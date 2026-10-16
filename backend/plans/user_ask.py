@@ -90,6 +90,9 @@ def open_asks_sql(columns: str, *, joins: str = "", by: str = "artifact") -> str
     A user block owned by the artifact on a task linked to it for attention.
     It has no task-state filter: every way a task ends withdraws its requests
     (``withdraw_node_asks``), so an open one always has a live task to release.
+    A deleted or purged owner's open tasks are closed before its plan is
+    archived (``delegation_child_lifecycle.end_open_work``), and migration 120
+    withdraws what older archives left open.
     ``by`` picks one document's, one task's or every request (``_OPEN_ASKS_BY``);
     ``l``, ``n``, ``p`` and ``h`` name the link, task, plan and hold. Each scope
     reads ``idx_plan_holds_active_node``, never the clearance history.

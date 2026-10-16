@@ -196,6 +196,21 @@ def test_an_agent_withdrawal_releases_the_task_and_wakes_nobody(db):
     assert _card(db, hold_id, artifact_id) == "withdrawn"
 
 
+# Structured Plans' #841 review: a deleted or purged worker's open ask ends with it.
+def test_a_deleted_threads_ask_leaves_the_pile_and_wakes_nobody(db):
+    from plans.delegation_child_lifecycle import on_child_thread_ended
+
+    plan_id, node_id, artifact_id, hold_id = _asked(db)
+
+    on_child_thread_ended(db, "owner", reason="deleted")
+
+    assert db.execute("SELECT state FROM plans WHERE id=?", (plan_id,)).fetchone()["state"] == "archived"
+    assert _in_pile(db, "proposal.md") == set()
+    assert _ended(db, hold_id) == {"ended": "closed"}
+    assert _card(db, hold_id, artifact_id) == "closed"
+    assert _asker_inputs(db) == []
+
+
 # Reviewer item 3b: a stale answer on an ended ask reports that it ended.
 def test_answering_an_ended_ask_is_not_offered_and_reports_that_it_ended(db):
     from doceditor import review_bar

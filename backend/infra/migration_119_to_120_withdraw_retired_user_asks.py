@@ -30,7 +30,8 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     marks = ",".join("?" for _ in terminal)
     rows = conn.execute(
         open_asks_sql("h.id AS hold_id, h.node_id", by="all")
-        + f" AND (n.archived_at IS NOT NULL OR n.state IN ({marks})) ORDER BY h.created_at, h.id",
+        + f" AND (n.archived_at IS NOT NULL OR p.state='archived' OR n.state IN ({marks}))"
+        " ORDER BY h.created_at, h.id",
         terminal,
     ).fetchall()
     for row in rows:

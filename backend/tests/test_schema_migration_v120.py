@@ -14,7 +14,6 @@ from registry import models
 from tests.plan_writer_authorizer import raw_plan_seed
 
 
-OWNER = PlanActor("owner", "user", "project")
 
 
 def _db() -> sqlite3.Connection:
@@ -25,26 +24,28 @@ def _db() -> sqlite3.Connection:
     db.execute(
         "INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project','Project','t','t')",
     )
-    db.execute(
-        """INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at)
-           VALUES ('owner','user','project','test/model','t','t')""",
-    )
+    for thread_id in ("owner", "gone"):
+        db.execute(
+            """INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at)
+               VALUES (?,'user','project','test/model','t','t')""",
+            (thread_id,),
+        )
     db.commit()
     return db
 
 
-def _artifact(db: sqlite3.Connection, external_id: str) -> str:
+def _artifact(db: sqlite3.Connection, external_id: str, owner: str = "owner") -> str:
     models.register_artifact(
         integration="workspace", type="document", external_id=external_id,
-        parent_thread_id="owner", title=external_id, db=db,
+        parent_thread_id=owner, title=external_id, db=db,
     )
     return str(db.execute(
         "SELECT id FROM artifact_identities WHERE external_id=?", (external_id,),
     ).fetchone()["id"])
 
 
-def _raise_ask(db: sqlite3.Connection, artifact_id: str):
-    plan = service.ensure_plan("thread", "owner", db=db)
+def _raise_ask(db: sqlite3.Connection, artifact_id: str, owner: str = "owner"):
+    plan = service.ensure_plan("thread", owner, db=db)
     node = service.add_node(
         plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
     )
@@ -53,7 +54,8 @@ def _raise_ask(db: sqlite3.Connection, artifact_id: str):
             "node_id": node.id, "reason_key": "review", "reason": "Review it",
             "owner_kind": "user", "ask_artifact_id": artifact_id,
             "expected_revision": service._node_row(db, node.id)["revision"],
-        }, actor=OWNER, provenance="test.migration_120", mutation_id=uuid.uuid4().hex, db=db,
+        }, actor=PlanActor(owner, "user", "project"), provenance="test.migration_120",
+        mutation_id=uuid.uuid4().hex, db=db,
     )
     hold = db.execute(
         "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
@@ -80,6 +82,11 @@ def test_withdraws_terminal_and_archived_asks_but_leaves_live_asks_open():
                 else:
                     db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node.id))
             retired.append(hold_id)
+        # A deleted owner's plan archived with its task still open (migration 58).
+        node, hold_id = _raise_ask(db, _artifact(db, "gone.md", "gone"), "gone")
+        with raw_plan_seed(db):
+            db.execute("UPDATE plans SET state='archived' WHERE id=?", (node.plan_id,))
+        retired.append(hold_id)
         live = _artifact(db, "live.md")
         _, live_hold = _raise_ask(db, live)
         before_metadata = db.execute(
