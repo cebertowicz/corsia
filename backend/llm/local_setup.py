@@ -290,7 +290,8 @@ async def resume_pending_setup() -> bool:
         return False
     eligibility = profile_eligibility(profile, await asyncio.to_thread(host_ram_bytes))
     if not eligibility.eligible:
-        log.warning("cannot resume local setup for ineligible profile %s", profile.id)
+        log.warning("discarding local setup recovery record for ineligible profile %s", profile.id)
+        local_setup_operation.clear()
         return False
 
     _flight.result = None

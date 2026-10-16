@@ -144,13 +144,45 @@ def test_preview_layout_moves_operational_state_into_state_once(tmp_path):
 
     moved = paths.move_preview_layout(app_dir, app_dir / "state")
 
-    assert moved == ["corsia.db", "corsia.db-wal", "uploads", "logs"]
+    assert moved == ["corsia.db", "corsia.db-wal", "logs", "uploads"]
     assert (app_dir / "state" / "corsia.db").read_text(encoding="utf-8") == "db"
     assert (app_dir / "state" / "logs" / "service.log").is_file()
     assert (app_dir / "service.json").is_file(), "app metadata stays beside state/"
     assert not (app_dir / "corsia.db").exists()
     assert sorted(path.name for path in app_dir.iterdir()) == ["service.json", "state"]
     assert paths.move_preview_layout(app_dir, app_dir / "state") == []
+
+
+def test_preview_layout_moves_every_state_entry_but_app_metadata(tmp_path):
+    paths = _platform_paths()
+    app_dir = tmp_path / "CORSIA"
+    app_dir.mkdir()
+    state_entries = {
+        "corsia.db",
+        "documents",
+        "assets",
+        "locks",
+        "security",
+        "worktree_reaper",
+        "reviewer",
+        "local_setup_installed_omlx",
+        "local_setup_existing_omlx_consented",
+        "local-setup-operation.json",
+    }
+    for name in state_entries:
+        path = app_dir / name
+        if "." in name:
+            path.write_text(name, encoding="utf-8")
+        else:
+            path.mkdir()
+            (path / "state").write_text(name, encoding="utf-8")
+    (app_dir / "service.json").write_text("{}", encoding="utf-8")
+
+    moved = paths.move_preview_layout(app_dir, app_dir / "state")
+
+    assert set(moved) == state_entries
+    assert {path.name for path in (app_dir / "state").iterdir()} == state_entries
+    assert sorted(path.name for path in app_dir.iterdir()) == ["service.json", "state"]
 
 
 def test_preview_layout_move_never_touches_an_existing_state_root(tmp_path):
@@ -190,7 +222,7 @@ def test_an_interrupted_preview_layout_move_is_finished_next_time(tmp_path):
 
     moved = paths.move_preview_layout(app_dir, app_dir / "state")
 
-    assert moved == ["corsia.db-wal", "uploads", "logs"]
+    assert moved == ["corsia.db-wal", "logs", "uploads"]
     assert (app_dir / "state" / "corsia.db").read_text(encoding="utf-8") == "db"
     assert not staging.exists()
 

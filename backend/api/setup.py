@@ -86,8 +86,19 @@ def _loopback_host(request: Request) -> bool:
 
 
 def _trusted_request(request: Request) -> bool:
-    """Require a direct local peer and literal loopback request target."""
-    return is_direct_loopback(request) and _loopback_host(request)
+    """Require a direct local peer, literal loopback target, and local origin."""
+    if not (is_direct_loopback(request) and _loopback_host(request)):
+        return False
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    own_port = _own_backend_port(request)
+    if own_port is None:
+        return False
+    return origin in {
+        *("http:" + f"//{host}:{own_port}" for host in _LOOPBACK_HOSTS),
+        *_TAURI_ORIGINS,
+    }
 
 
 def _trusted_json_post(request: Request) -> bool:
@@ -97,19 +108,11 @@ def _trusted_json_post(request: Request) -> bool:
     content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
     if content_type != "application/json":
         return False
-    origin = request.headers.get("origin")
-    if origin is None:
+    if request.headers.get("origin") is None:
         # Browsers attach Sec-Fetch-* metadata; a missing Origin is reserved
         # for a direct non-browser client that has already passed Host + JSON.
         return not any(name in request.headers for name in ("sec-fetch-mode", "sec-fetch-site"))
-    own_port = _own_backend_port(request)
-    if own_port is None:
-        return False
-    allowed_origins = {
-        *("http:" + f"//{host}:{own_port}" for host in _LOOPBACK_HOSTS),
-        *_TAURI_ORIGINS,
-    }
-    return origin in allowed_origins
+    return True
 
 
 def _macos_supported() -> bool:

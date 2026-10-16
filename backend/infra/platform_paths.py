@@ -219,31 +219,19 @@ def runtime_db_paths(state_root: Path) -> tuple[Path, Path, Path]:
     )
 
 
-# Every entry of operational state, by name under the state root. Moving an
-# install's state (the preview-layout move, adoption) moves exactly these.
-OPERATIONAL_STATE_ENTRIES = (
-    "corsia.db",
-    "corsia.db-wal",
-    "corsia.db-shm",
-    "analytics.duckdb",
-    "analytics.duckdb.wal",
-    "uploads",
-    "backups",
-    "keys",
-    "devices",
-    "logs",
-)
+_PREVIEW_LAYOUT_APP_METADATA = frozenset({"service.json"})
 
 
 def move_preview_layout(app_dir: Path, state_root: Path) -> list[str]:
     """Move a pre-release flat app folder's state into its ``state`` child once.
 
     A preview app kept ``corsia.db`` directly in the app folder. When that
-    database exists and the state root does not, each registry entry is
-    renamed into the new state root (same volume, so each move is atomic).
-    Returns the moved names; anything else returns an empty list untouched.
-    The entries gather in a hidden sibling first, so an interrupted move is
-    finished by the next call instead of leaving an empty state root.
+    database exists and the state root does not, every entry except the app's
+    explicit metadata is renamed into the new state root (same volume, so each
+    move is atomic). Returns the moved names; anything else returns an empty
+    list untouched. The entries gather in a hidden sibling first, so an
+    interrupted move is finished by the next call instead of leaving an empty
+    state root.
     """
     app_dir = Path(app_dir)
     state_root = Path(state_root)
@@ -254,11 +242,11 @@ def move_preview_layout(app_dir: Path, state_root: Path) -> list[str]:
         return []
     staging.mkdir(exist_ok=True)
     moved = []
-    for name in OPERATIONAL_STATE_ENTRIES:
-        source = app_dir / name
-        if source.exists() or source.is_symlink():
-            os.rename(source, staging / name)
-            moved.append(name)
+    for source in sorted(app_dir.iterdir(), key=lambda path: path.name):
+        if source.name in _PREVIEW_LAYOUT_APP_METADATA or source == staging:
+            continue
+        os.rename(source, staging / source.name)
+        moved.append(source.name)
     os.rename(staging, state_root)
     _fsync_directory(app_dir)
     return moved

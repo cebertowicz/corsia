@@ -60,3 +60,25 @@ def test_restart_resumes_the_persisted_kind_under_the_operation_lock(monkeypatch
     asyncio.run(scenario())
 
     assert observed == {"profile": profile.id, "starter": True, "eligible": True}
+
+
+def test_ineligible_recovery_record_is_discarded_before_fresh_setup(monkeypatch):
+    stale_profile = local_setup.profile_by_id("qwen-27b-oq4e")
+    assert stale_profile is not None
+    local_setup_operation.write(local_setup_operation.Operation(stale_profile.id, "setup", "task-1"))
+    monkeypatch.setattr(local_setup, "host_ram_bytes", lambda: 32 * 1024**3)
+
+    async def run_flight(*_args, **_kwargs):
+        return {"ok": True}
+
+    monkeypatch.setattr(local_setup, "_run_flight", run_flight)
+    monkeypatch.setattr(local_setup, "_claim_operation", lambda *_args: True)
+
+    async def scenario():
+        assert await local_setup.resume_pending_setup() is False
+        assert local_setup_operation.read() is None
+        result = await local_setup.begin_local_setup()
+        assert result["in_progress"] is True
+        await local_setup._flight.task
+
+    asyncio.run(scenario())

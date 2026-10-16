@@ -83,10 +83,6 @@ def _is_broken_leftover(path: str) -> bool:
     return broken
 
 
-def omlx_present() -> bool:
-    """Whether an ``omlx`` executable is present on PATH without touching it."""
-    return shutil.which("omlx") is not None
-
 
 def existing_omlx_requires_consent() -> bool:
     """Whether setup must ask before inspecting a pre-existing oMLX.

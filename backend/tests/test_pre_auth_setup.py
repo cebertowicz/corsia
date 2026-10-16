@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api import setup as setup_api  # noqa: E402
+from api import system as system_api  # noqa: E402
 from infra import accounts, token_admin  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 
@@ -28,6 +29,18 @@ JSON_HEADERS = {**LOOPBACK_HEADERS, "Content-Type": "application/json"}
 def app_client(isolated_db):
     app = FastAPI()
     app.include_router(setup_api.router)
+    with TestClient(
+        app,
+        base_url=LOOPBACK_BASE,
+        client=("127.0.0.1", 50100),
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+def system_client(isolated_db):
+    app = FastAPI()
+    app.include_router(system_api.router)
     with TestClient(
         app,
         base_url=LOOPBACK_BASE,
@@ -218,13 +231,44 @@ def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client
     assert calls == 1
 
 
-def test_omlx_presence_check_runs_no_command(monkeypatch):
+def test_existing_omlx_consent_check_runs_no_command(monkeypatch):
     from llm import local_setup_ownership
 
     monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda _: "/usr/local/bin/omlx")
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("presence must not execute oMLX"))
 
-    assert local_setup_ownership.omlx_present() is True
+    assert local_setup_ownership.existing_omlx_requires_consent() is True
+
+
+def test_operation_active_accepts_raw_loopback_shape_without_origin(system_client, monkeypatch):
+    async def no_operation(_callback):
+        return None
+
+    monkeypatch.setattr(system_api, "run_in_db", no_operation)
+
+    response = system_client.get(
+        "/api/system/operation-active",
+        headers={"Host": f"127.0.0.1:{DEFAULT_BACKEND_PORT}", "Connection": "close"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"active": False}
+
+
+@pytest.mark.parametrize(
+    ("client_address", "headers"),
+    [
+        (("198.51.100.1", 50100), LOOPBACK_HEADERS),
+        (("127.0.0.1", 50100), {**LOOPBACK_HEADERS, "Origin": "https://example.com"}),
+    ],
+)
+def test_operation_active_refuses_untrusted_requests(client_address, headers, isolated_db):
+    app = FastAPI()
+    app.include_router(system_api.router)
+    with TestClient(app, base_url=LOOPBACK_BASE, client=client_address) as client:
+        response = client.get("/api/system/operation-active", headers=headers)
+
+    assert response.status_code == 403
 
 
 def test_first_account_route_uses_the_app_path(client, monkeypatch):

@@ -92,7 +92,7 @@ def profile_name(workspace: Path) -> str:
     except OSError:
         return ""
     for line in text.splitlines():
-        if line.startswith("- **Preferred name:**"):
+        if line.startswith(_NAME_LABEL):
             name = "".join(char for char in line.removeprefix(_NAME_LABEL) if char.isprintable())
             return one_line(name)[:120]
     return ""
