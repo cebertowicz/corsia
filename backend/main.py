@@ -191,7 +191,7 @@ async def serve_frontend(path: str):
     try:
         file_path = (root / path).resolve()
         servable = file_path.is_relative_to(root) and file_path.is_file()
-    except (OSError, ValueError):  # ValueError: an embedded NUL byte
+    except ValueError:  # an embedded NUL byte; real I/O faults still raise
         servable = False
     if servable:
         import mimetypes

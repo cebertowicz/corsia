@@ -47,3 +47,14 @@ def test_a_path_outside_the_build_gets_the_app_page(build, path):
 def test_a_link_out_of_the_build_gets_the_app_page(build):
     (build / "linked.txt").symlink_to(build.parent / "outside.txt")
     assert _serve("linked.txt").body == b"app page"
+
+
+def test_an_io_fault_on_a_build_file_still_raises(build, monkeypatch):
+    import pathlib
+
+    def denied(self):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(pathlib.Path, "is_file", denied)
+    with pytest.raises(PermissionError):
+        _serve("_app/immutable/entry.js")
