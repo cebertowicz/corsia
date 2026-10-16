@@ -18,7 +18,7 @@
 		/** The row's own icon, for `current` and `todo`. */
 		icon?: Snippet;
 		/** The approved setup-step icon when a custom snippet is unnecessary. */
-		iconName?: 'sparkle' | 'person' | 'chip';
+		iconName?: 'sparkle' | 'person' | 'chip' | 'computer' | 'code';
 		onclick?: () => void;
 	}
 
@@ -61,6 +61,10 @@
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="3" /><path d="M5.5 20c.7-3.5 3-5.5 6.5-5.5s5.8 2 6.5 5.5" /></svg>
 				{:else if iconName === 'chip'}
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M18 9h4M2 15h4M18 15h4" /></svg>
+				{:else if iconName === 'computer'}
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
+				{:else if iconName === 'code'}
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M9 4 7 20M17 4l-2 16M4 9h17M3 15h17" /></svg>
 				{/if}
 			</span>
 		{/key}

@@ -1,0 +1,112 @@
+<script lang="ts">
+	import { tick } from 'svelte';
+	import { Button, CodeInput, Field, RailRow } from '$lib/components/ui';
+	import SetupHostSteps from './SetupHostSteps.svelte';
+	import type { SetupRemote } from '$lib/setupRemote.svelte';
+	import { openExternalUrl } from '$lib/linkTargetResolver';
+	import { SETTINGS_PATH, SYSTEM_SETTINGS_LOCAL_NETWORK } from '$lib/remoteShell';
+
+	/**
+	 * Connect to CORSIA on another computer, setup's r1 to r7. Choose: the computers found on this network as sidebar-style
+	 * rows (names only, the picked one selected), or a typed address. Code: the four characters that computer shows in its
+	 * Settings, typed one per box; the fourth connects, so there is no button. A refusal clears the boxes and puts the cursor
+	 * back in the first one.
+	 */
+	const { remote }: { remote: SetupRemote } = $props();
+
+	let list = $state<HTMLElement>();
+	let more = $state(false);
+	function listEdges() {
+		if (list) more = list.scrollTop + list.clientHeight < list.scrollHeight - 1;
+	}
+	$effect(() => { void remote.names.length; void tick().then(listEdges); });
+
+	// r7's content (picture, boxes, one line) scrolls above the fixed dock when a long name makes it tall. A refusal line is
+	// the last thing in the pane and is scrolled to the nearest edge, so the picture is cut only as far as needed.
+	let pane = $state<HTMLElement>();
+	let refusalLine = $state<HTMLElement>();
+	let moreBelow = $state(false);
+	let moreAbove = $state(false);
+	function paneEdges() {
+		if (!pane) return;
+		moreAbove = pane.scrollTop > 1;
+		moreBelow = pane.scrollTop + pane.clientHeight < pane.scrollHeight - 1;
+	}
+	$effect(() => {
+		if (!pane) return;
+		const observer = new ResizeObserver(paneEdges);
+		observer.observe(pane);
+		for (const child of pane.children) observer.observe(child);
+		paneEdges();
+		return () => observer.disconnect();
+	});
+	$effect(() => {
+		if (remote.refusal) void tick().then(() => { refusalLine?.scrollIntoView({ block: 'nearest' }); paneEdges(); });
+	});
+
+	const addressError = $derived(remote.chooseError || (remote.invalidAddress ? 'Type a name or an address, like studio.local or 192.168.1.20.' : undefined));
+	const hasError = $derived(Boolean(remote.chooseError));
+</script>
+
+{#if remote.stage === 'code'}
+	<div class="scroll" class:more={moreBelow} class:above={moreAbove} bind:this={pane} onscroll={paneEdges}>
+		<SetupHostSteps name={remote.label} />
+		<div class="code">
+			<CodeInput label="Code" bind:value={remote.code} invalid={remote.invalid} disabled={remote.busy} refocus={remote.refocus} focusAt={0} onsubmit={(entered) => void remote.submit(entered)} />
+			{#if remote.refusal}
+				<p class="err" role="alert" bind:this={refusalLine}>{remote.refusal}</p>
+			{:else if remote.busy || remote.connectedTo}
+				<p class="state" aria-busy="true"><span class="spinner"></span>Connecting to {remote.connectedTo || remote.label}…</p>
+			{/if}
+		</div>
+	</div>
+{:else}
+	{#if remote.names.length > 0}
+		<ul class="list" class:more aria-label="CORSIA on this network" bind:this={list} onscroll={listEdges}>
+			{#each remote.names as name (name)}
+				<li><RailRow label={name} iconName="computer" state={name === remote.picked ? 'current' : 'idle'} onclick={() => remote.pick(name)} /></li>
+			{/each}
+		</ul>
+	{:else if remote.denied}
+		<p class="sentence">CORSIA can’t look on this network. Allow it in Privacy &amp; Security › Local Network. It looks again when you come back to this window.</p>
+		<div class="action"><Button variant="chip" size="sm" onclick={() => void openExternalUrl(SYSTEM_SETTINGS_LOCAL_NETWORK)}>Open System Settings</Button></div>
+	{:else if remote.noneFound}
+		<p class="sentence">No other computer running CORSIA found yet. On that computer: {SETTINGS_PATH}, then turn on Let other devices connect. Or type its address.</p>
+		<p class="state" aria-busy="true"><span class="spinner"></span>Looking…</p>
+	{:else}
+		<p class="state" aria-busy="true"><span class="spinner"></span>Looking…</p>
+	{/if}
+
+	<div class="address">
+		<Field variant="chip" layout="stacked" label="Or type its address" labelFor="remote-address" error={addressError}>
+			<input id="remote-address" type="text" placeholder="Name or IP address" autocapitalize="off" autocomplete="off" spellcheck="false" aria-invalid={hasError || remote.invalidAddress} bind:value={remote.address} />
+		</Field>
+	</div>
+{/if}
+
+<style>
+	.list { list-style: none; margin: 0 0 var(--space-4); padding: 0; height: calc(var(--space-8) * 4); overflow-y: auto; flex: none; }
+	.list.more { mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--space-6)), transparent); }
+	.state { margin: 0 0 var(--space-4); display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-subhead); color: var(--text-secondary); }
+	.sentence { margin: 0 0 var(--space-3); max-width: calc(var(--space-8) * 9); font-size: var(--text-body); line-height: var(--lh-normal); text-wrap: pretty; }
+	.action { margin: 0 0 var(--space-4); }
+	.address { max-width: calc(var(--space-8) * 8); }
+	.spinner {
+		display: inline-block; width: var(--space-3); height: var(--space-3); flex-shrink: 0;
+		border: 2px solid color-mix(in srgb, var(--accent-line) 25%, transparent); border-top-color: var(--accent-line);
+		border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite;
+	}
+	@keyframes spin { to { transform: rotate(360deg); } }
+	/* The boxes sit one --space-5 under the picture, so they read as its answer. */
+	.scroll {
+		height: 100%; min-height: 0; overflow-y: auto;
+		/* Room at the top and sides for the boxes' focus ring and shadow, which an overflow box would clip; the margin takes it back. */
+		margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) calc(var(--space-2) * -1); padding: var(--space-4) var(--space-4) 0;
+	}
+	.scroll.more { mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--space-6)), transparent); }
+	.scroll.above { mask-image: linear-gradient(to bottom, transparent, currentColor var(--space-6)); }
+	.scroll.above.more { mask-image: linear-gradient(to bottom, transparent, currentColor var(--space-6), currentColor calc(100% - var(--space-6)), transparent); }
+	.code { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-5); }
+	.err { margin: 0; font-size: var(--text-footnote); color: var(--red-text); text-wrap: pretty; }
+	@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+</style>
