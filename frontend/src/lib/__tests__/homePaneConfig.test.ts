@@ -209,7 +209,7 @@ describe('buildPaneConfig — pane only on workspace Activity', () => {
 	});
 
 	it('a thread keeps its Plan and Artifacts sections while thread settings are open', () => {
-		const config = pane('chat', makeThread(OTHER_ID), SCOPE, CONDUCTOR_ID, null, false);
+		const config = pane('chat', makeThread(OTHER_ID), SCOPE, CONDUCTOR_ID, null);
 		expect(kinds(config)).toEqual(['plan', 'artifacts']);
 	});
 });
