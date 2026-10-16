@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections.abc import Callable
 import os
 from pathlib import Path
-import re
 import tempfile
 
 
@@ -61,6 +60,8 @@ def write_no_proctitle_shim(cache_dir: Path) -> Path:
 
 
 def _generated_profile_temp_rules() -> tuple[str, ...]:
+    from tools.host_path_policy import _sandbox_regex
+
     roots = {Path(tempfile.gettempdir()), Path("/tmp"), Path("/private/tmp")}
     for root in tuple(roots):
         raw = str(root)
@@ -68,8 +69,12 @@ def _generated_profile_temp_rules() -> tuple[str, ...]:
             roots.add(Path(raw.removeprefix("/private")))
         elif raw.startswith("/"):
             roots.add(Path("/private" + raw))
-    prefix = r"corsia-(?:shell-envelope|controlled-git|mcp-envelope)-[^/]*\.sb"
-    return tuple(f'(deny file-write* (regex #"^{re.escape(str(root))}/{prefix}$"))' for root in roots)
+    prefixes = ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
+    return tuple(
+        f'(deny file-write* (regex #"^{_sandbox_regex(str(root))}/{prefix}[^/]*\\.sb$"))'
+        for root in sorted(roots)
+        for prefix in prefixes
+    )
 
 
 def mcp_private_state_profile(

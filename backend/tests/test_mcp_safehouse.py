@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import stat
 import sys
+import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -44,13 +45,13 @@ for line in sys.stdin:
             child.send_signal(signal.SIGTERM)
             respond(request["id"], text(json.dumps({"returncode": child.wait(timeout=5)})))
         elif name == "write_shell_envelope":
-            target = os.path.join(tempfile.gettempdir(), "corsia-shell-envelope-mcp-test.sb")
+            target = os.environ["MCP_ENVELOPE_WRITE_TARGET"]
             try:
                 open(target, "w", encoding="utf-8").write("(allow default)")
             except OSError as error:
                 respond(request["id"], text(str(error), is_error=True))
             else:
-                respond(request["id"], text("unexpected generated profile write"))
+                respond(request["id"], text(f"unexpected generated profile write: {target}"))
         else:
             reports = []
             denied = False
@@ -118,9 +119,9 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     assert f'(subpath "{lexical}")' in profile
     assert f'(subpath "{state}")' in profile
     assert f'(subpath "{state / "keys"}")' in profile
-    assert "corsia-(?:shell-envelope|controlled-git|mcp-envelope)-[^/]*\\.sb" in profile
-    assert '^/tmp/' in profile
-    assert '^/private/tmp/' in profile
+    for prefix in ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-"):
+        assert f'^/tmp/{prefix}[^/]*\\.sb$' in profile
+        assert f'^/private/tmp/{prefix}[^/]*\\.sb$' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
 
@@ -242,6 +243,9 @@ async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_managem
         "MCP_KEY_PATH": str(key_path), "MCP_DB_PATH": str(db_path),
         "MCP_KEY_LINK_PATH": str(tmp_path / "state-link" / "keys" / "value"),
         "MCP_DB_LINK_PATH": str(tmp_path / "state-link" / "corsia.db"),
+        "MCP_ENVELOPE_WRITE_TARGET": str(
+            Path(tempfile.gettempdir()) / "corsia-shell-envelope-mcp-test.sb",
+        ),
     }}
 
     registry = ToolRegistry()
