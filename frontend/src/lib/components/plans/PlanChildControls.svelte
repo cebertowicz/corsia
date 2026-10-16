@@ -115,7 +115,7 @@
 	@media (hover: hover) {
 		.spawn-chip:hover, .child-open:hover { color: var(--text-primary); background: var(--bg-hover); }
 	}
-	.spawn-chip:focus-visible, .child-open:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.spawn-chip:focus-visible, .child-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	@keyframes child-pulse { 50% { opacity: 0.38; transform: scale(0.82); } }
 	@media (prefers-reduced-motion: reduce) {
 		.child-dot.active { animation: none; }

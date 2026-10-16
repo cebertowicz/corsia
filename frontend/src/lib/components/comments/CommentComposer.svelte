@@ -47,7 +47,7 @@
 </div>
 
 <style>
-	.composer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-bg); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+	.composer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-wash); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
 	.quote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 2px solid color-mix(in srgb, var(--amber) 55%, transparent); padding-left: 8px; color: var(--text-secondary); font-size: var(--text-caption); font-style: italic; }
 	.quote.label { font-style: normal; }
 	textarea { box-sizing: border-box; width: 100%; min-height: 48px; max-height: 150px; resize: vertical; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: var(--text-footnote); }

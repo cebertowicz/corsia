@@ -36,8 +36,9 @@
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const decisionCount = $derived(query.payload?.attention.awaiting_count ?? 0);
 	/**
-	 * This thread's own decisions, each a row, once the queue has them; otherwise the plan's
-	 * awaiting count stands in. Each display reads one source, never a difference of the two.
+	 * This thread's own decisions, each a row, once the queue has them. The plan's awaiting count also spans its
+	 * child plans, so whenever it exceeds the rows the indicator below them shows that total ("N decisions in all");
+	 * with no rows it stands alone. Each display reads one source, never a difference of the two.
 	 */
 	const activeDecisionItems = $derived(
 		$activeThreadId === threadId
@@ -255,9 +256,10 @@
 					<span class="decision-open">{decisionBusy ? 'Loading…' : 'Open'}</span>
 				</button>
 			{/each}
-		{:else if decisionCount > 0}
+		{/if}
+		{#if decisionCount > activeDecisionItems.length}
 			<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
-				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}
+				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}{activeDecisionItems.length > 0 ? ' in all' : ''}
 				<span>{decisionBusy ? 'Loading…' : 'Open'}</span>
 			</button>
 		{/if}
@@ -334,7 +336,7 @@
 	@media (any-pointer: coarse) { .decision-indicator { min-height: 44px; } }
 	.decision-indicator b { margin-right: 0.3em; color: var(--amber-text); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
 	.decision-indicator span { margin-left: auto; padding: 0 2px 0 var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); }
-	.decision-indicator:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.decision-indicator:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.decision-indicator:disabled { cursor: wait; opacity: 0.72; }
 	.decision-message { margin: 0; padding: 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); }
 	.plan-state {
@@ -351,7 +353,7 @@
 		background: var(--amber-bg); color: var(--text-primary); font-size: var(--text-caption);
 	}
 	.spinner {
-		width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--violet);
+		width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent);
 		border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite;
 	}
 	@keyframes spin { to { transform: rotate(360deg); } }

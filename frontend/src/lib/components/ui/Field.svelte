@@ -108,8 +108,8 @@
 	.c :global(select:focus),
 	.c :global(textarea:focus) {
 		outline: none;
-		border-color: var(--violet);
-		box-shadow: 0 0 0 3px var(--violet-bg);
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-wash);
 	}
 
 	.c :global(select) {

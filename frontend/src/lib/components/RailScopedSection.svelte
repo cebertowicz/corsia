@@ -334,7 +334,7 @@
 	.scoped-item.conductor.disabled .lbl { color: var(--text-tertiary); }
 	.scoped-item.conductor.disabled svg { color: var(--text-tertiary); opacity: 0.8; }
 	.scoped-item.conductor svg { color: var(--accent-text); opacity: 1; }
-	.scoped-item.active { background: var(--violet-bg); }
+	.scoped-item.active { background: var(--accent-wash); }
 	.drawer-toggle {
 		display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
 		padding: 7px 10px; border: none; border-radius: var(--radius-sm);

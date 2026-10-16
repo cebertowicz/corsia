@@ -1,8 +1,6 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { createRowMenu } from '$lib/components/ui/rowMenu.svelte';
 
-export { LONG_PRESS_MS } from '$lib/components/ui/rowMenu.svelte';
-
 export interface OpenTaskMenu {
 	node: OperatorNode;
 	x: number;

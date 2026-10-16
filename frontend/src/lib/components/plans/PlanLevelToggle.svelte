@@ -75,7 +75,7 @@
 	.details-toggle:disabled { cursor: wait; }
 	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
 	@media (hover: hover) { .details-toggle:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); } }
-	.details-toggle:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.details-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* Same geometry and token-driven spin as the shared Button primitive above. */
 	.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }

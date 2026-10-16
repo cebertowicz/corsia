@@ -229,7 +229,7 @@
 	}
 
 	const ACT_COLOR: Record<string, string> = {
-		added: 'var(--green)', described: 'var(--violet)'
+		added: 'var(--green)', described: 'var(--purple)'
 	};
 </script>
 
@@ -414,7 +414,7 @@
 		padding: 6px 10px;
 		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
 		border-radius: var(--radius-sm);
-		background: var(--accent-bg);
+		background: var(--accent-wash);
 		color: var(--text-primary);
 		font-size: var(--text-footnote);
 	}
@@ -453,7 +453,7 @@
 
 	.row { display: flex; align-items: center; gap: 9px; padding: 7px 6px 7px 24px; border-radius: var(--radius-sm); cursor: pointer; transition: background var(--dur-tight); }
 	.row:hover { background: var(--lg-row-hover, var(--bg-hover)); }
-	.row.sel { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
+	.row.sel { background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--accent); }
 	.row-ico { flex-shrink: 0; color: var(--text-tertiary); }
 	.row-ico.skill { color: var(--teal); }
 	.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -484,7 +484,7 @@
 		opacity: 1;
 		pointer-events: auto;
 	}
-	.row-attach:hover:not(:disabled) { background: var(--accent-bg); }
+	.row-attach:hover:not(:disabled) { background: var(--accent-wash); }
 	.row-attach:disabled {
 		cursor: not-allowed;
 		opacity: 0.5;

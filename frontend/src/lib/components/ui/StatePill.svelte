@@ -51,9 +51,9 @@
 	.pill.sm { font-size: var(--text-caption); padding: 1px 6px; }
 
 	.pill.loaded, .pill.active {
-		background: var(--violet-bg);
-		color: var(--violet-text, var(--violet));
-		border-color: var(--violet-line);
+		background: var(--accent-wash);
+		color: var(--accent-text, var(--accent));
+		border-color: var(--accent-line);
 	}
 	.pill.loading, .pill.warning {
 		background: var(--amber-bg);

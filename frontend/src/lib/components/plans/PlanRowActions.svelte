@@ -98,7 +98,7 @@
 	@media (hover: hover) {
 		.branch-toggle:hover, .discussion-archive:hover { color: var(--text-primary); background: var(--bg-hover); }
 	}
-	.branch-toggle:focus-visible, .discussion-archive:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.branch-toggle:focus-visible, .discussion-archive:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	@media (max-width: 620px) {
 		.branch-toggle, .discussion-archive { min-height: 44px; }
 		.branch-toggle { min-width: 44px; justify-content: flex-end; }

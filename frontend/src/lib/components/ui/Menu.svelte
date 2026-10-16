@@ -19,6 +19,7 @@
 	 * The one row-actions menu: a short list of verbs opened at a point (a
 	 * right-click, Shift+F10, or a long-press). A row owns its verbs
 	 * and what they do; this owns placement, focus, keys and the touch floor.
+	 * Sidebar thread rows still use SidebarContextMenu until #857.
 	 */
 	let {
 		ariaLabel,

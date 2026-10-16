@@ -93,7 +93,7 @@
 		cursor: pointer;
 	}
 	.active-chip-trigger:focus-visible {
-		outline: 2px solid var(--violet-line);
+		outline: 2px solid var(--accent-line);
 		outline-offset: 2px;
 	}
 	.host-access-icon {

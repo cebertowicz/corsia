@@ -206,7 +206,7 @@
 		transition: background var(--dur-tight) ease;
 	}
 	.scope-pill:hover, .scope-pill.hover { background: var(--bg-hover); }
-	.scope-pill.current { background: var(--violet-bg); }
+	.scope-pill.current { background: var(--accent-wash); }
 	.scope-pill-dot {
 		width: 9px; height: 9px; border-radius: var(--radius-circle); flex-shrink: 0;
 		box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent);

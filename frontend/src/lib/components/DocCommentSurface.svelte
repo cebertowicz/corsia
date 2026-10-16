@@ -393,7 +393,7 @@
 	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
 	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
-	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
+	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
 	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }
 	.suggestion-status details { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.suggestion-status p { margin: 4px 0; }

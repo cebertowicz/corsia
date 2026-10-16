@@ -85,7 +85,7 @@
 		cursor: pointer;
 	}
 	button.title:hover { text-decoration: underline; }
-	button.title:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
+	button.title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2xs); }
 	.sep, .earlier { color: var(--text-tertiary); }
 	.outcome { flex-shrink: 0; }
 	.earlier { flex-shrink: 0; margin-left: auto; }

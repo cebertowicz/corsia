@@ -19,7 +19,7 @@
 		provider,
 		expanded = false,
 		hasLoaded = false,
-		accentVar = 'var(--violet)',
+		accentVar = 'var(--accent)',
 		onToggleEnable,
 		onSettings,
 		onToggleExpand,
@@ -49,7 +49,7 @@
 	data-server-card={provider.server?.id}
 	class:expanded
 	class:has-loaded={hasLoaded}
-	style="--accent: {accentVar}"
+	style="--pr-accent: {accentVar}"
 >
 	<div class="pr-head" class:configurable>
 		<button
@@ -139,7 +139,7 @@
 	}
 	.pr-expand:focus { outline: none; }
 	.pr-expand:focus-visible {
-		outline: 2px solid var(--violet);
+		outline: 2px solid var(--accent);
 		outline-offset: -2px;
 	}
 	.pr-expand .chev { grid-column: -2; cursor: inherit; }
@@ -230,9 +230,9 @@
 		box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 	}
 	.tg.on {
-		background: linear-gradient(180deg, var(--violet-2), var(--violet));
-		border-color: var(--violet);
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 12px color-mix(in srgb, var(--violet) 30%, transparent);
+		background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+		border-color: var(--accent);
+		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
 	}
 	.tg.on::after {
 		left: calc(var(--w) - 18px);

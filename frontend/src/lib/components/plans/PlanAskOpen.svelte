@@ -32,6 +32,6 @@
 	@media (hover: hover) {
 		.ask-open:hover { color: var(--text-primary); background: var(--bg-hover); }
 	}
-	.ask-open:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.ask-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	@media (max-width: 620px) { .ask-open { min-height: 44px; } }
 </style>

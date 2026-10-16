@@ -286,7 +286,7 @@
 	/* The decision drawer is opaque: its sticky heading and sticky actions footer must be
 	   the same opaque sheet material, otherwise scrolled options visibly pass behind them. */
 	header { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); }
-	.eyebrow { display: block; margin-bottom: var(--space-1); color: var(--violet-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
+	.eyebrow { display: block; margin-bottom: var(--space-1); color: var(--accent-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
 	.eyebrow .scope { color: var(--text-tertiary); }
 	h3 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); line-height: var(--lh-tight); }
 	.source-note { margin: var(--space-1) 0 0; color: var(--text-tertiary); font-size: var(--text-caption); }
@@ -299,7 +299,7 @@
 	dd { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.options { display: flex; flex-direction: column; gap: var(--space-2); }
 	.option-button { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); text-align: left; cursor: pointer; }
-	.option-button.selected { border-color: var(--violet); background: var(--violet-bg); }
+	.option-button.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.option-button:disabled { opacity: 0.5; cursor: not-allowed; }
 	.option-button > strong { display: grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--radius-xs); background: var(--bg-tertiary); color: var(--text-secondary); font-size: var(--text-footnote); }
 	.option-button > span { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
@@ -307,7 +307,7 @@
 	.option-button b { font-size: var(--text-subhead); }
 	.option-button small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
 	.other-option { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--text-footnote); }
-	.other-option.selected { border-color: var(--violet); background: var(--violet-bg); }
+	.other-option.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.other-option > span:first-child { padding-top: var(--space-1); }
 	.other-option textarea { min-width: 0; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-primary); padding: var(--space-1) var(--space-2); outline: none; font-family: inherit; font-size: inherit; line-height: var(--lh-normal); resize: none; overflow-y: auto; min-height: calc(1em * var(--lh-normal) + var(--space-2)); max-height: min(40vh, 12em); }
 	.other-option textarea:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -318,17 +318,17 @@
 	fieldset.pick-any { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
 	fieldset.pick-any legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
 	.option-row { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
-	.option-row.selected { border-color: var(--violet); background: var(--violet-bg); }
+	.option-row.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.option-row:has(.tick:disabled) { opacity: 0.5; cursor: not-allowed; }
 	/* A native checkbox, drawn in CSS: the whole row is its label, so the row is the tap target. */
 	.tick { appearance: none; -webkit-appearance: none; display: grid; place-items: center; flex: none; width: 18px; height: 18px; margin: 1px; border: 1.5px solid var(--text-tertiary); border-radius: 5px; background: transparent; cursor: inherit; }
-	.tick:checked { border-color: var(--violet); background: var(--violet); }
+	.tick:checked { border-color: var(--accent); background: var(--accent); }
 	.tick:checked::after { content: ''; width: 4px; height: 8px; margin-top: -2px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
 	.option-text { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
 	.option-row b { font-size: var(--text-subhead); }
 	.option-row small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
-	.option-row:has(.tick:focus-visible) { outline: 2px solid var(--violet); outline-offset: 2px; }
-	.option-button:focus-visible, .other-option:focus-within { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.option-row:has(.tick:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.option-button:focus-visible, .other-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 	@media (max-width: 720px) {
 		.decision-top { grid-template-columns: 1fr; gap: var(--space-3); }
 		.option-button, .other-option { min-height: 44px; }

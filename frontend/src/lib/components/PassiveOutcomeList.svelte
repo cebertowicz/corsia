@@ -182,7 +182,7 @@
 	.link:hover { text-decoration: underline; }
 	.open-plan { min-height: 28px; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-	.row:focus-visible, .passive-toggle:focus-visible, .link:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
+	.row:focus-visible, .passive-toggle:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2xs); }
 	@media (pointer: coarse) {
 		.row { min-height: 44px; }
 		.open-plan { min-height: 44px; }
