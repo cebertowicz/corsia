@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Field, ListRow, Message, StatePill, Toggle } from '$lib/components/ui';
+	import { Button, Field, ListRow, Message, Spinner, StatePill, Toggle } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
-	import { accountToSignIn, startSignin } from '$lib/conductorSourcesApi';
+	import { fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
+	import { accountToSignIn, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startSignin } from '$lib/conductorSourcesApi';
+	import { openExternalUrl } from '$lib/linkTargetResolver';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
@@ -37,6 +38,9 @@
 	let providerName = $state('anthropic');
 	let apiKey = $state('');
 	let savingKey = $state(false);
+	// One vendor's place in install and sign-in; absent means the row shows its source's own state.
+	type ConnectPhase = { phase: 'confirm' | 'installing' | 'signing-in' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin'; reason?: string | null };
+	let flow = $state<Record<string, ConnectPhase | undefined>>({});
 
 	const steps = $derived<SetupStep[]>([
 		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
@@ -66,7 +70,7 @@
 			? 'The local model couldn’t start. Try again, or choose another source.'
 			: localDownloading
 				? 'Ready when the download finishes. You can close this window; CORSIA keeps going.'
-				: 'Sign in, add an API key, or download the local model to continue.',
+				: 'Connect Claude Code or Codex, or add an API key, to continue.',
 	);
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
 	const downloadModelLabel = $derived(status.model_name || 'local model');
@@ -89,7 +93,7 @@
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
-				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
+				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
 		}
 	});
 
@@ -225,18 +229,157 @@
 		}
 	}
 
-	async function signIn(source: ModelSource) {
+	const VENDOR_COPY: Record<string, { cli: string; uses: string; maker: string; origin: string; account: string; page: string }> = {
+		'claude-code': { cli: 'Claude Code', uses: 'Uses your Claude subscription.', maker: 'Anthropic', origin: 'claude.ai', account: 'Claude', page: 'https://code.claude.com/docs/en/setup' },
+		codex: { cli: 'Codex', uses: 'Uses your ChatGPT subscription.', maker: 'OpenAI', origin: 'chatgpt.com', account: 'ChatGPT', page: 'https://developers.openai.com/codex/cli' },
+	};
+	const POLL_MS = 3000;
+	const connectActive = $derived(Object.values(flow).some((entry) => entry?.phase === 'installing' || entry?.phase === 'signing-in'));
+
+	function setConnect(vendor: string, next: ConnectPhase | undefined) {
+		flow = { ...flow, [vendor]: next };
+	}
+
+	async function conductorThread(current: string): Promise<string> {
+		const conductor = await fetch('/api/conductor', { headers: { Authorization: `Bearer ${current}` } });
+		const target = (await conductor.json())?.target?.thread_id;
+		if (!target) throw new Error('conductor unavailable');
+		return target;
+	}
+
+	/** Start the vendor's browser sign-in in place; the poll below sees it complete. */
+	async function beginSignIn(source: ModelSource, installed = false) {
 		const current = get(token);
 		if (!current) return;
+		const vendor = source.source;
+		setConnect(vendor, { phase: 'signing-in', installed });
 		try {
-			const conductor = await fetch('/api/conductor', { headers: { Authorization: `Bearer ${current}` } });
-			const target = (await conductor.json())?.target?.thread_id;
-			if (!target) throw new Error('conductor unavailable');
-			const accountId = await accountToSignIn(current, source.source, source.name);
-			await startSignin(current, accountId, target);
-			await refreshSources();
-		} catch { sourceError = `CORSIA couldn’t start ${source.name} sign-in. Try again.`; }
+			const target = await conductorThread(current);
+			const accountId = await accountToSignIn(current, vendor, source.name);
+			const result = await startSignin(current, accountId, target);
+			if (result.status === 'failed' || result.status === 'unavailable' || result.status === 'refused') throw new Error(`signin ${result.status}`);
+			setConnect(vendor, { phase: 'signing-in', installed, accountId });
+			await tickConnect();
+		} catch {
+			setConnect(vendor, { phase: 'failed', failed: 'signin' });
+		}
 	}
+
+	async function openSignInAgain(source: ModelSource) {
+		const current = get(token);
+		const accountId = flow[source.source]?.accountId;
+		if (current && accountId) await cancelSignin(current, accountId).catch(() => undefined);
+		await beginSignIn(source, flow[source.source]?.installed);
+	}
+
+	/** The CLI is now there: sign in if it still needs to, and say it plainly when it is not found. */
+	async function afterInstalled(vendor: string) {
+		await refreshSources();
+		const source = sources.find((candidate) => candidate.source === vendor);
+		if (!source || sourceIsReady(source)) { setConnect(vendor, undefined); return; }
+		if (source.state === 'not_installed') { setConnect(vendor, { phase: 'failed', failed: 'install', reason: null }); return; }
+		await beginSignIn(source, true);
+	}
+
+	async function startInstall(source: ModelSource) {
+		const current = get(token);
+		if (!current) return;
+		const vendor = source.source;
+		setConnect(vendor, { phase: 'installing' });
+		try {
+			const refusal = await startCliInstall(current, vendor);
+			if (refusal === 'invisible_binary') await linkCli(current, vendor);
+			if (refusal) { await afterInstalled(vendor); return; }
+			await tickConnect();
+		} catch {
+			setConnect(vendor, { phase: 'failed', failed: 'install', reason: null });
+		}
+	}
+
+	let ticking = false;
+	/** One look at every install and sign-in under way. */
+	async function tickConnect() {
+		const current = get(token);
+		if (!current || ticking) return;
+		ticking = true;
+		try {
+			for (const [vendor, entry] of Object.entries(flow)) {
+				if (entry?.phase === 'installing') {
+					const install = await getCliInstall(current, vendor).catch(() => null);
+					if (install?.state === 'done' || install?.state === 'idle') await afterInstalled(vendor);
+					else if (install?.state === 'failed') setConnect(vendor, { phase: 'failed', failed: 'install', reason: install.reason });
+				} else if (entry?.phase === 'signing-in' && entry.accountId) {
+					const signin = await checkSignin(current, entry.accountId).catch(() => null);
+					if (signin?.status === 'completed') { await refreshSources(); setConnect(vendor, undefined); }
+					else if (signin && signin.status !== 'waiting') setConnect(vendor, { phase: 'failed', failed: 'signin' });
+				}
+			}
+		} finally { ticking = false; }
+	}
+
+	let rechecking = false;
+	/** Coming back to the window is how a copy fixed in Terminal, or a sign-in finished in the browser, is noticed. */
+	async function recheckOnFocus() {
+		if (page !== 'models' || rechecking) return;
+		rechecking = true;
+		try {
+			await refreshSources();
+			await tickConnect();
+		} finally { rechecking = false; }
+	}
+
+	$effect(() => {
+		if (!connectActive) return;
+		const timer = setInterval(() => void tickConnect(), POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	type RowView = {
+		meta: string; ready?: boolean; busy?: boolean; error?: boolean; detail?: string;
+		action?: { label: string; run: () => void };
+		confirm?: { label: string; run: () => void }[];
+		more?: { label: string; run: () => void }[];
+	};
+
+	function connectRow(source: ModelSource): RowView {
+		const copy = VENDOR_COPY[source.source] ?? { cli: source.name, uses: '', maker: source.name, origin: '', account: source.name, page: '' };
+		if (sourceIsReady(source)) return { meta: copy.uses, ready: true };
+		const entry = flow[source.source];
+		const lines = (rest: string) => `${copy.uses} ${rest}`.trim();
+		if (entry?.phase === 'confirm') {
+			return {
+				meta: lines(`CORSIA installs ${copy.cli} for you.`),
+				detail: `Set up ${copy.cli}? This runs ${copy.maker}’s official installer, downloaded from ${copy.origin}, and then you sign in to your ${copy.account} account.`,
+				confirm: [{ label: 'Set up', run: () => void startInstall(source) }, { label: 'Cancel', run: () => setConnect(source.source, undefined) }],
+			};
+		}
+		if (entry?.phase === 'installing') return { meta: `Installing with ${copy.maker}’s official installer. This can take up to 3 minutes.`, busy: true };
+		if (entry?.phase === 'signing-in') {
+			return {
+				meta: `${entry.installed ? 'Installed. ' : ''}Finish signing in to your ${copy.account} account in the browser window that just opened.`,
+				busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) },
+			};
+		}
+		if (entry?.phase === 'failed' && entry.failed === 'signin') {
+			return { meta: lines(`${copy.cli} is installed.`), error: true, detail: `Couldn’t sign in to ${copy.cli}. Choose Sign in to try again.`, action: { label: 'Sign in', run: () => void beginSignIn(source) } };
+		}
+		if (entry?.phase === 'failed') {
+			const why = entry.reason ? `: ${entry.reason}` : '';
+			const next = entry.reason?.includes('internet') ? 'Check your connection, then choose Try again.' : 'Choose Try again.';
+			return {
+				meta: lines(''), error: true, detail: `Couldn’t install ${copy.cli}${why}. ${next}`,
+				action: { label: 'Try again', run: () => void startInstall(source) },
+				more: copy.page ? [{ label: 'Open the install page', run: () => void openExternalUrl(copy.page) }] : undefined,
+			};
+		}
+		if (source.state === 'not_installed') return { meta: lines(`CORSIA installs ${copy.cli} for you.`), action: { label: 'Set up', run: () => setConnect(source.source, { phase: 'confirm' }) } };
+		if (source.limited) return { meta: lines('It has reached its usage limit for now.') };
+		if (source.state === 'unverified') return { meta: lines(`CORSIA couldn’t check this copy of ${copy.cli}.`), action: { label: 'Try again', run: () => void refreshSources() } };
+		return { meta: lines(`${copy.cli} is installed. Sign in to use it.`), action: { label: 'Sign in', run: () => void beginSignIn(source) } };
+	}
+
+	const harnessSources = $derived(sources.filter(isHarness));
+	const showLocalRow = $derived(Boolean(local) && (localDownloading || Boolean(local?.setup_error || localStartError) || (local && sourceIsReady(local))));
 
 	async function retryLocalDownload() {
 		const current = get(token);
@@ -290,7 +433,12 @@
 
 	onMount(() => {
 		void readStatus();
-		return on('models_updated', () => { if (page === 'models') void refreshSources(); });
+		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
+		const onVisible = () => { if (document.visibilityState === 'visible') void recheckOnFocus(); };
+		const onFocus = () => void recheckOnFocus();
+		window.addEventListener('focus', onFocus);
+		document.addEventListener('visibilitychange', onVisible);
+		return () => { offModels(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); };
 	});
 </script>
 
@@ -343,17 +491,38 @@
 		</div>
 	{:else if page === 'models'}
 		<div class="sources">
-			{#each sources as source (source.source)}
-				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[sourceMeta(source)]} centered>
-					{#snippet actions()}
-						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
-						{:else if source.source === 'omlx' && localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
-						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
-						{:else if source.state === 'not_installed'}<StatePill look="dot" state="idle" label="Not installed" /><Button variant="chip" size="sm" onclick={refreshSources}>Check again</Button>
-						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>Sign in</Button>{/if}
-					{/snippet}
-				</ListRow>
-			{/each}
+			<div class="rows">
+				{#each harnessSources as source (source.source)}
+					{@const row = connectRow(source)}
+					<section class="item" aria-label={VENDOR_COPY[source.source]?.cli ?? source.name}>
+						<ListRow name={VENDOR_COPY[source.source]?.cli ?? source.name} meta={[row.meta]} centered>
+							{#snippet actions()}
+								{#if row.ready}<StatePill look="dot" state="success" label="Ready" />
+								{:else if row.busy && !row.action}<Spinner size={14} />
+								{:else if row.action}<Button variant="chip" size="sm" onclick={row.action.run}>{row.action.label}</Button>{/if}
+							{/snippet}
+						</ListRow>
+						{#if row.detail}<p class="detail" class:err={row.error}>{row.detail}</p>{/if}
+						{#if row.confirm}
+							<div class="inrow">{#each row.confirm as item (item.label)}<Button variant="chip" size="sm" onclick={item.run}>{item.label}</Button>{/each}</div>
+						{:else if row.more}
+							<div class="inrow">{#each row.more as item (item.label)}<Button variant="chip" size="sm" onclick={item.run}>{item.label}</Button>{/each}</div>
+						{/if}
+					</section>
+				{/each}
+				{#if showLocalRow && local}
+					<section class="item" aria-label="This computer">
+						<ListRow name="This computer" meta={[sourceMeta(local)]} centered>
+							{#snippet actions()}
+								{#if sourceIsReady(local)}<StatePill look="dot" state="success" label="Ready" />
+								{:else if localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
+								{:else}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>Try again</Button>{/if}
+							{/snippet}
+						</ListRow>
+						{#if !localDownloading && !sourceIsReady(local)}<p class="detail err">{downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.</p>{/if}
+					</section>
+				{/if}
+			</div>
 			{#if keyOpen}
 				<Field variant="chip" layout="stacked" label="API key">
 					<select aria-label="Provider" bind:value={providerName}>{#each $providers.filter((provider) => provider.type === 'cloud') as provider}<option value={provider.name}>{provider.label}</option>{/each}</select>
@@ -379,4 +548,9 @@
 	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
 	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.api-key-action { align-self: flex-start; }
+	/* Rows keep the narrow window's width in a wide one, so an action stays beside its text. */
+	.rows { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 10); }
+	.detail { margin: var(--space-2) 0 0; font-size: var(--text-subhead); color: var(--text-secondary); line-height: var(--lh-normal); text-wrap: pretty; }
+	.detail.err { color: var(--red-text); }
+	.inrow { display: flex; gap: var(--space-2); margin: var(--space-1) 0 0 calc(var(--space-2) * -1); }
 </style>
