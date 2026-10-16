@@ -30,6 +30,7 @@ IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Clau
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
 IMPORT_FOLDER_OUTSIDE_PROJECT = "To use it in a project, connect it from that project's settings."
 IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
+IMPORT_NEEDS_SIGN_IN = "I can't bring over **{App}** ({client}) yet: it needs you to sign in, and CORSIA can't do that yet."
 
 
 def _home() -> Path:
@@ -96,6 +97,24 @@ def _kind(source: str, config: dict[str, Any]) -> str | None:
             return "stdio"
         return "remote" if isinstance(url, str) and url else None
     return None
+
+
+def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
+    """Whether a remote app cannot be imported before C supplies sign-in."""
+    if _kind(source, config) not in {"remote", "unsupported"}:
+        return False
+    if "oauth" in config:
+        return True
+    headers = config.get("headers", config.get("http_headers"))
+    if isinstance(headers, dict):
+        _clean, lifted = mcp_secrets.split_secrets("import", {"headers": headers}, headers=True)
+        if lifted:
+            return False
+    if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
+        return False
+    # Accepted limitation: public remote apps needing no key wait for C, which
+    # replaces this import-time decision with connect-time classification.
+    return True
 
 
 def _source_entries(source: str, path: Path) -> list[tuple[str, dict[str, Any], Path | None]]:
@@ -314,6 +333,12 @@ def import_selected(
             rows.append({"name": name, "status": "failed"})
             continue
         source_config, folder = entry
+        if _needs_sign_in(source, source_config):
+            rows.append({
+                "name": name, "status": "needs_sign_in",
+                "message": IMPORT_NEEDS_SIGN_IN.format(App=name, client=_SOURCE_LABELS[source]),
+            })
+            continue
         if _kind(source, source_config) == "unsupported":
             rows.append({"name": name, "status": "cannot_connect"})
             continue

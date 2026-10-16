@@ -55,7 +55,7 @@ def test_detection_reads_only_claude_project_mcp_servers_and_collapses_duplicate
     assert "must-not-read" not in rendered and "not-a-server" not in rendered
 
 
-def test_declared_claude_websocket_is_detected_but_cannot_be_imported(tmp_path: Path) -> None:
+def test_url_only_claude_websocket_is_detected_but_needs_sign_in(tmp_path: Path) -> None:
     _json(tmp_path / ".claude.json", {
         "mcpServers": {"Realtime": {"type": "ws", "url": "wss://example.test/mcp"}},
     })
@@ -70,7 +70,10 @@ def test_declared_claude_websocket_is_detected_but_cannot_be_imported(tmp_path: 
             [{"source": "claude_code", "name": "Realtime"}], db=db, home=tmp_path, actor="agent",
         )
 
-        assert imported == {"rows": [{"name": "Realtime", "status": "cannot_connect"}]}
+        assert imported == {"rows": [{
+            "name": "Realtime", "status": "needs_sign_in",
+            "message": "I can't bring over **Realtime** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+        }]}
         assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
     finally:
         db.close()
@@ -120,6 +123,7 @@ def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
         mcp_import.IMPORT_UNSUPPORTED,
         mcp_import.IMPORT_FOLDER_OUTSIDE_PROJECT,
         mcp_import.IMPORT_KEY_STAYS_IN_CODEX,
+        mcp_import.IMPORT_NEEDS_SIGN_IN,
     ))
 
 
@@ -170,3 +174,151 @@ def test_empty_stored_header_value_does_not_change_safe_text() -> None:
     from tools.mcp import _StoredHeadersAuth
 
     assert _StoredHeadersAuth({"X-Empty": ""}, "https://example.test").redact("safe") == "safe"
+
+
+def test_url_only_claude_http_is_excluded_as_needing_sign_in(tmp_path: Path) -> None:
+    _json(tmp_path / ".claude.json", {
+        "mcpServers": {"Bare HTTP": {"type": "http", "url": "https://example.test/mcp"}},
+    })
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "claude_code", "name": "Bare HTTP"}], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert imported == {"rows": [{
+            "name": "Bare HTTP", "status": "needs_sign_in",
+            "message": "I can't bring over **Bare HTTP** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+        }]}
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_claude_http_credential_header_is_lifted_not_excluded(tmp_path: Path) -> None:
+    from connections.app_reach import get_app
+
+    _json(tmp_path / ".claude.json", {
+        "mcpServers": {"Header": {
+            "type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "secret"},
+        }},
+    })
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "claude_code", "name": "Header"}], db=db, home=tmp_path, actor="agent",
+        )
+        app = get_app(imported["rows"][0]["id"], db=db)
+
+        assert imported["rows"][0]["state"] == "awaiting_approval"
+        assert app["config"]["key_refs"] == [{"kind": "header", "name": "Authorization"}]
+        assert "secret" not in json.dumps(app)
+    finally:
+        db.close()
+
+
+def test_codex_declared_bearer_token_imports_as_needing_a_key(tmp_path: Path) -> None:
+    from connections.app_reach import get_app
+
+    codex = tmp_path / ".codex" / "config.toml"
+    codex.parent.mkdir()
+    codex.write_text(
+        '[mcp_servers.Codex]\nurl = "https://example.test/mcp"\nbearer_token_env_var = "API_TOKEN"\n',
+        encoding="utf-8",
+    )
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "codex", "name": "Codex"}], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert imported["rows"][0]["state"] == "awaiting_approval"
+        assert get_app(imported["rows"][0]["id"], db=db)["config"]["needs_token"] is True
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(("name", "transport"), [("SSE", "sse"), ("WebSocket", "ws")])
+def test_url_only_remote_transports_are_excluded_as_needing_sign_in(
+    tmp_path: Path, name: str, transport: str,
+) -> None:
+    _json(tmp_path / ".claude.json", {
+        "mcpServers": {name: {"type": transport, "url": "https://example.test/mcp"}},
+    })
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "claude_code", "name": name}], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert imported["rows"] == [{
+            "name": name, "status": "needs_sign_in",
+            "message": f"I can't bring over **{name}** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+        }]
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_oauth_declaration_overrides_a_credential_header(tmp_path: Path) -> None:
+    _json(tmp_path / ".claude.json", {
+        "mcpServers": {"OAuth": {
+            "type": "http", "url": "https://example.test/mcp", "oauth": {},
+            "headers": {"Authorization": "secret"},
+        }},
+    })
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "claude_code", "name": "OAuth"}], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert imported["rows"] == [{
+            "name": "OAuth", "status": "needs_sign_in",
+            "message": "I can't bring over **OAuth** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+        }]
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_stdio_without_environment_stays_importable(tmp_path: Path) -> None:
+    _json(tmp_path / ".claude.json", {"mcpServers": {"Local": {"command": "npx"}}})
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "claude_code", "name": "Local"}], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert imported["rows"][0]["state"] == "awaiting_approval"
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_cant_bring_over_output_names_every_needs_sign_in_case(tmp_path: Path) -> None:
+    _json(tmp_path / ".claude.json", {"mcpServers": {
+        "Bare": {"type": "http", "url": "https://example.test/mcp"},
+        "SSE": {"type": "sse", "url": "https://example.test/sse"},
+        "OAuth": {"type": "http", "url": "https://example.test/oauth", "oauth": True,
+                  "headers": {"Cookie": "secret"}},
+    }})
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [
+                {"source": "claude_code", "name": "Bare"},
+                {"source": "claude_code", "name": "SSE"},
+                {"source": "claude_code", "name": "OAuth"},
+            ], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert imported["rows"] == [
+            {
+                "name": name, "status": "needs_sign_in",
+                "message": f"I can't bring over **{name}** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+            }
+            for name in ("Bare", "SSE", "OAuth")
+        ]
+    finally:
+        db.close()
