@@ -1,3 +1,4 @@
+import { on } from '$lib/ws/events';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 
@@ -147,8 +148,7 @@ export function createDevices(options: Options = {}) {
 	}
 
 	/**
-	 * Reads now, then again whenever the window regains focus or becomes visible (the host's state changes while the person
-	 * is on another screen). The countdown is local: one timeout aimed at the next moment its wording changes (each whole
+	 * Reads now, then again on the host's `devices_updated` and whenever the window regains focus or becomes visible. The countdown is local: one timeout aimed at the next moment its wording changes (each whole
 	 * minute, then the end).
 	 */
 	function start() {
@@ -163,9 +163,11 @@ export function createDevices(options: Options = {}) {
 		};
 		arm();
 		const refresh = () => { if (document.visibilityState === 'visible' && view.load === 'ready' && view.busy === null) void read(); };
+		// The host says when its state changed (a pairing used the code, it expired, a switch moved); focus is the fallback.
+		const offEvent = on('devices_updated', () => { if (view.busy === null) void read(); });
 		window.addEventListener('focus', refresh);
 		document.addEventListener('visibilitychange', refresh);
-		return () => { clearTimeout(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+		return () => { offEvent(); clearTimeout(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
 	}
 
 	return {

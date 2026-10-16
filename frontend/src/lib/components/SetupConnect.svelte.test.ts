@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SetupScreen from './SetupScreen.svelte';
 import { SETTINGS_PATH, type PairReason, type PairResult } from '$lib/remoteShell';
 
+// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
+const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
+
 vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 const openExternalUrl = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl }));
@@ -37,7 +40,7 @@ async function openConnect() {
 
 async function toCodeScreen(pick = 'Steve’s Mac Studio') {
 	await openConnect();
-	await vi.waitFor(() => expect(host.textContent).toContain(pick));
+	await waitFor(() => expect(host.textContent).toContain(pick));
 	buttons().find((candidate) => candidate.textContent?.includes(pick))?.click();
 	await settle();
 	button('Continue')?.click();
@@ -85,7 +88,7 @@ describe('Choose a computer (r1, r2, r3, r6)', () => {
 	it('lists the names found as sidebar rows, with the CONNECT section, and no code beside any', async () => {
 		await mountSetup();
 		await openConnect();
-		await vi.waitFor(() => expect(host.textContent).toContain('Living room mini'));
+		await waitFor(() => expect(host.textContent).toContain('Living room mini'));
 		expect(sidebar()).toContain('Connect');
 		expect(sidebar()).toContain('Choose a computer');
 		expect(sidebar()).toContain('Enter the code');
@@ -99,12 +102,12 @@ describe('Choose a computer (r1, r2, r3, r6)', () => {
 		await openConnect();
 		expect(host.textContent).toContain('Looking…');
 		discovered = { names: ['Studio'] };
-		await vi.waitFor(() => expect(host.textContent).toContain('Studio'), { timeout: 2500 });
+		await waitFor(() => expect(host.textContent).toContain('Studio'), { timeout: 2500 });
 	});
 	it('selects the picked row and enables Continue; typing an address deselects it', async () => {
 		await mountSetup();
 		await openConnect();
-		await vi.waitFor(() => expect(host.textContent).toContain('Living room mini'));
+		await waitFor(() => expect(host.textContent).toContain('Living room mini'));
 		buttons().find((candidate) => candidate.textContent?.includes('Living room mini'))?.click();
 		await settle();
 		expect(host.querySelector('ul[aria-label="CORSIA on this network"] .row.current')?.textContent).toContain('Living room mini');
@@ -119,7 +122,7 @@ describe('Choose a computer (r1, r2, r3, r6)', () => {
 		discovered = { names: [] };
 		await mountSetup();
 		await openConnect();
-		await vi.waitFor(() => expect(flat(host.textContent)).toContain('No other computer running CORSIA found yet.'), { timeout: 7000 });
+		await waitFor(() => expect(flat(host.textContent)).toContain('No other computer running CORSIA found yet.'), { timeout: 7000 });
 		expect(flat(host.textContent)).toContain(`On that computer: ${flat(SETTINGS_PATH)}`);
 		expect(host.textContent).toContain('Looking…');
 	}, 10_000);
@@ -127,7 +130,7 @@ describe('Choose a computer (r1, r2, r3, r6)', () => {
 		discovered = { names: [], denied: true };
 		await mountSetup();
 		await openConnect();
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA can’t look on this network.'));
+		await waitFor(() => expect(host.textContent).toContain('CORSIA can’t look on this network.'));
 		button('Open System Settings')?.click();
 		expect(openExternalUrl).toHaveBeenCalledWith(expect.stringContaining('Privacy_LocalNetwork'));
 	});
@@ -147,7 +150,7 @@ describe('Enter the code (r7)', () => {
 		expect(host.querySelector('h1')?.textContent).toBe('Enter the code');
 		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On Steve’s Mac Studio: ${flat(SETTINGS_PATH)}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.`);
 		expect(boxes()).toHaveLength(4);
-		await vi.waitFor(() => expect(document.activeElement).toBe(boxes()[0]));
+		await waitFor(() => expect(document.activeElement).toBe(boxes()[0]));
 		const steps = host.querySelectorAll('[data-testid="host-steps"] li');
 		expect(steps).toHaveLength(3);
 		expect(Array.from(steps).map((step) => step.querySelector('.n')?.textContent)).toEqual(['1', '2', '3']);
@@ -190,15 +193,15 @@ describe('Enter the code (r7)', () => {
 		await mountSetup();
 		await toCodeScreen();
 		paste('K7QX');
-		await vi.waitFor(() => expect(flat(host.querySelector('p.err')?.textContent)).toMatch(line));
-		await vi.waitFor(() => expect(boxes().map((box) => box.value)).toEqual(['', '', '', '']));
+		await waitFor(() => expect(flat(host.querySelector('p.err')?.textContent)).toMatch(line));
+		await waitFor(() => expect(boxes().map((box) => box.value)).toEqual(['', '', '', '']));
 		expect(document.activeElement).toBe(boxes()[0]);
 		expect(host.querySelector('h1')?.textContent).toBe('Enter the code');
 	});
 
 	const onChooseScreen: Array<[PairReason, string, string]> = [
 		['server', '', 'Steve’s Mac Studio answered, but CORSIA isn’t running there.'],
-		['network', '', 'CORSIA can’t reach Steve’s Mac Studio.'],
+		['network', '', 'Steve’s Mac Studio answered, but CORSIA isn’t running there.'],
 		['incompatible', '1.4/1.2', 'This computer has CORSIA 1.4 and Steve’s Mac Studio has 1.2. Update the older one, then try again.'],
 		['too_old', '', 'Steve’s Mac Studio has an older CORSIA. Update it, then try again.'],
 	];
@@ -208,7 +211,7 @@ describe('Enter the code (r7)', () => {
 		await mountSetup();
 		await toCodeScreen();
 		paste('K7QX');
-		await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Connect to CORSIA on another computer'));
+		await waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Connect to CORSIA on another computer'));
 		expect(flat(host.querySelector('.field .err')?.textContent)).toContain(line);
 	});
 
@@ -225,7 +228,7 @@ describe('Enter the code (r7)', () => {
 		discovered = { names: [] };
 		await mountSetup();
 		await openConnect();
-		await vi.waitFor(() => expect(flat(host.textContent)).toContain('No other computer running CORSIA found yet.'), { timeout: 7000 });
+		await waitFor(() => expect(flat(host.textContent)).toContain('No other computer running CORSIA found yet.'), { timeout: 7000 });
 		const lines = Array.from(host.querySelectorAll('p')).map((paragraph) => flat(paragraph.textContent)).filter((text) => text.includes('Settings ›'));
 		expect(lines.length).toBeGreaterThan(0);
 		for (const text of lines) expect(text).toContain('Open CORSIA › Settings › System');

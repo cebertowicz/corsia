@@ -3,13 +3,14 @@
 	import { page } from '$app/state';
 	import SetupScreen from '$lib/components/SetupScreen.svelte';
 	import SettingsDevices from '$lib/components/SettingsDevices.svelte';
+	import { handleMessage } from '$lib/ws/handlers';
 
 	/**
 	 * Frames for corsia#638 PR 2. The real screens run on their own code path; only the outside is faked, the way a test
 	 * fakes it: the desktop shell (`window.__CORSIA_SHELL__` and its commands) and the server answers (`fetch`). The
 	 * frame script reaches each state by using the screens (click, type), never by editing the page.
 	 *   ?kind=setup&discover=found|empty|denied&pair=ok|wrong_code|expired|too_many_tries|paused|busy|server|network|incompatible|too_old
-	 *   ?kind=devices&state=off|on|code|ending|not-announced|paused|starting|ports-taken|load-failed|loading|read-only|long-name|long-name-read-only
+	 *   ?kind=devices&state=off|on|code|ending|not-announced|paused|starting|ports-taken|load-failed|loading|read-only|consumed|long-name|long-name-read-only
 	 *   &theme=light|dark
 	 */
 	const query = page.url.searchParams;
@@ -43,9 +44,13 @@
 			'load-failed': () => json({}, 500),
 			loading: () => new Promise<Response>(() => {}),
 			'read-only': () => json(server({ code: { state: 'active', expires_in_seconds: 300 } }, name)),
+			// A joiner is about to pair: a code shows until the page's own websocket handler receives devices_updated.
+			consumed: () => json(server({ code: paired ? { state: 'none' } : active(540) }, 'Steve’s Mac Studio')),
 			'long-name': () => json(server({}, name)),
 			'long-name-read-only': () => json(server({}, name)),
 		};
+		let paired = false;
+		(window as unknown as Record<string, unknown>).__remoteFrame = { pair: () => { paired = true; handleMessage({ type: 'devices_updated' }, () => {}); } };
 		const read = byState[which] ?? byState.on;
 		window.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
 			// "starting": the switch turns on and the host is still starting; the answer never comes during the frame.
