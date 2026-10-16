@@ -166,7 +166,3 @@
 	onConfirmDeleteThread={onConfirmDeleteThread}
 	onCancelDeleteThread={onCancelDeleteThread}
 />
-
-<style>
-	@media (prefers-reduced-motion: reduce) { .auth-gate, .app-gate { animation-duration: var(--dur-tight) !important; } }
-</style>

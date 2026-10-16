@@ -53,5 +53,4 @@
 	.detail { margin: var(--space-2) 0 0; font-size: var(--text-subhead); color: var(--text-secondary); line-height: var(--lh-normal); text-wrap: pretty; }
 	.detail.err { color: var(--red-text); }
 	.inrow { display: flex; gap: var(--space-2); margin: var(--space-1) 0 0 calc(var(--space-2) * -1); }
-	@media (prefers-reduced-motion: reduce) { .disclosure { animation-duration: var(--dur-tight) !important; } }
 </style>
