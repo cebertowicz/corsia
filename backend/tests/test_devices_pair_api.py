@@ -127,6 +127,33 @@ def _finish(client: TestClient, exchange_id: str, confirm_c: bytes):
     )
 
 
+def test_pair_start_rejects_code_rotation_during_off_loop_spake_without_charging_replacement(monkeypatch):
+    first_code = _enable_pairing()
+    pairing = runtime.pairing
+    start_spake = pairing.start_spake
+    replacement_code: list[str] = []
+
+    def rotate_code_during_spake():
+        result = start_spake()
+        replacement_code.append(pairing.issue_code())
+        return result
+
+    stale_client = _client_pairing(first_code)
+    with monkeypatch.context() as patch:
+        patch.setattr(pairing, "start_spake", rotate_code_during_spake)
+        refused = _start(TestClient(app), stale_client.start())
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == {"reason": "invalid_exchange"}
+    assert pairing._wrong_tries == 0
+    assert not pairing._failures
+    assert not pairing._exchanges
+
+    replacement_client = _client_pairing(replacement_code[0])
+    started = _start(TestClient(app), replacement_client.start())
+    assert started.status_code == 200
+
+
 def test_disabled_pair_start_has_no_listener_or_key_side_effect(tmp_path):
     runtime.pairing.disable()
     assert runtime.listener is None

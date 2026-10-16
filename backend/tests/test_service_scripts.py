@@ -2617,6 +2617,7 @@ def test_rendered_launchd_service_has_explicit_shutdown_budget(
     env_file.write_text(
         "CORSIA_RESTART_CALLER_TOKEN=must-not-render\n"
         "CORSIA_RESTART_CURL=/tmp/must-not-render\n"
+        "CORSIA_DEVICES_DISABLE=1\n"
         "VISIBLE_SETTING=preserved\n"
     )
     result = _run_bash(
@@ -2650,6 +2651,7 @@ render_service_plist generation-test
     assert environment["VISIBLE_SETTING"] == "preserved"
     assert "CORSIA_RESTART_CALLER_TOKEN" not in environment
     assert "CORSIA_RESTART_CURL" not in environment
+    assert "CORSIA_DEVICES_DISABLE" not in environment
 
 
 def test_rendered_launchd_service_keeps_key_variables_for_the_key_store_migration(

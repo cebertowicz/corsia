@@ -105,12 +105,13 @@ async def pair_start(body: dict):
             spki_sha256=host_spki_sha256() if mode == "pinned" else None,
         )
         msg_c = _decode(body.get("msg_c"), "msg_c")
-        spake, msg_s = await asyncio.to_thread(runtime.pairing.start_spake)
+        spake, msg_s, generation = await asyncio.to_thread(runtime.pairing.start_spake)
         exchange_id, msg_s = runtime.pairing.start(
             msg_c=msg_c,
             transcript_prefix=prefix,
             spake=spake,
             msg_s=msg_s,
+            generation=generation,
         )
     except PairingError as error:
         _emit("pairing_failed", reason=error.reason)

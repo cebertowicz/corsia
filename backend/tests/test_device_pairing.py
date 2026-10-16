@@ -69,6 +69,29 @@ def test_start_prunes_expired_pending_exchanges_before_the_limit():
     assert set(pairing._exchanges) == {exchange_id}
 
 
+def test_start_rejects_spake_when_code_rotates_without_charging_replacement(monkeypatch):
+    pairing = DevicePairing()
+    pairing.enable()
+    pairing.issue_code()
+    start_spake = pairing.start_spake
+
+    def rotate_code_during_spake():
+        result = start_spake()
+        pairing.issue_code()
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pairing, "start_spake", rotate_code_during_spake)
+        with pytest.raises(PairingError, match="invalid_exchange"):
+            pairing.start(msg_c=b"client", transcript_prefix=b"test")
+
+    assert pairing._wrong_tries == 0
+    assert not pairing._failures
+    assert not pairing._exchanges
+    exchange_id, _ = pairing.start(msg_c=b"replacement", transcript_prefix=b"test")
+    assert exchange_id in pairing._exchanges
+
+
 def test_code_state_changes_notify_once_for_issue_expiry_disable_and_pause():
     now = [0.0]
     updates: list[str] = []

@@ -118,6 +118,7 @@ class DevicePairing:
         transcript_prefix: bytes,
         spake: object | None = None,
         msg_s: bytes | None = None,
+        generation: int | None = None,
     ) -> tuple[str, bytes]:
         self.require_active()
         self._prune_expired_exchanges()
@@ -127,7 +128,9 @@ class DevicePairing:
             self._record_failure()
             raise PairingError("reflected")
         if spake is None:
-            spake, msg_s = self.start_spake()
+            spake, msg_s, generation = self.start_spake()
+        if generation != self._generation:
+            raise PairingError("invalid_exchange")
         assert msg_s is not None
         exchange_id = secrets.token_urlsafe(24)
         self._exchanges[exchange_id] = _Exchange(
@@ -141,14 +144,14 @@ class DevicePairing:
         self._issued_server_messages.add(msg_s)
         return exchange_id, msg_s
 
-    def start_spake(self) -> tuple[object, bytes]:
-        """Do only the expensive SPAKE2 calculation after checking the active code."""
+    def start_spake(self) -> tuple[object, bytes, int]:
+        """Create SPAKE2 state together with the active pairing-code generation."""
         self.require_active()
         from spake2 import SPAKE2_Symmetric
 
         assert self._pairing_secret is not None
         spake = SPAKE2_Symmetric(self._pairing_secret, idSymmetric=PAIRING_IDENTITY)
-        return spake, spake.start()
+        return spake, spake.start(), self._generation
 
     def _prune_expired_exchanges(self) -> None:
         now = self._clock()
