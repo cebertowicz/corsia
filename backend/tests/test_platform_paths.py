@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import sqlite3
 import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -62,21 +63,23 @@ def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
     ]
 
 
-def test_service_file_lines_honour_only_the_workspace_and_port(tmp_path):
+def test_service_file_lines_honour_only_the_state_workspace_and_port(tmp_path):
     paths = _platform_paths()
     service_file = tmp_path / "service.json"
     service_file.write_text(
-        '{"workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
+        '{"state_dir": "/state", "workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
     )
 
     assert paths.service_file_lines(service_file) == [
         "note=service.json: ignoring unsupported key PATH",
         "note=service.json: ignoring unsupported key <unprintable name>",
+        "state_dir=/state",
         "workspace=/w",
         "port=4100",
     ]
-    service_file.write_text('{"workspace": "relative", "port": true}')
+    service_file.write_text('{"state_dir": "relative", "workspace": "relative", "port": true}')
     assert paths.service_file_lines(service_file) == [
+        "note=service.json: ignoring an invalid state_dir value",
         "note=service.json: ignoring an invalid workspace value",
         "note=service.json: ignoring an invalid port value",
     ]
@@ -84,6 +87,45 @@ def test_service_file_lines_honour_only_the_workspace_and_port(tmp_path):
     assert paths.service_file_lines(service_file) == [
         "note=service.json unreadable: ValueError"
     ]
+
+
+def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
+    paths = _platform_paths()
+    state = tmp_path / "Application Support" / "com.cebertowicz.corsia" / "state"
+    state.mkdir(parents=True)
+    database = state / "corsia.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("create table agents (id text)")
+        connection.execute("insert into agents values ('before-adopt')")
+    database.chmod(0o600)
+    keys = state / "keys"
+    keys.mkdir(mode=0o700)
+    key = keys / "provider"
+    key.write_text("kept-private")
+    key.chmod(0o600)
+    (state / "devices").mkdir(mode=0o700)
+    (state / "devices" / "registered").write_text("device")
+
+    snapshot = paths.create_adoption_snapshot(state)
+    with sqlite3.connect(database) as connection:
+        connection.execute("insert into agents values ('new-build')")
+    (state / "keys" / "new-key").write_text("new")
+    (state / "new-build-file").write_text("new")
+    (state / "corsia.db-wal").write_text("wal")
+    (state / "corsia.db-shm").write_text("shm")
+
+    paths.restore_adoption_snapshot(state, snapshot)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("select id from agents order by id").fetchall() == [("before-adopt",)]
+    assert not (state / "new-build-file").exists()
+    assert not (state / "keys" / "new-key").exists()
+    assert not (state / "corsia.db-wal").exists()
+    assert not (state / "corsia.db-shm").exists()
+    assert key.read_text() == "kept-private"
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o700
+    assert stat.S_IMODE(key.stat().st_mode) == 0o600
+    assert stat.S_IMODE(database.stat().st_mode) == 0o600
 
 
 def test_default_state_root_is_the_state_child_of_the_app_folder_in_the_app(tmp_path):

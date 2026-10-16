@@ -12,8 +12,8 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        Arc, Mutex,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -22,6 +22,7 @@ use std::{
 use serde::Serialize;
 use tauri::Manager;
 
+mod adoption;
 mod app_paths;
 mod first_run;
 mod lifecycle;
@@ -35,12 +36,18 @@ const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const KNOWN_SCHEMA_VERSION: u32 = 124;
+static ADOPTION_DRAIN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
 struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
+    adoption_in_progress: AtomicBool,
+    adoption_cancel_requested: AtomicBool,
+    /// Running tasks the source service still reports, plus one; zero until the first reading.
+    adoption_waiting: Arc<AtomicU32>,
 }
 
 /// The app binary's command-line modes; anything else opens the window.
@@ -84,6 +91,7 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
 enum ServiceStartup {
     Ready { url: String },
     RequiresApproval,
+    ExistingInstall { install_dir: String, workspace: String },
 }
 
 /// Drag-region handler injected into every page (including external URLs
@@ -276,6 +284,150 @@ fn restart_service() -> Result<(), String> {
     run_service_command("register")
 }
 
+struct SourceLifecycle {
+    source: adoption::SourceInstall,
+    waiting: Option<Arc<AtomicU32>>,
+    token: Option<String>,
+}
+
+impl SourceLifecycle {
+    fn lifecycle_command(&self, verb: &str) -> Result<(), String> {
+        let status = Command::new(&self.source.lifecycle_script).arg(verb).status()
+            .map_err(|error| format!("could not {verb} the source service: {error}"))?;
+        status.success().then_some(()).ok_or_else(|| format!("source service {verb} exited {status}"))
+    }
+
+    fn backend_dir(&self) -> Result<PathBuf, String> {
+        Ok(self.source.lifecycle_script.parent().and_then(Path::parent)
+            .ok_or("source lifecycle script has no checkout")?.join("backend"))
+    }
+
+    fn service_token(&mut self) -> Result<String, String> {
+        if let Some(token) = &self.token { return Ok(token.clone()); }
+        // This is not a source CLI command: it mints one short-lived lifecycle
+        // credential so the app can speak directly to the running old backend.
+        let backend = self.backend_dir()?;
+        let program = "import sys; sys.path.insert(0, sys.argv[1]); from infra import accounts, token_admin; users = accounts.list_users(); assert users, 'no signed-in account exists'; print(token_admin.issue_service_token(users[0]['id'], 'app-adoption'))";
+        let output = Command::new(&self.source.python).args(["-c", program]).arg(&backend)
+            .current_dir(&backend).env("CORSIA_STATE_DIR", &self.source.state)
+            .env("CORSIA_WORKSPACE", &self.source.workspace).output()
+            .map_err(|error| format!("could not get an adoption credential: {error}"))?;
+        if !output.status.success() { return Err("could not get an adoption credential; sign in to the source install first".into()); }
+        let token = String::from_utf8(output.stdout).map_err(|_| "adoption credential was not UTF-8")?;
+        let token = token.trim();
+        if token.is_empty() { return Err("could not get an adoption credential; sign in to the source install first".into()); }
+        let token = token.to_owned(); self.token = Some(token.clone()); Ok(token)
+    }
+
+    fn drain_query(token: &str, operation_id: Option<&str>) -> String {
+        let encode = |value: &str| value.bytes().map(|byte| match byte { b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(), _ => format!("%{byte:02X}") }).collect::<String>();
+        let mut query = format!("token={}", encode(token));
+        if let Some(operation_id) = operation_id { query.push_str("&operation_id="); query.push_str(&encode(operation_id)); }
+        query
+    }
+
+    fn drain_request(&self, method: &str, endpoint: &str, token: &str, operation_id: Option<&str>, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        let path = format!("/api/system/drain{endpoint}?{}", Self::drain_query(token, operation_id));
+        let payload = body.map(|value| value.to_string()).unwrap_or_default();
+        let mut stream = TcpStream::connect(("127.0.0.1", self.source.port)).map_err(|error| format!("could not reach the source backend drain API: {error}"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|error| error.to_string())?;
+        stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|error| error.to_string())?;
+        let request = format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", self.source.port, payload.len(), payload);
+        stream.write_all(request.as_bytes()).map_err(|error| format!("could not send drain request: {error}"))?;
+        let mut response = Vec::new(); stream.read_to_end(&mut response).map_err(|error| format!("could not read drain response: {error}"))?;
+        let split = response.windows(4).position(|part| part == b"\r\n\r\n").ok_or("drain response was malformed")?;
+        let head = std::str::from_utf8(&response[..split]).map_err(|_| "drain response headers were not UTF-8")?;
+        let status = head.split_whitespace().nth(1).ok_or("drain response had no HTTP status")?.parse::<u16>().map_err(|_| "drain response had an invalid HTTP status")?;
+        if status != 200 { return Err(format!("source drain API returned HTTP {status}")); }
+        serde_json::from_slice(&response[split + 4..]).map_err(|error| format!("drain response was not JSON: {error}"))
+    }
+
+    fn operation_id() -> String {
+        let sequence = ADOPTION_DRAIN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+        format!("{nanos:016x}{sequence:016x}")
+    }
+
+    fn parse_drain(value: serde_json::Value, expected: &str) -> Result<adoption::DrainStatus, String> {
+        let operation_id = value.get("operation_id").and_then(serde_json::Value::as_str).ok_or("drain response did not name its operation")?;
+        if operation_id != expected { return Err("drain response did not preserve the exact operation id".into()); }
+        let active = value.get("active").and_then(serde_json::Value::as_bool).ok_or("drain response did not report active state")?;
+        let active_processes = value.get("activeProcesses").and_then(serde_json::Value::as_u64).ok_or("drain response did not report live count")?;
+        Ok(adoption::DrainStatus { operation_id: operation_id.to_owned(), active_processes: active_processes as usize, active })
+    }
+}
+
+impl adoption::Lifecycle for SourceLifecycle {
+    fn begin_drain(&mut self) -> Result<adoption::DrainStatus, String> {
+        let token = self.service_token()?; let operation_id = Self::operation_id();
+        let value = self.drain_request("POST", "", &token, None, Some(serde_json::json!({"reason": "packaged-app adoption", "operation_id": operation_id})))?;
+        Self::parse_drain(value, &operation_id)
+    }
+
+    fn drain_status(&mut self, operation_id: &str) -> Result<adoption::DrainStatus, String> {
+        let token = self.service_token()?;
+        let exact = self.drain_request("GET", "", &token, Some(operation_id), None)?;
+        if exact.get("operation_id").and_then(serde_json::Value::as_str) != Some(operation_id) || exact.get("status").and_then(serde_json::Value::as_str) != Some("in_flight") { return Err("drain operation ended or changed before completion".into()); }
+        let value = self.drain_request("GET", "", &token, None, None)?;
+        let status = Self::parse_drain(value, operation_id)?;
+        if let Some(waiting) = &self.waiting { waiting.store(status.active_processes.min(u32::MAX as usize - 1) as u32 + 1, Ordering::Release); }
+        Ok(status)
+    }
+
+    fn cancel_drain(&mut self, operation_id: &str) -> Result<(), String> {
+        let token = self.service_token()?;
+        let value = self.drain_request("DELETE", "", &token, Some(operation_id), None)?;
+        if value.get("operation_id").and_then(serde_json::Value::as_str) == Some(operation_id) && value.get("active").and_then(serde_json::Value::as_bool) == Some(false) { Ok(()) } else { Err("source drain cancellation did not confirm the exact operation".into()) }
+    }
+
+    fn complete_drain(&mut self, operation_id: &str) -> Result<(), String> {
+        let token = self.service_token()?;
+        let value = self.drain_request("POST", "/ready", &token, None, Some(serde_json::json!({"operation_id": operation_id})))?;
+        if value.get("operation_id").and_then(serde_json::Value::as_str) == Some(operation_id) && value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) { Ok(()) } else { Err("source drain did not confirm readiness for the exact operation".into()) }
+    }
+
+    fn bootout_old(&mut self) -> Result<(), String> {
+        let target = format!("gui/{}/com.corsia.prod", unsafe { libc::geteuid() });
+        let status = Command::new("/bin/launchctl").args(["bootout", "--wait", &target]).status().map_err(|error| format!("could not release the source service: {error}"))?;
+        if !status.success() { return Err(format!("source service bootout exited {status}")); }
+        if probe_health(self.source.port) { return Err("the source backend still answers after bootout".into()); }
+        Ok(())
+    }
+
+    fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
+        let backend = self.source.lifecycle_script.parent().and_then(Path::parent).ok_or("source lifecycle script has no checkout")?.join("backend");
+        let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.platform_paths import create_adoption_snapshot; print(create_adoption_snapshot(Path(sys.argv[2])))";
+        let output = Command::new(&self.source.python).args(["-c", program]).arg(backend).arg(state).output()
+            .map_err(|error| format!("could not start the source state backup: {error}"))?;
+        if !output.status.success() { return Err(format!("source state backup exited {}", output.status)); }
+        let snapshot = String::from_utf8(output.stdout).map_err(|_| "source state backup returned a non-UTF-8 path")?;
+        let snapshot = PathBuf::from(snapshot.trim());
+        if !snapshot.is_dir() { return Err("source state backup did not create a snapshot".into()); }
+        Ok(snapshot)
+    }
+
+    fn start_new(&mut self, _state: &Path, port: u16, app_dir: &Path) -> Result<(), String> {
+        run_service_command("register")?;
+        wait_for_service(port, app_dir)
+    }
+
+    fn stop_new(&mut self, _state: &Path, port: u16) -> Result<(), String> {
+        unregister_service()?;
+        if probe_health(port) { return Err("the app backend still answers after service unregister".into()); }
+        Ok(())
+    }
+
+    fn restore_backup(&mut self, state: &Path, snapshot: &Path) -> Result<(), String> {
+        let backend = self.source.lifecycle_script.parent().and_then(Path::parent).ok_or("source lifecycle script has no checkout")?.join("backend");
+        let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.platform_paths import restore_adoption_snapshot; restore_adoption_snapshot(Path(sys.argv[2]), Path(sys.argv[3]))";
+        let status = Command::new(&self.source.python).args(["-c", program]).arg(backend).arg(state).arg(snapshot).status()
+            .map_err(|error| format!("could not restore the source state backup: {error}"))?;
+        status.success().then_some(()).ok_or_else(|| format!("source state restore exited {status}"))
+    }
+
+    fn start_old(&mut self) -> Result<(), String> { self.lifecycle_command("start") }
+}
+
 fn service_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
@@ -374,6 +526,11 @@ fn start_service(
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
     let app_dir = default_app_dir(app)?;
+    if let Some(interrupted) = adoption::interrupted_plan(&app_dir)? {
+        let mut lifecycle = SourceLifecycle { source: interrupted.source.clone(), token: None, waiting: None };
+        return adoption::recover(&interrupted, &mut lifecycle)
+            .and_then(|()| Err("the interrupted adoption was recovered; reopen CORSIA to use the restored install".into()));
+    }
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
@@ -387,6 +544,12 @@ fn start_service(
     };
     if let first_run::FirstRun::ExistingInstall { reason } = first_run {
         return Err(reason);
+    }
+    if let first_run::FirstRun::Adoptable { source } = &first_run {
+        return Ok(ServiceStartup::ExistingInstall {
+            install_dir: source.config.parent().unwrap_or(&source.state).display().to_string(),
+            workspace: source.workspace.display().to_string(),
+        });
     }
     let port = port_for_startup(&first_run, first_run::recorded_port(&app_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
@@ -507,6 +670,37 @@ fn configure_work_folder(
         .lock()
         .map_err(|_| "service state is unavailable")? = Some(app_dir);
     Ok(())
+}
+
+/// Running tasks the old service is still finishing, or none before its first reading.
+#[tauri::command]
+fn adoption_waiting_count(service: tauri::State<'_, AppServiceState>) -> Option<u32> {
+    service.adoption_waiting.load(Ordering::Acquire).checked_sub(1)
+}
+
+#[tauri::command]
+fn adopt_existing_install(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<ServiceStartup, String> {
+    let home = app.path().home_dir().map_err(|error| format!("could not resolve the home folder: {error}"))?;
+    let app_dir = default_app_dir(&app)?;
+    let first_run = first_run::plan(&home, &app_dir)?;
+    let first_run::FirstRun::Adoptable { source } = first_run else {
+        return Err("there is no source install ready to adopt".into());
+    };
+    let port = source.port;
+    let plan = adoption::Plan { source: source.clone(), app_dir: app_dir.clone() };
+    service.adoption_cancel_requested.store(false, Ordering::Release);
+    service.adoption_waiting.store(0, Ordering::Release);
+    service.adoption_in_progress.store(true, Ordering::Release);
+    let mut lifecycle = SourceLifecycle { source, token: None, waiting: Some(service.adoption_waiting.clone()) };
+    let adopted = adoption::adopt(&plan, &mut lifecycle, KNOWN_SCHEMA_VERSION, &service.adoption_cancel_requested);
+    service.adoption_in_progress.store(false, Ordering::Release);
+    adopted?;
+    *service.app_dir.lock().map_err(|_| "service state is unavailable")? = Some(app_dir.clone());
+    wait_for_service(port, &app_dir)?;
+    Ok(ServiceStartup::Ready { url: service_url(port) })
 }
 
 #[tauri::command]
@@ -724,6 +918,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            adopt_existing_install,
+            adoption_waiting_count,
             choose_work_folder,
             configure_work_folder,
             lifecycle::retry_quit,
@@ -809,6 +1005,13 @@ pub fn run() {
                             let _ = window.eval("window.__corsiaShowBackgroundApproval?.();");
                         }
                     }
+                    Ok(ServiceStartup::ExistingInstall { install_dir, workspace }) => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let install_dir = serde_json::to_string(&install_dir).unwrap_or_default();
+                            let workspace = serde_json::to_string(&workspace).unwrap_or_default();
+                            let _ = window.eval(format!("window.__corsiaShowExistingInstall?.({install_dir}, {workspace});"));
+                        }
+                    }
                     Err(error) => {
                         log::error!("bundled CORSIA service did not start: {error}");
                         if let Some(window) = app_handle.get_webview_window("main") {
@@ -874,6 +1077,14 @@ mod tests {
         let request = server.join().expect("test server");
         assert!(request.starts_with("GET /api/system/operation-active HTTP/1.1\r\n"));
         assert!(request.contains(&format!("\r\nHost: 127.0.0.1:{port}\r\n")));
+    }
+
+    #[test]
+    fn adoption_drain_query_binds_token_and_exact_operation_once() {
+        assert_eq!(
+            SourceLifecycle::drain_query("service token/+", Some("0123456789abcdef0123456789abcdef")),
+            "token=service%20token%2F%2B&operation_id=0123456789abcdef0123456789abcdef"
+        );
     }
 
     #[test]

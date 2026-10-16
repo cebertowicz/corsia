@@ -174,6 +174,7 @@
 		</section>
 		<div id="actions" class="actions" hidden>
 			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
+			<button id="quit" class="secondary" type="button" hidden>Quit</button>
 			<button id="retry" class="primary" type="button">Try again</button>
 		</div>
 	</div>
@@ -193,19 +194,69 @@
 			const openLoginItems = document.getElementById('open-login-items');
 			const retry = document.getElementById('retry');
 			const failureLoginItems = document.getElementById('failure-login-items');
+			const quit = document.getElementById('quit');
+			const ADOPTION_COPY = {
+				questionTitle: 'Use the CORSIA already on this computer?',
+				questionLine: (_installDir, workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It waits for running work to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
+
+				checkingTitle: 'Checking for running tasks…',
+				waitingTitle: (count) => `Waiting for ${count} running ${count === 1 ? 'task' : 'tasks'} to finish…`,
+				backingUpTitle: 'Backing up your data…',
+
+				failureTitle: 'CORSIA couldn’t switch over',
+				failureLine: (reason) => `Your existing CORSIA is running again, as it was. ${reason}`,
+			};
 			let quitFailure = false;
+			let adoptionPrompt = false;
 			let approvalPoll;
 			let approvalPollInFlight = false;
 			let continuationStarted = false;
 
 			function showStarting() {
 				quitFailure = false;
+				adoptionPrompt = false;
 				status.textContent = 'Starting CORSIA…';
 				line.hidden = true;
 				log.hidden = true;
 				spinner.hidden = false;
 				actions.hidden = true;
 				backgroundApproval.hidden = true;
+				quit.hidden = true;
+			}
+
+			function showExistingInstall(installDir, workDir) {
+				clearInterval(approvalPoll);
+				adoptionPrompt = true;
+				status.textContent = ADOPTION_COPY.questionTitle;
+				line.textContent = ADOPTION_COPY.questionLine(installDir, workDir);
+				line.hidden = false;
+				log.hidden = true;
+				spinner.hidden = true;
+				backgroundApproval.hidden = true;
+				failureLoginItems.hidden = true;
+				quit.hidden = false;
+				retry.textContent = 'Use it';
+				actions.hidden = false;
+				retry.disabled = false;
+				retry.focus();
+			}
+
+			async function showAdoptionFailure(reason) {
+				quitFailure = false;
+				adoptionPrompt = false;
+				backgroundApproval.hidden = true;
+				status.textContent = ADOPTION_COPY.failureTitle;
+				line.textContent = ADOPTION_COPY.failureLine(typeof reason === 'string' ? reason : 'CORSIA couldn’t switch over.');
+				line.hidden = false;
+				log.hidden = false;
+				spinner.hidden = true;
+				failureLoginItems.hidden = true;
+				quit.hidden = false;
+				retry.textContent = 'Try again';
+				actions.hidden = false;
+				try { logPath.textContent = await invoke('get_service_log_path'); } catch { logPath.textContent = 'Service log location unavailable'; }
+				retry.disabled = false;
+				retry.focus();
 			}
 
 			async function showFailure(why, quitting = false) {
@@ -219,6 +270,7 @@
 				spinner.hidden = true;
 				failureLoginItems.hidden = !quitting;
 				failureLoginItems.className = quitting ? 'primary' : 'secondary';
+				quit.hidden = false;
 				retry.className = quitting ? 'secondary' : 'primary';
 				actions.hidden = false;
 				try {
@@ -283,6 +335,8 @@
 					const startup = await invoke('start_local_service');
 					if (startup.state === 'ready') {
 						continueToService(startup);
+					} else if (startup.state === 'existing_install') {
+						showExistingInstall(startup.install_dir, startup.workspace);
 					} else {
 						await showBackgroundApproval();
 					}
@@ -292,6 +346,27 @@
 			}
 
 			async function retryFailure() {
+				if (adoptionPrompt) {
+					showStarting();
+					status.textContent = ADOPTION_COPY.checkingTitle;
+					const countPoll = setInterval(async () => {
+						try {
+							const count = await invoke('adoption_waiting_count');
+							if (count === null) return;
+							status.textContent = count > 0 ? ADOPTION_COPY.waitingTitle(count) : ADOPTION_COPY.backingUpTitle;
+						} catch { /* the next reading replaces this one */ }
+					}, 1000);
+					try {
+						const startup = await invoke('adopt_existing_install');
+						if (startup.state === 'ready') continueToService(startup);
+						else await showAdoptionFailure('CORSIA couldn’t switch over.');
+					} catch (error) {
+						await showAdoptionFailure(error);
+					} finally {
+						clearInterval(countPoll);
+					}
+					return;
+				}
 				if (!quitFailure) return start();
 				retry.disabled = true;
 				status.textContent = 'Stopping CORSIA…';
@@ -305,8 +380,10 @@
 			window.__corsiaShowServiceFailure = showFailure;
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
 			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
+			window.__corsiaShowExistingInstall = showExistingInstall;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
+			quit.addEventListener('click', () => window.__TAURI__?.window?.getCurrentWindow?.().close());
 			retry.addEventListener('click', retryFailure);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);

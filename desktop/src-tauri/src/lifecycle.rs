@@ -152,6 +152,11 @@ pub fn on_exit(app: &tauri::AppHandle) {
 }
 
 pub fn request_quit(app: &tauri::AppHandle) {
+    let service = app.state::<super::AppServiceState>();
+    if service.adoption_in_progress.load(Ordering::Acquire) {
+        service.adoption_cancel_requested.store(true, Ordering::Release);
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         if let Err(error) = quit(&app) {
