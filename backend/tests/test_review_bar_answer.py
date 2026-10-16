@@ -201,7 +201,10 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
 
     assert refused.value.code == "note_required"
     assert _open_holds(db, node) == 1
-    assert attention.get_attention_state(artifact, db=db) == "raised"
+    # The open hold is the ask's raised state; the pile reads it from there.
+    assert [item["metadata"]["attention_state"] for item in attention.list_raised(db=db)] == [
+        "raised",
+    ]
 
     _answer(db, artifact, "changes_requested", "Cut section 3.")
     assert _last_ask_wake(db) == _answer_notice(

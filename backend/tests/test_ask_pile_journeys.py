@@ -164,6 +164,8 @@ def test_an_ended_ask_leaves_the_pile_and_needs_you_in_the_same_transaction(
     plan_id, node_id, artifact_id, hold_id = _asked(db)
     assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
 
+    # The test owns the transaction, so the ending nests in it and is rolled back
+    # below. Its post-commit nudge then has no commit to follow and logs that.
     db.execute("BEGIN")
     if ending == "withdraw":
         _withdraw(db, plan_id, node_id, hold_id)
@@ -328,6 +330,7 @@ def test_each_disposition_releases_the_task_with_exactly_one_asker_input(
 
     _plan_id, node_id, artifact_id, hold_id = _asked(db)
     assert admission.project(node_id, db=db)["condition"] == "blocked"
+    assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
     assert _asker_inputs(db) == []
 
     dispose(artifact_id, outcome, reason="The person's reason", db=db, **extra)
@@ -350,6 +353,7 @@ def test_retiring_an_asked_artifact_ends_its_ask_as_retired(db):
     assert json.loads(db.execute(
         "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
     ).fetchone()["metadata"] or "{}").get("attention_state") != "raised"
+    assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
 
     models.retire(artifact_id, db=db)
 
@@ -382,3 +386,73 @@ def test_ended_is_written_only_by_the_one_ask_ending_writer():
             if any(key.value == "ended" for key in keys):
                 writers.append(f"{relative}:{node.lineno}")
     assert [writer.split(":")[0] for writer in writers] == ["plans/ask_endings.py"], writers
+
+
+# Review answer 7: the pile refetches on ``plans_changed``, so placing an ask,
+# the agent withdrawing it and the person answering it in the pile each nudge
+# the person after commit.
+def test_ask_place_withdraw_and_pile_answer_each_nudge_the_person(db, monkeypatch):
+    from plans import notifications, nudge_scheduling
+    from registry import attention
+
+    scheduled: list[tuple[str, ...]] = []
+    monkeypatch.setattr(nudge_scheduling, "_schedule_delivery", scheduled.append)
+
+    def nudged_users(messages) -> dict[str, set[str]]:
+        users: dict[str, set[str]] = {}
+        for user_id, message in messages:
+            assert message["type"] == "plans_changed"
+            users.setdefault(user_id, set()).update(row["plan_id"] for row in message["plans"])
+        return users
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    artifact_id = _document(db, "proposal.md")
+    ask = {
+        "node_id": node.id, "reason_key": "review", "reason": "Review it",
+        "owner_kind": "user", "ask_artifact_id": artifact_id,
+    }
+
+    placed = _plan_op(db, plan.id, "block_node", ask)
+    assert nudged_users(placed.messages) == {"user": {plan.id}}
+    hold_id = str(db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()["id"])
+
+    withdrawn = _plan_op(db, plan.id, "resolve_blocker", {"node_id": node.id, "hold_id": hold_id})
+    assert nudged_users(withdrawn.messages) == {"user": {plan.id}}
+
+    _plan_op(db, plan.id, "block_node", ask)
+    scheduled.clear()
+    attention.clear_attention(artifact_id, outcome="answer", verdict="approved", db=db)
+    assert [set(ids) for ids in scheduled] == [{plan.id}]
+    assert nudged_users(notifications.prepare_after_commit(scheduled[0], db=db)) == {
+        "user": {plan.id},
+    }
+
+
+# §7 test 11: two open asks on one document, left from before the one-open-ask
+# rule, show once in the pile and once per asking task in needs-you.
+def test_legacy_duplicate_asks_show_once_in_the_pile_and_once_per_task(db):
+    from api.attention import _summarize_raised
+    from plans import holds, user_ask
+    from registry import attention
+
+    plan_id, first, artifact_id, _hold = _asked(db)
+    second = service.add_node(
+        plan_id, kind="task", title="Second review", acceptance_criteria="Reviewed", db=db,
+    )
+    holds.block_hold(
+        second.id, reason_key="review", reason="Review it", owner_kind="user",
+        owner_id=artifact_id, expected_revision=service._node_row(db, second.id)["revision"],
+        actor_id="owner", provenance="test.legacy", db=db,
+    )
+    user_ask.attach(db, second.id, artifact_id, actor_id="owner", provenance="test.legacy")
+    db.commit()
+
+    assert [row["external_id"] for row in attention.list_raised(db=db)] == ["proposal.md"]
+    assert [row["external_id"] for row in _summarize_raised(None, "user", db=db)] == ["proposal.md"]
+    assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
+    assert sorted(item["node_id"] for item in _needs_you(db)) == sorted([first, second.id])

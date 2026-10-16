@@ -140,7 +140,7 @@ def test_is_idempotent_and_never_writes_attention_metadata():
         db.close()
 
 
-def test_v121_stamps_only_a_uniquely_open_deferred_ask():
+def test_stamps_only_a_uniquely_open_deferred_ask():
     db = _db()
     try:
         artifact_id = _artifact(db, "deferred.md")
@@ -165,7 +165,7 @@ def test_v121_stamps_only_a_uniquely_open_deferred_ask():
         db.close()
 
 
-def test_v121_leaves_a_deferred_artifact_with_multiple_open_asks_untouched():
+def test_leaves_a_deferred_artifact_with_multiple_open_asks_untouched():
     from plans import holds, user_ask
 
     db = _db()

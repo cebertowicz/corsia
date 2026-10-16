@@ -288,13 +288,15 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', ''));
 	});
 
-	it('a stale refusal shows the replaced notice', async () => {
+	it('a stale refusal says the request ended, never that it was replaced', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockRejectedValue(new ReviewRefusal('ask_stale', 'gone'));
 		await render();
 		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false });
 		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.stale')).toBeTruthy());
+		expect(host.querySelector('.review-bar.stale')!.textContent).toContain('This review request has ended');
+		expect(host.textContent).not.toContain('replaced');
 	});
 
 	it('tells the viewer to re-read its pending batch once the answer is confirmed, and not on a failed send', async () => {
