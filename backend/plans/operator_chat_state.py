@@ -28,9 +28,8 @@ def chat_state(
 ) -> str:
     """The chat list's one word for a thread: the plan header's lead, renamed.
 
-    A human decision or review, or a host-access request, is the user's move
-    and outranks a pause (pause contract rule 5): beside active
-    work the agent still moves, paused or alone it is blocked on the user.
+    A host-access request is the user's move and outranks a paused plan. A
+    plan-owned ask does not: pausing the plan removes it until the plan resumes.
     Otherwise ``operator_node_state.leading``, the header's one precedence,
     decides. ``counts`` is None with nothing open. ``stuck`` is the header's
     not-moving parts (``plans.not_moving.read``): a still plan never reads
@@ -40,7 +39,7 @@ def chat_state(
     (#2638, owner P0 2026-09-27).
     """
     paused = plan["state"] == "paused"
-    if owed or (counts and counts["review_human"]):
+    if owed or (not paused and counts and counts["review_human"]):
         if not counts:
             return "blocked_on_you"
         return "needs_input" if counts["active"] and not paused else "blocked_on_you"
@@ -228,7 +227,10 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
     seen = thread_updates.seen_by_thread(db, actor.user_id, attention_updates, visible_thread_ids)
     for plan_id, plan_row in plans_by_id.items():
         plan = presented_by_id.get(plan_id)
-        plan_items = _plan_attention_items(plan) if plan is not None else []
+        # Pausing a plan defers its own asks; independent host-access requests stay actionable.
+        plan_items = (
+            [] if plan_row["state"] == "paused" or plan is None else _plan_attention_items(plan)
+        )
         user_items = [*plan_items, *access_by_thread.get(str(plan_row["owner_id"]), [])]
         state, label_key = _plan_word(plan_row, plan, owed=bool(user_items))
         # Your move outranks Failed; its list is whatever owed items were found.
