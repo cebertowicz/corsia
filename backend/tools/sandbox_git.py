@@ -10,8 +10,9 @@ def verified_worktree_marker(
 ) -> tuple[Path, Path] | None:
     """Prove ``worktree`` is linked to ``repo`` through reciprocal Git markers.
 
-    When ``deps`` is given, every path the verdict depends on is appended to it
-    before it is inspected, so a caller can fingerprint them.
+    When ``deps`` is given, every *unresolved* path the verdict reads or
+    resolves is appended to it, so a caller can stamp each of them and every
+    ancestor (an intermediate symlink swap changes the resolved result).
     """
     marker = worktree / ".git"
     if deps is not None:
@@ -25,16 +26,17 @@ def verified_worktree_marker(
     if prefix != "gitdir":
         return None
     gitdir = Path(raw_gitdir.strip()).expanduser()
-    resolved_gitdir = (
-        gitdir if gitdir.is_absolute() else marker.parent / gitdir
-    ).resolve(strict=False)
+    raw_gitdir_path = gitdir if gitdir.is_absolute() else marker.parent / gitdir
+    resolved_gitdir = raw_gitdir_path.resolve(strict=False)
+    if deps is not None:
+        deps.extend((raw_gitdir_path, resolved_gitdir))
     try:
         resolved_gitdir.relative_to(repo / ".git" / "worktrees")
     except ValueError:
         return None
     reciprocal = resolved_gitdir / "gitdir"
     if deps is not None:
-        deps.extend((resolved_gitdir, reciprocal))
+        deps.append(reciprocal)
     if reciprocal.is_symlink() or not reciprocal.is_file():
         return None
     try:

@@ -589,8 +589,8 @@ def _validate_worktree_target(target: str, cwd: str) -> str | None:
     return "Error: worktrees must be created under `<repo>/.worktrees/<slug>`."
 
 
-def _sandbox_path(path: Path) -> str:
-    return str(path.resolve(strict=False)).replace("\\", "\\\\").replace('"', '\\"')
+def _sandbox_path(path: Path, *, canonical: bool = False) -> str:  # canonical: verified worktree paths
+    return str(path if canonical else path.resolve(strict=False)).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _direct_git_command(
@@ -710,7 +710,7 @@ def pinned_repo_sandbox_profile(
             for worktree in worktrees:
                 rules.append(
                     f'(allow file-read* file-write* (subpath '
-                    f'"{_sandbox_path(worktree)}"))'
+                    f'"{_sandbox_path(worktree, canonical=True)}"))'
                 )
     controlled_identity_write: set[Path] = set()
     worktree_control_repo: Path | None = None
@@ -808,7 +808,7 @@ def pinned_repo_sandbox_profile(
         if repo != worktree_control_repo:
             rules.extend(
                 f'(deny file-write* '
-                f'(literal "{_sandbox_path(worktree / ".git")}"))'
+                f'(literal "{_sandbox_path(worktree / ".git", canonical=True)}"))'
                 for worktree in verified_worktrees_by_repo.get(repo, ())
             )
     for unsupported in list_unsupported_pinned_repos(policies):

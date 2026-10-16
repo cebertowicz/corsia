@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -153,6 +154,59 @@ def test_gitdir_replaced_by_symlink_is_denied_on_the_next_call(tmp_path):
     gitdir.rename(moved)
     gitdir.symlink_to(moved)
     assert sandbox_config.list_repo_worktrees(repo) == []
+
+
+def test_retargeted_symlink_inside_the_gitdir_value_is_denied_on_the_next_call(tmp_path):
+    repo = tmp_path / "repo"
+    linked = _link(repo, "linked")
+    alias = repo / ".git" / "alias"
+    alias.symlink_to(repo / ".git" / "worktrees")
+    (linked / ".git").write_text(f"gitdir: {alias / 'linked'}\n", encoding="utf-8")
+    assert sandbox_config.list_repo_worktrees(repo) == [linked]
+
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "linked").mkdir(parents=True)
+    ((elsewhere / "linked") / "gitdir").write_text(
+        f"{linked / '.git'}\n", encoding="utf-8"
+    )
+    alias.unlink()
+    alias.symlink_to(elsewhere)
+    assert sandbox_config.list_repo_worktrees(repo) == []
+
+
+def test_retargeted_symlink_inside_the_reciprocal_path_is_denied_on_the_next_call(
+    tmp_path,
+):
+    repo = tmp_path / "repo"
+    linked = _link(repo, "linked")
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo / ".worktrees")
+    reciprocal = repo / ".git" / "worktrees" / "linked" / "gitdir"
+    reciprocal.write_text(f"{alias / 'linked' / '.git'}\n", encoding="utf-8")
+    # The decoy's marker is a hard link to the real one: same inode, size and
+    # times, so only the path it is reached through differs.
+    decoy = tmp_path / "decoy"
+    (decoy / "linked").mkdir(parents=True)
+    os.link(linked / ".git", decoy / "linked" / ".git")
+    assert sandbox_config.list_repo_worktrees(repo) == [linked]
+
+    alias.unlink()
+    alias.symlink_to(decoy)
+    assert sandbox_config.list_repo_worktrees(repo) == []
+
+
+def test_retargeted_symlink_above_the_repository_is_seen_on_the_next_call(tmp_path):
+    real = tmp_path / "real"
+    linked = _link(real / "repo", "linked")
+    via = tmp_path / "via"
+    via.symlink_to(real)
+    assert sandbox_config.list_repo_worktrees(via / "repo") == [linked]
+
+    elsewhere = tmp_path / "elsewhere" / "repo"
+    (elsewhere / ".worktrees").mkdir(parents=True)
+    via.unlink()
+    via.symlink_to(tmp_path / "elsewhere")
+    assert sandbox_config.list_repo_worktrees(via / "repo") == []
 
 
 def test_late_marker_on_a_listed_directory_is_picked_up(tmp_path):

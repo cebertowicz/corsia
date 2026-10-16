@@ -112,13 +112,15 @@ def registered_repo_for_path(
     return max(matches, key=lambda policy: len(policy.path.parts), default=None)
 
 
-_DEPS_KEY = "sandbox-verified-worktree-deps"
-
-
 def _verified_worktree_root_and_gitdir(
     path: Path, repo_root: Path, *, cache: dict | None = None,
+    deps: list[Path] | None = None,
 ) -> tuple[Path, Path] | None:
-    """Return a linked-worktree root and gitdir after reciprocal-marker proof."""
+    """Return a linked-worktree root and gitdir after reciprocal-marker proof.
+
+    ``deps`` collects the paths a fresh proof reads; it is ignored when the
+    request ``cache`` already holds the verdict, so pass it without a cache.
+    """
     repo = _resolved_path(repo_root, cache)
     resolved = _resolved_path(path, cache)
     try:
@@ -129,12 +131,10 @@ def _verified_worktree_root_and_gitdir(
         return None
     candidate = repo / ".worktrees" / relative.parts[1]
     cache_key = ("sandbox-verified-worktree", str(repo), str(candidate))
-    if cache is not None and cache_key in cache:
+    if cache is not None and deps is None and cache_key in cache:
         verified = cache[cache_key]
     else:
-        verified = verified_worktree_marker(
-            candidate, repo, deps=None if cache is None else cache.get(_DEPS_KEY),
-        )
+        verified = verified_worktree_marker(candidate, repo, deps)
         if cache is not None:
             cache[cache_key] = verified
     return verified if verified is None or _is_within(resolved, verified[0]) else None
@@ -142,9 +142,12 @@ def _verified_worktree_root_and_gitdir(
 
 def repo_worktree_root(
     path: Path, repo_root: Path, *, cache: dict | None = None,
+    deps: list[Path] | None = None,
 ) -> Path | None:
     """Return the verified ``.worktrees/<name>`` root containing ``path``."""
-    verified = _verified_worktree_root_and_gitdir(path, repo_root, cache=cache)
+    verified = _verified_worktree_root_and_gitdir(
+        path, repo_root, cache=cache, deps=deps,
+    )
     return verified[0] if verified is not None else None
 
 
@@ -172,9 +175,7 @@ def list_repo_worktrees(repo_root: Path) -> list[Path]:
     """List verified linked worktrees beneath the required local directory."""
     return list_verified_entries(
         repo_root,
-        lambda entry, repo, deps: repo_worktree_root(
-            entry, repo, cache={_DEPS_KEY: deps},
-        ),
+        lambda entry, repo, deps: repo_worktree_root(entry, repo, deps=deps),
     )
 
 
