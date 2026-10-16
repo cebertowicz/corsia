@@ -34,6 +34,8 @@ mod remote_config;
 mod remote_lifecycle;
 mod service_management;
 mod startup_failure;
+#[cfg(test)]
+mod test_tls;
 mod trust;
 mod version_check;
 mod update_stage;

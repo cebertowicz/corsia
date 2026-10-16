@@ -55,7 +55,6 @@ pub fn classify_health_status(status: u16) -> Result<(), Unreachable> {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     use super::{
         classify_connect_error, classify_discovery_error, classify_health_status,
         classify_tls_against_plain_http, Unreachable,
