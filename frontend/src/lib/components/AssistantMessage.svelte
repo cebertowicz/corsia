@@ -2,6 +2,8 @@
 	import { renderMarkdown } from '$lib/markdown';
 	import { formatTime } from '$lib/time';
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
+	import { activeModelId, findModelById, models } from '$lib/stores/models';
+	import { canonicalName } from '$lib/stores/modelGroups';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
@@ -51,7 +53,13 @@
 			status: 'done' as const,
 		}));
 	});
-	const footerLabel = $derived(messageFooterLabel(msg.metadata));
+	// Match the active composer's label for native local turns: the dispatch id in
+	// message metadata is operational detail, while the picker is the canonical name.
+	const composerModelName = $derived.by(() => {
+		const selected = findModelById($models, $activeModelId);
+		return selected ? canonicalName(selected) : null;
+	});
+	const footerLabel = $derived(messageFooterLabel(msg.metadata, composerModelName));
 
 	function modelTail(id: string): string {
 		if (id.includes('/')) return id.split('/').pop() ?? id;
@@ -83,9 +91,12 @@
 		return null;
 	}
 
-	function modelLabel(metadata: any): string | null {
+	function modelLabel(metadata: any, composerName: string | null): string | null {
 		const model = String(metadata?.model ?? '');
 		const modelName = metadata?.model_name ? String(metadata.model_name) : '';
+		// Native turn metadata records the dispatch id. Its matching user-facing name
+		// is the same canonical name the composer reads from the current catalog.
+		if ((model || modelName).startsWith('omlx@') && composerName) return composerName;
 		if (modelName && !modelName.includes('/') && !modelName.includes('@')) {
 			return modelName;
 		}
@@ -97,9 +108,12 @@
 		return modelTail(raw);
 	}
 
-	function messageFooterLabel(metadata: any): string | null {
+	function messageFooterLabel(metadata: any, composerName: string | null): string | null {
 		const harness = harnessLabel(metadata);
-		const model = modelLabel(metadata);
+		const model = modelLabel(metadata, composerName);
+		// The native composer shows just its chosen display name; keeping this caption
+		// equally plain avoids exposing a second, raw model identity in chat history.
+		if (String(metadata?.model ?? metadata?.model_name ?? '').startsWith('omlx@') && model) return model;
 		if (harness && model) return `${harness} · ${model}`;
 		return model ?? harness;
 	}
@@ -153,10 +167,8 @@
 
 		<div class="msg-footer">
 			<span class="msg-time">{formatTime(msg.created_at)}</span>
-			{#if msg.metadata?.for_user}
-				<span class="for-you-marker" title="Update for you"><span class="for-you-dot" aria-hidden="true"></span>Update</span>
-			{/if}
 			{#if footerLabel}
+				<span class="meta-separator" aria-hidden="true">·</span>
 				<span class="msg-model-badge" title={msg.metadata?.model ?? msg.metadata?.model_name}>
 					{footerLabel}
 				</span>
@@ -202,16 +214,10 @@
 
 	.msg-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 	.msg-time { font-size: var(--text-caption); color: var(--text-secondary); opacity: 0.7; }
-	.for-you-marker { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-caption); color: var(--text-secondary); }
-	.for-you-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-	.msg-model-badge {
-		font-size: var(--text-caption); color: var(--text-tertiary); background: var(--bg-secondary);
-		padding: 1px 6px; border-radius: var(--radius-sm); white-space: nowrap;
-		opacity: 0.7; transition: opacity var(--dur-standard);
-	}
-		.msg-model-badge:hover { opacity: 1; }
+	.msg-model-badge { font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
+	.meta-separator { color: var(--text-tertiary); }
 	.typewriter-cursor {
-		display: inline; color: var(--accent); font-weight: 300;
+		display: inline; color: var(--violet-text); font-weight: 300;
 		animation: blink-cursor 0.8s step-end infinite;
 	}
 	@keyframes blink-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

@@ -270,6 +270,7 @@
 				<span class="dock-action">
 					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}
 				</span>
+				<svg class="dock-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
 			</button>
 			</div>
 		{/if}
@@ -277,6 +278,7 @@
 			{#key current.external_id}
 				<AdaptiveDrawer
 					ariaLabel={`Decision — ${label(current)}`}
+					opaque
 					open={showChip}
 					onClose={close}
 				>
@@ -316,39 +318,46 @@
 <style>
 	.attention-dock {
 		flex: none;
-		padding: var(--space-2) var(--space-4) 0;
+		/* No side inset of its own: the chat column places it, so its edges are the transcript's. */
+		padding: var(--space-4) 0 0;
+		/* Transcript scrolling beneath fades out across that top inset, so the row's edge
+		   reads without a border or a tint. Invisible when nothing is under it. */
+		background: linear-gradient(to bottom, transparent, var(--bg-primary) var(--space-4));
 		/* The chat slot publishes this height budget so an opened chip scrolls
 		   inside it instead of growing off the top of the viewport (measured at
 		   320px: heading and close button at y = -91). */
 		max-height: var(--chat-attention-available-height, none);
-		overflow-y: auto;
-		overscroll-behavior: contain;
+		/* Never clip here: the opened chip already painted visible, and clipping the
+		   collapsed row cut its rounded bottom corners and drop shadow flat. The
+		   shadow paints into the slot's own shadow gutter below. */
+		overflow: visible;
 	}
-	.attention-dock.expanded { overflow: visible; }
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {
 		display: flex; align-items: center; gap: var(--space-3); width: 100%;
-		min-height: 44px; padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--violet-line); border-radius: var(--radius-sm);
-		/* The band floats over the live transcript, so a 10%-alpha tint alone let
-		   message text read straight through the bar. Keep the violet identity as
-		   a tint layered on the canonical glass material its rail peers already
-		   use, so the copy sits on an opaque-enough backing. */
-		background: linear-gradient(var(--violet-bg), var(--violet-bg)), var(--glass-regular-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
+		/* Needs-you is a raised card, distinct from the transcript's worked chips. */
+		min-height: 44px; padding: var(--space-2) var(--space-2) var(--space-2) 2px;
+		/* Needs-you is the composer's frosted card: its glass, hairline, corner and soft shadow. */
+		border: 1px solid var(--border); border-radius: var(--radius-xl);
+		background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip);
 		color: var(--text-primary);
 		font: inherit; text-align: left; cursor: pointer;
+		transition: background var(--dur-tight) var(--ease-snap);
 	}
+	@media (hover: hover) { .dock-bar:hover { background: var(--bg-hover); } }
 	.dock-row .dock-bar { flex: 1; min-width: 0; width: auto; }
-	.dock-mark { width: 8px; height: 8px; flex: none; border-radius: var(--radius-circle); background: var(--violet); }
-	.dock-text { display: flex; min-width: 0; flex-direction: column; }
-	.dock-text b { overflow: hidden; font-size: var(--text-footnote); text-overflow: ellipsis; white-space: nowrap; }
-	.dock-text small { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
-	.dock-count { margin-left: auto; flex: none; color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
-	.dock-action { flex: none; margin-left: auto; color: var(--violet-text); font-size: var(--text-footnote); font-weight: var(--fw-medium); }
-	.dock-count + .dock-action { margin-left: 0; }
-	.dock-bar:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	/* "Needs you" is amber everywhere (sidebar, plan, artifact row, this row). */
+	.dock-mark { display: flex; width: 36px; flex: none; align-items: center; justify-content: center; }
+	.dock-mark::before { content: ''; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--amber); }
+	.dock-text { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; }
+	.dock-text b { overflow: hidden; font-size: var(--text-callout); font-weight: var(--fw-semibold); line-height: var(--lh-tight); text-overflow: ellipsis; white-space: nowrap; }
+	.dock-text small { overflow: hidden; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-tight); text-overflow: ellipsis; white-space: nowrap; }
+	.dock-count { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; }
+	/* A trailing action reads as the plan's do: caption, tertiary, primary on hover. */
+	.dock-action { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
+	@media (hover: hover) { .dock-bar:hover .dock-action { color: var(--text-primary); } }
+	.dock-chevron { flex: none; color: var(--text-tertiary); }
+	.dock-bar:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
 	.dock-bar[aria-disabled='true'] { cursor: default; opacity: 0.75; }
 	/* These notes float over the live transcript exactly as .dock-bar does, and
 	   .dock-deferred renders in the host-access-awaiting state this band widens.
@@ -366,14 +375,11 @@
 		color: var(--text-tertiary);
 		font-size: var(--text-caption);
 	}
-	/* Outside the dock's own padding, so it lines up with the bar below. */
-	.dock-receipt { margin-inline: var(--space-4); }
 	.sr-only {
 		position: absolute; width: 1px; height: 1px; padding: 0;
 		margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 	}
 	@media (max-width: 620px) {
-		.attention-dock { padding-left: var(--space-3); padding-right: var(--space-3); }
 		/* The count carries the position, so the bar's action label yields room
 		   to the question; the whole bar is still the Answer button. */
 		.dock-row .dock-action { display: none; }

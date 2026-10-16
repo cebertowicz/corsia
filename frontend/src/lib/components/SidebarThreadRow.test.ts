@@ -182,7 +182,7 @@ describe('SidebarThreadRow motion truth', () => {
 		renderWithActivity('active');
 
 		const spinner = host.querySelector<SVGElement>('.thread-title-row .spinner');
-		expect(spinner?.getAttribute('stroke')).toBe('var(--accent)');
+		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Working');
 	});
 

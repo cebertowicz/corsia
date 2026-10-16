@@ -140,7 +140,7 @@
 	.btn.push { margin-left: auto; }
 	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
 	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent); color: #fff; }
+	.btn.primary { background: var(--accent); color: var(--on-accent); }
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.mono { font-family: var(--font-mono, monospace); }
 	@media (max-width: 640px) { .add-settings { grid-template-columns: 1fr; } .pathrow { flex-direction: column; } .pathrow .btn { align-self: flex-start; } }

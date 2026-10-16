@@ -45,7 +45,7 @@
 		{/if}
 		<span class="sep" aria-hidden="true">·</span>
 		<span class="outcome">{outcome}</span>
-		<OutcomeTime value={card.created_at} />
+		<span class="when"><OutcomeTime value={card.created_at} compact /></span>
 		{#if earlier > 0}
 			<span class="earlier">{earlier} earlier</span>
 		{/if}
@@ -67,8 +67,8 @@
 		color: var(--text-secondary);
 	}
 	/* The merged row is flat: no box of its own, the artifact row inside it carries the look. */
+	/* Full column width, so its chevron shares the right edge with every other row in the transcript. */
 	.update-card.merged { display: block; padding: 0; border: 0; background: transparent; }
-	.update-card.merged .update-ask { max-width: 480px; }
 	.title {
 		min-width: 0;
 		overflow: hidden;
@@ -89,6 +89,9 @@
 	.sep, .earlier { color: var(--text-tertiary); }
 	.outcome { flex-shrink: 0; }
 	.earlier { flex-shrink: 0; margin-left: auto; }
+	/* The same clock as every other transcript row: "9:41 AM" at the right edge, on one line; the title gives way first. */
+	.when { margin-left: auto; flex: 0 0 auto; padding-left: 8px; white-space: nowrap; }
+	.when :global(time) { white-space: nowrap; }
 	.update-card.failed .outcome { color: var(--red-text); }
 	.update-card.blocked .outcome { color: var(--amber); }
 </style>

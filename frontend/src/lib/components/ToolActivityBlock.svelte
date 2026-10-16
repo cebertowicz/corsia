@@ -252,7 +252,7 @@
 	.ta-check { flex-shrink: 0; color: var(--green); opacity: 0.8; }
 	.ta-failure { flex-shrink: 0; color: var(--red); }
 	.ta-status-spacer { flex: 0 0 12px; }
-	.ta-spin { flex-shrink: 0; color: var(--accent); animation: ta-spin 1s linear infinite; }
+	.ta-spin { flex-shrink: 0; color: var(--status-in-progress); animation: ta-spin 1s linear infinite; }
 	.ta-segments {
 		flex: 1; min-width: 0;
 		display: flex; align-items: center; flex-wrap: wrap;
@@ -290,18 +290,18 @@
 		transition: background var(--dur-tight);
 	}
 	.ta-row:hover { background: var(--bg-hover); }
-	.ta-row.active { color: var(--accent); cursor: default; }
+	.ta-row.active { color: var(--violet-text); cursor: default; }
 	.row-glyph {
 		flex-shrink: 0; color: var(--text-tertiary);
 		background: var(--bg-secondary); border-radius: var(--radius-circle);
 		padding: 2px; box-sizing: content-box; z-index: 1;
 	}
-	.ta-row.active .row-glyph { color: var(--accent); }
+	.ta-row.active .row-glyph { color: var(--violet-text); }
 	.ta-phrase {
 		flex: 1; min-width: 0; color: var(--text-primary);
 		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 	}
-	.ta-row.active .ta-phrase { color: var(--accent); }
+	.ta-row.active .ta-phrase { color: var(--violet-text); }
 	.ta-outcome {
 		flex-shrink: 0; max-width: 40%; color: var(--text-tertiary);
 		font-size: var(--text-caption);

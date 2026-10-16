@@ -230,9 +230,11 @@ describe('Chat slot owner — one component owns the bottom band', () => {
 		// band. .dock-deferred is the host-access-awaiting note this stack widens,
 		// and .dock-stale sits beside it — all three need real backing material,
 		// not just the bar. Asserted from source because the defect is pure CSS.
-		for (const selector of ['.dock-bar', '.dock-deferred', '.dock-stale']) {
-			const rule = new RegExp(`\\${selector}[^{}]*\\{[^{}]*\\}`);
-			const body = attentionDockSource.match(rule)?.[0] ?? '';
+		const ruleOf = (selector: string) => attentionDockSource.match(new RegExp(`\\${selector}[^{}]*\\{[^{}]*\\}`))?.[0] ?? '';
+		// The bar is a transcript row, so it is fully opaque in the transcript's own colour.
+		expect(ruleOf('.dock-bar'), '.dock-bar needs opaque backing').toContain('background: var(--bg-primary)');
+		for (const selector of ['.dock-deferred', '.dock-stale']) {
+			const body = ruleOf(selector);
 			expect(body, `${selector} should declare a rule`).not.toBe('');
 			expect(body, `${selector} needs opaque backing`).toContain('--glass-regular-thick');
 			expect(body, `${selector} needs the blur its peers use`).toContain('--glass-blur');

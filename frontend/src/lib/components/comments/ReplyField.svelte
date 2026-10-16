@@ -63,6 +63,6 @@
 		transition: height var(--dur-tight) var(--ease-snap);
 	}
 	.ct-input:focus { outline: none; border-color: var(--accent); }
-	.ct-send { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent); border: none; color: #fff; cursor: pointer; transition: filter var(--dur-tight); }
+	.ct-send { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent); border: none; color: var(--on-accent); cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }
 </style>

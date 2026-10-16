@@ -10,6 +10,9 @@
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
+	import { activeThreadId } from '$lib/stores/threads';
+	import { expand, visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import type { OperatorKey } from '$lib/stores/planKeys';
@@ -32,6 +35,8 @@
 	const offline = $derived($connectionState !== 'connected' && hasPayload);
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const decisionCount = $derived(query.payload?.attention.awaiting_count ?? 0);
+	const activeDecisionItems = $derived($activeThreadId === threadId ? $visibleQueue.items : []);
+	const showDecisionRows = $derived(activeDecisionItems.length > 0);
 	/**
 	 * Every step finished and folded (FW7): the empty state's calm, plus the
 	 * folded count below it. Nothing is left, so the count is suppressed with
@@ -136,6 +141,11 @@
 		openPlanAsk(threadId, artifact, nodeTitle, () => { void openDecisions(); });
 	}
 
+	function openDecision(item: AttentionQueueItem): void {
+		if (decisionBusy) return;
+		expand(item, false);
+	}
+
 	async function openDecisions(): Promise<void> {
 		if (decisionBusy) return;
 		decisionBusy = true;
@@ -222,7 +232,15 @@
 				{#if !offline}<Button variant="ghost" size="sm" onclick={() => query.retry()}>Retry</Button>{/if}
 			</div>
 		{/if}
-		{#if decisionCount > 0}
+		{#if showDecisionRows}
+			{#each activeDecisionItems as item (item.external_id)}
+				<button class="decision-row" type="button" onclick={() => openDecision(item)}>
+					<span class="decision-mark" aria-hidden="true">!</span>
+					<span class="decision-copy"><span class="decision-title">{item.detail.title}</span>{#if item.detail.source}<span class="decision-subline">{item.detail.source.thread_label}</span>{/if}</span>
+					<span class="decision-open">Open</span>
+				</button>
+			{/each}
+		{:else if decisionCount > 0}
 			<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
 				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}
 				<span>{decisionBusy ? 'Loading…' : 'Open'}</span>
@@ -286,14 +304,23 @@
 <style>
 	.thread-plan-pane { display: flex; flex-direction: column; gap: var(--space-2); }
 	.thread-plan-pane:focus { outline: none; }
+	.decision-row { display: flex; align-items: center; gap: var(--space-2); min-height: 38px; padding: 6px 8px; border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+	.decision-row:hover { background: var(--bg-hover); }
+	.decision-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; border: 1px solid var(--amber); border-radius: var(--radius-circle); color: var(--amber); font-size: var(--text-caption); font-weight: var(--fw-bold); }
+	.decision-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+	.decision-title, .decision-subline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.decision-title { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
+	.decision-subline { color: var(--amber-text); font-size: var(--text-caption); }
+	.decision-open { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
+	.decision-row:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 	.decision-indicator {
 		display: flex; align-items: center; min-height: 38px; padding: 6px 8px 6px 4px; border: 0;
-		border-radius: var(--radius-xs); background: transparent; color: var(--violet-text);
+		border-radius: var(--radius-xs); background: transparent; color: var(--amber-text);
 		font: inherit; font-size: var(--text-footnote); text-align: left; cursor: pointer;
 	}
 	@media (hover: hover) { .decision-indicator:hover:not(:disabled) { background: var(--bg-hover); } }
 	@media (any-pointer: coarse) { .decision-indicator { min-height: 44px; } }
-	.decision-indicator b { margin-right: 0.3em; color: var(--violet-text); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+	.decision-indicator b { margin-right: 0.3em; color: var(--amber-text); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
 	.decision-indicator span { margin-left: auto; padding: 0 2px 0 var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); }
 	.decision-indicator:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 	.decision-indicator:disabled { cursor: wait; opacity: 0.72; }

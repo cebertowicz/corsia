@@ -14,7 +14,7 @@
 .load-error { display: flex; flex-direction: column; gap: 8px; padding: 24px 4px; color: var(--text-secondary); }
 .load-error p { margin: 0; font-size: var(--text-subhead); color: var(--red); font-weight: var(--fw-medium); }
 .load-error code { font-size: var(--text-caption); color: var(--text-tertiary); word-break: break-all; }
-.sel-comment { position: fixed; z-index: 40; translate: 0 -50%; display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-pill); padding: 5px 12px 5px 10px; box-shadow: var(--shadow-chip), var(--glass-rim); cursor: pointer; animation: selpop var(--dur-tight) ease-out; }
+.sel-comment { position: fixed; z-index: 40; translate: 0 -50%; display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--on-accent); background: var(--accent); border: none; border-radius: var(--radius-pill); padding: 5px 12px 5px 10px; box-shadow: var(--shadow-chip), var(--glass-rim); cursor: pointer; animation: selpop var(--dur-tight) ease-out; }
 .sel-comment:hover { filter: brightness(1.08); }
 @keyframes selpop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 @media (max-width: 768px) { .sel-comment { padding: 9px 16px 9px 13px; font-size: var(--text-subhead); gap: 7px; } .sel-comment svg { width: 16px; height: 16px; } }

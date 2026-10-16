@@ -132,7 +132,7 @@
 	.figures .amber { color: var(--amber-text); }
 	.figures .red { color: var(--red-text); }
 	/* The model rows' own pending marker, so a held account choice reads as a held model switch does. */
-	.switch-marker { font-size: var(--text-caption); color: var(--accent); white-space: nowrap; }
+	.switch-marker { font-size: var(--text-caption); color: var(--violet-text); white-space: nowrap; }
 	@media (max-width: 480px) {
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */

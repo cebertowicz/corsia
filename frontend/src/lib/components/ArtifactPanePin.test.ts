@@ -63,26 +63,54 @@ function mountPane(demo: Record<string, unknown>) {
 	flushSync();
 }
 
+/** Open the first row's trailing ⋯; the menu is portaled to the body. */
+function openRowMenu(): void {
+	host.querySelector<HTMLButtonElement>('button[aria-label^="More actions for"]')!.click();
+	flushSync();
+}
+
+function menuItem(label: string): HTMLButtonElement | undefined {
+	return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+		.find((item) => item.textContent?.trim() === label);
+}
+
 describe('ArtifactPane — persistence marker', () => {
-	it('marks a pinned row and offers to unpin it', () => {
+	it('marks a pinned row once and offers to unpin it from its menu', () => {
 		mountPane({ nodes: [docNode({ pinned: true })], needs_attention: [] });
 
-		expect(host.querySelector('.pin-mark')).toBeTruthy();
-		expect(host.querySelector('button[aria-label="Unpin from pane"]')).toBeTruthy();
-		expect(host.querySelector('button[aria-label="Pin to pane"]')).toBeNull();
+		// One pin mark: the name's, never a second pin control on the row.
+		expect(host.querySelectorAll('.pin-mark')).toHaveLength(1);
+		expect(host.querySelector('button[aria-label="Unpin from pane"]')).toBeNull();
+		openRowMenu();
+		expect(menuItem('Unpin from pane')).toBeTruthy();
+		expect(menuItem('Pin to pane')).toBeUndefined();
+	});
+
+	it('announces the ⋯ as a menu button that reads open while its menu is', () => {
+		mountPane({ nodes: [docNode({ pinned: true })], needs_attention: [] });
+		const more = host.querySelector<HTMLButtonElement>('button[aria-label^="More actions for"]')!;
+		expect(more.getAttribute('aria-haspopup')).toBe('menu');
+		expect(more.getAttribute('aria-expanded')).toBe('false');
+		openRowMenu();
+		expect(more.getAttribute('aria-expanded')).toBe('true');
 	});
 
 	it('leaves an unpinned row unmarked but offers to pin it', () => {
 		mountPane({ nodes: [docNode()], needs_attention: [] });
 
 		expect(host.querySelector('.pin-mark')).toBeNull();
-		expect(host.querySelector('button[aria-label="Pin to pane"]')).toBeTruthy();
+		openRowMenu();
+		expect(menuItem('Pin to pane')).toBeTruthy();
 	});
 
-	it('keeps Remove from pane alongside the pin control', () => {
+	it('keeps Remove from pane beside Pin in the one row menu', () => {
 		mountPane({ nodes: [docNode()], needs_attention: [] });
 
-		expect(host.querySelector('button[aria-label="Remove from pane"]')).toBeTruthy();
+		// The row carries one trailing control, not an icon per action.
+		expect(host.querySelectorAll('.row-outer button[aria-label]')).toHaveLength(1);
+		openRowMenu();
+		expect([...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()))
+			.toEqual(['Pin to pane', 'Remove from pane']);
 	});
 
 	it('gives the pin mark exempt-aware wording instead of a fixed claim', () => {
@@ -106,22 +134,24 @@ describe('ArtifactPane — persistence marker', () => {
 	it('tells an exempt unpinned row it only reorders, not persists', () => {
 		mountPane({ nodes: [docNode({ retirement_exempt: true })], needs_attention: [] });
 
-		const btn = host.querySelector<HTMLButtonElement>('button[aria-label="Pin to pane"]')!;
-		expect(btn.title).toBe('Pin — keep this row leading its list');
+		openRowMenu();
+		expect(menuItem('Pin to pane')!.title).toBe('Pin — keep this row leading its list');
 	});
 
 	it('tells a non-exempt unpinned row pinning keeps it past task end', () => {
 		mountPane({ nodes: [docNode({ retirement_exempt: false })], needs_attention: [] });
 
-		const btn = host.querySelector<HTMLButtonElement>('button[aria-label="Pin to pane"]')!;
-		expect(btn.title).toBe('Pin — keep this after the task finishes');
+		openRowMenu();
+		expect(menuItem('Pin to pane')!.title).toBe('Pin — keep this after the task finishes');
 	});
 
 	it('offers no pin control on a subscriber-only row', () => {
 		mountPane({ nodes: [docNode({ pin_eligible: false })], needs_attention: [] });
 
-		expect(host.querySelector('button[aria-label="Pin to pane"]')).toBeNull();
-		expect(host.querySelector('button[aria-label="Unpin from pane"]')).toBeNull();
+		openRowMenu();
+		expect(menuItem('Pin to pane')).toBeUndefined();
+		expect(menuItem('Unpin from pane')).toBeUndefined();
+		expect(menuItem('Remove from pane')).toBeTruthy();
 	});
 });
 
@@ -129,7 +159,8 @@ describe('ArtifactPane — pin toggle', () => {
 	it('pins a row through the API', async () => {
 		mountPane({ nodes: [docNode()], needs_attention: [] });
 
-		host.querySelector<HTMLButtonElement>('button[aria-label="Pin to pane"]')!.click();
+		openRowMenu();
+		menuItem('Pin to pane')!.click();
 
 		await vi.waitFor(() => {
 			expect(setArtifactPinned).toHaveBeenCalledWith('a1', 'sess-1', true);
@@ -139,7 +170,8 @@ describe('ArtifactPane — pin toggle', () => {
 	it('unpins a pinned row through the same API', async () => {
 		mountPane({ nodes: [docNode({ pinned: true })], needs_attention: [] });
 
-		host.querySelector<HTMLButtonElement>('button[aria-label="Unpin from pane"]')!.click();
+		openRowMenu();
+		menuItem('Unpin from pane')!.click();
 
 		await vi.waitFor(() => {
 			expect(setArtifactPinned).toHaveBeenCalledWith('a1', 'sess-1', false);
@@ -159,7 +191,8 @@ describe('ArtifactPane — pin toggle', () => {
 		// Disclose the group, then pin the child inside it.
 		host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click();
 		flushSync();
-		host.querySelector<HTMLButtonElement>('button[aria-label="Pin to pane"]')!.click();
+		openRowMenu();
+		menuItem('Pin to pane')!.click();
 
 		await vi.waitFor(() => {
 			expect(setArtifactPinned).toHaveBeenCalledWith('c1', 'sess-1', true);

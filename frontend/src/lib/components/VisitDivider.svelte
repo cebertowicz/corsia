@@ -16,7 +16,7 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		color: var(--accent);
+		color: var(--violet-text);
 		font-size: var(--text-caption);
 	}
 	.visit-divider::before, .visit-divider::after {

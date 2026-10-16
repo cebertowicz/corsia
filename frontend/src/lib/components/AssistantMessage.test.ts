@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import AssistantMessage from './AssistantMessage.svelte';
+import { activeModelId, models } from '$lib/stores/models';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -9,6 +10,8 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host?.remove();
+	models.set([]);
+	activeModelId.set(null);
 });
 
 function render(metadata: Record<string, unknown> | null): HTMLElement {
@@ -33,16 +36,14 @@ function render(metadata: Record<string, unknown> | null): HTMLElement {
 	return host;
 }
 
-describe('AssistantMessage user-directed marker', () => {
-	it('renders the visible Update label and dot for marked updates', () => {
+describe('AssistantMessage metadata', () => {
+	it('keeps marked-update metadata out of the visible footer', () => {
 		const rendered = render({ for_user: true, node_id: 'node-1' });
-		const marker = rendered.querySelector<HTMLElement>('.for-you-marker');
-		expect(marker?.textContent).toBe('Update');
-		expect(marker?.getAttribute('title')).toBe('Update for you');
-		expect(marker?.querySelector('.for-you-dot')).not.toBeNull();
+		expect(rendered.querySelector('.for-you-marker')).toBeNull();
+		expect(rendered.textContent).not.toContain('Update');
 	});
 
-	it('renders the actual Codex model badge for a marked update with model metadata', () => {
+	it('renders the actual Codex model caption for a marked update with model metadata', () => {
 		const rendered = render({
 			for_user: true,
 			model: 'codex/gpt-5-codex',
@@ -67,5 +68,11 @@ describe('AssistantMessage model name', () => {
 	it('shows a stored display name as written', () => {
 		expect(badge({ harness: 'claude-code', model: 'claude-haiku-4-5-20251001', model_name: 'Claude Haiku 4.5' }))
 			.toBe('Claude Code · Claude Haiku 4.5');
+	});
+
+	it('uses the composer canonical name for a native local turn', () => {
+		models.set([{ id: 'mock/test-model', litellm_model: 'mock/test-model', name: 'Fortissimo oQ6', display_name: 'Fortissimo oQ6' } as any]);
+		activeModelId.set('mock/test-model');
+		expect(badge({ model: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ6-MTP' })).toBe('Fortissimo oQ6');
 	});
 });
