@@ -279,6 +279,7 @@
 				<AdaptiveDrawer
 					ariaLabel={`Decision — ${label(current)}`}
 					opaque
+					flushBottom
 					open={showChip}
 					onClose={close}
 				>

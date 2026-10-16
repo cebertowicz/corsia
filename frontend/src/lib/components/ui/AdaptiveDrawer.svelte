@@ -21,6 +21,7 @@
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
+		flushBottom = false,
 		followKeyboard = false,
 		headless = false,
 		opaque = false,
@@ -49,6 +50,8 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
+		/** Let a child-owned sticky footer reach the edge of the scroll region. The child owns its safe-area inset. */
+		flushBottom?: boolean;
 		/**
 		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
 		 * drawer whose text field must stay in view while typing. It reads the
@@ -179,7 +182,7 @@
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
 				</div>{/if}
 			</div>
-			<div class="drawer-body" class:fill>
+			<div class="drawer-body" class:fill class:flush-bottom={flushBottom}>
 				{@render children()}
 			</div>
 		</div>
@@ -339,6 +342,7 @@
 		scrollbar-gutter: stable;
 		padding: 0 var(--space-4) max(var(--space-4), env(safe-area-inset-bottom, 0px));
 	}
+	.drawer-body.flush-bottom { padding-bottom: 0; }
 	.drawer-body.fill { display: flex; flex-direction: column; overflow: hidden; }
 	@media (max-width: 620px) {
 		/* Touch minimum for the only dismiss control in the chrome. */
