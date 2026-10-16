@@ -19,7 +19,7 @@ def _agent_next_step(
     key_refs: list[dict[str, object]],
     *,
     on_here: bool,
-    place: str = "Workspace settings › Connected apps",
+    place: str = "Settings › Connected apps",
 ) -> str | None:
     """Return the fixed person-facing recovery step without exposing a key value."""
     label = name if isinstance(name, str) else "This app"
@@ -58,21 +58,8 @@ def _agent_next_step(
     return None
 
 
-def _place(app: dict[str, object], *, db) -> str:
-    """Describe the one Connected Apps surface that owns this app."""
-    reach = app["reach"]
-    assert isinstance(reach, dict)
-    project_ids = reach.get("project_ids")
-    if reach.get("mode") == "selected" and not reach.get("outside_projects") and project_ids and len(project_ids) == 1:
-        row = db.execute("SELECT name FROM projects WHERE id=?", (project_ids[0],)).fetchone()
-        if row is not None and isinstance(row["name"], str):
-            return f"{row['name']}'s Connected apps"
-    return "Workspace settings › Connected apps"
-
-
 def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person: bool = False) -> dict[str, object]:
     """Return a value-free app projection, limiting unreachable agent rows."""
-    place = _place(app, db=db)
     if app["state"] in {"awaiting_approval", "expired"}:
         live = {"state": app["state"], "state_since": app["state_since"], "tool_count": 0, "failure_class": None}
     else:
@@ -82,7 +69,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
     if not full:
         return {
             "name": app["name"], "state": live["state"], "on_here": False,
-            "next_step": _agent_next_step(app["name"], live["state"], None, [], on_here=False, place=place),
+            "next_step": _agent_next_step(app["name"], live["state"], None, [], on_here=False),
         }
     config = app["config"]
     assert isinstance(config, dict)
@@ -101,7 +88,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "tool_count": live["tool_count"],
         "failure_class": live["failure_class"],
         "next_step": _agent_next_step(
-            app["name"], live["state"], live["failure_class"], key_refs, on_here=on_here, place=place,
+            app["name"], live["state"], live["failure_class"], key_refs, on_here=on_here,
         ),
         "key_refs": key_refs,
         "config": {key: value for key, value in config.items() if key != "key_refs"},
