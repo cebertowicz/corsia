@@ -30,6 +30,15 @@ Released 2026-10-16.
 - Markdown links refresh when their source finishes parsing.
 - A document carries one open review request at a time, and a review request on a sub-step counts once in your chat list.
 
+### Chat and Interface
+
+- The chat view is tidied: the sidebar, chat, plan and document panes share one style for each repeated element, with dated boxes and heavy borders removed and no information or action lost.
+- Project colours keep text readable on every coloured control, in light and dark themes.
+- In installed iOS 27 apps, the phone header and first sidebar row sit below the system's top-edge blur, and chat text no longer shows through the header title.
+- The decision drawer's footer no longer covers its options on phones.
+- Plan decisions stay listed while the decision queue is still loading, and a decision row opens the decision it names.
+- Document row menus, collapse and expand, and keyboard access to row actions work reliably.
+
 ### Agents and Plans
 
 - Plans use clearer Done and Won’t do language, complete summaries on smaller screens, and smoother open and close motion. The chat thread list no longer shows a misleading Stuck status.
