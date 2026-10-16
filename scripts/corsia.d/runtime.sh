@@ -83,15 +83,23 @@ open_after_start() {
     open_browser
 }
 
-open_browser() {
-    local url="http://localhost:$BACKEND_PORT" version commit
-    echo "     ready at $url"
+# The installed release as a person reads it. A packaged app replaces it with
+# its bundle version (corsia.d/app_mode.sh).
+installed_release_label() {
+    local version commit
     version="$(git -C "$CORSIA_DIR" describe --tags --always 2>/dev/null)" || version=unknown
     commit="$(git -C "$CORSIA_DIR" rev-parse --short HEAD 2>/dev/null)" || commit=unknown
+    echo "CORSIA $version (commit $commit)"
+}
+
+open_browser() {
+    local url="http://localhost:$BACKEND_PORT" release
+    echo "     ready at $url"
+    release="$(installed_release_label)"
     if command -v open > /dev/null 2>&1 && open "$url"; then
-        echo "     Opening your browser…  Installed CORSIA $version (commit $commit)."
+        echo "     Opening your browser…  Installed $release."
     else
-        echo "     Open $url in your browser.  Installed CORSIA $version (commit $commit)."
+        echo "     Open $url in your browser.  Installed $release."
     fi
 }
 

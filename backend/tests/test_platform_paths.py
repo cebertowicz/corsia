@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -35,6 +36,54 @@ def test_app_bundle_root_is_a_path_check_on_the_module_location(tmp_path, monkey
     # The checkout this test runs from is never an app bundle, whatever the env says.
     monkeypatch.setenv("CORSIA_DESKTOP_BUNDLE", "1")
     assert paths.app_bundle_root() is None
+
+
+def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
+    paths = _platform_paths()
+    repo = Path(__file__).resolve().parents[2]
+    rust = (repo / "desktop" / "src-tauri" / "src" / "app_paths.rs").read_text()
+    launcher = (repo / "desktop" / "scripts" / "corsia-service").read_text()
+    app_mode = (repo / "scripts" / "corsia.d" / "app_mode.sh").read_text()
+
+    rust_folder = re.findall(r'^pub const APP_FOLDER: &str = "([^"]*)";$', rust, re.M)
+    launcher_folder = re.findall(r"^CORSIA_APP_FOLDER=(\S+)$", launcher, re.M)
+
+    assert rust_folder == launcher_folder == [paths.APP_FOLDER] == ["CORSIA"]
+    # The bundled lifecycle script asks the backend for every app path rather
+    # than spelling the folder a fourth time.
+    assert "Application Support" not in app_mode
+    # It finds the app binary's staged and previous copies by the same names.
+    stage = (repo / "desktop" / "src-tauri" / "src" / "update_stage.rs").read_text()
+    rust_names = re.findall(r'with_file_name\("(CORSIA\.app\.\w+)"\)', stage)
+    shell_names = re.findall(r'/(CORSIA\.app\.\w+)"', app_mode)
+    assert sorted(rust_names) == sorted(shell_names) == [
+        "CORSIA.app.previous",
+        "CORSIA.app.staged",
+    ]
+
+
+def test_service_file_lines_honour_only_the_workspace_and_port(tmp_path):
+    paths = _platform_paths()
+    service_file = tmp_path / "service.json"
+    service_file.write_text(
+        '{"workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
+    )
+
+    assert paths.service_file_lines(service_file) == [
+        "note=service.json: ignoring unsupported key PATH",
+        "note=service.json: ignoring unsupported key <unprintable name>",
+        "workspace=/w",
+        "port=4100",
+    ]
+    service_file.write_text('{"workspace": "relative", "port": true}')
+    assert paths.service_file_lines(service_file) == [
+        "note=service.json: ignoring an invalid workspace value",
+        "note=service.json: ignoring an invalid port value",
+    ]
+    service_file.write_text("[1]")
+    assert paths.service_file_lines(service_file) == [
+        "note=service.json unreadable: ValueError"
+    ]
 
 
 def test_default_state_root_is_the_state_child_of_the_app_folder_in_the_app(tmp_path):
