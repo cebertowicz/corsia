@@ -59,19 +59,32 @@ class AskRelease:
     detail: dict
 
 
+def open_asks_sql(columns: str, *, joins: str = "") -> str:
+    """The one definition of a document's open review requests: a SELECT of ``columns``.
+
+    A user block owned by the artifact on a task linked to it for attention,
+    whatever the task's state: a task that ended without withdrawing still holds
+    its request until the user answers it. ``?`` binds the artifact id; ``l``,
+    ``n``, ``p`` and ``h`` name the link, task, plan and hold.
+    """
+    return (
+        f"SELECT {columns} FROM plan_node_artifact_links l"
+        " JOIN plan_nodes n ON n.id = l.node_id"
+        " JOIN plans p ON p.id = n.plan_id"
+        " JOIN plan_node_holds h ON h.node_id = n.id"
+        f" {joins} WHERE l.artifact_id=? AND l.role='attention'"
+        f" AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id"
+    )
+
+
 def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
-        f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
-                  n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
-            ORDER BY h.created_at DESC, h.id DESC""",
+        open_asks_sql(
+            "h.id AS hold_id, h.reason, h.created_at AS raised_at,"
+            " n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name",
+            joins="LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'",
+        ) + " ORDER BY h.created_at DESC, h.id DESC",
         (artifact_id,),
     ).fetchall()
 
@@ -277,21 +290,16 @@ def _release(
     from prompts import plan_wakes as wakes
 
     rows = db.execute(
-        f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
-                  n.revision, n.executor_thread_id, n.owner_thread_id,
-                  p.owner_kind, p.owner_id,
-                  EXISTS (SELECT 1 FROM plan_node_holds other
-                          WHERE other.node_id=n.id AND other.id<>h.id
-                            AND other.cleared_at IS NULL) AS other_holds,
-                  i.title AS ask
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             JOIN artifact_identities i ON i.id = l.artifact_id
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
-            ORDER BY h.created_at, h.id""",
+        open_asks_sql(
+            "h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,"
+            " n.revision, n.executor_thread_id, n.owner_thread_id,"
+            " p.owner_kind, p.owner_id,"
+            " EXISTS (SELECT 1 FROM plan_node_holds other"
+            " WHERE other.node_id=n.id AND other.id<>h.id"
+            " AND other.cleared_at IS NULL) AS other_holds,"
+            " i.title AS ask",
+            joins="JOIN artifact_identities i ON i.id = l.artifact_id",
+        ) + " ORDER BY h.created_at, h.id",
         (artifact_id,),
     ).fetchall()
     causes = [

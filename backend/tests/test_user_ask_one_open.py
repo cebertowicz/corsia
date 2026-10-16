@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from plans import service
+from plans import service, user_ask
 from plans.boundary import PlanActor, mutate
 from registry import models
 from tests.test_attention_queue import db  # noqa: F401 - in-memory plan fixture
@@ -55,9 +55,13 @@ def test_refuses_competing_or_restated_asks_until_the_open_hold_is_resolved(db):
         "SELECT count(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (first.id,),
     ).fetchone()[0] == 1
 
-    with pytest.raises(service.PlanInputError, match=rf"node_id {first.id}.*hold_id {hold['id']}"):
+    with pytest.raises(
+        service.PlanInputError, match=rf"node_id {first.id}, hold_id {hold['id']}.*do not resolve it",
+    ):
         _block(db, plan.id, second.id, artifact_id)
-    with pytest.raises(service.PlanInputError, match=rf"node_id {first.id}, hold_id {hold['id']}"):
+    with pytest.raises(
+        service.PlanInputError, match=rf"node_id {first.id}, hold_id {hold['id']}\); resolve that",
+    ):
         _block(db, plan.id, first.id, artifact_id, reason="Review the revision")
 
     mutate(
@@ -74,7 +78,8 @@ def test_refuses_competing_or_restated_asks_until_the_open_hold_is_resolved(db):
 
 
 @pytest.mark.parametrize("operation", ("close_node", "archive_node"))
-def test_an_ended_task_never_locks_its_document(db, operation):
+def test_an_ended_tasks_open_request_holds_the_document_until_answered(db, operation):
+    """The rule counts what the review bar shows, so the bar never shows two requests."""
     user = PlanActor(None, "user-1", "project-1", kind="user")
     plan = service.ensure_plan("thread", "root", db=db)
     ended = service.add_node(
@@ -94,8 +99,11 @@ def test_an_ended_task_never_locks_its_document(db, operation):
         mutation_id=uuid.uuid4().hex, db=db,
     )
 
+    with pytest.raises(service.PlanInputError, match=rf"node_id {ended.id}.*do not resolve it"):
+        _block(db, plan.id, fresh.id, artifact_id)
+    assert [ask["node_id"] for ask in user_ask.raised_asks(db, artifact_id)] == [ended.id]
+
+    assert user_ask.cleared(artifact_id, "answer", db=db) == 1
     _block(db, plan.id, fresh.id, artifact_id)
 
-    assert db.execute(
-        "SELECT count(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (fresh.id,),
-    ).fetchone()[0] == 1
+    assert [ask["node_id"] for ask in user_ask.raised_asks(db, artifact_id)] == [fresh.id]
