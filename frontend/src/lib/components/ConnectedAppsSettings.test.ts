@@ -58,8 +58,8 @@ describe('ConnectedAppsSettings', () => {
 	it('renders the empty-state copy when there are no apps', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Ask CORSIA in chat'));
-		expect(host.textContent).not.toContain('Connect one here');
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Connect one here, or ask CORSIA in chat'));
+		expect(host.textContent).not.toContain('No connected apps yet. Ask CORSIA in chat');
 	});
 });
 
