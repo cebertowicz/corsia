@@ -17,6 +17,7 @@
 	import SettingsContext from './SettingsContext.svelte';
 	import SettingsProjects from './SettingsProjects.svelte';
 	import SettingsRow from './SettingsRow.svelte';
+	import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 	import { loadServerVersion } from '$lib/version';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
@@ -61,6 +62,7 @@
 	const groups: { id: SettingsSection; label: string }[][] = [
 		[
 			{ id: 'providers', label: 'Providers' },
+			{ id: 'connected-apps', label: 'Connected apps' },
 			{ id: 'skills', label: 'Skills' },
 			{ id: 'context', label: 'Context' },
 		],
@@ -142,6 +144,8 @@
 			{#if $settingsActiveSection === 'providers'}
 				<div class="inset"><ProviderManager /></div>
 				<div class="policy"><ProvidersPolicyBlock /></div>
+			{:else if $settingsActiveSection === 'connected-apps'}
+				<div class="inset"><ConnectedAppsSettings /></div>
 			{:else if $settingsActiveSection === 'skills'}
 				<h2 class="page-title">Skills</h2>
 				<SettingsSkills {onBrowseSkills} />
@@ -222,6 +226,8 @@
 	}
 	/* Sections that draw their own title: inset them to the edge the list pages use. */
 	.inset { padding: 0 var(--space-2); }
+	/* Connected apps was drawn to follow System; as its own page it starts at the top. */
+	.inset > :global(.connected-apps) { margin-top: 0; }
 	.policy { margin-top: var(--space-8); padding: 0 var(--space-2); }
 	.mobile-root { display: none; }
 
@@ -230,10 +236,13 @@
 		.desktop-nav { display: none; }
 		.settings-content { display: none; padding: var(--space-3) var(--space-3) var(--space-6); }
 		.settings-content.mobile-section { display: block; }
-		/* The app header names the page on a phone; the page title is not repeated under it. */
-		.section-host :global(.page-title) { display: none; }
+		/* The app header names the page on a phone; the title is not drawn again under it but stays the page's heading for assistive tech. */
+		.section-host :global(.page-title),
+		.inset :global(.page-head h2), .inset :global(.section-header h2), .inset :global(.connected-apps .heading h2) {
+			position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+			overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+		}
 		.inset :global(.page-head) { justify-content: flex-end; }
-		.inset :global(.page-head h2), .inset :global(.section-header h2) { display: none; }
 		.mobile-root { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: var(--space-3); }
 		.mobile-root.hidden { display: none; }
 		.mobile-group { display: flex; flex-direction: column; }

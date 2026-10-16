@@ -73,7 +73,7 @@ export function createReviewBarState() {
 		phase = 'sending'; failure = '';
 		onSendStarted?.();
 		try {
-			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '');
+			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '', read?.hold_ids ?? []);
 			// The hold-keyed card overlay must receive the canonical server response even if this bar moved on.
 			onSendConfirmed?.(sent);
 			if (!current(id, stamp)) return 'sent';

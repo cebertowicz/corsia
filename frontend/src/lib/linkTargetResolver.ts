@@ -80,10 +80,13 @@ function settingsLink(href: string, origin: string): { section: SettingsSection;
 		return null;
 	}
 	if (url.origin !== origin) return null;
-	const match = /^\/settings\/([a-z]+)\/?$/.exec(url.pathname);
-	const section = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
-	if (!section) return null;
-	return { section, anchor: /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null };
+	const match = /^\/settings\/([a-z-]+)\/?$/.exec(url.pathname);
+	const named = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
+	if (!named) return null;
+	const anchor = /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null;
+	// An anchor that has become its own section (/settings/system#connected-apps) opens that section.
+	const section = SETTINGS_SECTIONS.find((id) => id === anchor) ?? named;
+	return { section, anchor };
 }
 
 /** A same-origin `/thread/<id>` link, as an agent writes it to hand the person to a conversation. */

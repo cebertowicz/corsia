@@ -33,7 +33,7 @@ describe('SettingsView navigation', () => {
 		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
 		flushSync();
 
-		const entries = [...host.querySelectorAll('.desktop-nav .nav-item')].map((el) => el.textContent?.trim().toLowerCase());
+		const entries = [...host.querySelectorAll('.desktop-nav .nav-item')].map((el) => el.getAttribute('data-settings-section'));
 		expect(entries).toEqual([...SETTINGS_SECTIONS]);
 		for (const id of SETTINGS_SECTIONS) {
 			settingsActiveSection.set(id);

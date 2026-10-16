@@ -152,17 +152,16 @@ def _append_inventory_front(
     agent_envelope, harness_model_facts: dict[str, Any],
 ) -> None:
     from core.token_estimation import _text_tokens
+    from core.tool_definition_sources import tool_definition_entries
 
     if canonical_tool_definitions:
-        source_entries.append(ContextSourceEntry(
-            source_id="native:tool-definitions", origin_section="tools",
-            label="Native tool definitions", stable_reference=f"thread://{thread_id}/tool-definitions",
-            freshness="fresh", inclusion="included", reason="exact selected Native tool schema ledger",
-            owner_surface="tool-registry", prompt_content=canonical_tool_definitions,
-            prompt_tokens_override=_text_tokens(
-                canonical_tool_definitions, harness_model_facts.get("model"),
-            ) + 4,
-            metadata={"tool_count": len(frozen_tool_definitions)},
+        model = harness_model_facts.get("model")
+        source_entries.extend(tool_definition_entries(
+            id_prefix="native", thread_id=thread_id, freshness="fresh", model=model,
+            canonical_tool_definitions=canonical_tool_definitions,
+            frozen_tool_definitions=frozen_tool_definitions,
+            total_tokens=_text_tokens(canonical_tool_definitions, model) + 4,
+            single_label="Native tool definitions",
         ))
     envelope_source = agent_send_envelope_source_entry(
         thread_id=thread_id, harness="native", agent_envelope=agent_envelope,

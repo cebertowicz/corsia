@@ -148,8 +148,8 @@ def test_a_started_parent_still_counts_its_own_ask(db):
 
 
 def test_an_unstarted_parent_counts_its_own_ask_beside_its_child(db):
-    from plans import user_ask
-    from tests.plan_ask_helpers import document_ask
+    from plans import artifact_links
+    from registry import attention, models
 
     owner = _thread(db, "container-ask")
     plan = _plan(db, "container-ask")
@@ -163,8 +163,17 @@ def test_an_unstarted_parent_counts_its_own_ask_beside_its_child(db):
         "expected_revision": revision(db, child.id),
     }, actor=HUMAN)
     # The parent's own raised artifact is a need of its own, not its child's rollup.
-    user_ask.attach(
-        db, parent.id, document_ask(db, "container-ask"), actor_id=None, provenance="test",
+    # Only a task holds a review request, so the parent's is non-ask attention.
+    models.register_artifact(
+        integration="github", type="pr", external_id="container-ask#1",
+        parent_thread_id="container-ask", title="Merge the release", db=db,
+    )
+    raised = db.execute(
+        "SELECT id FROM artifact_identities WHERE external_id='container-ask#1'",
+    ).fetchone()["id"]
+    attention.raise_attention(raised, db=db)
+    artifact_links.link(
+        parent.id, raised, "attention", actor_id=None, provenance="test", db=db,
     )
     db.commit()
 

@@ -491,6 +491,7 @@ async function measurementScopedRouteReady(page: Page, data: Seed, timeout = 20_
 /** Settings tabs, each with what proves its own content (not the previous tab's) is showing. */
 const SETTINGS_TAB_CONTENT: Record<string, string> = {
 	Providers: 'Accounts and rollover',
+	'Connected apps': 'Connected apps',
 	Skills: 'All projects',
 	Context: 'All projects',
 	Projects: 'Active',

@@ -239,6 +239,24 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
         agent.tools.register(tool_type())
     agent.tools.register(ModelSourcesTool())
     agent.tools.register(GitHubAgentAccountTool())
+    _register_google_tools(agent)
+
+
+def _register_google_tools(agent: CORSIAAgent) -> None:
+    from tools.google_account import GoogleConnectTool, GoogleStatusTool
+    from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
+    from tools.google_email import EmailDraftTool, EmailSendTool
+    from tools.google_email_read import EmailReadTool, EmailSearchTool
+
+    agent.tools.register(EmailSearchTool())
+    agent.tools.register(EmailReadTool())
+    agent.tools.register(GoogleConnectTool())
+    agent.tools.register(GoogleStatusTool())
+    agent.tools.register(EmailDraftTool())
+    agent.tools.register(EmailSendTool())
+    agent.tools.register(CalendarListTool())
+    agent.tools.register(CalendarDraftInviteTool())
+    agent.tools.register(CalendarSendInviteTool())
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:

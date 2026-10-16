@@ -1,6 +1,6 @@
 import { get, writable } from 'svelte/store';
 
-export const SETTINGS_SECTIONS = ['providers', 'skills', 'context', 'projects', 'keys', 'system', 'debug'] as const;
+export const SETTINGS_SECTIONS = ['providers', 'connected-apps', 'skills', 'context', 'projects', 'keys', 'system', 'debug'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const settingsActiveSection = writable<SettingsSection>('providers');
