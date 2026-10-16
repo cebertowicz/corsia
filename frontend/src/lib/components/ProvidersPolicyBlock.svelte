@@ -145,6 +145,8 @@
 	.scope-setting, .line, .account-row { justify-content: space-between; }
 	.order-controls :global(.ico-btn) { width: 24px; height: 24px; }
 	.scope-setting > div { min-width: 0; }
+	/* A narrow project policy line must wrap its copy, never shrink the switch track. */
+	.scope-setting :global(.tg) { flex: 0 0 auto; }
 	.scope-label, .line > span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: 500; }
 	.workspace-link { appearance: none; border: 0; padding: 0; background: transparent; color: var(--accent-text); cursor: pointer; font: inherit; font-size: var(--text-footnote); text-decoration: underline; }
 	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
