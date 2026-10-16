@@ -12,7 +12,7 @@ __all__ = [
     "broadcast_to_thread", "send_to_thread_sessions", "broadcast_event", "broadcast_to_user",
     "broadcast_all", "owner_broadcast",
     "send_to_client",
-    "notify_models_changed",
+    "notify_models_changed", "notify_devices_updated", "schedule_devices_updated",
     "CROSS_TAB_EVENTS",
 ]
 
@@ -204,6 +204,11 @@ def notify_models_changed() -> None:
     schedule_unavailable_model_recovery()
 
 
+def notify_devices_updated() -> None:
+    """Tell every connected client to re-read its Devices state."""
+    broadcast_all({"type": "devices_updated"})
+
+
 def broadcast_from_any_thread(broadcast: Callable[[], None], what: str) -> None:
     """Run ``broadcast`` on the application loop, from a DB worker's after-commit included.
 
@@ -228,3 +233,8 @@ def broadcast_from_any_thread(broadcast: Callable[[], None], what: str) -> None:
 def schedule_models_changed() -> None:
     """``notify_models_changed`` from any thread."""
     broadcast_from_any_thread(notify_models_changed, "models_updated")
+
+
+def schedule_devices_updated() -> None:
+    """``notify_devices_updated`` from the pairing state owner or a DB worker."""
+    broadcast_from_any_thread(notify_devices_updated, "devices_updated")
