@@ -9,7 +9,7 @@ export interface SourceAccount {
 	identified: boolean;
 	state: SourceAccountState;
 	resets_at: string | null;
-	conductor_binding: boolean;
+	corsia_agent_binding: boolean;
 }
 
 /** One row of `GET /api/providers/sources` (#3308): one state and one fix. */

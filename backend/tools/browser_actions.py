@@ -12,7 +12,8 @@ class BrowserSnapshotTool(Tool):
     name = "browser_snapshot"
     description = (
         "Get the accessibility tree of the current browser page. "
-        "Returns semantic DOM with element refs (e.g. @e42) for interaction.\n\n"
+        "Returns semantic DOM with element refs (e.g. @e42) for interaction. "
+        "These actions work alongside the person; password pages are for the person to handle.\n\n"
         "USE THIS to:\n"
         "- See what's on the current page (text, buttons, inputs, links)\n"
         "- Find element refs for browser_click or browser_fill\n"
@@ -49,7 +50,8 @@ class BrowserClickTool(Tool):
 
     name = "browser_click"
     description = (
-        "Click an element in the browser by ref (from snapshot) or CSS selector.\n\n"
+        "Click an element in the browser by ref (from snapshot) or CSS selector. "
+        "These actions work alongside the person; password pages are for the person to handle.\n\n"
         "USE THIS to:\n"
         "- Click buttons, links, checkboxes\n"
         "- Navigate between pages\n"
@@ -81,7 +83,8 @@ class BrowserFillTool(Tool):
 
     name = "browser_fill"
     description = (
-        "Clear and fill a text input in the browser.\n\n"
+        "Clear and fill a text input in the browser. "
+        "These actions work alongside the person; password pages are for the person to handle.\n\n"
         "USE THIS to:\n"
         "- Fill form fields, search boxes, text areas\n"
         "- Enter credentials or test data\n\n"
@@ -116,7 +119,8 @@ class BrowserEvalTool(Tool):
 
     name = "browser_eval"
     description = (
-        "Run JavaScript in the current browser page and return the result.\n\n"
+        "Run JavaScript in the current browser page and return the result. "
+        "These actions work alongside the person; password pages are for the person to handle.\n\n"
         "USE THIS to:\n"
         "- Extract data from the page (e.g. document.title, localStorage)\n"
         "- Check computed state or values\n"
@@ -148,7 +152,8 @@ class BrowserWaitTool(Tool):
 
     name = "browser_wait"
     description = (
-        "Wait for an element to appear on the page, or wait a fixed number of milliseconds.\n\n"
+        "Wait for an element to appear on the page, or wait a fixed number of milliseconds. "
+        "These actions work alongside the person; password pages are for the person to handle.\n\n"
         "USE THIS to:\n"
         "- Wait for async content to load after an action\n"
         "- Pause between interactions\n"

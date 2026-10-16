@@ -7,7 +7,7 @@ from pathlib import Path
 
 from connections.account_policy import require_claim, require_launch
 from connections.account_receipts import capture_receipt
-from connections.account_runtime import launch_homes
+from connections.account_runtime import OPERATION_KINDS, launch_homes
 from infra.database import get_db
 
 
@@ -64,6 +64,8 @@ def _model(request, model=None):
 
 
 def bind_operation_session(request, session, *, kind, model=None):
+    if kind not in OPERATION_KINDS:
+        raise ValueError(f'unknown operation kind: {kind}')
     launch = request.vendor_launch
     session.vendor_account_id = request.vendor_account_id
     session.vendor_account_receipt = request.vendor_account_receipt

@@ -57,7 +57,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 beforeEach(() => {
 	conductor._resetFirstRunLandingForTests();
-	conductor.workspaceConductorId.set(null);
+	conductor.corsiaAgentId.set(null);
 	user.set(null);
 	token.set('fixture-session');
 	activeThreadId.set(null);
@@ -79,6 +79,7 @@ beforeEach(() => {
 		paths.push(url.pathname);
 		if (url.pathname === '/api/auth/logout' && init?.method === 'POST') return json({});
 		if (init?.method && init.method !== 'GET') throw new Error(`Unexpected write: ${init.method} ${url.pathname}`);
+		if (url.pathname === '/api/corsia-agent') return scopeLookups.get('workspace') ?? lookup.promise;
 		if (url.pathname === '/api/conductor') return scopeLookups.get(url.searchParams.get('scope') ?? '') ?? lookup.promise;
 		if (url.pathname === '/api/threads') return deferredThreadList?.promise ?? json({ threads: listedThreads });
 		if (url.pathname === '/api/projects') return deferredProjectList?.promise ?? json({ projects: [] });
@@ -136,8 +137,8 @@ describe('first-run entry across auth readiness', () => {
 		expect(host.querySelector('.auth-gate')).not.toBeNull();
 		resolveLookup();
 		await settle();
-		expect(get(conductor.workspaceConductorId)).toBeNull();
-		expect(paths.filter(path => path === '/api/conductor')).toHaveLength(0);
+		expect(get(conductor.corsiaAgentId)).toBeNull();
+		expect(paths.filter(path => path === '/api/corsia-agent')).toHaveLength(0);
 		expect(landSpy).not.toHaveBeenCalled();
 		const preAuthLandingAttempts = landSpy.mock.calls.length;
 		const preAuthThreadListReads = paths.filter(path => path === '/api/threads').length;
@@ -153,7 +154,7 @@ describe('first-run entry across auth readiness', () => {
 			landingAttempts: landSpy.mock.calls.length, preAuthLandingAttempts, preAuthThreadListReads,
 		}));
 		expect(get(activeThreadId)).toBe('fixture-conductor');
-		expect(get(conductor.workspaceConductorId)).toBe('fixture-conductor');
+		expect(get(conductor.corsiaAgentId)).toBe('fixture-conductor');
 		expect(historyReads('fixture-conductor')).toHaveLength(1);
 	});
 
@@ -324,7 +325,7 @@ describe('first-run entry across auth readiness', () => {
 		render();
 		authenticate();
 		await settle();
-		expect(paths).toContain('/api/conductor');
+		expect(paths).toContain('/api/corsia-agent');
 		await unmount(page!);
 		page = null;
 		resolveLookup();
@@ -362,14 +363,14 @@ describe('first-run entry across auth readiness', () => {
 		await settle();
 		await logout();
 		await settle();
-		const conductorReadsAtLogout = paths.filter(path => path === '/api/conductor').length;
+		const conductorReadsAtLogout = paths.filter(path => path === '/api/corsia-agent').length;
 		resolveLookup();
 		await settle();
 		expect(get(isAuthenticated)).toBe(false);
 		expect(host.querySelector('.auth-gate')).not.toBeNull();
 		expect(landSpy).not.toHaveBeenCalled();
 		expect(get(activeThreadId)).toBeNull();
-		expect(paths.filter(path => path === '/api/conductor')).toHaveLength(conductorReadsAtLogout);
+		expect(paths.filter(path => path === '/api/corsia-agent')).toHaveLength(conductorReadsAtLogout);
 		expect(historyReads('fixture-conductor')).toHaveLength(0);
 	});
 

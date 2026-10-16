@@ -94,7 +94,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 116:
+    if SCHEMA_VERSION == 119:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
@@ -240,6 +240,28 @@ def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
     retired = _mark(db, already)
     assert (retired["state"], retired["placement_state"]) == ("retired", "already")
     assert retired["placement_detail"] == "context/X.md"
+
+
+def test_checkpoint_stages_a_flagged_trial_with_its_checkpoint_epoch(tmp_path, monkeypatch) -> None:
+    path, db, lesson, _ = _review_setup(tmp_path, monkeypatch)
+    db.close()
+    continuity = _tool_db(path, monkeypatch)
+    trial = _raw(
+        q2="task_start", text="On 2026-10-14, name the exact commit a check ran on.",
+        skill_name="commit-check", skill_description="Record exact commits for check results.",
+        trial={"kind": "hypothesis", "review_after": "2027-01-01", "boundary": None},
+    )
+
+    result = continuity._run(
+        "thread-1", "review", {"entry_id": lesson, "verdict": "select", "placement": trial}, "cp-1",
+    )
+
+    assert result.startswith(f"Staged entry {lesson} verdict select")
+    db = _connect(str(path))
+    row = db.execute(
+        "SELECT history_epoch,entry_id,revision FROM lesson_placement_checks"
+    ).fetchone()
+    assert tuple(row) == (0, lesson, 1)
 
 
 def test_already_conflicts_when_the_file_stopped_saying_it_before_install(

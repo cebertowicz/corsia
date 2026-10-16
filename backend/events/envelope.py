@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from events.connectors import get_manifest
+from events.connectors import EventTypeDecl, get_manifest
 from events.identity_formula import compute_event_id
 
 
@@ -31,6 +31,14 @@ class EventEnvelope:
     provenance: dict[str, Any]
     event_class: str
     ownerless_ok: bool
+
+
+def _event_class(decl: EventTypeDecl, facts: dict[str, Any]) -> str:
+    """The type's class, promoted to actionable only by its declared fact rule."""
+    rule = decl.actionable_when
+    if rule and all(k in facts and facts[k] == v for k, v in rule.items()):
+        return "actionable"
+    return decl.event_class
 
 
 def normalize(
@@ -65,6 +73,6 @@ def normalize(
         relationships=tuple(relationships),
         artifact_ref=artifact_ref,
         provenance=provenance,
-        event_class=decl.event_class,
+        event_class=_event_class(decl, facts),
         ownerless_ok=decl.ownerless_ok,
     )

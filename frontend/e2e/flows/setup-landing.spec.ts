@@ -58,7 +58,7 @@ test.describe('@surface:first-run setup landing', () => {
 			await expect(composer).toBeVisible({ timeout: 20_000 });
 			await expect(composer).toBeEnabled();
 			await expect(page.locator('.auth-gate')).toHaveCount(0);
-			// The conductor opens with a model chosen (not the 'Select Model' placeholder) and a live socket.
+			// The CORSIA agent opens with a model chosen (not the 'Select Model' placeholder) and a live socket.
 			await waitForWsConnected(page);
 			await shot(page, `landing-${slug}-${project}`);
 

@@ -70,6 +70,17 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
             runtime_context_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1
         );
+        CREATE TABLE lesson_placement_checks (
+            thread_id TEXT NOT NULL,
+            history_epoch INTEGER NOT NULL,
+            entry_id INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            check_name TEXT NOT NULL,
+            flag TEXT NOT NULL,
+            override_reason TEXT,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (thread_id, history_epoch, entry_id, revision, check_name, flag)
+        );
         CREATE TABLE messages (
             id TEXT PRIMARY KEY,
             thread_id TEXT NOT NULL,
@@ -2083,6 +2094,11 @@ def test_purge_destroys_continuity_with_the_transcript(tmp_path):
         "created_at, updated_at) VALUES "
         "('s1', 0, 1, 'active_constraints', '{}', 1, 'active', 't', 't')"
     )
+    db.execute(
+        """INSERT INTO lesson_placement_checks(
+            thread_id,history_epoch,entry_id,revision,check_name,flag,created_at
+        ) VALUES ('s1',0,1,1,'incident-details','date','t')"""
+    )
     db.commit()
 
     run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
@@ -2092,4 +2108,7 @@ def test_purge_destroys_continuity_with_the_transcript(tmp_path):
     ).fetchone()[0] == 0
     assert db.execute(
         "SELECT COUNT(*) FROM continuity_store WHERE thread_id='s1'"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM lesson_placement_checks WHERE thread_id='s1'"
     ).fetchone()[0] == 0

@@ -132,9 +132,21 @@ describe('syncCanvasHeader — no doc', () => {
 		expect(get(canvasHeader)?.title).toBe('Settings');
 	});
 
-	it('names a designated hidden thread as conductor settings', () => {
+	it('names the workspace scope\'s designated hidden thread as CORSIA settings', () => {
 		syncCanvasHeader(makeInput({
 			threadSettingsOpen: true,
+			uiScopeName: null,
+			activeThreadId: 'agent-1',
+			conductorThreadId: 'agent-1',
+		}));
+		expect(get(canvasHeader)?.title).toBe('CORSIA settings');
+		expect(get(canvasHeader)?.backLabel).toBe('CORSIA');
+	});
+
+	it('keeps Conductor for a project scope\'s designated hidden thread', () => {
+		syncCanvasHeader(makeInput({
+			threadSettingsOpen: true,
+			uiScopeName: 'Alpha',
 			activeThreadId: 'conductor-1',
 			conductorThreadId: 'conductor-1',
 		}));

@@ -8,6 +8,12 @@ model, only while no Turn has read it.
 from __future__ import annotations
 
 import json
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -46,11 +52,11 @@ def _wake_row() -> dict:
 
 async def _new_install_picks(model: str) -> str:
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
     from thread.model import switch_model
 
     accounts.create_user("newcomer", SECRET_ENOUGH)
-    conductor_id = get_conductor(WORKSPACE_SCOPE)
+    conductor_id = get_corsia_agent()
     await switch_model(
         conductor_id, model, user_id="newcomer", actor_kind="user",
         actor_id="newcomer", reason="harness_model_switch",
@@ -187,11 +193,11 @@ class TestFirstModelChoice:
 class TestOnlyAnUnreadWakeChanges:
     def _queue(self, delivery_state: str, delivery_error: str | None) -> str:
         from infra import accounts
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import write_transaction
 
         accounts.create_user("newcomer", SECRET_ENOUGH)
-        conductor_id = get_conductor(WORKSPACE_SCOPE)
+        conductor_id = get_corsia_agent()
         with write_transaction(None, scope="test_wake_state") as db:
             db.execute(
                 "UPDATE messages SET delivery_state=?, delivery_error=? WHERE thread_id=?",
@@ -345,13 +351,16 @@ class TestAppPath:
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
-    # This base does not yet serve the app reference; validate its fact contract when Agent Substrate ships it.
+    # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
+    # (`setup.setup_decisions`, the `user_profile` fields), which are not facts of their own.
     @pytest.mark.skipif(not __import__("onboarding.first_run_wake", fromlist=["app_reference_served"]).app_reference_served(), reason="first-run-app.md is not served on this base")
     def test_served_app_reference_names_the_app_fact_keys(self):
         import re
 
         from onboarding import first_run_wake
 
-        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("**How you talk.**", 1)[0]
-        keys = {key.split(".", 1)[0] for key in re.findall(r"`([^`]+)`", paragraph)}
-        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path"}
+        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("Never restate", 1)[0]
+        top_level = re.sub(r"\([^)]*\)", "", paragraph)
+        keys = set(re.findall(r"`([a-z_]+)`", top_level))
+        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path", "setup"}
+        assert "`setup.setup_decisions`" in paragraph  # setup is named through its nested decisions
