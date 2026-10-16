@@ -36,6 +36,8 @@ def test_a_file_in_the_build_is_served(build):
     "../outside.txt",
     "_app/../../outside.txt",
     "{tmp}/outside.txt",
+    "\x00",
+    "_app/immutable/entry\x00.js",
 ])
 def test_a_path_outside_the_build_gets_the_app_page(build, path):
     response = _serve(path.format(tmp=build.parent))
