@@ -604,13 +604,39 @@ async fn remote_pair(
     }
     let proxy = proxy::start(locator.clone(), paired.trust.clone(), 0, || {}).await.map_err(|error| format!("could not start remote proxy: {error:?}"))?;
     let app_dir = default_app_dir(&app)?;
-    remote_config::save_remote(&app_dir, remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: proxy.port })?;
+    let record = remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: proxy.port };
+    remote_config::save_remote(&app_dir, record)?;
+    if unregister_service().is_err() {
+        proxy.stop();
+        remote_config::forget_remote(&app_dir)?;
+        return Ok(RemotePairResponse::Failure { ok: false, reason: "server".into(), app_version: None, host_version: None });
+    }
     *remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")? = Some(proxy);
-    unregister_service()?;
     if let Some(window) = app.get_webview_window("main") {
         window.eval(format!("window.location.replace('http://127.0.0.1:{}');", remote_config::load_remote(&app_dir)?.expect("saved remote").proxy_port)).map_err(|error| error.to_string())?;
     }
     Ok(RemotePairResponse::Success { ok: true, name: paired.name })
+}
+
+#[tauri::command]
+fn disconnect_remote(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+    remote: tauri::State<'_, RemoteRuntime>,
+) -> Result<(), String> {
+    if let Some(proxy) = remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")?.take() {
+        proxy.stop();
+    }
+    let app_dir = default_app_dir(&app)?;
+    remote_config::forget_remote(&app_dir)?;
+    run_service_command("register")?;
+    let startup = start_service(&app, &service)?;
+    if let ServiceStartup::Ready { url } = startup {
+        if let Some(window) = app.get_webview_window("main") {
+            window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -830,6 +856,7 @@ pub fn run() {
             start_local_service,
             remote_discovered,
             remote_pair,
+            disconnect_remote,
             choose_work_folder,
             configure_work_folder,
             lifecycle::retry_quit,
