@@ -98,7 +98,6 @@
 	.sub.failed { color: var(--red-text); }
 	.trailing { flex-shrink: 0; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 	.chev { flex-shrink: 0; color: var(--text-tertiary); }
-	.actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-1); }
-	/* A Settings row's text action ends on the same edge as its other trailing controls. */
-	.actions :global(.btn.ghost) { border-right-width: 0; padding-right: var(--space-1); }
+	/* Preserve the ghost button's symmetric hit area while its fill reaches the row edge. */
+	.actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-1); margin-right: calc(-1 * var(--space-1)); }
 </style>
