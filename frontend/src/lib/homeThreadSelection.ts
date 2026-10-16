@@ -4,7 +4,7 @@ import { activeThreadId, threads } from '$lib/stores/threads';
 import { openThread } from '$lib/stores/openThread';
 import { contextAttachTarget } from '$lib/stores/contextAttach';
 import { clearDocPickerTarget } from '$lib/stores/docPickerTarget';
-import { closeScopeSettings } from '$lib/stores/workspaceSettings';
+import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { beginThreadOpen, type ThreadOpenSource } from '$lib/openTimingRuntime';
 import { enterThreadScope } from '$lib/stores/projects';
@@ -38,7 +38,7 @@ export async function selectHomeThread(
 	openThread.set(null);
 	contextAttachTarget.set(null);
 	clearDocPickerTarget();
-	closeScopeSettings();
+	threadSettingsOpen.set(false);
 	ports.prepareChatSurface(!!firstRunOwner);
 	paneOpen.set(false);
 	await tick();

@@ -5,8 +5,7 @@
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
 	import { loadProviderPolicy, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
 	let policy = $state<ProviderPolicy | null>(null);
@@ -57,9 +56,9 @@
 		if (!projects.length) return 'Every project uses these settings';
 		return `Overridden in ${projects.length} ${projects.length === 1 ? 'project' : 'projects'}: ${projects.map((project) => project.name).join(', ')}`;
 	}
-	function openWorkspaceSettings() {
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(true);
+	// The workspace's order sits under Providers, above every project's override.
+	function openWorkspaceProviders() {
+		requestSettingsSection('providers', 'workspace-provider-policy');
 	}
 	function setEnabled(provider: ProviderEntry, unitId: string, enabled: boolean) {
 		void save(provider, { disabled: enabled ? provider.disabled.filter((id) => id !== unitId) : [...provider.disabled, unitId] });
@@ -74,8 +73,8 @@
 	}
 </script>
 
-<section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'}>
-	<h2>Providers</h2>
+<section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
+	<h2>Accounts and rollover</h2>
 	{#if loading}<p role="status">Loading providers…</p>
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
@@ -89,7 +88,7 @@
 					{:else}
 						<p>Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.</p>
 					{/if}
-					<button class="workspace-link" type="button" onclick={openWorkspaceSettings}>Open Workspace settings</button>
+					<button class="workspace-link" type="button" onclick={openWorkspaceProviders}>Open workspace providers</button>
 				</div>
 				<Toggle checked={policy.use_workspace ?? true} disabled={busy} ariaLabel="Use workspace settings" onchange={toggleScope} />
 			</div>
@@ -138,15 +137,16 @@
 </section>
 
 <style>
-	.providers-policy { border: 1px solid var(--border-subtle); border-radius: var(--lg-card-radius); background: var(--bg-secondary); padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
-	h2 { margin: 0; font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--text-secondary); }
+	.providers-policy { display: flex; flex-direction: column; gap: var(--space-4); }
+	h2 { margin: 0; font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary); }
 	h3 { margin: 0; font-size: var(--text-subhead); }
 	.provider { display: flex; flex-direction: column; gap: 10px; }
 	.scope-setting, .line, .account-row, .order-controls { display: flex; align-items: center; gap: 8px; }
 	.scope-setting, .line, .account-row { justify-content: space-between; }
-	.order-controls :global(.ico-btn) { width: 28px; height: 28px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); }
-	.order-controls :global(.ico-btn:hover:not(:disabled)) { border-color: var(--border); }
+	.order-controls :global(.ico-btn) { width: 24px; height: 24px; }
 	.scope-setting > div { min-width: 0; }
+	/* A narrow project policy line must wrap its copy, never shrink the switch track. */
+	.scope-setting :global(.tg) { flex: 0 0 auto; }
 	.scope-label, .line > span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: 500; }
 	.workspace-link { appearance: none; border: 0; padding: 0; background: transparent; color: var(--accent-text); cursor: pointer; font: inherit; font-size: var(--text-footnote); text-decoration: underline; }
 	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }

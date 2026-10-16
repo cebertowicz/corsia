@@ -2,7 +2,7 @@ import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { activeThreadId } from '$lib/stores/threads';
-import { requestSettingsSection, settingsReturnThread } from '$lib/stores/settingsNavigation';
+import { rememberSettingsReturnThread, requestSettingsSection } from '$lib/stores/settingsNavigation';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import { failureCopy, failureFromOperation } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
@@ -232,7 +232,7 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 /** Open Settings > System at the Updates card, remembering the thread so Back returns to it. */
 export function openUpdates(): void {
 	dismissNotice();
-	settingsReturnThread.set(get(activeThreadId));
+	rememberSettingsReturnThread(get(activeThreadId));
 	requestSettingsSection('system', 'update');
 }
 

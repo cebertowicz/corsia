@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { activeThreadId } from '$lib/stores/threads';
-import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest, settingsReturnThread } from '$lib/stores/settingsNavigation';
+import { settingsNavigation } from '$lib/stores/settingsNavigation';
 import {
 	loadUpdateStatus,
 	resetUpdateStoreForTests,
@@ -98,7 +98,7 @@ describe('update store', () => {
 			}
 			return { ok: true, json: async () => running('holding') };
 		}));
-		const opened = get(settingsOpenRequest);
+		const opened = get(settingsNavigation).openRequest;
 		const started = startUpdate();
 		expect(get(updateStarting)).toBe(true);
 		await vi.advanceTimersByTimeAsync(1_100);
@@ -108,7 +108,7 @@ describe('update store', () => {
 		await started;
 		expect(get(updateStarting)).toBe(false);
 		// Progress is the pinned toast alone: starting opens no sheet, panel or Settings.
-		expect(get(settingsOpenRequest)).toBe(opened);
+		expect(get(settingsNavigation).openRequest).toBe(opened);
 	});
 
 	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming'] as const)(
@@ -157,14 +157,14 @@ describe('update store', () => {
 		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
 		activeThreadId.set('thread-1');
-		const opened = get(settingsOpenRequest);
+		const opened = get(settingsNavigation).openRequest;
 		await loadUpdateStatus();
 		const notice = get(toasts).find((toast) => toast.button)!;
 		await toasts.runAction(notice.id);
-		expect(get(settingsActiveSection)).toBe('system');
-		expect(get(settingsAnchorRequest)).toBe('update');
-		expect(get(settingsOpenRequest)).toBe(opened + 1);
-		expect(get(settingsReturnThread)).toBe('thread-1');
+		expect(get(settingsNavigation).section).toBe('system');
+		expect(get(settingsNavigation).anchor).toBe('update');
+		expect(get(settingsNavigation).openRequest).toBe(opened + 1);
+		expect(get(settingsNavigation).returnThread).toBe('thread-1');
 		expect(get(toasts).some((toast) => toast.button)).toBe(false);
 		activeThreadId.set(null);
 	});
@@ -187,7 +187,7 @@ describe('update store', () => {
 		expect(toast?.action?.label).toBe('Details');
 		await toasts.runAction(toast!.id);
 		expect(get(toasts)).toEqual([]);
-		expect(get(settingsAnchorRequest)).toBe('update');
+		expect(get(settingsNavigation).anchor).toBe('update');
 
 		await loadUpdateStatus();
 		expect(get(toasts)).toEqual([]);
@@ -359,7 +359,7 @@ describe('update store', () => {
 			await loadUpdateStatus();
 			await vi.advanceTimersByTimeAsync(10);
 			await toasts.runAction(pinned()[0].id);
-			expect(get(settingsAnchorRequest)).toBe('update');
+			expect(get(settingsNavigation).anchor).toBe('update');
 		});
 	});
 

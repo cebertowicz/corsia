@@ -15,7 +15,7 @@
 	import { Message } from '$lib/components/ui';
 	import { loadModels } from '$lib/stores/models';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { providerCardRequest, settingsAnchorRequest } from '$lib/stores/settingsNavigation';
+	import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import HostSection from './HostSection.svelte';
 	import ProviderRow from './ProviderRow.svelte';
 	import ProviderModelsBody from './ProviderModelsBody.svelte';
@@ -106,7 +106,7 @@
 	// A link to an account's billing row opens the settings of the provider that holds it
 	// (the first account without a price, else the first account), then focuses the row.
 	$effect(() => {
-		if ($settingsAnchorRequest !== 'account-billing') return;
+		if ($settingsNavigation.anchor !== 'account-billing') return;
 		const live = $vendorAccounts.filter((account) => account.state !== 'removed');
 		const target = live.find((account) => !account.billing) ?? live[0];
 		const provider = target && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === target.provider);
