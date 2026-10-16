@@ -12,20 +12,19 @@ _TABLES = (
 
 def migrate_119_to_120(conn: sqlite3.Connection) -> None:
     """Finalize retired asks and bind uniquely deferred asks to their open hold."""
+    present = {str(row[0]) for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    if not present.issuperset(_TABLES):
+        return
     withdraw_retired_user_asks(conn)
     stamp_deferred_ask_holds(conn)
 
 
 def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     """Clear orphaned user asks only when their task is positively retired."""
-    from plans.ask_endings import detail
-    from plans.public import TERMINAL_STATES, clear_hold_write, open_asks_sql
+    from plans.public import TERMINAL_STATES, ask_ending_detail, clear_hold_write, open_asks_sql
 
-    present = {str(row[0]) for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    )}
-    if not present.issuperset(_TABLES):
-        return 0
     terminal = tuple(sorted(TERMINAL_STATES))
     marks = ",".join("?" for _ in terminal)
     rows = conn.execute(
@@ -39,7 +38,7 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
         # validates live state nor reconciles admission, so it is migration-safe.
         clear_hold_write(
             str(row["node_id"]), str(row["hold_id"]), expected_kind="blocked",
-            actor_id=None, provenance="migration.119_to_120", detail=detail(why="task_ended"), db=conn,
+            actor_id=None, provenance="migration.119_to_120", detail=ask_ending_detail(why="task_ended"), db=conn,
         )
     return len(rows)
 
