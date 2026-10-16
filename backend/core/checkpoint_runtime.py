@@ -165,30 +165,33 @@ async def _execute(
     cancel_event: asyncio.Event,
 ) -> CheckpointRecord:
     try:
-        try:
-            if cancel_event.is_set():
-                raise asyncio.CancelledError
-            if provider_request.target.harness in {'claude-code', 'codex'}:
-                from core.checkpoint_account import admit_checkpoint
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        if provider_request.target.harness in {'claude-code', 'codex'}:
+            from core.checkpoint_account import admit_checkpoint
 
-                provider_request = admit_checkpoint(provider_request)
-            result = await invoke_with_cold_correction(
-                provider_request, cancel_event, _invoke,
-            )
-            if cancel_event.is_set():
-                raise asyncio.CancelledError
-        except asyncio.CancelledError:
-            await run_in_db(
-                checkpoint_store.cancel,
-                checkpoint_id,
-                ended_at=utc_now_iso(),
-            )
-            return await _read(checkpoint_id)
-        except Exception as error:
-            return await _terminal_failure(checkpoint_id, error)
+            provider_request = admit_checkpoint(provider_request)
+        result = await invoke_with_cold_correction(
+            provider_request, cancel_event, _invoke,
+        )
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
         return await _capture_and_install(checkpoint_id, result)
+    except asyncio.CancelledError:
+        await run_in_db(
+            checkpoint_store.cancel,
+            checkpoint_id,
+            ended_at=utc_now_iso(),
+        )
+        return await _read(checkpoint_id)
+    except BaseException as error:
+        return await _terminal_failure(checkpoint_id, error)
     finally:
         record = await _read(checkpoint_id)
+        if record.status == "running":
+            record = await _terminal_failure(
+                checkpoint_id, RuntimeError("checkpoint task exited without a terminal status"),
+            )
         await _notify_completion(record)
 
 
@@ -332,7 +335,12 @@ async def await_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     handle = _tasks.get(checkpoint_id)
     if handle is not None:
         return await asyncio.shield(handle.task)
-    return await _read(checkpoint_id)
+    record = await _read(checkpoint_id)
+    if record.status == "running":
+        return await _terminal_failure(
+            checkpoint_id, RuntimeError("checkpoint task has no local owner"),
+        )
+    return record
 
 
 async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:

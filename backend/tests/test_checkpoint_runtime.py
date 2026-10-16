@@ -490,6 +490,56 @@ async def test_provider_failure_is_one_terminal_row(isolated_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_task_exit_before_capture_is_failed(isolated_db, monkeypatch):
+    from core import checkpoint_runtime as runtime
+
+    _seed("thread-1")
+
+    async def invoke(_request, _cancel):
+        return ProviderCheckpointResult("body", None)
+
+    async def capture_failure(_checkpoint_id, _result):
+        raise RuntimeError("capture persistence failed")
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(runtime, "_capture_and_install", capture_failure)
+    await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    )
+
+    record = await runtime.await_checkpoint("cp-1")
+
+    assert (record.status, record.error) == ("failed", "capture persistence failed")
+
+
+@pytest.mark.asyncio
+async def test_ownerless_running_checkpoint_fails_then_allows_fresh_attempt(
+    isolated_db, monkeypatch,
+):
+    from core import checkpoint_runtime as runtime
+    from infra import checkpoints as store
+
+    _seed("thread-1")
+    store.create_running(_checkpoint("thread-1", "cp-orphan"))
+
+    async def invoke(_request, _cancel):
+        return ProviderCheckpointResult("body", None)
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+
+    orphan = await runtime.await_checkpoint("cp-orphan")
+    fresh = await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-fresh"), _provider("thread-1", "cp-fresh")
+    )
+
+    assert (orphan.status, orphan.error) == (
+        "failed", "checkpoint task has no local owner",
+    )
+    assert fresh.id == "cp-fresh"
+    assert (await runtime.await_checkpoint("cp-fresh")).status == "installed"
+
+
+@pytest.mark.asyncio
 async def test_blank_transport_fails_even_with_staged_edits(
     isolated_db, monkeypatch
 ):
