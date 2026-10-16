@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections.abc import Callable
 import os
 from pathlib import Path
-import tempfile
 
 
 def direct_safehouse_argv(
@@ -60,20 +59,16 @@ def write_no_proctitle_shim(cache_dir: Path) -> Path:
 
 
 def _generated_profile_temp_rules() -> tuple[str, ...]:
-    from tools.host_path_policy import _sandbox_regex
+    from tools.host_path_policy import (
+        GENERATED_PROFILE_PREFIXES,
+        _sandbox_regex,
+        generated_profile_temp_roots,
+    )
 
-    roots = {Path(tempfile.gettempdir()), Path("/tmp"), Path("/private/tmp")}
-    for root in tuple(roots):
-        raw = str(root)
-        if raw.startswith("/private/"):
-            roots.add(Path(raw.removeprefix("/private")))
-        elif raw.startswith("/"):
-            roots.add(Path("/private" + raw))
-    prefixes = ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
     return tuple(
         f'(deny file-write* (regex #"^{_sandbox_regex(str(root))}/{prefix}[^/]*\\.sb$"))'
-        for root in sorted(roots)
-        for prefix in prefixes
+        for root in generated_profile_temp_roots()
+        for prefix in GENERATED_PROFILE_PREFIXES
     )
 
 
