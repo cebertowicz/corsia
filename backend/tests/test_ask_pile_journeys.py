@@ -68,9 +68,9 @@ def _plan_op(db, plan_id: str, operation: str, params: dict, actor: PlanActor = 
     )
 
 
-def _ask(db, plan_id: str, node_id: str, artifact_id: str) -> str:
+def _ask(db, plan_id: str, node_id: str, artifact_id: str, reason: str = "Review it") -> str:
     _plan_op(db, plan_id, "block_node", {
-        "node_id": node_id, "reason_key": "review", "reason": "Review it",
+        "node_id": node_id, "reason_key": "review", "reason": reason,
         "owner_kind": "user", "ask_artifact_id": artifact_id,
     })
     return str(db.execute(
@@ -211,7 +211,7 @@ def test_a_deleted_threads_ask_leaves_the_pile_and_wakes_nobody(db):
     assert _asker_inputs(db) == []
 
 
-# Reviewer item 3b: a stale answer on an ended ask reports that it ended.
+# A stale answer on an ended ask reports that the review request ended.
 def test_answering_an_ended_ask_is_not_offered_and_reports_that_it_ended(db):
     from doceditor import review_bar
     from registry import attention
@@ -282,18 +282,19 @@ def test_a_legacy_raised_approval_on_an_ended_ask_is_absent_without_migration(db
 
 def test_an_approval_after_the_ask_ended_is_refused(db):
     from doceditor import review_bar
-    from parent_review.disposition import APPROVE_TO_USER, DispositionError, dispose
+    from parent_review.disposition import APPROVE_TO_USER, dispose
 
     plan_id, node_id, artifact_id, hold_id = _asked(db)
     _withdraw(db, plan_id, node_id, hold_id)
 
-    with pytest.raises(DispositionError, match=review_bar.STALE):
+    with pytest.raises(review_bar.AnswerRefused, match=review_bar.STALE) as refused:
         dispose(artifact_id, APPROVE_TO_USER, review_result=SimpleNamespace(blocking_failure=False), db=db)
+    assert refused.value.code == "ask_stale"
     assert "disposition_outcome" not in _metadata(db, artifact_id)
     assert _in_pile(db, "proposal.md") == set()
 
 
-# A deferral binds only to the hold it deferred.
+# A deferral belongs only to the hold it deferred.
 def test_defer_expiry_withdraw_and_reask_follow_the_open_hold(db):
     from automation import watches
     from registry import attention
@@ -302,12 +303,17 @@ def test_defer_expiry_withdraw_and_reask_follow_the_open_hold(db):
     deadline = {"type": "deadline", "value": "2026-10-01T16:00:00+00:00"}
 
     attention.clear_attention(artifact_id, outcome="defer", condition=deadline, db=db)
-    assert _metadata(db, artifact_id)["deferred_hold_id"] == hold_id
+    assert db.execute(
+        "SELECT hold_id FROM plan_ask_deferrals WHERE hold_id=?", (hold_id,),
+    ).fetchone()["hold_id"] == hold_id
     assert _in_pile(db, "proposal.md") == set()
     assert _needs_you(db) == []
 
     watch = watches.arm_watch(artifact_id, deadline, owner_thread="owner", db=db)
     watches.expire_watch(watch.id, db=db)
+    assert db.execute(
+        "SELECT 1 FROM plan_ask_deferrals WHERE hold_id=?", (hold_id,),
+    ).fetchone() is None
     [item] = attention.list_raised(db=db)
     assert item["metadata"]["attention_state"] == "raised"
     assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
@@ -321,7 +327,7 @@ def test_defer_expiry_withdraw_and_reask_follow_the_open_hold(db):
     assert second != hold_id
 
 
-def test_a_stale_deferral_stamp_does_not_defer_a_new_ask(db):
+def test_a_new_ask_does_not_inherit_a_cleared_hold_deferral(db):
     from registry import attention
 
     plan_id, node_id, artifact_id, hold_id = _asked(db)
@@ -447,6 +453,59 @@ def test_an_approval_on_an_open_ask_records_its_audit_but_not_its_state(db):
     assert "attention_state" not in metadata
 
 
+def test_approval_undeferes_an_open_ask_and_returns_raised(db):
+    from parent_review.disposition import APPROVE_TO_USER, dispose
+    from registry import attention
+
+    _plan_id, _node_id, artifact_id, hold_id = _asked(db)
+    attention.clear_attention(
+        artifact_id, outcome="defer",
+        condition={"type": "deadline", "value": "2026-10-01T16:00:00+00:00"},
+        hold_ids=[hold_id], db=db,
+    )
+
+    result = dispose(
+        artifact_id, APPROVE_TO_USER, hold_ids=[hold_id],
+        review_result=SimpleNamespace(blocking_failure=False), db=db,
+    )
+
+    assert result.attention_state == "raised"
+    assert [item["hold_ids"] for item in attention.list_raised(db=db)] == [[hold_id]]
+
+
+def test_ask_attention_state_tracks_open_deferred_replacement_and_ended_holds(db):
+    from registry import attention
+
+    plan_id, node_id, artifact_id, first = _asked(db)
+    assert attention.get_attention_state(artifact_id, db=db) == "raised"
+    attention.clear_attention(
+        artifact_id, outcome="defer",
+        condition={"type": "deadline", "value": "2026-10-01T16:00:00+00:00"},
+        hold_ids=[first], db=db,
+    )
+    assert attention.get_attention_state(artifact_id, db=db) == "deferred"
+
+    second = _ask(db, plan_id, node_id, artifact_id, reason="Review the revised proposal")
+    assert second != first
+    assert attention.get_attention_state(artifact_id, db=db) == "raised"
+    _withdraw(db, plan_id, node_id, second)
+    assert attention.get_attention_state(artifact_id, db=db) == "cleared"
+
+
+def test_artifact_links_keep_ask_state_scoped_to_each_node(db):
+    from plans import artifact_links
+
+    plan_id, first_node, artifact_id, first = _asked(db)
+    _withdraw(db, plan_id, first_node, first)
+    second_node = service.add_node(
+        plan_id, kind="task", title="Replacement review", acceptance_criteria="Reviewed", db=db,
+    )
+    _ask(db, plan_id, second_node.id, artifact_id)
+
+    assert artifact_links.list_for_node(first_node, db=db)[0]["attention_state"] == "cleared"
+    assert artifact_links.list_for_node(second_node.id, db=db)[0]["attention_state"] == "raised"
+
+
 def _metadata(db, artifact_id: str) -> dict:
     return json.loads(db.execute(
         "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
@@ -470,7 +529,7 @@ def test_retiring_an_asked_artifact_ends_its_ask_as_retired(db):
     assert _in_pile(db, "proposal.md") == set()
 
 
-# Reviewer item 3c: ``ended`` is written by plans.ask_endings alone.
+# The durable ask ending value is written by plans.ask_endings alone.
 def test_ended_is_written_only_by_the_one_ask_ending_writer():
     backend = Path(__file__).resolve().parents[1]
     writers = []
@@ -512,6 +571,19 @@ def test_open_requests_are_defined_once():
         if join.search(line)
     ]
     assert [site.split(":")[0] for site in sites] == ["plans/user_ask.py"], sites
+    deferral_reads = [
+        f"{path.relative_to(backend).as_posix()}:{number}"
+        for path in sorted(backend.rglob("*.py"))
+        if not path.relative_to(backend).as_posix().startswith(("tests/", "venv/", ".venv/"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"\b(?:FROM|JOIN)\s+plan_ask_deferrals\b", line)
+    ]
+    assert {site.split(":")[0] for site in deferral_reads} == {"plans/user_ask.py"}, deferral_reads
+    assert "deferred_hold_id" not in "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in backend.rglob("*.py")
+        if not path.relative_to(backend).as_posix().startswith(("tests/", "venv/", ".venv/"))
+    )
 
 
 # The pile refetches on ``plans_changed``, so placing an ask,
@@ -557,6 +629,33 @@ def test_ask_place_withdraw_and_pile_answer_each_nudge_the_person(db, monkeypatc
     assert nudged_users(notifications.prepare_after_commit(scheduled[0], db=db)) == {
         "user": {plan.id},
     }
+
+
+def test_deferring_and_undefering_an_ask_nudge_without_revising_the_node(db, monkeypatch):
+    from plans import notifications, nudge_scheduling
+    from registry import attention
+
+    scheduled: list[tuple[str, ...]] = []
+    monkeypatch.setattr(nudge_scheduling, "_schedule_delivery", scheduled.append)
+    plan_id, node_id, artifact_id, hold_id = _asked(db)
+    revision = service._node_row(db, node_id)["revision"]
+    scheduled.clear()
+
+    attention.clear_attention(
+        artifact_id, outcome="defer",
+        condition={"type": "deadline", "value": "2026-10-01T16:00:00+00:00"},
+        hold_ids=[hold_id], db=db,
+    )
+    assert service._node_row(db, node_id)["revision"] == revision
+    assert len(scheduled) == 1
+    assert {row["plan_id"] for _, message in notifications.prepare_after_commit(scheduled.pop(), db=db)
+            for row in message["plans"]} == {plan_id}
+
+    attention.raise_attention(artifact_id, db=db)
+    assert service._node_row(db, node_id)["revision"] == revision
+    assert len(scheduled) == 1
+    assert {row["plan_id"] for _, message in notifications.prepare_after_commit(scheduled.pop(), db=db)
+            for row in message["plans"]} == {plan_id}
 
 
 # Two open asks on one document, left from before the one-open-ask rule, show

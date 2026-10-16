@@ -1,7 +1,6 @@
-"""Schema 119 -> 120: withdraw open asks on retired tasks."""
+"""Schema 119 -> 120: withdraw retired asks and move legacy deferrals to holds."""
 from __future__ import annotations
 
-import json
 import sqlite3
 
 _TABLES = (
@@ -11,14 +10,14 @@ _TABLES = (
 
 
 def migrate_119_to_120(conn: sqlite3.Connection) -> None:
-    """Finalize retired asks and bind uniquely deferred asks to their open hold."""
+    """Finalize retired asks and copy uniquely deferred legacy asks beside their hold."""
     present = {str(row[0]) for row in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     )}
     if not present.issuperset(_TABLES):
         return
     withdraw_retired_user_asks(conn)
-    stamp_deferred_ask_holds(conn)
+    copy_deferred_ask_holds(conn)
 
 
 def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
@@ -43,25 +42,30 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-def stamp_deferred_ask_holds(conn: sqlite3.Connection) -> int:
-    """Stamp only deferred artifacts with exactly one positively open ask."""
+def copy_deferred_ask_holds(conn: sqlite3.Connection) -> int:
+    """Copy only legacy deferrals with exactly one positively open ask."""
     from plans.public import open_asks_sql
 
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS plan_ask_deferrals (
+               hold_id TEXT PRIMARY KEY REFERENCES plan_node_holds(id),
+               deferred_at TEXT NOT NULL
+           )"""
+    )
     rows = conn.execute(
-        "SELECT id,metadata FROM artifact_identities WHERE json_extract(metadata, '$.attention_state')='deferred'"
+        "SELECT id,updated_at FROM artifact_identities "
+        "WHERE json_extract(metadata, '$.attention_state')='deferred'"
     ).fetchall()
-    stamped = 0
+    copied = 0
     for row in rows:
         holds = conn.execute(
             open_asks_sql("h.id") + " ORDER BY h.created_at, h.id", (str(row["id"]),),
         ).fetchall()
         if len(holds) != 1:
             continue
-        metadata = json.loads(row["metadata"] or "{}")
-        hold_id = str(holds[0]["id"])
-        if metadata.get("deferred_hold_id") == hold_id:
-            continue
-        metadata["deferred_hold_id"] = hold_id
-        conn.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (json.dumps(metadata, sort_keys=True), row["id"]))
-        stamped += 1
-    return stamped
+        conn.execute(
+            "INSERT OR IGNORE INTO plan_ask_deferrals (hold_id,deferred_at) VALUES (?,?)",
+            (str(holds[0]["id"]), str(row["updated_at"])),
+        )
+        copied += 1
+    return copied

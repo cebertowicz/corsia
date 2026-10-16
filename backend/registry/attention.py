@@ -67,22 +67,49 @@ def _attention_state(row: dict) -> str | None:
     return meta.get("attention_state")
 
 
+def record_attention(db, identity_row: dict, patch: dict[str, Any]) -> None:
+    """Apply attention state through the sole writer funnel.
+
+    Ask-linked artifacts keep lifecycle state beside their open holds; metadata
+    retains only audit fields and non-ask attention's existing lifecycle.
+    """
+    from plans import public as plans_public
+
+    artifact_id = str(identity_row["id"])
+    ask_state = plans_public.ask_attention_state(db, artifact_id)
+    patch = dict(patch)
+    state = patch.pop("attention_state", None)
+    if ask_state is not None:
+        if state == ATTENTION_DEFERRED:
+            plans_public.defer_asks(db, artifact_id)
+        elif state == ATTENTION_RAISED:
+            plans_public.undefer_asks(db, artifact_id)
+    elif state is not None:
+        patch["attention_state"] = state
+    if patch:
+        identity = _identity(identity_row)
+        models.update_metadata(
+            identity["integration"], identity["type"], identity["external_id"], patch, db=db,
+        )
+
+
 def raise_attention(artifact_id: str, *, db=None) -> str:
     """Mark an artifact's attention as raised, optionally inside a caller transaction."""
     with write_transaction(db, scope="raise_attention") as _db:
-        identity = _identity(_identity_row(artifact_id, _db))
-        models.update_metadata(
-            identity["integration"], identity["type"], identity["external_id"],
-            {"attention_state": ATTENTION_RAISED}, db=_db,
-        )
+        row = _identity_row(artifact_id, _db)
+        record_attention(_db, row, {"attention_state": ATTENTION_RAISED})
         return ATTENTION_RAISED
 
 
 def get_attention_state(artifact_id: str, *, db=None) -> str | None:
     """Read the current attention state. Reading NEVER clears (close-viewer ≠ clear)."""
+    from plans import public as plans_public
+
     _db = db or get_db()
     try:
-        return _attention_state(_identity_row(artifact_id, _db))
+        row = _identity_row(artifact_id, _db)
+        ask_state = plans_public.ask_attention_state(_db, str(row["id"]))
+        return ask_state if ask_state is not None else _attention_state(row)
     finally:
         if not db:
             _db.close()
@@ -101,9 +128,9 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
     _db = db or get_db()
     try:
         asks = plans_public.open_ask_artifacts(_db)
-        ask_holds: dict[str, set[str]] = {}
+        ask_holds: dict[str, list[str]] = {}
         for ask in asks:
-            ask_holds.setdefault(str(ask["artifact_id"]), set()).add(str(ask["hold_id"]))
+            ask_holds.setdefault(str(ask["artifact_id"]), []).append(str(ask["hold_id"]))
         metadata_rows = _db.execute(
             "SELECT * FROM artifact_identities i WHERE i.state='active'"
             " AND json_extract(i.metadata, '$.attention_state')=?"
@@ -130,15 +157,16 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
             metadata = json.loads(rowd["metadata"]) if rowd["metadata"] else {}
             holds = ask_holds.get(artifact_id)
             if holds:
-                if (metadata.get("attention_state") == ATTENTION_DEFERRED
-                        and metadata.get("deferred_hold_id") in holds):
+                state = plans_public.ask_attention_state(_db, artifact_id)
+                if state != ATTENTION_RAISED:
                     continue
-                metadata = {**metadata, "attention_state": ATTENTION_RAISED}
+                metadata = {**metadata, "attention_state": state}
             raised.append({"identity": identity,
                            "external_id": rowd["external_id"],
                            "title": rowd.get("title"),
                            "owner_thread": record.owner_thread,
                            "levels": sorted(levels),
+                           "hold_ids": sorted(holds) if holds else [],
                            "metadata": metadata})
         return raised
     finally:
@@ -149,7 +177,8 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
 def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
-    hold_ids: list[str] | None = None, db=None, drives: list[str] | None = None,
+    hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
+    drives: list[str] | None = None,
 ) -> AttentionResult:
     """Clear attention through one of the public user/system outcomes.
 
@@ -162,11 +191,12 @@ def clear_attention(
         raise AttentionError(f"unknown clearing outcome {outcome!r}")
     if (verdict is not None or note is not None) and outcome != "answer":
         raise AttentionError("a verdict or note goes only with the answer outcome")
-    if (note is not None or hold_ids is not None) and verdict is None:
-        raise AttentionError("a note or hold_ids need a verdict")
+    if note is not None and verdict is None:
+        raise AttentionError("a note needs a verdict")
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
-        verdict=verdict, note=note, hold_ids=hold_ids, db=db, drives=drives,
+        verdict=verdict, note=note, hold_ids=hold_ids, require_hold_ids=require_hold_ids,
+        db=db, drives=drives,
     )
 
 
@@ -180,7 +210,8 @@ def retire_attention(artifact_id: str, *, db=None) -> AttentionResult:
 def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
-    hold_ids: list[str] | None = None, db=None, drives: list[str] | None = None,
+    hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
+    drives: list[str] | None = None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -198,12 +229,14 @@ def _clear_attention(
         record = AR.register_or_resolve(identity, db=_db)
         levels = sorted({s.thread for s in record.subscribers})
 
+        from doceditor import review_bar
+
+        # Every person action on an ask proves it acts on exactly the holds it saw.
+        review_bar.assert_current_ask(
+            _db, str(row["id"]), hold_ids, require_hold_ids=require_hold_ids,
+        )
         answer = None
         if verdict is not None:
-            # Before the state flips: a stale ask refuses, and the round's feedback
-            # reaches its owner in this same write.
-            from doceditor import review_bar
-
             answer = review_bar.answer(_db, str(row["id"]), verdict, note, hold_ids)
         defer_condition = None
         if outcome == "defer":
@@ -217,11 +250,7 @@ def _clear_attention(
                                  "attention_reason": reason}
         if defer_condition is not None:
             patch["defer_condition"] = defer_condition  # S7 arms from this later
-            patch.update(plans_public.deferral_stamp(_db, str(row["id"])))
-        models.update_metadata(
-            identity["integration"], identity["type"], identity["external_id"],
-            patch, db=_db,
-        )
+        record_attention(_db, row, patch)
         _record_closeout(identity, outcome, _db)
         # Attention owns every way an ask stops being raised. Plans owns what
         # that lifecycle means for a linked task; its public hook is a no-op for

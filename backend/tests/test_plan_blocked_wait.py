@@ -338,7 +338,7 @@ def test_a_document_ask_holds_the_task_until_the_user_acts(db):
         "SELECT role FROM plan_node_artifact_links WHERE node_id=? AND artifact_id=?",
         (node.id, ask),
     ).fetchone()["role"] == "attention"
-    assert attention.get_attention_state(ask, db=db) is None  # The open hold is the ask's sole raised state.
+    assert attention.get_attention_state(ask, db=db) == "raised"  # The open hold is the sole state owner.
     assert admission.project(node.id, db=db)["condition"] == "blocked"
     shown = operator_projection.read_thread("owner", actor=USER, db=db)["plans"][0]["nodes"][0]
     assert shown["artifacts"][0]["attention_state"] == "raised"

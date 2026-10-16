@@ -148,6 +148,27 @@ def round_state(db, artifact_id: str) -> dict:
     }
 
 
+def assert_current_ask(
+    db, artifact_id: str, hold_ids: list[str] | None, *, require_hold_ids: bool = False,
+) -> None:
+    """Refuse any person action that does not name exactly the open ask holds."""
+    from plans.public import ask_attention_state, raised_asks
+
+    if ask_attention_state(db, artifact_id) is None:
+        return
+    asks = raised_asks(db, artifact_id)
+    current = {str(ask["hold_id"]) for ask in asks}
+    if not current:
+        raise AnswerRefused("ask_stale", STALE)
+    if hold_ids is None:
+        if require_hold_ids:
+            raise AnswerRefused("ask_stale", STALE)
+        return
+    supplied = set(hold_ids)
+    if supplied != current or len(hold_ids) != len(supplied):
+        raise AnswerRefused("ask_stale", STALE)
+
+
 def answer(
     db, artifact_id: str, verdict: str, note: str | None,
     hold_ids: list[str] | None = None,
@@ -168,8 +189,9 @@ def answer(
     note = (note or "").strip() or None
     if note and len(note) > NOTE_MAX:
         raise AnswerRefused("note_too_long", f"The note is over {NOTE_MAX} characters.")
+    assert_current_ask(db, artifact_id, hold_ids)
     asks = raised_asks(db, artifact_id)
-    if not asks or (hold_ids is not None and str(asks[0]["hold_id"]) not in hold_ids):
+    if not asks:
         raise AnswerRefused("ask_stale", STALE)
     since = asks[0]["raised_at"]
     counts = round_counts(db, artifact_id, since)

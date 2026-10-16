@@ -116,6 +116,7 @@ def _summarize(item: dict) -> dict:
         "defer_condition": meta.get("defer_condition"),
         "owner_thread": item.get("owner_thread"),
         "levels": item.get("levels", []),
+        "hold_ids": item.get("hold_ids", []),
     }
 
 
@@ -264,7 +265,7 @@ async def post_clear(artifact_id: str, body: ClearBody):
         result = await run_in_db(lambda: attention.clear_attention(
             artifact_id, outcome=body.outcome, condition=body.condition,
             reason=body.reason, verdict=body.verdict, note=body.note,
-            hold_ids=body.hold_ids, drives=woken,
+            hold_ids=body.hold_ids, require_hold_ids=True, drives=woken,
         ))
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
@@ -288,6 +289,7 @@ class DisposeBody(BaseModel):
     condition: dict | None = None
     replacement_id: str | None = None
     actor_thread: str | None = None
+    hold_ids: list[str] | None = None
 
 
 @router.post("/{artifact_id}/dispose")
@@ -308,9 +310,14 @@ async def post_dispose(artifact_id: str, body: DisposeBody):
             authority=body.authority, override_blocking=body.override_blocking,
             new_owner=body.new_owner, condition=body.condition,
             replacement_id=body.replacement_id, actor_thread=body.actor_thread,
-            drives=woken))
+            hold_ids=body.hold_ids, require_hold_ids=True, drives=woken))
     except D.BlockingProfileError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except review_bar.AnswerRefused as exc:
+        status = 409 if exc.code == "ask_stale" else 422
+        raise HTTPException(
+            status_code=status, detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except D.DispositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await public.drive_threads(woken)

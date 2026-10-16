@@ -75,8 +75,9 @@ def _resolve(artifact_id: str, db) -> dict:
 
 
 def _record_state(identity: dict, patch: dict, db) -> None:
-    models.update_metadata(identity["integration"], identity["type"],
-                           identity["external_id"], patch, db=db)
+    from registry import attention
+
+    attention.record_attention(db, identity, patch)
 
 
 def _clear_ask(identity: dict, child_owner: str | None, outcome: str,
@@ -163,7 +164,8 @@ def dispose(
     answer: str | None = None, authority: str | None = None,
     override_blocking: bool = False, new_owner: str | None = None,
     condition: dict | None = None, replacement_id: str | None = None,
-    review_result=None, actor_thread: str | None = None, db=None,
+    hold_ids: list[str] | None = None, require_hold_ids: bool = False, review_result=None,
+    actor_thread: str | None = None, db=None,
     drives: list[str] | None = None,
 ) -> DispositionResult:
     """Record a parent disposition and route its outcome durably (never silent).
@@ -174,6 +176,13 @@ def dispose(
     if outcome not in OUTCOMES:
         raise DispositionError(f"unknown disposition outcome {outcome!r}")
     if outcome == REROUTE_OWNER:
+        from doceditor import review_bar
+
+        with write_transaction(db, scope="parent_reroute_ask_guard") as connection:
+            identity = _resolve(artifact_id, connection)
+            review_bar.assert_current_ask(
+                connection, str(identity["id"]), hold_ids, require_hold_ids=require_hold_ids,
+            )
         return _do_reroute(artifact_id, new_owner, authority, reason, actor_thread, db)
     from plans import public as plans_public
 
@@ -186,7 +195,11 @@ def dispose(
             {"integration": identity["integration"], "type": identity["type"],
              "external_id": identity["external_id"]}, db=_db)
         child_owner = record.owner_thread
+        from doceditor import review_bar
 
+        review_bar.assert_current_ask(
+            _db, str(identity["id"]), hold_ids, require_hold_ids=require_hold_ids,
+        )
         if outcome == APPROVE_TO_USER:
             return _do_approve(identity, artifact_id, review_result,
                                override_blocking, authority, reason, actor_thread, _db)
@@ -204,22 +217,10 @@ def _do_approve(identity, artifact_id, review_result, override_blocking,
                 authority, reason, actor_thread, db) -> DispositionResult:
     from plans import public as plans_public
 
-    open_ask = bool(plans_public.open_ask_artifacts(db, str(identity["id"])))
-    if not open_ask and db.execute(
-        "SELECT 1 FROM artifact_identities i"
-        f" WHERE i.id=? AND {plans_public.ask_linked_sql('i')}", (identity["id"],),
-    ).fetchone() is not None:
-        # Its open ask alone shows an asked document to the person; with none
-        # left, its request has ended and an approval would reach nobody.
-        from doceditor import review_bar
-
-        raise DispositionError(review_bar.STALE)
     audit = _enforce_blocking(artifact_id, identity, review_result,
                               override_blocking, authority, reason, actor_thread, db)
-    patch = {"disposition_outcome": APPROVE_TO_USER, "disposition_audit": audit}
-    # An open ask's hold owns its state; metadata raises only non-ask attention.
-    if not open_ask:
-        patch["attention_state"] = "raised"
+    patch = {"attention_state": "raised", "disposition_outcome": APPROVE_TO_USER,
+             "disposition_audit": audit}
     _record_state(identity, patch, db)
     emit_product_event("parent_disposition", APPROVE_TO_USER,
                        properties={"external_id": identity["external_id"]})
@@ -295,7 +296,6 @@ def _do_defer(identity, artifact_id, child_owner, condition, reason,
              "disposition_outcome": DEFER_UNTIL,
              "defer_condition": condition,
              "disposition_reason": reason}
-    patch.update(plans_public.deferral_stamp(db, str(identity["id"])))
     _record_state(identity, patch, db)
     return DispositionResult(artifact_id, DEFER_UNTIL, user_visible=False,
                              attention_state="deferred", routed_to=child_owner,

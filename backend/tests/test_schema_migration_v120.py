@@ -147,7 +147,7 @@ def test_is_idempotent_and_never_writes_attention_metadata():
         db.close()
 
 
-def test_stamps_only_a_uniquely_open_deferred_ask():
+def test_copies_only_a_uniquely_open_deferred_ask_to_its_hold():
     db = _db()
     try:
         artifact_id = _artifact(db, "deferred.md")
@@ -159,15 +159,14 @@ def test_stamps_only_a_uniquely_open_deferred_ask():
         db.commit()
 
         migrate_119_to_120(db)
-        metadata = json.loads(db.execute(
-            "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
-        ).fetchone()["metadata"])
-        assert metadata["deferred_hold_id"] == hold_id
+        assert db.execute(
+            "SELECT hold_id FROM plan_ask_deferrals WHERE hold_id=?", (hold_id,),
+        ).fetchone()["hold_id"] == hold_id
 
         migrate_119_to_120(db)
-        assert json.loads(db.execute(
-            "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
-        ).fetchone()["metadata"])["deferred_hold_id"] == hold_id
+        assert db.execute(
+            "SELECT count(*) FROM plan_ask_deferrals WHERE hold_id=?", (hold_id,),
+        ).fetchone()[0] == 1
     finally:
         db.close()
 
@@ -201,5 +200,6 @@ def test_leaves_a_deferred_artifact_with_multiple_open_asks_untouched():
         assert db.execute(
             "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
         ).fetchone()["metadata"] == before
+        assert db.execute("SELECT count(*) FROM plan_ask_deferrals").fetchone()[0] == 0
     finally:
         db.close()

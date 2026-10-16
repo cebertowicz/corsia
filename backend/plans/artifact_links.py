@@ -3,25 +3,16 @@
 from __future__ import annotations
 
 from plans import service
-from plans.user_ask import askable_sql, open_asks_sql
+from plans.user_ask import ask_attention_state_sql, askable_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
 
-# An ask link's state belongs to its open review request (``open_asks_sql``),
-# read per link through the active-hold index. Registry metadata retains only
-# non-ask attention and a deferral stamp for one concrete open request. The
-# definition is a derived table so its aliases never shadow this link ``l``.
-_DEFERRED_STAMP = (
-    "json_extract(i.metadata, '$.attention_state')='deferred'"
-    " AND json_extract(i.metadata, '$.deferred_hold_id')=ask.hold_id"
-)
+# An ask link's state belongs to its open review request. The one state SQL
+# definition is node-scoped here so a replaced ask on another node cannot leak
+# into this link's presentation.
 _ATTENTION_STATE_SQL = f"""CASE
-    WHEN l.role='attention' AND {askable_sql('i')} THEN COALESCE((
-        SELECT CASE WHEN {_DEFERRED_STAMP} THEN 'deferred' ELSE 'raised' END AS ask_state
-          FROM ({open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id", by="all")}) ask
-         WHERE ask.node_id=l.node_id AND ask.owner_id=l.artifact_id
-         ORDER BY ask_state='deferred' DESC LIMIT 1
-    ), 'cleared')
+    WHEN l.role='attention' AND {askable_sql('i')}
+        THEN {ask_attention_state_sql('l.artifact_id', node_id_sql='l.node_id')}
     ELSE json_extract(i.metadata, '$.attention_state')
 END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,
