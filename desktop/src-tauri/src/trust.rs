@@ -74,7 +74,12 @@ pub fn spki_sha256(certificate: &CertificateDer<'_>) -> Result<[u8; 32], Error> 
     Ok(digest.into())
 }
 
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub fn pinned_client_config(pin: [u8; 32]) -> Result<ClientConfig, Error> {
+    install_crypto_provider();
     Ok(ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(PinnedVerifier::new(pin)?))
@@ -147,6 +152,7 @@ impl ServerCertVerifier for CaptureVerifier {
 }
 
 pub fn capture_client_config(verifier: CaptureVerifier) -> ClientConfig {
+    install_crypto_provider();
     ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
@@ -156,6 +162,7 @@ pub fn capture_client_config(verifier: CaptureVerifier) -> ClientConfig {
 pub fn system_client_config() -> Result<ClientConfig, Error> {
     use rustls_platform_verifier::ConfigVerifierExt;
 
+    install_crypto_provider();
     ClientConfig::with_platform_verifier()
 }
 
