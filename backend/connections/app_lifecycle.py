@@ -6,7 +6,8 @@ import uuid
 
 from connections.app_lifecycle_support import (
     _assert_name_available, _assert_selected_projects_exist, _config_json,
-    _ensure_app_key_entries, _expire_pending_proposal, _write_audit, _write_projects,
+    _ensure_app_key_entries, _expire_pending_proposal, _reaches_nothing, _remove_new_app_keys,
+    _write_audit, _write_projects,
 )
 from connections.app_notices import append_app_notice
 from connections.app_reach import (
@@ -229,25 +230,51 @@ def replace_config(
 
 
 def approve_proposal(
-    app_id: str, *, audit_actor: tuple[str, str] | None = None, db: sqlite3.Connection | None = None,
+    app_id: str,
+    *,
+    reach: object | None = None,
+    expected_revision: int | None = None,
+    audit_actor: tuple[str, str] | None = None,
+    db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Promote a pending config, unless its seven-day review window has elapsed."""
+    """Promote a pending config, unless its seven-day review window has elapsed.
+
+    A person's approval may carry the place the app works. The reach, its checks and the
+    approval land in one revision-checked transaction, and an app that reaches nothing is
+    refused before anything changes.
+    """
+    chosen = normalize_reach(reach) if reach is not None else None
     expired = False
     expired_agent_name: str | None = None
     with write_transaction(db, scope="connected_app_proposal_approve") as conn:
         app = conn.execute(
-            "SELECT revision,pending_config_json,state_since,pending_previous_state,pending_actor_thread_id "
+            "SELECT name,revision,pending_config_json,state_since,pending_previous_state,pending_actor_thread_id "
             "FROM connected_apps WHERE id=? AND state=?",
             (app_id, PENDING_STATE),
         ).fetchone()
         if app is None:
             raise AppPendingApprovalError("no connected app change is awaiting approval")
+        if expected_revision is not None and app["revision"] != expected_revision:
+            raise AppRevisionConflictError("connected app changed")
         if _proposal_expired(PENDING_STATE, app["state_since"]):
             expired_agent_name = _requesting_agent_name(app["pending_actor_thread_id"], db=conn)
             _expire_pending_proposal(conn, app_id, app)
             expired = True
         else:
-            current_reach = _reach(app_id, db=conn)
+            previous_reach = _reach(app_id, db=conn)
+            current_reach = chosen or previous_reach
+            if chosen is not None:
+                _assert_selected_projects_exist(chosen, db=conn)
+            if _reaches_nothing(current_reach, db=conn):
+                raise AppReachError("Choose where it works first, then approve it.")
+            _assert_name_available(app["name"], current_reach, app_id=app_id, db=conn)
+            if chosen is not None:
+                conn.execute("DELETE FROM connected_app_reach WHERE app_id=?", (app_id,))
+                _write_projects(app_id, chosen, db=conn)
+                conn.execute(
+                    "UPDATE connected_apps SET reach_mode=?,outside_projects=? WHERE id=?",
+                    (chosen.mode, int(chosen.outside_projects), app_id),
+                )
             now = utc_now_iso()
             next_revision = app["revision"] + 1
             config_json = app["pending_config_json"]
@@ -259,7 +286,7 @@ def approve_proposal(
             )
             _write_audit(
                 conn, actor=audit_actor, app_id=app_id, action="approve",
-                reach_from=current_reach, reach_to=current_reach,
+                reach_from=previous_reach, reach_to=current_reach,
             )
             approved = conn.execute(
                 "SELECT name,config_json FROM connected_apps WHERE id=?", (app_id,)
@@ -296,6 +323,7 @@ def decline_proposal(
         else:
             current_reach = _reach(app_id, db=conn)
             if app["pending_config_json"] is None:
+                _remove_new_app_keys(conn, app_id)
                 _write_audit(
                     conn, actor=audit_actor, app_id=app_id, action="decline",
                     reach_from=current_reach, reach_to=None,

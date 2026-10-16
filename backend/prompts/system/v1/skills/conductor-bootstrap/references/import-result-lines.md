@@ -2,6 +2,7 @@
 
 After `POST /api/mcp/import`, post one line per returned row, in this order of checks:
 
+- `"state": "awaiting_approval"` with a `message` (an app set up for a folder in no project): that message, as it is.
 - `"state": "awaiting_approval"`: `[name]: Waiting for your approval`
 - a row with a `message`: that message, as it is.
 - `already_exists`: `[name]: you already have [name] in CORSIA with different settings, so I kept yours.`

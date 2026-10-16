@@ -33,7 +33,7 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
 		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), { method: 'POST' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_revision: 1 }) })));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
 	});
 
@@ -53,6 +53,41 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Q4 launch, Home renovation, 1 more'));
 		expect(host.textContent).not.toContain('Select individually');
+	});
+
+	it('shows an empty-reach row as waiting for a place, with no Approve until one is saved', async () => {
+		const folderApp = { ...awaiting, id: 'postgres', name: 'Postgres', reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [folderApp] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+		expect(host.querySelector('.app-copy span')?.textContent).toBe('Waiting for your approval');
+		const labels = [...host.querySelectorAll('.actions button')].map((button) => button.textContent?.trim());
+		expect(labels).toEqual(['Choose where it works…', 'Decline']);
+	});
+
+	it('approves an empty-reach row from the sheet with the chosen place and the row revision', async () => {
+		const folderApp = { ...awaiting, id: 'postgres', name: 'Postgres', revision: 3, reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		const catalog = [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }];
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/approve')
+			? { ...folderApp, state: 'working', revision: 4, reach: { mode: 'selected', project_ids: ['q4'], outside_projects: false } }
+			: String(input).includes('/api/projects') ? { projects: catalog } : { servers: [folderApp] } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Choose where it works…'));
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Choose where it works…')) as HTMLButtonElement).click();
+		flushSync();
+		const approve = () => [...document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve') as HTMLButtonElement;
+		expect(approve().disabled).toBe(true);
+		([...document.body.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Q4 launch')) as HTMLInputElement).click();
+		flushSync();
+		expect(document.body.textContent).toContain('Agents in Q4 launch will be able to use Postgres.');
+		expect(approve().disabled).toBe(false);
+		approve().click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/postgres/approve'), expect.objectContaining({
+			method: 'POST',
+			body: JSON.stringify({ expected_revision: 3, reach: { mode: 'selected', project_ids: ['q4'], outside_projects: false } }),
+		})));
+		await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
 	});
 
 	it('renders the empty-state copy when there are no apps', async () => {

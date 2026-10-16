@@ -41,7 +41,10 @@ import cli
         ),
         (["mcp", "remove", "server-1"], "DELETE", "/api/mcp/servers/server-1", None, None),
         (["mcp", "reconnect", "server-1"], "POST", "/api/mcp/servers/server-1/reconnect", None, None),
-        (["mcp", "approve", "server-1"], "POST", "/api/mcp/servers/server-1/approve", None, None),
+        (
+            ["mcp", "approve", "server-1", "--expected-revision", "2"],
+            "POST", "/api/mcp/servers/server-1/approve", {"expected_revision": 2}, None,
+        ),
     ],
 )
 def test_connected_app_commands_use_the_server_routes(

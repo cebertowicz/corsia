@@ -122,8 +122,8 @@ def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
         "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
     )
     assert mcp_import.IMPORT_UNSUPPORTED == "CORSIA can't connect to that kind of app yet."
-    assert mcp_import.IMPORT_FOLDER_OUTSIDE_PROJECT == (
-        "To use it in a project, connect it from that project's settings."
+    assert mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE == (
+        "Not working yet. Choose where it works, then approve it."
     )
     assert mcp_import.IMPORT_KEY_STAYS_IN_CODEX == (
         "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
@@ -131,7 +131,7 @@ def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
     assert all("bearer_file" not in line for line in (
         mcp_import.IMPORT_NONE_FOUND,
         mcp_import.IMPORT_UNSUPPORTED,
-        mcp_import.IMPORT_FOLDER_OUTSIDE_PROJECT,
+        mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE,
         mcp_import.IMPORT_KEY_STAYS_IN_CODEX,
         mcp_import.IMPORT_NEEDS_SIGN_IN,
     ))

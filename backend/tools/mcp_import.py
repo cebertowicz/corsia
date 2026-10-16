@@ -29,7 +29,7 @@ log = logging.getLogger("corsia.key_audit")
 # The import conversation is assembled from these canonical person-facing lines.
 IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
-IMPORT_FOLDER_OUTSIDE_PROJECT = "To use it in a project, connect it from that project's settings."
+IMPORT_FOLDER_WAITING_FOR_PLACE = "Not working yet. Choose where it works, then approve it."
 IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
 IMPORT_NEEDS_SIGN_IN = "I can't bring over **{App}** ({client}) yet: it needs you to sign in, and CORSIA can't do that yet."
 
@@ -342,8 +342,8 @@ def import_selected(
             continue
         reach, outside_folder = project_reach(folder, db=db)
         if reach is None:
-            rows.append({"name": name, "status": "outside_project", "folder": outside_folder or ""})
-            continue
+            # The folder is display-only: it reaches nothing until the person chooses a place (G-P1).
+            reach = {"mode": "selected", "project_ids": [], "outside_projects": False}
         try:
             copied = _copyable_config(source, source_config)
             app_id = str(uuid.uuid4())
@@ -358,7 +358,11 @@ def import_selected(
                 for entry_name, value in lifted.items():
                     key_store.set_managed_value(entry_name, value, db=db)
                     audit_import_key_write(actor, _SOURCE_LABELS[source], name)
-            rows.append({"id": str(result["id"]), "name": name, "state": "awaiting_approval"})
+            row = {"id": str(result["id"]), "name": name, "state": "awaiting_approval"}
+            if outside_folder is not None:
+                row["folder"] = outside_folder
+                row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE
+            rows.append(row)
         except AppNameOverlapError:
             rows.append({"name": name, "status": "already_exists"})
         except (MCPConfigError, key_store.KeyStoreError):

@@ -16,6 +16,7 @@
 	let actionId = $state<string | null>(null);
 	let actionError = $state('');
 	let whereApp = $state<ConnectedApp | null>(null);
+	let whereApprove = $state(false);
 	let openId = $state<string | null>(null);
 	let signInHere = $state(false);
 	let signedOut = $state<Set<string>>(new Set());
@@ -41,6 +42,10 @@
 
 	function failureLine(failure: string | null | undefined): string {
 		return ({ cannot_start: "app didn't start", timed_out: 'no response', protocol_error: 'not compatible', name_collision: 'clashes with another app' }[failure ?? ''] ?? 'unknown reason');
+	}
+
+	function needsPlace(app: ConnectedApp): boolean {
+		return app.state === 'awaiting_approval' && app.reach.mode === 'selected' && app.reach.project_ids.length === 0 && !app.reach.outside_projects;
 	}
 
 	function placeLine(app: ConnectedApp): string {
@@ -70,7 +75,7 @@
 		actionId = app.id;
 		actionError = '';
 		try {
-			if (action === 'approve') replace(await approveConnectedApp(app.id));
+			if (action === 'approve') replace(await approveConnectedApp(app));
 			else if (action === 'decline') replace(await declineConnectedApp(app.id));
 			else if (action === 'reconnect') replace(await reconnectConnectedApp(app.id));
 			else { await removeConnectedApp(app.id); apps = apps.filter((row) => row.id !== app.id); }
@@ -96,7 +101,7 @@
 			{#each apps as app (app.id)}
 				<article class:open={isOpen(app)} class="app-row">
 					<button class="summary press-tint" aria-expanded={isOpen(app)} onclick={() => openId = openId === app.id ? null : app.id}>
-						<span class="app-copy"><strong title={app.name}>{app.name}</strong><span>{stateLine(app)} · {placeLine(app)}</span></span><span aria-hidden="true">›</span>
+						<span class="app-copy"><strong title={app.name}>{app.name}</strong><span>{needsPlace(app) ? stateLine(app) : `${stateLine(app)} · ${placeLine(app)}`}</span></span><span aria-hidden="true">›</span>
 					</button>
 					{#if isOpen(app)}
 						<div class="details">
@@ -104,11 +109,14 @@
 							<AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
 								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} />
 							<div class="actions">
-								{#if app.state === 'awaiting_approval'}
+								{#if needsPlace(app)}
+									<Button variant="primary" onclick={() => { whereApprove = true; whereApp = app; }}>Choose where it works…</Button>
+									<Button loading={actionId === app.id} onclick={() => run(app, 'decline')}>Decline</Button>
+								{:else if app.state === 'awaiting_approval'}
 									<Button variant="primary" loading={actionId === app.id} onclick={() => run(app, 'approve')}>Approve</Button>
 									<Button loading={actionId === app.id} onclick={() => run(app, 'decline')}>Decline</Button>
 								{:else}
-									<Button onclick={() => whereApp = app}>Where it works…</Button>
+									<Button onclick={() => { whereApprove = false; whereApp = app; }}>Where it works…</Button>
 									<Button loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>
 									{#if app.sign_in?.signed_in && confirmingOut !== app.id}<Button onclick={() => confirmingOut = app.id}>Sign out</Button>{/if}
 									<Button variant="danger" loading={actionId === app.id} onclick={() => run(app, 'remove')}>Remove</Button>
@@ -122,7 +130,7 @@
 	{/if}
 </section>
 
-{#if whereApp}<WhereItWorks app={whereApp} onClose={() => whereApp = null} onSaved={(app) => { replace(app); whereApp = null; }} />{/if}
+{#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { replace(app); whereApp = null; }} />{/if}
 
 <style>
 	.connected-apps { max-width: 760px; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }

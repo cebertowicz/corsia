@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { saveConnectedAppReach, type ConnectedApp } from '$lib/api/connectedApps';
+	import { approveConnectedApp, saveConnectedAppReach, type ConnectedApp } from '$lib/api/connectedApps';
 
-	let { app, onClose, onSaved }: { app: ConnectedApp; onClose: () => void; onSaved: (app: ConnectedApp) => void } = $props();
+	let { app, approve = false, onClose, onSaved }: { app: ConnectedApp; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedApp) => void } = $props();
 	let mode = $state<'all' | 'selected'>(app.reach.mode);
 	let selected = $state(new Set(app.reach.project_ids));
 	let outsideProjects = $state(app.reach.outside_projects);
@@ -28,9 +28,10 @@
 		}
 		const from = originalNames.join(', ');
 		const to = selectedNames.join(', ');
+		if (originalNames.length === 0) return `Agents in ${to} will be able to use ${app.name}.`;
 		return `${app.name} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;
 	});
-	const disabledLine = $derived(`Select at least one project, or remove ${app.name}.`);
+	const disabledLine = $derived(approve ? 'Select at least one project.' : `Select at least one project, or remove ${app.name}.`);
 
 	function selectAllProjects(): void {
 		mode = 'all';
@@ -55,7 +56,7 @@
 			const reach = mode === 'all'
 				? { mode: 'all' as const, project_ids: [], outside_projects: false }
 				: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects };
-			onSaved(await saveConnectedAppReach(app, reach));
+			onSaved(await (approve ? approveConnectedApp(app, reach) : saveConnectedAppReach(app, reach)));
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Could not update this app. Try again.';
 		} finally {
@@ -90,7 +91,7 @@
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 	</div>
 	{#snippet foot()}
-		<div class="actions"><Button onclick={onClose}>Cancel</Button><Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>Save</Button></div>
+		<div class="actions"><Button onclick={onClose}>Cancel</Button><Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>{approve ? 'Approve' : 'Save'}</Button></div>
 	{/snippet}
 </Modal>
 

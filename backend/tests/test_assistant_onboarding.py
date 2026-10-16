@@ -89,6 +89,7 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
         assert f"`{status}`" in result_lines or f'"{status}"' in result_lines
     assert "`Approve them in [Settings › System › Connected apps](/settings/system#connected-apps).`" in result_lines
     assert "Every CORSIA agent can use what you bring over" not in first_run
+    assert "with a `message` (an app set up for a folder in no project): that message, as it is." in result_lines
     assert "**The Assistant:**" in first_run
     assert "never offer the Assistant" in first_run
     assert "Set up Google tools" in first_run
