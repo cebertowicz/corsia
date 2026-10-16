@@ -163,6 +163,21 @@ def test_first_run_stays_within_its_body_size():
     assert len(FIRST_RUN.read_bytes()) <= 17600  # +the router to first-run-app.md
 
 
+LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"
+
+
+def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits_on_it():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+    running = offer.split("## Setup already running", 1)[1]
+
+    assert offer.index("`state` is `running` or `downloading`") < offer.index("2. Ask once")
+    assert "make no offer" in offer
+    assert "never holds up a setup task" in running
+    assert "at the end of each later setup task" in running
+    assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
+    assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
+
+
 FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
 HANDOFF = "That's everything. So, what's taking up your time this week?"
 
