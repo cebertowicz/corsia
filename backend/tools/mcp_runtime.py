@@ -183,6 +183,10 @@ async def _close() -> None:
     """Close every connected-app session and reset the registry under the lock."""
     global _registry
     app_stacks = tuple(_app_stacks.values())
+    if state._agent is not None:
+        for name in _registry.tool_names:
+            if state._agent.tools.get(name) is _registry.get(name):
+                state._agent.tools.unregister(name)
     _app_stacks.clear()
     _app_tools.clear()
     _app_servers.clear()
