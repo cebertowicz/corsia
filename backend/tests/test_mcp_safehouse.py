@@ -282,8 +282,8 @@ async def test_local_mcp_safehouse_real_launches(monkeypatch, tmp_path, name, co
     node_app.write_text(_NODE_SERVER, encoding="utf-8")
     node_app.chmod(node_app.stat().st_mode | stat.S_IXUSR)
     if name == "npx":
-        from tools.mcp import _mcp_cache_dir
-        cache = _mcp_cache_dir(name, workspace, state) / "cwd"
+        from tools.mcp_local_transport import _mcp_app_id, _mcp_cache_dir
+        cache = _mcp_cache_dir(_mcp_app_id(name), workspace, state) / "cwd"
         package = cache / "node_modules" / "mcp-floor-npx"
         binary = package / "bin" / "server.js"
         binary.parent.mkdir(parents=True)
