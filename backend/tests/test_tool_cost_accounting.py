@@ -13,7 +13,7 @@ from typing import Any
 from core.loaded_tool_usage import loaded_tool_tokens
 from core.token_estimation import _estimate_messages_tokens, _text_tokens
 from core.tool_definition_sources import tool_definition_entries
-from tests.test_tool_surface_disclosure import _ConfiguredTool, _registry
+from tests.test_tool_surface_disclosure import _ConfiguredTool, _registry, reachable_mcp_tools  # noqa: F401 - shared fixture
 
 SERVERS = {"mcp_github_search": "github", "mcp_github_pr": "github", "mcp_linear_issue": "linear"}
 
@@ -58,7 +58,7 @@ def _history() -> list[dict[str, Any]]:
     ]
 
 
-def test_index_rows_and_corsia_remainder_equal_the_old_tool_definitions_total(tmp_path):
+def test_index_rows_and_corsia_remainder_equal_the_old_tool_definitions_total(tmp_path, reachable_mcp_tools):
     from core.native_context_prefix import _canonical_tool_definitions
     from tools.catalog import advertised_tool_definitions
 
