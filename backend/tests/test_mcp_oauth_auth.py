@@ -144,6 +144,16 @@ async def test_sign_out_revokes_then_deletes(env):  # C-R6
     assert env.audit()[-1] == "sign_out_revoked"
 
 
+async def test_sign_out_revokes_every_persons_grant_it_deletes(env):  # C-R6
+    grant = await signed_in(env)
+    other_refresh = f"{grant.refresh_token}-other"
+    store.save_new(store.Grant(**{**grant.__dict__, "user_id": "someone-else", "refresh_token": other_refresh}))
+    result = await signout.sign_out(env.app_id, user_id=env.user_id)
+    assert result == {"had_sign_in": True, "provider_told": True, "provider_url": None}
+    assert sorted(env.fake.revoked) == sorted([grant.refresh_token, other_refresh])
+    assert store.load_all(env.app_id) == []
+
+
 @pytest.mark.parametrize("mode", ["fail", "hang"])
 async def test_a_revoke_failure_or_timeout_still_deletes(env, mode):  # C-R6, C-R9
     await signed_in(env)

@@ -35,16 +35,18 @@ async def _revoke(grant: store.Grant) -> bool:
 async def sign_out(app_id: str, *, user_id: str) -> dict[str, object]:
     """Revoke, delete and audit. Returns whether the provider was told, and where to remove CORSIA if not."""
     await flow.cancel(app_id, user_id=user_id)
-    grant = await run_in_db(store.load, app_id)
-    revoked = await _revoke(grant) if grant is not None else False
+    # Every grant is revoked, not just one: the app's sign-ins are all deleted below.
+    grants = await run_in_db(store.load_all, app_id)
+    untold = [grant for grant in grants if not await _revoke(grant)]
     await run_in_db(store.delete_all, app_id)
-    if grant is not None and grant.refresh_count:
-        await _audit(app_id, f"refresh_coalesced:count={grant.refresh_count}", user_id)
-    await _audit(app_id, "sign_out_revoked" if revoked else "sign_out_local_only", user_id)
+    for grant in grants:
+        if grant.refresh_count:
+            await _audit(app_id, f"refresh_coalesced:count={grant.refresh_count}", user_id)
+    await _audit(app_id, "sign_out_local_only" if untold or not grants else "sign_out_revoked", user_id)
     return {
-        "had_sign_in": grant is not None,
-        "provider_told": revoked or grant is None,
-        "provider_url": _origin_url(grant.issuer) if grant is not None and not revoked else None,
+        "had_sign_in": bool(grants),
+        "provider_told": not untold,
+        "provider_url": _origin_url(untold[0].issuer) if untold else None,
     }
 
 

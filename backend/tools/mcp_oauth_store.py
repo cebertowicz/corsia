@@ -144,6 +144,16 @@ def load(app_id: str, user_id: str | None = None, *, db: sqlite3.Connection | No
             conn.close()
 
 
+def load_all(app_id: str, *, db: sqlite3.Connection | None = None) -> list[Grant]:
+    """Every person's sign-in for ``app_id``; for revoking them all when the app goes."""
+    conn = db if db is not None else key_store._db(None)
+    try:
+        return _entries_for(app_id, conn)
+    finally:
+        if db is None:
+            conn.close()
+
+
 def delete_all(app_id: str, *, db: sqlite3.Connection | None = None) -> int:
     """Delete every sign-in entry of ``app_id``, whatever else failed. Returns how many."""
     conn = db if db is not None else key_store._db(None)
