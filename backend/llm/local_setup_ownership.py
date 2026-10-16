@@ -83,7 +83,6 @@ def _is_broken_leftover(path: str) -> bool:
     return broken
 
 
-
 def existing_omlx_requires_consent() -> bool:
     """Whether setup must ask before inspecting a pre-existing oMLX.
 
