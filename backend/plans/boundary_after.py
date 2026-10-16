@@ -120,7 +120,7 @@ def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, com
             plan = service._plan_row(common["db"], plan_id)
             ask = user_ask.require(common["db"], plan, params["node_id"], params, actor)
         if ask is not None:
-            from plans import ask_withdrawal, errors
+            from plans import ask_attention, errors
 
             # The caller's revision is checked before the replaced ask is
             # withdrawn, which advances it.
@@ -128,7 +128,7 @@ def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, com
                 service._live_node_row(common["db"], params["node_id"]),
                 expected["expected_revision"],
             )
-            if ask_withdrawal.withdraw_node_asks(
+            if ask_attention.withdraw_node_asks(
                 common["db"], params["node_id"], actor_id=common["actor_id"],
                 provenance=common["provenance"], keep_artifact_id=ask,
             ):

@@ -169,14 +169,19 @@ def _already_asked(open_ask) -> str:
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
-    """Link the ask to its task and put it in the user's attention pile."""
-    from plans import artifact_links
-    from registry import attention
+    """Link the ask to its task and put it in the user's attention pile.
+
+    The pile follows the artifact's live causes (``ask_attention``), so an ask
+    the user deferred stays deferred when its task blocks on it again.
+    """
+    from plans import artifact_links, ask_attention
 
     artifact_links.link(
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
-    attention.raise_attention(artifact_id, db=db)
+    ask_attention.sync_ask_attention(
+        db, artifact_id, outcome=ask_attention.ending_outcome(actor_id),
+    )
 
 
 def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:

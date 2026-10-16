@@ -231,23 +231,28 @@ def test_a_withdrawn_round_reads_withdrawn_not_answered(db):
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == "withdrawn"
 
 
+def _restate(db, plan_id, node_id, artifact_id) -> str:
+    """Re-block on the same document in new words; returns the hold that replaced the open one."""
+    mutate(
+        plan_id, "block_node", {
+            "node_id": node_id, "reason_key": "needs_review", "reason": "read the revision",
+            "owner_kind": "user", "ask_artifact_id": artifact_id,
+            "expected_revision": service._node_row(db, node_id)["revision"],
+        }, actor=PlanActor("owner", "user", "p"), provenance="test.restate",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+    return db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node_id,),
+    ).fetchone()["id"]
+
+
 def test_a_restated_round_follows_its_successor_until_it_withdraws(db):
     from plans import holds
 
     plan_id, node_id = _node(db)
     ask = document_ask(db, "owner")
     first = _ask(db, plan_id, node_id, ask)
-    mutate(
-        plan_id, "block_node", {
-            "node_id": node_id, "reason_key": "needs_review", "reason": "read the revision",
-            "owner_kind": "user", "ask_artifact_id": ask,
-            "expected_revision": service._node_row(db, node_id)["revision"],
-        }, actor=PlanActor("owner", "user", "p"), provenance="test.restate",
-        mutation_id=uuid.uuid4().hex, db=db,
-    )
-    second = db.execute(
-        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node_id,),
-    ).fetchone()["id"]
+    second = _restate(db, plan_id, node_id, ask)
 
     assert ask_cards(db, {first: ask})[first]["state"] == "needs_review"
 
@@ -260,6 +265,52 @@ def test_a_restated_round_follows_its_successor_until_it_withdraws(db):
     cards = ask_cards(db, {first: ask, second: ask})
     assert cards[first]["state"] == "withdrawn"
     assert cards[second]["state"] == "withdrawn"
+
+
+def test_a_restated_round_reads_the_answer_it_led_to_not_a_later_ask(db):
+    from registry.attention import clear_attention
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    first = _ask(db, plan_id, node_id, ask)
+    second = _restate(db, plan_id, node_id, ask)
+    clear_attention(ask, outcome="answer", db=db)
+    # The same task asks about the same document again, after that round ended.
+    third = _ask(db, plan_id, node_id, ask, turn="turn-2")
+
+    cards = ask_cards(db, {first: ask, second: ask, third: ask})
+
+    assert cards[first]["state"] == "answered"
+    assert cards[second]["state"] == "answered"
+    assert cards[third]["state"] == "needs_review"
+
+
+def test_a_round_restated_before_successors_were_recorded_reads_its_tasks_newest_ask(db):
+    from registry.attention import clear_attention
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    first = _ask(db, plan_id, node_id, ask)
+    # A restatement recorded before its clearance named a successor.
+    db.execute(
+        "INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at)"
+        " VALUES ('legacy-restate',?, 'test','hold_cleared',?, 't')",
+        (node_id, json.dumps({
+            "hold_id": first, "kind": "blocked", "detail": {"ended": "restated"},
+        })),
+    )
+    db.execute(
+        "UPDATE plan_node_holds SET cleared_at='t', cleared_by_actor_id='owner',"
+        " clearance_event_id='legacy-restate' WHERE id=?",
+        (first,),
+    )
+    _ask(db, plan_id, node_id, ask, turn="turn-2")
+
+    assert ask_cards(db, {first: ask})[first]["state"] == "needs_review"
+
+    clear_attention(ask, outcome="answer", db=db)
+
+    assert ask_cards(db, {first: ask})[first]["state"] == "answered"
 
 
 def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):

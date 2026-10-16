@@ -12,21 +12,20 @@ _TABLES = (
 
 
 def _stale_review_attention_sql() -> str:
-    """Raised attention an ended user ask left behind, and nothing else.
+    """Raised attention an ended user ask may have left behind: the candidates.
 
-    It takes positive evidence: a user ask on the item ended and none is open.
-    Attention a parent review approved or deferred (``disposition_outcome``) or
-    a raised plan decision holds stays raised: neither has an ask behind it.
+    It takes positive evidence: a user ask on the item ended. Whether anything
+    still raises it (another open ask, a parent review's approval or deferral, a
+    raised plan decision) is not restated here: each candidate goes to
+    ``sync_ask_attention``, the reconciler every runtime ask edge calls, so the
+    repair and the runtime agree on which attention an ask owns. Attention no
+    ask ever touched is never a candidate.
     """
-    from plans.public import open_user_block_sql  # lazy: plans imports infra
-
-    return f"""
+    return """
     SELECT i.id
       FROM artifact_identities i
      WHERE i.state='active'
        AND json_extract(i.metadata, '$.attention_state')='raised'
-       AND json_extract(i.metadata, '$.disposition_outcome') IS NULL
-       AND COALESCE(json_extract(i.metadata, '$.plan_decision.state'), '') != 'raised'
        AND EXISTS (
            SELECT 1
              FROM plan_node_artifact_links l
@@ -34,13 +33,6 @@ def _stale_review_attention_sql() -> str:
             WHERE l.artifact_id=i.id AND l.role='attention'
               AND h.kind='blocked' AND h.owner_kind='user'
               AND h.owner_id=l.artifact_id AND h.cleared_at IS NOT NULL
-       )
-       AND NOT EXISTS (
-           SELECT 1
-             FROM plan_node_artifact_links l
-             JOIN plan_node_holds h ON h.node_id=l.node_id
-            WHERE l.artifact_id=i.id AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
        )
      ORDER BY i.id
 """
@@ -87,8 +79,12 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
 
 
 def withdraw_stale_review_attention(conn: sqlite3.Connection) -> int:
-    """Use attention's canonical writer for stale raised review asks, once each."""
-    from registry import attention
+    """Reconcile each candidate through the runtime's ask reconciler, once each.
+
+    ``sync_ask_attention`` withdraws a candidate only when nothing still raises
+    it, through attention's canonical writer. Returns how many it withdrew.
+    """
+    from plans.public import sync_ask_attention  # lazy: plans imports infra
 
     present = {str(row[0]) for row in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
@@ -96,6 +92,7 @@ def withdraw_stale_review_attention(conn: sqlite3.Connection) -> int:
     if not present.issuperset(_TABLES):
         return 0  # an older partial schema holds no review asks to repair
     artifact_ids = [row[0] for row in conn.execute(_stale_review_attention_sql())]
-    for artifact_id in artifact_ids:
-        attention.withdraw_attention(str(artifact_id), db=conn)
-    return len(artifact_ids)
+    return sum(
+        sync_ask_attention(conn, str(artifact_id), outcome="withdraw") is not None
+        for artifact_id in artifact_ids
+    )

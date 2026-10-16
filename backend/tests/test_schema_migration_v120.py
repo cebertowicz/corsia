@@ -161,6 +161,49 @@ def test_repairs_open_asks_on_retired_nodes_without_touching_live_ones():
         db.close()
 
 
+def test_repairs_each_candidate_through_the_runtime_reconciler(monkeypatch):
+    import plans.public
+
+    db = _db()
+    try:
+        # Its ask ended, but attention stayed raised: nothing raises it now.
+        stale = _artifact(db, "stale.md")
+        node, hold = _raise_ask(db, stale)
+        holds.clear(
+            node.id, hold, expected_kind="blocked",
+            expected_revision=service._node_row(db, node.id)["revision"],
+            actor_id="owner", provenance="test.clear", db=db,
+        )
+        attention.raise_attention(stale, db=db)
+        # Its first ask ended, and a later task asks about it again.
+        asked_again = _artifact(db, "asked-again.md")
+        node, hold = _raise_ask(db, asked_again)
+        holds.clear(
+            node.id, hold, expected_kind="blocked",
+            expected_revision=service._node_row(db, node.id)["revision"],
+            actor_id="owner", provenance="test.clear", db=db,
+        )
+        _raise_ask(db, asked_again)
+        reconciled = []
+        reconcile = plans.public.sync_ask_attention
+
+        def recorded(conn, artifact_id, *, outcome):
+            reconciled.append((artifact_id, outcome))
+            return reconcile(conn, artifact_id, outcome=outcome)
+
+        monkeypatch.setattr(plans.public, "sync_ask_attention", recorded)
+
+        assert withdraw_stale_review_attention(db) == 1
+        assert sorted(reconciled) == sorted([(stale, "withdraw"), (asked_again, "withdraw")])
+        assert attention.get_attention_state(stale, db=db) == "cleared"
+        assert json.loads(db.execute(
+            "SELECT metadata FROM artifact_identities WHERE id=?", (stale,),
+        ).fetchone()["metadata"])["attention_outcome"] == "withdraw"
+        assert attention.get_attention_state(asked_again, db=db) == "raised"
+    finally:
+        db.close()
+
+
 def test_keeps_attention_no_ended_ask_left_behind():
     db = _db()
     try:
