@@ -84,7 +84,10 @@ def test_email_and_calendar_route_to_google_setup_and_no_assistant_remains():
     """Step 6 and the first-agent path both load google-setup; the Assistant and its handover are gone."""
     assert "skill `google-setup`" in FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "skill `google-setup`" in FIRST_AGENT.read_text(encoding="utf-8")
-    assert not (SKILLS / "assistant-onboarding").exists()
+    assert not (SKILLS / "assistant-onboarding/SKILL.md").exists()
+    assert "`gmail_eligible`" in FIRST_AGENT.read_text(encoding="utf-8")
+    first_run = (SKILLS / "conductor-bootstrap/references/first-run.md").read_text(encoding="utf-8")
+    assert "the Assistant" not in first_run
     for path in SKILLS.rglob("*.md"):
         text = path.read_text(encoding="utf-8")
         assert "google_adopt_assistant_sign_in" not in text, path

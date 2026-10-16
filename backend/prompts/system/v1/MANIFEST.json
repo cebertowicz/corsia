@@ -130,6 +130,18 @@
       "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
     },
     {
+      "bytes": 4519,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/assets/gws-env.sh",
+      "sha256": "29b9f56a09d6ed5bdb416c1299adefce41e05ab4f4b30275ebd5c749abdb8701"
+    },
+    {
+      "bytes": 7707,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/assets/gws-reply-guard.py",
+      "sha256": "70daaac27a3bfded05fab13a8f86d30f55d8e9c0f28afdea741dcd432da7776f"
+    },
+    {
       "bytes": 19107,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
@@ -154,10 +166,10 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 2177,
+      "bytes": 2249,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-agent.md",
-      "sha256": "7aea68ba3c1511d155373fd93a3bddb2ff3bd1bc018a772286a4e802a71eb277"
+      "sha256": "db04a28cd613ee8908ca6c3169feb388a5c09579052faa69e98cf87f031468a1"
     },
     {
       "bytes": 11099,
@@ -166,10 +178,10 @@
       "sha256": "35ce6301cabcf31861c665cf40d286063d68fe7e11a78776596ba08924eec543"
     },
     {
-      "bytes": 17589,
+      "bytes": 17547,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "6fabfc68b5b7131be88fb15122b97d5951f8143c3dfdffe54c01eb6507f286a0"
+      "sha256": "cadc0d6c79f15df02fadad6a81859a921bc2ec95e30e416efb04e9a98a274eed"
     },
     {
       "bytes": 851,
