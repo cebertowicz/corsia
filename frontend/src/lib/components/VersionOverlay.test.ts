@@ -48,9 +48,9 @@ describe('VersionOverlay', () => {
 		expect(stamp()).not.toBeNull();
 	});
 
-	it('renders the build stamp before settings load', () => {
+	it('does not render a build stamp before the backend resolves settings', () => {
 		withFeatures(undefined);
 		render();
-		expect(stamp()).not.toBeNull();
+		expect(stamp()).toBeNull();
 	});
 });
