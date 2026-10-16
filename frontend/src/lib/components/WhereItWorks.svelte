@@ -53,7 +53,7 @@
 		error = '';
 		try {
 			const reach = mode === 'all'
-				? { mode: 'all' as const, project_ids: [], outside_projects: true }
+				? { mode: 'all' as const, project_ids: [], outside_projects: false }
 				: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects };
 			onSaved(await saveConnectedAppReach(app, reach));
 		} catch (cause) {

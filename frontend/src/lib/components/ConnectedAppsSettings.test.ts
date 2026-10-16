@@ -5,7 +5,7 @@ import WhereItWorks from './WhereItWorks.svelte';
 import { token } from '$lib/stores/auth';
 import { projects } from '$lib/stores/projects';
 
-const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: true } };
+const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
@@ -46,10 +46,20 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
 	});
 
+	it('names the projects an app works in on its row', async () => {
+		const catalog = [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }, { id: 'home', name: 'Home renovation', status: 'active', accent_color: null }];
+		const selected = { ...awaiting, state: 'working', reach: { mode: 'selected', project_ids: ['q4', 'home'], outside_projects: true } };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/api/projects') ? { projects: catalog } : { servers: [selected] } })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Q4 launch, Home renovation, 1 more'));
+		expect(host.textContent).not.toContain('Select individually');
+	});
+
 	it('renders the empty-state copy when there are no apps', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No apps shared with every project yet.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('No apps shared with every project yet. Ask CORSIA in chat'));
+		expect(host.textContent).not.toContain('Connect one here');
 	});
 });
 
@@ -71,6 +81,20 @@ describe('WhereItWorks', () => {
 		([...host.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Q4 launch')) as HTMLInputElement).click();
 		flushSync();
 		expect(host.textContent).toContain("GitHub will move from Garden plan to Q4 launch, with its sign-in and key. Agents in Garden plan won't be able to use it.");
+	});
+
+	it('saves All projects in the shape the server accepts', async () => {
+		const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ ...awaiting, state: 'working', revision: 2 }) }));
+		vi.stubGlobal('fetch', fetch);
+		const onSaved = vi.fn();
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, state: 'working', reach: { mode: 'selected', project_ids: ['q4'], outside_projects: false } }, onClose: vi.fn(), onSaved } });
+		await settle();
+		(host.querySelector('input[type="radio"]') as HTMLInputElement).click();
+		flushSync();
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Save')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
+		const call = fetch.mock.calls.find(([input]) => String(input).includes('/reach'));
+		expect(JSON.parse(String(call?.[1]?.body)).reach).toEqual({ mode: 'all', project_ids: [], outside_projects: false });
 	});
 
 	it('disables Save until an individual target is selected', async () => {

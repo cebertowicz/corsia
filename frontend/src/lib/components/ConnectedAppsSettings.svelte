@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
+	import { projects, loadProjects } from '$lib/stores/projects';
 	import {
 		approveConnectedApp, declineConnectedApp, loadConnectedApps, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
@@ -35,7 +36,13 @@
 	}
 
 	function placeLine(app: ConnectedApp): string {
-		return app.reach.mode === 'all' ? 'All projects' : 'Select individually';
+		if (app.reach.mode === 'all') return 'All projects';
+		const names = [
+			...$projects.filter((project) => app.reach.project_ids.includes(project.id)).map((project) => project.name),
+			...(app.reach.outside_projects ? ['Outside projects'] : []),
+		];
+		if (names.length === 0) return 'Choose where it works';
+		return names.length > 2 ? `${names.slice(0, 2).join(', ')}, ${names.length - 2} more` : names.join(', ');
 	}
 
 	async function load(): Promise<void> {
@@ -60,7 +67,7 @@
 	}
 
 	function replace(next: ConnectedApp): void { apps = apps.map((app) => app.id === next.id ? { ...app, ...next } : app); }
-	onMount(load);
+	onMount(() => { void loadProjects(); void load(); });
 </script>
 
 <section class="connected-apps" data-settings-anchor="connected-apps" id="connected-apps">
@@ -70,7 +77,7 @@
 	{:else if error}
 		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Try again</Button></div>
 	{:else if apps.length === 0}
-		<p class="state">No apps shared with every project yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor or Codex, for example: “Bring over my apps from Claude.”</p>
+		<p class="state">No apps shared with every project yet. Ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor or Codex, for example: “Bring over my apps from Claude.”</p>
 	{:else}
 		<div class="rows">
 			{#each apps as app (app.id)}
