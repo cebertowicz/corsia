@@ -77,12 +77,24 @@ def test_plain_write_does_not_lift_headers_but_the_migration_shape_can():
     {"secret_env": "TOKEN"},
     {"secret_env": ["TOKEN", "TOKEN"]},
     {"secret_env": ["TOKEN"], "env": {"TOKEN": "value-one"}},
-    {"secret_headers": ["Authorization"]},
-    {"secret_headers": ["cookie"]},
+    {"secret_headers": ["Proxy-Authorization"]},
+    {"secret_headers": ["Authorization", "Authorization"]},
 ])
 def test_malformed_references_are_refused(bad):
     with pytest.raises(MCPConfigError):
         mcp_secrets.check_references({"command": "fixture", **bad})
+
+
+def test_authorization_and_cookie_headers_lift_to_references():
+    clean, lifted = mcp_secrets.split_secrets(
+        "svc", {"url": "https://example.test/mcp", "headers": {"Authorization": "Bearer example", "Cookie": "session=example"}},
+        headers=True,
+    )
+
+    assert "headers" not in clean
+    assert clean["secret_headers"] == ["Authorization", "Cookie"]
+    mcp_secrets.check_references(clean)
+    assert set(lifted.values()) == {"Bearer example", "session=example"}
 
 
 def test_resolve_returns_stored_values_and_names_missing_variables_without_values(store):
@@ -99,6 +111,12 @@ def test_resolve_returns_stored_values_and_names_missing_variables_without_value
         mcp_secrets.resolve("svc", clean)
     assert "API_KEY" in str(error.value)
     assert "value-two" not in str(error.value)
+
+
+def test_url_origin_normalizes_scheme_before_default_port_selection():
+    from tools.mcp import _url_origin
+
+    assert _url_origin("HTTPS://example.test/mcp") == ("https", "example.test", 443)
 
 
 def test_managed_header_key_reaches_auth_only_after_key_store_resolution(store):

@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from loguru import logger
@@ -26,23 +27,38 @@ from tools.registry import ToolRegistry, _is_reserved_execution_param
 class _StoredHeadersAuth(httpx.Auth):
     """Send managed header keys while keeping their values out of transport logs."""
 
-    def __init__(self, headers: dict[str, str]) -> None:
+    def __init__(self, headers: dict[str, str], origin: str | None = None) -> None:
         self._headers = headers
+        self._origin = _url_origin(origin) if origin is not None else None
 
     def auth_flow(self, request):
+        request_origin = _url_origin(str(request.url))
+        if self._origin is None:
+            self._origin = request_origin
+        if request_origin != self._origin:
+            raise MCPConfigError("MCP endpoint changed origin; stored app keys were not sent")
         request.headers.update(self._headers)
         yield request
 
     def redact(self, value):
         if isinstance(value, str):
             for header_value in self._headers.values():
-                value = value.replace(header_value, "[REDACTED]")
+                if header_value:
+                    value = value.replace(header_value, "[REDACTED]")
             return value
         if isinstance(value, dict):
             return {self.redact(key): self.redact(item) for key, item in value.items()}
         if isinstance(value, list):
             return [self.redact(item) for item in value]
         return value
+
+
+def _url_origin(url: str) -> tuple[str, str, int] | None:
+    parsed = urlsplit(url)
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    return (scheme, parsed.hostname.lower(), parsed.port or (443 if scheme == "https" else 80))
 
 
 class MCPConnectionError(MCPConfigError):
@@ -195,6 +211,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from tools.mcp_secrets import resolve
 
     auth = None
+    transport_task: asyncio.Task | None = None
     secret_env, secret_headers = await run_in_db(resolve, config.get("connected_app_id", name), config)
     if config.get("command"):
         if config.get("bearer_file"):
@@ -211,31 +228,47 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         except OSError as error:
             raise MCPConfigError(_mcp_oserror_detail(error)) from None
     elif config.get("url"):
-        from mcp.client.streamable_http import streamable_http_client
+        from mcp.client.sse import sse_client
+        from tools.mcp_http_transport import sse_http_client_factory
 
         options, auth = http_options(config)
         if secret_headers:
             if auth is not None:
                 raise MCPConfigError("stored header keys cannot be combined with bearer_file")
-            auth = _StoredHeadersAuth(secret_headers)
+            auth = _StoredHeadersAuth(secret_headers, config["url"])
             options["auth"] = auth
         protect_transport_logs(auth)
-        client = await stack.enter_async_context(httpx.AsyncClient(**options))
-        read, write, _ = await stack.enter_async_context(
-            streamable_http_client(config["url"], http_client=client),
-        )
+        transport = config.get("transport", "http")
+        if transport == "sse":
+            read, write = await stack.enter_async_context(
+                sse_client(
+                    config["url"], headers=options["headers"], auth=auth,
+                    httpx_client_factory=sse_http_client_factory,
+                ),
+            )
+            session = await stack.enter_async_context(ClientSession(read, write))
+            initialized = await session.initialize()
+        elif transport == "http":
+            from tools.mcp_http_transport import open_streamable_http_session
+
+            session, initialized, transport_task = await open_streamable_http_session(
+                config["url"], options, auth, stack,
+            )
+        else:
+            raise MCPConfigError("MCP transport is not supported")
     else:
         raise MCPConfigError("configure an MCP command or URL")
-    session = await stack.enter_async_context(ClientSession(read, write))
-    initialized = await session.initialize()
+    if not config.get("url"):
+        session = await stack.enter_async_context(ClientSession(read, write))
+        initialized = await session.initialize()
     instructions = getattr(initialized, "instructions", None)
-    return session, auth, instructions if isinstance(instructions, str) else None
+    return session, auth, instructions if isinstance(instructions, str) else None, transport_task
 
 
 async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     allowlist = allowed_names(config)
     tool_timeout = timeout_seconds(config, "tool_timeout", 30)
-    session, auth, instructions = await _open_session(name, config, stack)
+    session, auth, instructions, transport_task = await _open_session(name, config, stack)
     discovered = []
     cursor = None
     while True:
@@ -251,9 +284,9 @@ async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     app_id = config.get("connected_app_id")
     if app_id is not None and (not isinstance(app_id, str) or not app_id):
         raise MCPConfigError("connected app identity must be a nonempty string")
-    return [MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth,
-                           instructions=instructions, app_id=app_id)
-            for tool in discovered if allowlist is None or tool.name in allowlist]
+    return ([MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth,
+                            instructions=instructions, app_id=app_id)
+             for tool in discovered if allowlist is None or tool.name in allowlist], transport_task)
 
 
 class _ServerConnection:
@@ -269,12 +302,32 @@ class _ServerConnection:
     async def _run(self):
         try:
             async with AsyncExitStack() as stack:
-                wrappers = await _discover_tools(self.name, self.config, stack)
+                wrappers, transport_task = await _discover_tools(self.name, self.config, stack)
                 for wrapper in wrappers:
                     wrapper._connection = self
                 self.ready.set_result(wrappers)
-                await self.stop.wait()
-        except Exception as error:
+                if transport_task is None:
+                    await self.stop.wait()
+                else:
+                    stop_wait = asyncio.create_task(self.stop.wait())
+                    done, _ = await asyncio.wait(
+                        {stop_wait, transport_task}, return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if stop_wait in done:
+                        return
+                    stop_wait.cancel()
+                    await asyncio.gather(stop_wait, return_exceptions=True)
+                    transport_task.result()
+                    raise MCPConfigError("streamable HTTP connection closed")
+        except asyncio.CancelledError as error:
+            if self.stop.is_set():
+                raise
+            self.error = safe_error(error)
+            if not self.ready.done():
+                self.ready.set_exception(
+                    MCPConnectionError(self.error, mcp_failure_class(error, self.config))
+                )
+        except (Exception, BaseExceptionGroup) as error:
             self.error = safe_error(error)
             if not self.ready.done():
                 self.ready.set_exception(

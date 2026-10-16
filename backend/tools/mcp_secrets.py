@@ -26,8 +26,10 @@ from tools.mcp_config import MCPConfigError
 SECRET_ENV = "secret_env"
 SECRET_HEADERS = "secret_headers"
 _KINDS = {SECRET_ENV: "env", SECRET_HEADERS: "headers"}
-#: Header names HTTP MCP config refuses outright, whether literal or stored.
-REFUSED_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie"})
+# Proxy credentials are never safe to replay to an imported app. Other
+# credential-named headers are lifted into the key store rather than retained
+# in the app configuration.
+REFUSED_HEADERS = frozenset({"proxy-authorization"})
 
 # 4 + 10 + 1 + 14 + 1 + 10 characters: the longest name still fits the store's 40.
 _SERVER_SLUG = 10
@@ -84,7 +86,7 @@ def check_references(config: dict) -> None:
         if set(names) & set(_literals(config, source)):
             raise MCPConfigError(f"{field} and {source} both set the same name")
     if any(name.lower() in REFUSED_HEADERS for name in _listed(config, SECRET_HEADERS)):
-        raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
+        raise MCPConfigError("proxy authorization headers are not supported")
 
 
 def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[dict, dict[str, str]]:
@@ -92,9 +94,8 @@ def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[
 
     Pure: nothing is stored. Existing references are kept. A credential-named
     value that is blank or not a string stays where it is for the config's own
-    validation to judge. Headers are lifted only for ``headers=True``, which the
-    one-time migration uses: HTTP MCP config refuses a literal credential header
-    on every write path, so a write never lifts one, and the refusal stands.
+    validation to judge. Import callers pass ``headers=True`` so Authorization,
+    Cookie and other credential-named headers become managed references.
     """
     check_references(config)
     result = dict(config)

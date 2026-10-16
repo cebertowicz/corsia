@@ -60,6 +60,7 @@ async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], ap
     return await apply_connected_app_runtime(action, app_id)
 
 
+
 def _agent_thread(user: dict, db) -> tuple[str, dict]:
     """Resolve an agent's scope from its server-provided current thread only."""
     thread_id = user.get("thread_id")
@@ -118,7 +119,7 @@ def _key_refs(value: object) -> list[dict[str, str]]:
 
 def _config(body: dict[str, Any]) -> dict[str, Any]:
     config = body.get("config")
-    if not isinstance(config, dict) or "key_refs" in config:
+    if not isinstance(config, dict) or {"key_refs", "asked_by_thread_id"}.intersection(config):
         raise _refusal("config must be an object; declare key names with key_refs")
     from tools.conductor_api_policy import contains_forbidden_fields
 
@@ -187,6 +188,11 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
     name = body.get("name")
     config = _config(body)
     human = is_person_session(user)
+    asked_by_thread_id = body.get("asked_by_thread_id")
+    if asked_by_thread_id is not None and (not isinstance(asked_by_thread_id, str) or not asked_by_thread_id):
+        raise _refusal("asked_by_thread_id must be a nonempty thread id")
+    if human and asked_by_thread_id is not None:
+        raise _refusal("asked_by_thread_id is for a workspace agent proposal only", 403)
     if not human and "reach" in body:
         raise _refusal("Connected-app reach comes from your current thread; remove reach and retry.", 403)
     if human:
@@ -199,11 +205,21 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
             return create_app(name, config, reach, audit_actor=_audit_actor(user), db=_db())
     else:
         def create() -> dict[str, object]:
+            from connections.account_policy import AccountAdmissionError, thread_scope
             from connections.app_lifecycle import create_pending_app
+            from infra.corsia_agent import is_corsia_agent
+
             thread_id, scope = _agent_thread(user, _db())
+            if asked_by_thread_id is not None:
+                if not is_corsia_agent(thread_id, db=_db()):
+                    raise _refusal("Only the workspace CORSIA agent can name an asking agent.", 403)
+                try:
+                    thread_scope(asked_by_thread_id, db=_db())
+                except AccountAdmissionError:
+                    raise _refusal("The asking agent thread no longer exists; use its current thread id.") from None
             return create_pending_app(
                 name, config, _agent_reach(thread_id, scope, db=_db()), actor_thread_id=thread_id,
-                audit_actor=_audit_actor(user), db=_db(),
+                asked_by_thread_id=asked_by_thread_id, audit_actor=_audit_actor(user), db=_db(),
             )
     try:
         result = await run_in_db(create)
@@ -289,9 +305,9 @@ async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dic
         )
     except Exception as exc:
         raise _app_error(exc) from None
-    await _run_app_runtime("connect", app_id)
+    state = await _run_app_runtime("connect", app_id)
     notice = _local_app_notice(result["config"])
-    return {**result, **({"notice": notice} if notice else {})}
+    return {**result, **state, **({"notice": notice} if notice else {})}
 
 
 @connected_apps_router.post("/servers/{app_id}/decline")
@@ -327,7 +343,11 @@ async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict
         result = await run_in_db(delete)
     except Exception as exc:
         raise _app_error(exc) from None
-    await _run_app_runtime("remove", app_id)
+    try:
+        await _run_app_runtime("remove", app_id)
+    except Exception:
+        # The row is already deleted; report that, and keep the runtime failure in the log.
+        log.exception("connected-app runtime remove failed for app_id=%s", app_id)
     return result
 
 
