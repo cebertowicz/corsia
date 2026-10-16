@@ -560,7 +560,7 @@ fn update_remote_state(
     Ok(())
 }
 
-fn grant_remote_proxy_origin(app: &tauri::AppHandle, proxy_port: u16) -> Result<(), String> {
+fn grant_remote_proxy_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, proxy_port: u16) -> Result<(), String> {
     app.add_capability(
         CapabilityBuilder::new("remote-proxy-origin")
             .remote(format!("http://127.0.0.1:{proxy_port}"))
@@ -965,6 +965,10 @@ fn sync_window_chrome(window: &tauri::WebviewWindow) {
     }
 }
 
+fn generated_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Every command-line mode is dispatched here, before any window exists.
@@ -987,7 +991,7 @@ pub fn run() {
         }
         Some(CommandLineMode::UpdateStage(_)) | None => {}
     }
-    let context = tauri::generate_context!();
+    let context = generated_context();
     if let Some(CommandLineMode::UpdateStage(operation_id)) = mode {
         std::process::exit(update_stage::run(context, operation_id));
     }
@@ -1163,16 +1167,31 @@ mod tests {
     use base64::Engine;
     use std::fs;
 
+    const SHELL_COMMANDS: &[&str] = &[
+        "start_local_service",
+        "remote_discovered",
+        "remote_pair",
+        "disconnect_remote",
+        "choose_work_folder",
+        "configure_work_folder",
+        "retry_quit",
+        "open_login_items",
+        "get_service_log_path",
+        "save_setup_report",
+        "start_window_drag",
+    ];
+
     fn acl_test_app() -> tauri::App<tauri::test::MockRuntime> {
         tauri::test::mock_builder()
-            .invoke_handler(|invoke| match invoke.message.command() {
-                "disconnect_remote" | "start_window_drag" => {
+            .invoke_handler(|invoke| {
+                if SHELL_COMMANDS.contains(&invoke.message.command()) {
                     invoke.resolver.resolve(serde_json::Value::Null);
                     true
+                } else {
+                    false
                 }
-                _ => false,
             })
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .build(generated_context())
             .unwrap()
     }
 
@@ -1206,6 +1225,25 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
         assert!(invoke_from(&webview, "disconnect_remote", "tauri://localhost").is_ok());
         assert!(invoke_from(&webview, "start_window_drag", "tauri://localhost").is_ok());
+    }
+
+    #[test]
+    fn runtime_proxy_capability_allows_only_its_exact_origin_and_commands() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let proxy_origin = "http://127.0.0.1:47911";
+        grant_remote_proxy_origin(app.handle(), 47911).unwrap();
+
+        for command in ["disconnect_remote", "start_window_drag"] {
+            assert!(invoke_from(&webview, command, proxy_origin).is_ok(), "{command} was refused from the granted proxy origin");
+            assert!(invoke_from(&webview, command, "http://127.0.0.1:47912").is_err(), "{command} was allowed from an ungranted proxy port");
+        }
+        for command in SHELL_COMMANDS {
+            if ["disconnect_remote", "start_window_drag"].contains(command) {
+                continue;
+            }
+            assert!(invoke_from(&webview, command, proxy_origin).is_err(), "{command} was allowed from the proxy origin");
+        }
     }
 
     #[test]
