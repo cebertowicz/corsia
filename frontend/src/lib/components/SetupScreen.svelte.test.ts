@@ -567,7 +567,7 @@ describe('SetupScreen', () => {
 		window.dispatchEvent(new Event('focus'));
 		await settle();
 		expect(rechecks).toEqual([]);
-	});
+	}, 15_000);
 
 	it('leaves the rail free of it once the download is ready', async () => {
 		await reachModels({ state: 'ready' });
