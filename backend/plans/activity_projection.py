@@ -17,6 +17,7 @@ from plans import (
     hierarchy,
     node_states,
     not_moving,
+    operator_display_state,
     operator_nodes,
     operator_owners,
     operator_plan_display,
@@ -160,7 +161,8 @@ def counted_plan_ids(plan_ids, *, actor: PlanActor, db) -> set[str]:
     worker's step shows it under) is unarchived and has an owner Activity shows,
     so the user's queue and Activity's count agree on an archived project. The
     walk has no depth cap, like ``hierarchy.descendants``; UNION ends a malformed
-    cycle, and a cycle of shown plans has no top, so it stays excluded. Two
+    cycle, and a cycle of shown plans has no top, so it stays excluded. A paused
+    plan counts nothing (``plan_defers_asks``). Two
     set-wise reads for the walk plus the owner index, whatever the plan count.
     """
     wanted = list(dict.fromkeys(str(plan_id) for plan_id in plan_ids))
@@ -193,7 +195,19 @@ def counted_plan_ids(plan_ids, *, actor: PlanActor, db) -> set[str]:
             chunk,
         ).fetchall())
     owners = _shown_owners(tops, actor, db=db)
-    return {plan_id for plan_id, top_id in top_of.items() if top_id in owners}
+    paused: set[str] = set()
+    for start in range(0, len(wanted), hierarchy._ID_CHUNK):
+        chunk = wanted[start:start + hierarchy._ID_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        paused.update(
+            str(row["id"]) for row in db.execute(
+                f"SELECT id, state FROM plans WHERE id IN ({marks})", chunk,
+            ).fetchall() if operator_display_state.plan_defers_asks(str(row["state"]))
+        )
+    return {
+        plan_id for plan_id, top_id in top_of.items()
+        if top_id in owners and plan_id not in paused
+    }
 
 
 def _owned_rows(plan_rows: list, owners: dict[str, dict]) -> list:
@@ -332,7 +346,7 @@ def _scope(kind: str, owner_id: str, label: str, actor: PlanActor, *, db) -> dic
         str(item["artifact_id"])
         for item in decision_facts
         if item["answerable"] and str(item["plan_id"]) in eligible_tree
-        and plan_index[str(item["plan_id"])]["state"] != "paused"
+        and not operator_display_state.plan_defers_asks(plan_index[str(item["plan_id"])]["state"])
     })
     target = {"kind": kind, "id": owner_id, "label": label}
     revision_source = {

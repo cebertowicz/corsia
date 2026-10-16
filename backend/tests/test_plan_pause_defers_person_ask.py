@@ -1,4 +1,6 @@
-"""A whole-plan pause defers a raised decision's attention count until resume.
+"""A whole-plan pause defers a raised decision's attention until resume.
+
+Activity's count, the operator payload and the dock queue share one rule.
 
 The decision stays raised and answerable meanwhile (the person may still answer
 it), and resume restores the count. Node-level asks are covered by
@@ -7,6 +9,7 @@ it), and resume restores the count. Node-level asks are covered by
 
 from __future__ import annotations
 
+from api import attention
 from plans import boundary, decision_projection, operator_projection, service
 from tests.test_plan_decision_answer import (
     _human,
@@ -31,15 +34,21 @@ def _payload_awaiting(db) -> int:
     ]
 
 
+def _dock(db) -> list:
+    return attention._queue_for("user-1", db=db)
+
+
 def test_pause_defers_the_decision_count_and_resume_restores_it(db):
     plan, _source, decision = _raised_decision(db)
     assert decision_projection.awaiting_count([plan.id], db=db) == 1
     assert _payload_awaiting(db) == 1
+    assert len(_dock(db)) == 1
 
     _lifecycle(db, plan.id, "pause")
 
     assert decision_projection.awaiting_count([plan.id], db=db) == 0
     assert _payload_awaiting(db) == 0
+    assert _dock(db) == []
     # Deferred, not removed: still raised and answerable.
     assert [item["id"] for item in decision_projection.raised_decisions([plan.id], db=db)] == [
         decision["id"]
@@ -49,3 +58,4 @@ def test_pause_defers_the_decision_count_and_resume_restores_it(db):
 
     assert decision_projection.awaiting_count([plan.id], db=db) == 1
     assert _payload_awaiting(db) == 1
+    assert len(_dock(db)) == 1

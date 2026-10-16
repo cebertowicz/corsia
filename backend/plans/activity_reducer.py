@@ -93,7 +93,7 @@ def reduce_node(
     condition, child_active, child_working, quiet_block, liveness_quiet = _execution_facts(
         row, plan, decision_wait=decision_wait, child_cause=child_cause,
     )
-    paused = plan["state"] == "paused"
+    paused = operator_display_state.plan_defers_asks(plan["state"])
     needs_user = operator_node_state.needs_user_from_facts(
         str(row["state"]),
         condition,

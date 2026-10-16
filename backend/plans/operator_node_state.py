@@ -21,8 +21,8 @@ from plans.operator_display_state import (
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
-#: PLANS-CANONICAL-STATE-MATRIX display matrix; review outranks pause, so a
-#: review raised before the pause stays current and answerable.
+#: PLANS-CANONICAL-STATE-MATRIX display matrix. A review raised before a node
+#: pause stays current; a whole-plan pause defers its ask (``plan_defers_asks``).
 CURRENT_CONDITIONS = frozenset({"running", "waiting", "blocked", "review"})
 ATTEMPT_HISTORY_LIMIT = 20
 _EMPTY_ATTEMPTS = {"attempt_count": 0, "friction_count": 0, "revision_round": 0}

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 from infra.packed_rows import fetch_all
-from plans import aggregates, hierarchy, node_states
+from plans import aggregates, hierarchy, node_states, operator_display_state
 from plans.decision_fields import pick_of
 
 DECISION_TYPE = "plan-decision"
@@ -297,7 +297,10 @@ def awaiting_count(plan_ids, *, db) -> int:
     decision stays raised and answerable meanwhile.
     """
     rows = hierarchy.descendants(db, plan_ids)
-    live = [row["id"] for row in rows if row["state"] != "paused"]
+    live = [
+        row["id"] for row in rows
+        if not operator_display_state.plan_defers_asks(row["state"])
+    ]
     return len(raised_decisions(live, db=db, open_nodes=True))
 
 
