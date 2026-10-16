@@ -101,7 +101,7 @@ def _kind(source: str, config: dict[str, Any]) -> str | None:
 
 def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
     """Whether a remote app cannot be imported before C supplies sign-in."""
-    if _kind(source, config) not in {"remote", "unsupported"}:
+    if _kind(source, config) != "remote":
         return False
     if "oauth" in config:
         return True
@@ -333,14 +333,14 @@ def import_selected(
             rows.append({"name": name, "status": "failed"})
             continue
         source_config, folder = entry
+        if _kind(source, source_config) == "unsupported":
+            rows.append({"name": name, "status": "cannot_connect"})
+            continue
         if _needs_sign_in(source, source_config):
             rows.append({
                 "name": name, "status": "needs_sign_in",
                 "message": IMPORT_NEEDS_SIGN_IN.format(App=name, client=_SOURCE_LABELS[source]),
             })
-            continue
-        if _kind(source, source_config) == "unsupported":
-            rows.append({"name": name, "status": "cannot_connect"})
             continue
         reach, outside_folder = _project_reach(folder, db=db)
         if reach is None:
