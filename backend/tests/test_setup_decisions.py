@@ -19,7 +19,7 @@ from plans import decision_fields
 
 REAL_SAVED_EMAIL = setup._saved_email
 GITHUB_TASK = "Set up GitHub"
-PROJECT_TASK = "Set up your first agent or project"
+PROJECT_TASK = "Set up your first project"
 WEB = "Connect web search"
 OMLX_TASK = "Configuration checks"
 

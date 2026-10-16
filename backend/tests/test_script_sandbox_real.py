@@ -113,11 +113,11 @@ async def test_real_script_runs_in_the_sandbox_with_a_turnless_cwd(sandbox) -> N
 
 
 @pytest.mark.asyncio
-async def test_real_script_receives_no_gws_or_agent_account_environment(sandbox) -> None:
+async def test_real_script_receives_no_agent_account_environment(sandbox) -> None:
     path = _script(
         sandbox,
         "no-credentials.sh",
-        'test -z "$CORSIA_GWS_HOME" && test -z "$GH_CONFIG_DIR" && test -z "$GIT_CONFIG_COUNT"\n',
+        'test -z "$GH_CONFIG_DIR" && test -z "$GIT_CONFIG_COUNT"\n',
     )
     run = await _run(path)
     assert run.returncode == 0, run.stderr

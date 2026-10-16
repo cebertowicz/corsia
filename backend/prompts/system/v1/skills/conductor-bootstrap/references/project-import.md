@@ -8,7 +8,7 @@ The objective is a project that runs the way this person actually works and gets
 
 1. **Show what was found** (the import decision's option that names projects), newest first, at most 10: name, path, last used, which tool, whether it is a git repo. Nothing found: `I didn't find any. Tell me a folder, or describe what you're working on.`
 2. **Raise `Which should I set up first?`** with the top three as A–C and Other for any listed or typed path. Context: `I'll create the project and hand it to its own conductor. Nothing starts until you approve how it should run.`
-3. **On the answer** (or a folder the person named in `Set up your first agent or project`), call `project_create` with `name`, `description` and `repo_path`. If the name is taken, offer to attach the folder to the existing project. Do not read the folder yourself.
+3. **On the answer** (or a folder the person named in `Set up your first project`), call `project_create` with `name`, `description` and `repo_path`. If the name is taken, offer to attach the folder to the existing project. Do not read the folder yourself.
 4. **Hand off once.** One `delegate_send` to the returned `conductor_thread_id`: the person's pick, the listing row or their description, and `Set this project up; follow references/project-import.md.` After a `queued` handoff, call `delegate_status` with the `conductor_thread_id` (load pack `delegation` if needed); only when it succeeds with `model` equal to `""` say the project's conductor is waiting for a model, and add their task `Pick a model for [project]`. Not done until that conductor reports its proposal.
 
 ## If you are the new project's conductor

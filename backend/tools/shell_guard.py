@@ -988,7 +988,6 @@ def safehouse_argv(
     leased: bool = False,
     external_agent: bool = False,
     agent_account: AgentAccountView | None = None,
-    gws_home: Path | None = None,
     thread_id: str | None = None,
     policies: list[RepoPolicy] | None = None,
 ) -> list[str]:
@@ -1006,7 +1005,7 @@ def safehouse_argv(
         # untrusted below, so that file is not live lease authority.
         argv.append("--allow-workdir-config-writes")
     else:
-        if rw := ":".join(map(str, _canonical_paths([*get_sandbox_add_dirs_rw(thread_id, policies=policies), *([gws_home] if gws_home else [])]))):
+        if rw := ":".join(map(str, _canonical_paths(get_sandbox_add_dirs_rw(thread_id, policies=policies)))):
             argv.append(f"--add-dirs={rw}")
         read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account)]
         if ro := ":".join(map(str, _canonical_paths(read_only))):
