@@ -215,7 +215,7 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Create your account');
 	});
 
-	it('prefills the one data owner read-only with the matching-data helper text', async () => {
+	it('prefills the one data owner read-only, with no helper caption', async () => {
 		if (component) await unmount(component);
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
@@ -231,7 +231,7 @@ describe('SetupScreen', () => {
 		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
 		expect(username.value).toBe('legacy-owner');
 		expect(username.readOnly).toBe(true);
-		expect(host.textContent).toContain('This matches the existing data on this computer.');
+		expect(host.textContent).not.toContain('This matches the existing data on this computer.');
 	});
 
 	it('leaves the username editable with no helper text on a fresh install', async () => {
