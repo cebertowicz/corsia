@@ -345,8 +345,9 @@ async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict
         raise _app_error(exc) from None
     try:
         await _run_app_runtime("remove", app_id)
-    except Exception as exc:
-        raise _app_error(exc) from None
+    except Exception:
+        # The row is already deleted; report that, and keep the runtime failure in the log.
+        log.exception("connected-app runtime remove failed for app_id=%s", app_id)
     return result
 
 

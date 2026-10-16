@@ -175,7 +175,7 @@ def _runtime_db(monkeypatch, mcp_runtime, apps):
             return list(apps)
         if fn.__name__ == "load_runtime_app_config":
             return apps[args[0]]
-        if fn.__name__ == "missing_app_key_refs":
+        if fn.__name__ == "load_missing_app_key_refs":
             return []
         if fn.__name__ == "record_runtime_app_state":
             return None
@@ -205,7 +205,7 @@ def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, 
         if fn.__name__ == "load_runtime_app_config":
             app_id = args[0]
             return "GitHub", {"connected_app_id": app_id, "version": versions[app_id]}
-        if fn.__name__ == "missing_app_key_refs":
+        if fn.__name__ == "load_missing_app_key_refs":
             return []
         if fn.__name__ == "record_runtime_app_state":
             return None
@@ -245,7 +245,7 @@ def test_connected_app_with_an_unset_key_never_attempts_a_connection(runtime, mo
     async def load(fn, *args):
         if fn.__name__ == "load_runtime_app_config":
             return "GitHub", {"connected_app_id": args[0], "secret_env": ["GITHUB_TOKEN"]}
-        if fn.__name__ == "missing_app_key_refs":
+        if fn.__name__ == "load_missing_app_key_refs":
             return ["GITHUB_TOKEN"]
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])
@@ -270,7 +270,7 @@ def test_connected_app_keeps_the_transport_failure_class(runtime, monkeypatch):
     async def load(fn, *args):
         if fn.__name__ == "load_runtime_app_config":
             return "GitHub", {"connected_app_id": args[0]}
-        if fn.__name__ == "missing_app_key_refs":
+        if fn.__name__ == "load_missing_app_key_refs":
             return []
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])
@@ -290,3 +290,81 @@ def test_connected_app_keeps_the_transport_failure_class(runtime, monkeypatch):
         "failure_class": "timed_out",
     }
     assert [state["state"] for state in published] == ["connecting", "failed"]
+
+
+def test_connect_runs_the_real_key_lookup_for_a_local_and_a_keyed_app(runtime, isolated_db):
+    """Only the transport is faked; every DB job, the missing-key lookup included, really runs."""
+    from connections.app_lifecycle import create_app
+    from infra.database import get_db
+
+    mcp_runtime, _tools, _gate = runtime
+    everywhere = {"mode": "all", "project_ids": [], "outside_projects": False}
+    db = get_db()
+    try:
+        local = create_app("Local", {"command": "fixture", "key_refs": []}, everywhere, db=db)
+        keyed = create_app(
+            "Keyed", {"url": "https://example.test/mcp", "transport": "http", "needs_token": True,
+                      "key_refs": [{"kind": "header", "name": "Authorization"}]},
+            everywhere, db=db,
+        )
+    finally:
+        db.close()
+
+    async def scenario():
+        return (
+            await mcp_runtime.apply_connected_app_runtime("connect", str(local["id"])),
+            await mcp_runtime.apply_connected_app_runtime("connect", str(keyed["id"])),
+        )
+
+    local_result, keyed_result = asyncio.run(scenario())
+
+    assert local_result["state"] == "working"
+    assert keyed_result["state"] == "needs_token"
+    assert mcp_runtime.connected_app_state(str(keyed["id"]))["state"] == "needs_token"
+
+
+def test_runtime_error_after_connecting_publishes_failed_and_a_later_connect_retries(runtime, monkeypatch):
+    from infra import state
+
+    mcp_runtime, tools, _gate = runtime
+    published = []
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return "GitHub", {"connected_app_id": args[0]}
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            published.append(args[1])
+            return None
+        raise AssertionError(fn.__name__)
+
+    class _Agent:
+        def __init__(self) -> None:
+            from tools.registry import ToolRegistry
+
+            self.tools = ToolRegistry()
+
+    calls = {"n": 0}
+
+    def flaky_register(_tools) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("fixture registration failed")
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    monkeypatch.setattr(mcp_runtime, "register_mcp_tools", flaky_register)
+    monkeypatch.setattr(state, "_agent", _Agent())
+
+    first = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
+
+    assert first["state"] == "failed" and first["failure_class"] == "cannot_start"
+    assert mcp_runtime.connected_app_state("app-1")["state"] == "failed"
+    assert [item["state"] for item in published][-1] == "failed"
+    assert "app-1" not in mcp_runtime._app_stacks
+    assert not any(tool.session_open for tool in tools)
+
+    second = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
+
+    assert second["state"] == "working"
+    assert mcp_runtime.connected_app_state("app-1")["state"] == "working"

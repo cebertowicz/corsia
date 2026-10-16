@@ -6,7 +6,9 @@ import json
 
 import pytest
 
+from tests.mcp_import_fixtures import seed_project
 from tools import mcp_import
+from tools.mcp_import_reach import project_reach
 
 
 def _json(path, value):
@@ -183,11 +185,7 @@ def test_import_selected_creates_pending_app_and_keeps_key_out_of_row(tmp_path):
     initialize_schema(db)
     project = tmp_path / "corsia"
     project.mkdir()
-    db.execute(
-        "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,?,?)",
-        ("project", "Corsia", str(project), "t", "t"),
-    )
-    db.commit()
+    seed_project(db, "project", project)
     _json(tmp_path / ".claude.json", {
         "projects": {str(project): {"mcpServers": {
             "GitHub": {"type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "import-secret"}},
@@ -299,13 +297,12 @@ def test_project_reach_uses_real_paths_components_and_deepest_match(tmp_path):
     nested.mkdir(parents=True)
     sibling.mkdir()
     for project_id, path in (("outer", outer), ("nested", nested)):
-        db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,?,?)", (project_id, project_id, str(path), "t", "t"))
-    db.commit()
+        seed_project(db, project_id, path)
     alias = tmp_path / "alias"
     alias.symlink_to(nested, target_is_directory=True)
 
-    reach, missing = mcp_import._project_reach(alias / "work", db=db)
-    sibling_reach, sibling_missing = mcp_import._project_reach(sibling, db=db)
+    reach, missing = project_reach(alias / "work", db=db)
+    sibling_reach, sibling_missing = project_reach(sibling, db=db)
 
     assert reach == {"mode": "selected", "project_ids": ["nested"], "outside_projects": False}
     assert missing is None

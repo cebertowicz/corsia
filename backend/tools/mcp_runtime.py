@@ -129,10 +129,10 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             return result
         except Exception:
             logger.exception("connected-app runtime failed for app_id={}", app_id)
-            if stack is not None:
+            registered = _app_stacks.get(app_id) is stack
+            await _remove_connected_app(app_id)
+            if stack is not None and not registered:
                 await stack.aclose()
-            _app_servers.pop(app_id, None)
-            _app_tools.pop(app_id, None)
             result = {
                 "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
                 "failure_class": "cannot_start",

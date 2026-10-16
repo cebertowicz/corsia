@@ -16,6 +16,7 @@ from typing import Any
 
 from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
+from tools.mcp_import_reach import project_reach
 
 _SOURCE_LABELS = {
     "claude_desktop": "Claude Desktop",
@@ -295,38 +296,6 @@ def _key_refs(app_id: str, config: dict[str, Any]) -> tuple[dict[str, Any], dict
     return {**clean, "key_refs": refs}, lifted
 
 
-def _project_reach(folder: Path | None, *, db) -> tuple[dict[str, object] | None, str | None]:
-    if folder is None:
-        return {"mode": "all", "project_ids": [], "outside_projects": False}, None
-    candidate = folder.expanduser().resolve(strict=False)
-    from core.project_context import resolve_project_row_paths
-    from infra.config import WORKSPACE
-    from infra.workspace_paths import looks_like_workspace_reference
-
-    matches: list[tuple[int, str]] = []
-    for row in db.execute("SELECT id,name,path FROM projects WHERE path IS NOT NULL"):
-        raw_path = row["path"]
-        if looks_like_workspace_reference(raw_path):
-            try:
-                _name, project_path = resolve_project_row_paths(
-                    WORKSPACE, project_name=row["name"], raw_path=raw_path,
-                )
-            except ValueError:
-                log.warning("skipping unresolved project path for project_id=%s", row["id"])
-                continue
-        else:
-            project_path = Path(str(raw_path))
-        if project_path is None:
-            continue
-        project_path = project_path.resolve(strict=False)
-        if candidate == project_path or project_path in candidate.parents:
-            matches.append((len(project_path.parts), row["id"]))
-    if not matches:
-        return None, folder.name or candidate.name
-    _depth, project_id = max(matches)
-    return {"mode": "selected", "project_ids": [project_id], "outside_projects": False}, None
-
-
 def audit_import_key_write(actor: str, source: str, name: str) -> None:
     """Audit import key writes without emitting the value or generated key name."""
     log.info("key import: actor=%s source=%s app=%s", actor, source, name)
@@ -371,7 +340,7 @@ def import_selected(
                 "message": IMPORT_NEEDS_SIGN_IN.format(App=name, client=_SOURCE_LABELS[source]),
             })
             continue
-        reach, outside_folder = _project_reach(folder, db=db)
+        reach, outside_folder = project_reach(folder, db=db)
         if reach is None:
             rows.append({"name": name, "status": "outside_project", "folder": outside_folder or ""})
             continue

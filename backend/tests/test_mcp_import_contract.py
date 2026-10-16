@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.mcp_import_fixtures import seed_project
 from tools import mcp_import
 
 
@@ -22,14 +23,6 @@ def _db() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     return db
-
-
-def _project(db: sqlite3.Connection, project_id: str, path: Path) -> None:
-    db.execute(
-        "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,?,?)",
-        (project_id, project_id, str(path), "t", "t"),
-    )
-    db.commit()
 
 
 def test_detection_reads_only_claude_project_mcp_servers_and_collapses_duplicates(tmp_path: Path) -> None:
@@ -106,8 +99,8 @@ def test_trailing_claude_project_folder_import_stays_in_its_project(tmp_path: Pa
         project_b = tmp_path / "b"
         project_a.mkdir()
         project_b.mkdir()
-        _project(db, "a", project_a)
-        _project(db, "b", project_b)
+        seed_project(db, "a", project_a)
+        seed_project(db, "b", project_b)
         _json(tmp_path / ".claude.json", {
             "projects": {str(project_b) + "/": {"mcpServers": {"Scoped": {"command": "npx"}}}},
         })

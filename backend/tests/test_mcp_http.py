@@ -538,7 +538,7 @@ async def test_seven_servers_and_39_tools_in_fresh_codex_registries(
             return list(apps)
         if fn.__name__ == "load_runtime_app_config":
             return apps[args[0]]
-        if fn.__name__ == "missing_app_key_refs":
+        if fn.__name__ == "load_missing_app_key_refs":
             return []
         if fn.__name__ == "record_runtime_app_state":
             return None
