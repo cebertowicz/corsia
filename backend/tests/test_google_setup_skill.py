@@ -96,6 +96,9 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     steps = skill.split("# Connect Google", 1)[1]
 
     assert "I'll set up your own private Google project in a browser you can watch" in steps
+    assert "Google will also ask for your Drive, Docs and Sheets, so you won't have to sign in again later." in steps
+    for api in ("Gmail API", "Google Calendar API", "Google Drive API", "Google Docs API", "Google Sheets API"):
+        assert api in steps
     assert '"Go to CORSIA (unsafe)"' in steps
     assert "a project left in Testing stops letting me in after 7 days. Go ahead?" in steps
     assert "`Ask me any time to connect your email.`" in steps
