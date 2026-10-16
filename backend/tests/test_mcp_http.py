@@ -245,6 +245,26 @@ async def test_sse_endpoint_on_another_origin_never_receives_stored_key(isolated
 
 
 @pytest.mark.asyncio
+async def test_declared_sse_connects_and_executes_tools(tmp_path):
+    legacy = LegacySSEServer(405)
+    app = Starlette(routes=[
+        Route("/mcp", legacy.mcp, methods=["GET", "POST"]),
+        Route("/messages", legacy.messages, methods=["POST"]),
+    ])
+    async with _serve(app) as base_url:
+        legacy.url = f"{base_url}/mcp"
+        config = server_config(tmp_path, legacy, transport="sse", connect_timeout=1)
+        registry = ToolRegistry()
+        async with AsyncExitStack() as stack:
+            assert await connect_mcp_servers({"legacy": config}, registry, stack) == {}
+            assert registry.tool_names == ["work_read_profile"]
+            assert await registry.get("work_read_profile").execute() == "ok"
+
+    assert legacy.http_attempts == 0
+    assert set(legacy.headers) == {f"Bearer {legacy.token}"}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [404, 405])
 async def test_http_initialize_404_or_405_falls_back_to_sse(tmp_path, status):
     legacy = LegacySSEServer(status)
