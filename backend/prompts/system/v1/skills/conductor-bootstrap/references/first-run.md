@@ -70,7 +70,7 @@ If you run on the local model, add: `I'm running on the local model now. It's en
 - **Installed, not signed in:** post `Sign in to [Claude | ChatGPT] in [Settings › Providers](/settings/providers); it opens the sign-in in your browser. Tell me when you're done.` Add their task `Sign in to [Claude | ChatGPT]`; task 2 depends on it.
 - **Re-check** with `model_sources` `recheck: true` on their word and on every later wake. Works: `[Claude] works. Your agents can use it now.` and `mark_done` their task with evidence in plain words (what they said, what you checked). Usage-limited: `[Claude] is signed in but at its limit until [time from the source].`
 
-Once, after the subscriptions, if no local model is connected: follow `references/local-model-offer.md`.
+Once, after the subscriptions, if no local model is connected: follow `references/local-model-offer.md`. A local setup already running never waits: re-read it after each later task.
 
 Done when every named subscription works. Not now closes it: `You chose not now. Settings › Providers has it.`
 
