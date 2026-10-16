@@ -2,7 +2,7 @@
 //
 // On a computer with no CORSIA, the first launch creates the default workspace
 // folder, makes it a Git repository, and records the choice in `service.json`
-// inside the state folder. The bundled service launcher reads that file, so a
+// inside the app folder. The bundled service launcher reads that file, so a
 // double-click starts the app with nothing else configured. The shell is the
 // only writer of the file.
 //
@@ -61,8 +61,8 @@ fn existing_install(reason: String) -> Result<FirstRun, String> {
 }
 
 /// Decide what a launch must do about the workspace, reading only.
-pub fn plan(home: &Path, state_dir: &Path) -> Result<FirstRun, String> {
-    if present(&state_dir.join(SERVICE_FILE))? {
+pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
+    if present(&app_dir.join(SERVICE_FILE))? {
         return Ok(FirstRun::Configured);
     }
 
@@ -122,8 +122,8 @@ pub fn plan(home: &Path, state_dir: &Path) -> Result<FirstRun, String> {
 }
 
 /// The port an earlier launch recorded, so the app keeps one local address.
-pub fn recorded_port(state_dir: &Path) -> Option<u16> {
-    let text = fs::read_to_string(state_dir.join(SERVICE_FILE)).ok()?;
+pub fn recorded_port(app_dir: &Path) -> Option<u16> {
+    let text = fs::read_to_string(app_dir.join(SERVICE_FILE)).ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     let port = u16::try_from(value.get("port")?.as_u64()?).ok()?;
     (port != 0).then_some(port)
@@ -185,7 +185,7 @@ pub fn git_init(
     }
 }
 
-fn write_service_file(state_dir: &Path, workspace: &Path, port: u16) -> Result<(), String> {
+fn write_service_file(app_dir: &Path, workspace: &Path, port: u16) -> Result<(), String> {
     let workspace = workspace
         .to_str()
         .ok_or("the workspace path is not valid UTF-8")?;
@@ -195,8 +195,8 @@ fn write_service_file(state_dir: &Path, workspace: &Path, port: u16) -> Result<(
     }))
     .map_err(|error| error.to_string())?;
 
-    let target = state_dir.join(SERVICE_FILE);
-    let staged = state_dir.join(format!("{SERVICE_FILE}.tmp"));
+    let target = app_dir.join(SERVICE_FILE);
+    let staged = app_dir.join(format!("{SERVICE_FILE}.tmp"));
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -225,7 +225,7 @@ fn write_service_file(state_dir: &Path, workspace: &Path, port: u16) -> Result<(
 /// next launch plans again from the same markers.
 pub fn apply(
     workspace: &Path,
-    state_dir: &Path,
+    app_dir: &Path,
     port: u16,
     init_git: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<(), String> {
@@ -237,9 +237,9 @@ pub fn apply(
             workspace.display()
         );
     }
-    fs::create_dir_all(state_dir)
-        .map_err(|error| format!("could not create {}: {error}", state_dir.display()))?;
-    write_service_file(state_dir, workspace, port)
+    fs::create_dir_all(app_dir)
+        .map_err(|error| format!("could not create {}: {error}", app_dir.display()))?;
+    write_service_file(app_dir, workspace, port)
 }
 
 #[cfg(test)]
@@ -259,11 +259,8 @@ mod tests {
             Home(root)
         }
 
-        fn state(&self) -> PathBuf {
-            self.0
-                .join("Library")
-                .join("Application Support")
-                .join("CORSIA")
+        fn app_dir(&self) -> PathBuf {
+            crate::app_paths::app_dir_for_home(&self.0)
         }
 
         /// Everything under the home, as relative paths, to prove nothing was written.
@@ -298,7 +295,7 @@ mod tests {
 
     fn assert_refused(home: &Home, marker: &str) {
         let before = home.listing();
-        match plan(&home.0, &home.state()).expect("plan") {
+        match plan(&home.0, &home.app_dir()).expect("plan") {
             FirstRun::ExistingInstall { reason } => {
                 assert!(reason.contains(marker), "reason names the marker: {reason}");
                 assert!(reason.ends_with("Nothing was changed."));
@@ -312,7 +309,7 @@ mod tests {
     fn fresh_computer_plans_the_default_workspace_and_writes_it_down() {
         let home = Home::new("fresh");
         assert_eq!(
-            plan(&home.0, &home.state()).unwrap(),
+            plan(&home.0, &home.app_dir()).unwrap(),
             FirstRun::Fresh {
                 workspace: home.0.join("corsia")
             }
@@ -321,7 +318,7 @@ mod tests {
 
         let workspace = home.0.join("corsia");
         let mut initialised = None;
-        apply(&workspace, &home.state(), 47_895, |path| {
+        apply(&workspace, &home.app_dir(), 47_895, |path| {
             initialised = Some(path.to_path_buf());
             Ok(())
         })
@@ -330,7 +327,7 @@ mod tests {
         assert_eq!(initialised, Some(workspace.clone()));
         assert!(workspace.is_dir());
         let recorded: serde_json::Value =
-            serde_json::from_slice(&fs::read(home.state().join(SERVICE_FILE)).unwrap()).unwrap();
+            serde_json::from_slice(&fs::read(home.app_dir().join(SERVICE_FILE)).unwrap()).unwrap();
         assert_eq!(recorded["workspace"], workspace.to_str().unwrap());
         assert_eq!(recorded["port"], 47_895);
         assert_eq!(
@@ -338,12 +335,12 @@ mod tests {
             2,
             "only workspace and port are recorded"
         );
-        assert_eq!(recorded_port(&home.state()), Some(47_895));
-        assert!(!home.state().join("service.json.tmp").exists());
+        assert_eq!(recorded_port(&home.app_dir()), Some(47_895));
+        assert!(!home.app_dir().join("service.json.tmp").exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(home.state().join(SERVICE_FILE))
+            let mode = fs::metadata(home.app_dir().join(SERVICE_FILE))
                 .unwrap()
                 .permissions()
                 .mode();
@@ -356,12 +353,12 @@ mod tests {
         let home = Home::new("nogit");
         let workspace = home.0.join("corsia");
 
-        apply(&workspace, &home.state(), 47_895, |_| {
+        apply(&workspace, &home.app_dir(), 47_895, |_| {
             Err("git is not installed".into())
         })
         .unwrap();
 
-        assert!(home.state().join(SERVICE_FILE).is_file());
+        assert!(home.app_dir().join(SERVICE_FILE).is_file());
     }
 
     #[test]
@@ -458,7 +455,7 @@ mod tests {
         fs::write(home.0.join("Corsia").join(".DS_Store"), "").unwrap();
 
         assert_eq!(
-            plan(&home.0, &home.state()).unwrap(),
+            plan(&home.0, &home.app_dir()).unwrap(),
             FirstRun::Fresh {
                 workspace: home.0.join("Corsia")
             }
@@ -476,9 +473,9 @@ mod tests {
     #[test]
     fn an_existing_service_file_wins_over_every_marker() {
         let home = Home::new("configured");
-        fs::create_dir_all(home.state()).unwrap();
+        fs::create_dir_all(home.app_dir()).unwrap();
         fs::write(
-            home.state().join(SERVICE_FILE),
+            home.app_dir().join(SERVICE_FILE),
             r#"{"workspace": "/somewhere/else", "port": 5123}"#,
         )
         .unwrap();
@@ -489,20 +486,20 @@ mod tests {
         let before = home.listing();
 
         assert_eq!(
-            plan(&home.0, &home.state()).unwrap(),
+            plan(&home.0, &home.app_dir()).unwrap(),
             FirstRun::Configured
         );
-        assert_eq!(recorded_port(&home.state()), Some(5123));
+        assert_eq!(recorded_port(&home.app_dir()), Some(5123));
         assert_eq!(home.listing(), before);
     }
 
     #[test]
     fn recorded_port_ignores_a_damaged_file() {
         let home = Home::new("damaged");
-        fs::create_dir_all(home.state()).unwrap();
+        fs::create_dir_all(home.app_dir()).unwrap();
         for text in ["", "not json", r#"{"port": 0}"#, r#"{"port": 70000}"#, r#"{"port": "80"}"#] {
-            fs::write(home.state().join(SERVICE_FILE), text).unwrap();
-            assert_eq!(recorded_port(&home.state()), None, "{text}");
+            fs::write(home.app_dir().join(SERVICE_FILE), text).unwrap();
+            assert_eq!(recorded_port(&home.app_dir()), None, "{text}");
         }
     }
 }

@@ -6,6 +6,7 @@
 
 use std::{
     env,
+    ffi::OsString,
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -21,26 +22,58 @@ use std::{
 use serde::Serialize;
 use tauri::Manager;
 
+mod app_paths;
 mod first_run;
 mod lifecycle;
 mod service_management;
 mod startup_failure;
 mod update_stage;
-
-pub fn service_command_from_environment() -> Option<i32> {
-    service_management::command_from_environment()
-}
+mod update_swap;
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
 struct AppServiceState {
-    state_dir: Mutex<Option<PathBuf>>,
+    app_dir: Mutex<Option<PathBuf>>,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
+}
+
+/// The app binary's command-line modes; anything else opens the window.
+#[derive(Debug, PartialEq, Eq)]
+enum CommandLineMode {
+    Service,
+    UpdateStage(String),
+    UpdateSwap(String),
+}
+
+fn operation_argument(args: &[OsString], flag: &str) -> Result<Option<String>, String> {
+    if args.len() == 2 && args[0] == flag && !args[1].is_empty() {
+        return Ok(Some(args[1].to_string_lossy().into_owned()));
+    }
+    if args.iter().any(|arg| arg == flag) {
+        return Err(format!(
+            "{flag} requires exactly one operation ID and no other mode flags"
+        ));
+    }
+    Ok(None)
+}
+
+fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, String> {
+    if args.first().is_some_and(|arg| arg == "--service") {
+        return Ok(Some(CommandLineMode::Service));
+    }
+    let stage = operation_argument(args, "--update-stage")?;
+    let swap = operation_argument(args, "--update-swap")?;
+    Ok(match (stage, swap) {
+        (Some(operation_id), None) => Some(CommandLineMode::UpdateStage(operation_id)),
+        (None, Some(operation_id)) => Some(CommandLineMode::UpdateSwap(operation_id)),
+        _ => None,
+    })
 }
 
 #[derive(Serialize)]
@@ -98,26 +131,17 @@ fn start_window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
-fn default_state_dir_for_home(home: &Path) -> PathBuf {
-    home.join("Library")
-        .join("Application Support")
-        .join("CORSIA")
-}
-
-fn default_state_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    if let Some(path) = env::var_os("CORSIA_STATE_DIR").filter(|path| !path.is_empty()) {
-        return Ok(PathBuf::from(path));
-    }
-
-    // Keep the shell's default aligned with backend/infra/platform_paths.py.
+fn default_app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .home_dir()
-        .map(|home| default_state_dir_for_home(&home))
-        .map_err(|error| format!("could not resolve the CORSIA state directory: {error}"))
+        .map(|home| app_paths::app_dir_for_home(&home))
+        .map_err(|error| format!("could not resolve the CORSIA app folder: {error}"))
 }
 
-fn service_log_path(state_dir: &PathBuf) -> PathBuf {
-    state_dir.join("logs").join("service.log")
+fn service_log_path(app_dir: &Path) -> PathBuf {
+    app_paths::state_dir_for(app_dir)
+        .join("logs")
+        .join("service.log")
 }
 
 fn preferred_port(recorded: Option<u16>) -> u16 {
@@ -248,7 +272,7 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     }
 }
 
-fn wait_for_service(port: u16, state_dir: &PathBuf) -> Result<(), String> {
+fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
     let deadline = Instant::now() + HEALTH_TIMEOUT;
     while Instant::now() < deadline {
         if probe_health(port) {
@@ -256,7 +280,60 @@ fn wait_for_service(port: u16, state_dir: &PathBuf) -> Result<(), String> {
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
-    Err(startup_failure::timeout_message(&service_log_path(state_dir)))
+    Err(startup_failure::timeout_message(&service_log_path(app_dir)))
+}
+
+/// The bundle's generation as the launcher reports it to the service
+/// (`CFBundleShortVersionString+CFBundleVersion`).
+fn bundle_generation(bundle: &Path) -> Option<String> {
+    let info = plist::Value::from_file(bundle.join("Contents").join("Info.plist")).ok()?;
+    let info = info.as_dictionary()?;
+    let short_version = info.get("CFBundleShortVersionString")?.as_string()?;
+    let build = info.get("CFBundleVersion")?.as_string()?;
+    Some(format!("{short_version}+{build}"))
+}
+
+/// An update swapped a new app into this window's path, and the new app's
+/// service answers: the window belongs to the replaced app, so reopen it.
+fn should_relaunch(launched: &str, installed: Option<&str>, healthy: impl FnOnce() -> bool) -> bool {
+    installed.is_some_and(|installed| installed != launched) && healthy()
+}
+
+fn relaunch(app: &tauri::AppHandle, bundle: &Path) {
+    let service = app.state::<AppServiceState>();
+    // The service now belongs to the new app: this exit must never unregister it.
+    let cleanup_was_pending = !service.exit_cleanup_attempted.swap(true, Ordering::AcqRel);
+    match Command::new("/usr/bin/open").arg("-n").arg(bundle).status() {
+        Ok(status) if status.success() => {
+            service.quitting.store(true, Ordering::Relaxed);
+            app.exit(0);
+        }
+        outcome => {
+            log::error!("could not reopen the updated CORSIA app: {outcome:?}");
+            if cleanup_was_pending {
+                service.exit_cleanup_attempted.store(false, Ordering::Release);
+            }
+        }
+    }
+}
+
+fn watch_for_swapped_app(app: tauri::AppHandle) {
+    let Ok(bundle) = update_stage::running_bundle() else {
+        return;
+    };
+    let Some(launched) = bundle_generation(&bundle) else {
+        return;
+    };
+    thread::spawn(move || loop {
+        thread::sleep(RELAUNCH_POLL_INTERVAL);
+        let installed = bundle_generation(&bundle);
+        let service = app.state::<AppServiceState>();
+        let port = lifecycle::service_port(&app, &service);
+        if should_relaunch(&launched, installed.as_deref(), || probe_health(port)) {
+            relaunch(&app, &bundle);
+            return;
+        }
+    });
 }
 
 fn register_or_report_status(port: u16) -> Result<service_management::ServiceStatus, String> {
@@ -267,7 +344,7 @@ fn start_service(
     app: &tauri::AppHandle,
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
-    let state_dir = default_state_dir(app)?;
+    let app_dir = default_app_dir(app)?;
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
@@ -277,15 +354,15 @@ fn start_service(
             .path()
             .home_dir()
             .map_err(|error| format!("could not resolve the home folder: {error}"))?;
-        first_run::plan(&home, &state_dir)?
+        first_run::plan(&home, &app_dir)?
     };
     if let first_run::FirstRun::ExistingInstall { reason } = first_run {
         return Err(reason);
     }
-    let port = port_for_startup(&first_run, first_run::recorded_port(&state_dir))?;
+    let port = port_for_startup(&first_run, first_run::recorded_port(&app_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
         let resources = bundled_resource_dir(app).ok();
-        first_run::apply(&workspace, &state_dir, port, |path| {
+        first_run::apply(&workspace, &app_dir, port, |path| {
             first_run::git_init(
                 path,
                 resources.as_deref(),
@@ -294,13 +371,13 @@ fn start_service(
         })?;
     }
     *service
-        .state_dir
+        .app_dir
         .lock()
-        .map_err(|_| "service state is unavailable")? = Some(state_dir.clone());
+        .map_err(|_| "service state is unavailable")? = Some(app_dir.clone());
 
     match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
-            wait_for_service(port, &state_dir)?;
+            wait_for_service(port, &app_dir)?;
             Ok(ServiceStartup::Ready {
                 url: service_url(port),
             })
@@ -333,13 +410,13 @@ fn get_service_log_path(
     app: tauri::AppHandle,
     service: tauri::State<'_, AppServiceState>,
 ) -> Result<String, String> {
-    let state_dir = service
-        .state_dir
+    let app_dir = service
+        .app_dir
         .lock()
         .map_err(|_| "service state is unavailable")?
         .clone()
-        .unwrap_or(default_state_dir(&app)?);
-    Ok(service_log_path(&state_dir).display().to_string())
+        .unwrap_or(default_app_dir(&app)?);
+    Ok(service_log_path(&app_dir).display().to_string())
 }
 
 /// Macos traffic-light positioning workaround.
@@ -450,14 +527,26 @@ fn sync_window_chrome(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let context = tauri::generate_context!();
-    match update_stage::update_stage_argument() {
-        Ok(Some(operation_id)) => std::process::exit(update_stage::run(context, operation_id)),
-        Ok(None) => {}
+    // Every command-line mode is dispatched here, before any window exists.
+    let mode = match command_line_mode(&env::args_os().skip(1).collect::<Vec<_>>()) {
+        Ok(mode) => mode,
         Err(error) => {
             eprintln!("usage error: {error}");
             std::process::exit(update_stage::USAGE_ERROR);
         }
+    };
+    match &mode {
+        Some(CommandLineMode::Service) => std::process::exit(
+            service_management::command_from_environment().unwrap_or(update_stage::USAGE_ERROR),
+        ),
+        Some(CommandLineMode::UpdateSwap(operation_id)) => {
+            std::process::exit(update_swap::run(operation_id))
+        }
+        Some(CommandLineMode::UpdateStage(_)) | None => {}
+    }
+    let context = tauri::generate_context!();
+    if let Some(CommandLineMode::UpdateStage(operation_id)) = mode {
+        std::process::exit(update_stage::run(context, operation_id));
     }
 
     tauri::Builder::default()
@@ -524,6 +613,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppServiceState::default());
+            watch_for_swapped_app(app.handle().clone());
             #[cfg(target_os = "macos")]
             app.set_menu(lifecycle::menu(app.handle())?)?;
             // Apply traffic-light position once the main window is up.
@@ -601,6 +691,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use base64::Engine;
+    use std::fs;
 
     #[test]
     fn updater_configuration_pins_the_release_verification_key() {
@@ -689,19 +780,57 @@ mod tests {
     }
 
     #[test]
-    fn macos_default_state_dir_uses_corsia_not_the_legacy_identifier() {
-        let home = Path::new("/tmp/corsia-desktop-state-test");
-        let state_dir = default_state_dir_for_home(home);
+    fn command_line_modes_take_exactly_one_operation_id() {
+        let args = |values: &[&str]| values.iter().map(OsString::from).collect::<Vec<_>>();
 
         assert_eq!(
-            state_dir,
-            home.join("Library")
-                .join("Application Support")
-                .join("CORSIA")
+            command_line_mode(&args(&["--update-stage", "op-1"])),
+            Ok(Some(CommandLineMode::UpdateStage("op-1".into())))
         );
-        assert!(!state_dir
-            .to_string_lossy()
-            .contains("com.cebertowicz.corsia"));
+        assert_eq!(
+            command_line_mode(&args(&["--update-swap", "op-1"])),
+            Ok(Some(CommandLineMode::UpdateSwap("op-1".into())))
+        );
+        assert_eq!(
+            command_line_mode(&args(&["--service", "status"])),
+            Ok(Some(CommandLineMode::Service))
+        );
+        assert_eq!(command_line_mode(&args(&[])), Ok(None));
+        for refused in [
+            &["--update-stage"][..],
+            &["--update-swap"],
+            &["--update-stage", "op-1", "--service"],
+            &["--update-swap", "op-1", "--update-stage"],
+        ] {
+            assert!(command_line_mode(&args(refused)).is_err(), "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn relaunch_waits_for_a_different_installed_generation_and_a_healthy_service() {
+        let unreachable = || -> bool { panic!("health is only probed after a swap") };
+
+        assert!(!should_relaunch("0.4.0+1", Some("0.4.0+1"), unreachable));
+        assert!(!should_relaunch("0.4.0+1", None, unreachable));
+        assert!(!should_relaunch("0.4.0+1", Some("0.4.1+2"), || false));
+        assert!(should_relaunch("0.4.0+1", Some("0.4.1+2"), || true));
+    }
+
+    #[test]
+    fn bundle_generation_joins_short_version_and_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("CORSIA.app");
+        fs::create_dir_all(bundle.join("Contents")).unwrap();
+        fs::write(
+            bundle.join("Contents").join("Info.plist"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict>\
+             <key>CFBundleShortVersionString</key><string>0.4.0</string>\
+             <key>CFBundleVersion</key><string>7</string></dict></plist>",
+        )
+        .unwrap();
+
+        assert_eq!(bundle_generation(&bundle).as_deref(), Some("0.4.0+7"));
+        assert_eq!(bundle_generation(temp.path()), None);
     }
 
 }

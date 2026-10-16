@@ -4,7 +4,23 @@ set -eu
 resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 contents="$(CDPATH= cd -- "$resources/.." && pwd -P)"
 bundle="$(CDPATH= cd -- "$contents/.." && pwd -P)"
-state_dir="${CORSIA_STATE_DIR:-$HOME/Library/Application Support/CORSIA}"
+# The app folder holds app metadata (service.json). Its name is shared with the
+# app shell (APP_FOLDER) and the backend (platform_paths.APP_FOLDER); a parity
+# test holds the three equal.
+CORSIA_APP_FOLDER=CORSIA
+app_dir="$HOME/Library/Application Support/$CORSIA_APP_FOLDER"
+# The state root has one definition, the backend's default_state_root(). A
+# pre-release preview folder's flat state moves into it first, once, before
+# anything opens it.
+state_dir="$(PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 "$resources/python/bin/python3" -I -c '
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import default_state_root, move_preview_layout
+state = default_state_root()
+move_preview_layout(Path(sys.argv[2]), state)
+print(state)
+' "$resources/backend" "$app_dir")" || exit 1
 mkdir -p "$state_dir/logs"
 # The service identity comes from the bundle that launchd started, never an
 # inherited shell environment. This makes a replaced bundle observable.
@@ -14,7 +30,6 @@ bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info_pli
 export CORSIA_SERVICE_GENERATION="$bundle_short_version+$bundle_version"
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
-export CORSIA_DESKTOP_BUNDLE=1
 login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
 base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # Bundled Git's exec path leads, ahead of the login PATH, so a plain `git` never
@@ -29,14 +44,13 @@ export PATH="$CORSIA_SERVICE_PATH"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_TERMINAL_PROMPT=0
 export PYTHONPATH="$resources/python/backend-packages"
-export CORSIA_STATE_DIR="$state_dir"
 
 # service.json (written once by the app shell) names the workspace and port.
 # It is parsed, never sourced, and only those two keys are honoured. An
 # explicit CORSIA_WORKSPACE or --port still wins, which is what tests use.
 service_file_port=""
 config_notes=""
-if [ -f "$state_dir/service.json" ]; then
+if [ -f "$app_dir/service.json" ]; then
   config_notes="$(PYTHONNOUSERSITE=1 "$resources/python/bin/python3" -I -B -c '
 import json, sys
 KEYS = ("workspace", "port")
@@ -65,7 +79,7 @@ if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
     print("port=%d" % port)
 elif "port" in data:
     print("note=service.json: ignoring an invalid port value")
-' "$state_dir/service.json" 2>/dev/null || true)"
+' "$app_dir/service.json" 2>/dev/null || true)"
   if [ -z "$config_notes" ]; then config_notes="note=service.json: could not be read"; fi
   file_workspace=""
   parsed_notes=""

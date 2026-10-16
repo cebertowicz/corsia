@@ -15,38 +15,43 @@ use minisign_verify::{PublicKey, Signature};
 use semver::Version;
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::app_paths;
+
 pub const UPDATE_STAGED: i32 = 0;
 pub const FETCH_FAILED: i32 = 41;
 pub const BUILD_FAILED: i32 = 42;
 pub const USAGE_ERROR: i32 = 64;
+// Another stage or swap holds the update lock (EX_TEMPFAIL).
+pub const UPDATE_BUSY: i32 = 75;
 // The current notarized archive is about 672 MiB. This leaves 50% headroom for
 // normal release growth while bounding a malicious or malformed response.
 pub const MAX_ARCHIVE_BYTES: u64 = 1_024 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const STALL_TIMEOUT: Duration = Duration::from_secs(20);
-const ARCHIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const ARCHIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const STAGING_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024;
 
-pub fn update_stage_argument() -> Result<Option<String>, String> {
-    parse_update_stage_args(&env::args_os().skip(1).collect::<Vec<_>>())
-}
-
-fn parse_update_stage_args(args: &[std::ffi::OsString]) -> Result<Option<String>, String> {
-    if args.is_empty() {
-        return Ok(None);
-    }
-    if args.len() == 2 && args[0] == "--update-stage" && !args[1].is_empty() {
-        return Ok(Some(args[1].to_string_lossy().into_owned()));
-    }
-    if args.iter().any(|arg| arg == "--update-stage") {
-        return Err(
-            "--update-stage requires exactly one operation ID and no other mode flags".into(),
-        );
-    }
-    Ok(None)
-}
-
 pub fn run(mut context: tauri::Context<tauri::Wry>, operation_id: String) -> i32 {
+    // The lock comes before anything else, so a second update never touches
+    // the first one's staged copy.
+    let state_dir = match app_paths::app_dir() {
+        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+        Err(reason) => {
+            eprintln!("update staging failed: {reason}");
+            return BUILD_FAILED;
+        }
+    };
+    let _lock = match app_paths::try_lock_update(&state_dir) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            eprintln!("update staging refused: another update is in progress");
+            return UPDATE_BUSY;
+        }
+        Err(reason) => {
+            eprintln!("update staging failed: {reason}");
+            return BUILD_FAILED;
+        }
+    };
     context.config_mut().app.windows.clear();
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     let app = match tauri::Builder::default()
@@ -104,6 +109,9 @@ async fn stage<R: tauri::Runtime>(
     let staging_root = staged_bundle.with_extension("work");
     clear_previous_stage(&staged_bundle).map_err(StageError::Build)?;
     clear_previous_stage(&staging_root).map_err(StageError::Build)?;
+    // The swap keeps the app it replaces here until the new version is
+    // proven; an earlier update's copy is cleared so this one can swap.
+    clear_previous_stage(&previous_path(&current_bundle)).map_err(StageError::Build)?;
     fs::create_dir(&staging_root).map_err(|error| StageError::Build(error.to_string()))?;
 
     let result = stage_in_work(app, &current_bundle, &staged_bundle, &staging_root).await;
@@ -420,7 +428,7 @@ fn updater_public_key() -> Result<PublicKey, String> {
         .map_err(|error| error.to_string())
 }
 
-fn running_bundle() -> Result<PathBuf, String> {
+pub(crate) fn running_bundle() -> Result<PathBuf, String> {
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     executable
         .parent()
@@ -431,8 +439,12 @@ fn running_bundle() -> Result<PathBuf, String> {
         .ok_or_else(|| "update staging must run from a CORSIA.app bundle".into())
 }
 
-fn staged_path(current_bundle: &Path) -> PathBuf {
+pub(crate) fn staged_path(current_bundle: &Path) -> PathBuf {
     current_bundle.with_file_name("CORSIA.app.staged")
+}
+
+pub(crate) fn previous_path(current_bundle: &Path) -> PathBuf {
+    current_bundle.with_file_name("CORSIA.app.previous")
 }
 
 fn clear_previous_stage(staged: &Path) -> Result<(), String> {
@@ -466,7 +478,7 @@ struct SigningIdentity {
     requirement: String,
 }
 
-fn verify_bundle_identity(current: &Path, staged: &Path) -> Result<(), String> {
+pub(crate) fn verify_bundle_identity(current: &Path, staged: &Path) -> Result<(), String> {
     let current_identity = code_identity(current)?;
     let staged_identity = code_identity(staged)?;
     ensure_matching_identity(&current_identity, &staged_identity)
@@ -547,28 +559,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn update_stage_requires_exactly_one_operation_id() {
-        use std::ffi::OsString;
-
-        assert_eq!(
-            parse_update_stage_args(&[OsString::from("--update-stage"), OsString::from("op-1")]),
-            Ok(Some("op-1".into()))
-        );
-        assert_eq!(
-            parse_update_stage_args(&[OsString::from("--service")]),
-            Ok(None)
-        );
-        assert!(parse_update_stage_args(&[OsString::from("--update-stage")]).is_err());
-        assert!(parse_update_stage_args(&[
-            OsString::from("--update-stage"),
-            OsString::from("op-1"),
-            OsString::from("--service"),
-        ])
-        .is_err());
+    fn stage_limits_and_exit_codes_are_stable() {
         assert_eq!(MAX_ARCHIVE_BYTES, 1_024 * 1024 * 1024);
+        assert_eq!(ARCHIVE_CONNECT_TIMEOUT, Duration::from_secs(20));
         assert_eq!(
-            (UPDATE_STAGED, FETCH_FAILED, BUILD_FAILED, USAGE_ERROR),
-            (0, 41, 42, 64)
+            (UPDATE_STAGED, FETCH_FAILED, BUILD_FAILED, USAGE_ERROR, UPDATE_BUSY),
+            (0, 41, 42, 64, 75)
         );
     }
 

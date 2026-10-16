@@ -82,7 +82,7 @@ def test_descriptor_limit_precedes_frontend_pairing(monkeypatch) -> None:
 
 def test_packaged_desktop_skips_checkout_release_pairing(monkeypatch, tmp_path) -> None:
     """An immutable app bundle serves its included frontend without checkout scripts."""
-    monkeypatch.setenv("CORSIA_DESKTOP_BUNDLE", "1")
+    monkeypatch.setattr(frontend_build, "app_bundle_root", lambda: tmp_path / "CORSIA.app")
     monkeypatch.setattr(frontend_build, "FRONTEND_ROOT", tmp_path)
     monkeypatch.setattr(
         frontend_build.subprocess,
@@ -91,6 +91,18 @@ def test_packaged_desktop_skips_checkout_release_pairing(monkeypatch, tmp_path) 
     )
 
     frontend_build.ensure_frontend_built()
+
+
+def test_an_environment_variable_cannot_claim_app_mode(monkeypatch, tmp_path) -> None:
+    """App mode is the module's location; a source install still pairs its release."""
+    run = Mock(return_value=subprocess.CompletedProcess(["corsia"], 0))
+    monkeypatch.setenv("CORSIA_DESKTOP_BUNDLE", "1")
+    monkeypatch.setattr(frontend_build, "FRONTEND_ROOT", tmp_path)
+    monkeypatch.setattr(frontend_build.subprocess, "run", run)
+
+    frontend_build.ensure_frontend_built()
+
+    assert run.call_count == 1
 
 
 def test_frontend_pairing_passes_resolved_runtime_identity(monkeypatch, tmp_path) -> None:
