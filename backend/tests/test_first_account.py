@@ -238,6 +238,14 @@ def test_the_cli_and_the_setup_route_write_the_same_profile(client, workspace, m
     assert from_route.startswith("# User profile\n\n- **Preferred name:** Pat Example\n- **Email:** pat@example.test\n")
 
 
+def test_cli_first_account_queues_the_script_path(workspace, monkeypatch):
+    import json
+
+    assert _cli_first_account(monkeypatch, name="pat", answers=["Pat Example", "pat@example.test"]) == 0
+    [wake] = accounts._db(None).execute("SELECT metadata FROM messages WHERE id LIKE 'first-run:%'").fetchall()
+    assert json.loads(wake["metadata"])["first_run_path"] == "script"
+
+
 def test_staging_a_profile_changes_nothing_until_it_is_published(workspace):
     staged = user_profile.stage_user_profile(workspace, "Pat", "America/Los_Angeles", "")
     assert staged is not None

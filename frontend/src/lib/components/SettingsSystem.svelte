@@ -77,26 +77,8 @@
 		}
 	}
 
-	let accountConfirm = $state<'logout' | 'reset-url' | null>(null);
+	let accountConfirm = $state<'logout' | null>(null);
 	let accountInProgress = $state(false);
-	let isTauri = $state(false);
-	$effect(() => {
-		if (typeof window !== 'undefined') {
-			isTauri = !!((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
-		}
-	});
-
-	async function resetServerUrl() {
-		const tauri = (window as any).__TAURI_INTERNALS__ ?? (window as any).__TAURI__;
-		const invoke = tauri?.invoke ?? (window as any).__TAURI__?.core?.invoke;
-		if (!invoke) {
-			settingsError = 'Tauri runtime not available — open in the desktop shell.';
-		return;
-	}
-	await invoke('reset_server_url');
-	await logout();
-	window.location.href = 'tauri://localhost';
-	}
 
 	function memoryColor(pressure: string): string {
 		if (pressure === 'critical') return 'var(--red)';
@@ -165,7 +147,7 @@
 
 <div class="settings-card">
 	<h3>Account</h3>
-	<p class="card-desc">Sign out of this CORSIA instance, or {isTauri ? 'reset the desktop shell back to the server picker' : 'sign in again with a different token'}.</p>
+	<p class="card-desc">Sign out of this CORSIA instance and return to its login screen.</p>
 
 	<div class="service-grid">
 		<div class="service-row">
@@ -181,27 +163,7 @@
 				{/if}
 			</div>
 		</div>
-		{#if isTauri}
-			<div class="service-row">
-				<span class="service-name">Reset URL</span>
-				<span class="service-status">Forgets this server and reopens the CORSIA picker.</span>
-				<div class="service-actions">
-					{#if accountConfirm !== 'reset-url'}
-						<Button size="sm" onclick={() => accountConfirm = 'reset-url'}>Reset</Button>
-					{:else}
-						<span class="confirm-text">Reset and reopen picker?</span>
-						<Button variant="danger" size="sm" disabled={accountInProgress} onclick={async () => {
-							accountInProgress = true;
-							try { await resetServerUrl(); }
-							catch (e) { settingsError = String(e); }
-							accountConfirm = null;
-							accountInProgress = false;
-						}}>{accountInProgress ? 'Resetting…' : 'Confirm'}</Button>
-						<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
-					{/if}
-				</div>
-			</div>
-		{/if}
+
 	</div>
 </div>
 

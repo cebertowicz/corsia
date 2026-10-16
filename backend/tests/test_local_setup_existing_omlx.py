@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from llm import local_setup, local_setup_existing, local_setup_ownership, local_sources
+from llm import local_setup, local_setup_existing, local_setup_operation, local_setup_ownership, local_sources
 from vendor_account_fixtures import isolated_shutdown_tasks  # noqa: F401
 
 ELIGIBLE = local_setup.Eligibility(40960, True)
@@ -17,6 +17,7 @@ ELIGIBLE = local_setup.Eligibility(40960, True)
 
 @pytest.fixture(autouse=True)
 def fresh_flight(monkeypatch):
+    local_setup_operation.clear()
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: None)
     monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: ELIGIBLE)

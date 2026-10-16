@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 PROFILE_RELATIVE_PATH = Path("context") / "50-USER-PROFILE.md"
 _LOCALTIME = Path("/etc/localtime")
 _EMAIL_LABEL = "- **Email:**"
+_NAME_LABEL = "- **Preferred name:**"
 
 
 def mac_full_name() -> str:
@@ -82,6 +83,19 @@ def profile_email(workspace: Path) -> str:
         return _email_in((Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8"))
     except OSError:
         return ""
+
+
+def profile_name(workspace: Path) -> str:
+    """The existing profile's preferred name, without control characters, or empty."""
+    try:
+        text = (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        if line.startswith(_NAME_LABEL):
+            name = "".join(char for char in line.removeprefix(_NAME_LABEL) if char.isprintable())
+            return one_line(name)[:120]
+    return ""
 
 
 class StagedProfile:
