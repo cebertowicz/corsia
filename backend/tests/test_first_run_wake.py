@@ -351,13 +351,16 @@ class TestAppPath:
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
-    # This base does not yet serve the app reference; validate its fact contract when Agent Substrate ships it.
+    # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
+    # (`setup.setup_decisions`, the `user_profile` fields), which are not facts of their own.
     @pytest.mark.skipif(not __import__("onboarding.first_run_wake", fromlist=["app_reference_served"]).app_reference_served(), reason="first-run-app.md is not served on this base")
     def test_served_app_reference_names_the_app_fact_keys(self):
         import re
 
         from onboarding import first_run_wake
 
-        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("**How you talk.**", 1)[0]
-        keys = {key.split(".", 1)[0] for key in re.findall(r"`([^`]+)`", paragraph)}
-        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path"}
+        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("Never restate", 1)[0]
+        top_level = re.sub(r"\([^)]*\)", "", paragraph)
+        keys = set(re.findall(r"`([a-z_]+)`", top_level))
+        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path", "setup"}
+        assert "`setup.setup_decisions`" in paragraph  # setup is named through its nested decisions
