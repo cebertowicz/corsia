@@ -89,11 +89,12 @@ def get_attention_state(artifact_id: str, *, db=None) -> str | None:
 
 
 def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]]:
-    """Return metadata-raised non-asks and open asks, optionally by subscriber.
+    """Return metadata-raised non-asks and undeferred open asks, optionally by subscriber.
 
     An ask is visible because its hold is open, not because mutable artifact
-    metadata happens to agree. Non-ask attention (including decisions) keeps
-    its existing metadata-backed lifecycle.
+    metadata happens to agree; the person's deferral of that hold takes it out
+    until the deferral ends. Non-ask attention (including decisions) keeps its
+    existing metadata-backed lifecycle.
     """
     from plans import public as plans_public
 
@@ -111,8 +112,6 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
         ).fetchall()
         rows = {str(row["id"]): dict(row) for row in metadata_rows}
         if ask_holds:
-            # Every open request is listed, as the review bar and the rule count
-            # it: one still holding a task stays answerable here.
             marks = ",".join("?" * len(ask_holds))
             rows.update({
                 str(row["id"]): dict(row)
@@ -131,13 +130,10 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
             metadata = json.loads(rowd["metadata"]) if rowd["metadata"] else {}
             holds = ask_holds.get(artifact_id)
             if holds:
-                metadata = dict(metadata)
-                metadata["attention_state"] = (
-                    ATTENTION_DEFERRED
-                    if metadata.get("attention_state") == ATTENTION_DEFERRED
-                    and metadata.get("deferred_hold_id") in holds
-                    else ATTENTION_RAISED
-                )
+                if (metadata.get("attention_state") == ATTENTION_DEFERRED
+                        and metadata.get("deferred_hold_id") in holds):
+                    continue
+                metadata = {**metadata, "attention_state": ATTENTION_RAISED}
             raised.append({"identity": identity,
                            "external_id": rowd["external_id"],
                            "title": rowd.get("title"),
@@ -153,11 +149,12 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
 def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
-    db=None, drives: list[str] | None = None,
+    hold_ids: list[str] | None = None, db=None, drives: list[str] | None = None,
 ) -> AttentionResult:
     """Clear attention through one of the public user/system outcomes.
 
-    A review ``verdict`` (with its optional ``note``) rides only on ``answer``.
+    A review ``verdict`` (with its optional ``note`` and the ``hold_ids`` the
+    person answered) rides only on ``answer``.
     ``drives`` collects the threads this write gave a plan wake (an answered
     ask's asker), for the caller to drive once the write has committed.
     """
@@ -165,11 +162,11 @@ def clear_attention(
         raise AttentionError(f"unknown clearing outcome {outcome!r}")
     if (verdict is not None or note is not None) and outcome != "answer":
         raise AttentionError("a verdict or note goes only with the answer outcome")
-    if note is not None and verdict is None:
-        raise AttentionError("a note needs a verdict")
+    if (note is not None or hold_ids is not None) and verdict is None:
+        raise AttentionError("a note or hold_ids need a verdict")
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
-        verdict=verdict, note=note, db=db, drives=drives,
+        verdict=verdict, note=note, hold_ids=hold_ids, db=db, drives=drives,
     )
 
 
@@ -183,7 +180,7 @@ def retire_attention(artifact_id: str, *, db=None) -> AttentionResult:
 def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
-    db=None, drives: list[str] | None = None,
+    hold_ids: list[str] | None = None, db=None, drives: list[str] | None = None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -207,7 +204,7 @@ def _clear_attention(
             # reaches its owner in this same write.
             from doceditor import review_bar
 
-            answer = review_bar.answer(_db, str(row["id"]), verdict, note)
+            answer = review_bar.answer(_db, str(row["id"]), verdict, note, hold_ids)
         defer_condition = None
         if outcome == "defer":
             defer_condition = validate_defer_condition(condition)

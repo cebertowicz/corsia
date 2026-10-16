@@ -247,6 +247,7 @@ class ClearBody(BaseModel):
     reason: str | None = None
     verdict: str | None = None
     note: str | None = None
+    hold_ids: list[str] | None = None
 
 
 @router.post("/{artifact_id}/clear")
@@ -262,7 +263,8 @@ async def post_clear(artifact_id: str, body: ClearBody):
     try:
         result = await run_in_db(lambda: attention.clear_attention(
             artifact_id, outcome=body.outcome, condition=body.condition,
-            reason=body.reason, verdict=body.verdict, note=body.note, drives=woken,
+            reason=body.reason, verdict=body.verdict, note=body.note,
+            hold_ids=body.hold_ids, drives=woken,
         ))
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422

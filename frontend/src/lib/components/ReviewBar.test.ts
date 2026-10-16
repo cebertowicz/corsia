@@ -280,15 +280,15 @@ describe('ReviewBar', () => {
 		expect(host.querySelector('textarea')).toBeNull();
 	});
 
-	it('a plain Approve is not blocked by a draft', async () => {
+	it('a plain Approve is not blocked by a draft, and answers the request it shows', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0) });
 		await render(true);
 		button('Approve')!.click();
-		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', ''));
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']));
 	});
 
-	it('a stale refusal says the request ended, never that it was replaced', async () => {
+	it('a stale refusal says the request ended', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockRejectedValue(new ReviewRefusal('ask_stale', 'gone'));
 		await render();
@@ -296,7 +296,6 @@ describe('ReviewBar', () => {
 		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.stale')).toBeTruthy());
 		expect(host.querySelector('.review-bar.stale')!.textContent).toContain('This review request has ended');
-		expect(host.textContent).not.toContain('replaced');
 	});
 
 	it('tells the viewer to re-read its pending batch once the answer is confirmed, and not on a failed send', async () => {

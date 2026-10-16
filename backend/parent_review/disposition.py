@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from events.disposition import delivery_disposition
-from infra.database import get_db, write_transaction
+from infra.database import write_transaction
 from infra.product_events import emit_product_event
 from registry import artifact_record as AR
 from registry import models
@@ -177,29 +177,27 @@ def dispose(
         return _do_reroute(artifact_id, new_owner, authority, reason, actor_thread, db)
     from plans import public as plans_public
 
-    _db = db or get_db()
-    try:
-        with plans_public.collect_wake_recipients(_db, drives):
-            identity = _resolve(artifact_id, _db)
-            record = AR.register_or_resolve(
-                {"integration": identity["integration"], "type": identity["type"],
-                 "external_id": identity["external_id"]}, db=_db)
-            child_owner = record.owner_thread
+    # One write: the wakes collected are this disposition's alone, and a failed
+    # ask release leaves no outcome recorded.
+    with write_transaction(db, scope="parent_dispose") as _db, \
+            plans_public.collect_wake_recipients(_db, drives):
+        identity = _resolve(artifact_id, _db)
+        record = AR.register_or_resolve(
+            {"integration": identity["integration"], "type": identity["type"],
+             "external_id": identity["external_id"]}, db=_db)
+        child_owner = record.owner_thread
 
-            if outcome == APPROVE_TO_USER:
-                return _do_approve(identity, artifact_id, review_result,
-                                   override_blocking, authority, reason, actor_thread, _db)
-            if outcome == DEFER_UNTIL:
-                return _do_defer(identity, artifact_id, child_owner, condition, reason, _db)
-            if outcome == SUPERSEDE:
-                return _do_supersede(identity, artifact_id, child_owner,
-                                     replacement_id, reason, _db)
-            # reject_with_reason / answer_internally / request_revision
-            return _do_route_back(identity, artifact_id, child_owner, outcome,
-                                  reason or answer, _db)
-    finally:
-        if not db:
-            _db.close()
+        if outcome == APPROVE_TO_USER:
+            return _do_approve(identity, artifact_id, review_result,
+                               override_blocking, authority, reason, actor_thread, _db)
+        if outcome == DEFER_UNTIL:
+            return _do_defer(identity, artifact_id, child_owner, condition, reason, _db)
+        if outcome == SUPERSEDE:
+            return _do_supersede(identity, artifact_id, child_owner,
+                                 replacement_id, reason, _db)
+        # reject_with_reason / answer_internally / request_revision
+        return _do_route_back(identity, artifact_id, child_owner, outcome,
+                              reason or answer, _db)
 
 
 def _do_approve(identity, artifact_id, review_result, override_blocking,

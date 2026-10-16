@@ -148,8 +148,15 @@ def round_state(db, artifact_id: str) -> dict:
     }
 
 
-def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer:
+def answer(
+    db, artifact_id: str, verdict: str, note: str | None,
+    hold_ids: list[str] | None = None,
+) -> ReviewAnswer:
     """Check the verdict against the round, then close the user's open feedback batch.
+
+    ``hold_ids`` are the asks the person's bar showed (``round_state``); when
+    the newest open ask is not among them, it replaced what they read, so the
+    verdict is refused as stale rather than applied to a request they never saw.
 
     Runs in the caller's write transaction, before the asks are released, so
     the feedback task exists when the release notice points at it.
@@ -162,7 +169,7 @@ def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer
     if note and len(note) > NOTE_MAX:
         raise AnswerRefused("note_too_long", f"The note is over {NOTE_MAX} characters.")
     asks = raised_asks(db, artifact_id)
-    if not asks:
+    if not asks or (hold_ids is not None and str(asks[0]["hold_id"]) not in hold_ids):
         raise AnswerRefused("ask_stale", STALE)
     since = asks[0]["raised_at"]
     counts = round_counts(db, artifact_id, since)

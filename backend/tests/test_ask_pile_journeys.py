@@ -302,15 +302,15 @@ def test_defer_expiry_withdraw_and_reask_follow_the_open_hold(db):
     deadline = {"type": "deadline", "value": "2026-10-01T16:00:00+00:00"}
 
     attention.clear_attention(artifact_id, outcome="defer", condition=deadline, db=db)
-    [item] = attention.list_raised(db=db)
-    assert item["metadata"]["attention_state"] == "deferred"
-    assert item["metadata"]["deferred_hold_id"] == hold_id
-    assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
+    assert _metadata(db, artifact_id)["deferred_hold_id"] == hold_id
+    assert _in_pile(db, "proposal.md") == set()
+    assert _needs_you(db) == []
 
     watch = watches.arm_watch(artifact_id, deadline, owner_thread="owner", db=db)
     watches.expire_watch(watch.id, db=db)
     [item] = attention.list_raised(db=db)
     assert item["metadata"]["attention_state"] == "raised"
+    assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
 
     _withdraw(db, plan_id, node_id, hold_id)
     assert _in_pile(db, "proposal.md") == set()
@@ -399,6 +399,26 @@ def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db):
     assert db.execute(
         "SELECT COUNT(*) FROM context_change_journal WHERE change_kind='artifact.disposition'",
     ).fetchone()[0] == 1
+
+
+def test_a_disposition_whose_release_fails_records_nothing(db, monkeypatch):
+    from parent_review.disposition import REJECT_WITH_REASON, dispose
+    from plans import public as plans_public
+
+    _plan_id, _node_id, artifact_id, hold_id = _asked(db)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("release failed")
+
+    monkeypatch.setattr(plans_public, "ask_cleared", fail)
+    with pytest.raises(RuntimeError):
+        dispose(artifact_id, REJECT_WITH_REASON, reason="Not yet", db=db)
+
+    assert "disposition_outcome" not in _metadata(db, artifact_id)
+    assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
+    assert db.execute(
+        "SELECT cleared_at FROM plan_node_holds WHERE id=?", (hold_id,),
+    ).fetchone()["cleared_at"] is None
 
 
 def test_an_approval_on_an_open_ask_records_its_audit_but_not_its_state(db):
