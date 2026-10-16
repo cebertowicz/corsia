@@ -158,7 +158,9 @@ async def lifespan(app: FastAPI):
         from infra.settings import get_devices_enabled
         await devices_runtime.restore(app, await run_in_db(get_devices_enabled))
         await start_documents()
+        from llm.local_model import backfill_legacy_record
         from llm.local_setup import resume_pending_setup
+        await asyncio.to_thread(backfill_legacy_record)
         await resume_pending_setup()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(

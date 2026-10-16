@@ -102,7 +102,8 @@ def compute(root: Path) -> ClosureResult:
             context_files.append(path)
         elif entry["kind"] == "skill":
             skill = Path(rel).parts[1]
-            result.manifest_skills.add(skill)
+            if Path(rel).parts[2:] == ("SKILL.md",):
+                result.manifest_skills.add(skill)  # an asset-only directory is not a skill
             skill_files.setdefault(skill, []).append(path)
 
     kit_skills = _skill_names(kit / "skills")

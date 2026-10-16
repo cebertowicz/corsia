@@ -31,7 +31,7 @@
     "backend/host_access/supervisor.py": 1728,
     "backend/infra/host_access_leases.py": 1177,
     "backend/infra/project_repo_policy.py": 1082,
-    "backend/infra/schema.py": 526,
+    "backend/infra/schema.py": 525,
     "backend/infra/send_dispatch.py": 644,
     "backend/llm/isolated_structured.py": 2195,
     "backend/registry/durable_writes.py": 799,
@@ -54,7 +54,7 @@
     "frontend/src/lib/ws/handlers.ts": 365,
     "frontend/src/lib/ws/handlersTurns.ts": 478,
     "frontend/src/routes/+page.svelte": 499,
-    "frontend/src/routes/_design/+page.svelte": 648
+    "frontend/src/routes/_design/+page.svelte": 611
   },
   "function_limits": {
     "backend/api/delegation.py::create_thread": 154,

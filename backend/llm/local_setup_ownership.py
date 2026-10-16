@@ -270,6 +270,21 @@ def _present_bytes(folder: Path) -> int:
     return total
 
 
+def download_complete(folder: Path, download_bytes: int) -> bool:
+    """Whether ``folder`` holds a finished download: every expected byte, and no partial file.
+
+    A cancelled or failed download leaves its folder behind (oMLX resumes there), so the
+    folder existing proves nothing. Partial files carry Hugging Face's ``.incomplete``
+    suffix until they are renamed into place.
+    """
+    if not folder.is_dir():
+        return False
+    for _root, _dirs, files in os.walk(folder):
+        if any(name.endswith(".incomplete") for name in files):
+            return False
+    return _present_bytes(folder) >= download_bytes
+
+
 def require_free_disk(download_bytes: int, model_dir: Path | None, repository: str) -> None:
     """Raise DiskSpaceError when ``model_dir``'s volume lacks room for what is still to download.
 

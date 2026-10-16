@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from collections import namedtuple
 
 import pytest
@@ -56,6 +57,88 @@ def test_loader_rejects_malformed_settings_files(tmp_path):
             load(bad)
     with pytest.raises(RuntimeError, match="unreadable"):
         local_profiles.load_settings(tmp_path / "absent.json")
+
+
+@pytest.fixture
+def legacy(monkeypatch, tmp_path):
+    """A finished pre-record setup: setup's marker, its working oMLX, and the starter on disk."""
+    from llm import local_model
+
+    state = tmp_path / "state"
+    settings = tmp_path / "omlx" / "settings.json"
+    model_dir = tmp_path / "models"
+    starter = model_dir / local_profiles.OWN_OMLX_STARTER.repository
+    starter.mkdir(parents=True)
+    with open(starter / "model.safetensors", "wb") as weights:  # sparse: full size, no disk
+        weights.truncate(local_profiles.OWN_OMLX_STARTER.download_size_bytes)
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"model": {"model_dir": str(model_dir)}}))
+    state.mkdir()
+    (state / "marker").write_text("installed")
+    env = {"omlx": "/opt/homebrew/bin/omlx", "foreign": False}
+    monkeypatch.setattr(local_model, "_record_path", lambda: state / "local-model.json")
+    monkeypatch.setattr(local_setup_operation, "record_path", lambda: state / "operation.json")
+    monkeypatch.setattr("llm.local_setup_ownership.marker_path", lambda: state / "marker")
+    monkeypatch.setattr("llm.local_setup_ownership.own_omlx_settings_file", lambda: settings)
+    monkeypatch.setattr("llm.local_setup_ownership.installed_omlx", lambda: env["omlx"])
+    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: env["foreign"])
+    return local_model, state, model_dir, env
+
+
+def test_startup_backfills_the_starter_a_finished_legacy_setup_installed(legacy):
+    local_model, state, _model_dir, _env = legacy
+
+    assert local_model.set_up_model() is None
+    assert local_model.backfill_legacy_record() == local_profiles.OWN_OMLX_STARTER
+    assert local_model.set_up_model() == local_profiles.OWN_OMLX_STARTER
+    assert json.loads((state / "local-model.json").read_text()) == local_model.to_record(
+        local_profiles.OWN_OMLX_STARTER)
+    assert local_model.backfill_legacy_record() is None
+
+
+@pytest.mark.parametrize("case", [
+    "no_marker", "no_omlx", "foreign", "no_starter", "setup_in_flight", "download_short", "download_partial",
+])
+def test_startup_backfill_never_fires_without_proof_of_a_finished_setup(legacy, case):
+    local_model, state, model_dir, env = legacy
+    if case == "no_marker":
+        (state / "marker").unlink()
+    elif case == "no_omlx":
+        env["omlx"] = None
+    elif case == "foreign":
+        env["foreign"] = True
+    elif case == "no_starter":
+        shutil.rmtree(model_dir / local_profiles.OWN_OMLX_STARTER.repository)
+    elif case == "download_short":
+        # A cancelled or failed download: setup cleared its record, the folder stays.
+        weights = model_dir / local_profiles.OWN_OMLX_STARTER.repository / "model.safetensors"
+        with open(weights, "r+b") as handle:
+            handle.truncate(local_profiles.OWN_OMLX_STARTER.download_size_bytes - 1)
+    elif case == "download_partial":
+        (model_dir / local_profiles.OWN_OMLX_STARTER.repository / "tokenizer.json.incomplete").write_text("{")
+    else:
+        (state / "operation.json").write_text(json.dumps({"profile": "legacy-mid-download"}))
+
+    assert local_model.backfill_legacy_record() is None
+    assert not (state / "local-model.json").exists()
+
+
+def test_local_setup_view_reads_ram_once_per_process(monkeypatch):
+    from llm import local_setup_gates, local_setup_prepare
+
+    reads = []
+    monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: reads.append(True) or 128 * GIB)
+    local_setup_gates.host_ram_bytes.cache_clear()
+    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: False)
+    monkeypatch.setattr("llm.local_model.set_up_model", lambda: None)
+    monkeypatch.setattr(local_setup_prepare, "_prepare", local_setup_prepare._Prepare())
+
+    try:
+        assert asyncio.run(local_setup_prepare.pick_view())["state"] == "not_checked"
+        assert asyncio.run(local_setup_prepare.pick_view())["state"] == "not_checked"
+        assert reads == [True]
+    finally:
+        local_setup_gates.host_ram_bytes.cache_clear()
 
 
 def test_download_and_settings_use_the_picked_model(monkeypatch):

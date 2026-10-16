@@ -28,6 +28,8 @@ LOCKED_HOME = "/var/empty/corsia-gh-agent-locked"
 LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 DEVICE_URL = "https://github.com/login/device"
 _USER_CODE = re.compile(r"one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})\b")
+# gh wraps the marker and code in ANSI SGR sequences when colour is enabled.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 # A stored token line in ``hosts.yml``; its value is never read out of the match.
 _TOKEN_LINE = re.compile(rb"^\s+oauth_token:\s*\S", re.MULTILINE)
 
@@ -132,9 +134,10 @@ def parse_status(code: int, stdout: bytes) -> tuple[bool | None, dict[str, str]]
     return False, {}
 
 
-def signin_prompt(line: str) -> dict[str, str] | None:
-    """The device code a ``gh`` web sign-in prints; nothing else of its output is kept."""
-    match = _USER_CODE.search(line)
+def signin_prompt(output: str) -> dict[str, str] | None:
+    """Read ``gh``'s device code after removing terminal formatting and carriage returns."""
+    normalized = _ANSI_ESCAPE.sub("", output).replace("\r", "")
+    match = _USER_CODE.search(normalized)
     return {"user_code": match.group(1), "verification_uri": DEVICE_URL} if match else None
 
 

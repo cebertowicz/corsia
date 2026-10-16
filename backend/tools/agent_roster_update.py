@@ -67,6 +67,7 @@ class AgentRosterEntryTool(Tool):
                 return {
                     "thread_id": thread_id,
                     "updated_at": target["agent_roster_updated_at"],
+                    "name": target["title"],
                     "agent_enabled": bool(target["agent_enabled"]),
                     "active": target["agent_status"] == "active",
                     "responsibility": target["agent_responsibility"],
@@ -113,6 +114,10 @@ class AgentRosterUpdateTool(Tool):
                 "expected_updated_at": {
                     "type": "string", "minLength": 1,
                     "description": "The target's roster updated_at from a fresh agent_roster_entry read.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The agent's display name (its thread title), 1-80 characters.",
                 },
                 "responsibility": {"type": "string"},
                 "responsibility_paths": {

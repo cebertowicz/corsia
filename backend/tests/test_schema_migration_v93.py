@@ -10,7 +10,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_v93_clears_canonical_subscription_costs_preserving_tokens_idempotently():
-    assert SCHEMA_VERSION == 123
+    assert SCHEMA_VERSION == 124
     assert MIGRATIONS[92] is migrate_92_to_93
     rows = [
         ("host_access_application_review", "claude-code/sonnet", 0.11, 11, 1),

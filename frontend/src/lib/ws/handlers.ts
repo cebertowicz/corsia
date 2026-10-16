@@ -33,7 +33,7 @@ import { acceptThreadModelTruth } from '../stores/models';
 import { handleCheckpointChanged } from './checkpointInvalidation';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
 
-import { threadSwitchFields } from './threadSwitchFields';
+import { threadFrameFields } from './threadFrameFields';
 import { FORWARDED_TYPES } from './forwardedTypes';
 
 function reconcileCorrelatedMessage(
@@ -299,7 +299,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 						...s,
 						...(data.title !== undefined ? { title: data.title } : {}),
 						...(data.last_message !== undefined ? { last_message: data.last_message } : {}),
-						...threadSwitchFields(data),
+						...threadFrameFields(data),
 						...threadAccountFields(data),
 						...(!carriesModelTruth && data.updated_at !== undefined
 							? { updated_at: data.updated_at }

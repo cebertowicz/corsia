@@ -19,6 +19,41 @@ require_no_extra_lifecycle_args() {
     done
 }
 
+# Once the CORSIA app adopts an install it runs its own service on that state
+# root and records it in service.json (its app folder, platform_paths). A second
+# backend on the same state root would share one database, so start and restart
+# from a source checkout refuse. The app runs this same script on that root and
+# is never refused. A missing file, or one without state_dir, leaves the install
+# unclaimed; a file that cannot be read is treated as claimed.
+refuse_if_app_owns_install() {
+    is_app_mode && return 0
+    local verdict
+    verdict="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import SERVICE_FILE, app_metadata_dir, service_file_state_dir
+path = app_metadata_dir() / SERVICE_FILE
+try:
+    claimed = service_file_state_dir(path)
+except ValueError:
+    print("unreadable", path)
+else:
+    if claimed is not None and str(claimed) == os.path.realpath(sys.argv[2]):
+        print("owned", path)
+' "$BACKEND_DIR" "$CORSIA_STATE_DIR" 2>/dev/null)" || verdict="unreadable service.json"
+    case "$verdict" in
+        owned*)
+            fail "The CORSIA app owns this install (${verdict#owned }). Use the CORSIA app to start or restart it."
+            return 1
+            ;;
+        unreadable*)
+            fail "Cannot read the CORSIA app's ${verdict#unreadable }, so this install may belong to the app. Use the CORSIA app, or fix that file."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
 # A healthy backend must publish readiness within one minute. Provider catalog
