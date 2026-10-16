@@ -623,7 +623,7 @@ describe('SetupScreen', () => {
 		type Fake = {
 			sources: Record<string, unknown>[];
 			installPost: { status: number; body: unknown };
-			install: { state: string; reason: string | null };
+			install: { state: string; reason: string | null; path_shadowed_by?: string | null };
 			signin: string;
 			posted: string[];
 		};
@@ -640,7 +640,7 @@ describe('SetupScreen', () => {
 				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_name: 'Qwen 3.8', model_size_gb: 30 });
 				if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 				if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: fake.sources });
-				if (url === '/api/providers/cli/claude-code/install' && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
+				if ((url === '/api/providers/cli/claude-code/install' || url === '/api/providers/cli/claude-code/update') && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
 				if (url === '/api/providers/cli/claude-code/install') return json(fake.install);
 				if (url === '/api/providers/cli/claude-code/link') return json({ ok: true, outcome: 'linked' });
 				if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'conductor-1' } });
@@ -702,6 +702,39 @@ describe('SetupScreen', () => {
 			await refocus();
 			expect(row('Claude Code').textContent).toContain('Ready');
 			expect(start().disabled).toBe(false);
+		});
+
+		it('updates an unverified CLI only after confirmation, then names an older PATH copy', async () => {
+			await openConnectStep([claude('unverified')]);
+
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Update']);
+			await press(row('Claude Code'), 'Update');
+			expect(row('Claude Code').textContent).toContain('Update Claude Code? This runs Anthropic’s official installer');
+			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/update');
+
+			await press(row('Claude Code'), 'Update');
+			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/update');
+			expect(row('Claude Code').textContent).toContain('Updating with Anthropic’s official installer.');
+
+			fake.install = { state: 'done', reason: null, path_shadowed_by: '/usr/local/bin/claude' };
+			await refocus();
+			expect(row('Claude Code').textContent).toContain('older copy comes first on this computer’s PATH');
+			expect(row('Claude Code').textContent).toContain('Remove the older copy at /usr/local/bin/claude, then come back to this window.');
+			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
+		});
+
+		it('leaves package-manager copies alone with their exact update command', async () => {
+			await openConnectStep([
+				claude('unverified', { cli_package_manager: 'homebrew' }),
+				{ source: 'codex', name: 'Codex', state: 'unverified', cli_package_manager: 'npm' },
+			]);
+
+			expect(row('Claude Code').textContent).toContain('CORSIA can’t use this copy of Claude Code, which Homebrew installed.');
+			expect(row('Claude Code').textContent).toContain('Update it in Terminal with brew upgrade claude-code. CORSIA notices when you come back to this window.');
+			expect(row('Codex').textContent).toContain('CORSIA can’t use this copy of Codex, which npm installed.');
+			expect(row('Codex').textContent).toContain('Update it in Terminal with npm update -g @openai/codex. CORSIA notices when you come back to this window.');
+			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
+			expect(row('Codex').querySelectorAll('button').length).toBe(0);
 		});
 
 		it('offers Sign in for a signed-out CLI, and signs in without installing', async () => {

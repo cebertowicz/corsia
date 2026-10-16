@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from api.provider_sources import recheck_sources_once
-from cli_location import login_shell_binary, service_binary, service_path
+from cli_location import login_shell_binary, package_manager_for, path_shadowed_binary, service_binary, service_path
 from connections.vendor_accounts import VENDORS
 from infra.auth import require_user
 from infra.state.ws import schedule_models_changed
@@ -53,10 +53,12 @@ class InstallerFailure(RuntimeError):
 
 @dataclass
 class InstallJob:
-    """The current in-memory state for one vendor installation job."""
+    """The current in-memory state for one vendor installation or update job."""
 
     state: str = "running"
     reason: str | None = None
+    operation: str = "install"
+    path_shadowed_by: str | None = None
     task: asyncio.Task | None = None
 
 
@@ -66,7 +68,8 @@ _jobs: dict[str, InstallJob] = {}
 def _status(vendor: str) -> dict[str, str | None]:
     """Return the public state shape for one vendor's installation job."""
     job = _jobs.get(vendor)
-    return {"state": job.state, "reason": job.reason} if job else {"state": "idle", "reason": None}
+    return ({"state": job.state, "reason": job.reason, "path_shadowed_by": job.path_shadowed_by}
+            if job else {"state": "idle", "reason": None, "path_shadowed_by": None})
 
 
 def _download_script(vendor: str) -> Path:
@@ -145,13 +148,18 @@ def _run_installer(vendor: str) -> str | None:
 
 
 async def _complete_job(vendor: str, job: InstallJob) -> None:
-    """Settle an install job, refresh sources once, and notify live model consumers."""
+    """Settle an installer job, refresh sources once, and notify live model consumers."""
     try:
         job.reason = await asyncio.to_thread(_run_installer, vendor)
     except Exception:
         log.exception("CLI installer for %s stopped unexpectedly", vendor)
         job.reason = INSTALLER_STOPPED
     job.state = "failed" if job.reason else "done"
+    if not job.reason:
+        try:
+            job.path_shadowed_by = await asyncio.to_thread(path_shadowed_binary, vendor)
+        except Exception:
+            log.warning("CLI location check after installation did not complete")
     try:
         await recheck_sources_once()
     except Exception:
@@ -172,6 +180,16 @@ async def get_install(vendor: str, _user: dict = Depends(require_user)) -> dict[
     return _status(vendor)
 
 
+async def _start_job(vendor: str, operation: str) -> dict[str, str | None] | JSONResponse:
+    existing = _jobs.get(vendor)
+    if existing and existing.state == "running":
+        return _status(vendor)
+    job = InstallJob(operation=operation)
+    _jobs[vendor] = job
+    job.task = asyncio.create_task(_complete_job(vendor, job))
+    return _status(vendor)
+
+
 @router.post("/{vendor}/install", response_model=None)
 async def start_install(vendor: str, _user: dict = Depends(require_user)) -> dict[str, str | None] | JSONResponse:
     """Start one CLI installer, returning an already-running job instead of another."""
@@ -187,10 +205,16 @@ async def start_install(vendor: str, _user: dict = Depends(require_user)) -> dic
         hidden = None
     if hidden:
         return JSONResponse(status_code=409, content={"reason": "invisible_binary"})
-    existing = _jobs.get(vendor)
-    if existing and existing.state == "running":
-        return _status(vendor)
-    job = InstallJob()
-    _jobs[vendor] = job
-    job.task = asyncio.create_task(_complete_job(vendor, job))
-    return _status(vendor)
+    return await _start_job(vendor, "install")
+
+
+@router.post("/{vendor}/update", response_model=None)
+async def start_update(vendor: str, _user: dict = Depends(require_user)) -> dict[str, str | None] | JSONResponse:
+    """Run the vendor's official installer again for a CLI the service already resolves."""
+    _valid_vendor(vendor)
+    binary = service_binary(vendor)
+    if not binary:
+        return JSONResponse(status_code=409, content={"reason": "not_installed"})
+    if await asyncio.to_thread(package_manager_for, vendor, binary):
+        return JSONResponse(status_code=409, content={"reason": "package_managed"})
+    return await _start_job(vendor, "update")

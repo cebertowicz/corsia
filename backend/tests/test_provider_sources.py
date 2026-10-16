@@ -128,6 +128,14 @@ class TestSeedCodex:
         claude = _sources(client)["claude-code"]
         assert claude["state"] == "unverified" and claude["reason"] == "Not checked yet"
 
+    def test_unverified_cli_reports_a_proven_package_manager(self, isolated_db, client, monkeypatch):
+        import cli_location
+
+        self._seed(monkeypatch, "ready")
+        monkeypatch.setattr(cli_location, "package_manager_for", lambda provider: "homebrew" if provider == "claude-code" else None)
+
+        assert _sources(client)["claude-code"]["cli_package_manager"] == "homebrew"
+
     def test_reseed_keeps_the_last_claude_verdict(self, isolated_db, client, monkeypatch):
         from connections.models import get_connection
         from connections.source_state import apply_check
