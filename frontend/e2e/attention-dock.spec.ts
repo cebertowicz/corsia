@@ -58,6 +58,20 @@ function decision(over: Record<string, unknown> = {}) {
   };
 }
 
+function review(over: Record<string, unknown> = {}) {
+  return {
+    review_key: "pr-9",
+    title: "Reviewer findings on the plans PR",
+    requester: { kind: "thread", label: "Reviewer subagent", lane: "quality" },
+    pending_count: 3,
+    total_count: 5,
+    node_id: "node-review",
+    destination: null,
+    source: SOURCE,
+    ...over,
+  };
+}
+
 /** Intercepts only the queue; every other route stays the real backend. */
 async function seedQueue(page: Page, current: unknown, count: number) {
   await page.route("**/api/attention/queue", async (route) => {
@@ -578,6 +592,63 @@ test.describe("@surface:attention Hit testing — the dock is actually reachable
         [answerBox.x + answerBox.width / 2, answerBox.y + answerBox.height / 2],
       );
       expect(answerHit, `${label} Answer`).toBe("drawer");
+    });
+  }
+
+  for (const [label, width, height] of [
+    ["desktop-600", 1280, 600],
+    ["mobile-664", 390, 664],
+  ] as const) {
+    test(`the dock keeps its shadow room and scrolls an opened review inside the band at ${label}`, async ({
+      page,
+      request,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await seedQueue(
+        page,
+        {
+          external_id: "review-1",
+          renderer: "external-review",
+          detail: review({ title: "Reviewer findings on the plans PR. ".repeat(80) }),
+        },
+        1,
+      );
+      await openThread(page, request, `attention-budget-${label}`);
+
+      const dock = page.locator("[data-attention-dock]");
+      // The dock clips where it scrolls, so the collapsed card needs room inside
+      // that clip for its rounded corners and drop shadow.
+      const room = await dock.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const bar = el.querySelector(".dock-bar")!.getBoundingClientRect();
+        return { below: box.bottom - bar.bottom, left: bar.left - box.left, right: box.right - bar.right };
+      });
+      for (const [side, px] of Object.entries(room)) {
+        expect(px, `${label} shadow room ${side}`).toBeGreaterThanOrEqual(11.5);
+      }
+
+      await dock.locator(".dock-bar").click();
+      await expect(dock.locator(".external-review")).toBeVisible();
+      const geometry = await dock.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const slot = el.parentElement!.getBoundingClientRect();
+        const header = document.querySelector(".shell-header")!.getBoundingClientRect();
+        return {
+          top: box.top,
+          bottom: box.bottom,
+          slotBottom: slot.bottom,
+          headerBottom: header.bottom,
+          scrolls: el.scrollHeight > el.clientHeight + 1,
+        };
+      });
+      expect(geometry.scrolls, `${label} the review overflows the band and scrolls`).toBe(true);
+      expect(geometry.top, `${label} dock top below the header`).toBeGreaterThanOrEqual(geometry.headerBottom - 0.5);
+      expect(geometry.bottom, `${label} dock inside the band`).toBeLessThanOrEqual(geometry.slotBottom + 0.5);
+      await expect(page.getByRole("button", { name: "Collapse review" })).toBeInViewport();
+      await dock.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await expect(dock.getByText("This review has no destination recorded.", { exact: false })).toBeInViewport();
     });
   }
 

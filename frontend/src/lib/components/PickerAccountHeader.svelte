@@ -97,7 +97,7 @@
 	.usage { min-width: 0; font-variant-numeric: tabular-nums; }
 	.usage .amber { color: var(--amber-text); }
 	.usage .red { color: var(--red-text); }
-	.recovery { padding: 0; color: var(--accent-scope-text); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
+	.recovery { padding: 0; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
 	.picker-account-usage { padding: 2px 0 2px; font-size: var(--text-caption); color: var(--text-tertiary); }
 	@media (max-width: 480px) {
 		.picker-account-title { flex-basis: 100%; }

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { accentRoles } from '../../src/lib/utils/projectColors';
+import { contrastRatio, parseColor } from '../../src/lib/utils/contrast';
+import { ACCENT_ROLE_TOKENS, accentRoles } from '../../src/lib/utils/projectColors';
 import { loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 const tok = encodeURIComponent(TEST_TOKEN);
@@ -23,22 +24,13 @@ test('project scope applies computed accent roles', async ({ page, request }) =>
 	const theme = await page.locator('html').getAttribute('data-theme');
 	expect(theme === 'light' || theme === 'dark').toBe(true);
 	const expected = accentRoles(color, theme as 'light' | 'dark');
-	const actual = await page.evaluate(() => {
+	const actual = await page.evaluate((tokens) => {
 		const style = getComputedStyle(document.documentElement);
-		return {
-			accent: style.getPropertyValue('--accent').trim(),
-			legacyAccent: style.getPropertyValue('--violet').trim(),
-			legacyText: style.getPropertyValue('--violet-text').trim(),
-			onFill: style.getPropertyValue('--accent-on-fill').trim(),
-			scopeText: style.getPropertyValue('--accent-scope-text').trim(),
-		};
-	});
+		return Object.fromEntries(
+			Object.entries(tokens).map(([role, token]) => [role, style.getPropertyValue(token).trim()]),
+		);
+	}, ACCENT_ROLE_TOKENS);
 
-	expect(actual).toEqual({
-		accent: color,
-		legacyAccent: color,
-		legacyText: expected.text,
-		onFill: expected.onFill,
-		scopeText: expected.text,
-	});
+	expect(actual).toEqual(expected);
+	expect(contrastRatio(parseColor(actual.fill)!, parseColor(actual.onFill)!)).toBeGreaterThanOrEqual(4.5);
 });

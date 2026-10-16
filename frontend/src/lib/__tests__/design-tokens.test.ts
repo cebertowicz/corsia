@@ -59,7 +59,7 @@ const RUNTIME_PROVIDED = new Set([
  * This list may only shrink. A new entry means a new silently-dropped
  * declaration and should be fixed instead of appended.
  */
-const KNOWN_UNRESOLVED_BASELINE_COUNT = 7;
+const KNOWN_UNRESOLVED_BASELINE_COUNT = 5;
 const KNOWN_UNRESOLVED = new Set([
 	'lib/components/ThreadAgentPanel.svelte:356 → var(--text-quaternary)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:137 → var(--surface-2)',
@@ -118,8 +118,8 @@ describe('design tokens', () => {
 	});
 
 	it('keeps the known-unresolved baseline shrink-only', () => {
-		// Fixes may remove entries. Appending a tenth silently-dropped declaration
-		// fails until the new reference itself is fixed.
+		// Fixes may remove entries, and the baseline drops with them. Appending another
+		// silently-dropped declaration fails until the new reference itself is fixed.
 		expect(KNOWN_UNRESOLVED.size).toBeLessThanOrEqual(KNOWN_UNRESOLVED_BASELINE_COUNT);
 	});
 

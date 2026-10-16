@@ -178,7 +178,7 @@
 	.crumb-gap { display: none; }
 	.text { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-secondary); overflow-wrap: anywhere; }
 	.skeleton { width: 60%; height: 12px; border-radius: var(--radius-2xs); background: var(--bg-hover); }
-	.link { padding: 0; border: 0; background: transparent; color: var(--accent-scope-text); font: inherit; cursor: pointer; }
+	.link { padding: 0; border: 0; background: transparent; color: var(--accent-text); font: inherit; cursor: pointer; }
 	.link:hover { text-decoration: underline; }
 	.open-plan { min-height: 28px; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

@@ -154,7 +154,7 @@
 	.nm { font-size: var(--text-subhead); color: var(--text-primary); }
 	.sub { font-size: var(--text-footnote); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.mono { font-family: var(--font-mono, monospace); }
-	.badge { font-size: var(--text-caption); font-weight: 600; font-family: var(--font-mono, monospace); color: var(--accent-scope-text); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); padding: 1px 7px; border-radius: var(--radius-pill); flex-shrink: 0; }
+	.badge { font-size: var(--text-caption); font-weight: 600; font-family: var(--font-mono, monospace); color: var(--accent-text); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); padding: 1px 7px; border-radius: var(--radius-pill); flex-shrink: 0; }
 	.badge.muted { color: var(--text-tertiary); border-color: var(--border); }
 	.badge.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
 	.iconbtn { background: none; border: none; cursor: pointer; color: var(--text-tertiary); font-size: var(--text-footnote); padding: 3px 6px; border-radius: var(--radius-xs); flex-shrink: 0; line-height: 1; }
@@ -164,7 +164,7 @@
 	.setting-copy { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
 	.setting-title { font-size: var(--text-footnote); color: var(--text-secondary); }
 	.setting-detail { font-size: var(--text-caption); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.branch-button { background: none; border: none; padding: 2px 3px; cursor: pointer; color: var(--accent-scope-text); font: inherit; font-size: var(--text-caption); white-space: nowrap; }
+	.branch-button { background: none; border: none; padding: 2px 3px; cursor: pointer; color: var(--accent-text); font: inherit; font-size: var(--text-caption); white-space: nowrap; }
 	.branch-button:disabled { opacity: 0.5; cursor: not-allowed; }
 	.branch-select { min-width: 0; max-width: 120px; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--bg-secondary); color: var(--text-primary); font-size: var(--text-caption); }
 	@media (max-width: 640px) { .repo-summary { align-items: flex-start; flex-wrap: wrap; } .repo-settings { grid-template-columns: 1fr; padding-left: 0; } }

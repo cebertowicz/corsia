@@ -261,7 +261,7 @@
 	}
 	.delivery-action:disabled { cursor: wait; opacity: 0.45; }
 	.user-bubble {
-		background: var(--accent); color: var(--accent-on-fill);
+		background: var(--accent-fill); color: var(--accent-on-fill);
 		border-radius: 18px 18px 4px 18px; padding: 10px 16px;
 		min-width: 0; max-width: 100%; overflow: hidden;
 	}

@@ -45,7 +45,7 @@
 	.headline { color: var(--text-primary); }
 	.detail { color: var(--text-tertiary); }
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
-	summary { cursor: pointer; color: var(--accent-scope-text); }
+	summary { cursor: pointer; color: var(--accent-text); }
 	pre { max-height: 180px; overflow: auto; margin: var(--space-2) 0 0; white-space: pre-wrap; color: var(--text-tertiary); font: var(--text-caption)/1.45 var(--font-mono, monospace); }
 	@media (max-width: 768px) { .service-row { flex-wrap: wrap; gap: var(--space-2); } .service-actions { width: 100%; margin-left: 0; justify-content: flex-end; } }
 </style>

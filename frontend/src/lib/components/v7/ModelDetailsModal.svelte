@@ -317,7 +317,7 @@
 
 	.empty { font-size: var(--text-footnote); color: var(--text-tertiary); padding: 4px 0; margin: 0; }
 	.hint { font-size: var(--text-footnote); color: var(--text-tertiary); margin: 12px 0 0; }
-	.hint a { color: var(--accent-scope-text); }
+	.hint a { color: var(--accent-text); }
 
 	.srv-row {
 		display: flex; align-items: center; justify-content: space-between;

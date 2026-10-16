@@ -33,7 +33,7 @@
 	/* Approved for setup-only use: dot and word. A shared rollout needs a Product Experience decision. */
 	.dotmark { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
 	.dotmark .dot { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--text-tertiary); flex: none; }
-	.dotmark.loaded .dot, .dotmark.active .dot { background: var(--accent-line); }
+	.dotmark.loaded .dot, .dotmark.active .dot { background: var(--accent); }
 	.dotmark.success .dot { background: var(--green); }
 	.dotmark.loading .dot, .dotmark.warning .dot { background: var(--amber); }
 	.dotmark.error .dot { background: var(--red); }

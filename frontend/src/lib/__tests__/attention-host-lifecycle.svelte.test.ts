@@ -233,7 +233,7 @@ describe('Chat slot owner — one component owns the bottom band', () => {
 		const ruleOf = (selector: string) => attentionDockSource.match(new RegExp(`\\${selector}[^{}]*\\{[^{}]*\\}`))?.[0] ?? '';
 		const dock = ruleOf('.attention-dock');
 		expect(dock, '.attention-dock should declare a rule').not.toBe('');
-		expect(dock, '.attention-dock reserves its solid backing inset').toContain('padding: var(--space-4) 0 0');
+		expect(dock, '.attention-dock reserves its solid backing inset').toContain('padding: var(--space-4) var(--dock-gutter) var(--dock-gutter)');
 		expect(dock, '.attention-dock paints the solid backing beneath the bar').toContain(
 			'var(--bg-primary) var(--space-4)'
 		);

@@ -35,12 +35,15 @@
 	const offline = $derived($connectionState !== 'connected' && hasPayload);
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const decisionCount = $derived(query.payload?.attention.awaiting_count ?? 0);
+	/**
+	 * This thread's own decisions, each a row, once the queue has them; otherwise the plan's
+	 * awaiting count stands in. Each display reads one source, never a difference of the two.
+	 */
 	const activeDecisionItems = $derived(
 		$activeThreadId === threadId
 			? $visibleQueue.items.filter((item) => item.detail.source?.thread_id === threadId)
 			: [],
 	);
-	const showDecisionRows = $derived(activeDecisionItems.length > 0);
 	/**
 	 * Every step finished and folded (FW7): the empty state's calm, plus the
 	 * folded count below it. Nothing is left, so the count is suppressed with
@@ -244,20 +247,14 @@
 				{#if !offline}<Button variant="ghost" size="sm" onclick={() => query.retry()}>Retry</Button>{/if}
 			</div>
 		{/if}
-		{#if showDecisionRows}
+		{#if activeDecisionItems.length > 0}
 			{#each activeDecisionItems as item (item.external_id)}
 				<button class="decision-row" type="button" disabled={decisionBusy} onclick={() => openDecision(item)}>
 					<span class="decision-mark" aria-hidden="true">!</span>
-					<span class="decision-copy"><span class="decision-title">{item.detail.title}</span>{#if item.detail.source}<span class="decision-subline">{item.detail.source.thread_label}</span>{/if}</span>
+					<span class="decision-title">{item.detail.title}</span>
 					<span class="decision-open">{decisionBusy ? 'Loading…' : 'Open'}</span>
 				</button>
 			{/each}
-			{#if decisionCount > activeDecisionItems.length}
-				<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
-					<b>{decisionCount - activeDecisionItems.length}</b> {decisionCount - activeDecisionItems.length === 1 ? 'more decision' : 'more decisions'}
-					<span>{decisionBusy ? 'Loading…' : 'Open'}</span>
-				</button>
-			{/if}
 		{:else if decisionCount > 0}
 			<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
 				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}
@@ -325,10 +322,7 @@
 	.decision-row { display: flex; align-items: center; gap: var(--space-2); min-height: 38px; padding: 6px 8px; border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 	@media (hover: hover) { .decision-row:hover { background: var(--bg-hover); } }
 	.decision-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; border: 1px solid var(--amber); border-radius: var(--radius-circle); color: var(--amber); font-size: var(--text-caption); font-weight: var(--fw-bold); }
-	.decision-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
-	.decision-title, .decision-subline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.decision-title { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
-	.decision-subline { color: var(--amber-text); font-size: var(--text-caption); }
+	.decision-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 	.decision-open { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.decision-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.decision-indicator {

@@ -103,23 +103,44 @@ describe('SidebarThreadRow update summary', () => {
 		expect(host.querySelector('.thread-update-summary')).toBeNull();
 	});
 
-	it('restores the Needs you action with its structured attention label and analytics', () => {
+	it('puts the owed mark on the second line, naming its one item, with the mark\'s action and analytics', () => {
 		const onOpenAttention = vi.fn();
 		const analytics = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
 		threadPlanStates.set({ [thread.id]: {
 			state: 'needs_input', label_key: null, paused: false,
 			attention_items: [{ kind: 'decision', title: 'Choose a model', node_id: 'n' }],
+			latest_update: { kind: 'marked', summary: 'An update the owed line replaces' },
 		} });
 		render(false, onOpenAttention);
 
-		const control = host.querySelector<HTMLButtonElement>('button.thread-update-summary.needs-you');
-		expect(control?.textContent).toBe('Needs you · Choose a model');
-		control?.click();
-		expect(onOpenAttention).toHaveBeenCalledWith(thread.id, 'Needs you · Choose a model');
+		const marks = host.querySelectorAll<HTMLElement>('.plan-state');
+		expect(marks).toHaveLength(1);
+		const control = marks[0];
+		expect(control.classList.contains('line')).toBe(true);
+		expect(host.querySelector('.thread-title-row .plan-state')).toBeNull();
+		expect(host.querySelector('.thread-update-summary')).toBeNull();
+		expect(control.textContent).toBe('Needs you · Choose a model');
+		expect(control.getAttribute('aria-label')).toBe('Needs you · Choose a model: 1 item');
+		control.click();
+		expect(onOpenAttention).toHaveBeenCalledWith(thread.id, 'Decide');
+		expect(analytics).toHaveBeenCalledTimes(1);
 		expect(analytics).toHaveBeenCalledWith('sidebar', 'attention_opened', expect.objectContaining({
 			thread_id: thread.id, state: 'needs_input', word: 'Decide', count: 1,
 		}));
-		expect(host.querySelector('.plan-state.needs_input')).toBeNull();
+	});
+
+	it('keeps the count with several owed items, in the mark\'s own word', () => {
+		threadPlanStates.set({ [thread.id]: {
+			state: 'needs_input', label_key: null, paused: false,
+			attention_items: [
+				{ kind: 'decision', title: 'Choose a model', node_id: 'a' },
+				{ kind: 'decision', title: 'Pick a region', node_id: 'b' },
+				{ kind: 'decision', title: 'Name the project', node_id: 'c' },
+			],
+		} });
+		render();
+
+		expect(host.querySelector('.plan-state.line')?.textContent).toBe('Needs you · 3 to decide');
 	});
 
 	it('renders static Needs you text when the user owes an unitemized move', () => {
@@ -128,9 +149,11 @@ describe('SidebarThreadRow update summary', () => {
 		} });
 		render();
 
-		expect(host.querySelector('button.thread-update-summary.needs-you')).toBeNull();
-		expect(host.querySelector('.thread-update-summary.needs-you.static')?.textContent).toBe('Needs you');
-		expect(host.querySelector('.plan-state.blocked_on_you')).toBeNull();
+		const line = host.querySelector<HTMLElement>('.plan-state.line.blocked_on_you');
+		expect(line?.classList.contains('static')).toBe(true);
+		expect(line?.getAttribute('role')).toBeNull();
+		expect(line?.textContent).toBe('Needs you');
+		expect(host.querySelector('.thread-title-row .plan-state')).toBeNull();
 	});
 });
 

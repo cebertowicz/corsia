@@ -307,6 +307,7 @@
 					onReload={() => imageViewer?.reload()}
 				/>
 			{:else if target}
+				<!-- DocViewer owns Escape precedence (comment draft, then selection), so handing it onClose keeps that order in compact. -->
 				<div class="doc-host" class:covered={documentCovered} inert={documentCovered}>
 					<DocViewer
 						bind:this={viewer}
@@ -321,6 +322,7 @@
 						covered={imageOpen}
 					/>
 				</div>
+				<!-- Shown once the document under it is bound, so its comments come from that document from the first frame. -->
 				{#if imageOpen && shownImage && viewer}
 					<ArtifactDocumentImageOverlay
 						image={shownImage}
@@ -351,7 +353,7 @@
 		width: 24px; height: 24px; border-radius: var(--radius-xs);
 		color: var(--text-tertiary);
 	}
-	.rail-ico.active { color: var(--accent-scope-text); background: var(--accent-bg); }
+	.rail-ico.active { color: var(--accent-text); background: var(--accent-wash); }
 	.rail-ico.err { color: var(--red); }
 	.rail-dot {
 		position: absolute; top: 1px; right: 1px;
@@ -369,17 +371,17 @@
 	/* The tab and collapse controls belong to the leaf panel, after the shared
 	   shell header. Keeping this in normal leaf flow makes that boundary explicit. */
 	.canvas-header-strip { flex: 0 0 40px; min-height: 40px; }
-	.canvas-header-strip :global(.strip) {
-		height: 100%; padding-left: 10px; padding-right: 6px;
-		border-bottom: 0; background: transparent;
-	}
+	.canvas-header-strip :global(.strip) { height: 100%; padding-left: 10px; padding-right: 6px; border-bottom: 0; background: transparent; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
+	/* In compact the document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; padding-top: 0; }
 	.leaf-body.document-canvas { position: relative; }
+	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
 	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	.leaf-body.browser-canvas { padding: 0; }
+	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
 	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
 
 	.gone {
@@ -394,5 +396,5 @@
 		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 		padding: 6px 12px; cursor: pointer;
 	}
-	.gone button:hover { border-color: var(--accent); color: var(--accent-scope-text); }
+	.gone button:hover { border-color: var(--accent); color: var(--accent-text); }
 </style>

@@ -207,7 +207,7 @@
 	.msg-model-badge { font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
 	.meta-separator { color: var(--text-tertiary); }
 	.typewriter-cursor {
-		display: inline; color: var(--accent-scope-text); font-weight: 300;
+		display: inline; color: var(--accent-text); font-weight: 300;
 		animation: blink-cursor 0.8s step-end infinite;
 	}
 	@keyframes blink-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
