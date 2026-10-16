@@ -279,7 +279,7 @@ mod tests {
         let dev = tauri::Url::parse("http://localhost:5273/").unwrap();
         assert_eq!(quit_failure_url(Some(&dev)).as_str(), "http://localhost:5273/#quit-failure");
         let shell = include_str!("../../dist-shell/index.html");
-        assert!(shell.contains("CORSIA couldn't stop its background service."));
+        assert!(shell.contains("CORSIA couldn’t stop its background service."));
         assert!(shell.contains("invoke('retry_quit')"));
     }
 
