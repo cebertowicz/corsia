@@ -8,6 +8,8 @@ const captureEnabled = process.env.CORSIA_CAPTURE_CONNECTED_APPS === '1';
 
 test.describe('Connected apps Settings section capture', () => {
 	test.skip(!captureEnabled, 'Capture-only proof; enable explicitly when producing the evidence pack.');
+	// Four full-page states run in each browser project; the default 30 seconds can expire mid-capture and leave stale proof behind.
+	test.setTimeout(120_000);
 
 	test('captures the Settings section states', async ({ page }) => {
 		mkdirSync(outputDir, { recursive: true });
