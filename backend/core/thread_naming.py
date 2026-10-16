@@ -7,7 +7,6 @@ no session, tools, or transcript beyond the quoted recent messages.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from loguru import logger
@@ -56,19 +55,18 @@ def _title_object(raw: object) -> object:
 
     Claude Code and Codex hand the seam a parsed object; Native hands it the
     model's raw content string, which may wrap the JSON in reasoning tags or a
-    code fence, or skip the JSON and answer with the bare title.
+    code fence. Anything that is not exactly one JSON object after that raises,
+    so truncated or off-format output never becomes a title.
     """
     if not isinstance(raw, str):
         return raw
+    from llm.isolated_structured import _strict_json_loads
     from llm.think_tags import strip_think_tags
 
     text = (strip_think_tags(raw) or "").strip()
     if text.startswith("```"):
         text = text.strip("`").removeprefix("json").strip()
-    try:
-        return json.loads(text)
-    except ValueError:
-        return {"title": text}
+    return _strict_json_loads(text)
 
 
 def _validate_title_payload(raw: object) -> str:

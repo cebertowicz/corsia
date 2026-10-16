@@ -297,11 +297,31 @@ def _native_title_target():
         '{"title": "Login Flow Debug"}',
         '```json\n{"title": "Login Flow Debug"}\n```',
         '<think>short title for login</think>\n{"title": "Login Flow Debug"}',
-        "Login Flow Debug",
     ],
 )
 async def test_native_title_accepts_the_seam_raw_string(monkeypatch, raw):
     """The Native seam hands the validator the raw content string, not a dict."""
+    assert await _native_title(monkeypatch, raw) == "Login Flow Debug"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "Login Flow Debug",
+        '{"title": "Login',
+        '<think>the user wants a login title and I should',
+        '```json\n{"title": "Login Flow Debug"}\n```\nHope that helps',
+        '{"title": "A", "title": "B"}',
+        '{"title": "A", "extra": 1}',
+    ],
+)
+async def test_native_title_rejects_off_format_output(monkeypatch, raw):
+    """Truncated or non-JSON output yields no title instead of being saved as one."""
+    assert await _native_title(monkeypatch, raw) is None
+
+
+async def _native_title(monkeypatch, raw):
     from core import thread_naming
     from llm import isolated_structured
 
@@ -310,7 +330,4 @@ async def test_native_title_accepts_the_seam_raw_string(monkeypatch, raw):
 
     monkeypatch.setattr(thread_naming, "_resolve_title_target", lambda model: (_native_title_target(), ""))
     monkeypatch.setattr(isolated_structured, "_invoke_native_structured", invoke_native)
-
-    title = await thread_naming._call_title_llm("User: debug login", "omlx@local/Qwen")
-
-    assert title == "Login Flow Debug"
+    return await thread_naming._call_title_llm("User: debug login", "omlx@local/Qwen")
