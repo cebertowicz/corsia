@@ -107,6 +107,24 @@ def test_failed_listener_start_does_not_mint_code(monkeypatch):
     assert response["code"]["state"] == "none"
 
 
+def test_devices_snapshot_uses_its_injected_name_resolver():
+    announcements = []
+    expected_announcement = SimpleNamespace(announced_name="Announced name")
+    devices = DevicesRuntime(
+        name_resolver=lambda announcement: announcements.append(announcement) or "Canonical name"
+    )
+    devices.listener = SimpleNamespace(
+        listening={"port": 47901},
+        announcement=expected_announcement,
+        port=47901,
+    )
+
+    snapshot = devices.snapshot()
+
+    assert snapshot["local_hostname"] == "Canonical name"
+    assert announcements == [expected_announcement]
+
+
 @pytest.mark.parametrize(
     "connection_scope",
     [
@@ -172,7 +190,7 @@ def test_devices_address_hints_are_authenticated_and_not_pre_auth(monkeypatch):
     import core.devices_runtime as devices_runtime
 
     runtime.pairing.disable()
-    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio.local")
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "studio.local")
     monkeypatch.setattr(
         devices_runtime,
         "lan_addresses",
@@ -298,7 +316,7 @@ def test_devices_status_omits_dns_sd_failure_cause(monkeypatch, failure):
     runtime.pairing.disable()
     runtime.pairing.enable()
     monkeypatch.setattr(runtime, "listener", listener)
-    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio.local")
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "studio.local")
     monkeypatch.setattr(devices_runtime, "lan_addresses", lambda *, include_link_local: ["192.168.1.20"])
     monkeypatch.setitem(
         app.dependency_overrides,
@@ -337,7 +355,7 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
     monkeypatch.setattr(runtime.pairing, "_on_update", lambda: updates.append({"type": "devices_updated"}))
     monkeypatch.setattr(DevicesRuntime, "enable", fake_enable)
     monkeypatch.setattr(devices_api, "run_in_db", fake_run_in_db)
-    monkeypatch.setattr(devices_api, "_management_name", lambda: "Studio")
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "Studio")
     monkeypatch.setitem(
         app.dependency_overrides,
         devices_api.require_human_user,
