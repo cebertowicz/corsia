@@ -271,14 +271,16 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
-			<ArtifactTabStrip
-				tabs={workspace.tabs}
-				activeKey={workspace.activeTabId}
-				{imageTabIds}
-				onSelect={selectTab}
-				onClose={requestCloseTab}
-				onCollapse={collapse}
-			/>
+			<div class="canvas-header-strip">
+				<ArtifactTabStrip
+					tabs={workspace.tabs}
+					activeKey={workspace.activeTabId}
+					{imageTabIds}
+					onSelect={selectTab}
+					onClose={requestCloseTab}
+					onCollapse={collapse}
+				/>
+			</div>
 		{/if}
 		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
 			{#if activeTab?.kind === 'browser' && activeTab.threadId}
@@ -305,8 +307,7 @@
 					onReload={() => imageViewer?.reload()}
 				/>
 			{:else if target}
-				<!-- DocViewer owns Escape precedence (comment draft, then selection),
-				     so handing it onClose keeps that order intact in compact. -->
+				<!-- DocViewer owns Escape precedence (comment draft, then selection), so handing it onClose keeps that order in compact. -->
 				<div class="doc-host" class:covered={documentCovered} inert={documentCovered}>
 					<DocViewer
 						bind:this={viewer}
@@ -352,26 +353,28 @@
 		width: 24px; height: 24px; border-radius: var(--radius-xs);
 		color: var(--text-tertiary);
 	}
-	.rail-ico.active { color: var(--accent); background: var(--accent-bg); }
+	.rail-ico.active { color: var(--accent-text); background: var(--accent-wash); }
 	.rail-ico.err { color: var(--red); }
 	.rail-dot {
 		position: absolute; top: 1px; right: 1px;
 		width: 6px; height: 6px; border-radius: var(--radius-circle);
 		background: var(--accent);
 	}
-
 	.leaf {
 		height: 100%; display: flex; flex: 1; flex-direction: column; min-width: 0;
-		min-height: 0; overflow: hidden;
+		min-height: 0; overflow: hidden; position: relative;
 		box-sizing: border-box; padding-top: var(--header-bottom);
-		border-left: 1px solid var(--border-subtle);
+		border-left: none;
 		background: var(--bg-primary);
 	}
-	/* Compact fills the canvas, so it owns no divider edge and the tab strip's
-	   role is taken over by the app header. */
 	.leaf.compact { flex: 1; border-left: none; }
+	/* The tab and collapse controls belong to the leaf panel, after the shared
+	   shell header. Keeping this in normal leaf flow makes that boundary explicit. */
+	.canvas-header-strip { flex: 0 0 40px; min-height: 40px; }
+	.canvas-header-strip :global(.strip) { height: 100%; padding-left: 10px; padding-right: 6px; border-bottom: 0; background: transparent; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
-	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; }
+	/* In compact the document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
+	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; padding-top: 0; }
 	.leaf-body.document-canvas { position: relative; }
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
@@ -379,8 +382,7 @@
 	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	.leaf-body.browser-canvas { padding: 0; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
-	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
-	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }
+	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
@@ -394,5 +396,5 @@
 		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 		padding: 6px 12px; cursor: pointer;
 	}
-	.gone button:hover { border-color: var(--accent); color: var(--accent); }
+	.gone button:hover { border-color: var(--accent); color: var(--accent-text); }
 </style>

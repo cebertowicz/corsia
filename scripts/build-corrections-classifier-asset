@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
-from core.corrections_classifier import ASSET_ID, INPUT_POLICY_ID
+from core.corrections_classifier import CORRECTIONS_SPEC
 
 
 def digest(path: Path) -> dict[str, object]:
@@ -53,12 +53,13 @@ def main() -> None:
     if not isinstance(vectors, list) or len(vectors) != 4:
         raise SystemExit("self-test must contain exactly four synthetic vectors")
     names = [source.name for source in files] + ["LICENSE", "NOTICE"]
+    head = CORRECTIONS_SPEC.required_heads[0]
     manifest = {
-        "asset_id": ASSET_ID, "version": args.version,
+        "asset_id": CORRECTIONS_SPEC.asset_id, "version": args.version,
         "kind": "classifier", "minimum_onnxruntime": "1.31.0",
-        "input_policy_id": INPUT_POLICY_ID,
+        "input_policy_id": CORRECTIONS_SPEC.input_policy_id,
         "files": {name: digest(args.out / name) for name in names},
-        "heads": [{"name": "correction", "labels": ["not_correction", "correction"], "threshold": args.threshold}],
+        "heads": [{"name": head, "labels": list(CORRECTIONS_SPEC.labels[head]), "threshold": args.threshold}],
         "base_model_license": "Apache-2.0", "self_test": vectors,
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")

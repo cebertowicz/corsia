@@ -223,16 +223,25 @@ describe('ArtifactPane — capability-driven actions', () => {
 			})],
 			needs_attention: [],
 		});
-		expect(host.querySelector('button[aria-label="Remove from pane"]')).toBeTruthy();
+		expect(removeFromPane()).toBeTruthy();
 	});
 });
+
+/** The first row's Remove from pane, through its context menu (the menu is portaled to the body). */
+function removeFromPane(): HTMLButtonElement | undefined {
+	host.querySelector<HTMLElement>('.row-outer')?.dispatchEvent(
+		new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 })
+	);
+	flushSync();
+	return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+		.find((item) => item.textContent?.trim() === 'Remove from pane');
+}
 
 describe('ArtifactPane — hide (remove from pane)', () => {
 	it('calls setArtifactDisplay(id, threadId, true) when the hide button is clicked', async () => {
 		mountPane({ nodes: [docNode()], needs_attention: [] });
 
-		const hideBtn = host.querySelector<HTMLButtonElement>('button[aria-label="Remove from pane"]')!;
-		hideBtn.click();
+		removeFromPane()!.click();
 
 		await vi.waitFor(() => {
 			expect(setArtifactDisplay).toHaveBeenCalledWith('a1', 'sess-1', true);
@@ -354,7 +363,7 @@ describe('ArtifactPane — fetch failure is not "no artifacts"', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('notes.md'));
 
 		// Hiding a row reloads the pane; that reload is the one that fails.
-		host.querySelector<HTMLButtonElement>('button[aria-label="Remove from pane"]')!.click();
+		removeFromPane()!.click();
 
 		await vi.waitFor(() => {
 			expect(host.querySelector('.stale-notice')).toBeTruthy();

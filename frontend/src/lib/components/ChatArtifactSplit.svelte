@@ -11,7 +11,7 @@
 		threadWorkspaces, splitWidth as splitWidthStore, emptyWorkspace, setActiveSurface,
 		setActiveTab, setLeafVisible,
 	} from '$lib/stores/artifactWorkspace';
-	import { computeSplitLayout, ARTIFACT_MIN, isCompactCanvas } from '$lib/artifactSplitLayout';
+	import { computeSplitLayout, ARTIFACT_MIN, DIVIDER_WIDTH, isCompactCanvas } from '$lib/artifactSplitLayout';
 	import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { releaseDisplayedDocument, updateDocumentOpenCapability } from '$lib/ws/presence';
@@ -23,6 +23,7 @@
 		onOpenLightbox,
 		onAutoCreateThread,
 		onOpenDocuments,
+		onArtifactHeaderInset = () => {},
 	}: {
 		threadId: string | null;
 		chatPanelRef?: ChatPanel;
@@ -30,6 +31,7 @@
 		onOpenLightbox: (url: string) => void;
 		onAutoCreateThread: () => Promise<void>;
 		onOpenDocuments?: (documentId?: string) => void;
+		onArtifactHeaderInset?: (width: number | null) => void;
 	} = $props();
 
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
@@ -67,6 +69,14 @@
 		: null
 	);
 	const artifactWidth = $derived(layout.mode === 'split' ? layout.artifactWidth : ARTIFACT_MIN);
+	const artifactHeaderInset = $derived(leafMode === 'expanded' ? artifactWidth + DIVIDER_WIDTH : null);
+
+	// Header and leaf are siblings. Publish the exact occupied right-column width on
+	// their shared ancestor, rather than making either duplicate split layout rules.
+	$effect(() => {
+		onArtifactHeaderInset(artifactHeaderInset);
+		return () => onArtifactHeaderInset(null);
+	});
 
 	// Publish the measured mode so the app header can take over in compact.
 	$effect(() => { canvasCompact.set(artifactFullCanvas); });

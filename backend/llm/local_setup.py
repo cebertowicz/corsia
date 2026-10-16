@@ -10,20 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass
-from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, Callable
-
-import httpx
+from typing import Any, Callable, IO
 
 from llm.local_setup_gates import Eligibility, host_ram_bytes, profile_eligibility, resolve_profile
 from llm.local_setup_gates import limited_subscription_message as _limited_subscription_message
 from llm.local_setup_gates import subscription_available as _subscription_available
 from llm.local_setup_results import failure_message as _failure_message
-from llm.local_setup_results import DownloadProgress, local_setup_error, setup_command
-from llm.local_setup_results import task_from_payload as _task_from_payload
+from llm.local_setup_results import local_setup_error, setup_command
 # Re-exported: the flight modules and their tests reach these through this module.
 from llm.local_setup_auth import (  # noqa: F401
     SKIP_AUTH_SETTING,
@@ -38,142 +32,44 @@ from llm.local_setup_ownership import ensure_omlx as _ensure_omlx
 from llm.local_setup_ownership import existing_install_is_foreign
 from llm.local_setup_ownership import omlx_log_detail, own_omlx_admin_key, own_omlx_port, require_free_disk
 from llm.local_setup_ownership import run_command as _run
-from llm.local_profiles import DEFAULT_PROFILE, OMLX_GLOBAL_SETTINGS, LocalProfile, format_size
+from llm.local_profiles import DEFAULT_PROFILE, LocalProfile, format_size, profile_by_id
+from llm import local_setup_download, local_setup_operation
+from llm.local_setup_download import (
+    DOWNLOAD_BACKGROUND_POLL_SECONDS,
+    DOWNLOAD_FOLLOW_SECONDS,
+    DOWNLOAD_POLL_SECONDS,
+    DOWNLOAD_WAIT_SECONDS,
+    StillDownloading,
+)
+from llm.local_setup_runtime import (
+    HEALTH_WAIT_SECONDS,
+    LOCAL_HOST,
+    LOCAL_SERVER_NAME,
+    configure_global as _configure_global,
+    configure_model_settings as _configure_model_settings,
+    register_loopback_server as _register_loopback_server,
+    wait_for_health as _wait_for_health,
+)
 
-LOCAL_HOST = "127.0.0.1"
-# A first start on a new Mac imports MLX and preloads pinned models before it answers.
-HEALTH_WAIT_SECONDS = 120.0
-LOCAL_SERVER_NAME = "This Mac"
-DOWNLOAD_WAIT_SECONDS = 60 * 60
-DOWNLOAD_POLL_SECONDS = 2.0
-# Past the wait the one flight keeps following at a slower poll (2 per minute,
-# against 30 per minute while waiting) and stops after DOWNLOAD_FOLLOW_SECONDS.
-DOWNLOAD_BACKGROUND_POLL_SECONDS = 30.0
-DOWNLOAD_FOLLOW_SECONDS = 24 * 60 * 60
 EVENT_CATEGORY = "local_setup"
 
 log = logging.getLogger(__name__)
 
 
-async def _wait_for_health(port: int) -> None:
-    """Wait for oMLX on ``port``; on timeout, say what oMLX's own log says."""
-    from llm.providers.omlx_endpoints import health_url
-
-    deadline = time.monotonic() + HEALTH_WAIT_SECONDS
-    async with httpx.AsyncClient(timeout=2.0) as client:
-        while time.monotonic() < deadline:
-            try:
-                if (await client.get(health_url(LOCAL_HOST, port))).status_code == 200:
-                    return
-            except httpx.HTTPError:
-                pass
-            await asyncio.sleep(0.5)
-    detail = await asyncio.to_thread(omlx_log_detail)
-    raise RuntimeError(
-        f"oMLX didn't answer on {LOCAL_HOST}:{port} within {int(HEALTH_WAIT_SECONDS)} seconds.{detail}",
+async def _wait_for_download(
+    server_id: str, progress: Callable[[str], None], profile: LocalProfile,
+) -> None:
+    """Follow oMLX's persisted download task using this flight's live state."""
+    await local_setup_download.wait_for_download(
+        server_id, progress, profile, record_task=_record_download_task, flight=_flight,
+        wait_seconds=DOWNLOAD_WAIT_SECONDS, poll_seconds=DOWNLOAD_POLL_SECONDS,
+        background_poll_seconds=DOWNLOAD_BACKGROUND_POLL_SECONDS,
+        follow_seconds=DOWNLOAD_FOLLOW_SECONDS,
     )
 
 
-async def _register_loopback_server(*, port: int, api_key: str | None = None) -> str:
-    """Use the existing manual-registration path after the loopback health check.
-
-    A foreign oMLX is registered without a key at its configured port. CORSIA's
-    own instance is registered with its generated key before oMLX receives it.
-    """
-    from api.network_server_helpers import _add_omlx_server
-
-    result = await _add_omlx_server(SimpleNamespace(
-        hostname=LOCAL_HOST, port=port, name=LOCAL_SERVER_NAME, api_key=api_key,
-    ))
-    return str(result["server_id"])
-
-
-async def _configure_global(server_id: str) -> None:
-    """Write oMLX's server-wide settings and, once, the loopback-only auth flag."""
-    from llm.providers.omlx_settings import save_global_settings
-
-    pairs = {**OMLX_GLOBAL_SETTINGS, SKIP_AUTH_SETTING: True}
-    result = await save_global_settings({"server_id": server_id}, pairs)
-    if not result.get("ok"):
-        raise RuntimeError(str(result.get("message", "oMLX could not save global settings.")))
-
-
-async def _configure_model_settings(server_id: str, context_window: int, profile: LocalProfile) -> None:
-    from llm.providers.omlx_endpoints import admin_request
-
-    payload = {**profile.model_settings, "max_context_window": context_window}
-    response = await admin_request(
-        {"server_id": server_id}, "PUT", f"/models/{profile.model}/settings", json=payload, timeout=15.0,
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"oMLX could not save settings for {profile.display_name} (HTTP {response.status_code}).")
-
-
-async def _wait_for_download(server_id: str, progress: Callable[[str], None],
-                             profile: LocalProfile) -> None:
-    """Request one persisted HF task and follow it with the one poll loop.
-
-    The foreground wait ends into background following, not a failure: the
-    same loop keeps polling slowly, so its completion reaches the flight, the
-    only owner of the configure and catalog-refresh transition.
-    """
-    from llm.providers.omlx_endpoints import admin_request
-
-    cfg = {"server_id": server_id}
-    response = await admin_request(
-        cfg, "POST", "/hf/download", json={"repo_id": profile.repository, "hf_token": ""}, timeout=15.0,
-    )
-    if response.status_code not in (200, 201, 202):
-        raise RuntimeError(f"oMLX could not start the model download (HTTP {response.status_code}).")
-    payload = response.json()
-    if not isinstance(payload, dict) or not payload.get("success"):
-        raise RuntimeError("oMLX did not accept the model download request.")
-    task = payload.get("task")
-    task_id = task.get("task_id") if isinstance(task, dict) else None
-    if not isinstance(task_id, str) or not task_id:
-        raise RuntimeError("oMLX did not return a download task id.")
-
-    started = time.monotonic()
-    tracker = DownloadProgress(started)
-    while True:
-        tasks_response = await admin_request(cfg, "GET", "/hf/tasks", timeout=15.0)
-        if tasks_response.status_code != 200:
-            raise RuntimeError("oMLX could not read download progress.")
-        task = _task_from_payload(tasks_response.json(), task_id)
-        if task is None:
-            raise RuntimeError(f"oMLX no longer reports the {profile.display_name} download task.")
-        status = str(task.get("status") or "").lower()
-        shown = tracker.due(task.get("downloaded_size"), task.get("total_size"), time.monotonic())
-        if shown is not None:
-            progress(f"Downloading {profile.model} ({format_size(profile.download_size_bytes)}, {shown}%)")
-        if status in {"completed", "complete", "success", "succeeded"}:
-            return
-        if status in {"failed", "error", "cancelled", "canceled"}:
-            detail = task.get("error") or "The oMLX download task failed."
-            raise RuntimeError(str(detail))
-        elapsed = time.monotonic() - started
-        if elapsed >= DOWNLOAD_FOLLOW_SECONDS:
-            raise StillDownloading()
-        if elapsed >= DOWNLOAD_WAIT_SECONDS and not _flight.following:
-            _flight.following = True
-            progress(f"Still downloading {profile.model}; it will finish in the background")
-        await asyncio.sleep(
-            DOWNLOAD_BACKGROUND_POLL_SECONDS if _flight.following else DOWNLOAD_POLL_SECONDS,
-        )
-
-
-async def _download_dir(server_id: str) -> Path | None:
-    """Where this oMLX downloads to, as it reports it; None when it can't be read.
-
-    ``model.model_dir`` is oMLX's own resolution of ``--model-dir``, its settings file
-    and its default; oMLX ``server.py`` hands that directory to ``HFDownloader``.
-    """
-    from llm.providers.omlx_settings import get_settings
-
-    settings = (await get_settings({"server_id": server_id})).get("settings")
-    model = settings.get("model") if isinstance(settings, dict) else None
-    path = model.get("model_dir") if isinstance(model, dict) else None
-    return Path(path) if isinstance(path, str) and path else None
+async def _download_dir(server_id: str):
+    return await local_setup_download.download_dir(server_id)
 
 
 async def _download(server_id: str, report: Callable[[str], None], profile: LocalProfile) -> None:
@@ -184,10 +80,6 @@ async def _download(server_id: str, report: Callable[[str], None], profile: Loca
     await _wait_for_download(server_id, report, profile)
 
 
-class StillDownloading(Exception):
-    """The download outlived what CORSIA follows; oMLX is still running it."""
-
-
 @dataclass
 class _Flight:
     task: asyncio.Task | None = None
@@ -196,6 +88,7 @@ class _Flight:
     eligibility: Eligibility | None = None
     following: bool = False
     kind: str | None = None
+    operation_lock: IO[str] | None = None
 
 
 _flight = _Flight()
@@ -203,6 +96,37 @@ _flight = _Flight()
 
 def _running() -> bool:
     return _flight.task is not None and not _flight.task.done()
+
+
+def _release_operation_lock() -> None:
+    local_setup_operation.unlock(_flight.operation_lock)
+    _flight.operation_lock = None
+
+
+def _claim_operation(profile: LocalProfile, kind: str) -> bool:
+    """Persist and exclusively own one flight before it can request a download."""
+    lock = local_setup_operation.try_lock()
+    if lock is None:
+        return False
+    try:
+        if local_setup_operation.read() is not None:
+            local_setup_operation.unlock(lock)
+            return False
+        local_setup_operation.write(local_setup_operation.Operation(profile.id, kind))
+    except Exception:
+        local_setup_operation.unlock(lock)
+        raise
+    _flight.operation_lock = lock
+    return True
+
+
+def _record_download_task(profile: LocalProfile, task_id: str) -> None:
+    operation = local_setup_operation.read()
+    if operation is None or operation.profile_id != profile.id:
+        return
+    local_setup_operation.write(
+        local_setup_operation.Operation(profile.id, operation.kind, task_id),
+    )
 
 
 def setup_stage() -> str | None:
@@ -316,6 +240,9 @@ async def _run_flight(eligibility: Eligibility, *, profile: LocalProfile, into_o
             result = await adopt_existing_omlx(report, eligibility, events)
         else:
             result = await _setup_new_omlx(report, eligibility, events, profile)
+    except asyncio.CancelledError:
+        _release_operation_lock()
+        raise
     except StillDownloading:
         _emit("downloading_stopped", profile=profile.id)
         result = {
@@ -334,12 +261,62 @@ async def _run_flight(eligibility: Eligibility, *, profile: LocalProfile, into_o
     _flight.result = result
     _flight.stage = None
     _flight.following = False
+    if result.get("ok") and not result.get("downloading"):
+        local_setup_operation.clear()
+    elif not result.get("downloading"):
+        # A terminal oMLX error cannot be followed. Removing its stale task id
+        # lets an explicit retry create one new task instead of replaying it.
+        local_setup_operation.clear()
+    _release_operation_lock()
     return result
 
 
 def flight_task() -> asyncio.Task | None:
     """The flight's task for lifespan shutdown to cancel and join, else None."""
     return _flight.task
+
+
+async def resume_pending_setup() -> bool:
+    """Re-follow a persisted oMLX task after a backend restart, without posting a duplicate."""
+    if _running():
+        return True
+    operation = local_setup_operation.read()
+    if operation is None:
+        return False
+    profile = profile_by_id(operation.profile_id)
+    if profile is None or operation.kind not in {"setup", "starter"}:
+        log.warning("discarding unreadable local setup recovery record")
+        local_setup_operation.clear()
+        return False
+    eligibility = profile_eligibility(profile, await asyncio.to_thread(host_ram_bytes))
+    if not eligibility.eligible:
+        log.warning("discarding local setup recovery record for ineligible profile %s", profile.id)
+        local_setup_operation.clear()
+        return False
+
+    _flight.result = None
+    _flight.eligibility = eligibility
+    _flight.kind = operation.kind
+    _flight.stage = "Waiting to resume local model setup"
+
+    async def resume() -> dict:
+        while _flight.operation_lock is None:
+            lock = local_setup_operation.try_lock()
+            if lock is not None:
+                _flight.operation_lock = lock
+                break
+            await asyncio.sleep(0.25)
+        return await _run_flight(
+            eligibility,
+            profile=profile,
+            into_own_omlx=operation.kind == "starter",
+        )
+
+    _flight.task = asyncio.create_task(resume())
+    _flight.task.add_done_callback(_observe_setup_task)
+    _flight.task.add_done_callback(lambda _task: _notify_models_changed())
+    _emit("resumed", profile=profile.id, kind=operation.kind)
+    return True
 
 
 async def begin_local_setup(
@@ -356,6 +333,10 @@ async def begin_local_setup(
     """
     if _running():
         return _in_progress_result(_flight.eligibility)
+    if local_setup_operation.read() is not None:
+        if await resume_pending_setup():
+            return _in_progress_result(_flight.eligibility)
+        return local_setup_error("CORSIA could not resume the local model setup safely.", profile_id or DEFAULT_PROFILE.id)
     ram_bytes = await asyncio.to_thread(host_ram_bytes)
     foreign = profile_id is not None and await asyncio.to_thread(existing_install_is_foreign)
     # Refused before anything is cleared or started: the caller reads the reason.
@@ -383,6 +364,10 @@ async def begin_local_setup(
         return {**local_setup_error(message, profile.id), "eligibility": eligibility.__dict__, "progress": []}
     if _running():
         return _in_progress_result(_flight.eligibility)
+    if not _claim_operation(profile, "setup"):
+        if await resume_pending_setup():
+            return _in_progress_result(_flight.eligibility)
+        return _in_progress_result(eligibility)
     _flight.stage = "Installing"
     _flight.kind = "setup"
     _flight.eligibility = eligibility

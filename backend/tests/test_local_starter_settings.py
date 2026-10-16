@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from llm import local_setup
+from llm.local_profiles import OMLX_GLOBAL_SETTINGS
 
 
 def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment_override(monkeypatch):
@@ -43,10 +44,10 @@ def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment
     assert "OMLX_SDPA256_TILED" not in str(calls)
     # The one auth write CORSIA makes: no bind host, port, CORS or key setting.
     assert not {"host", "port", "cors_origins", "api_key", "server"} & set(calls[0][2])
-    assert not {"host", "port", "cors_origins", "api_key", "server"} & set(local_setup.OMLX_GLOBAL_SETTINGS)
+    assert not {"host", "port", "cors_origins", "api_key", "server"} & set(OMLX_GLOBAL_SETTINGS)
 
 
 def test_starter_serializes_requests_as_the_setup_decision_says():
     # setup_strings.OMLX ("At {recommended}, oMLX finishes one request before it starts the
     # next") describes this value; changing it makes that decision text false.
-    assert local_setup.OMLX_GLOBAL_SETTINGS["max_concurrent_requests"] == 1
+    assert OMLX_GLOBAL_SETTINGS["max_concurrent_requests"] == 1

@@ -157,18 +157,30 @@ type LabelSample = {
 	outgoing: { x: number; width: number } | null;
 };
 
-async function outgoingLabelSample(page: Page, outgoingLabel: string): Promise<LabelSample> {
-	return page.locator('.pane > footer').evaluate((footer, label) => {
+// Waits in the page for the outgoing label's own fade to reach the fraction, then samples in the same task:
+// a node-side wait plus a second round trip can land after a 120 ms outro has already unmounted the label.
+async function outgoingLabelSample(page: Page, outgoingLabel: string, fraction = 0): Promise<LabelSample> {
+	return page.locator('.pane > footer').evaluate(async (footer, [label, targetFraction]) => {
 		const button = footer.querySelector<HTMLElement>('.btn.pill');
 		if (!button) throw new Error('Missing setup pill');
+		const findOutgoing = () =>
+			Array.from(footer.querySelectorAll<HTMLElement>('.primary-label')).find((element) => element.textContent === label);
+		const fade = findOutgoing()?.getAnimations().find((animation) => animation.playState === 'running');
+		if (fade && Number(targetFraction) > 0) {
+			const duration = Number(fade.effect?.getComputedTiming().duration ?? 0);
+			await new Promise<void>((resolve) => {
+				const reached = () => Number(fade.currentTime ?? duration) >= duration * Number(targetFraction) || fade.playState !== 'running';
+				const step = () => (reached() ? resolve() : requestAnimationFrame(step));
+				step();
+			});
+		}
 		const buttonRect = button.getBoundingClientRect();
-		const outgoing = Array.from(footer.querySelectorAll<HTMLElement>('.primary-label')).find((element) => element.textContent === label);
-		const outgoingRect = outgoing?.getBoundingClientRect();
+		const outgoingRect = findOutgoing()?.getBoundingClientRect();
 		return {
 			button: { x: buttonRect.x, width: buttonRect.width, overflow: getComputedStyle(button).overflow },
 			outgoing: outgoingRect ? { x: outgoingRect.x, width: outgoingRect.width } : null,
 		};
-	}, outgoingLabel);
+	}, [outgoingLabel, fraction] as const);
 }
 
 function expectOutgoingLabelCenteredAndClipped(sample: LabelSample) {
@@ -200,12 +212,12 @@ async function recordPillWidthTransition<T>(page: Page, outgoingLabel: string, n
 	await expect(page.locator('.pane > footer .primary-label').filter({ hasText: nextLabel })).toHaveCount(1);
 	await expect.poll(() => button.evaluate((element) => element.getAnimations().some((animation) => animation instanceof CSSTransition && animation.transitionProperty === 'width' && animation.playState === 'running'))).toBe(true);
 	const startSample = await outgoingLabelSample(page, outgoingLabel);
+	// Sampled in the page alongside the mid capture, so a slow screenshot cannot outlast the fade.
+	const laterSamples = Promise.all([outgoingLabelSample(page, outgoingLabel, 0.5), outgoingLabelSample(page, outgoingLabel, 0.85)]);
 	await waitForWidthTransitionFraction(button, 0.5);
 	const mid = await button.evaluate((element) => element.getBoundingClientRect().width);
-	const midSample = await outgoingLabelSample(page, outgoingLabel);
 	await captureMid();
-	await waitForWidthTransitionFraction(button, 0.85);
-	const lateSample = await outgoingLabelSample(page, outgoingLabel);
+	const [midSample, lateSample] = await laterSamples;
 	for (const sample of [startSample, midSample, lateSample]) expectOutgoingLabelCenteredAndClipped(sample);
 	const crossfade = await crossfadePromise;
 	await expect.poll(() => button.evaluate((element) => element.getAnimations({ subtree: true }).every((animation) => animation.playState !== 'running'))).toBe(true);

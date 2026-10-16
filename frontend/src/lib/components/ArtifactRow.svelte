@@ -6,7 +6,8 @@
 	// signed-in user for a download) and degrades honestly when it cannot.
 	import { get } from 'svelte/store';
 	import { token, user } from '$lib/stores/auth';
-	import { IconButton } from '$lib/components/ui';
+	import Menu from '$lib/components/ui/Menu.svelte';
+	import { createRowMenu } from '$lib/components/ui/rowMenu.svelte';
 	import { openArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import { toasts } from '$lib/stores/toast';
@@ -43,6 +44,34 @@
 
 	const disabled = $derived(effectiveDisabled(item));
 	const disabledReason = $derived(effectiveDisabledReason(item));
+
+	// The row's secondary actions live in the shared row menu, opened like a plan
+	// row's (right-click, Shift+F10, long-press). The row never draws an
+	// additional action button, keeping the list face consistent on every width.
+	const menu = createRowMenu<ArtifactNode>(() => true);
+	const menuItems = $derived([
+		...(item.pin_eligible ? [{ id: 'pin', label: item.pinned ? 'Unpin from pane' : 'Pin to pane', title: pinHint(item) }] : []),
+		{ id: 'remove', label: 'Remove from pane' },
+	]);
+
+	// An exempt row never clears on task end, so pinning it only reorders.
+	function pinHint(it: ArtifactNode): string {
+		if (it.pinned) {
+			return it.retirement_exempt
+				? 'Unpin — this one is not cleared by task completion'
+				: 'Unpin — let this clear once its work is done';
+		}
+		return it.retirement_exempt
+			? 'Pin — keep this row leading its list'
+			: 'Pin — keep this after the task finishes';
+	}
+
+	function select(id: string) {
+		const it = menu.open?.item ?? item;
+		menu.close();
+		if (id === 'pin') onPin(it.id, !it.pinned);
+		else onHide(it.id);
+	}
 
 	function effectiveDisabled(it: ArtifactNode): boolean {
 		if (it.action.disabled) return true;
@@ -89,47 +118,29 @@
 	}
 </script>
 
-<div class="row-outer">
+<div class="row-outer" {...menu.rowHandlers(item)}>
 	{#if !disabled}
 		<button type="button" class="row openable" onclick={activate}>
 			{@render rowContent()}
 		</button>
 	{:else}
-		<div class="row disabled" title={disabledReason ?? undefined}>
+		<div class="row disabled" role="button" tabindex="0" aria-disabled="true" title={disabledReason ?? undefined}>
 			{@render rowContent()}
 		</div>
 	{/if}
-	{#if item.pin_eligible}
-		<IconButton
-			ariaLabel={item.pinned ? 'Unpin from pane' : 'Pin to pane'}
-			title={item.pinned
-				? (item.retirement_exempt
-					? 'Unpin — this one is not cleared by task completion'
-					: 'Unpin — let this clear once its work is done')
-				: (item.retirement_exempt
-					? 'Pin — keep this row leading its list'
-					: 'Pin — keep this after the task finishes')}
-			size="sm"
-			variant="ghost"
-			class={item.pinned ? 'pin-btn is-pinned' : 'pin-btn'}
-			disabled={pending}
-			onclick={() => onPin(item.id, !item.pinned)}
-		>
-			{@render pinIcon(item.pinned)}
-		</IconButton>
-	{/if}
-	<IconButton
-		ariaLabel="Remove from pane"
-		title="Remove from pane"
-		size="sm"
-		variant="ghost"
-		class="hide-btn"
-		disabled={pending}
-		onclick={() => onHide(item.id)}
-	>
-		<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-	</IconButton>
+	<!-- The context menu is intentionally the sole action doorway for this row. -->
 </div>
+{#if menu.open}
+	<Menu
+		ariaLabel={`Actions for ${item.name}`}
+		items={menuItems}
+		x={menu.open.x}
+		y={menu.open.y}
+		busy={pending}
+		onSelect={select}
+		onClose={menu.close}
+	/>
+{/if}
 
 {#snippet pinIcon(filled: boolean)}
 	<svg viewBox="0 0 24 24" width="13" height="13" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3l6 6-3 1-4 4-1 6-2-2-4 4-1-1 4-4-2-2 6-1 4-4z"/></svg>
@@ -162,19 +173,8 @@
 
 <style>
 	.row-outer { display: flex; align-items: center; gap: 0; }
-	.row-outer:hover :global(.hide-btn), .row-outer:focus-within :global(.hide-btn) { opacity: 1; }
-	:global(.hide-btn) { opacity: 0; flex-shrink: 0; transition: opacity var(--dur-tight) ease; }
-	@media (hover: none) { :global(.hide-btn) { opacity: 1; } }
 
-	/* The pin control is an affordance on hover, but a pinned row keeps it
-	   visible: the filled pin beside the name is status, and a control that
-	   vanished would leave no way back. */
-	.row-outer:hover :global(.pin-btn), .row-outer:focus-within :global(.pin-btn) { opacity: 1; }
-	:global(.pin-btn) { opacity: 0; flex-shrink: 0; transition: opacity var(--dur-tight) ease; }
-	:global(.pin-btn.is-pinned) { opacity: 1; color: var(--accent); }
-	@media (hover: none) { :global(.pin-btn) { opacity: 1; } }
-
-	.pin-mark { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--accent); }
+	.pin-mark { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--accent-text); }
 
 	.row {
 		position: relative; display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
@@ -188,7 +188,7 @@
 
 	.name { font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 	.row.disabled .name { color: var(--text-tertiary); }
-	.reply-mark { flex-shrink: 0; color: var(--accent); }
+	.reply-mark { flex-shrink: 0; color: var(--accent-text); }
 	.sp { flex: 1; }
 
 	.meta { font-size: var(--text-footnote); color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }

@@ -32,8 +32,8 @@
 		color: var(--green-text, var(--green));
 	}
 	.msg.info {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
 		color: var(--text-primary);
 	}
 	.msg.warn {

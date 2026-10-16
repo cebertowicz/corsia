@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+export PATH="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PYTHONNOUSERSITE=1
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPATH="$resources/python/backend-packages"
+exec "$resources/python/bin/python3" "$resources/backend/cli.py" "$@"

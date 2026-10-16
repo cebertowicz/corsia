@@ -80,6 +80,10 @@ async def begin_add_starter_model() -> dict:
     """
     if ls._running():
         return ls._in_progress_result(ls._flight.eligibility)
+    if ls.local_setup_operation.read() is not None:
+        if await ls.resume_pending_setup():
+            return ls._in_progress_result(ls._flight.eligibility)
+        return {"ok": False, "reason": "recovery_failed", "message": "CORSIA could not resume the local model setup safely."}
     if not await asyncio.to_thread(ls.existing_install_is_foreign):
         return {"ok": False, "reason": "not_your_omlx",
                 "message": "This oMLX was set up by CORSIA; use Set up for the local model."}
@@ -87,6 +91,10 @@ async def begin_add_starter_model() -> dict:
     if not eligibility.eligible:
         ls._emit("skipped", reason="ineligible", existing_omlx=True)
         return {"ok": False, "reason": "mac_cannot_run", "message": "This Mac can't run a local model well."}
+    if not ls._claim_operation(DEFAULT_PROFILE, "starter"):
+        if await ls.resume_pending_setup():
+            return ls._in_progress_result(ls._flight.eligibility)
+        return ls._in_progress_result(eligibility)
     ls._flight.result = None
     ls._flight.eligibility = eligibility
     ls._flight.stage = "Checking your oMLX"

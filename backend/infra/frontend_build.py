@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from infra.config import FRONTEND_DIR, STATE_ROOT, WORKSPACE
+from infra.platform_paths import app_bundle_root
 
 FRONTEND_ROOT = FRONTEND_DIR.parent
 _SERVING_ROOT = FRONTEND_ROOT.parent
@@ -21,7 +22,9 @@ _CORSIA_SCRIPT = _SERVING_ROOT / "scripts" / "corsia"
 
 def ensure_frontend_built() -> None:
     """Require frontend assets paired to this checkout before lifespan proceeds."""
-    if not FRONTEND_ROOT.is_dir():
+    # An app bundle carries one immutable, signed frontend release, so there is
+    # nothing to pair or rebuild (its ensure-current-release is a no-op too).
+    if app_bundle_root() is not None or not FRONTEND_ROOT.is_dir():
         return
 
     env = os.environ.copy()

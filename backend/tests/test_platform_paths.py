@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -16,35 +17,214 @@ def _platform_paths():
     return importlib.import_module("infra.platform_paths")
 
 
-def test_default_state_root_uses_macos_application_support(tmp_path):
+def _fake_app_module(tmp_path) -> Path:
+    module = (
+        tmp_path / "Applications" / "CORSIA.app" / "Contents" / "Resources"
+        / "backend" / "infra" / "platform_paths.py"
+    )
+    module.parent.mkdir(parents=True)
+    module.write_text("", encoding="utf-8")
+    return module
+
+
+def test_app_bundle_root_is_a_path_check_on_the_module_location(tmp_path, monkeypatch):
+    paths = _platform_paths()
+    module = _fake_app_module(tmp_path)
+
+    assert paths.app_bundle_root(module) == tmp_path / "Applications" / "CORSIA.app"
+    assert paths.app_bundle_root(tmp_path / "checkout" / "backend" / "infra" / "x.py") is None
+    # The checkout this test runs from is never an app bundle, whatever the env says.
+    monkeypatch.setenv("CORSIA_DESKTOP_BUNDLE", "1")
+    assert paths.app_bundle_root() is None
+
+
+def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
+    paths = _platform_paths()
+    repo = Path(__file__).resolve().parents[2]
+    rust = (repo / "desktop" / "src-tauri" / "src" / "app_paths.rs").read_text()
+    launcher = (repo / "desktop" / "scripts" / "corsia-service").read_text()
+    app_mode = (repo / "scripts" / "corsia.d" / "app_mode.sh").read_text()
+
+    rust_folder = re.findall(r'^pub const APP_FOLDER: &str = "([^"]*)";$', rust, re.M)
+    launcher_folder = re.findall(r"^CORSIA_APP_FOLDER=(\S+)$", launcher, re.M)
+
+    assert rust_folder == launcher_folder == [paths.APP_FOLDER] == ["CORSIA"]
+    # The bundled lifecycle script asks the backend for every app path rather
+    # than spelling the folder a fourth time.
+    assert "Application Support" not in app_mode
+    # It finds the app binary's staged and previous copies by the same names.
+    stage = (repo / "desktop" / "src-tauri" / "src" / "update_stage.rs").read_text()
+    rust_names = re.findall(r'with_file_name\("(CORSIA\.app\.\w+)"\)', stage)
+    shell_names = re.findall(r'/(CORSIA\.app\.\w+)"', app_mode)
+    assert sorted(rust_names) == sorted(shell_names) == [
+        "CORSIA.app.previous",
+        "CORSIA.app.staged",
+    ]
+
+
+def test_service_file_lines_honour_only_the_workspace_and_port(tmp_path):
+    paths = _platform_paths()
+    service_file = tmp_path / "service.json"
+    service_file.write_text(
+        '{"workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
+    )
+
+    assert paths.service_file_lines(service_file) == [
+        "note=service.json: ignoring unsupported key PATH",
+        "note=service.json: ignoring unsupported key <unprintable name>",
+        "workspace=/w",
+        "port=4100",
+    ]
+    service_file.write_text('{"workspace": "relative", "port": true}')
+    assert paths.service_file_lines(service_file) == [
+        "note=service.json: ignoring an invalid workspace value",
+        "note=service.json: ignoring an invalid port value",
+    ]
+    service_file.write_text("[1]")
+    assert paths.service_file_lines(service_file) == [
+        "note=service.json unreadable: ValueError"
+    ]
+
+
+def test_default_state_root_is_the_state_child_of_the_app_folder_in_the_app(tmp_path):
     paths = _platform_paths()
 
     result = paths.default_state_root(
         env={},
         platform="darwin",
         home=tmp_path,
+        app_bundle=tmp_path / "Applications" / "CORSIA.app",
+    )
+
+    assert result == tmp_path / "Library" / "Application Support" / "CORSIA" / "state"
+    assert result.parent == paths.app_metadata_dir(tmp_path)
+
+
+def test_default_state_root_for_a_source_install_never_uses_the_app_folder(tmp_path):
+    paths = _platform_paths()
+    app_folder = tmp_path / "Library" / "Application Support" / "CORSIA"
+    app_folder.mkdir(parents=True)
+
+    result = paths.default_state_root(
+        env={},
+        platform="darwin",
+        home=tmp_path,
+        app_bundle=None,
     )
 
     assert result == (
         tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
     )
+    assert not result.is_relative_to(app_folder)
 
 
-def test_default_state_root_does_not_claim_existing_application_metadata(tmp_path):
+def test_default_state_root_reads_app_mode_from_the_module_location(tmp_path):
     paths = _platform_paths()
-    application_root = tmp_path / "Library" / "Application Support" / APPLICATION_ID
-    application_root.mkdir(parents=True)
-    config = application_root / "config.json"
-    config.write_text('{"server_url":"http://localhost"}\n', encoding="utf-8")
 
-    result = paths.default_state_root(
-        env={},
-        platform="darwin",
-        home=tmp_path,
+    # This checkout's module is not inside a bundle: the source-install rule.
+    assert paths.default_state_root(env={}, platform="darwin", home=tmp_path) == (
+        tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
     )
 
-    assert result == application_root / "state"
-    assert config.read_text(encoding="utf-8") == ('{"server_url":"http://localhost"}\n')
+
+def _preview_folder(tmp_path) -> Path:
+    app_dir = tmp_path / "CORSIA"
+    (app_dir / "logs").mkdir(parents=True)
+    (app_dir / "uploads").mkdir()
+    (app_dir / "corsia.db").write_text("db", encoding="utf-8")
+    (app_dir / "corsia.db-wal").write_text("wal", encoding="utf-8")
+    (app_dir / "logs" / "service.log").write_text("log", encoding="utf-8")
+    (app_dir / "service.json").write_text("{}", encoding="utf-8")
+    return app_dir
+
+
+def test_preview_layout_moves_operational_state_into_state_once(tmp_path):
+    paths = _platform_paths()
+    app_dir = _preview_folder(tmp_path)
+
+    moved = paths.move_preview_layout(app_dir, app_dir / "state")
+
+    assert moved == ["corsia.db", "corsia.db-wal", "logs", "uploads"]
+    assert (app_dir / "state" / "corsia.db").read_text(encoding="utf-8") == "db"
+    assert (app_dir / "state" / "logs" / "service.log").is_file()
+    assert (app_dir / "service.json").is_file(), "app metadata stays beside state/"
+    assert not (app_dir / "corsia.db").exists()
+    assert sorted(path.name for path in app_dir.iterdir()) == ["service.json", "state"]
+    assert paths.move_preview_layout(app_dir, app_dir / "state") == []
+
+
+def test_preview_layout_moves_every_state_entry_but_app_metadata(tmp_path):
+    paths = _platform_paths()
+    app_dir = tmp_path / "CORSIA"
+    app_dir.mkdir()
+    state_entries = {
+        "corsia.db",
+        "documents",
+        "assets",
+        "locks",
+        "security",
+        "worktree_reaper",
+        "reviewer",
+        "local_setup_installed_omlx",
+        "local_setup_existing_omlx_consented",
+        "local-setup-operation.json",
+    }
+    for name in state_entries:
+        path = app_dir / name
+        if "." in name:
+            path.write_text(name, encoding="utf-8")
+        else:
+            path.mkdir()
+            (path / "state").write_text(name, encoding="utf-8")
+    (app_dir / "service.json").write_text("{}", encoding="utf-8")
+
+    moved = paths.move_preview_layout(app_dir, app_dir / "state")
+
+    assert set(moved) == state_entries
+    assert {path.name for path in (app_dir / "state").iterdir()} == state_entries
+    assert sorted(path.name for path in app_dir.iterdir()) == ["service.json", "state"]
+
+
+def test_preview_layout_move_never_touches_an_existing_state_root(tmp_path):
+    paths = _platform_paths()
+    app_dir = _preview_folder(tmp_path)
+    (app_dir / "state").mkdir()
+
+    assert paths.move_preview_layout(app_dir, app_dir / "state") == []
+    assert (app_dir / "corsia.db").is_file()
+    assert list((app_dir / "state").iterdir()) == []
+
+
+def test_preview_layout_move_ignores_a_folder_without_a_database(tmp_path):
+    paths = _platform_paths()
+    app_dir = tmp_path / "CORSIA"
+    app_dir.mkdir()
+    (app_dir / "service.json").write_text("{}", encoding="utf-8")
+
+    assert paths.move_preview_layout(app_dir, app_dir / "state") == []
+    assert not (app_dir / "state").exists()
+
+
+def test_preview_layout_move_ignores_a_state_root_outside_the_app_folder(tmp_path):
+    paths = _platform_paths()
+    app_dir = _preview_folder(tmp_path)
+
+    assert paths.move_preview_layout(app_dir, tmp_path / "elsewhere" / "state") == []
+    assert (app_dir / "corsia.db").is_file()
+
+
+def test_an_interrupted_preview_layout_move_is_finished_next_time(tmp_path):
+    paths = _platform_paths()
+    app_dir = _preview_folder(tmp_path)
+    staging = app_dir / ".state.moving"
+    staging.mkdir()
+    os.rename(app_dir / "corsia.db", staging / "corsia.db")
+
+    moved = paths.move_preview_layout(app_dir, app_dir / "state")
+
+    assert moved == ["corsia.db-wal", "logs", "uploads"]
+    assert (app_dir / "state" / "corsia.db").read_text(encoding="utf-8") == "db"
+    assert not staging.exists()
 
 
 def test_default_state_root_uses_xdg_state_home(tmp_path):

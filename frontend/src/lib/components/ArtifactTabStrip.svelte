@@ -88,9 +88,10 @@
 		gap: 2px;
 	}
 	.tabs::-webkit-scrollbar { display: none; }
+	/* A tab is a pill in the transcript's pill geometry (32 px, fully round); wide enough for a typical file name. */
 	.tab-wrap {
 		display: flex; align-items: center; flex-shrink: 0;
-		max-width: 200px; margin: 6px 0; border-radius: var(--radius-sm);
+		max-width: 260px; height: 32px; margin: auto 0; border-radius: var(--radius-pill);
 		color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-medium);
 	}
 	/* Hover eases in; the active mark moves in the same frame as the content it labels, never fading behind it. */
@@ -98,10 +99,10 @@
 	.tab-wrap.active { background: var(--bg-active); color: var(--text-primary); transition: none; }
 	.tab {
 		display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%;
-		padding: 0 2px 0 10px; background: none; border: none; cursor: pointer;
+		padding: 0 2px 0 12px; background: none; border: none; cursor: pointer;
 		color: inherit; font: inherit;
 	}
-	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-pill); }
 	.tab-ico { flex-shrink: 0; }
 	.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 	.tab-err {
@@ -116,7 +117,7 @@
 	.tab-ro { flex-shrink: 0; display: flex; color: var(--text-tertiary); }
 	.tab-close {
 		display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-		width: 18px; height: 18px; margin-right: 6px; border-radius: var(--radius-2xs);
+		width: 18px; height: 18px; margin-right: 8px; border-radius: var(--radius-circle);
 		background: none; border: none; cursor: pointer; color: inherit; opacity: 0.7;
 	}
 	.tab-close:hover { opacity: 1; background: var(--bg-hover); color: var(--red); }

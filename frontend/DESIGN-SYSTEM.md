@@ -68,16 +68,21 @@ accessibility media queries, press behavior, and app-wide mechanics.
 
 ### 2.1 Color — semantic palette
 
-The canonical accent palette is **violet / teal / sky / amber**. Each has
-`--{name}`, `--{name}-2` (hover/emphasis), `--{name}-bg` (10% tint), and
-`--{name}-line` (28%/32% border).
+The accent is a family of **role tokens**: CORSIA blue by default, and under a
+project scope every role is derived from the project's colour
+(`accentRoles()` in `src/lib/utils/projectColors.ts`). The categorical hues are
+**purple / teal / sky / amber**, each with `--{name}`, `--{name}-bg` (tint) and
+`--{name}-line` (border).
 
 | Token | Role | Dark | Light | Notes |
 |---|---|---|---|---|
-| `--violet` | Brand accent | `#8b5cf6` | `#7c5cf6` | Aliased to `--purple` in dark; do not reach for `--purple` directly. |
-| `--violet-2` | Hover/emphasis | `#b29bff` | `#6d4ce6` | Used for hover states, active text. |
-| `--violet-bg` | Subtle fill | `rgba(139,92,246,0.10)` | `rgba(124,92,246,0.08)` | Buttons, pills, hover. |
-| `--violet-line` | Border tint | `rgba(139,92,246,0.28)` | `rgba(124,92,246,0.32)` | Pill / button borders. |
+| `--accent` | Accent: selection, focus, links, active state | `#60a5fa` | `#2563eb` | |
+| `--accent-hover` | Hover/emphasis | `#93c5fd` | `#1d4ed8` | |
+| `--accent-text` | Accent text | `var(--accent)` | `#1d4ed8` | Reaches 4.5:1 on every pane. |
+| `--accent-wash` | Subtle fill | `rgba(96,165,250,0.08)` | `rgba(37,99,235,0.10)` | Buttons, pills, hover, focus rings. |
+| `--accent-line` | Border tint | `rgba(96,165,250,0.28)` | `rgba(37,99,235,0.32)` | Pill / button borders. |
+| `--accent-fill` / `--accent-on-fill` | Solid fill and the ink on it | `var(--accent)` / `#0a0a0b` | `var(--accent)` / `#ffffff` | Send button, user bubble, swipe action. |
+| `--purple` | Categorical violet: identity and kind colours | `#8b5cf6` | `#7c5cf6` | Never the accent. `--purple-2`, `--purple-text`, `--purple-bg`, `--purple-line` alongside. |
 | `--teal` | Local-source accent | `#2dd4bf` | `#0d9488` | Used for local model surfaces. |
 | `--teal-bg` | | `rgba(45,212,191,0.10)` | `rgba(13,148,136,0.08)` | |
 | `--teal-line` | | `rgba(45,212,191,0.28)` | `rgba(13,148,136,0.32)` | |
@@ -96,10 +101,11 @@ The canonical accent palette is **violet / teal / sky / amber**. Each has
 | `--red-bg-hover` | | `rgba(248,113,113,0.14)` | `#fee2e2` *(solid)* | |
 
 **Anti-patterns:**
-- ❌ Reaching for `--purple` or `--blue` directly. Use `--violet` / `--sky`.
-- ❌ Inline `rgba(139,92,246,...)` because you "need a custom violet
-  opacity". Use `--violet-bg` / `--violet-line` or `color-mix(in srgb,
-  var(--violet) X%, transparent)`.
+- ❌ Reaching for `--blue` directly, or `--purple` for the accent. Use the
+  `--accent*` roles for the accent and `--sky` for info.
+- ❌ Inline `rgba(...)` because you "need a custom accent opacity". Use
+  `--accent-wash` / `--accent-line` or `color-mix(in srgb, var(--accent) X%,
+  transparent)`.
 - ❌ Defining a per-component fallback like `var(--bg, #fff)` — define the
   token in `app-tokens.css` instead. Color/theme fallbacks inside `var()` are
   forbidden by the "CSS Variable Convention" rule in `FRONTEND.md`.
@@ -362,7 +368,7 @@ staggered `animation-delay` (0.0 / 0.2 / 0.4s).
 
 **Hover tint (links / list rows / pills).** `transition: background
 150ms` (typical). Pure background swap — no transform, no scale. Use
-`--bg-hover` for neutral rows; `--violet-bg` + `--violet-line` for
+`--bg-hover` for neutral rows; `--accent-wash` + `--accent-line` for
 primary pills.
 
 **Page-level navigation.** No global page-transition framework today;
@@ -461,7 +467,7 @@ unchanged. Markdown content uses `--text-callout` and scales down inside
 `Section.svelte` and ad-hoc sidebar headers):
 - 9.5–10.5px / weight 700 / 0.10–0.12em letter-spacing / uppercase
 - Color: `var(--text-tertiary)` for `Section`; sidebar variants tint
-  with `color-mix(in srgb, var(--violet) 55%, var(--text-tertiary))`
+  with `color-mix(in srgb, var(--accent) 55%, var(--text-tertiary))`
 
 **Numeric / monospace:** `'SF Mono', 'Fira Code', monospace` for code,
 tool-call names, and IDs.
@@ -479,7 +485,7 @@ override font-size to 13px / line-height 1.5 / `--text-tertiary` color.
 | `--red-bg` | rgba 0.08 | `#fef2f2` (solid) | Same pattern. |
 | `--amber` hue | `#f59e0b` | `#d97706` | Different hue, not just opacity. Intentional for light-mode contrast. |
 | `--blue` (sky base) | `#60a5fa` | `#3b82f6` | Different hue. Intentional. |
-| `--accent` | `#8b5cf6` | `#7c5cf6` | Slightly darker violet for light-mode contrast. |
+| `--accent` | `#60a5fa` | `#2563eb` | Darker blue for light-mode contrast. |
 | `--glass-rim` opacity | 0.05 | 0.60 | Flip rationale in §2.6. |
 | `--glass-blur` saturate | 180% | 115% | Flip rationale in §2.6. |
 
@@ -692,7 +698,7 @@ interface Props {
 10px h-padding / 11.5px font.
 
 **Variants:**
-- `primary` — locked-on violet tint (`--violet-bg` + line + text). Most
+- `primary` — locked-on accent tint (`--accent-wash` + line + text). Most
   prominent action on a page or modal foot.
 - `secondary` — neutral default (`--bg-secondary` + `--border` +
   `--text-secondary`). Hovers to violet tint.
@@ -771,7 +777,7 @@ trailing col. Mobile (≤720px) collapses to single column.
 
 **Native control styling** (provided via `:global()` selectors): inputs/
 selects/textareas get `--bg-tertiary` bg, `--border` border, `--radius-xs`
-(6px), 32px height, 12.5px font. Focus ring is 3px `--violet-bg`
+(6px), 32px height, 12.5px font. Focus ring is 3px `--accent-wash`
 box-shadow.
 
 Native chrome stripped from selects (custom chevron data-URI inside
@@ -1011,8 +1017,8 @@ Material: `--glass-thick`. **Must include `box-shadow: var(--glass-rim)`.**
 
 Section caps inside the sidebar (PROJECTS, PINNED, CONVERSATIONS) are
 unified at 10.5px / weight 700 / 0.1em letter-spacing /
-`color-mix(in srgb, var(--violet) 55%, var(--text-tertiary))`. PROJECTS
-hover goes full violet. Use these directly; they do *not* compose into
+`color-mix(in srgb, var(--accent) 55%, var(--text-tertiary))`. PROJECTS
+hover goes full accent. Use these directly; they do *not* compose into
 the `Section` primitive (different aesthetic — see §3.6 note).
 
 ### 5.3 Headers
@@ -1143,7 +1149,7 @@ The following are *don'ts*. Violations should be caught in review.
    with visible focus treatment.
 6. **Mixed gap/margin rhythm.** Don't pair `padding: 12px` with
    `margin-bottom: 16px` on the same axis — pick a rhythm and stick.
-7. **Reaching for `--purple` or `--blue`.** Use `--violet` / `--sky`.
+7. **Reaching for `--blue`, or `--purple` for the accent.** Use the `--accent*` roles / `--sky`.
 8. **Era prefixes (`v7-`, `v054-`).** Retired. Grep should stay empty.
 9. **`var(--bg, #fff)` color fallbacks.** Forbidden by FRONTEND.md's CSS
    Variable Convention rule. Numeric fallbacks (`var(--radius-xs, 4px)`)

@@ -148,7 +148,7 @@
 	.order-controls :global(.ico-btn:hover:not(:disabled)) { border-color: var(--border); }
 	.scope-setting > div { min-width: 0; }
 	.scope-label, .line > span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: 500; }
-	.workspace-link { appearance: none; border: 0; padding: 0; background: transparent; color: var(--violet-text); cursor: pointer; font: inherit; font-size: var(--text-footnote); text-decoration: underline; }
+	.workspace-link { appearance: none; border: 0; padding: 0; background: transparent; color: var(--accent-text); cursor: pointer; font: inherit; font-size: var(--text-footnote); text-decoration: underline; }
 	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.error { color: var(--red-text); }
 </style>

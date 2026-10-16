@@ -9,7 +9,7 @@ import pytest
 
 import cli_local_before_start as before_start
 import cli_sources
-from llm import local_setup, local_setup_ownership
+from llm import local_setup, local_setup_download, local_setup_ownership
 from llm.local_setup_gates import Eligibility, SubscriptionSource
 from llm.local_setup_results import DownloadProgress
 
@@ -250,7 +250,7 @@ def test_installer_download_reports_every_five_percent_and_every_ten_seconds(mon
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr(local_setup.asyncio, "sleep", pause)
-    monkeypatch.setattr(local_setup.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(local_setup_download.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(DownloadProgress, "STEP", 5)
     monkeypatch.setattr(DownloadProgress, "SECONDS", 10.0)
 

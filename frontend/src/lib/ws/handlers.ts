@@ -318,9 +318,9 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 		}
 
-		case 'models_updated': {
-			import('../stores/models').then(m => m.loadModels());
-			emit('models_updated', data);
+		case 'models_updated': case 'classifier_updated': {
+			if (data.type === 'models_updated') import('../stores/models').then(m => m.loadModels());
+			emit(data.type, data);
 			break;
 		}
 

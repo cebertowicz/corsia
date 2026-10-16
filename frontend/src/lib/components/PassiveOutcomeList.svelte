@@ -154,11 +154,11 @@
 
 <style>
 	.passive-outcomes { max-width: 760px; margin: 0 auto 14px; color: var(--text-secondary); font-size: var(--text-footnote); }
-	.passive-toggle { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 7px; padding: 8px 4px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: var(--fw-medium); text-align: left; cursor: pointer; }
+	.passive-toggle { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 7px; padding: 8px 8px 8px 4px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: var(--fw-medium); text-align: left; cursor: pointer; }
 	.outcome-icon { color: var(--green-text); flex: 0 0 auto; }
 	.outcome-icon.closed { color: var(--text-tertiary); }
 	.outcome-icon.failed, .failed-count { color: var(--red-text); }
-	.passive-chevron { margin-left: auto; flex: 0 0 auto; transition: transform var(--dur-tight); }
+	.passive-chevron { margin-left: auto; flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.passive-chevron.expanded { transform: rotate(90deg); }
 	ul { list-style: none; margin: 0 0 0 22px; padding: 0 4px; }
 	li { padding: 0; }
@@ -178,11 +178,11 @@
 	.crumb-gap { display: none; }
 	.text { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-secondary); overflow-wrap: anywhere; }
 	.skeleton { width: 60%; height: 12px; border-radius: var(--radius-2xs); background: var(--bg-hover); }
-	.link { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+	.link { padding: 0; border: 0; background: transparent; color: var(--accent-text); font: inherit; cursor: pointer; }
 	.link:hover { text-decoration: underline; }
 	.open-plan { min-height: 28px; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-	.row:focus-visible, .passive-toggle:focus-visible, .link:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
+	.row:focus-visible, .passive-toggle:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2xs); }
 	@media (pointer: coarse) {
 		.row { min-height: 44px; }
 		.open-plan { min-height: 44px; }
