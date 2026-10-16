@@ -81,10 +81,6 @@ export function createConnectedApp(input: Pick<ConnectedApp, 'name' | 'reach'> &
 	});
 }
 
-export function startGoogleSignIn(): Promise<{ url: string }> {
-	return response('/api/google/connect', { method: 'POST' });
-}
-
 export function approveConnectedApp(id: string): Promise<ConnectedApp> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/approve`, { method: 'POST' });
 }

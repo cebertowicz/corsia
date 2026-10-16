@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { loadProjects, projects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { createConnectedApp, startGoogleSignIn, type ConnectedApp } from '$lib/api/connectedApps';
+	import { createConnectedApp, type ConnectedApp } from '$lib/api/connectedApps';
+	import { requestCorsiaMessage } from '$lib/corsiaRequest';
 
 	let { onClose, onConnected }: { onClose: () => void; onConnected: (app: ConnectedApp) => void } = $props();
 	type AppKind = 'local' | 'web' | 'google';
@@ -41,7 +42,7 @@
 	function continueFromWhat(): void {
 		error = '';
 		if (kind === 'google') {
-			void connectGoogle();
+			connectGoogle();
 			return;
 		}
 		step = 'setup';
@@ -81,18 +82,9 @@
 		} catch { /* An incomplete address remains unnamed until the person enters a name. */ }
 	}
 
-	async function connectGoogle(): Promise<void> {
-		submitting = true;
-		error = '';
-		try {
-			const { url } = await startGoogleSignIn();
-			window.open(url, '_blank', 'noopener,noreferrer');
-			onClose();
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : "Couldn't start Google sign-in. Try again.";
-		} finally {
-			submitting = false;
-		}
+	function connectGoogle(): void {
+		requestCorsiaMessage('Connect a Google account for all my projects');
+		onClose();
 	}
 
 	async function connect(): Promise<void> {

@@ -1,5 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { requestCorsiaMessage } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn() }));
+vi.mock('$lib/corsiaRequest', () => ({ requestCorsiaMessage }));
+
 import ConnectAppFlow from './ConnectAppFlow.svelte';
 import { token } from '$lib/stores/auth';
 import { _setProjectsForTests } from '$lib/stores/projects';
@@ -20,6 +24,7 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	vi.restoreAllMocks();
+	requestCorsiaMessage.mockReset();
 	token.set(null);
 });
 
@@ -107,16 +112,16 @@ describe('ConnectAppFlow', () => {
 		expect(host.textContent).toContain('Where it works');
 	});
 
-	it('uses the existing Google sign-in entry point', async () => {
-		const open = vi.spyOn(window, 'open').mockImplementation(() => null);
-		const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ url: 'https://accounts.google.example/authorize' }) }));
+	it('opens CORSIA with the Google request instead of starting OAuth', () => {
+		const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) }));
 		vi.stubGlobal('fetch', fetch);
 		const { onClose } = render();
 		const google = [...host.querySelectorAll('input[type="radio"]')].find((input) => input.parentElement?.textContent?.includes('Google')) as HTMLInputElement;
 		google.click();
 		press('Continue');
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/google/connect'), { method: 'POST' }));
-		await vi.waitFor(() => expect(open).toHaveBeenCalledWith('https://accounts.google.example/authorize', '_blank', 'noopener,noreferrer'));
+		expect(requestCorsiaMessage).toHaveBeenCalledOnce();
+		expect(requestCorsiaMessage).toHaveBeenCalledWith('Connect a Google account for all my projects');
+		expect(fetch.mock.calls.some(([input]) => String(input).includes('/api/google/connect'))).toBe(false);
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 });

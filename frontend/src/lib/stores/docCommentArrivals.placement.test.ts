@@ -90,8 +90,7 @@ describe('a held comment is placed by the placement owner when it becomes visibl
 		expect(row('c1')?.placement).toBe('placing');
 		expect(doc.asks()).toHaveLength(asks + 1);
 		doc.answer(doc.asks().at(-1)!, ['c0', 'c1']);
-		await settled();
-		expect(row('c1')?.placement).toBe('placed');
+		await vi.waitFor(() => expect(row('c1')?.placement).toBe('placed'));
 	});
 
 	it('a missing-frame release places the comment and asks for its position', async () => {
