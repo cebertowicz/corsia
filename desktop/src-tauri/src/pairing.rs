@@ -335,14 +335,81 @@ fn validate_name(name: &str) -> Result<(), PairError> {
 
 #[cfg(test)]
 mod tests {
+    use std::{convert::Infallible, sync::{Arc, Mutex}};
+
     use super::*;
+    use http_body_util::BodyExt;
+    use hyper::{body::{Bytes, Incoming}, service::service_fn, Request, Response};
+    use hyper_util::rt::TokioIo;
     use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
+    use tokio::net::TcpListener;
 
     fn decode_hex(value: &str) -> Vec<u8> {
         (0..value.len())
             .step_by(2)
             .map(|index| u8::from_str_radix(&value[index..index + 2], 16).unwrap())
             .collect()
+    }
+
+    fn json_response(value: serde_json::Value) -> Response<http_body_util::Full<Bytes>> {
+        Response::new(http_body_util::Full::new(Bytes::from(serde_json::to_vec(&value).unwrap())))
+    }
+
+    async fn start_pairing_server(
+        config: Arc<rustls::ServerConfig>,
+        pin: [u8; 32],
+        requests: Arc<Mutex<Vec<String>>>,
+    ) -> (u16, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let exchange = Arc::new(Mutex::new(None));
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let tls = tokio_rustls::TlsAcceptor::from(config).accept(stream).await.unwrap();
+            let service = service_fn(move |request: Request<Incoming>| {
+                let exchange = Arc::clone(&exchange);
+                let requests = Arc::clone(&requests);
+                async move {
+                    let path = request.uri().path().to_owned();
+                    let body = request.into_body().collect().await.unwrap().to_bytes();
+                    let body_text = String::from_utf8(body.to_vec()).unwrap();
+                    requests.lock().unwrap().push(body_text.clone());
+                    let request: serde_json::Value = serde_json::from_str(&body_text).unwrap();
+                    let response = if path == "/api/devices/pair/start" {
+                        let message = BASE64.decode(request["msg_c"].as_str().unwrap()).unwrap();
+                        let password = pairing_password("K7QX");
+                        let (spake, reply) = Spake2::<Ed25519Group>::start_symmetric(
+                            &Password::new(&password),
+                            &Identity::new(PAIRING_IDENTITY),
+                        );
+                        *exchange.lock().unwrap() = Some((spake, message, reply.clone()));
+                        serde_json::json!({"exchange_id": "test-exchange", "msg_s": BASE64.encode(reply)})
+                    } else {
+                        let (spake, msg_c, msg_s) = exchange.lock().unwrap().take().unwrap();
+                        let shared = spake.finish(&msg_c).unwrap();
+                        let (client_key, server_key) = confirmation_keys(&shared).unwrap();
+                        let mut transcript = transcript_prefix("pinned", &pin);
+                        transcript.extend_from_slice(&msg_c);
+                        transcript.extend_from_slice(&msg_s);
+                        assert_eq!(
+                            BASE64.decode(request["confirm_c"].as_str().unwrap()).unwrap(),
+                            confirmation(&client_key, &transcript),
+                        );
+                        transcript.extend_from_slice(b"name:Studio");
+                        serde_json::json!({
+                            "confirm_s": BASE64.encode(confirmation(&server_key, &transcript)),
+                            "name": "Studio",
+                        })
+                    };
+                    Ok::<_, Infallible>(json_response(response))
+                }
+            });
+            hyper::server::conn::http1::Builder::new()
+                .serve_connection(TokioIo::new(tls), service)
+                .await
+                .unwrap();
+        });
+        (port, task)
     }
 
     #[test]
@@ -416,9 +483,65 @@ mod tests {
         transcript.extend_from_slice(&message);
         transcript.extend_from_slice(b"name:Studio");
         assert_eq!(
-            confirmation(&server_key, &transcript),
+            confirmation(&server_key, &transcript).as_slice(),
             decode_hex("944a40f6df11c32fd42a3a2652610d84113da85571c5d6f62a9e8867423be7e0")
         );
+    }
+
+    #[test]
+    fn committed_spake2_vector_reproduces_the_rust_first_message_and_shared_key() {
+        let password = pairing_password("K7QX");
+        let identity = Identity::new(PAIRING_IDENTITY);
+        let mut rng = ChaCha20Rng::from_seed([0x22; 32]);
+        let (state, message) = Spake2::<Ed25519Group>::start_symmetric_with_rng(
+            &Password::new(&password),
+            &identity,
+            &mut rng,
+        );
+        assert_eq!(
+            message,
+            decode_hex("532d48ad759c38f68782de779208ac0440d28191e2ecbdaaae158894a05788b1f2")
+        );
+        let shared = state.finish(&decode_hex("53d8cb46e1104bd78d9cc5b6ffaefe49f1f8f80673b790f7bfff29da99d98539bd")).unwrap();
+        assert_eq!(shared, decode_hex("005071fab558c21bb23c1806278cf833f953e5f762aea6b50a25be14b8c1e321"));
+    }
+
+    #[tokio::test]
+    async fn pairing_wire_bodies_never_carry_the_code_or_its_hash() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let (port, server) = start_pairing_server(identity.config, identity.pin, Arc::clone(&requests)).await;
+        let client = client_for(Trust::Pinned { spki_sha256: identity.pin }).unwrap();
+        let exchange = start(&client, "127.0.0.1", port, "pinned", None, "K7QX").await.unwrap();
+        let paired = finish_exchange(
+            client,
+            "127.0.0.1",
+            port,
+            Trust::Pinned { spki_sha256: identity.pin },
+            transcript_prefix("pinned", &identity.pin),
+            exchange,
+        )
+        .await
+        .unwrap();
+        assert_eq!(paired.name, "Studio");
+        server.await.unwrap();
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let password_hash = pairing_password("K7QX");
+        let password_hash_base64 = BASE64.encode(password_hash);
+        let password_hash_hex = password_hash.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        for request in requests.iter() {
+            assert!(!request.contains("K7QX"));
+            assert!(!request.contains(&password_hash_base64));
+            assert!(!request.contains(&password_hash_hex));
+        }
+        let start: serde_json::Value = serde_json::from_str(&requests[0]).unwrap();
+        let finish: serde_json::Value = serde_json::from_str(&requests[1]).unwrap();
+        assert_eq!(start["mode"], "pinned");
+        assert!(start.get("msg_c").is_some());
+        assert!(finish.get("exchange_id").is_some());
+        assert!(finish.get("confirm_c").is_some());
     }
 
     #[tokio::test]

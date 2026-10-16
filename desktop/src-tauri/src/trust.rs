@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
+use rustls::{ClientConfig, DigitallySignedStruct, Error, SignatureScheme};
 use sha2::{Digest, Sha256};
 use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -15,18 +15,14 @@ pub enum Trust {
 #[derive(Clone, Debug)]
 pub struct PinnedVerifier {
     expected: [u8; 32],
-    signature_verifier: Arc<rustls::client::WebPkiServerVerifier>,
+    signature_algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
 }
 
 impl PinnedVerifier {
     pub fn new(expected: [u8; 32]) -> Result<Self, Error> {
-        let roots = Arc::new(RootCertStore::empty());
-        let signature_verifier = rustls::client::WebPkiServerVerifier::builder(roots)
-            .build()
-            .map_err(|error| Error::General(error.to_string()))?;
         Ok(Self {
             expected,
-            signature_verifier,
+            signature_algorithms: rustls::crypto::ring::default_provider().signature_verification_algorithms,
         })
     }
 }
@@ -54,7 +50,7 @@ impl ServerCertVerifier for PinnedVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.signature_verifier.verify_tls12_signature(message, cert, dss)
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.signature_algorithms)
     }
 
     fn verify_tls13_signature(
@@ -63,11 +59,11 @@ impl ServerCertVerifier for PinnedVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.signature_verifier.verify_tls13_signature(message, cert, dss)
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.signature_algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.signature_verifier.supported_verify_schemes()
+        self.signature_algorithms.supported_schemes()
     }
 }
 
@@ -91,18 +87,14 @@ pub fn pinned_client_config(pin: [u8; 32]) -> Result<ClientConfig, Error> {
 #[derive(Clone, Debug)]
 pub struct CaptureVerifier {
     observed_spki: Arc<Mutex<Option<[u8; 32]>>>,
-    signature_verifier: Arc<rustls::client::WebPkiServerVerifier>,
+    signature_algorithms: rustls::crypto::WebPkiSupportedAlgorithms,
 }
 
 impl CaptureVerifier {
     pub fn new() -> Result<Self, Error> {
-        let roots = Arc::new(RootCertStore::empty());
-        let signature_verifier = rustls::client::WebPkiServerVerifier::builder(roots)
-            .build()
-            .map_err(|error| Error::General(error.to_string()))?;
         Ok(Self {
             observed_spki: Arc::new(Mutex::new(None)),
-            signature_verifier,
+            signature_algorithms: rustls::crypto::ring::default_provider().signature_verification_algorithms,
         })
     }
 
@@ -137,7 +129,7 @@ impl ServerCertVerifier for CaptureVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.signature_verifier.verify_tls12_signature(message, cert, dss)
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.signature_algorithms)
     }
 
     fn verify_tls13_signature(
@@ -146,11 +138,11 @@ impl ServerCertVerifier for CaptureVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.signature_verifier.verify_tls13_signature(message, cert, dss)
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.signature_algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.signature_verifier.supported_verify_schemes()
+        self.signature_algorithms.supported_schemes()
     }
 }
 
