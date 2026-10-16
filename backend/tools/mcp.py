@@ -1,7 +1,12 @@
 """Canonical MCP sessions and native tools, shared by every harness."""
 
 import asyncio
+import hashlib
+import os
+import shlex
+import tempfile
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -77,6 +82,8 @@ class MCPToolWrapper(Tool):
         parts = [block.text if isinstance(block, types.TextContent) else str(block)
                  for block in result.content]
         output = self._redact("\n".join(parts) or "(no output)")
+        if guidance := _mcp_denial_guidance(output):
+            return f"Error: {guidance}"
         return f"Error: {output}" if getattr(result, "isError", False) else output
 
     async def _authorized_user(self):
@@ -111,6 +118,113 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
+_SAFEHOUSE_INHERITED_ENV = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
+_NO_PROCTITLE_SHIM = """const descriptor = Object.getOwnPropertyDescriptor(process, 'title');
+if (!descriptor?.configurable) {
+  throw new Error('CORSIA MCP preload cannot safely disable process.title');
+}
+const get = typeof descriptor.get === 'function' ? descriptor.get : () => descriptor.value;
+Object.defineProperty(process, 'title', {get, set(){}, configurable:true});
+"""
+
+
+def _mcp_app_id(name: str) -> str:
+    """Return a stable path-safe identity for one configured MCP app."""
+    return hashlib.sha256(name.encode("utf-8")).hexdigest()
+
+
+def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
+    """Return an app-private cache that cannot overlap CORSIA workspace or state."""
+    from infra.platform_paths import APPLICATION_ID
+
+    cache_dir = (
+        Path.home() / "Library" / "Caches" / APPLICATION_ID / "mcp" / _mcp_app_id(name)
+    ).resolve(strict=False)
+    if any(
+        cache_dir == root or cache_dir.is_relative_to(root) or root.is_relative_to(cache_dir)
+        for root in (workspace.resolve(strict=False), state_root.resolve(strict=False))
+    ):
+        raise MCPConfigError("local MCP cache must be outside CORSIA workspace and state")
+    return cache_dir
+
+
+def _write_no_proctitle_shim(cache_dir: Path) -> Path:
+    """Rewrite the app-local Node preload before every Safehouse launch."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    shim_path = cache_dir / "no-proctitle.cjs"
+    shim_path.write_text(_NO_PROCTITLE_SHIM, encoding="utf-8")
+    return shim_path
+
+
+def _mcp_denial_guidance(text: str) -> str | None:
+    """Turn a Safehouse denial into the existing path-aware refusal where possible."""
+    from tools.host_path_policy import denial_guidance_for_output
+
+    if guidance := denial_guidance_for_output(text):
+        path, separator, message = guidance.partition(" — ")
+        if separator and "requires reviewed host access" in message:
+            return f"{path} — CORSIA private state is blocked for local MCP apps. Nothing was returned."
+        return guidance
+    if "Operation not permitted" in text:
+        return "local MCP Safehouse confinement refused the operation; no private state was returned"
+    return None
+
+
+def _mcp_setup_refusal(detail: str) -> str:
+    return f"local MCP app confinement setup failed: {detail}. Nothing ran."
+
+
+
+def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: dict[str, str]):
+    """Build a fail-closed direct-exec Safehouse launch for one local app."""
+    from mcp import StdioServerParameters
+
+    from infra.config import STATE_ROOT, WORKSPACE
+    from tools.safehouse_launch import direct_safehouse_argv, mcp_private_state_profile
+    from tools.shell_guard import _safehouse_executable, safehouse_version_error
+
+    if version_error := safehouse_version_error():
+        if "FileNotFound" in version_error or "unavailable" in version_error.lower():
+            from host_access.refusal_messages import safehouse_unavailable_refusal
+
+            raise MCPConfigError(safehouse_unavailable_refusal(os.environ.get("PATH")))
+        raise MCPConfigError(_mcp_setup_refusal(version_error))
+    workspace = Path(WORKSPACE).expanduser().resolve(strict=False)
+    cache_dir = _mcp_cache_dir(name, workspace, Path(STATE_ROOT))
+    cwd = cache_dir / "cwd"
+    cwd.mkdir(parents=True, exist_ok=True)
+    shim_path = _write_no_proctitle_shim(cache_dir)
+    node_options = f"--require {shlex.quote(str(shim_path))}"
+    if existing := env.get("NODE_OPTIONS"):
+        node_options = f"{node_options} {existing}"
+    server_env = {
+        "npm_config_script_shell": "/bin/sh",
+        **env,
+        "npm_config_cache": str(cache_dir / "npm"),
+        "UV_CACHE_DIR": str(cache_dir / "uv"),
+        "XDG_CACHE_HOME": str(cache_dir / "xdg"),
+        "NODE_OPTIONS": node_options,
+    }
+    descriptor, raw_profile = tempfile.mkstemp(prefix="corsia-mcp-envelope-", suffix=".sb")
+    profile_path = Path(raw_profile).resolve(strict=False)
+    try:
+        safehouse_path = _safehouse_executable()
+        with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
+            profile.write(mcp_private_state_profile(profile_path, safehouse_path, Path(STATE_ROOT)))
+        argv = direct_safehouse_argv(
+            command,
+            args,
+            cwd,
+            profile_path,
+            env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,
+            executable=lambda: safehouse_path,
+        )
+    except (FileNotFoundError, OSError, ValueError) as error:
+        profile_path.unlink(missing_ok=True)
+        raise MCPConfigError(_mcp_setup_refusal(type(error).__name__)) from None
+    return StdioServerParameters(command=argv[0], args=argv[1:], env=server_env, cwd=cwd), profile_path
+
+
 async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
@@ -127,9 +241,14 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         from mcp.client.stdio import stdio_client
 
         env = {**(config.get("env") or {}), **secret_env}
-        params = StdioServerParameters(command=config["command"],
-                                       args=config.get("args", []), env=env or None)
-        read, write = await stack.enter_async_context(stdio_client(params))
+        params, profile_path = await asyncio.to_thread(
+            _safehouse_stdio_parameters, name, config["command"], config.get("args", []), env,
+        )
+        stack.callback(profile_path.unlink, missing_ok=True)
+        try:
+            read, write = await stack.enter_async_context(stdio_client(params))
+        except OSError as error:
+            raise MCPConfigError(_mcp_denial_guidance(str(error)) or _mcp_setup_refusal(type(error).__name__)) from None
     elif config.get("url"):
         from mcp.client.streamable_http import streamable_http_client
 

@@ -1,0 +1,212 @@
+"""Real Safehouse proof for local stdio MCP applications."""
+from __future__ import annotations
+
+import asyncio
+from contextlib import AsyncExitStack
+import json
+from pathlib import Path
+import shutil
+import stat
+import sys
+
+import pytest
+
+from tools.mcp import connect_mcp_servers
+from tools.registry import ToolRegistry
+
+
+_PYTHON_SERVER = r'''
+import json, os, signal, subprocess, sys
+
+def respond(request_id, result):
+    print(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}), flush=True)
+
+def text(value):
+    return {"content": [{"type": "text", "text": value}]}
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        respond(request["id"], {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "mcp-floor", "version": "1"}})
+    elif method == "tools/list":
+        respond(request["id"], {"tools": [
+            {"name": "read_private", "description": "probe private files", "inputSchema": {"type": "object", "properties": {}}},
+            {"name": "manage_child", "description": "spawn signal and wait", "inputSchema": {"type": "object", "properties": {}}},
+        ]})
+    elif method == "tools/call":
+        name = request["params"]["name"]
+        if name == "manage_child":
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+            child.send_signal(signal.SIGTERM)
+            respond(request["id"], text(json.dumps({"returncode": child.wait(timeout=5)})))
+        else:
+            reports = []
+            for path in (os.environ["MCP_KEY_PATH"], os.environ["MCP_DB_PATH"]):
+                try:
+                    reports.append({"path": path, "content": open(path, encoding="utf-8").read()})
+                except OSError as error:
+                    reports.append({"path": path, "errno": error.errno, "message": str(error)})
+            respond(request["id"], text(json.dumps(reports)))
+'''
+
+_NODE_SERVER = r'''
+const rl = require("node:readline").createInterface({input: process.stdin});
+const reply = (id, result) => process.stdout.write(JSON.stringify({jsonrpc: "2.0", id, result}) + "\n");
+rl.on("line", line => { const request = JSON.parse(line);
+  if (request.method === "initialize") reply(request.id, {protocolVersion: "2024-11-05", capabilities: {tools:{}}, serverInfo:{name:"mcp-floor",version:"1"}});
+  else if (request.method === "tools/list") reply(request.id, {tools:[{name:"ok",description:"answer",inputSchema:{type:"object",properties:{}}}]});
+  else if (request.method === "tools/call") reply(request.id, {content:[{type:"text",text:"ok"}]});
+});
+'''
+
+
+def _require_safehouse() -> None:
+    from tools.shell_guard import safehouse_version_error
+
+    error = safehouse_version_error()
+    if error:
+        if __import__("os").environ.get("CORSIA_REQUIRE_SAFEHOUSE"):
+            pytest.fail(error)
+        pytest.skip(error)
+
+
+def _configure_roots(monkeypatch, tmp_path: Path, *, symlinked: bool = False) -> tuple[Path, Path]:
+    from infra import config
+
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    workspace.mkdir()
+    state.mkdir()
+    if symlinked:
+        lexical = tmp_path / "state-link"
+        lexical.symlink_to(state, target_is_directory=True)
+        state_root = lexical
+    else:
+        state_root = state
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr(config, "STATE_ROOT", state_root)
+    return workspace, state
+
+
+def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_path):
+    from tools.safehouse_launch import mcp_private_state_profile
+
+    _workspace, state = _configure_roots(monkeypatch, tmp_path, symlinked=True)
+    lexical = tmp_path / "state-link"
+    profile = mcp_private_state_profile(
+        tmp_path / "generated.sb", Path("/usr/local/bin/safehouse"), lexical,
+    )
+
+    assert profile.startswith("(allow default)\n")
+    assert f'(subpath "{lexical}")' in profile
+    assert f'(subpath "{state}")' in profile
+    assert f'(subpath "{state / "keys"}")' in profile
+    assert '(deny process-info*)' in profile
+    assert '(allow signal (target same-sandbox))' in profile
+
+
+@pytest.mark.asyncio
+async def test_missing_safehouse_refuses_stdio_without_spawning(monkeypatch, tmp_path):
+    from tools import shell_guard
+
+    _configure_roots(monkeypatch, tmp_path)
+    marker = tmp_path / "spawned"
+    app = tmp_path / "app.py"
+    app.write_text(f'from pathlib import Path; Path({str(marker)!r}).write_text("ran")\n', encoding="utf-8")
+    monkeypatch.setattr(shell_guard, "safehouse_version_error", lambda: "could not verify the Agent Safehouse version: Agent Safehouse is unavailable")
+
+    async with AsyncExitStack() as stack:
+        errors = await connect_mcp_servers(
+            {"local": {"command": sys.executable, "args": [str(app)]}}, ToolRegistry(), stack,
+        )
+    assert "Agent Safehouse was not found" in errors["local"]
+    assert not marker.exists()
+
+
+async def _connect(name: str, config: dict):
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        errors = await connect_mcp_servers({name: config}, registry, stack)
+        assert errors == {}
+        return registry
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_management(monkeypatch, tmp_path):
+    _require_safehouse()
+    workspace, state = _configure_roots(monkeypatch, tmp_path, symlinked=True)
+    keys = state / "keys"
+    keys.mkdir()
+    secret = "mcp-secret-value"
+    key_path = keys / "value"
+    key_path.write_text(secret, encoding="utf-8")
+    db_path = state / "corsia.db"
+    db_path.write_text("database-private", encoding="utf-8")
+    app = tmp_path / "server.py"
+    app.write_text(_PYTHON_SERVER, encoding="utf-8")
+    config = {"command": sys.executable, "args": [str(app)], "env": {"MCP_KEY_PATH": str(key_path), "MCP_DB_PATH": str(db_path)}}
+
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        errors = await connect_mcp_servers({"private": config}, registry, stack)
+        assert errors == {}
+        read_result = await registry.get("mcp_private_read_private").execute()
+        child_result = await registry.get("mcp_private_manage_child").execute()
+    assert secret not in read_result
+    assert "CORSIA private state is blocked for local MCP apps" in read_result or "Stored secrets are closed" in read_result
+    assert json.loads(child_result)["returncode"] == -15
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,command,args", [
+    ("python", sys.executable, ["{python}"]),
+    ("node", "node", ["{node}"]),
+    ("npx", "npx", ["--no-install", "mcp-floor-npx"]),
+])
+async def test_local_mcp_safehouse_real_launches(monkeypatch, tmp_path, name, command, args):
+    _require_safehouse()
+    if shutil.which(command) is None:
+        pytest.fail(f"{command} is required for the L3 Safehouse proof")
+    workspace, state = _configure_roots(monkeypatch, tmp_path)
+    python_app = tmp_path / "server.py"
+    node_app = tmp_path / "server.js"
+    python_app.write_text(_PYTHON_SERVER, encoding="utf-8")
+    node_app.write_text(_NODE_SERVER, encoding="utf-8")
+    node_app.chmod(node_app.stat().st_mode | stat.S_IXUSR)
+    if name == "npx":
+        from tools.mcp import _mcp_cache_dir
+        cache = _mcp_cache_dir(name, workspace, state) / "cwd"
+        package = cache / "node_modules" / "mcp-floor-npx"
+        binary = package / "bin" / "server.js"
+        binary.parent.mkdir(parents=True)
+        (package / "package.json").write_text('{"name":"mcp-floor-npx","version":"1","bin":"bin/server.js"}', encoding="utf-8")
+        binary.write_text("#!/usr/bin/env node\n" + _NODE_SERVER, encoding="utf-8")
+        binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+        link = cache / "node_modules" / ".bin" / "mcp-floor-npx"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(Path("..") / "mcp-floor-npx" / "bin" / "server.js")
+    rendered_args = [arg.format(python=python_app, node=node_app) for arg in args]
+    registry = await _connect(name, {"command": command, "args": rendered_args})
+    assert await registry.get(f"mcp_{name}_{'ok' if name != 'python' else 'manage_child'}").execute()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
+    _require_safehouse()
+    if shutil.which("uvx") is None:
+        pytest.fail("uvx is required for the L3 Safehouse proof")
+    _configure_roots(monkeypatch, tmp_path)
+    package = tmp_path / "uvx-package"
+    package.mkdir()
+    (package / "pyproject.toml").write_text(
+        "[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n"
+        "[project]\nname='mcp-floor-uvx'\nversion='1'\n[project.scripts]\nmcp-floor-uvx='mcp_floor_uvx:main'\n",
+        encoding="utf-8",
+    )
+    (package / "mcp_floor_uvx.py").write_text(_PYTHON_SERVER + "\ndef main():\n    pass\n", encoding="utf-8")
+    registry = await _connect("uvx", {"command": "uvx", "args": ["--from", str(package), "mcp-floor-uvx"]})
+    assert await registry.get("mcp_uvx_manage_child").execute()
