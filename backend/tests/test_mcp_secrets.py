@@ -339,7 +339,7 @@ async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store
     monkeypatch.setattr(
         mcp,
         "_safehouse_stdio_parameters",
-        lambda _name, command, args, env: (
+        lambda _name, _config, command, args, env: (
             StdioServerParameters(command=command, args=args, env=env or None), profile,
         ),
     )

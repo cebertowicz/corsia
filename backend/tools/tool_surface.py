@@ -24,6 +24,12 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from tools.base import Tool
+from tools.connected_app_visibility import (
+    connected_app_reach_refusal,
+    mcp_app_id,
+    mcp_tool_reaches_thread,
+    mcp_tool_visible_here,
+)
 from tools.catalog import (
     TOOL_CATALOG,
     TOOL_PACKS,
@@ -118,7 +124,7 @@ def _server_tools(registry: ToolRegistry) -> dict[str, list[Tool]]:
     """Group the configured MCP tools by server, in each server's own discovery order."""
     grouped: dict[str, list[Tool]] = {}
     for tool in _user_configured_in_order(registry):
-        if not _mcp_tool_visible_here(tool):
+        if not mcp_tool_visible_here(tool):
             continue
         server = getattr(tool, "mcp_server_name", None)
         if isinstance(server, str) and server:
@@ -187,59 +193,10 @@ def _user_configured(registry: ToolRegistry) -> list[Tool]:
     return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
-def mcp_app_id(tool: Tool) -> str | None:
-    """Return the stable connected-app identity bound to one MCP tool."""
-    app_id = getattr(tool, "mcp_app_id", None)
-    return app_id if isinstance(app_id, str) and app_id else None
-
-
-def mcp_tool_reaches_thread(tool: Tool, thread_id: str, *, db: Any) -> bool:
-    """Apply the connected-app reach owner to one app-bound MCP tool.
-
-    Legacy configured MCP tools have no connected-app identity and retain their
-    existing behavior. A bound tool is visible only when its durable app reaches
-    the server-resolved thread; app and thread absence both fail closed there.
-    """
-    app_id = mcp_app_id(tool)
-    if app_id is None:
-        return True
-    from connections.app_reach import app_reaches_thread
-
-    return app_reaches_thread(app_id, thread_id, db=db)
-
-
-def connected_app_reach_refusal() -> str:
-    """The value-free remedy for a connected app outside the current reach."""
-    return (
-        "Error: This connected app is not available to this project. Ask the "
-        "person who manages Connected apps to grant this project access, then retry."
-    )
-
-
-def _mcp_tool_visible_here(tool: Tool) -> bool:
-    """Check an app-bound tool against this server's current thread context."""
-    if mcp_app_id(tool) is None:
-        return True
-    from infra import state
-    from infra.database import get_db
-
-    thread_id = state._current_thread_id.get(None)
-    if not isinstance(thread_id, str) or not thread_id:
-        return False
-    db = get_db()
-    try:
-        return mcp_tool_reaches_thread(tool, thread_id, db=db)
-    except Exception:
-        # Discovery is fail-closed: an unavailable identity or reach store must
-        # never expose an app's server, schema, or configuration references.
-        return False
-    finally:
-        db.close()
-
 
 def _hidden_mcp_tool(registry: ToolRegistry, name: str) -> bool:
     tool = registry.get(name)
-    return bool(tool and tool.user_configured and not _mcp_tool_visible_here(tool))
+    return bool(tool and tool.user_configured and not mcp_tool_visible_here(tool))
 
 
 def _labelled(name: str) -> str:
@@ -254,7 +211,7 @@ def reachable_tool_names(
     configured = {
         tool.name
         for tool in _user_configured(registry)
-        if include_unreachable_mcp or _mcp_tool_visible_here(tool)
+        if include_unreachable_mcp or mcp_tool_visible_here(tool)
     }
     return [
         name for name in registry.tool_names
@@ -343,7 +300,7 @@ class ToolsLoadTool(Tool):
         if server is not None:
             if any(
                 getattr(tool, "mcp_server_name", None) == server
-                and not _mcp_tool_visible_here(tool)
+                and not mcp_tool_visible_here(tool)
                 for tool in _user_configured(self._registry)
             ):
                 return connected_app_reach_refusal()

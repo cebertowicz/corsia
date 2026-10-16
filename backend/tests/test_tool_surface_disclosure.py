@@ -344,7 +344,7 @@ async def test_configured_mcp_tools_are_indexed_loadable_and_callable(isolated_d
 async def test_connected_app_reach_hides_mcp_index_and_refuses_before_session_or_key_access(
     isolated_db, monkeypatch,
 ):
-    from connections.app_reach import create_app
+    from connections.app_lifecycle import create_app
     from infra import state
     from infra.database import get_db
     from tools.mcp import MCPToolWrapper

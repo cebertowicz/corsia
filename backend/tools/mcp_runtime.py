@@ -95,7 +95,7 @@ async def _publish_app_state(app_id: str, result: dict[str, object]) -> None:
         result.get("state"), result.get("failure_class"), result.get("tool_count"),
     ):
         return
-    from connections.app_reach import record_runtime_app_state
+    from connections.app_notices import record_runtime_app_state
 
     await run_in_db(record_runtime_app_state, app_id, result)
 

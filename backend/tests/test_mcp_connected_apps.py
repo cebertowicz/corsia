@@ -6,13 +6,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from connections.app_reach import create_app, create_pending_app, get_app, key_entry_names
+from connections.app_lifecycle import create_app, create_pending_app
+from connections.app_reach import get_app, key_entry_names
 from infra.database import initialize_schema
 
 
 @pytest.fixture
 def connected_apps_client(monkeypatch):
-    from api import mcp
+    from api import connected_apps, mcp
     from infra.auth import require_user
 
     db = sqlite3.connect(":memory:", check_same_thread=False)
@@ -40,9 +41,9 @@ def connected_apps_client(monkeypatch):
     async def runtime_noop(_action: str, _app_id: str) -> dict[str, object]:
         return {"state": "disconnected", "state_since": "t", "tool_count": 0, "failure_class": None}
 
-    monkeypatch.setattr(mcp, "run_in_db", immediate)
-    monkeypatch.setattr(mcp, "_db", lambda: db)
-    monkeypatch.setattr(mcp, "_run_app_runtime", runtime_noop)
+    monkeypatch.setattr(connected_apps, "run_in_db", immediate)
+    monkeypatch.setattr(connected_apps, "_db", lambda: db)
+    monkeypatch.setattr(connected_apps, "_run_app_runtime", runtime_noop)
     with TestClient(app) as client:
         yield client, db, actor
     db.close()
@@ -145,7 +146,7 @@ def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client
 
 
 def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_client, monkeypatch) -> None:
-    from api import mcp
+    from api import connected_apps
 
     client, _db, actor = connected_apps_client
     actions: list[tuple[str, str]] = []
@@ -153,7 +154,7 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     async def record(action: str, app_id: str) -> None:
         actions.append((action, app_id))
 
-    monkeypatch.setattr(mcp, "_run_app_runtime", record)
+    monkeypatch.setattr(connected_apps, "_run_app_runtime", record)
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
     created = client.post(
@@ -176,7 +177,7 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
 
 
 def test_reconnect_uses_the_app_runtime_and_returns_its_live_state(connected_apps_client, monkeypatch) -> None:
-    from api import mcp
+    from api import connected_apps
 
     client, db, actor = connected_apps_client
     app = create_app(
@@ -189,7 +190,7 @@ def test_reconnect_uses_the_app_runtime_and_returns_its_live_state(connected_app
         calls.append((action, app_id))
         return {"state": "working", "state_since": "now", "tool_count": 2, "failure_class": None}
 
-    monkeypatch.setattr(mcp, "_run_app_runtime", reconnect)
+    monkeypatch.setattr(connected_apps, "_run_app_runtime", reconnect)
     response = client.post(f"/api/mcp/servers/{app['id']}/reconnect")
 
     assert response.status_code == 200

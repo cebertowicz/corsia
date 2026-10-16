@@ -26,17 +26,14 @@ from infra.plan_schema import STRUCTURED_PLAN_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.project_repo_policy_schema import PROJECT_REPO_POLICY_TABLE_SQL
 from infra.provider_availability_schema import PROVIDER_AVAILABILITY_TABLE_SQL
+from infra.settings_schema import SETTINGS_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
 SCHEMA_VERSION = 121
 SCHEMA_SQL = f"""
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+    {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
     CREATE TABLE IF NOT EXISTS threads (
         id TEXT PRIMARY KEY,

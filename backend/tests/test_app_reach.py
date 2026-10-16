@@ -5,19 +5,21 @@ import sqlite3
 
 import pytest
 
+from connections.app_lifecycle import (
+    approve_proposal,
+    create_app,
+    create_pending_app,
+    decline_proposal,
+    propose_config,
+    replace_reach,
+)
 from connections.app_reach import (
     AppNameOverlapError,
     AppProposalExpiredError,
     AppRevisionConflictError,
     app_reaches_thread,
-    approve_proposal,
-    create_app,
-    create_pending_app,
-    decline_proposal,
     get_app,
     get_reach,
-    propose_config,
-    replace_reach,
 )
 from infra.database import initialize_schema
 from infra.migration_120_to_121_connected_apps import migrate_120_to_121
@@ -126,7 +128,7 @@ def test_reach_change_notifies_only_threads_whose_app_availability_changes() -> 
 
 
 def test_app_state_notices_collapse_to_the_latest_state_per_delivery() -> None:
-    from connections.app_reach import append_app_notice
+    from connections.app_notices import append_app_notice
     from infra.passive_digest import build_digest
 
     db = _db()

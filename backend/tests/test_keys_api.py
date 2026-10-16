@@ -82,7 +82,7 @@ async def test_set_with_the_password_saves_and_never_shows_the_value(client, cap
 
 @pytest.mark.asyncio
 async def test_mcp_key_write_reconnects_only_its_stable_app(client, monkeypatch):
-    from connections.app_reach import create_app
+    from connections.app_lifecycle import create_app
     from infra.database import get_db
     from infra.db_async import run_in_db
     from tools.mcp_secrets import entry_name
