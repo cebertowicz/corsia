@@ -85,6 +85,25 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
+	it('keeps an authenticated incomplete setup on Connect an AI when setup status says the account exists', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		const onExistingAccount = vi.fn();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ code: 'setup_complete' }, 409);
+			if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: [{ source: 'codex', name: 'Codex', state: 'needs_sign_in' }] });
+			return json({});
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount, onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync();
+
+		await settle();
+
+		expect(onExistingAccount).not.toHaveBeenCalled();
+		expect(host.textContent).toContain('Connect an AI');
+	});
+
 	it('keeps a local-AI opt-out after setup resumes on a page reload', async () => {
 		await settle();
 		const localSwitch = host.querySelector<HTMLButtonElement>('button[aria-label="Also run AI on this computer"]');

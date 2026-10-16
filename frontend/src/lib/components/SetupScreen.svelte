@@ -103,7 +103,13 @@
 		page = 'checking';
 		try {
 			const response = await fetch('/api/setup/status');
-			if (response.status === 409) { onExistingAccount(); return; }
+			if (response.status === 409) {
+				// A resumed authenticated setup necessarily has an account already. Its
+				// recovery destination is the model step, not the signed-out app shell.
+				if (resume) { page = 'models'; return; }
+				onExistingAccount();
+				return;
+			}
 			if (!response.ok) throw new Error(`setup status ${response.status}`);
 			status = await response.json();
 			folder = status.work_folder || folder;
