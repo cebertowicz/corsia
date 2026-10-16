@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import secrets
 import time
+import unicodedata
 from collections import deque
 from dataclasses import dataclass
 from typing import Literal
@@ -74,6 +76,8 @@ class DevicePairing:
         self._expire_if_needed()
         state = "paused" if self._paused else "active" if self._code else "none"
         result = {"state": state, "expires_at": self._expires_at if state == "active" else None}
+        if self._expires_at is not None:
+            result["expires_in_seconds"] = max(0, math.ceil(self._expires_at - self._clock()))
         if include_code and self._code is not None:
             result["value"] = self._code
         return result
@@ -127,7 +131,7 @@ class DevicePairing:
         self._issued_server_messages.add(msg_s)
         return exchange_id, msg_s
 
-    def finish(self, *, exchange_id: str, confirm_c: bytes) -> bytes:
+    def finish(self, *, exchange_id: str, confirm_c: bytes, name: str) -> tuple[bytes, str]:
         self._require_active()
         exchange = self._exchanges.pop(exchange_id, None)
         if exchange is None or exchange.generation != self._generation or exchange.expires_at <= self._clock():
@@ -140,8 +144,16 @@ class DevicePairing:
         if not hmac.compare_digest(expected, confirm_c):
             self._record_failure()
             raise PairingError(self._failure_reason())
+        normalized_name = pairing_computer_name(name)
         self._end_code()
-        return hmac.new(server_key, transcript, hashlib.sha256).digest()
+        return (
+            hmac.new(
+                server_key,
+                transcript + b"name:" + normalized_name.encode("utf-8"),
+                hashlib.sha256,
+            ).digest(),
+            normalized_name,
+        )
 
     def _require_active(self) -> None:
         self._expire_if_needed()
@@ -183,6 +195,20 @@ class DevicePairing:
         if self._code is None:
             return "too_many_tries"
         return "wrong_code"
+
+
+def pairing_computer_name(name: str) -> str:
+    """Normalize the DNS-SD computer name and bound it to the pairing protocol."""
+    normalized = unicodedata.normalize("NFC", name)
+    characters: list[str] = []
+    byte_count = 0
+    for character in normalized:
+        encoded = character.encode("utf-8")
+        if byte_count + len(encoded) > 63:
+            break
+        characters.append(character)
+        byte_count += len(encoded)
+    return "".join(characters)
 
 
 def canonical_verified_host(host: object) -> str:

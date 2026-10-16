@@ -13,14 +13,20 @@ from core.device_pairing import (
 
 
 def test_code_uses_unambiguous_four_character_alphabet():
-    pairing = DevicePairing()
+    now = [0.0]
+    pairing = DevicePairing(clock=lambda: now[0])
     pairing.enable()
 
     code = pairing.issue_code()
+    now[0] = 61.0
 
     assert len(code) == 4
     assert set(code) <= set(CODE_ALPHABET)
-    assert pairing.status() == {"state": "active", "expires_at": pytest.approx(pairing.status()["expires_at"])}
+    assert pairing.status() == {
+        "state": "active",
+        "expires_at": CODE_TTL_SECONDS,
+        "expires_in_seconds": 539,
+    }
 
 
 def test_disable_ends_code_and_new_code_replaces_previous_generation():
@@ -32,6 +38,7 @@ def test_disable_ends_code_and_new_code_replaces_previous_generation():
     assert first != second or len(CODE_ALPHABET) ** 4 > 1
     pairing.disable()
     assert pairing.status() == {"state": "none", "expires_at": None}
+    assert "expires_in_seconds" not in pairing.status()
 
 
 def test_expired_code_is_not_active():
@@ -42,6 +49,7 @@ def test_expired_code_is_not_active():
     now[0] = CODE_TTL_SECONDS
 
     assert pairing.status() == {"state": "none", "expires_at": None}
+    assert "expires_in_seconds" not in pairing.status()
     with pytest.raises(PairingError, match="expired"):
         pairing.start(msg_c=b"client", transcript_prefix=b"test")
 
