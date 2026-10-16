@@ -3,11 +3,61 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
-## Unreleased
+## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, and steadier plans
+
+Released 2026-10-15.
+
+### Upgrading
+
+- This update adds `flatbuffers`, `onnxruntime`, `protobuf`, and `publicsuffixlist`; the update installs them as part of its normal dependency setup.
+
+### Updates and Interface
+
+- Updates now have a complete in-app journey: notice, decision, progress, result, and release notes. You can schedule an update overnight, once or automatically, and a completed restart clears an old staged-update failure.
+- Update failures retain a clear cause, update progress stays in one notice, and notices stay readable and out of the way while work continues.
+- Phone layouts clear the header reliably around safe areas, keep their blur while content scrolls underneath, and restore the faded blur. Installed iOS apps keep the frosted header intact.
+
+### Shared Browser
+
+- A Browser tab lets you watch an agent’s browser and explicitly take control when needed.
+- The browser fits its pane, follows your theme, supports navigation and input while you are in control, and keeps rendering and page commands smooth while work continues.
+
+### Documents and Collaboration
+
+- Returning to a document tab no longer lets an older restore disturb the tab you switched to, and open tabs return directly to their saved place without a loading flash.
+- Mobile document comments stay clear of save status and selection controls; save feedback stays quiet for fast saves and appears when needed; review headers remain compact on phones with an ask open.
+- Markdown links refresh when their source finishes parsing.
+
+### Agents and Plans
+
+- Plans use clearer Done and Won’t do language, complete summaries on smaller screens, and smoother open and close motion. The chat thread list no longer shows a misleading Stuck status.
+- Steps needing your action show clear in-place instructions and what they unblock. Nested plan review requests now appear in chat, and a stopped review or failing item no longer prevents other scheduled follow-through from running.
+- Agents see and are prompted to resume work they intentionally set aside, browser sign-in requests open a clear task and settle only when completion is observed, and a new input stays queued behind a live Codex writer instead of failing.
+
+### Providers
+
+- Model switches can use another eligible account when the selected one has reached its limit, and the model picker preserves known usage limits and reset times when a fresh check is unavailable.
+- Providers can be turned off without losing their settings, and queued work resumes when they are turned back on. The model picker also aligns its account chooser, selected account, and current indicators.
 
 ### Measurement
 
 - Corrections are checked locally with the installed, verified corrections classifier instead of the retired provider-backed checker. Its current asset version and any unavailable or failed state are available to Measurement.
+- Corrections classifier failures, version checks, and repeated load crashes stay recoverable instead of ending the flow.
+- Work-per-hour reporting stays comparable across reviewers and declared work sizes.
+
+### First Run and Setup
+
+- First-run setup guides you through local setup and connecting your first account, and asks before importing detected MCP servers.
+- The supported setup for 16 GB Macs is now documented.
+
+<!-- cut4: verify -->
+### Packaged Mac App and Setup
+
+- The macOS desktop app ships as a self-contained local CORSIA service, including its frontend, backend, Python runtime, and local AI dependencies. On a fresh Mac, opening it creates the local workspace and starts CORSIA without prior configuration.
+- The app includes its own Git, asks before reusing an existing local AI runtime, and keeps optional background downloads from delaying Start using CORSIA while showing progress and recovery if they fail.
+- Closing the CORSIA window keeps its packaged background service running, with recovery if macOS disables it. CORSIA can securely download and verify a newer desktop update before it is ready to install.
+- Setup shows clear background-download progress and a smoother step indicator.
+<!-- /cut4: verify -->
 
 ## v0.3.0 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
 
