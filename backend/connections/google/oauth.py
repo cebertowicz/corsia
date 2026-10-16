@@ -32,14 +32,19 @@ from infra.time import utc_now_iso
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
-SCOPES = (
+# Email and calendar are what the Google tools use, so a sign-in without them is refused.
+REQUIRED_SCOPES = (
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar",
+)
+# Asked for in the same sign-in so the person needn't come back later; declining one still connects.
+OPTIONAL_SCOPES = (
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/spreadsheets",
 )
+SCOPES = REQUIRED_SCOPES + OPTIONAL_SCOPES
 PENDING_SECONDS = 600
 CLIENT_FILE_MAX_BYTES = 16_384
 CALLBACK_PATH = "/api/google/oauth/callback"
@@ -52,7 +57,10 @@ NEEDS_CLIENT_FILE = (
 )
 BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
 DENIED = "Google sign-in was refused or has expired. Call google_connect for a new link."
-MISSING_SCOPES = "The person didn't allow every permission. Call google_connect and ask them to allow all of them."
+MISSING_SCOPES = (
+    "The person didn't allow Gmail and Calendar access. Call google_connect and ask them to allow "
+    "Gmail and Calendar; Drive, Docs and Sheets are optional."
+)
 
 
 class GoogleSignInError(GoogleError):
@@ -200,7 +208,7 @@ async def complete_sign_in(code: object, state: object) -> str:
         raise
     except Exception:
         raise GoogleSignInError(DENIED) from None
-    if not set(SCOPES) <= set(scopes):
+    if not set(REQUIRED_SCOPES) <= set(scopes):
         raise GoogleSignInError(MISSING_SCOPES)
     await run_in_db(_store, pending, refresh_token, str(email), scopes)
     return str(email)
