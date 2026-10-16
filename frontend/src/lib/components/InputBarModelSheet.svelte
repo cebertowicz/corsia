@@ -12,10 +12,8 @@
 	import PickerModelGroupHeader from './PickerModelGroupHeader.svelte';
 	import { choosePickerAccount } from '$lib/stores/pickerAccountChoice';
 	import { corsiaAgentId } from '$lib/utils/conductor';
-	import { requestProviderCard } from '$lib/stores/settingsNavigation';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
+	import { openProjectSettings, requestProviderCard, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import PickerLocalStatus from './PickerLocalStatus.svelte';
 	import { localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import { toasts } from '$lib/stores/toast';
@@ -80,13 +78,8 @@
 
 	function openRolloverSettings() {
 		threadSettingsOpen.set(false);
-		if (activeThread?.project_id) {
-			workspaceSettingsOpen.set(false);
-			projectSettingsOpen.set(true);
-		} else {
-			projectSettingsOpen.set(false);
-			workspaceSettingsOpen.set(true);
-		}
+		if (activeThread?.project_id) openProjectSettings(activeThread.project_id, 'project-provider-policy');
+		else requestSettingsSection('providers', 'workspace-provider-policy');
 		onclose();
 	}
 

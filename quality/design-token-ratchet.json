@@ -1455,7 +1455,7 @@
     },
     "frontend/src/lib/components/ProjectRepos.svelte": {
       "raw_colors": 0,
-      "raw_px": 6,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1468,8 +1468,8 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/ProjectSettingsView.svelte": {
-      "raw_colors": 4,
-      "raw_px": 32,
+      "raw_colors": 0,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1483,7 +1483,7 @@
     },
     "frontend/src/lib/components/ProvidersPolicyBlock.svelte": {
       "raw_colors": 0,
-      "raw_px": 7,
+      "raw_px": 4,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1511,7 +1511,7 @@
     },
     "frontend/src/lib/components/RepoRow.svelte": {
       "raw_colors": 0,
-      "raw_px": 17,
+      "raw_px": 7,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1581,7 +1581,7 @@
     },
     "frontend/src/lib/components/SettingsView.svelte": {
       "raw_colors": 0,
-      "raw_px": 22,
+      "raw_px": 3,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1658,8 +1658,8 @@
     },
     "frontend/src/lib/components/SkillScopePanel.svelte": {
       "raw_colors": 0,
-      "raw_px": 10,
-      "heavy_borders": 1,
+      "raw_px": 1,
+      "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
@@ -1808,13 +1808,6 @@
       "raw_px": 23,
       "heavy_borders": 1,
       "raw_shadows": 1,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/components/WorkspaceSettingsView.svelte": {
-      "raw_colors": 0,
-      "raw_px": 24,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/activity/ActivityGroupBlock.svelte": {
@@ -3973,13 +3966,6 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/stores/projectSettings.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
     "frontend/src/lib/stores/projects.ts": {
       "raw_colors": 0,
       "raw_px": 0,
@@ -4184,13 +4170,6 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/stores/warmToast.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/stores/workspaceSettings.ts": {
       "raw_colors": 0,
       "raw_px": 0,
       "heavy_borders": 0,

@@ -13,7 +13,7 @@ vi.mock('$lib/stores/providersV7', () => ({
 }));
 
 import ProviderSettingsModal from './ProviderSettingsModal.svelte';
-import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest } from '$lib/stores/settingsNavigation';
 
 const server = {
 	id: 'ns-plan', provider: 'external', instance_id: 'token-plan.example/v1',
@@ -42,7 +42,7 @@ describe('ProviderSettingsModal remove', () => {
 		component = null;
 		document.body.innerHTML = '';
 		removeNetworkServer.mockClear();
-		workspaceSettingsOpen.set(false);
+		settingsAnchorRequest.set(null);
 		vi.unstubAllGlobals();
 	});
 
@@ -103,9 +103,12 @@ describe('ProviderSettingsModal remove', () => {
 				} as never, onClose },
 			});
 			await vi.waitFor(() => expect(document.body.textContent).toContain('Plus account 1'));
-			button('Workspace settings').click();
+			const before = get(settingsOpenRequest);
+			button('Accounts and rollover').click();
 			flushSync();
-			expect(get(workspaceSettingsOpen)).toBe(true);
+			expect(get(settingsOpenRequest)).toBe(before + 1);
+			expect(get(settingsActiveSection)).toBe('providers');
+			expect(get(settingsAnchorRequest)).toBe('workspace-provider-policy');
 			expect(onClose).toHaveBeenCalledOnce();
 		});
 
@@ -123,7 +126,7 @@ describe('ProviderSettingsModal remove', () => {
 			} as never, onClose: vi.fn() },
 		});
 		await vi.waitFor(() => expect(document.body.textContent).toContain('Personal · person@example.test'));
-		expect(document.body.textContent).toContain('Rollover and account order are set in Workspace settings.');
+		expect(document.body.textContent).toContain('Rollover and account order are set in Accounts and rollover.');
 	});
 
 	it.each([

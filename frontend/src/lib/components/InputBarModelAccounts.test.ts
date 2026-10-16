@@ -16,10 +16,8 @@ import { pickerPolicy, pickerPolicyProject } from '$lib/stores/accountPicker';
 import { activeModelId, models, type Model } from '$lib/stores/models';
 import type { RunsOn } from '$lib/stores/modelTurn';
 import { activeThreadId, threads } from '$lib/stores/threads';
-import { projectSettingsOpen } from '$lib/stores/projectSettings';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
-import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
-import { providerCardRequest, settingsActiveSection, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, settingsActiveSection, settingsAnchorRequest, settingsOpenRequest, settingsProject } from '$lib/stores/settingsNavigation';
 import { vendorAccounts, type VendorAccount, type VendorAccountUsage } from '$lib/stores/vendorAccounts';
 
 const CAPS = {
@@ -87,9 +85,9 @@ beforeEach(() => {
 	providerCardRequest.set(null);
 	settingsActiveSection.set('providers');
 	settingsOpenRequest.set(0);
-	projectSettingsOpen.set(false);
+	settingsProject.set(null);
+	settingsAnchorRequest.set(null);
 	threadSettingsOpen.set(false);
-	workspaceSettingsOpen.set(false);
 	vendorAccounts.set([account('work', 'Work', {}, {}, 'work@example.test'), account('personal', 'Personal')]);
 	pinReply = () => json(200, { account_id: 'personal', runtime_context_epoch: 8, changed: true });
 	fetchMock.mockReset();
@@ -112,9 +110,9 @@ afterEach(() => {
 	providerCardRequest.set(null);
 	settingsActiveSection.set('providers');
 	settingsOpenRequest.set(0);
-	projectSettingsOpen.set(false);
+	settingsProject.set(null);
+	settingsAnchorRequest.set(null);
 	threadSettingsOpen.set(false);
-	workspaceSettingsOpen.set(false);
 	models.set([]);
 	threads.set([]);
 	activeThreadId.set(null);
@@ -180,7 +178,7 @@ describe('model picker account rows', () => {
 		expect(accountRows().map((row) => row.querySelector('.check-glyph') !== null)).toEqual([true, false]);
 	});
 
-	it('opens the existing scope Subscriptions settings from the rollover footer and closes the picker', () => {
+	it('opens Settings at the workspace account order from the rollover footer and closes the picker', () => {
 		pickerPolicy.set({ 'claude-code': { rollover: true, order: ['work', 'personal'] } });
 		pickerPolicyProject.set(null);
 		threadSettingsOpen.set(true);
@@ -190,23 +188,25 @@ describe('model picker account rows', () => {
 		flushSync();
 		host.querySelector<HTMLButtonElement>('.rollover-settings button')!.click();
 		expect(get(threadSettingsOpen)).toBe(false);
-		expect(get(projectSettingsOpen)).toBe(false);
-		expect(get(workspaceSettingsOpen)).toBe(true);
+		expect(get(settingsOpenRequest)).toBe(1);
+		expect(get(settingsActiveSection)).toBe('providers');
+		expect(get(settingsProject)).toBeNull();
+		expect(get(settingsAnchorRequest)).toBe('workspace-provider-policy');
 		expect(onclose).toHaveBeenCalledOnce();
 	});
 
-	it('opens Project settings from the rollover footer when the thread belongs to a project', () => {
+	it('opens the project\'s Settings page at its account order when the thread belongs to a project', () => {
 		threads.set([{ id: 'thread-1', model: 'claude-code/opus', updated_at: '2026-10-05T10:00:00Z', project_id: 'project-1', account_id: 'work', runtime_context_epoch: 7 } as never]);
 		pickerPolicy.set({ 'claude-code': { rollover: true, order: ['work', 'personal'] } });
 		pickerPolicyProject.set('project-1');
-		workspaceSettingsOpen.set(true);
 		open(false);
 		host.querySelector<HTMLButtonElement>('button.picker-account-title')!.click();
 		flushSync();
 		host.querySelector<HTMLButtonElement>('.rollover-settings button')!.click();
 		expect(get(threadSettingsOpen)).toBe(false);
-		expect(get(workspaceSettingsOpen)).toBe(false);
-		expect(get(projectSettingsOpen)).toBe(true);
+		expect(get(settingsActiveSection)).toBe('projects');
+		expect(get(settingsProject)).toBe('project-1');
+		expect(get(settingsAnchorRequest)).toBe('project-provider-policy');
 	});
 
 	it('shows no order from another project\'s policy, and the thread\'s own once its read lands', async () => {

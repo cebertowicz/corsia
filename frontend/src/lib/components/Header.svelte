@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { activeThread, activeThreadId, isNavAgent } from '$lib/stores/threads';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+	import { openProjectSettings as showProjectSettings, openWorkspaceSettings as showWorkspaceSettings } from '$lib/stores/settingsNavigation';
 	import { sidebarCollapsed } from '$lib/stores/ui';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { measurementScopeTitle } from '$lib/stores/measurementScopeTitle';
@@ -62,21 +61,15 @@
 	function run(fn: () => void) { overflowOpen = false; fn(); }
 	function openThreadSettings() {
 		haptic();
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(false);
 		threadSettingsOpen.update((open) => !open);
 	}
 	function openProjectSettings() {
 		haptic();
-		threadSettingsOpen.set(false);
-		workspaceSettingsOpen.set(false);
-		projectSettingsOpen.set(true);
+		if ($uiScope) showProjectSettings($uiScope.id);
 	}
 	function openWorkspaceSettings() {
 		haptic();
-		threadSettingsOpen.set(false);
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(true);
+		showWorkspaceSettings();
 	}
 </script>
 
@@ -146,11 +139,11 @@
 			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
 				{@render gearIcon()}
 			</button>
-		{:else if activeView === 'activity' && $uiScope && !$projectSettingsOpen}
+		{:else if activeView === 'activity' && $uiScope}
 			<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
 				{@render gearIcon()}
 			</button>
-		{:else if activeView === 'activity' && !$uiScope && !$workspaceSettingsOpen}
+		{:else if activeView === 'activity' && !$uiScope}
 			<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
 				{@render gearIcon()}
 			</button>

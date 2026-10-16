@@ -202,24 +202,7 @@ describe('buildPaneConfig — pane only on workspace Activity', () => {
 		expect(buildPaneConfig('activity', null, SCOPE, CONDUCTOR_ID)).toBeNull();
 	});
 
-	it('the Workspace settings takeover opened from Activity has no pane', () => {
-		expect(buildPaneConfig('activity', null, null, CONDUCTOR_ID, null, true)).toBeNull();
-	});
-
-	it('the Project settings takeover opened from Activity has no pane', () => {
-		expect(buildPaneConfig('activity', null, SCOPE, CONDUCTOR_ID, null, true)).toBeNull();
-	});
-
-	it('Project settings opened from a chat has no pane', () => {
-		expect(buildPaneConfig('chat', makeThread(OTHER_ID), SCOPE, CONDUCTOR_ID, null, true)).toBeNull();
-		expect(buildPaneConfig('chat', makeThread(CONDUCTOR_ID), SCOPE, CONDUCTOR_ID, null, true)).toBeNull();
-	});
-
-	it('Workspace settings opened from a chat has no pane', () => {
-		expect(buildPaneConfig('chat', makeThread(OTHER_ID), null, CONDUCTOR_ID, null, true)).toBeNull();
-		expect(buildPaneConfig('chat', null, SCOPE, CONDUCTOR_ID, null, true)).toBeNull();
-	});
-
+	// Workspace and project settings live in Settings, which has no pane.
 	it.each(['measurement', 'settings', 'documents'] as const)('%s has no pane in either scope', (view) => {
 		expect(buildPaneConfig(view, null, null, CONDUCTOR_ID)).toBeNull();
 		expect(buildPaneConfig(view, null, SCOPE, CONDUCTOR_ID)).toBeNull();

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
 	import { Button } from '$lib/components/ui';
+	import SettingsRow from './SettingsRow.svelte';
 	import { createSkill, fetchSkills, type SkillRow, type SkillScope } from '$lib/api/skills';
 
 	let {
@@ -11,6 +12,7 @@
 		threadId = null,
 		onBrowseSkills,
 		onOpenSkill,
+		heading = true,
 	}: {
 		scope: SkillScope;
 		scopeLabel: string;
@@ -19,6 +21,8 @@
 		threadId?: string | null;
 		onBrowseSkills?: () => void;
 		onOpenSkill?: () => void;
+		/** Settings names the level in its own section label. */
+		heading?: boolean;
 	} = $props();
 
 	let rows = $state<SkillRow[]>([]);
@@ -106,15 +110,14 @@
 </script>
 
 <div class="skills-panel">
-	<div class="skills-scope">Managing skills for {scopeLabel}</div>
-	<div class="skills-summary">
-		<span>{countLabel}</span>
-		<span class:bad={invalidRows.length > 0}>{invalidLabel}</span>
-	</div>
+	{#if heading}<div class="skills-scope">Managing skills for {scopeLabel}</div>{/if}
+	<p class="skills-summary">
+		{countLabel}<span class="sep" aria-hidden="true"> · </span><span class:bad={invalidRows.length > 0}>{invalidLabel}</span>
+	</p>
 	<p class="skills-hint">{inheritanceHint}</p>
 
 	{#if error}
-		<div class="skills-error" role="alert">{error}</div>
+		<p class="skills-error" role="alert">{error}</p>
 	{/if}
 
 	{#if loading}
@@ -124,36 +127,17 @@
 	{:else}
 		<div class="skills-list">
 			{#each validRows as row (row.path)}
-				<div class="skill-row">
-					<div class="skill-main">
-						<span class="skill-name">{row.name}</span>
-						{#if row.description}
-							<span class="skill-desc">{row.description}</span>
-						{/if}
-					</div>
-					<Button size="sm" onclick={() => openSkill(row)}>Open</Button>
-				</div>
+				<SettingsRow name={row.name} sub={row.description ?? ''} onOpen={() => openSkill(row)} />
 			{/each}
 			{#each invalidRows as row (row.path)}
-				<div class="skill-row invalid">
-					<div class="skill-main">
-						<span class="skill-name">{row.name}</span>
-						<span class="skill-desc">Omitted: {row.errors.join(', ')}</span>
-					</div>
-					<Button size="sm" variant="ghost" onclick={() => openSkill(row)}>Repair</Button>
-				</div>
+				<SettingsRow name={row.name} sub={`Omitted: ${row.errors.join(', ')}`} subTone="failed" onOpen={() => openSkill(row)} />
 			{/each}
 		</div>
 	{/if}
 
 	<div class="skills-actions">
-		<Button size="sm" disabled={loading} onclick={() => onBrowseSkills?.()}>Browse</Button>
-		<Button
-			size="sm"
-			variant={createOpen ? 'ghost' : 'secondary'}
-			disabled={loading || creating}
-			onclick={() => (createOpen = !createOpen)}
-		>{createOpen ? 'Cancel' : 'Create skill'}</Button>
+		<Button size="sm" variant="ghost" disabled={loading} onclick={() => onBrowseSkills?.()}>Browse</Button>
+		<Button size="sm" variant="ghost" disabled={loading || creating} onclick={() => (createOpen = !createOpen)}>{createOpen ? 'Cancel' : 'Create skill'}</Button>
 		<Button size="sm" variant="ghost" disabled={loading} onclick={load}>Refresh</Button>
 	</div>
 
@@ -179,122 +163,21 @@
 </div>
 
 <style>
-	.skills-panel {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-
-	.skills-scope {
-		color: var(--text-secondary);
-		font-size: var(--text-subhead);
-		font-weight: 600;
-	}
-
-	.skills-summary {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-	}
-
-	.skills-summary span {
-		border: 1px solid var(--border-subtle);
-		border-radius: var(--radius-xs);
-		padding: 2px 7px;
-	}
-
-	.skills-summary .bad {
-		color: var(--red);
-		border-color: color-mix(in srgb, var(--red) 35%, transparent);
-		background: var(--red-bg);
-	}
-
-	.skills-hint,
-	.skills-empty {
-		margin: 0;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-	}
-
-	.skills-error {
-		border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
-		border-radius: var(--radius-sm);
-		background: var(--red-bg);
-		color: var(--red);
-		font-size: var(--text-footnote);
-		padding: 8px 10px;
-	}
-
-	.skills-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.skill-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: center;
-		gap: var(--space-2);
-		min-height: 34px;
-	}
-
-	.skill-row.invalid {
-		border-left: 2px solid var(--red);
-		padding-left: var(--space-2);
-	}
-
-	.skill-main {
-		min-width: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
-
-	.skill-name {
-		color: var(--text-primary);
-		font-size: var(--text-subhead);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.skill-desc {
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.skills-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-	}
-
-	.skill-create {
-		display: grid;
-		grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto;
-		gap: var(--space-2);
-	}
-
+	.skills-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+	.skills-scope { color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
+	.skills-summary, .skills-hint, .skills-empty, .skills-error { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
+	.skills-summary .bad, .skills-error { color: var(--red-text); }
+	.skills-list { display: flex; flex-direction: column; }
+	.skills-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--space-2)); }
+	.skill-create { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto; gap: var(--space-2); }
 	.skill-create input {
 		min-width: 0;
-		font: inherit;
-		font-size: var(--text-subhead);
-		padding: 7px 10px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border);
-		background: var(--bg-primary);
-		color: var(--text-primary);
+		font: inherit; font-size: var(--text-subhead);
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius-sm); border: 1px solid var(--border);
+		background: var(--bg-primary); color: var(--text-primary);
 	}
-
 	@media (max-width: 640px) {
-		.skill-create {
-			grid-template-columns: minmax(0, 1fr);
-		}
+		.skill-create { grid-template-columns: minmax(0, 1fr); }
 	}
 </style>

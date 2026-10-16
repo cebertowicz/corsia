@@ -64,8 +64,9 @@ first needs it, from what that screen gets approved with.
 | Role | Treatment | Drawn by |
 |---|---|---|
 | Pane header | Height `--header-height`. Title `--text-body`, `--fw-semibold`, `--text-primary`. 12px side inset. No bottom line. The chat header is the one glass header over scrolling content: `--header-gradient-top` into `--glass-thin`, `--glass-blur`, `--glass-rim`. | `Header.svelte` `.shell-header`, `.h-title` |
+| Page title | Top of a full-page view's content column (Settings sections). `--text-title2`, `--fw-semibold`, `--text-primary`, the row's `--space-2` side inset, `--space-5` below. Hidden on a phone, where the app header names the page. | `SettingsView.svelte` `.page-title` |
 | Section label | `--text-footnote`, `--fw-semibold`, `--text-tertiary`, sentence case. No fill, border or rule. | `Pane.svelte` cap label; `SidebarThreadList.svelte` group label |
-| List row | Flat on the pane surface: no border or fill at rest. Min height 38px. Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row |
+| List row | Flat on the pane surface: no border or fill at rest. Min height `--list-row-min-height` (38px). Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row; `SettingsRow.svelte` |
 | Second line | `--text-caption`, `--text-tertiary`. When the line states a status, it takes that status's text colour (Needs you `--amber-text`). | `SidebarThreadRow.svelte` update line; `PlanRowFace.svelte` subline |
 | Trailing detail and row action | `--text-caption`, `--text-tertiary`. An action is text that turns `--text-primary` on hover, with no button chrome at rest. | `PlanHeadControls.svelte`, `PlanChildControls.svelte`, `AttentionDock.svelte` Answer |
 | Status | A dot or coloured text, never a filled badge. Needs you: `--amber` mark, `--amber-text` text. Working: `--status-in-progress`. Done: `--green`. Failed: `--red`. | `PlanRowFace.svelte`, `SidebarThreadRow.svelte` |
@@ -75,7 +76,7 @@ first needs it, from what that screen gets approved with.
 | Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
 | Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
 | Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
-| Project mark | A 9px dot in the project's colour with an 8% `--text-primary` ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
+| Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
 | Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
 | Time | Formatted only by `lib/time.ts` (`relLabel` for recency, `formatMoment` for plan times). Never formatted inside a component. | `time.ts` |
 | Spacing | `--space-*` tokens. A raw px value is allowed only where this table names one. | `app-tokens.css` |

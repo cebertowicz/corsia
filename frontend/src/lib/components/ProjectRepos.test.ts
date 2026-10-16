@@ -306,7 +306,8 @@ describe('ProjectRepos repository policy controls', () => {
 		});
 		await mountLoaded(fetchMock);
 
-		host.querySelector<HTMLButtonElement>('.add')?.click();
+		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Add repository')?.click();
 		await vi.waitFor(() => expect(host.querySelector('[role="dialog"]')).not.toBeNull());
 		const pathField = input('Repository path');
 		pathField.value = '/Users/alice/code/app';
@@ -344,7 +345,8 @@ describe('ProjectRepos repository policy controls', () => {
 		});
 		await mountLoaded(fetchMock);
 
-		host.querySelector<HTMLButtonElement>('.add')?.click();
+		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Add repository')?.click();
 		await vi.waitFor(() => expect(host.querySelector('[role="dialog"]')).not.toBeNull());
 		button('Pin current branch for added repository').click();
 		button('Protect base checkout for added repository').click();
