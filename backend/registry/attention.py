@@ -220,12 +220,7 @@ def _clear_attention(
                                  "attention_reason": reason}
         if defer_condition is not None:
             patch["defer_condition"] = defer_condition  # S7 arms from this later
-            ask_holds = [
-                str(ask["hold_id"])
-                for ask in plans_public.open_ask_artifacts(_db, str(row["id"]))
-            ]
-            if len(ask_holds) == 1:
-                patch["deferred_hold_id"] = ask_holds[0]
+            patch.update(plans_public.deferral_stamp(_db, str(row["id"])))
         models.update_metadata(
             identity["integration"], identity["type"], identity["external_id"],
             patch, db=_db,

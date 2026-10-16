@@ -80,17 +80,23 @@ def _record_state(identity: dict, patch: dict, db) -> None:
 
 
 def _route_back(identity: dict, child_owner: str | None, outcome: str,
-                reason: str | None, db) -> str | None:
-    """Record an owner-visible (NOT user-visible) route-back to the child owner."""
+                reason: str | None, released: bool, db) -> str | None:
+    """Record an owner-visible (NOT user-visible) route-back to the child owner.
+
+    A released ask hold already wakes the child with the outcome, so it gets no
+    second route-back.
+    """
     if child_owner is None:
         return None
-    label = delivery_disposition("owner", "actionable")  # owner_wake
-    models.record_artifact_change(
-        artifact_id=identity["id"],
-        internal_event="artifact.disposition", external_id=identity["external_id"],
-        summary=f"parent disposition: {outcome}" + (f" — {reason}" if reason else ""),
-        provenance={"outcome": outcome, "reason": reason,
-                    "route_disposition": label, "user_visible": False}, db=db)
+    label = None
+    if not released:
+        label = delivery_disposition("owner", "actionable")  # owner_wake
+        models.record_artifact_change(
+            artifact_id=identity["id"],
+            internal_event="artifact.disposition", external_id=identity["external_id"],
+            summary=f"parent disposition: {outcome}" + (f" — {reason}" if reason else ""),
+            provenance={"outcome": outcome, "reason": reason,
+                        "route_disposition": label, "user_visible": False}, db=db)
     emit_product_event("parent_disposition", outcome,
                        properties={"external_id": identity["external_id"],
                                    "child_owner": child_owner})
@@ -191,11 +197,11 @@ def _do_approve(identity, artifact_id, review_result, override_blocking,
                               override_blocking, authority, reason, actor_thread, db)
     from plans import public as plans_public
 
-    has_open_ask = bool(plans_public.open_ask_artifacts(db, str(identity["id"])))
-    if not has_open_ask:
-        _record_state(identity, {"attention_state": "raised",
-                                 "disposition_outcome": APPROVE_TO_USER,
-                                 "disposition_audit": audit}, db)
+    patch = {"disposition_outcome": APPROVE_TO_USER, "disposition_audit": audit}
+    # An open ask's hold owns its state; metadata raises only non-ask attention.
+    if not plans_public.open_ask_artifacts(db, str(identity["id"])):
+        patch["attention_state"] = "raised"
+    _record_state(identity, patch, db)
     emit_product_event("parent_disposition", APPROVE_TO_USER,
                        properties={"external_id": identity["external_id"]})
     return DispositionResult(artifact_id, APPROVE_TO_USER, user_visible=True,
@@ -216,7 +222,7 @@ def _do_route_back(identity, artifact_id, child_owner, outcome, reason,
         release=plans_public.AskRelease({"note": reason}) if reason else None,
         db=db,
     )
-    label = None if released else _route_back(identity, child_owner, outcome, reason, db)
+    label = _route_back(identity, child_owner, outcome, reason, bool(released), db)
     return DispositionResult(artifact_id, outcome, user_visible=False,
                              attention_state=state, routed_to=child_owner,
                              route_disposition=label, reason=reason)
@@ -271,12 +277,7 @@ def _do_defer(identity, artifact_id, child_owner, condition, reason,
              "disposition_outcome": DEFER_UNTIL,
              "defer_condition": condition,
              "disposition_reason": reason}
-    ask_holds = [
-        str(ask["hold_id"])
-        for ask in plans_public.open_ask_artifacts(db, str(identity["id"]))
-    ]
-    if len(ask_holds) == 1:
-        patch["deferred_hold_id"] = ask_holds[0]
+    patch.update(plans_public.deferral_stamp(db, str(identity["id"])))
     _record_state(identity, patch, db)
     return DispositionResult(artifact_id, DEFER_UNTIL, user_visible=False,
                              attention_state="deferred", routed_to=child_owner,
@@ -298,7 +299,7 @@ def _do_supersede(identity, artifact_id, child_owner, replacement_id, reason,
         release=plans_public.AskRelease({"note": reason}) if reason else None,
         db=db,
     )
-    label = None if released else _route_back(identity, child_owner, SUPERSEDE, reason, db)
+    label = _route_back(identity, child_owner, SUPERSEDE, reason, bool(released), db)
     return DispositionResult(artifact_id, SUPERSEDE, user_visible=False,
                              attention_state="superseded", routed_to=child_owner,
                              route_disposition=label, reason=reason,

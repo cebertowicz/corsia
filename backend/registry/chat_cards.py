@@ -31,12 +31,6 @@ VERDICTS = frozenset({"approved", "approved_with_changes", "changes_requested"})
 #: one whose artifact is gone.
 NEEDS_REVIEW = "needs_review"
 ANSWERED = "answered"
-REPLACED = "replaced"
-WITHDRAWN = "withdrawn"
-CLOSED = "closed"
-REJECTED = "rejected"
-REVISION_REQUESTED = "revision_requested"
-ANSWERED_INTERNALLY = "answered_internally"
 UNAVAILABLE = "unavailable"
 
 UNAVAILABLE_TITLE = "No longer available"
@@ -95,9 +89,7 @@ def card_for(
     return card
 
 
-def ask_state(
-    hold: Mapping[str, Any], artifact: Mapping[str, Any] | None,
-) -> tuple[str, dict[str, int] | None]:
+def ask_state(hold: Mapping[str, Any]) -> tuple[str, dict[str, int] | None]:
     """The round state one ask reads as, with the feedback counts its verdict carried.
 
     ``hold`` is one ``plans.public.ask_holds`` entry. Open reads as needing
@@ -105,17 +97,16 @@ def ask_state(
     Otherwise it reads its terminal path from the hold's clearance event, and
     falls back to answered only for older rows that recorded no ending.
     """
+    from plans.public import ASK_ENDINGS
+
     if hold["open"]:
         return NEEDS_REVIEW, None
     answer = hold["answer"]
     ended = answer.get("ended")
-    if ended in {
-        WITHDRAWN, CLOSED, REPLACED, REJECTED, REVISION_REQUESTED,
-        ANSWERED_INTERNALLY,
-    }:
-        return ended, None
     if ended == "retired":
         return UNAVAILABLE, None
+    if ended in ASK_ENDINGS:
+        return ended, None
     verdict = answer.get("verdict")
     if verdict in VERDICTS:
         return verdict, _counts(answer.get("feedback_counts"))
@@ -133,7 +124,7 @@ def ask_cards(db, asks: Mapping[str, str]) -> dict[str, dict[str, Any]]:
         if hold is None:
             continue
         artifact = registry_models.get_artifact(artifact_id, db=db)
-        state, feedback = ask_state(hold, artifact)
+        state, feedback = ask_state(hold)
         cards[hold_id] = card_for(
             artifact, artifact_id, kind="ask", hold_id=hold_id, state=state, feedback=feedback,
         )

@@ -741,7 +741,6 @@ _CASES = {
     ("holds.py", '"invalid plan hold kind"'): _invalid_hold_kind,
     ("holds.py", '"a blocker anyone but the user clears is a wait, not a hold; " '
                  '"block_node arms it with a deadline"'): _wait_owner_as_hold,
-    # Same-task restatement replaces atomically; it has no input refusal.
     # --- plans/blocked_wait.py ---
     ("blocked_wait.py", '"a blocker only the user can clear is a hold; any other is a wait " '
                         '"that ends at a deadline, so its condition must be a deadline"'):

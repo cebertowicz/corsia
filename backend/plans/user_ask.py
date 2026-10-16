@@ -131,6 +131,16 @@ def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
     return [dict(row) for row in db.execute(sql, () if artifact_id is None else (artifact_id,))]
 
 
+def deferral_stamp(db, artifact_id: str) -> dict[str, str]:
+    """The metadata stamp that ties a deferral to the open request it defers.
+
+    A document holds at most one open request; with none, the deferral stays
+    non-ask attention and is stamped with nothing.
+    """
+    holds = [str(ask["hold_id"]) for ask in open_ask_artifacts(db, artifact_id)]
+    return {"deferred_hold_id": holds[0]} if len(holds) == 1 else {}
+
+
 def is_user_block(operation: str, params) -> bool:
     """Whether this call holds a task for the user."""
     return operation == "block_node" and params.get("owner_kind") == "user"

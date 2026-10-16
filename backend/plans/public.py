@@ -97,6 +97,7 @@ from plans.user_ask import (
     AskRelease,
     ask_linked_sql,
     cleared as ask_cleared,
+    deferral_stamp,
     open_ask_artifacts,
     open_asks_sql,
     placed_ask_hold_sql,

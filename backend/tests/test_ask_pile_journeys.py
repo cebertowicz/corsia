@@ -340,10 +340,15 @@ def test_a_stale_deferral_stamp_does_not_defer_a_new_ask(db):
     ("supersede", "replaced", {"replacement_id": "replacement.md"}),
 ])
 def test_each_disposition_releases_the_task_with_exactly_one_asker_input(
-    db, outcome, ended, extra,
+    db, outcome, ended, extra, monkeypatch,
 ):
+    from parent_review import disposition
     from parent_review.disposition import dispose
 
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        disposition, "emit_product_event", lambda category, action, **_: events.append((category, action)),
+    )
     _plan_id, node_id, artifact_id, hold_id = _asked(db)
     assert admission.project(node_id, db=db)["condition"] == "blocked"
     assert _in_pile(db, "proposal.md") == OPEN_ASK_ROUTES
@@ -359,6 +364,27 @@ def test_each_disposition_releases_the_task_with_exactly_one_asker_input(
     assert wake.startswith(f"plan-wake:ask_released:{node_id}:")
     content = db.execute("SELECT content FROM messages WHERE id=?", (wake,)).fetchone()["content"]
     assert "The person's reason" in content
+    assert events == [("parent_disposition", outcome)]
+    assert _metadata(db, artifact_id)["disposition_outcome"] == outcome
+
+
+def test_an_approval_on_an_open_ask_records_its_audit_but_not_its_state(db):
+    from parent_review.disposition import APPROVE_TO_USER, dispose
+
+    _plan_id, _node_id, artifact_id, _hold_id = _asked(db)
+
+    dispose(artifact_id, APPROVE_TO_USER, review_result=SimpleNamespace(blocking_failure=False), db=db)
+
+    metadata = _metadata(db, artifact_id)
+    assert metadata["disposition_outcome"] == APPROVE_TO_USER
+    assert metadata["disposition_audit"] == {"blocking_failure": False}
+    assert "attention_state" not in metadata
+
+
+def _metadata(db, artifact_id: str) -> dict:
+    return json.loads(db.execute(
+        "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
+    ).fetchone()["metadata"] or "{}")
 
 
 # §7 test 10: retirement ends the ask whatever the metadata reads.

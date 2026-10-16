@@ -216,15 +216,24 @@ def test_a_cleared_round_reads_its_outcome_not_needs_review(db, outcome, expecte
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == expected
 
 
-@pytest.mark.parametrize("ended,expected", [
-    ("withdrawn", "withdrawn"), ("closed", "closed"), ("replaced", "replaced"),
-    ("retired", "unavailable"), ("rejected", "rejected"),
-    ("revision_requested", "revision_requested"), ("answered_internally", "answered_internally"),
-])
+_CARD_STATE_BY_ENDING = {
+    "withdrawn": "withdrawn", "closed": "closed", "replaced": "replaced",
+    "retired": "unavailable", "rejected": "rejected",
+    "revision_requested": "revision_requested", "answered_internally": "answered_internally",
+}
+
+
+@pytest.mark.parametrize("ended,expected", sorted(_CARD_STATE_BY_ENDING.items()))
 def test_every_ask_ending_has_one_card_state(ended, expected):
     from registry.chat_cards import ask_state
 
-    assert ask_state({"open": False, "answer": {"ended": ended}}, None) == (expected, None)
+    assert ask_state({"open": False, "answer": {"ended": ended}}) == (expected, None)
+
+
+def test_the_card_states_cover_every_recorded_ending():
+    from plans.public import ASK_ENDINGS
+
+    assert set(_CARD_STATE_BY_ENDING) == ASK_ENDINGS
 
 
 def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):
