@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 
 import pytest
 
@@ -134,7 +133,7 @@ def test_a_record_from_before_values_were_kept_per_model_still_restores(client, 
     client.post(APPLY, json={"fingerprint": _fingerprint()})
     stored = json.loads(own_omlx_management.record_path().read_text())
     legacy = {**{key: value for key, value in stored.items() if key != "originals_models"},
-              "model": asdict(MODEL), "originals_model": stored["originals_models"][MODEL.model]}
+              "originals_model": stored["originals_models"][MODEL.model]}
     own_omlx_management.record_path().write_text(json.dumps(legacy))
 
     assert own_omlx_management.read().originals_models == stored["originals_models"]

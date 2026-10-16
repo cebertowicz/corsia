@@ -7,7 +7,7 @@ advisory lock makes a second backend wait rather than issue another download.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import fcntl
 import json
 import logging
@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 from typing import IO
 
-from llm.local_model import LocalModel
+from llm.local_model import LocalModel, from_recommendation, to_record
 
 
 logger = logging.getLogger(__name__)
@@ -65,23 +65,19 @@ def read() -> Operation | None:
         return None
     if not isinstance(payload, dict):
         payload = {}
-    repository = payload.get("repository")
-    size = payload.get("download_size_bytes")
-    window = payload.get("context_window")
+    model = from_recommendation(payload.get("model"))
     kind = payload.get("kind")
     task_id = payload.get("task_id")
-    # A record from before the recommender named a profile id instead of a model:
-    # malformed here, so it is discarded and the next request starts afresh.
+    # A record from before it kept the recommender row (a profile id, or flat model
+    # fields): malformed here, so it is discarded and the next request starts afresh.
     if (
-        not isinstance(repository, str)
-        or not isinstance(size, int) or isinstance(size, bool)
-        or not isinstance(window, int) or isinstance(window, bool)
+        model is None
         or not isinstance(kind, str)
         or (task_id is not None and not isinstance(task_id, str))
     ):
         logger.warning("local setup operation record is malformed; treating it as absent")
         return None
-    return Operation(repository, size, window, kind, task_id)
+    return Operation.for_model(model, kind, task_id)
 
 
 def write(operation: Operation) -> None:
@@ -90,7 +86,8 @@ def write(operation: Operation) -> None:
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
         with staged.open("w", encoding="utf-8") as handle:
-            json.dump(asdict(operation), handle, sort_keys=True)
+            json.dump({"model": to_record(operation.model), "kind": operation.kind,
+                       "task_id": operation.task_id}, handle, sort_keys=True)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(staged, target)

@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -105,6 +105,12 @@ def from_recommendation(raw: object) -> LocalModel | None:
     return LocalModel(repository, size, min(context, MAX_CONTEXT))
 
 
+def to_record(model: LocalModel) -> dict:
+    """The model as a state record keeps it: the recommender row, read back with ``from_recommendation``."""
+    return {"repo_id": model.repository, "download_bytes": model.download_size_bytes,
+            "max_context": model.context_window}
+
+
 def pick(payload: object) -> LocalModel | None:
     """The first row of the recommender's ``best`` section that reaches 32K, else None."""
     sections = payload.get("sections") if isinstance(payload, dict) else None
@@ -156,7 +162,7 @@ def record_set_up(model: LocalModel) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
-        staged.write_text(json.dumps(asdict(model), sort_keys=True), encoding="utf-8")
+        staged.write_text(json.dumps(to_record(model), sort_keys=True), encoding="utf-8")
         os.replace(staged, target)
     finally:
         staged.unlink(missing_ok=True)
@@ -171,10 +177,7 @@ def set_up_model() -> LocalModel | None:
     except (OSError, ValueError) as error:
         log.warning("local model record is unreadable; treating it as absent: %s", error)
         return None
-    model = from_recommendation({
-        "repo_id": raw.get("repository"), "download_bytes": raw.get("download_size_bytes"),
-        "max_context": raw.get("context_window"),
-    }) if isinstance(raw, dict) else None
+    model = from_recommendation(raw)
     if model is None:
         log.warning("local model record is malformed; treating it as absent")
     return model

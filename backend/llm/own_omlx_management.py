@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from llm.local_model import LocalModel, from_recommendation
+from llm.local_model import LocalModel, from_recommendation, to_record
 
 log = logging.getLogger(__name__)
 
@@ -88,11 +88,7 @@ def read() -> Management | None:
     if not isinstance(raw, dict):
         log.warning("own oMLX management record is malformed; treating it as absent")
         return None
-    stored = raw.get("model")
-    model = from_recommendation({
-        "repo_id": stored.get("repository"), "download_bytes": stored.get("download_size_bytes"),
-        "max_context": stored.get("context_window"),
-    }) if isinstance(stored, dict) else None
+    model = from_recommendation(raw.get("model"))
     globals_ = raw.get("originals_global")
     cannot_check = raw.get("cannot_check")
     return Management(
@@ -109,7 +105,7 @@ def read() -> Management | None:
 def _write(record: Management) -> None:
     target = record_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {**asdict(record), "model": asdict(record.model) if record.model else None}
+    payload = {**asdict(record), "model": to_record(record.model) if record.model else None}
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
         staged.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")

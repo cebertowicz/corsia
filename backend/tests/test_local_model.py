@@ -306,7 +306,11 @@ def test_the_set_up_record_round_trips_and_a_bad_one_reads_as_absent():
     local_model.record_set_up(model)
 
     assert local_model.set_up_model() == model
-    local_model._record_path().write_text('{"repository": "Jundot/x", "download_size_bytes": 1, "context_window": 512}')
+    local_model._record_path().write_text('{"repo_id": "Jundot/x", "download_bytes": 1, "max_context": 512}')
+    assert local_model.set_up_model() is None
+    # The flat shape unreleased builds wrote reads as absent too.
+    local_model._record_path().write_text(
+        '{"repository": "Jundot/x", "download_size_bytes": 1, "context_window": 262144}')
     assert local_model.set_up_model() is None
     local_model._record_path().write_text("not json")
     assert local_model.set_up_model() is None
