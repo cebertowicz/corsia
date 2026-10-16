@@ -11,6 +11,7 @@
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
+	import { selectSetupFirstModel } from '$lib/setupFirstModel';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
 	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
@@ -86,7 +87,7 @@
 				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
-				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
+				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: () => void selectSetupFirstModel(get(token), sources).then((selected) => { if (selected) onFinished(); }) };
 		}
 	});
 
@@ -215,12 +216,12 @@
 			connect();
 			await Promise.all([refreshSources(), classifier.read()]);
 			password = ''; confirmation = '';
-			// A source already Ready (named by setup status, confirmed by the recheck above) means the AI step never appears.
-			if (status.ready_ai && canFinish) { onFinished(); return; }
+			if (status.ready_ai && canFinish && await selectSetupFirstModel(get(token), sources)) { onFinished(); return; }
 			page = 'models';
 		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
+
 
 	async function refreshSources() {
 		const current = get(token);
