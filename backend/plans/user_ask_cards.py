@@ -66,7 +66,6 @@ def _endings(db, rows) -> dict[str, dict]:
         payload = _decoded(row["payload_json"])
         detail = payload.get("detail") if payload is not None else None
         if isinstance(detail, dict):
-            detail = dict(detail)
             endings[row["id"]] = detail
     return endings
 
