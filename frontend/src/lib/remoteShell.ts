@@ -96,8 +96,9 @@ export function codeRefusalLine(reason: PairReason, name: string): string | null
 /** The line under the address field when the computer can't be used (r4, r5 and the too-old host). */
 export function unreachableLine(reason: PairReason, target: string, versions: { app?: string; host?: string }): string | null {
 	switch (reason) {
+		// Setup's approved r4 frame draws one line for "can't reach it"; no separate network wording is approved.
+		case 'network':
 		case 'server': return `${target} answered, but CORSIA isn’t running there.`;
-		case 'network': return `CORSIA can’t reach ${target}. Check that it’s on and on the same network as this computer.`;
 		case 'incompatible': return `This computer has CORSIA ${versions.app ?? 'a different version'} and ${target} has ${versions.host ?? 'another'}. Update the older one, then try again.`;
 		case 'too_old': return `${target} has an older CORSIA. Update it, then try again.`;
 		default: return null;

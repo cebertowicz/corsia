@@ -2,6 +2,9 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CodeInput from './CodeInput.svelte';
 
+// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
+const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
+
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 const state = $state({ value: '', refocus: 0 });
@@ -45,7 +48,7 @@ describe('CodeInput', () => {
 	});
 	it('takes focus in the first box when it shows', async () => {
 		show({ focusAt: 0 });
-		await vi.waitFor(() => expect(document.activeElement).toBe(boxes()[0]));
+		await waitFor(() => expect(document.activeElement).toBe(boxes()[0]));
 	});
 	it('a disabled input accepts nothing', () => {
 		show({ disabled: true });

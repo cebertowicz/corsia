@@ -12,6 +12,9 @@ import SettingsSystem from './SettingsSystem.svelte';
 import { connectOpen } from '$lib/stores/remoteConnect';
 import { coreSettings } from '$lib/stores/settings';
 
+// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
+const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
+
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let invoke: ReturnType<typeof vi.fn>;
@@ -52,7 +55,7 @@ describe('Settings › System with a shell', () => {
 		expect(flat(host.textContent)).toContain('Your work stays on Steve’s Mac Studio. This app signs out and returns to setup.');
 		expect(order).toEqual([]);
 		button('Disconnect')?.click();
-		await vi.waitFor(() => expect(order).toEqual(['logout', 'disconnect_remote']));
+		await waitFor(() => expect(order).toEqual(['logout', 'disconnect_remote']));
 	});
 	it('Cancel leaves everything as it was', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
@@ -93,7 +96,7 @@ describe('the Devices row countdown', () => {
 		}));
 		await show();
 		expect(flat(host.textContent)).toContain('Ends in under a minute');
-		await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(2), { timeout: 3000 });
-		await vi.waitFor(() => expect(flat(host.textContent)).not.toContain('Ends in'));
+		await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+		await waitFor(() => expect(flat(host.textContent)).not.toContain('Ends in'));
 	});
 });

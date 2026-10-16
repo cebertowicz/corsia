@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { token } from '$lib/stores/auth';
+import { handleMessage } from '$lib/ws/handlers';
 import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
+
+// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
+const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
 
 const api = (patch: Partial<DevicesApi> = {}): DevicesApi => ({
 	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local',
@@ -121,6 +125,34 @@ describe('createDevices', () => {
 		clock += 60_000; devices.tick();
 		expect(devices.view.endsInSeconds).toBe(0);
 		expect(calls).toHaveLength(1);
+	});
+
+	it('re-reads on the host’s devices_updated, so a pairing that used the code returns the row to New code', async () => {
+		const devices = createDevices({ now: () => clock });
+		responses.push(json(api({ code: { state: 'active', value: 'K7QX', expires_in_seconds: 540 } })));
+		const stop = devices.start();
+		await waitFor(() => expect(devices.view.pairing).toBe('code'));
+		responses.push(json(api({ code: { state: 'none' } })));
+		handleMessage({ type: 'devices_updated' }, vi.fn());
+		await waitFor(() => expect(devices.view).toMatchObject({ pairing: 'idle', code: null, endsInSeconds: null }));
+		expect(calls).toHaveLength(2);
+		stop();
+		handleMessage({ type: 'devices_updated' }, vi.fn());
+		expect(calls).toHaveLength(2);
+	});
+
+	it('does not re-read over a start in progress', async () => {
+		const devices = createDevices({ now: () => clock });
+		responses.push(json(api({ enabled: false, announced_name: null })));
+		await devices.read();
+		const stop = devices.start();
+		await waitFor(() => expect(calls).toHaveLength(2));
+		responses.push(() => new Response(null, { status: 200 }));
+		void devices.setEnabled(true);
+		const before = calls.length;
+		handleMessage({ type: 'devices_updated' }, vi.fn());
+		expect(calls).toHaveLength(before);
+		stop();
 	});
 
 	it('takes the connected computer’s name from the shell', async () => {
