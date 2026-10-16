@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plans import service
-from plans.user_ask import ASKABLE_TYPES, open_asks_sql
+from plans.user_ask import askable_sql, open_asks_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
 
@@ -15,9 +15,8 @@ _DEFERRED_STAMP = (
     "json_extract(i.metadata, '$.attention_state')='deferred'"
     " AND json_extract(i.metadata, '$.deferred_hold_id')=ask.hold_id"
 )
-_ASKABLE = ",".join(f"'{kind}'" for kind in ASKABLE_TYPES)
 _ATTENTION_STATE_SQL = f"""CASE
-    WHEN l.role='attention' AND i.type IN ({_ASKABLE}) THEN COALESCE((
+    WHEN l.role='attention' AND {askable_sql('i')} THEN COALESCE((
         SELECT CASE WHEN {_DEFERRED_STAMP} THEN 'deferred' ELSE 'raised' END AS ask_state
           FROM ({open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id", by="all")}) ask
          WHERE ask.node_id=l.node_id AND ask.owner_id=l.artifact_id

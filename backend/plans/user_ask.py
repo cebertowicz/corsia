@@ -51,6 +51,23 @@ _PROVENANCE = "user.ask_cleared"
 ASKABLE_TYPES = ("document", "image")
 
 
+def askable_sql(alias: str) -> str:
+    """Whether the artifact row ``alias`` is a type a review request can name."""
+    return f"{alias}.type IN ({','.join(repr(kind) for kind in ASKABLE_TYPES)})"
+
+
+def ask_linked_sql(alias: str) -> str:
+    """Whether the artifact row ``alias`` is askable and linked to a task for attention.
+
+    Such an artifact's raised state belongs to its open requests
+    (``open_asks_sql``), never to its registry metadata.
+    """
+    return (
+        f"({askable_sql(alias)} AND EXISTS (SELECT 1 FROM plan_node_artifact_links al"
+        f" WHERE al.artifact_id={alias}.id AND al.role='attention'))"
+    )
+
+
 @dataclass(frozen=True)
 class AskRelease:
     """What the answering side hands Plans when it clears an ask, opaque to Plans.

@@ -104,16 +104,9 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
         for ask in asks:
             ask_holds.setdefault(str(ask["artifact_id"]), set()).add(str(ask["hold_id"]))
         metadata_rows = _db.execute(
-            """SELECT * FROM artifact_identities i
-                 WHERE i.state='active'
-                   AND json_extract(i.metadata, '$.attention_state')=?
-                   AND NOT (
-                       i.type IN ('document','image')
-                       AND EXISTS (
-                           SELECT 1 FROM plan_node_artifact_links l
-                            WHERE l.artifact_id=i.id AND l.role='attention'
-                       )
-                   )""",
+            "SELECT * FROM artifact_identities i WHERE i.state='active'"
+            " AND json_extract(i.metadata, '$.attention_state')=?"
+            f" AND NOT {plans_public.ask_linked_sql('i')}",
             (ATTENTION_RAISED,),
         ).fetchall()
         rows = {str(row["id"]): dict(row) for row in metadata_rows}
