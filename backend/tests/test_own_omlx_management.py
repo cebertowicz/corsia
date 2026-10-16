@@ -43,7 +43,7 @@ class FakeOmlx:
     """oMLX's admin routes: nested global GET, flat global POST, model list GET, model PUT (null unsets)."""
 
     def __init__(self):
-        self.globals = {**GLOBALS_BEFORE, "port": 8000, "host": "127.0.0.1", "model_dir": "/Users/them/models"}
+        self.globals = {**GLOBALS_BEFORE, "port": 8000, "host": "127.0.0.1", "model_dir": "/opt/omlx-models"}
         self.models = {MODEL.model: dict(MODEL_BEFORE), OTHER: dict(OTHER_BEFORE)}
         self.requests: list[tuple[str, str, dict | None]] = []
         self.fail_writes = False
