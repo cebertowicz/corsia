@@ -25,6 +25,12 @@ pub struct RemoteConnection {
     state: LaunchState,
 }
 
+impl Default for RemoteConnection {
+    fn default() -> Self {
+        Self::launch(None)
+    }
+}
+
 impl RemoteConnection {
     pub fn launch(saved: Option<&RemoteRecord>) -> Self {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
@@ -113,5 +119,10 @@ mod tests {
         assert_eq!(connection.state(), &LaunchState::Connecting { name: "Studio".into() });
         connection.key_changed("Studio");
         assert_eq!(connection.state(), &LaunchState::KeyChanged { name: "Studio".into() });
+        connection.connected("Studio");
+        connection.begin_disconnect();
+        assert_eq!(connection.state(), &LaunchState::Disconnecting);
+        connection.local();
+        assert_eq!(connection.state(), &LaunchState::Local);
     }
 }
