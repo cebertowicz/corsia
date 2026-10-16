@@ -212,12 +212,17 @@ describe('SetupScreen', () => {
 			expect(bodies).toEqual(['{"consent_existing":true,"manage_existing":false}']);
 		});
 
-		it('hides both choices when the switch is off', async () => {
+		it('removes every local choice from the rest of setup when the switch is off', async () => {
 			await mountOwnOmlx();
 			(host.querySelector('button[aria-label="Also run AI on this computer"]') as HTMLButtonElement).click();
 			await settle();
 			expect(host.querySelector('[aria-label="Your oMLX"]')).toBeNull();
 			expect(host.textContent).not.toContain('Letting CORSIA manage it');
+
+			button('Get started')!.click();
+			await settle();
+			expect(host.textContent).toContain('Create your account');
+			expect(host.textContent).not.toContain('Use your oMLX?');
 		});
 
 		it('sends no choice for a consent Welcome never offered the two choices for', async () => {
@@ -675,8 +680,8 @@ describe('SetupScreen', () => {
 		expect(calls).not.toContain('/api/conductor');
 	});
 
-	async function reachModels(classifier: unknown, options: { onRequest?: (url: string, init?: RequestInit) => void; sourceReady?: boolean; onFinished?: () => void; posts?: Array<unknown | (() => Promise<unknown>)> } = {}) {
-		const { onRequest, sourceReady = true, onFinished = vi.fn(), posts = [] } = options;
+	async function reachModels(classifier: unknown, options: { onRequest?: (url: string, init?: RequestInit) => void; sourceReady?: boolean; onFinished?: () => void; posts?: Array<unknown | (() => Promise<unknown>)>; providers?: unknown[] } = {}) {
+		const { onRequest, sourceReady = true, onFinished = vi.fn(), posts = [], providers = [] } = options;
 		const queue = [...posts];
 		if (component) await unmount(component);
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -695,6 +700,7 @@ describe('SetupScreen', () => {
 			if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'corsia-thread' } });
 			if (url === '/api/models?thread_id=corsia-thread') return json({ models: [{ id: 'claude-code/sonnet', name: 'Sonnet', size: '', backend: 'harness', speed: '', connection: 'claude-code', status: 'ready' }] });
 			if (url.startsWith('/api/threads/corsia-thread?token=')) return json({ model: 'claude-code/sonnet', model_updated_at: '2026-10-16T00:00:00Z' });
+			if (url.startsWith('/api/settings/providers?')) return json({ providers });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
 				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
 				{ source: 'claude-code', name: 'Claude Code', state: sourceReady ? 'ready' : 'needs_auth', accounts: [{ state: sourceReady ? 'ready' : 'needs_auth' }] },
@@ -727,6 +733,15 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Installing');
 		expect(host.textContent).toContain('Ready');
 		expect(startButton()).toHaveProperty('disabled', false);
+	});
+
+	it('loads cloud providers before opening the API-key form', async () => {
+		await reachModels({ state: 'idle' }, { providers: [{ name: 'anthropic', label: 'Anthropic', type: 'cloud' }] });
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use an API key instead')?.click();
+		await settle();
+
+		expect(Array.from(host.querySelectorAll('select[aria-label="Provider"] option')).map((option) => option.textContent)).toEqual(['Anthropic']);
 	});
 
 	it('shows the background download only in the rail, as Finishing setup with its percent', async () => {
@@ -952,37 +967,26 @@ describe('SetupScreen', () => {
 			expect(start().disabled).toBe(false);
 		});
 
-		it('updates an unverified CLI only after confirmation, then names an older PATH copy', async () => {
+		it('does not offer an Update action for an unverified CLI', async () => {
 			await openConnectStep([claude('unverified')]);
 
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Update']);
-			await press(row('Claude Code'), 'Update');
-			expect(row('Claude Code').textContent).toContain('Update Claude Code? This runs Anthropic’s official installer');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).not.toContain('Update');
 			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/update');
-
-			await press(row('Claude Code'), 'Update');
-			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/update');
-			expect(row('Claude Code').textContent).toContain('Updating with Anthropic’s official installer.');
-
-			fake.install = { state: 'done', reason: null, path_shadowed_by: '/usr/local/bin/claude' };
-			await refocus();
-			expect(row('Claude Code').textContent).toContain('older copy comes first on this computer’s PATH');
-			expect(row('Claude Code').textContent).toContain('Remove the older copy at /usr/local/bin/claude, then come back to this window.');
-			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
 		});
 
-		it('leaves package-manager copies alone with their exact update command', async () => {
+		it('lets an unverified package-manager CLI recheck or sign in without suggesting an update', async () => {
 			await openConnectStep([
 				claude('unverified', { cli_package_manager: 'homebrew' }),
 				{ source: 'codex', name: 'Codex', state: 'unverified', cli_package_manager: 'npm' },
 			]);
 
-			expect(row('Claude Code').textContent).toContain('CORSIA can’t use this copy of Claude Code, which Homebrew installed.');
-			expect(row('Claude Code').textContent).toContain('Update it in Terminal with brew upgrade claude-code. CORSIA notices when you come back to this window.');
-			expect(row('Codex').textContent).toContain('CORSIA can’t use this copy of Codex, which npm installed.');
-			expect(row('Codex').textContent).toContain('Update it in Terminal with npm update -g @openai/codex. CORSIA notices when you come back to this window.');
-			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
-			expect(row('Codex').querySelectorAll('button').length).toBe(0);
+			expect(row('Claude Code').textContent).toContain('CORSIA couldn’t check Claude Code’s sign-in.');
+			expect(row('Codex').textContent).toContain('CORSIA couldn’t check Codex’s sign-in.');
+			expect(row('Claude Code').textContent).not.toContain('brew upgrade');
+			expect(row('Codex').textContent).not.toContain('npm update');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Check again', 'Sign in']);
+			await press(row('Claude Code'), 'Check again');
+			expect(fake.posted.some((call) => call.startsWith('POST /api/providers/sources/recheck'))).toBe(true);
 		});
 
 		it('offers Sign in for a signed-out CLI, and signs in without installing', async () => {

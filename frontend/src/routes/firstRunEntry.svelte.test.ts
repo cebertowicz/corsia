@@ -199,6 +199,16 @@ describe('first-run entry across auth readiness', () => {
 		expect(historyReads('fixture-conductor')).toHaveLength(0);
 	});
 
+	it('resumes the model setup step for an authenticated incomplete setup', async () => {
+		render();
+		authenticate();
+		resolveLookup({ thread_id: 'fixture-conductor', setup_incomplete: true });
+		await settle();
+
+		expect(host.textContent).toContain('Connect an AI');
+		expect(host.querySelector('.chat-shell')).toBeNull();
+	});
+
 	it('does not steal a user selection made while lookup is in flight', async () => {
 		listedThreads = [row('fixture-choice')];
 		render();

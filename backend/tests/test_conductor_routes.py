@@ -167,6 +167,7 @@ class TestConductorRoutes:
         assert got["target"] == {
             "thread_id": "sess-1",
             "title": "Native conductor",
+            "setup_incomplete": False,
             "bootloader_files": '["context/CONDUCTOR.md"]',
             "updated_at": row_updated_at,
             "model": "vmlx-local-qwen",

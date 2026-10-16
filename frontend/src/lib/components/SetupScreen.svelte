@@ -17,8 +17,8 @@
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
 	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
-	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
-	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
+	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; resume?: boolean; }
+	const { onExistingAccount, onAccountCreated, onFinished, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
 	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
@@ -45,6 +45,7 @@
 	let localStartError = $state('');
 	let localDownloadPending = $state(false);
 	let localSetupBusy = $state(false);
+	let localAiDisabled = $state(false);
 	let existingOmlxConsent = $state(false);
 	/** Welcome's Let CORSIA manage it (or Use mine) for the person's own oMLX. */
 	let manageOwnOmlx = $state(true);
@@ -59,7 +60,7 @@
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
 	/** Welcome's choice where it showed both (Let CORSIA manage it, Use mine); undefined where it didn't. */
-	const ownOmlxChoice = $derived(status.existing_omlx && localPick.wanted ? manageOwnOmlx : undefined);
+	const ownOmlxChoice = $derived(status.existing_omlx && !localAiDisabled ? manageOwnOmlx : undefined);
 	const manageExisting = $derived(ownOmlxChoice === true);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
@@ -132,7 +133,7 @@
 
 	async function beginSetup() {
 		void classifier.start();
-		if (status.existing_omlx) {
+		if (status.existing_omlx && !localAiDisabled) {
 			existingOmlxConsent = true;
 			page = 'models';
 			return;
@@ -220,7 +221,7 @@
 			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
 			// A session opened here has no socket until something connects it; the app shell only connects on mount.
 			connect();
-			await Promise.all([refreshSources(), classifier.read()]);
+			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
 			password = ''; confirmation = '';
 			if (status.ready_ai && canFinish) return finishSetupWithBestEffortSelection(get(token), sources, onFinished);
 			page = 'models';
@@ -262,7 +263,7 @@
 	});
 
 	const harnessSources = $derived(sources.filter(isHarness));
-	const showLocalRow = $derived(page === 'models' && Boolean(local));
+	const showLocalRow = $derived(page === 'models' && !localAiDisabled && Boolean(local));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows: AiRow[] = harnessSources.map((source) => {
 			const row = connectFlow.row(source);
@@ -342,7 +343,10 @@
 	}
 
 	onMount(() => {
-		void readStatus();
+		if (resume) {
+			page = 'models';
+			void Promise.all([refreshSources(), classifier.read(), loadProviders()]);
+		} else void readStatus();
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const onVisible = () => { if (document.visibilityState === 'visible') void recheckOnFocus(); };
@@ -364,7 +368,7 @@
 
 	{#if page === 'welcome'}
 		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
-			onWantedChange={(next) => localPick.change(next, Boolean(status.existing_omlx))} onRecheck={readStatus} onRetry={() => void localPick.start()}
+			onWantedChange={(next) => { localAiDisabled = !next; localPick.change(next, Boolean(status.existing_omlx)); }} onRecheck={readStatus} onRetry={() => void localPick.start()}
 			ownOmlx={Boolean(status.existing_omlx)} manage={manageOwnOmlx} onManageChange={(next) => (manageOwnOmlx = next)} />
 	{:else if page === 'account'}
 		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />

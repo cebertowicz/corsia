@@ -53,6 +53,7 @@
 	let conductorLookup = $state<CoordinationLookup>({ kind: 'unknown' });
 	const conductorThreadId = $derived(conductorLookup.kind === 'target' ? conductorLookup.target.thread_id : null);
 	const conductorKnownAbsent = $derived(conductorLookup.kind === 'absent');
+	const setupIncomplete = $derived(conductorLookup.kind === 'target' && conductorLookup.target.setup_incomplete === true);
 
 	let lastEmittedView: View = 'activity';
 	$effect(() => {
@@ -480,7 +481,7 @@
 
 
 <HomePageView
-	isAuthenticated={$isAuthenticated} {activeView} bind:sidebarOpen bind:chatPanelRef
+	isAuthenticated={$isAuthenticated} {setupIncomplete} {activeView} bind:sidebarOpen bind:chatPanelRef
 	{conductorThreadId} {conductorKnownAbsent} {systemStatus} {isDraggingOver} {paneConfig}
 	bind:lightboxUrl bind:lightboxOpen
 	{deleteConfirmId}
