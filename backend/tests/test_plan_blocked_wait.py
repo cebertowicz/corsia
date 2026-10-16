@@ -338,7 +338,7 @@ def test_a_document_ask_holds_the_task_until_the_user_acts(db):
         "SELECT role FROM plan_node_artifact_links WHERE node_id=? AND artifact_id=?",
         (node.id, ask),
     ).fetchone()["role"] == "attention"
-    assert attention.get_attention_state(ask, db=db) == "raised"
+    assert attention.get_attention_state(ask, db=db) is None  # The open hold is the ask's sole raised state.
     assert admission.project(node.id, db=db)["condition"] == "blocked"
     shown = operator_projection.read_thread("owner", actor=USER, db=db)["plans"][0]["nodes"][0]
     assert shown["artifacts"][0]["attention_state"] == "raised"
@@ -384,6 +384,32 @@ def test_answering_a_review_requested_document_ask_wakes_the_owner_once(db):
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
     _ask_wake_next(db, wake, node, event='The user acknowledged "Read the proposal"')
+
+
+@pytest.mark.parametrize(("outcome", "ended", "event"), [
+    ("reject_with_reason", "rejected", 'The user rejected "Read the proposal"'),
+    ("request_revision", "revision_requested", 'The user asked for a revision of "Read the proposal"'),
+    ("answer_internally", "answered_internally", 'The user answered "Read the proposal"'),
+    ("supersede", "replaced", 'The user replaced "Read the proposal"'),
+])
+def test_each_waking_ask_ending_keeps_its_stored_value_and_renders_a_verb(
+    db, outcome, ended, event,
+):
+    from plans import user_ask
+
+    node, ask = _ask_held_node(db, state="pending", external_id=f"{outcome}.md")
+
+    assert user_ask.cleared(
+        ask, outcome, db=db, release=user_ask.AskRelease({"note": "The reason"}),
+    ) == 1
+
+    [wake] = _ask_release_wakes(db)
+    _ask_wake_next(db, wake, node, event=event, answer="The reason")
+    detail = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE id=(SELECT clearance_event_id "
+        "FROM plan_node_holds WHERE node_id=?)", (node.id,),
+    ).fetchone()["payload_json"]
+    assert json.loads(detail)["detail"]["ended"] == ended
 
 
 def test_answering_an_ask_that_still_has_another_hold_reports_that_hold(db):

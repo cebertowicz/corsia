@@ -25,12 +25,22 @@ def _document(db) -> str:
     ).fetchone()["id"])
 
 
-def _block(db, plan_id: str, node_id: str, artifact_id: str, reason: str = "Review it"):
+def _ask_release_wakes(db):
+    return db.execute(
+        "SELECT id FROM messages WHERE id LIKE 'plan-wake:ask_released:%' ORDER BY input_order",
+    ).fetchall()
+
+
+def _block(
+    db, plan_id: str, node_id: str, artifact_id: str, reason: str = "Review it",
+    *, expected_revision: int | None = None,
+):
     return mutate(
         plan_id, "block_node", {
             "node_id": node_id, "reason_key": "review", "reason": reason,
             "owner_kind": "user", "ask_artifact_id": artifact_id,
-            "expected_revision": service._node_row(db, node_id)["revision"],
+            "expected_revision": expected_revision if expected_revision is not None
+            else service._node_row(db, node_id)["revision"],
         }, actor=OWNER, provenance="test.one_open_ask", mutation_id=uuid.uuid4().hex, db=db,
     )
 
@@ -58,6 +68,7 @@ def test_refuses_competing_asks_and_atomically_replaces_a_new_reason(db):
 
     with pytest.raises(service.PlanInputError, match=rf"node_id {first.id}.*hold_id {hold['id']}"):
         _block(db, plan.id, second.id, artifact_id)
+    stale_revision = service._node_row(db, first.id)["revision"]
     _block(db, plan.id, first.id, artifact_id, reason="Review the revision")
     [replacement] = db.execute(
         "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (first.id,),
@@ -68,6 +79,19 @@ def test_refuses_competing_asks_and_atomically_replaces_a_new_reason(db):
         "SELECT clearance_event_id FROM plan_node_holds WHERE id=?)", (hold["id"],),
     ).fetchone()["payload_json"]
     assert json.loads(previous)["detail"] == {"ended": "replaced"}
+    assert _ask_release_wakes(db) == []
+
+    with pytest.raises(service.PlanError):
+        _block(
+            db, plan.id, first.id, artifact_id, reason="A stale replacement",
+            expected_revision=stale_revision,
+        )
+    assert db.execute(
+        "SELECT count(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (first.id,),
+    ).fetchone()[0] == 1
+    assert db.execute(
+        "SELECT count(*) FROM plan_node_holds WHERE node_id=?", (first.id,),
+    ).fetchone()[0] == 2
 
     mutate(
         plan.id, "resolve_blocker", {
@@ -75,11 +99,38 @@ def test_refuses_competing_asks_and_atomically_replaces_a_new_reason(db):
             "expected_revision": service._node_row(db, first.id)["revision"],
         }, actor=OWNER, provenance="test.one_open_ask", mutation_id=uuid.uuid4().hex, db=db,
     )
+    assert _ask_release_wakes(db) == []
 
     _block(db, plan.id, second.id, artifact_id, reason="Review the revision")
     assert db.execute(
         "SELECT count(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (second.id,),
     ).fetchone()[0] == 1
+
+
+def test_open_ask_artifacts_filters_on_the_canonical_active_hold_read(db):
+    from plans import public as plans_public
+
+    plan = service.ensure_plan("thread", "root", db=db)
+    first = service.add_node(plan.id, kind="task", title="First", acceptance_criteria="Reviewed", db=db)
+    second = service.add_node(plan.id, kind="task", title="Second", acceptance_criteria="Reviewed", db=db)
+    first_artifact = _document(db)
+    models.register_artifact(
+        integration="workspace", type="document", external_id="other-review.md",
+        parent_thread_id="root", title="Other review", db=db,
+    )
+    second_artifact = str(db.execute(
+        "SELECT id FROM artifact_identities WHERE external_id='other-review.md'",
+    ).fetchone()["id"])
+    db.commit()
+    _block(db, plan.id, first.id, first_artifact)
+    _block(db, plan.id, second.id, second_artifact)
+
+    assert {row["artifact_id"] for row in plans_public.open_ask_artifacts(db, first_artifact)} == {
+        first_artifact,
+    }
+    assert {row["artifact_id"] for row in plans_public.open_ask_artifacts(db)} == {
+        first_artifact, second_artifact,
+    }
 
 
 @pytest.mark.parametrize("operation", ("close_node", "archive_node"))
@@ -112,3 +163,4 @@ def test_user_terminal_actions_close_an_open_ask_card(db, operation):
     ).fetchone()["payload_json"]
     assert json.loads(payload)["detail"] == {"ended": "closed"}
     assert ask_cards(db, {hold["id"]: artifact_id})[hold["id"]]["state"] == "closed"
+    assert _ask_release_wakes(db) == []

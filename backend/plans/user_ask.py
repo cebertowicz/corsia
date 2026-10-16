@@ -38,10 +38,11 @@ NOT_ASKABLE = (
 #: The user outcomes that end an ask, as the agent is told them. Defer keeps
 #: the task held.
 _ENDS_ASK = {
-    "answer": "answered", "acknowledge": "acknowledged",
-    "dismiss": "dismissed", "supersede": "replaced",
-    "retire": "retired", "reject_with_reason": "rejected",
-    "request_revision": "revision_requested", "answer_internally": "answered_internally",
+    "answer": ("answered", "answered"), "acknowledge": ("acknowledged", "acknowledged"),
+    "dismiss": ("dismissed", "dismissed"), "supersede": ("replaced", "replaced"),
+    "retire": ("retired", "retired"), "reject_with_reason": ("rejected", "rejected"),
+    "request_revision": ("revision_requested", "asked for a revision of"),
+    "answer_internally": ("answered_internally", "answered"),
 }
 # The one vocabulary for agent-facing ask cards. The hold's clearance event,
 # never artifact metadata, records these terminal path outcomes.
@@ -83,8 +84,8 @@ def raised_asks(db, artifact_id: str) -> list:
     ).fetchall()
 
 
-def open_ask_artifacts(db) -> list[dict]:
-    """Return every open ask's artifact and hold through the Plans public boundary.
+def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
+    """Return open asks, optionally only one artifact, through the Plans public boundary.
 
     The query begins at active holds, so SQLite reads the partial active-hold
     index rather than the append-only clearance history. Registry callers use
@@ -102,7 +103,9 @@ def open_ask_artifacts(db) -> list[dict]:
                 WHERE h.kind='blocked' AND h.owner_kind='user'
                   AND h.owner_id IS NOT NULL AND h.cleared_at IS NULL
                   AND i.type IN ('document','image') AND i.state='active'
-                ORDER BY h.created_at,h.id"""
+                  AND (? IS NULL OR l.artifact_id=?)
+                ORDER BY h.created_at,h.id""",
+            (artifact_id, artifact_id),
         ).fetchall()
     ]
 
@@ -241,14 +244,16 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
     if outcome not in _ENDS_ASK:
         return 0
     with service._connection(db) as connection, service._write(connection):
+        ended, wake_verb = _ENDS_ASK[outcome]
         return _release(
-            connection, artifact_id, _ENDS_ASK[outcome],
+            connection, artifact_id, ended, wake_verb=wake_verb,
             retired=outcome == "retire", release=release,
         )
 
 
 def _release(
-    db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
+    db, artifact_id: str, done: str, *, wake_verb: str, retired: bool = False,
+    release: AskRelease | None = None,
 ) -> int:
     from plans import admission_projection, holds, plan_wake
     from plans.plan_events import append_owner_event
@@ -287,7 +292,7 @@ def _release(
     executors = {row["hold_id"]: admission_projection.executor_of(row, row) for row in rows}
     handoffs = _reconcile_for_askers(db, rows, executors)
     for row, (cause_id, cause_at) in zip(rows, causes):
-        summary = _release_summary(row, done, retired=retired, release=release)
+        summary = _release_summary(row, wake_verb, retired=retired, release=release)
         executor = executors[row["hold_id"]]
         wake_id = None if executor is None else plan_wake.append(
             db,
@@ -318,6 +323,10 @@ def _release(
             },
             created_at=cause_at,
         )
+    if rows:
+        from plans import notifications
+
+        notifications.report_touched({str(row["plan_id"]) for row in rows}, db=db)
     return len(rows)
 
 
@@ -345,13 +354,13 @@ def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], di
     return handoffs
 
 
-def _release_summary(row, done: str, *, retired: bool, release: AskRelease | None) -> str:
+def _release_summary(row, wake_verb: str, *, retired: bool, release: AskRelease | None) -> str:
     """Return the one-line answer the wake and its receipt carry."""
     from prompts import plan_wakes as wakes
 
     detail = release.detail if release is not None else {}
     return wakes.ask_release_summary(
-        ask=str(row["ask"] or "your ask"), done=done, retired=retired,
+        ask=str(row["ask"] or "your ask"), done=wake_verb, retired=retired,
         kind=str(row["kind"]), title=str(row["title"]), node_id=str(row["node_id"]),
         verdict=detail.get("verdict"), note=detail.get("note"),
         other_holds=bool(row["other_holds"]),

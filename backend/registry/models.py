@@ -218,10 +218,7 @@ def retire(
         metadata = json.loads(row["metadata"] or "{}") if row is not None else {}
         from plans import public as plans_public
 
-        has_open_ask = any(
-            str(ask["artifact_id"]) == artifact_id
-            for ask in plans_public.open_ask_artifacts(_db)
-        )
+        has_open_ask = bool(plans_public.open_ask_artifacts(_db, artifact_id))
         if has_open_ask or metadata.get("attention_state") in {"raised", "deferred"}:
             from registry import attention
 

@@ -164,3 +164,35 @@ def test_v121_stamps_only_a_uniquely_open_deferred_ask():
         ).fetchone()["metadata"])["deferred_hold_id"] == hold_id
     finally:
         db.close()
+
+
+def test_v121_leaves_a_deferred_artifact_with_multiple_open_asks_untouched():
+    from plans import holds, user_ask
+
+    db = _db()
+    try:
+        artifact_id = _artifact(db, "multiple-deferred.md")
+        first, _ = _raise_ask(db, artifact_id)
+        second = service.add_node(
+            service._node_row(db, first.id)["plan_id"], kind="task", title="Second review",
+            acceptance_criteria="Reviewed", db=db,
+        )
+        holds.block_hold(
+            second.id, reason_key="review", reason="Review it", owner_kind="user",
+            owner_id=artifact_id, expected_revision=service._node_row(db, second.id)["revision"],
+            actor_id="owner", provenance="test.migration_120", db=db,
+        )
+        user_ask.attach(
+            db, second.id, artifact_id, actor_id="owner", provenance="test.migration_120",
+        )
+        before = json.dumps({"attention_state": "deferred", "other": "keep"})
+        db.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (before, artifact_id))
+        db.commit()
+
+        migrate_120_to_121(db)
+
+        assert db.execute(
+            "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
+        ).fetchone()["metadata"] == before
+    finally:
+        db.close()

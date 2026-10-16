@@ -191,10 +191,7 @@ def _do_approve(identity, artifact_id, review_result, override_blocking,
                               override_blocking, authority, reason, actor_thread, db)
     from plans import public as plans_public
 
-    has_open_ask = any(
-        str(ask["artifact_id"]) == str(identity["id"])
-        for ask in plans_public.open_ask_artifacts(db)
-    )
+    has_open_ask = bool(plans_public.open_ask_artifacts(db, str(identity["id"])))
     if not has_open_ask:
         _record_state(identity, {"attention_state": "raised",
                                  "disposition_outcome": APPROVE_TO_USER,
@@ -276,8 +273,7 @@ def _do_defer(identity, artifact_id, child_owner, condition, reason,
              "disposition_reason": reason}
     ask_holds = [
         str(ask["hold_id"])
-        for ask in plans_public.open_ask_artifacts(db)
-        if str(ask["artifact_id"]) == str(identity["id"])
+        for ask in plans_public.open_ask_artifacts(db, str(identity["id"]))
     ]
     if len(ask_holds) == 1:
         patch["deferred_hold_id"] = ask_holds[0]

@@ -227,8 +227,7 @@ def _clear_attention(
             patch["defer_condition"] = defer_condition  # S7 arms from this later
             ask_holds = [
                 str(ask["hold_id"])
-                for ask in plans_public.open_ask_artifacts(_db)
-                if str(ask["artifact_id"]) == str(row["id"])
+                for ask in plans_public.open_ask_artifacts(_db, str(row["id"]))
             ]
             if len(ask_holds) == 1:
                 patch["deferred_hold_id"] = ask_holds[0]

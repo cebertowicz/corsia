@@ -216,6 +216,17 @@ def test_a_cleared_round_reads_its_outcome_not_needs_review(db, outcome, expecte
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == expected
 
 
+@pytest.mark.parametrize("ended,expected", [
+    ("withdrawn", "withdrawn"), ("closed", "closed"), ("replaced", "replaced"),
+    ("retired", "unavailable"), ("rejected", "rejected"),
+    ("revision_requested", "revision_requested"), ("answered_internally", "answered_internally"),
+])
+def test_every_ask_ending_has_one_card_state(ended, expected):
+    from registry.chat_cards import ask_state
+
+    assert ask_state({"open": False, "answer": {"ended": ended}}, None) == (expected, None)
+
+
 def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):
     plan_id, node_id = _node(db)
     ask = document_ask(db, "owner")
