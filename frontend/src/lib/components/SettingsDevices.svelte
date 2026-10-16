@@ -7,6 +7,8 @@
 	/** The Let other devices connect row on Settings › System, fed by `GET`/`PUT /api/devices` and `POST /api/devices/code`. */
 	const devices = createDevices({ remoteName: () => { const info = shellInfo(); return info?.mode === 'remote' ? info.name : undefined; } });
 	onMount(() => devices.start());
+	// The code ran out: ask the host once what is true now (a new code, or none).
+	$effect(() => { if (devices.view.endsInSeconds === 0) void devices.read(); });
 </script>
 
 <SettingsDevicesView view={devices.view} onToggle={(next) => void devices.setEnabled(next)} onNewCode={() => void devices.newCode()} onRetry={() => void devices.retry()} />

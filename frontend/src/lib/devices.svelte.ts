@@ -81,8 +81,6 @@ export function createDevices(options: Options = {}) {
 	let endsAt: number | null = null;
 	let remaining = $state<number | null>(null);
 	let forcedReadOnly = false;
-	let timer: ReturnType<typeof setInterval> | undefined;
-	let refetching = false;
 
 	const headers = (json = false): Record<string, string> => {
 		const current = get(token);
@@ -108,14 +106,11 @@ export function createDevices(options: Options = {}) {
 		}
 	}
 
+	/** Counts the code down locally; the component reads the host again once it reaches 0. */
 	function tick() {
 		if (endsAt === null) return;
 		remaining = Math.max(0, Math.ceil((endsAt - now()) / 1000));
 		view = { ...view, endsInSeconds: remaining };
-		if (remaining === 0 && !refetching) {
-			refetching = true;
-			void read().finally(() => { refetching = false; });
-		}
 	}
 
 	async function write(path: string, init: RequestInit): Promise<DevicesApi | null> {
@@ -151,11 +146,26 @@ export function createDevices(options: Options = {}) {
 		await setEnabled(true);
 	}
 
-	function start(pollMs = 5000) {
+	/**
+	 * Reads now, then again whenever the window regains focus or becomes visible (the host's state changes while the person
+	 * is on another screen). The countdown is local: one timeout aimed at the next moment its wording changes (each whole
+	 * minute, then the end).
+	 */
+	function start() {
 		void read();
-		timer = setInterval(() => { tick(); }, 1000);
-		const poll = setInterval(() => { if (view.load === 'ready' && view.busy === null) void read(); }, pollMs);
-		return () => { if (timer) clearInterval(timer); clearInterval(poll); };
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const arm = () => {
+			clearTimeout(timer);
+			if (endsAt === null) { timer = setTimeout(arm, 1000); return; }
+			const left = Math.max(0, Math.ceil((endsAt - now()) / 1000));
+			const next = left > 60 ? 60 * (Math.ceil(left / 60) - 1) : 0;
+			timer = setTimeout(() => { tick(); arm(); }, Math.max(250, endsAt - now() - next * 1000 + 50));
+		};
+		arm();
+		const refresh = () => { if (document.visibilityState === 'visible' && view.load === 'ready' && view.busy === null) void read(); };
+		window.addEventListener('focus', refresh);
+		document.addEventListener('visibilitychange', refresh);
+		return () => { clearTimeout(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
 	}
 
 	return {
