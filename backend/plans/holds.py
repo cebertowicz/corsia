@@ -62,7 +62,6 @@ def place_hold(
     provenance: str,
     db,
     raised_in: Mapping[str, str] | None = None,
-    hold_id: str | None = None,
 ):
     """Append one cause and release its selected attempt; the caller reconciles.
 
@@ -70,10 +69,6 @@ def place_hold(
     ``tool_invocation_id``, ``provider_call_id``); it rides nested under
     ``raised_in`` in the ``hold_placed`` payload, so no key can shadow the event's
     own fields, and the chat shows the ask on the step that raised it.
-
-    ``hold_id`` is for a caller that must name the new hold in the same write
-    (a restated ask records it as the old hold's successor); without one, a
-    fresh id is minted.
 
     Returns:
         The task row as it was before the cause was placed.
@@ -96,7 +91,7 @@ def place_hold(
         ).fetchone()
         if existing is not None:
             raise service.PlanError("task already has an active pause hold")
-    hold_id = hold_id or uuid.uuid4().hex
+    hold_id = uuid.uuid4().hex
     now = service._now()
     db.execute(
         """INSERT INTO plan_node_holds
@@ -316,18 +311,14 @@ def block_hold(
                  AND owner_id=? AND cleared_at IS NULL""",
             (node_id, owner_id),
         ).fetchone()
-        if existing is not None and (existing["reason_key"], existing["reason"]) == (
-            reason_key, reason,
-        ):
-            return node
-    else:
-        existing = None
-    if existing is not None:
-        raise service.PlanInputError(
-            f"task already has an open ask on this artifact (hold_id {existing['id']}); "
-            "resolve hold first, then ask again"
-        )
-    node = place_hold(
+        if existing is not None:
+            if (existing["reason_key"], existing["reason"]) == (reason_key, reason):
+                return node
+            raise service.PlanInputError(
+                f"task already has an open ask on this artifact (hold_id {existing['id']}); "
+                "resolve hold first, then ask again"
+            )
+    return place_hold(
         node_id,
         kind="blocked",
         reason_key=reason_key,
@@ -340,7 +331,6 @@ def block_hold(
         db=db,
         raised_in=raised_in,
     )
-    return node
 
 
 def block(
