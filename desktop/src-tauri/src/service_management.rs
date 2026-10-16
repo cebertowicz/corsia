@@ -326,6 +326,7 @@ pub fn ensure_service_registered(
     manager: &impl ServiceManager,
     reader: &impl LaunchctlReader,
     executable: &Path,
+    operation_state: impl FnOnce() -> Result<bool, String>,
 ) -> Result<ServiceStatus, String> {
     let status = manager.status()?;
     let bundle = bundle_root(executable)?;
@@ -333,6 +334,9 @@ pub fn ensure_service_registered(
         ServiceStatus::Enabled => match current_service(reader, &bundle)? {
             CurrentService::Current => Ok(ServiceStatus::Enabled),
             CurrentService::Stale => {
+                if super::should_prevent_quit(operation_state()) {
+                    return Err(super::ACTIVE_OPERATION_ERROR.into());
+                }
                 unregister_if_registered(manager)?;
                 manager.register()?;
                 manager.status()
@@ -443,10 +447,17 @@ impl ServiceManager for NativeServiceManager {
 
 
 #[cfg(target_os = "macos")]
-pub fn ensure_registered_from_app() -> Result<ServiceStatus, String> {
+pub fn ensure_registered_from_app(
+    operation_state: impl FnOnce() -> Result<bool, String>,
+) -> Result<ServiceStatus, String> {
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
-    ensure_service_registered(&NativeServiceManager, &SystemLaunchctl, &executable)
+    ensure_service_registered(
+        &NativeServiceManager,
+        &SystemLaunchctl,
+        &executable,
+        operation_state,
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -456,7 +467,9 @@ pub fn open_login_items() {
 
 
 #[cfg(not(target_os = "macos"))]
-pub fn ensure_registered_from_app() -> Result<ServiceStatus, String> {
+pub fn ensure_registered_from_app(
+    _operation_state: impl FnOnce() -> Result<bool, String>,
+) -> Result<ServiceStatus, String> {
     Err("CORSIA service management is only available on macOS".into())
 }
 
@@ -563,6 +576,14 @@ mod tests {
         (executable, root)
     }
 
+    fn ensure_unlocked_service_registered(
+        manager: &impl ServiceManager,
+        reader: &impl LaunchctlReader,
+        executable: &Path,
+    ) -> Result<ServiceStatus, String> {
+        ensure_service_registered(manager, reader, executable, || Ok(false))
+    }
+
     #[test]
     fn shared_ownership_fixtures_cover_register_including_missing_files() {
         let fixtures: serde_json::Value = serde_json::from_str(include_str!(
@@ -613,7 +634,7 @@ mod tests {
         };
 
         assert_eq!(
-            ensure_service_registered(&manager, &reader, &executable),
+            ensure_unlocked_service_registered(&manager, &reader, &executable),
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(manager.registrations.get(), 0);
@@ -622,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn enabled_stale_canonical_service_is_reregistered() {
+    fn enabled_stale_canonical_service_is_reregistered_when_unlocked() {
         let (executable, root) = bundle_executable();
         let manager = FakeManager::default();
         manager.status.set(Some(ServiceStatus::Enabled));
@@ -637,11 +658,33 @@ mod tests {
         };
 
         assert_eq!(
-            ensure_service_registered(&manager, &reader, &executable),
+            ensure_service_registered(&manager, &reader, &executable, || Ok(false)),
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(manager.unregistrations.get(), 1);
         assert_eq!(manager.registrations.get(), 1);
+    }
+
+    #[test]
+    fn enabled_stale_canonical_service_is_not_replaced_when_operation_is_locked() {
+        let (executable, root) = bundle_executable();
+        let manager = FakeManager::default();
+        manager.status.set(Some(ServiceStatus::Enabled));
+        let reader = FakeLaunchctl {
+            jobs: format!("123 0 {}", service_label()),
+            details: format!(
+                "{} = {{\n program = {}/Old CORSIA.app/Contents/Resources/bin/corsia-service\n}}\n",
+                service_label(),
+                root.path().display()
+            ),
+        };
+
+        assert_eq!(
+            ensure_service_registered(&manager, &reader, &executable, || Ok(true)),
+            Err(crate::ACTIVE_OPERATION_ERROR.into())
+        );
+        assert_eq!(manager.unregistrations.get(), 0);
+        assert_eq!(manager.registrations.get(), 0);
     }
 
     #[test]
@@ -652,7 +695,7 @@ mod tests {
         let reader = FakeLaunchctl { jobs: String::new(), details: String::new() };
 
         assert_eq!(
-            ensure_service_registered(&manager, &reader, &executable),
+            ensure_unlocked_service_registered(&manager, &reader, &executable),
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(manager.unregistrations.get(), 0);
@@ -670,7 +713,7 @@ mod tests {
         };
 
         assert_eq!(
-            ensure_service_registered(&manager, &reader, &executable),
+            ensure_unlocked_service_registered(&manager, &reader, &executable),
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(manager.unregistrations.get(), 0);
@@ -688,7 +731,7 @@ mod tests {
         };
 
         assert_eq!(
-            ensure_service_registered(&manager, &reader, &executable),
+            ensure_unlocked_service_registered(&manager, &reader, &executable),
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(manager.unregistrations.get(), 0);
@@ -708,7 +751,7 @@ mod tests {
             )],
         };
 
-        assert!(ensure_service_registered(&manager, &reader, &executable).is_err());
+        assert!(ensure_unlocked_service_registered(&manager, &reader, &executable).is_err());
         assert_eq!(manager.unregistrations.get(), 0);
         assert_eq!(manager.registrations.get(), 0);
     }
@@ -720,7 +763,7 @@ mod tests {
         let approval = FakeManager::default();
         approval.status.set(Some(ServiceStatus::RequiresApproval));
         assert_eq!(
-            ensure_service_registered(&approval, &reader, &executable),
+            ensure_unlocked_service_registered(&approval, &reader, &executable),
             Ok(ServiceStatus::RequiresApproval)
         );
         assert_eq!(approval.registrations.get(), 0);
@@ -729,7 +772,7 @@ mod tests {
         absent.status.set(Some(ServiceStatus::NotRegistered));
         absent.registered_status.set(Some(ServiceStatus::Enabled));
         assert_eq!(
-            ensure_service_registered(&absent, &reader, &executable),
+            ensure_unlocked_service_registered(&absent, &reader, &executable),
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(absent.registrations.get(), 1);

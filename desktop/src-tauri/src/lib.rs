@@ -31,6 +31,7 @@ pub fn service_command_from_environment() -> Option<i32> {
 }
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
+const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -257,8 +258,8 @@ fn wait_for_service(port: u16, state_dir: &PathBuf) -> Result<(), String> {
     Err(startup_failure::timeout_message(&service_log_path(state_dir)))
 }
 
-fn register_or_report_status() -> Result<service_management::ServiceStatus, String> {
-    service_management::ensure_registered_from_app()
+fn register_or_report_status(port: u16) -> Result<service_management::ServiceStatus, String> {
+    service_management::ensure_registered_from_app(|| operation_is_active(port))
 }
 
 fn start_service(
@@ -296,7 +297,7 @@ fn start_service(
         .lock()
         .map_err(|_| "service state is unavailable")? = Some(state_dir.clone());
 
-    match register_or_report_status()? {
+    match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &state_dir)?;
             Ok(ServiceStartup::Ready {
