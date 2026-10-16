@@ -63,9 +63,11 @@ function mountPane(demo: Record<string, unknown>) {
 	flushSync();
 }
 
-/** Open the first row's trailing ⋯; the menu is portaled to the body. */
+/** Open the first row's context menu; the menu is portaled to the body. */
 function openRowMenu(): void {
-	host.querySelector<HTMLButtonElement>('button[aria-label^="More actions for"]')!.click();
+	host.querySelector<HTMLElement>('.row-outer')!.dispatchEvent(
+		new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 })
+	);
 	flushSync();
 }
 
@@ -86,13 +88,15 @@ describe('ArtifactPane — persistence marker', () => {
 		expect(menuItem('Pin to pane')).toBeUndefined();
 	});
 
-	it('announces the ⋯ as a menu button that reads open while its menu is', () => {
+	it('draws no trailing action button and opens its menu from Shift+F10', () => {
 		mountPane({ nodes: [docNode({ pinned: true })], needs_attention: [] });
-		const more = host.querySelector<HTMLButtonElement>('button[aria-label^="More actions for"]')!;
-		expect(more.getAttribute('aria-haspopup')).toBe('menu');
-		expect(more.getAttribute('aria-expanded')).toBe('false');
-		openRowMenu();
-		expect(more.getAttribute('aria-expanded')).toBe('true');
+		expect(host.querySelector('button[aria-label^="More actions for"]')).toBeNull();
+
+		host.querySelector<HTMLElement>('.row-outer')!.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })
+		);
+		flushSync();
+		expect(menuItem('Unpin from pane')).toBeTruthy();
 	});
 
 	it('leaves an unpinned row unmarked but offers to pin it', () => {
@@ -106,8 +110,8 @@ describe('ArtifactPane — persistence marker', () => {
 	it('keeps Remove from pane beside Pin in the one row menu', () => {
 		mountPane({ nodes: [docNode()], needs_attention: [] });
 
-		// The row carries one trailing control, not an icon per action.
-		expect(host.querySelectorAll('.row-outer button[aria-label]')).toHaveLength(1);
+		// Secondary actions stay in the menu; the row draws no trailing action control.
+		expect(host.querySelectorAll('.row-outer button[aria-label]')).toHaveLength(0);
 		openRowMenu();
 		expect([...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()))
 			.toEqual(['Pin to pane', 'Remove from pane']);

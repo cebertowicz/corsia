@@ -70,9 +70,16 @@ describe('AssistantMessage model name', () => {
 			.toBe('Claude Code · Claude Haiku 4.5');
 	});
 
-	it('uses the composer canonical name for a native local turn', () => {
-		models.set([{ id: 'mock/test-model', litellm_model: 'mock/test-model', name: 'Fortissimo oQ6', display_name: 'Fortissimo oQ6' } as any]);
-		activeModelId.set('mock/test-model');
+	it('uses the stored catalog name for a native local turn, not the active composer', () => {
+		models.set([
+			{ id: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ6-MTP', litellm_model: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ6-MTP', name: 'Fortissimo oQ6', display_name: 'Fortissimo oQ6' } as any,
+			{ id: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ8-MTP', litellm_model: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ8-MTP', name: 'Fortissimo oQ8', display_name: 'Fortissimo oQ8' } as any,
+		]);
+		activeModelId.set('omlx@local/Qwen3.8-Flash-Next-MLX-oQ8-MTP');
 		expect(badge({ model: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ6-MTP' })).toBe('Fortissimo oQ6');
+	});
+
+	it('falls back to the stored native model tail when that variant is no longer in the catalog', () => {
+		expect(badge({ model: 'omlx@local/Qwen3.8-Flash-Next-MLX-oQ6-MTP' })).toBe('Qwen3.8-Flash-Next-MLX-oQ6-MTP');
 	});
 });

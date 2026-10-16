@@ -227,9 +227,11 @@ describe('ArtifactPane — capability-driven actions', () => {
 	});
 });
 
-/** The first row's Remove from pane, through its trailing ⋯ (the menu is portaled to the body). */
+/** The first row's Remove from pane, through its context menu (the menu is portaled to the body). */
 function removeFromPane(): HTMLButtonElement | undefined {
-	host.querySelector<HTMLButtonElement>('button[aria-label^="More actions for"]')?.click();
+	host.querySelector<HTMLElement>('.row-outer')?.dispatchEvent(
+		new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 })
+	);
 	flushSync();
 	return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
 		.find((item) => item.textContent?.trim() === 'Remove from pane');

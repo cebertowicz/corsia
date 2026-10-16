@@ -2,8 +2,7 @@
 	import { renderMarkdown } from '$lib/markdown';
 	import { formatTime } from '$lib/time';
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
-	import { activeModelId, findModelById, models } from '$lib/stores/models';
-	import { canonicalName } from '$lib/stores/modelGroups';
+	import { models, type Model } from '$lib/stores/models';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
@@ -53,13 +52,7 @@
 			status: 'done' as const,
 		}));
 	});
-	// Match the active composer's label for native local turns: the dispatch id in
-	// message metadata is operational detail, while the picker is the canonical name.
-	const composerModelName = $derived.by(() => {
-		const selected = findModelById($models, $activeModelId);
-		return selected ? canonicalName(selected) : null;
-	});
-	const footerLabel = $derived(messageFooterLabel(msg.metadata, composerModelName));
+	const footerLabel = $derived(messageFooterLabel(msg.metadata, $models));
 
 	function modelTail(id: string): string {
 		if (id.includes('/')) return id.split('/').pop() ?? id;
@@ -91,28 +84,25 @@
 		return null;
 	}
 
-	function modelLabel(metadata: any, composerName: string | null): string | null {
+	function modelLabel(metadata: any, catalog: Model[]): string | null {
 		const model = String(metadata?.model ?? '');
 		const modelName = metadata?.model_name ? String(metadata.model_name) : '';
-		// Native turn metadata records the dispatch id. Its matching user-facing name
-		// is the same canonical name the composer reads from the current catalog.
-		if ((model || modelName).startsWith('omlx@') && composerName) return composerName;
-		if (modelName && !modelName.includes('/') && !modelName.includes('@')) {
-			return modelName;
-		}
+		if (modelName && !modelName.includes('/') && !modelName.includes('@')) return modelName;
 		if (!model && !modelName) return null;
 		const raw = model || modelName;
-		if (raw.startsWith('claude-code/') || raw.startsWith('codex/')) {
-			return formatExternalModelName(raw);
+		if (raw.startsWith('claude-code/') || raw.startsWith('codex/')) return formatExternalModelName(raw);
+		if (raw.startsWith('omlx@')) {
+			const stored = catalog.find((entry) => entry.litellm_model === raw || entry.id === raw);
+			return stored?.display_name ?? stored?.name ?? modelTail(raw);
 		}
 		return modelTail(raw);
 	}
 
-	function messageFooterLabel(metadata: any, composerName: string | null): string | null {
+	function messageFooterLabel(metadata: any, catalog: Model[]): string | null {
 		const harness = harnessLabel(metadata);
-		const model = modelLabel(metadata, composerName);
-		// The native composer shows just its chosen display name; keeping this caption
-		// equally plain avoids exposing a second, raw model identity in chat history.
+		const model = modelLabel(metadata, catalog);
+		// Native history belongs to its stored catalog identity, not to whichever
+		// composer model the user selected later.
 		if (String(metadata?.model ?? metadata?.model_name ?? '').startsWith('omlx@') && model) return model;
 		if (harness && model) return `${harness} · ${model}`;
 		return model ?? harness;

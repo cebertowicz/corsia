@@ -181,7 +181,9 @@ describe('SidebarThreadRow motion truth', () => {
 	it('shows the blue spinner while its own Turn runs', () => {
 		renderWithActivity('active');
 
-		const spinner = host.querySelector<SVGElement>('.thread-title-row .spinner');
+		// The spinner occupies the trailing column so it stays vertically centred
+		// whether the row has one line or an update summary.
+		const spinner = host.querySelector<SVGElement>('.thread-item > .spinner');
 		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Working');
 	});
@@ -190,7 +192,7 @@ describe('SidebarThreadRow motion truth', () => {
 		applyLifecycle('subagent-of-thread-ctx', { turnId: 'turn-sub', turnOrder: 3 }, 'thread-ctx');
 		renderWithActivity();
 
-		const spinner = host.querySelector<SVGElement>('.thread-title-row .spinner');
+		const spinner = host.querySelector<SVGElement>('.thread-item > .spinner');
 		expect(spinner?.getAttribute('stroke')).toBe('var(--text-tertiary)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Subagent working');
 		expect(host.querySelector('.update-dot')).toBeNull();

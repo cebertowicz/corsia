@@ -123,7 +123,7 @@
 /* Model and reasoning are one chosen-model control pair, so both use the project accent. */
 .model-chip { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.02em; color: var(--violet); min-width: 0; }
 .model-chip.unloaded { color: var(--amber); }
-.model-chip.unloaded:hover, .model-chip.unloaded.open { color: var(--amber-2, var(--amber)); background: var(--amber-bg); }
+.model-chip.unloaded:hover, .model-chip.unloaded.open { color: var(--amber); background: var(--amber-bg); }
 .effort-chip { font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--violet); }
 .effort-chip:hover, .effort-chip.open { color: var(--violet-text, var(--violet)); background: var(--violet-bg); }
 .context-chip, .cc-model-chip { font-size: var(--text-footnote); font-weight: 500; color: var(--text-secondary); }

@@ -305,7 +305,7 @@
 	.thread-plan-pane { display: flex; flex-direction: column; gap: var(--space-2); }
 	.thread-plan-pane:focus { outline: none; }
 	.decision-row { display: flex; align-items: center; gap: var(--space-2); min-height: 38px; padding: 6px 8px; border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-	.decision-row:hover { background: var(--bg-hover); }
+	@media (hover: hover) { .decision-row:hover { background: var(--bg-hover); } }
 	.decision-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; border: 1px solid var(--amber); border-radius: var(--radius-circle); color: var(--amber); font-size: var(--text-caption); font-weight: var(--fw-bold); }
 	.decision-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 	.decision-title, .decision-subline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
