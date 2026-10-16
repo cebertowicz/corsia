@@ -129,7 +129,7 @@
 				{:else}
 				<article class:open={isOpen(app)} class="app-row">
 					<button class="summary press-tint" aria-expanded={isOpen(app)} onclick={() => openId = openId === app.id ? null : app.id}>
-						<span class="app-copy waiting-copy"><strong title={app.name}>{app.name}</strong><span class="second status">{needsPlace(app) ? stateLine(app) : `${stateLine(app)} · ${placeLine(app)}`}</span></span><span aria-hidden="true">›</span>
+						<span class="app-copy waiting-copy"><strong title={app.name}>{app.name}</strong><span class="second" class:status={app.state !== 'working'}>{stateLine(app)}{#if !needsPlace(app)}<span class="place"> · {placeLine(app)}</span>{/if}</span></span><span aria-hidden="true">›</span>
 					</button>
 					{#if isOpen(app)}
 						<div class="details">

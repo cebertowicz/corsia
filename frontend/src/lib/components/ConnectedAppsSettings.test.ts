@@ -46,7 +46,15 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-copy strong')).toHaveLength(2));
 		expect(host.querySelector('.app-copy')?.classList.contains('waiting-copy')).toBe(true);
-		expect(host.querySelector('.app-copy .second.status')?.textContent).toContain('Connected · 2 actions');
+		expect(host.querySelector('.app-copy .second.status')).toBeNull();
+		expect(host.querySelector('.app-copy .second')?.textContent).toContain('Connected · 2 actions');
+	});
+
+	it('uses amber only for connected-app states needing attention', async () => {
+		const needsSignIn = { ...awaiting, id: 'notion', name: 'Notion', state: 'needs_sign_in' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [needsSignIn] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.app-copy .second.status')?.textContent).toContain('Needs you to sign in'));
 	});
 
 	it('calls decline for an awaiting approval row', async () => {
