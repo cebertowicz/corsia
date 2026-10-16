@@ -115,26 +115,9 @@ def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, com
         return None
     if operation == "block_node":
         ask = None
-        expected = fields.expected(params)
         if user_ask.is_user_block(operation, params):
             plan = service._plan_row(common["db"], plan_id)
             ask = user_ask.require(common["db"], plan, params["node_id"], params, actor)
-        if ask is not None:
-            from plans import ask_attention, errors
-
-            # The caller's revision is checked before the replaced ask is
-            # withdrawn, which advances it.
-            errors.require_node_revision(
-                service._live_node_row(common["db"], params["node_id"]),
-                expected["expected_revision"],
-            )
-            if ask_attention.withdraw_node_asks(
-                common["db"], params["node_id"], actor_id=common["actor_id"],
-                provenance=common["provenance"], keep_artifact_id=ask,
-            ):
-                expected = {"expected_revision": service._node_row(
-                    common["db"], params["node_id"],
-                )["revision"]}
         holds.block_hold(
             params["node_id"],
             reason_key=fields.text(params, "reason_key"),
@@ -145,7 +128,7 @@ def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, com
             owner_id=ask if ask is not None else params.get("owner_id"),
             # Where a user ask was raised, so chat shows the ask on that step.
             raised_in=_raised_in(actor) if ask is not None else None,
-            **expected, **common,
+            **fields.expected(params), **common,
         )
         if ask is not None:
             user_ask.attach(

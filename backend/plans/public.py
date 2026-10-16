@@ -66,6 +66,7 @@ from plans.service import (
     _node_row as node_row,
     ensure_plan, get_node, record_runner_event,
 )
+from plans.holds import clear_write as clear_hold_write
 from plans.receipts import (
     load as load_mutation_receipt,
     record as record_mutation_receipt,
@@ -98,8 +99,6 @@ from plans.user_ask import (
     user_ask_hold_sql,
 )
 from plans.user_ask_cards import ask_holds
-from plans.ask_attention import sync_ask_attention
-from plans.holds import clear_write as clear_hold_write
 from plans.node_states import blocked_on_user_sql, failure_asks_user_sql, open_user_block_sql
 from plans.folded_reads import read_folded, read_path as read_folded_path
 from plans.operator_node_read import read_node as read_operator_node

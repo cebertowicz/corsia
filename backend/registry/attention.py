@@ -27,7 +27,6 @@ ATTENTION_CLEARED = "cleared"
 #: Explicit clearing actions (AC-4.2). Closing a viewer is NOT one of these.
 CLEAR_OUTCOMES = frozenset({"answer", "acknowledge", "dismiss", "supersede", "defer"})
 RETIRE_OUTCOME = "retire"
-WITHDRAW_OUTCOME = "withdraw"
 
 DEFER_CONDITION_TYPES = frozenset({"deadline", "event", "milestone", "dependency"})
 
@@ -69,23 +68,12 @@ def _attention_state(row: dict) -> str | None:
 
 
 def raise_attention(artifact_id: str, *, db=None) -> str:
-    """Mark an artifact's attention as raised, optionally inside a caller transaction.
-
-    A raise from any state but raised or deferred starts a new attention
-    episode. A parent review's ``disposition_outcome`` belongs to the episode it
-    was written in, so this raise drops it: a disposition from an episode the
-    user already ended never counts as raising the new one. A raise while the
-    item is still raised or deferred keeps it.
-    """
+    """Mark an artifact's attention as raised, optionally inside a caller transaction."""
     with write_transaction(db, scope="raise_attention") as _db:
-        row = _identity_row(artifact_id, _db)
-        identity = _identity(row)
-        patch: dict[str, Any] = {"attention_state": ATTENTION_RAISED}
-        if _attention_state(row) not in (ATTENTION_RAISED, ATTENTION_DEFERRED):
-            patch["disposition_outcome"] = None  # update_metadata drops a None key
+        identity = _identity(_identity_row(artifact_id, _db))
         models.update_metadata(
             identity["integration"], identity["type"], identity["external_id"],
-            patch, db=_db,
+            {"attention_state": ATTENTION_RAISED}, db=_db,
         )
         return ATTENTION_RAISED
 
@@ -167,13 +155,6 @@ def retire_attention(artifact_id: str, *, db=None) -> AttentionResult:
     )
 
 
-def withdraw_attention(artifact_id: str, *, db=None) -> AttentionResult:
-    """End attention because the asking task withdrew its review request."""
-    return _clear_attention(
-        artifact_id, outcome=WITHDRAW_OUTCOME, reason="review request withdrawn", db=db,
-    )
-
-
 def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
@@ -219,13 +200,9 @@ def _clear_attention(
             patch, db=_db,
         )
         _record_closeout(identity, outcome, _db)
-        # Attention owns this one state write; Plans owns what it means for a
-        # linked task. The hook clears only the task holds still open on this
-        # artifact, so it is idempotent and safe in either order: a user ending
-        # the ask here releases the task, and an ask a task already ended in
-        # Plans (``plans.ask_attention``) has no open hold left, so the hook
-        # does nothing. It is a no-op for ordinary artifacts and decisions, and
-        # ``defer`` keeps the hold.
+        # Attention owns every way an ask stops being raised. Plans owns what
+        # that lifecycle means for a linked task; its public hook is a no-op for
+        # ordinary artifacts and decisions, and ``defer`` keeps the hold.
         plans_public.ask_cleared(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )

@@ -168,11 +168,13 @@ def clear(
         (hold_id, node_id, expected_kind),
     ).fetchone()
     if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
-        from plans import ask_attention
+        from plans.boundary import is_user_audit_id
 
-        ask_attention.end_ask(
-            db, node_id, hold_id, str(hold["owner_id"]),
-            actor_id=actor_id, provenance=provenance,
+        clear_write(
+            node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
+            provenance=provenance,
+            detail=None if is_user_audit_id(actor_id) else {"ended": "withdrawn"},
+            db=db,
         )
     else:
         clear_write(
@@ -295,11 +297,9 @@ def block_hold(
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
     Re-blocking a task on the artifact it already asks about keeps one open
-    hold for that ask: the same reason writes nothing, and a new reason
-    replaces the hold (holds are immutable) so the user reads the agent's
-    latest words. The replaced hold's clearance names the new one as its
-    ``successor``, so a card for the earlier hold reads the round it led to.
-    The ask itself stays raised throughout.
+    hold for that ask: the same reason writes nothing. A new reason is refused
+    while the old ask is open, so the user never reads competing requests.
+    Resolve the open hold before asking again with the revised reason.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
@@ -322,7 +322,11 @@ def block_hold(
             return node
     else:
         existing = None
-    successor = uuid.uuid4().hex
+    if existing is not None:
+        raise service.PlanInputError(
+            f"task already has an open ask on this artifact (hold_id {existing['id']}); "
+            "resolve hold first, then ask again"
+        )
     node = place_hold(
         node_id,
         kind="blocked",
@@ -335,15 +339,7 @@ def block_hold(
         provenance=provenance,
         db=db,
         raised_in=raised_in,
-        hold_id=successor,
     )
-    if existing is not None:
-        # The replaced hold ends here, not through ``clear``: its ask goes on.
-        clear_write(
-            node_id, str(existing["id"]), expected_kind="blocked", actor_id=actor_id,
-            provenance=provenance, detail={"ended": "restated", "successor": successor},
-            db=db,
-        )
     return node
 
 

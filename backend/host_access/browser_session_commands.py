@@ -26,7 +26,8 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
     command = partial(_command, owner, runtime, lease_id)
-    guarded = not pane and not (session == "new" and args[0] == "open")
+    opening_unlaunched_session = args[0] == "open" and runtime.record.binding is None
+    guarded = not pane and not opening_unlaunched_session
     # A pane command is never a DOM write (_PANE_COMMANDS), so a marked field is always the agent's.
     shared_write = browser_control.has_pane(thread_id) and browser_dom_write.is_dom_write(args)
     # One page target per command: the probe, a read's target and a write all act on the same page.

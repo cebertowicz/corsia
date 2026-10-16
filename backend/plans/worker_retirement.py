@@ -38,7 +38,7 @@ def settle_terminal(
     in the same write, so it passes ``settles_worker=False`` and the worker
     is left be; every other terminal verdict settles the worker too.
     """
-    from plans import admission_attempts, ask_attention
+    from plans import admission_attempts, user_ask
     from plans.decision_lifecycle import withdraw_for_closed_source
     from registry.node_retirement import (
         retire_registrations_for_node, retire_taskless_rows,
@@ -58,7 +58,7 @@ def settle_terminal(
                 connection, thread_id=start[0], started_at=start[1],
                 trigger=TASKLESS_TRIGGER, causal_event_id=event_id,
             )
-    ask_attention.withdraw_node_asks(
+    user_ask.withdraw_node_asks(
         connection, node_id, actor_id=actor_id, provenance=provenance,
     )
     withdraw_for_closed_source(

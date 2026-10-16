@@ -107,8 +107,6 @@ def user_ask_hold_sql(event_id_expr: str, column: str) -> str:
     )
 
 
-# The card-read projection lives in ``plans.user_ask_cards``; lifecycle writes stay here.
-
 
 def require(db, plan, node_id: str, params, actor) -> str | None:
     """Return the artifact an agent's user block asks about, or refuse the block.
@@ -169,19 +167,37 @@ def _already_asked(open_ask) -> str:
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
-    """Link the ask to its task and put it in the user's attention pile.
-
-    The pile follows the artifact's live causes (``ask_attention``), so an ask
-    the user deferred stays deferred when its task blocks on it again.
-    """
-    from plans import artifact_links, ask_attention
+    """Link the ask to its task and put it in the user's attention pile."""
+    from plans import artifact_links
+    from registry import attention
 
     artifact_links.link(
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
-    ask_attention.sync_ask_attention(
-        db, artifact_id, outcome=ask_attention.ending_outcome(actor_id),
-    )
+    attention.raise_attention(artifact_id, db=db)
+
+
+def withdraw_node_asks(
+    db, node_id: str, *, actor_id: str | None, provenance: str,
+) -> int:
+    """Withdraw the open asks a terminal or archived task no longer owns."""
+    from plans import holds
+
+    rows = db.execute(
+        f"""SELECT h.id AS hold_id
+              FROM plan_node_holds h
+              JOIN plan_node_artifact_links l
+                ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
+             WHERE h.node_id=? AND {open_user_block_sql('h')} AND h.owner_id IS NOT NULL
+             ORDER BY h.created_at,h.id""",
+        (node_id,),
+    ).fetchall()
+    for row in rows:
+        holds.clear_write(
+            node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
+            provenance=provenance, detail={"ended": "withdrawn"}, db=db,
+        )
+    return len(rows)
 
 
 def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:

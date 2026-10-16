@@ -98,9 +98,9 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
         _require_settled_spawned_work(connection, node)
         _require_settled_delegation(connection, node)
         # After every refusal, so a refused archive leaves the graph untouched.
-        from plans import ask_attention
+        from plans import user_ask
 
-        ask_attention.withdraw_node_asks(
+        user_ask.withdraw_node_asks(
             connection, node_id, actor_id=actor_id, provenance=provenance,
         )
         dependencies.drop_edges_for_node(
