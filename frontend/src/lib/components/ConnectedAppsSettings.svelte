@@ -6,7 +6,7 @@
 		approveConnectedApp, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
 	} from '$lib/api/connectedApps';
-	import { anyFirstSignIn, needsSignInAttention, SIGN_IN_LEDE, signInStateLine } from '$lib/appSignIn';
+	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE, signInStateLine } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
 
@@ -117,7 +117,7 @@
 						<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'decline')}>Decline</Button>
 					</div>
 					{#if errorId === app.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
-					{#if app.sign_in}
+					{#if hasSignInToShow(app)}
 						<div class="waiting-panel"><AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
 							onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} /></div>
 					{/if}

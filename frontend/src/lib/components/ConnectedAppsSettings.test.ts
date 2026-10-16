@@ -73,6 +73,38 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('.waiting-copy b')).toBeNull();
 	});
 
+	it('gives every waiting row the same rhythm: an idle sign-in view reserves no empty panel', async () => {
+		const place = { mode: 'selected', project_ids: [], outside_projects: false };
+		const rows = [
+			{ ...awaiting, id: 'acme', name: 'Acme', reach: place },
+			{ ...awaiting, id: 'notes', name: 'Notes', transport: 'http', sign_in: { status: 'idle', signed_in: false }, reach: place },
+			{ ...awaiting, id: 'postgres', name: 'Postgres', reach: place },
+		];
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: rows }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(3));
+		for (const row of host.querySelectorAll('.waiting-row')) {
+			expect(row.querySelector('.waiting-panel')).toBeNull();
+			expect([...row.children].map((child) => child.classList.contains('waiting-copy') ? 'copy' : child.classList.contains('waiting-actions') ? 'actions' : 'other')).toEqual(['copy', 'actions']);
+		}
+	});
+
+	it('still shows the sign-in panel on a waiting row once there is something to say', async () => {
+		const pending = { ...awaiting, id: 'notes', name: 'Notes', transport: 'http', sign_in: { status: 'pending', signed_in: false }, reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [pending] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.waiting-panel')).not.toBeNull());
+	});
+
+	it('lists the rows in the order the server sends them', async () => {
+		const place = { mode: 'selected', project_ids: [], outside_projects: false };
+		const rows = ['Acme', 'Linear', 'Notes', 'Postgres'].map((name) => ({ ...awaiting, id: name.toLowerCase(), name, reach: place }));
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: rows }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(4));
+		expect([...host.querySelectorAll('.waiting-copy strong')].map((el) => el.textContent)).toEqual(['Acme', 'Linear', 'Notes', 'Postgres']);
+	});
+
 	it('offers only Dismiss on an expired request', async () => {
 		const expired = { ...awaiting, state: 'expired', reach: { mode: 'selected', project_ids: [], outside_projects: false } };
 		const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ servers: [expired] }) }));

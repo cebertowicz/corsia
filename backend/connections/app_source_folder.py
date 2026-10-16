@@ -12,7 +12,7 @@ SOURCE_FOLDER_KEY = "source_folder"
 
 
 def clean_folder_label(value: object) -> str | None:
-    """Return plain text for display: control and separator characters removed, capped with an ellipsis."""
+    """Return plain text for display: control characters removed, only the text after the last path separator kept, capped with an ellipsis."""
     if not isinstance(value, str):
         return None
     text = "".join(
@@ -20,7 +20,8 @@ def clean_folder_label(value: object) -> str | None:
         for char in value
         if unicodedata.category(char) not in {"Cc", "Cf", "Cs", "Co", "Cn"} or char == " "
     )
-    text = " ".join(text.split())
+    # A path is never stored: whatever is passed in, only its last segment survives.
+    text = " ".join(text.split()).replace("\\", "/").rstrip("/ ").rsplit("/", 1)[-1].strip()
     if not text:
         return None
     return text if len(text) <= MAX_FOLDER_LABEL else text[: MAX_FOLDER_LABEL - 1].rstrip() + "…"

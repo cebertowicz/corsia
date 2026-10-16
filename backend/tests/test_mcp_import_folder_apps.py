@@ -435,3 +435,39 @@ def test_a_hostile_folder_name_comes_over_as_a_short_plain_label(tmp_path):
     row = _import(tmp_path, db)
     assert len(row["folder"]) == 60 and row["folder"].endswith("…")
     assert "‮" not in row["folder"] and get_app(row["id"], db=db)["source_folder"] == row["folder"]
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("/Users/me/work/shop", "shop"), ("/Users/me/work/shop/", "shop"), ("C:\\Users\\me\\shop", "shop"),
+    ("a/b\\c", "c"), ("/", None), ("///", None), ("work / shop", "shop"),
+])
+def test_the_sanitizer_keeps_only_the_last_path_segment(raw, expected):
+    from connections.app_source_folder import clean_folder_label
+
+    assert clean_folder_label(raw) == expected
+
+
+def test_a_full_path_given_to_create_pending_app_is_stored_and_returned_as_its_last_segment_only():
+    from connections.app_lifecycle import create_pending_app
+
+    db = _db()
+    created = create_pending_app(
+        "Postgres", {"command": "npx"}, EMPTY, actor_thread_id="thread-a",
+        source_folder="/Users/me/private/clients/shop", db=db,
+    )
+    stored = db.execute("SELECT config_json FROM connected_apps WHERE id=?", (created["id"],)).fetchone()[0]
+    assert json.loads(stored)["source_folder"] == "shop"
+    assert get_app(created["id"], db=db)["source_folder"] == "shop"
+    assert "private" not in stored and "/Users" not in stored
+
+
+def test_the_app_list_has_one_fixed_order_whatever_the_ids_are():
+    """Ids are random, so id order differs between installs and between runs; the list goes by name."""
+    from connections.app_lifecycle import create_pending_app
+    from connections.app_reach import list_apps
+
+    db = _db()
+    for app_id, name in (("a-1", "Postgres"), ("b-2", "Acme"), ("c-3", "linear"), ("d-4", "Notes"), ("e-5", "Acme")):
+        create_pending_app(name, {"command": "npx"}, EMPTY, actor_thread_id="thread-a", app_id=app_id, db=db)
+    listed = [(app["name"], app["id"]) for app in list_apps(db=db)]
+    assert listed == [("Acme", "b-2"), ("Acme", "e-5"), ("linear", "c-3"), ("Notes", "d-4"), ("Postgres", "a-1")]

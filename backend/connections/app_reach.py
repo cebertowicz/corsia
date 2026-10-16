@@ -249,8 +249,8 @@ def get_app(app_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
 
 
 def list_apps(*, db: sqlite3.Connection) -> list[dict[str, object]]:
-    """Read every app by id; callers never resolve an app from an old name."""
-    ids = [row["id"] for row in db.execute("SELECT id FROM connected_apps ORDER BY id")]
+    """Read every app in a fixed order (name, then id); callers never resolve an app from an old name."""
+    ids = [row["id"] for row in db.execute("SELECT id FROM connected_apps ORDER BY name COLLATE NOCASE, name, id")]
     return [get_app(app_id, db=db) for app_id in ids]
 
 
