@@ -153,6 +153,13 @@ readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bu
 readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $macos_short_version" "$APP/Contents/Info.plist"
+# SMAppService discovers this static, signed definition inside the app bundle.
+# It intentionally contains no per-user environment; the launcher reads the
+# service record and constructs its identity itself at every launch.
+install -d "$APP/Contents/Library/LaunchAgents"
+install -m 0644 "$ROOT/desktop/launchd/ai.corsia.service.plist" \
+  "$APP/Contents/Library/LaunchAgents/ai.corsia.service.plist"
+"$ROOT/desktop/scripts/check-bundle-launch-agent.sh" "$APP"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"

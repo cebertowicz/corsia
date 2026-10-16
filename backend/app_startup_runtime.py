@@ -114,8 +114,12 @@ async def _start_runtime_services() -> None:
     placement_worker.poke()
     state._idle_recovery_task = asyncio.create_task(rearm_idle_checkpoints())
     state._nightly_job_task = asyncio.create_task(nightly_job_loop())
+    from core.corrections_asset_download import FLIGHT as classifier_download
+    from core.corrections_asset_download import recover_interrupted_install
     from jobs.corrections_realtime import startup_scan
 
+    recover_interrupted_install()
+    classifier_download.resume()
     startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 

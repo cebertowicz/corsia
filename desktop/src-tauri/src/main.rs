@@ -2,5 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    if let Some(exit_code) = app_lib::service_command_from_environment() {
+        std::process::exit(exit_code);
+    }
     app_lib::run();
 }

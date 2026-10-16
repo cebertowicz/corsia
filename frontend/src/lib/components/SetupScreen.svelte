@@ -10,11 +10,13 @@
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
+	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
-	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; ready_ai?: string | null; error?: string };
+	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
+	const classifier = createSetupClassifier();
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
 	let localWanted = $state(true);
@@ -61,6 +63,7 @@
 	const canFinish = $derived(sources.some(sourceIsReady));
 	const jobs = $derived<SetupJob[]>([
 		...(localJob ? [localJob] : []),
+		...(classifier.job ? [classifier.job] : []),
 		...(page === 'account' && accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const, meta: 'Preparing your account' }] : []),
 		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
 		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
@@ -107,6 +110,7 @@
 			status = await response.json();
 			folder = status.work_folder || folder;
 			if (status.required_username) username = status.required_username;
+			if (status.classifier) classifier.accept(status.classifier);
 			if (status.has_users) { onExistingAccount(); return; }
 			if (status.apple_silicon === false || status.macos_supported === false || status.app_location === 'disk_image') page = 'hard-stop';
 			else {
@@ -131,6 +135,7 @@
 	}
 
 	async function beginSetup() {
+		void classifier.start();
 		if (status.existing_omlx) {
 			existingOmlxConsent = true;
 			page = 'models';
@@ -204,10 +209,10 @@
 			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
 			// A session opened here has no socket until something connects it; the app shell only connects on mount.
 			connect();
-			await refreshSources();
+			await Promise.all([refreshSources(), classifier.read()]);
 			password = ''; confirmation = '';
-			// A source that is already Ready means the AI step never appears: the person goes straight in.
-			if (canFinish) { onFinished(); return; }
+			// A source already Ready (named by setup status, confirmed by the recheck above) means the AI step never appears.
+			if (status.ready_ai && canFinish) { onFinished(); return; }
 			page = 'models';
 		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
@@ -434,11 +439,12 @@
 	onMount(() => {
 		void readStatus();
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
+		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const onVisible = () => { if (document.visibilityState === 'visible') void recheckOnFocus(); };
-		const onFocus = () => void recheckOnFocus();
+		const onFocus = () => { void classifier.recheckSpace(); void recheckOnFocus(); };
 		window.addEventListener('focus', onFocus);
 		document.addEventListener('visibilitychange', onVisible);
-		return () => { offModels(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); };
+		return () => { offModels(); offClassifier(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); };
 	});
 </script>
 
