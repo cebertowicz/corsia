@@ -62,6 +62,7 @@ def place_hold(
     provenance: str,
     db,
     raised_in: Mapping[str, str] | None = None,
+    _validated_node=None,
 ):
     """Append one cause and release its selected attempt; the caller reconciles.
 
@@ -74,7 +75,7 @@ def place_hold(
         The task row as it was before the cause was placed.
     """
 
-    node = _validate_node(db, node_id, expected_revision)
+    node = _validated_node or _validate_node(db, node_id, expected_revision)
     if kind not in HOLD_KINDS:
         raise service.PlanInputError("invalid plan hold kind")
     if owner_kind not in OWNER_KINDS:
@@ -292,9 +293,9 @@ def block_hold(
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
     Re-blocking a task on the artifact it already asks about keeps one open
-    hold for that ask: the same reason writes nothing. A new reason is refused
-    while the old ask is open, so the user never reads competing requests.
-    Resolve the open hold before asking again with the revised reason.
+    hold for that ask: the same reason writes nothing. A new reason atomically
+    replaces the old ask, so the user sees one current request and the caller's
+    revision is checked once before either write.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
@@ -314,9 +315,16 @@ def block_hold(
         if existing is not None:
             if (existing["reason_key"], existing["reason"]) == (reason_key, reason):
                 return node
-            raise service.PlanInputError(
-                f"task already has an open ask on this artifact (hold_id {existing['id']}); "
-                "resolve hold first, then ask again"
+            clear_write(
+                node_id, str(existing["id"]), expected_kind="blocked", actor_id=actor_id,
+                provenance=provenance, detail={"ended": "replaced"}, db=db,
+            )
+            return place_hold(
+                node_id, kind="blocked", reason_key=reason_key, reason=reason,
+                owner_kind=owner_kind, owner_id=owner_id,
+                expected_revision=expected_revision, actor_id=actor_id,
+                provenance=provenance, db=db, raised_in=raised_in,
+                _validated_node=node,
             )
     return place_hold(
         node_id,

@@ -466,14 +466,6 @@ def _user_block_on_document_asked_elsewhere(db, scene):
     )
 
 
-def _user_block_restated_on_open_ask(db, scene):
-    """The same task asks again about its open request with a new reason."""
-    ask = document_ask(db, "root")
-    _user_block(db, scene, ask_artifact_id=ask)()
-    return _user_block(
-        db, scene, ask_artifact_id=ask, reason="Review the revision",
-    )
-
 
 def _user_block_on_non_document(db, scene):
     ask = _artifact(db, external_id="user-ask-pr", owner="root")
@@ -748,8 +740,7 @@ _CASES = {
     ("holds.py", '"invalid plan hold kind"'): _invalid_hold_kind,
     ("holds.py", '"a blocker anyone but the user clears is a wait, not a hold; " '
                  '"block_node arms it with a deadline"'): _wait_owner_as_hold,
-    ("holds.py", 'f"task already has an open ask on this artifact (hold_id {existing[\'id\']}); " '
-                 '"resolve hold first, then ask again"'): _user_block_restated_on_open_ask,
+    # Same-task restatement replaces atomically; it has no input refusal.
     # --- plans/blocked_wait.py ---
     ("blocked_wait.py", '"a blocker only the user can clear is a hold; any other is a wait " '
                         '"that ends at a deadline, so its condition must be a deadline"'):

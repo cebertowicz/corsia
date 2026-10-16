@@ -41,6 +41,6 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
         # validates live state nor reconciles admission, so it is migration-safe.
         clear_hold_write(
             str(row["node_id"]), str(row["hold_id"]), expected_kind="blocked",
-            actor_id=None, provenance="migration.119_to_120", detail={"ended": "withdrawn"}, db=conn,
+            actor_id=None, provenance="migration.119_to_120", detail={"ended": "closed"}, db=conn,
         )
     return len(rows)

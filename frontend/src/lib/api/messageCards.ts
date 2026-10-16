@@ -20,7 +20,8 @@ export interface MessageCard {
 
 export type MessageCardState =
 	| 'needs_review' | 'approved' | 'approved_with_changes' | 'changes_requested'
-	| 'answered' | 'replaced' | 'withdrawn' | 'unavailable';
+	| 'answered' | 'answered_internally' | 'closed' | 'rejected'
+	| 'replaced' | 'revision_requested' | 'withdrawn' | 'unavailable';
 
 /** Neutral state labels: true for any reader, short enough not to wrap at 393. */
 export const CARD_STATE_LABELS: Record<MessageCardState, string> = {
@@ -29,7 +30,11 @@ export const CARD_STATE_LABELS: Record<MessageCardState, string> = {
 	approved_with_changes: 'Approved with changes',
 	changes_requested: 'Changes requested',
 	answered: 'Answered',
+	answered_internally: 'Answered',
+	closed: 'Task closed',
+	rejected: 'Rejected',
 	replaced: 'Replaced',
+	revision_requested: 'Revision requested',
 	withdrawn: 'Withdrawn',
 	unavailable: 'No longer available',
 };

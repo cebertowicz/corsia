@@ -40,8 +40,15 @@ NOT_ASKABLE = (
 _ENDS_ASK = {
     "answer": "answered", "acknowledge": "acknowledged",
     "dismiss": "dismissed", "supersede": "replaced",
-    "retire": "retired",
+    "retire": "retired", "reject_with_reason": "rejected",
+    "request_revision": "revision_requested", "answer_internally": "answered_internally",
 }
+# The one vocabulary for agent-facing ask cards. The hold's clearance event,
+# never artifact metadata, records these terminal path outcomes.
+ASK_ENDINGS = frozenset({
+    "withdrawn", "closed", "replaced", "retired", "rejected",
+    "revision_requested", "answered_internally",
+})
 _PROVENANCE = "user.ask_cleared"
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
@@ -74,6 +81,30 @@ def raised_asks(db, artifact_id: str) -> list:
             ORDER BY h.created_at DESC, h.id DESC""",
         (artifact_id,),
     ).fetchall()
+
+
+def open_ask_artifacts(db) -> list[dict]:
+    """Return every open ask's artifact and hold through the Plans public boundary.
+
+    The query begins at active holds, so SQLite reads the partial active-hold
+    index rather than the append-only clearance history. Registry callers use
+    this solely to derive their presentation; they never own or mutate a hold.
+    """
+    return [
+        dict(row)
+        for row in db.execute(
+            """SELECT l.artifact_id,h.id AS hold_id
+                 FROM plan_node_holds h
+                 JOIN plan_node_artifact_links l
+                   ON l.node_id=h.node_id AND l.artifact_id=h.owner_id
+                  AND l.role='attention'
+                 JOIN artifact_identities i ON i.id=l.artifact_id
+                WHERE h.kind='blocked' AND h.owner_kind='user'
+                  AND h.owner_id IS NOT NULL AND h.cleared_at IS NULL
+                  AND i.type IN ('document','image') AND i.state='active'
+                ORDER BY h.created_at,h.id"""
+        ).fetchall()
+    ]
 
 
 def is_user_block(operation: str, params) -> bool:
@@ -167,14 +198,12 @@ def _already_asked(open_ask) -> str:
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
-    """Link the ask to its task and put it in the user's attention pile."""
+    """Link an ask to its task; its open hold determines pile visibility."""
     from plans import artifact_links
-    from registry import attention
 
     artifact_links.link(
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
-    attention.raise_attention(artifact_id, db=db)
 
 
 def withdraw_node_asks(
@@ -195,7 +224,7 @@ def withdraw_node_asks(
     for row in rows:
         holds.clear_write(
             node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
-            provenance=provenance, detail={"ended": "withdrawn"}, db=db,
+            provenance=provenance, detail={"ended": "closed"}, db=db,
         )
     return len(rows)
 
@@ -244,11 +273,14 @@ def _release(
             ORDER BY h.created_at, h.id""",
         (artifact_id,),
     ).fetchall()
+    detail = dict(release.detail) if release is not None else {}
+    if done in ASK_ENDINGS:
+        detail["ended"] = done
     causes = [
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
             actor_id=None, provenance=_PROVENANCE, db=db,
-            detail=release.detail if release else None,
+            detail=detail or None,
         )
         for row in rows
     ]

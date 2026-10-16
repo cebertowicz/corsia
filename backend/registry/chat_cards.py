@@ -15,7 +15,6 @@ truth, so a renamed or retired artifact reads as it is now.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
@@ -34,17 +33,14 @@ NEEDS_REVIEW = "needs_review"
 ANSWERED = "answered"
 REPLACED = "replaced"
 WITHDRAWN = "withdrawn"
+CLOSED = "closed"
+REJECTED = "rejected"
+REVISION_REQUESTED = "revision_requested"
+ANSWERED_INTERNALLY = "answered_internally"
 UNAVAILABLE = "unavailable"
 
 UNAVAILABLE_TITLE = "No longer available"
 
-
-def _payload(raw: object) -> dict:
-    try:
-        parsed = json.loads(str(raw)) if raw else {}
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 def _file_name(artifact: Mapping[str, Any]) -> str | None:
@@ -106,21 +102,23 @@ def ask_state(
 
     ``hold`` is one ``plans.public.ask_holds`` entry. Open reads as needing
     review. A cleared ask reads as its verdict when the review bar recorded one.
-    Without one it reads as replaced when the artifact's attention was cleared as
-    superseded, and as answered otherwise (a round answered before verdicts were
-    recorded).
+    Otherwise it reads its terminal path from the hold's clearance event, and
+    falls back to answered only for older rows that recorded no ending.
     """
     if hold["open"]:
         return NEEDS_REVIEW, None
     answer = hold["answer"]
-    if answer.get("ended") == "withdrawn":
-        return WITHDRAWN, None
+    ended = answer.get("ended")
+    if ended in {
+        WITHDRAWN, CLOSED, REPLACED, REJECTED, REVISION_REQUESTED,
+        ANSWERED_INTERNALLY,
+    }:
+        return ended, None
+    if ended == "retired":
+        return UNAVAILABLE, None
     verdict = answer.get("verdict")
     if verdict in VERDICTS:
         return verdict, _counts(answer.get("feedback_counts"))
-    attention = _payload(artifact.get("metadata")) if artifact else {}
-    if attention.get("attention_state") == "cleared" and attention.get("attention_outcome") == "supersede":
-        return REPLACED, None
     return ANSWERED, None
 
 

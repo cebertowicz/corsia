@@ -7,6 +7,7 @@ import uuid
 
 from infra.database_migrations import MIGRATIONS
 from infra.migration_119_to_120_withdraw_retired_user_asks import migrate_119_to_120
+from infra.migration_120_to_121_stamp_deferred_ask_hold import migrate_120_to_121
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 from plans import service
 from plans.boundary import PlanActor, mutate
@@ -62,8 +63,9 @@ def _raise_ask(db: sqlite3.Connection, artifact_id: str):
 
 
 def test_registers_the_hold_only_migration():
-    assert SCHEMA_VERSION == 120
+    assert SCHEMA_VERSION == 121
     assert MIGRATIONS[119] is migrate_119_to_120
+    assert MIGRATIONS[120] is migrate_120_to_121
 
 
 def test_withdraws_terminal_and_archived_asks_but_leaves_live_asks_open():
@@ -96,7 +98,7 @@ def test_withdraws_terminal_and_archived_asks_but_leaves_live_asks_open():
             payload = json.loads(db.execute(
                 "SELECT payload_json FROM plan_node_events WHERE id=?", (row["clearance_event_id"],),
             ).fetchone()["payload_json"])
-            assert payload["detail"] == {"ended": "withdrawn"}
+            assert payload["detail"] == {"ended": "closed"}
         assert db.execute(
             "SELECT cleared_at FROM plan_node_holds WHERE id=?", (live_hold,),
         ).fetchone()["cleared_at"] is None
@@ -135,5 +137,30 @@ def test_is_idempotent_and_never_writes_attention_metadata():
         assert db.execute(
             "SELECT cleared_at FROM plan_node_holds WHERE id=?", (hold_id,),
         ).fetchone()["cleared_at"] is not None
+    finally:
+        db.close()
+
+
+def test_v121_stamps_only_a_uniquely_open_deferred_ask():
+    db = _db()
+    try:
+        artifact_id = _artifact(db, "deferred.md")
+        _, hold_id = _raise_ask(db, artifact_id)
+        db.execute(
+            "UPDATE artifact_identities SET metadata=? WHERE id=?",
+            (json.dumps({"attention_state": "deferred"}), artifact_id),
+        )
+        db.commit()
+
+        migrate_120_to_121(db)
+        metadata = json.loads(db.execute(
+            "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
+        ).fetchone()["metadata"])
+        assert metadata["deferred_hold_id"] == hold_id
+
+        migrate_120_to_121(db)
+        assert json.loads(db.execute(
+            "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
+        ).fetchone()["metadata"])["deferred_hold_id"] == hold_id
     finally:
         db.close()

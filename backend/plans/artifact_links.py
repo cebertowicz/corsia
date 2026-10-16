@@ -5,7 +5,30 @@ from __future__ import annotations
 from plans import service
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
-_ATTENTION_STATE_SQL = "json_extract(i.metadata, '$.attention_state')"
+
+# An ask link's state belongs to its open user hold. Registry metadata retains
+# only non-ask attention and a deferral stamp for one concrete open ask.
+_ATTENTION_STATE_SQL = """CASE
+    WHEN l.role='attention' AND i.type IN ('document','image') THEN
+        CASE
+            WHEN EXISTS (
+                SELECT 1 FROM plan_node_holds h
+                 WHERE h.node_id=l.node_id AND h.kind='blocked'
+                   AND h.owner_kind='user' AND h.owner_id=l.artifact_id
+                   AND h.cleared_at IS NULL
+                   AND json_extract(i.metadata, '$.attention_state')='deferred'
+                   AND json_extract(i.metadata, '$.deferred_hold_id')=h.id
+            ) THEN 'deferred'
+            WHEN EXISTS (
+                SELECT 1 FROM plan_node_holds h
+                 WHERE h.node_id=l.node_id AND h.kind='blocked'
+                   AND h.owner_kind='user' AND h.owner_id=l.artifact_id
+                   AND h.cleared_at IS NULL
+            ) THEN 'raised'
+            ELSE 'cleared'
+        END
+    ELSE json_extract(i.metadata, '$.attention_state')
+END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,
     {_ATTENTION_STATE_SQL} AS attention_state"""
 

@@ -299,14 +299,17 @@ async def post_dispose(artifact_id: str, body: DisposeBody):
     if body.actor_thread is not None and not await run_in_db(
             lambda: owns_thread(body.actor_thread, user["id"])):
         raise HTTPException(status_code=403, detail="actor_thread not accessible")
+    woken: list[str] = []
     try:
         result = await run_in_db(lambda: D.dispose(
             artifact_id, body.outcome, reason=body.reason, answer=body.answer,
             authority=body.authority, override_blocking=body.override_blocking,
             new_owner=body.new_owner, condition=body.condition,
-            replacement_id=body.replacement_id, actor_thread=body.actor_thread))
+            replacement_id=body.replacement_id, actor_thread=body.actor_thread,
+            drives=woken))
     except D.BlockingProfileError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except D.DispositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await public.drive_threads(woken)
     return asdict(result)

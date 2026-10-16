@@ -89,36 +89,66 @@ def get_attention_state(artifact_id: str, *, db=None) -> str | None:
 
 
 def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]]:
-    """Active artifacts whose attention is raised, optionally scoped to a
-    subscribed thread. A read — it does not mutate attention state."""
+    """Return metadata-raised non-asks and open asks, optionally by subscriber.
+
+    An ask is visible because its hold is open, not because mutable artifact
+    metadata happens to agree. Non-ask attention (including decisions) keeps
+    its existing metadata-backed lifecycle.
+    """
+    from plans import public as plans_public
+
     _db = db or get_db()
     try:
-        # Filter to raised rows in SQL (json_extract over metadata — the same
-        # convention as registry.bootload) so we only resolve the few raised
-        # artifacts, not every active one. This is a read: it never mutates
-        # attention state, adds no delivery class, and parent_chain stays
-        # digest-only (levels are display data, not a wake).
-        rows = _db.execute(
-            "SELECT * FROM artifact_identities WHERE state='active' "
-            "AND json_extract(metadata, '$.attention_state') = ?",
+        asks = plans_public.open_ask_artifacts(_db)
+        ask_holds: dict[str, set[str]] = {}
+        for ask in asks:
+            ask_holds.setdefault(str(ask["artifact_id"]), set()).add(str(ask["hold_id"]))
+        metadata_rows = _db.execute(
+            """SELECT * FROM artifact_identities i
+                 WHERE i.state='active'
+                   AND json_extract(i.metadata, '$.attention_state')=?
+                   AND NOT (
+                       i.type IN ('document','image')
+                       AND EXISTS (
+                           SELECT 1 FROM plan_node_artifact_links l
+                            WHERE l.artifact_id=i.id AND l.role='attention'
+                       )
+                   )""",
             (ATTENTION_RAISED,),
         ).fetchall()
+        rows = {str(row["id"]): dict(row) for row in metadata_rows}
+        if ask_holds:
+            marks = ",".join("?" * len(ask_holds))
+            rows.update({
+                str(row["id"]): dict(row)
+                for row in _db.execute(
+                    f"SELECT * FROM artifact_identities WHERE id IN ({marks}) AND state='active'",
+                    tuple(ask_holds),
+                ).fetchall()
+            })
         raised: list[dict[str, Any]] = []
-        for row in rows:
-            rowd = dict(row)
+        for artifact_id, rowd in rows.items():
             identity = _identity(rowd)
             record = AR.register_or_resolve(identity, db=_db)
             levels = {s.thread for s in record.subscribers}
             if thread_id is not None and thread_id not in levels:
                 continue
-            # Return the resolved owner + parsed metadata so callers need not
-            # re-resolve (single resolution path).
+            metadata = json.loads(rowd["metadata"]) if rowd["metadata"] else {}
+            holds = ask_holds.get(artifact_id)
+            if holds:
+                metadata = dict(metadata)
+                metadata["attention_state"] = (
+                    ATTENTION_DEFERRED
+                    if metadata.get("attention_state") == ATTENTION_DEFERRED
+                    and metadata.get("deferred_hold_id") in holds
+                    else ATTENTION_RAISED
+                )
             raised.append({"identity": identity,
                            "external_id": rowd["external_id"],
                            "title": rowd.get("title"),
                            "owner_thread": record.owner_thread,
                            "levels": sorted(levels),
-                           "metadata": json.loads(rowd["metadata"]) if rowd["metadata"] else {}})
+                           "metadata": metadata})
         return raised
     finally:
         if not db:
@@ -195,6 +225,13 @@ def _clear_attention(
                                  "attention_reason": reason}
         if defer_condition is not None:
             patch["defer_condition"] = defer_condition  # S7 arms from this later
+            ask_holds = [
+                str(ask["hold_id"])
+                for ask in plans_public.open_ask_artifacts(_db)
+                if str(ask["artifact_id"]) == str(row["id"])
+            ]
+            if len(ask_holds) == 1:
+                patch["deferred_hold_id"] = ask_holds[0]
         models.update_metadata(
             identity["integration"], identity["type"], identity["external_id"],
             patch, db=_db,

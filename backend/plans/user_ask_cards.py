@@ -61,11 +61,18 @@ def _endings(db, rows) -> dict[str, dict]:
     marks = ",".join("?" * len(event_ids))
     endings = {}
     for row in db.execute(
-        f"SELECT id,payload_json FROM plan_node_events WHERE id IN ({marks})", event_ids,
+        f"SELECT id,payload_json,provenance FROM plan_node_events WHERE id IN ({marks})", event_ids,
     ):
         payload = _decoded(row["payload_json"])
         detail = payload.get("detail") if payload is not None else None
         if isinstance(detail, dict):
+            detail = dict(detail)
+            # The original v120 wrote withdrawn for a task-ending migration.
+            # Its unique provenance positively identifies that path; legacy
+            # withdraw_node_asks rows lack causal evidence and remain withdrawn.
+            if (detail.get("ended") == "withdrawn"
+                    and row["provenance"] == "migration.119_to_120"):
+                detail["ended"] = "closed"
             endings[row["id"]] = detail
     return endings
 
