@@ -67,13 +67,6 @@
 		openProvider = p;
 	}
 
-	function accentFor(p: HostProvider): string {
-		if (p.name === 'omlx') return 'var(--accent)';
-		if (p.name === 'lmstudio') return 'var(--green)';
-		if (p.type === 'cloud' || p.type === 'harness') return 'var(--accent)';
-		return 'var(--accent)';
-	}
-
 	function hasLoaded(p: HostProvider): boolean {
 		if (p.type === 'cloud') {
 			return p.raw.has_key === true;
@@ -162,7 +155,6 @@
 					provider={p}
 					expanded={expanded.has(key)}
 					hasLoaded={hasLoaded(p)}
-					accentVar={accentFor(p)}
 					onToggleEnable={() => handleToggleEnable(p)}
 					onSettings={() => handleSettings(p)}
 					onToggleExpand={() => toggleExpand(key)}

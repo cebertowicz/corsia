@@ -148,16 +148,17 @@ describe('design tokens', () => {
 		}
 	});
 
-	it('never uses the deprecated accent aliases', () => {
+	it('neither declares nor uses the retired accent names', () => {
 		// `--violet*` once meant both the accent and the violet hue. Accent consumers read the roles (`--accent`,
-		// `--accent-hover`, `-text`, `-wash`, `-line`); categorical violet reads `--purple*`. `--violet-brand` stays.
-		const deprecated = /var\(\s*--(?:violet(?!-brand)[a-z0-9-]*|accent-bg)\s*[,)]/;
-		const uses = walk(SRC, [], /\.(svelte|css|ts)$/)
-			.filter((file) => !/app-tokens\.css$|\.(test|spec)\.ts$/.test(file))
+		// `--accent-hover`, `-text`, `-wash`, `-line`); categorical violet reads `--purple*`; `--violet-brand` is its own
+		// hue. A reference to a removed name would fail silently, so any declaration or use of one fails here.
+		const retired = /--(?:violet(?:-2|-text|-bg|-line)?|accent-bg)(?![\w-])/;
+		const hits = walk(SRC, [], /\.(svelte|css|ts|js)$/)
+			.filter((file) => file !== __filename)
 			.flatMap((file) => readFileSync(file, 'utf8').split('\n')
 				.map((text, index) => ({ text, at: `${file.slice(SRC.length + 1)}:${index + 1}` }))
-				.filter(({ text }) => deprecated.test(text))
+				.filter(({ text }) => retired.test(text))
 				.map(({ at }) => at));
-		expect(uses).toEqual([]);
+		expect(hits).toEqual([]);
 	});
 });

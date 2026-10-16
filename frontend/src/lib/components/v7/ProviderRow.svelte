@@ -8,7 +8,6 @@
 		provider: HostProvider;
 		expanded?: boolean;
 		hasLoaded?: boolean;
-		accentVar?: string;
 		onToggleEnable?: () => void;
 		onSettings?: () => void;
 		onToggleExpand?: () => void;
@@ -19,7 +18,6 @@
 		provider,
 		expanded = false,
 		hasLoaded = false,
-		accentVar = 'var(--accent)',
 		onToggleEnable,
 		onSettings,
 		onToggleExpand,
@@ -49,7 +47,6 @@
 	data-server-card={provider.server?.id}
 	class:expanded
 	class:has-loaded={hasLoaded}
-	style="--pr-accent: {accentVar}"
 >
 	<div class="pr-head" class:configurable>
 		<button

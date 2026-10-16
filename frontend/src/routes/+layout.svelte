@@ -33,8 +33,8 @@
 	$effect(() => {
 		const s = $uiScope;
 		const root = document.documentElement;
-		// The project's colour is the accent and every role comes from it; without a scope the
-		// tokens' CORSIA-blue defaults apply again.
+		// The project's colour is the accent and every role comes from it; without a scope, or with a
+		// colour that does not parse, the tokens' CORSIA-blue defaults apply again.
 		const roles = s ? accentRoles(s.color, $theme) : null;
 		root.toggleAttribute('data-project-accent', !!roles);
 		for (const [role, token] of Object.entries(ACCENT_ROLE_TOKENS) as [keyof AccentRoles, string][]) {

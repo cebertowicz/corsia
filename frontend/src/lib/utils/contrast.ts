@@ -3,7 +3,9 @@
 export type Rgb = [number, number, number];
 
 const HEX = /^#([0-9a-f]{6})$/i;
-const HSL = /^hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)$/i;
+const ANY_HEX = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const FUNCTION = /^(rgba?|hsla?)\(\s*(.*?)\s*\)$/i;
+const ARGUMENT = /^(\d+(?:\.\d+)?|\.\d+)(%?)$/;
 
 export function parseHex(hex: string): Rgb | null {
 	const match = HEX.exec(hex.trim());
@@ -12,13 +14,61 @@ export function parseHex(hex: string): Rgb | null {
 	return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
-/** A six-digit hex or an `hsl(h, s%, l%)` colour; anything else is null. */
+const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), max);
+
+/**
+ * Every colour form the project API accepts (`_ACCENT_COLOR_RE` in `backend/api/project_types.py`): `#rgb`, `#rgba`,
+ * `#rrggbb`, `#rrggbbaa`, and `rgb()`, `rgba()`, `hsl()`, `hsla()` in comma or space syntax, with an optional
+ * alpha (`/ a` in space syntax). Null for anything else, including text that matches that pattern but is not a colour.
+ */
+export function parseCssColour(colour: string): { rgb: Rgb; alpha: number } | null {
+	const text = colour.trim();
+	const hex = ANY_HEX.exec(text);
+	if (hex) {
+		const digits = hex[1].length <= 4 ? [...hex[1]].map((digit) => digit + digit) : hex[1].match(/../g)!;
+		const [r, g, b, a = 255] = digits.map((pair) => parseInt(pair, 16));
+		return { rgb: [r, g, b], alpha: a / 255 };
+	}
+	const call = FUNCTION.exec(text);
+	if (!call) return null;
+	const isHsl = call[1].toLowerCase().startsWith('hsl');
+	const commas = call[2].includes(',');
+	let parts: string[];
+	let alphaText: string | undefined;
+	if (commas) {
+		parts = call[2].split(',').map((part) => part.trim());
+		if (parts.length === 4) alphaText = parts.pop();
+	} else {
+		const [channels, alpha, extra] = call[2].split('/');
+		if (extra !== undefined) return null;
+		parts = channels.trim().split(/\s+/);
+		alphaText = alpha?.trim();
+	}
+	if (parts.length !== 3) return null;
+	const args = parts.map((part) => ARGUMENT.exec(part));
+	if (!args.every((arg): arg is RegExpExecArray => arg !== null)) return null;
+	const [first, second, third] = args;
+	let alpha = 1;
+	if (alphaText !== undefined) {
+		const arg = ARGUMENT.exec(alphaText);
+		if (!arg) return null;
+		alpha = clamp(Number(arg[1]) / (arg[2] ? 100 : 1), 1);
+	}
+	if (isHsl) {
+		// The hue is a bare number; saturation and lightness are percentages, or bare numbers in space syntax.
+		if (first[2] || (commas && (!second[2] || !third[2]))) return null;
+		const unit = (arg: RegExpExecArray) => clamp(Number(arg[1]), 100) / 100;
+		return { rgb: fromHsl([Number(first[1]) % 360, unit(second), unit(third)]), alpha };
+	}
+	// Comma syntax takes all numbers or all percentages; space syntax may mix them.
+	if (commas && new Set(args.map((arg) => arg[2])).size > 1) return null;
+	const channel = (arg: RegExpExecArray) => clamp(Number(arg[1]) * (arg[2] ? 2.55 : 1), 255);
+	return { rgb: [channel(first), channel(second), channel(third)], alpha };
+}
+
+/** Any colour `parseCssColour` reads, with its alpha dropped; anything else is null. */
 export function parseColor(colour: string): Rgb | null {
-	const hex = parseHex(colour);
-	if (hex) return hex;
-	const match = HSL.exec(colour.trim());
-	if (!match) return null;
-	return fromHsl([Number(match[1]) % 360, Number(match[2]) / 100, Number(match[3]) / 100]);
+	return parseCssColour(colour)?.rgb ?? null;
 }
 
 export const toHex = (rgb: Rgb) => `#${rgb.map((channel) => Math.round(channel).toString(16).padStart(2, '0')).join('')}`;

@@ -209,27 +209,21 @@
 <style>
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
 	/*
-	 * The approved blue, for setup only: the app-wide accent waits. The role tokens carry it; the deprecated legacy
-	 * names mirror them only for branches in flight (#856). Each role has its own shade because one hex cannot be a
-	 * fill, ink on that fill, text and a hairline at AA in both themes.
+	 * Setup keeps its own blue until its coherence pass moves it to the app accent. Each role has its own shade
+	 * because one hex cannot be a fill, ink on that fill, text and a hairline at AA in both themes.
 	 */
 	.setup-shell {
 		--accent-fill: #3aa9d0; --accent-on-fill: #04121a; --accent-text: #2e9cc4; --accent-line: #2e9cc4;
 		--accent-wash: color-mix(in srgb, #2e9cc4 10%, transparent);
 		--accent: #2e9cc4; --accent-hover: #3aa9d0;
-		--violet: #3aa9d0; --violet-2: #3aa9d0; --violet-text: #2e9cc4;
-		--violet-bg: color-mix(in srgb, #2e9cc4 10%, transparent); --violet-line: color-mix(in srgb, #2e9cc4 30%, transparent);
 	}
 	:global([data-theme='light']) .setup-shell {
 		--accent-fill: #00769e; --accent-on-fill: #ffffff; --accent-text: #006d92; --accent-line: #00769e;
 		--accent-wash: color-mix(in srgb, #00769e 10%, transparent);
 		--accent: #00769e; --accent-hover: #006d92;
-		--violet: #00769e; --violet-2: #00769e; --violet-text: #006d92;
-		--violet-bg: color-mix(in srgb, #00769e 10%, transparent); --violet-line: color-mix(in srgb, #00769e 30%, transparent);
 	}
-	/* The toggle keeps the shades it had under the legacy names, which differ from the roles above. */
-	.setup-shell :global(.tg) { --accent: #3aa9d0; }
-	:global([data-theme='light']) .setup-shell :global(.tg) { --accent: #00769e; --accent-hover: #00769e; }
+	/* An on toggle is a fill: its track, border and focus ring all take the fill shade. */
+	.setup-shell :global(.tg) { --accent: var(--accent-fill); --accent-hover: var(--accent-fill); }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
