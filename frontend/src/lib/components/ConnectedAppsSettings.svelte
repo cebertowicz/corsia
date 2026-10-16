@@ -103,10 +103,10 @@
 
 <style>
 	.connected-apps { max-width: 760px; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }
-	.heading h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title-3); }
+	.heading h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
 	.heading p { margin: var(--space-2) 0 0; color: var(--text-secondary); line-height: 1.5; }
 	.rows { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
-	.app-row { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-secondary); overflow: hidden; }
+	.app-row { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); overflow: hidden; }
 	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-4); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
 	.app-copy { min-width: 0; display: grid; gap: var(--space-1); }
 	.app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
