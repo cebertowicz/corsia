@@ -14,7 +14,10 @@ from tools.recorded_call import CompletedToolFailure, execute_recorded_call
 from tools.tool_surface import (
     TOOL_CALL,
     TOOLS_LOAD,
+    connected_app_reach_refusal,
     invalid_dispatch_hint,
+    mcp_app_id,
+    mcp_tool_reaches_thread,
     reachable_tool_names,
     resolve_dispatch,
     unknown_tool_error,
@@ -201,7 +204,10 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if dispatcher is not None and name == TOOL_CALL and tool:
             return tool
-        names = reachable_tool_names(self) if dispatcher else self.tool_names
+        names = (
+            reachable_tool_names(self, include_unreachable_mcp=True)
+            if dispatcher else self.tool_names
+        )
         if not tool or name not in names:
             return unknown_tool_error([name], names)
         return tool
@@ -256,6 +262,9 @@ class ToolRegistry:
                         "Error: Tool execution session identity is unavailable."
                         + _HINT
                     )
+                reach_refusal = await self._mcp_reach_refusal(tool, thread_context)
+                if reach_refusal is not None:
+                    return reach_refusal
                 execution_params = self._inject_context(
                     model_params,
                     thread_context,
@@ -283,6 +292,25 @@ class ToolRegistry:
                 safe_error = sanitize_credential_text(str(e))
                 set_attrs(_tool_span, {"tool.error": safe_error[:200]})
                 return f"Error executing {name}: {safe_error}" + _HINT
+
+    @staticmethod
+    async def _mcp_reach_refusal(
+        tool: Tool, thread_context: dict[str, Any],
+    ) -> str | None:
+        """Refuse an unreachable connected app before any tool/session access."""
+        if mcp_app_id(tool) is None:
+            return None
+        from infra.database import get_db
+        from infra.db_async import run_in_db
+
+        def reaches() -> bool:
+            db = get_db()
+            try:
+                return mcp_tool_reaches_thread(tool, thread_context["id"], db=db)
+            finally:
+                db.close()
+
+        return None if await run_in_db(reaches) else connected_app_reach_refusal()
 
     @staticmethod
     def _strip_reserved_context(params: dict[str, Any]) -> dict[str, Any]:

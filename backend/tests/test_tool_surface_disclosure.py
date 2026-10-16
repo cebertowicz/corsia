@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -156,12 +157,12 @@ async def test_tools_load_by_name_reports_unknown_names_with_close_matches(tmp_p
     assert loader.validate_params({}) != []
 
 
-def _seed_thread(db_path, thread_id: str) -> None:
+def _seed_thread(db_path, thread_id: str, project_id: str | None = None) -> None:
     db = sqlite3.connect(db_path)
     db.execute(
         "INSERT INTO threads (id,user_id,model,project_id,created_at,updated_at) "
         "VALUES (?,?,?,?,?,?)",
-        (thread_id, "user-1", "test/model", None, "t", "t"),
+        (thread_id, "user-1", "test/model", project_id, "t", "t"),
     )
     db.commit()
     db.close()
@@ -303,10 +304,14 @@ async def test_loader_and_dispatcher_reach_only_catalog_reachable_tools(isolated
 class _ConfiguredTool(_CaptureTool):
     user_configured = True
 
-    def __init__(self, name: str = "mcp_wiki_search", server: str = "wiki", purpose: str | None = None) -> None:
+    def __init__(
+        self, name: str = "mcp_wiki_search", server: str = "wiki",
+        purpose: str | None = None, app_id: str | None = None,
+    ) -> None:
         super().__init__(name)
         self.mcp_server_name = server
         self.mcp_server_config = {} if purpose is None else {"purpose": purpose}
+        self.mcp_app_id = app_id
 
     @property
     def description(self) -> str:
@@ -333,6 +338,79 @@ async def test_configured_mcp_tools_are_indexed_loadable_and_callable(isolated_d
     assert '"name": "mcp_wiki_search"' in loaded
     assert result == "ok"
     assert configured.calls[0]["value"] == "x"
+
+
+@pytest.mark.asyncio
+async def test_connected_app_reach_hides_mcp_index_and_refuses_before_session_or_key_access(
+    isolated_db, monkeypatch,
+):
+    from connections.app_reach import create_app
+    from infra import state
+    from infra.database import get_db
+    from tools.mcp import MCPToolWrapper
+    import tools.mcp_secrets as mcp_secrets
+
+    db = get_db()
+    try:
+        for project_id in ("project-a", "project-b"):
+            db.execute(
+                "INSERT INTO projects(id,name,created_at,updated_at) VALUES (?,?,?,?)",
+                (project_id, project_id, "t", "t"),
+            )
+        app = create_app(
+            "Wiki", {},
+            {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False},
+            db=db,
+        )
+        db.commit()
+    finally:
+        db.close()
+    _seed_thread(isolated_db, "project-a-thread", "project-a")
+    _seed_thread(isolated_db, "project-b-thread", "project-b")
+    session = SimpleNamespace(call_tool=AsyncMock(return_value=SimpleNamespace(content=[])))
+    wrapper = MCPToolWrapper(
+        session,
+        "wiki",
+        SimpleNamespace(
+            name="search", description="Search the team wiki.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        app_id=app["id"],
+    )
+    registry = _dispatch_registry(wrapper)
+    key_lookup = AsyncMock()
+    monkeypatch.setattr(mcp_secrets, "resolve", key_lookup)
+
+    denied_context = state._current_thread_id.set("project-b-thread")
+    try:
+        index = registry.get("tools_load").description
+        loaded = await registry.execute("tools_load", {"names": [wrapper.name]})
+        server = await registry.execute("tools_load", {"server": "wiki"})
+        called = await registry.execute("tool_call", {"name": wrapper.name, "arguments": {}})
+    finally:
+        state._current_thread_id.reset(denied_context)
+
+    refusal = (
+        "Error: This connected app is not available to this project. Ask the person who manages "
+        "Connected apps to grant this project access, then retry."
+    )
+    assert "wiki" not in index
+    assert wrapper.name not in index
+    assert loaded == server == called == refusal
+    session.call_tool.assert_not_awaited()
+    key_lookup.assert_not_awaited()
+
+    allowed_context = state._current_thread_id.set("project-a-thread")
+    try:
+        assert f"- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
+        loaded = await registry.execute("tools_load", {"names": [wrapper.name]})
+        called = await registry.execute("tool_call", {"name": wrapper.name, "arguments": {}})
+    finally:
+        state._current_thread_id.reset(allowed_context)
+
+    assert f'"name": "{wrapper.name}"' in loaded
+    assert called == "(no output)"
+    session.call_tool.assert_awaited_once_with("search", arguments={})
 
 
 @pytest.mark.asyncio

@@ -47,10 +47,14 @@ class MCPToolWrapper(Tool):
     self_describing_errors = True
 
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30,
-                 *, config: dict | None = None, auth=None, instructions: str | None = None):
+                 *, config: dict | None = None, auth=None, instructions: str | None = None,
+                 app_id: str | None = None):
         config = config or {}
+        if app_id is not None and (not isinstance(app_id, str) or not app_id):
+            raise MCPConfigError("connected app identity must be a nonempty string")
         self._session = session
         self.mcp_server_name = server_name
+        self.mcp_app_id = app_id
         self.mcp_server_config = config
         # The server's own description of itself, from its initialize result.
         self.mcp_instructions = instructions
@@ -306,8 +310,11 @@ async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
         cursor = page.nextCursor
     if allowlist is not None and not allowlist.issubset({tool.name for tool in discovered}):
         raise MCPConfigError("server did not advertise every allowed tool; check the pinned allowlist")
+    app_id = config.get("connected_app_id")
+    if app_id is not None and (not isinstance(app_id, str) or not app_id):
+        raise MCPConfigError("connected app identity must be a nonempty string")
     return [MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth,
-                           instructions=instructions)
+                           instructions=instructions, app_id=app_id)
             for tool in discovered if allowlist is None or tool.name in allowlist]
 
 
