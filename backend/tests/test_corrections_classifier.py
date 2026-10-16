@@ -244,14 +244,14 @@ def test_tampered_asset_file_is_refused(tmp_path):
 def test_verified_files_are_hashed_once_until_they_change(monkeypatch, tmp_path):
     import os
 
-    from core import corrections_classifier
+    from core import onnx_asset
     from core.corrections_classifier import AssetError, AssetManifest
 
     path = _manifest(tmp_path)
     manifest = AssetManifest.load(path)
     hashes = []
-    real_sha256 = corrections_classifier.hashlib.sha256
-    monkeypatch.setattr(corrections_classifier.hashlib, "sha256", lambda *a: hashes.append(1) or real_sha256(*a))
+    real_sha256 = onnx_asset.hashlib.sha256
+    monkeypatch.setattr(onnx_asset.hashlib, "sha256", lambda *a: hashes.append(1) or real_sha256(*a))
 
     manifest.verify_files()
     first = len(hashes)
@@ -352,14 +352,15 @@ def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
 def test_child_marks_a_load_time_rss_breach_deterministic(self_test_asset, monkeypatch):
     from types import SimpleNamespace
 
-    from core import corrections_child
+    from core import onnx_child
+    from core.corrections_child import _child_main
 
     sent = []
     connection = SimpleNamespace(send=sent.append, poll=lambda _timeout: False)
     original_connect = socket.socket.connect
-    monkeypatch.setattr(corrections_child, "_peak_rss_bytes", lambda: corrections_child.RSS_LIMIT_BYTES + 1)
+    monkeypatch.setattr(onnx_child, "_peak_rss_bytes", lambda: 2**63)
     try:
-        corrections_child._child_main(connection, str(self_test_asset / "manifest.json"))
+        _child_main(connection, str(self_test_asset / "manifest.json"))
     finally:
         setattr(socket.socket, "connect", original_connect)
 
@@ -637,11 +638,13 @@ class _FakeProcess:
 
 
 def _child_with(monkeypatch, tmp_path, connection):
+    from core import onnx_child
     from core import corrections_child as module
     from core.corrections_classifier import AssetManifest
 
-    monkeypatch.setattr(module, "Process", _FakeProcess)
-    monkeypatch.setattr(module, "Pipe", lambda: (connection, _FakeConnection([])))
+    monkeypatch.setattr(onnx_child, "Process", _FakeProcess)
+    monkeypatch.setattr(onnx_child, "Pipe", lambda: (connection, _FakeConnection([])))
+    monkeypatch.setattr(onnx_child, "_child_rss_bytes", lambda _process: 0)
     return module.ClassifierChild(AssetManifest.load(_manifest(tmp_path)))
 
 
@@ -661,7 +664,7 @@ def test_load_and_call_each_wait_under_their_own_bound(monkeypatch, tmp_path):
     result = child.classify([("assistant", "synthetic")], "synthetic owner")
 
     assert result.label == "correction"
-    assert connection.polls == [LOAD_TIMEOUT_SECONDS, CALL_TIMEOUT_SECONDS]
+    assert connection.polls == [0.05, 0.05]
     assert LOAD_TIMEOUT_SECONDS > CALL_TIMEOUT_SECONDS
 
 

@@ -44,6 +44,17 @@ send and dispatch services before entering the selected execution provider.
 Deeper callable maps live in `BACKEND.md` and `FRONTEND.md`. Visual work also
 follows `frontend/DESIGN-SYSTEM.md`.
 
+### Verified ONNX assets
+
+`backend/core/onnx_asset.py` is the single owner of verified ONNX asset
+manifests, source pins, file hashing and stat caching, session construction,
+and self-tests. `backend/core/onnx_child.py` owns the isolated child lifecycle:
+network blocking, child-side and parent-polled RSS ceilings, request timeouts,
+and shutdown escalation. Each feature defines only an `OnnxAssetSpec` and a
+module-level scorer. `corrections_classifier.py` and `corrections_child.py`
+are compatibility adapters that expose corrections-specific versions, labels,
+and existing public imports without duplicating the generic lifecycle.
+
 ### oMLX public authentication
 
 `backend/llm/providers/omlx_public_auth.py` derives a public Bearer header from
