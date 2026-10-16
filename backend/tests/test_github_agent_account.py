@@ -37,8 +37,14 @@ case "$*" in
     fi
     exit 0;;
   "auth login"*)
-    echo "! First copy your one-time code: ABCD-1234"
-    echo "Open this URL to continue in your web browser: https://github.com/login/device"
+    case "${LOGIN_MODE:-prompt}" in
+      colored_prompt) printf '\033[33m!\033[0m First copy your one-time code: \033[1mABCD-\r1234\033[0m\n' >&2;;
+      unrecognized) printf 'GitHub CLI is waiting for a browser response\n' >&2;;
+      early_exit) printf 'GitHub CLI could not start device login\n' >&2; exit 1;;
+      *)
+        echo "! First copy your one-time code: ABCD-1234"
+        echo "Open this URL to continue in your web browser: https://github.com/login/device";;
+    esac
     i=0
     while [ ! -f "$APPROVE" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done
     [ -f "$APPROVE" ] || exit 1
@@ -195,6 +201,68 @@ async def test_signin_exposes_only_user_code(agent):
         assert "Open this URL" not in json.dumps(shown)
     finally:
         await account_controls.cancel_signin(account["id"])
+
+
+def test_signin_prompt_accepts_gh_291_colored_stderr_bytes():
+    """Match gh's stderr device-flow form when terminal formatting reaches the pipe."""
+    from connections import github_agent_home
+
+    observed = b"\x1b[33m!\x1b[0m First copy your one-time code: \x1b[1mABCD-\r1234\x1b[0m\n"
+    assert github_agent_home.signin_prompt(observed.decode()) == {
+        "user_code": "ABCD-1234", "verification_uri": github_agent_home.DEVICE_URL,
+    }
+
+
+@pytest.mark.asyncio
+async def test_connect_reads_gh_291_colored_stderr_prompt(agent, monkeypatch):
+    from connections import account_controls
+    from tools.github_agent_account import GitHubAgentAccountTool
+
+    monkeypatch.setenv("LOGIN_MODE", "colored_prompt")
+    tool = GitHubAgentAccountTool()
+    connected = json.loads(await tool.execute(action="connect"))
+    try:
+        assert connected["signin"]["user_code"] == "ABCD-1234"
+        assert connected["signin"]["verification_uri"] == "https://github.com/login/device"
+    finally:
+        await account_controls.cancel_signin(connected["signin"]["account_id"])
+
+
+@pytest.mark.asyncio
+async def test_connect_and_check_name_an_unrecognized_prompt(agent, monkeypatch):
+    from connections import account_controls
+    from tools import github_agent_account
+
+    monkeypatch.setenv("LOGIN_MODE", "unrecognized")
+    monkeypatch.setattr(github_agent_account, "_PROMPT_SECONDS", 0.01)
+    tool = github_agent_account.GitHubAgentAccountTool()
+    connected = json.loads(await tool.execute(action="connect"))
+    account_id = connected["signin"]["account_id"]
+    try:
+        assert connected["signin"] == {
+            "account_id": account_id, "route": "browser", "status": "waiting",
+            "cause": "prompt_unrecognized", "next": github_agent_account._PROMPT_NEXT,
+        }
+        checked = json.loads(await tool.execute(action="check"))
+        assert checked["signin"] == connected["signin"]
+    finally:
+        await account_controls.cancel_signin(account_id)
+
+
+@pytest.mark.asyncio
+async def test_connect_and_check_name_early_login_exit(agent, monkeypatch):
+    from tools import github_agent_account
+
+    monkeypatch.setenv("LOGIN_MODE", "early_exit")
+    tool = github_agent_account.GitHubAgentAccountTool()
+    connected = json.loads(await tool.execute(action="connect"))
+    account_id = connected["signin"]["account_id"]
+    assert connected["signin"] == {
+        "account_id": account_id, "route": "browser", "status": "failed",
+        "cause": "vendor_login_failed", "next": github_agent_account._LOGIN_FAILURE_NEXT,
+    }
+    checked = json.loads(await tool.execute(action="check"))
+    assert checked["signin"] == connected["signin"]
 
 
 @pytest.mark.asyncio
