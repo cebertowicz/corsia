@@ -35,6 +35,7 @@ from tools.sandbox_config import (
     registered_repo_for_path,
     repo_worktree_root,
 )
+from tools.sandbox_git import sandbox_literal
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
 from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, shell_env_pass_names
@@ -589,8 +590,8 @@ def _validate_worktree_target(target: str, cwd: str) -> str | None:
     return "Error: worktrees must be created under `<repo>/.worktrees/<slug>`."
 
 
-def _sandbox_path(path: Path, *, canonical: bool = False) -> str:  # canonical: verified worktree paths
-    return str(path if canonical else path.resolve(strict=False)).replace("\\", "\\\\").replace('"', '\\"')
+def _sandbox_path(path: Path) -> str:
+    return sandbox_literal(path.resolve(strict=False))
 
 
 def _direct_git_command(
@@ -707,10 +708,9 @@ def pinned_repo_sandbox_profile(
             or not policy.source_binding_valid
         ):
             rules.append(f'(deny file-write* (subpath "{_sandbox_path(repo)}"))')
-            for worktree in worktrees:
+            for worktree in worktrees:  # resolved roots proved by this request's listing
                 rules.append(
-                    f'(allow file-read* file-write* (subpath '
-                    f'"{_sandbox_path(worktree, canonical=True)}"))'
+                    f'(allow file-read* file-write* (subpath "{sandbox_literal(worktree)}"))'
                 )
     controlled_identity_write: set[Path] = set()
     worktree_control_repo: Path | None = None
@@ -808,8 +808,8 @@ def pinned_repo_sandbox_profile(
         if repo != worktree_control_repo:
             rules.extend(
                 f'(deny file-write* '
-                f'(literal "{_sandbox_path(worktree / ".git", canonical=True)}"))'
-                for worktree in verified_worktrees_by_repo.get(repo, ())
+                f'(literal "{sandbox_literal(worktree / ".git")}"))'
+                for worktree in verified_worktrees_by_repo.get(repo, ())  # .git proved a plain file
             )
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(

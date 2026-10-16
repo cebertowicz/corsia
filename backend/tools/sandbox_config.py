@@ -25,7 +25,6 @@ from infra.project_repo_policy import (
 from tools.repo_worktree_guidance import protected_checkout_worktree_guidance
 from tools.sandbox_ignored_files import is_ignored_untracked_file
 from tools.sandbox_git import verified_worktree_marker
-from tools.sandbox_worktree_listing import list_verified_entries
 from tools.unix_socket_policy import thread_bind_roots
 
 
@@ -114,13 +113,8 @@ def registered_repo_for_path(
 
 def _verified_worktree_root_and_gitdir(
     path: Path, repo_root: Path, *, cache: dict | None = None,
-    deps: list[Path] | None = None,
 ) -> tuple[Path, Path] | None:
-    """Return a linked-worktree root and gitdir after reciprocal-marker proof.
-
-    ``deps`` collects the paths a fresh proof reads; it is ignored when the
-    request ``cache`` already holds the verdict, so pass it without a cache.
-    """
+    """Return a linked-worktree root and gitdir after reciprocal-marker proof."""
     repo = _resolved_path(repo_root, cache)
     resolved = _resolved_path(path, cache)
     try:
@@ -131,10 +125,10 @@ def _verified_worktree_root_and_gitdir(
         return None
     candidate = repo / ".worktrees" / relative.parts[1]
     cache_key = ("sandbox-verified-worktree", str(repo), str(candidate))
-    if cache is not None and deps is None and cache_key in cache:
+    if cache is not None and cache_key in cache:
         verified = cache[cache_key]
     else:
-        verified = verified_worktree_marker(candidate, repo, deps)
+        verified = verified_worktree_marker(candidate, repo)
         if cache is not None:
             cache[cache_key] = verified
     return verified if verified is None or _is_within(resolved, verified[0]) else None
@@ -142,12 +136,9 @@ def _verified_worktree_root_and_gitdir(
 
 def repo_worktree_root(
     path: Path, repo_root: Path, *, cache: dict | None = None,
-    deps: list[Path] | None = None,
 ) -> Path | None:
     """Return the verified ``.worktrees/<name>`` root containing ``path``."""
-    verified = _verified_worktree_root_and_gitdir(
-        path, repo_root, cache=cache, deps=deps,
-    )
+    verified = _verified_worktree_root_and_gitdir(path, repo_root, cache=cache)
     return verified[0] if verified is not None else None
 
 
@@ -173,10 +164,27 @@ def repo_worktree_branch(
 
 def list_repo_worktrees(repo_root: Path) -> list[Path]:
     """List verified linked worktrees beneath the required local directory."""
-    return list_verified_entries(
-        repo_root,
-        lambda entry, repo, deps: repo_worktree_root(entry, repo, deps=deps),
-    )
+    parent = repo_root.expanduser().resolve(strict=False) / ".worktrees"
+    if not parent.is_dir():
+        return []
+    worktrees: list[Path] = []
+    cache: dict = {}
+    plain_parent = not parent.is_symlink()
+    try:
+        entries = parent.iterdir()
+        for entry in entries:
+            # Under a resolved, non-symlink parent a non-symlink entry is its own
+            # canonical path; any other entry is resolved exactly once.
+            resolved = (
+                entry if plain_parent and not entry.is_symlink()
+                else entry.resolve(strict=False)
+            )
+            cache[("sandbox-resolved-path", str(entry))] = resolved
+            if repo_worktree_root(entry, repo_root, cache=cache) == resolved:
+                worktrees.append(resolved)
+    except OSError:
+        return []
+    return sorted(worktrees)
 
 
 

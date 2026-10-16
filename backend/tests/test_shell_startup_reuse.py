@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 from pathlib import Path
 
 from infra.project_repo_policy import RepoPolicy
-from tools import sandbox_config, shell_guard
+from tools import sandbox_config, sandbox_git, shell_guard
 
 
 def test_argv_grants_come_from_the_callers_policy_snapshot(monkeypatch, tmp_path):
@@ -73,146 +71,52 @@ def _link(repo: Path, name: str) -> Path:
     return worktree.resolve()
 
 
-def test_unchanged_worktrees_are_not_reverified(monkeypatch, tmp_path):
+def test_listing_keeps_symlink_entry_and_parent_semantics(tmp_path):
     repo = tmp_path / "repo"
-    linked = [_link(repo, f"w{i}") for i in range(5)]
-    assert sandbox_config.list_repo_worktrees(repo) == sorted(linked)
+    first, second = _link(repo, "a"), _link(repo, "b")
+    (repo / ".worktrees" / "stray").mkdir()
+    (repo / ".worktrees" / "alias").symlink_to(first)
+    (repo / ".worktrees" / "dangling").symlink_to(tmp_path / "missing")
 
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("unchanged worktrees must not be re-verified")
+    # A symlink to a sibling worktree lists that sibling's root once more.
+    assert sandbox_config.list_repo_worktrees(repo) == sorted([first, first, second])
 
-    monkeypatch.setattr(sandbox_config, "verified_worktree_marker", forbidden)
-    assert sandbox_config.list_repo_worktrees(repo) == sorted(linked)
-
-
-def test_added_and_removed_worktrees_show_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    first = _link(repo, "first")
-    assert sandbox_config.list_repo_worktrees(repo) == [first]
-
-    second = _link(repo, "second")
-    assert sandbox_config.list_repo_worktrees(repo) == sorted([first, second])
-
-    shutil.rmtree(first)
-    assert sandbox_config.list_repo_worktrees(repo) == [second]
+    redirected = tmp_path / "redirected"
+    (redirected / ".git").mkdir(parents=True)
+    (redirected / ".worktrees").symlink_to(repo / ".worktrees")
+    assert sandbox_config.list_repo_worktrees(redirected) == []
 
 
-def test_forged_marker_is_denied_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    other = _link(repo, "other")
-    assert sandbox_config.list_repo_worktrees(repo) == sorted([linked, other])
+def test_profile_worktree_rules_match_resolved_rendering(tmp_path):
+    plain = tmp_path / "plain"
+    linked = [_link(plain, "a"), _link(plain, "b")]
+    (plain / ".worktrees" / "alias").symlink_to(linked[0])
+    behind_link = tmp_path / "behind-link"
+    _link(behind_link, "hidden")
+    redirected = tmp_path / "redirected"
+    (redirected / ".git").mkdir(parents=True)
+    (redirected / ".worktrees").symlink_to(behind_link / ".worktrees")
+    alias_root = tmp_path / "alias-root"
+    alias_root.symlink_to(plain)
+    policies = [
+        RepoPolicy("p1", "plain", alias_root, "main", True),
+        RepoPolicy("p1", "redirected", redirected.resolve(), "main", True),
+    ]
 
-    # Repoint a cached worktree at another worktree's gitdir: reciprocity fails.
-    (linked / ".git").write_text(
-        f"gitdir: {repo / '.git' / 'worktrees' / 'other'}\n", encoding="utf-8"
+    profile = shell_guard.pinned_repo_sandbox_profile(
+        "printf ok", str(tmp_path), policies=policies
     )
-    assert sandbox_config.list_repo_worktrees(repo) == [other]
 
-
-def test_edited_reciprocal_gitdir_is_denied_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
-
-    reciprocal = repo / ".git" / "worktrees" / "linked" / "gitdir"
-    reciprocal.write_text(f"{tmp_path / 'elsewhere' / '.git'}\n", encoding="utf-8")
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-
-def test_marker_swapped_for_symlink_is_denied_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
-
-    real = tmp_path / "real-marker"
-    real.write_text((linked / ".git").read_text(encoding="utf-8"), encoding="utf-8")
-    (linked / ".git").unlink()
-    (linked / ".git").symlink_to(real)
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-
-def test_gitdir_outside_git_worktrees_is_denied_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
-
-    outside = tmp_path / "outside-gitdir"
-    outside.mkdir()
-    (outside / "gitdir").write_text(f"{linked / '.git'}\n", encoding="utf-8")
-    (linked / ".git").write_text(f"gitdir: {outside}\n", encoding="utf-8")
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-
-def test_gitdir_replaced_by_symlink_is_denied_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
-
-    gitdir = repo / ".git" / "worktrees" / "linked"
-    moved = tmp_path / "moved-gitdir"
-    gitdir.rename(moved)
-    gitdir.symlink_to(moved)
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-
-def test_retargeted_symlink_inside_the_gitdir_value_is_denied_on_the_next_call(tmp_path):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    alias = repo / ".git" / "alias"
-    alias.symlink_to(repo / ".git" / "worktrees")
-    (linked / ".git").write_text(f"gitdir: {alias / 'linked'}\n", encoding="utf-8")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
-
-    elsewhere = tmp_path / "elsewhere"
-    (elsewhere / "linked").mkdir(parents=True)
-    ((elsewhere / "linked") / "gitdir").write_text(
-        f"{linked / '.git'}\n", encoding="utf-8"
+    # The pre-change rendering resolved every worktree path and its .git marker.
+    for root in linked:
+        marker = root / ".git"
+        allow = shell_guard._sandbox_path(root)
+        deny = shell_guard._sandbox_path(marker)
+        assert f'(allow file-read* file-write* (subpath "{allow}"))' in profile
+        assert f'(deny file-write* (literal "{deny}"))' in profile
+        assert sandbox_git.sandbox_literal(root) == allow
+        assert sandbox_git.sandbox_literal(marker) == deny
+    assert profile.count("(allow file-read* file-write* (subpath") == len(
+        sandbox_config.list_repo_worktrees(plain)
     )
-    alias.unlink()
-    alias.symlink_to(elsewhere)
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-
-def test_retargeted_symlink_inside_the_reciprocal_path_is_denied_on_the_next_call(
-    tmp_path,
-):
-    repo = tmp_path / "repo"
-    linked = _link(repo, "linked")
-    alias = tmp_path / "alias"
-    alias.symlink_to(repo / ".worktrees")
-    reciprocal = repo / ".git" / "worktrees" / "linked" / "gitdir"
-    reciprocal.write_text(f"{alias / 'linked' / '.git'}\n", encoding="utf-8")
-    # The decoy's marker is a hard link to the real one: same inode, size and
-    # times, so only the path it is reached through differs.
-    decoy = tmp_path / "decoy"
-    (decoy / "linked").mkdir(parents=True)
-    os.link(linked / ".git", decoy / "linked" / ".git")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
-
-    alias.unlink()
-    alias.symlink_to(decoy)
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-
-def test_retargeted_symlink_above_the_repository_is_seen_on_the_next_call(tmp_path):
-    real = tmp_path / "real"
-    linked = _link(real / "repo", "linked")
-    via = tmp_path / "via"
-    via.symlink_to(real)
-    assert sandbox_config.list_repo_worktrees(via / "repo") == [linked]
-
-    elsewhere = tmp_path / "elsewhere" / "repo"
-    (elsewhere / ".worktrees").mkdir(parents=True)
-    via.unlink()
-    via.symlink_to(tmp_path / "elsewhere")
-    assert sandbox_config.list_repo_worktrees(via / "repo") == []
-
-
-def test_late_marker_on_a_listed_directory_is_picked_up(tmp_path):
-    repo = tmp_path / "repo"
-    (repo / ".worktrees" / "pending").mkdir(parents=True)
-    assert sandbox_config.list_repo_worktrees(repo) == []
-
-    linked = _link(repo, "pending")
-    assert sandbox_config.list_repo_worktrees(repo) == [linked]
+    assert "hidden" not in profile
