@@ -627,6 +627,10 @@ async fn remote_pair(
     Ok(RemotePairResponse::Success { ok: true, name: paired.name })
 }
 
+fn saved_proxy_origin_allows(remote: Option<&remote_config::RemoteRecord>, actual: &str) -> bool {
+    remote.is_some_and(|saved| actual.trim_end_matches('/') == format!("http://127.0.0.1:{}", saved.proxy_port))
+}
+
 #[tauri::command]
 fn disconnect_remote(
     app: tauri::AppHandle,
@@ -635,10 +639,9 @@ fn disconnect_remote(
     webview: tauri::Webview,
 ) -> Result<(), String> {
     let app_dir = default_app_dir(&app)?;
-    let saved = remote_config::load_remote(&app_dir)?.ok_or("no remote connection is saved")?;
-    let expected = format!("http://127.0.0.1:{}", saved.proxy_port);
+    let saved = remote_config::load_remote(&app_dir)?;
     let actual = webview.url().map_err(|error| format!("could not read calling origin: {error}"))?;
-    if actual.as_str().trim_end_matches('/') != expected {
+    if !saved_proxy_origin_allows(saved.as_ref(), actual.as_str()) {
         return Err("disconnect_remote is allowed only from the saved proxy origin".into());
     }
     if let Some(proxy) = remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")?.take() {
@@ -1015,6 +1018,21 @@ mod tests {
     use super::*;
     use base64::Engine;
     use std::fs;
+
+    #[test]
+    fn disconnect_accepts_only_the_current_saved_proxy_origin() {
+        let remote = remote_config::RemoteRecord {
+            locator: remote_config::Locator::Address { host: "192.168.1.20".into(), port: 47901 },
+            trust: remote_config::RemoteTrust::System,
+            name: "Studio".into(),
+            proxy_port: 47911,
+        };
+        assert!(saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47911"));
+        assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47912"));
+        assert!(!saved_proxy_origin_allows(Some(&remote), "https://127.0.0.1:47911"));
+        assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47895"));
+        assert!(!saved_proxy_origin_allows(None, "http://127.0.0.1:47911"));
+    }
 
     #[test]
     fn local_requests_name_the_port_the_backend_guard_requires() {
