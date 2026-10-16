@@ -136,6 +136,79 @@ def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     assert stat.S_IMODE(database.stat().st_mode) == 0o600
 
 
+def _adoptable_state(tmp_path, stored: dict[str, str]) -> Path:
+    """A state root whose one values file holds ``stored`` (entry name -> value), as the key store writes it."""
+    import json
+
+    state = tmp_path / "state"
+    (state / "keys").mkdir(parents=True)
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute(
+            "create table key_store_entries (name text primary key, created_at text not null, value_ref text)"
+        )
+        values = {}
+        for name, value in stored.items():
+            reference = f"{name}.0123456789abcdef"
+            values[reference] = value
+            connection.execute(
+                "insert into key_store_entries values (?, 'now', ?)", (name, reference)
+            )
+        # A row with no value, and a leftover from the key store's temporary file.
+        connection.execute("insert into key_store_entries values ('provider-groq', 'now', null)")
+    (state / "keys" / "values.json").write_text(json.dumps(values))
+    (state / "keys" / ".values.json.deadbeef.tmp").write_text("{}")
+    return state
+
+
+def test_adoption_preflight_names_the_stored_keys_it_misses_in_the_single_values_file(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {"provider-openai": "stored-openai-value"})
+
+    with pytest.raises(snapshots.AdoptionRefused) as refused:
+        snapshots.check_adoption_preflight(state, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"])
+
+    message = str(refused.value)
+    assert "ANTHROPIC_API_KEY" in message
+    assert "OPENAI_API_KEY" not in message
+    assert "stored-openai-value" not in message
+
+
+def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(
+        tmp_path, {"provider-openai": "stored-openai-value", "provider-anthropic": "stored-anthropic-value"}
+    )
+    monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 0)
+
+    snapshots.check_adoption_preflight(state, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
+    assert snapshots.preflight_main([str(state), "OPENAI_API_KEY"]) == 0
+
+
+def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_path, monkeypatch, capsys):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 1 << 60)
+
+    assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
+    assert "not enough free space" in capsys.readouterr().err
+    assert not (state / "backups").exists()
+
+
+def test_a_failed_snapshot_copy_leaves_no_partial_backup_behind(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+
+    def full_disk(source, destination):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(snapshots, "_copy_entry", full_disk)
+
+    with pytest.raises(OSError):
+        snapshots.create_adoption_snapshot(state)
+
+    assert list((state / "backups").iterdir()) == []
+
+
 def test_default_state_root_is_the_state_child_of_the_app_folder_in_the_app(tmp_path):
     paths = _platform_paths()
 

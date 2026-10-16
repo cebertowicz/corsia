@@ -45,41 +45,80 @@ pub struct Plan {
 pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall, String> {
     let value = plist::Value::from_file(plist_path)
         .map_err(|error| format!("could not read source service plist: {error}"))?;
-    let root = value.as_dictionary().ok_or("source service plist is not a dictionary")?;
+    let root = value
+        .as_dictionary()
+        .ok_or("source service plist is not a dictionary")?;
     if root.get("Label").and_then(plist::Value::as_string) != Some("com.corsia.prod") {
         return Err("source service plist is not the CORSIA production service".into());
     }
-    let environment = root.get("EnvironmentVariables").and_then(plist::Value::as_dictionary)
+    let environment = root
+        .get("EnvironmentVariables")
+        .and_then(plist::Value::as_dictionary)
         .ok_or("source service plist has no environment")?;
-    let working_directory = root.get("WorkingDirectory").and_then(plist::Value::as_string)
-        .map(PathBuf::from).ok_or("source service plist has no working directory")?;
-    let python = root.get("ProgramArguments").and_then(plist::Value::as_array)
-        .and_then(|arguments| arguments.first()).and_then(plist::Value::as_string)
-        .map(PathBuf::from).ok_or("source service plist has no Python executable")?;
-    let text = |name: &str| environment.get(name).and_then(plist::Value::as_string)
-        .filter(|value| !value.is_empty()).map(PathBuf::from);
-    let workspace = text("CORSIA_WORKSPACE").or_else(|| {
-        fs::read_to_string(home.join(".corsia/config.json")).ok().and_then(|raw| {
-            serde_json::from_str::<serde_json::Value>(&raw).ok()?.get("workspace")?.as_str().map(PathBuf::from)
+    let working_directory = root
+        .get("WorkingDirectory")
+        .and_then(plist::Value::as_string)
+        .map(PathBuf::from)
+        .ok_or("source service plist has no working directory")?;
+    let python = root
+        .get("ProgramArguments")
+        .and_then(plist::Value::as_array)
+        .and_then(|arguments| arguments.first())
+        .and_then(plist::Value::as_string)
+        .map(PathBuf::from)
+        .ok_or("source service plist has no Python executable")?;
+    let text = |name: &str| {
+        environment
+            .get(name)
+            .and_then(plist::Value::as_string)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let workspace = text("CORSIA_WORKSPACE")
+        .or_else(|| {
+            fs::read_to_string(home.join(".corsia/config.json"))
+                .ok()
+                .and_then(|raw| {
+                    serde_json::from_str::<serde_json::Value>(&raw)
+                        .ok()?
+                        .get("workspace")?
+                        .as_str()
+                        .map(PathBuf::from)
+                })
         })
-    }).ok_or("source service plist has no workspace")?;
+        .ok_or("source service plist has no workspace")?;
     let state = text("CORSIA_STATE_DIR").unwrap_or_else(|| workspace.join(".corsia"));
-    let port = environment.get("BACKEND_PORT").and_then(plist::Value::as_string)
-        .and_then(|value| value.parse().ok()).filter(|port: &u16| *port != 0)
+    let port = environment
+        .get("BACKEND_PORT")
+        .and_then(plist::Value::as_string)
+        .and_then(|value| value.parse().ok())
+        .filter(|port: &u16| *port != 0)
         .ok_or("source service plist has no valid port")?;
-    let source_root = working_directory.parent().ok_or("source service backend has no checkout root")?;
+    let source_root = working_directory
+        .parent()
+        .ok_or("source service backend has no checkout root")?;
     Ok(SourceInstall {
-        plist: plist_path.to_path_buf(), config: home.join(".corsia/config.json"),
-        lifecycle_script: source_root.join("scripts/corsia"), python,
-        env_file: home.join(".corsia/.env"), legacy_v1: state == workspace.join(".corsia"),
-        plist_provider_key_names: environment.keys()
-            .filter(|name| is_provider_key_name(name)).cloned().collect(),
-        state, workspace, port,
+        plist: plist_path.to_path_buf(),
+        config: home.join(".corsia/config.json"),
+        lifecycle_script: source_root.join("scripts/corsia"),
+        python,
+        env_file: home.join(".corsia/.env"),
+        legacy_v1: state == workspace.join(".corsia"),
+        plist_provider_key_names: environment
+            .keys()
+            .filter(|name| is_provider_key_name(name))
+            .cloned()
+            .collect(),
+        state,
+        workspace,
+        port,
     })
 }
 
 impl Plan {
-    pub fn adopted_dir(&self) -> PathBuf { self.app_dir.join("adopted") }
+    pub fn adopted_dir(&self) -> PathBuf {
+        self.app_dir.join("adopted")
+    }
 
     /// All refusal conditions run before the source service starts draining.
     pub fn preflight(&self, supported_schema: u32) -> Result<(), String> {
@@ -91,21 +130,23 @@ impl Plan {
         {
             return Err("your data is newer than this app".into());
         }
-        let expected_keys = provider_key_names(&self.source.env_file, &self.source.plist_provider_key_names)?;
-        let stored_keys = key_store_count(&self.source.state.join("keys"))?;
-        if expected_keys.len() > stored_keys {
-            return Err(format!(
-                "{}/{} provider keys are stored in CORSIA. Move the missing provider keys into CORSIA before adopting; source .env and plist values were not read.",
-                stored_keys, expected_keys.len()
-            ));
-        }
         Ok(())
+    }
+
+    /// The variable names the source install sets for provider access, for the
+    /// backend to compare with what it has stored. Names only.
+    pub fn expected_key_names(&self) -> Result<BTreeSet<String>, String> {
+        provider_key_names(&self.source.env_file, &self.source.plist_provider_key_names)
     }
 }
 
 /// Production owns the launchd and database effects. Unit tests provide a
 /// fake, which makes the rollback order observable without invoking them.
 pub trait Lifecycle {
+    /// Ask the source backend whether adoption can finish: every expected
+    /// provider key is stored (names compared, nothing else read) and the disk
+    /// holds the backup plus a reserve. Runs before anything is drained.
+    fn check_ready(&mut self, state: &Path, key_names: &BTreeSet<String>) -> Result<(), String>;
     /// Start an exact authenticated drain operation. It has not released the
     /// source service yet; the caller owns polling and cancellation.
     fn begin_drain(&mut self) -> Result<DrainStatus, String>;
@@ -140,7 +181,14 @@ pub struct DrainStatus {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
-enum Step { Stopped, BackedUp, MetadataMoved, ServiceWritten, NewStarted, Registered }
+enum Step {
+    Stopped,
+    BackedUp,
+    MetadataMoved,
+    ServiceWritten,
+    NewStarted,
+    Registered,
+}
 
 #[derive(Deserialize, Serialize)]
 struct Journal {
@@ -149,34 +197,70 @@ struct Journal {
     snapshot: Option<PathBuf>,
 }
 
-fn journal_path(plan: &Plan) -> PathBuf { plan.adopted_dir().join(JOURNAL) }
+fn journal_path(plan: &Plan) -> PathBuf {
+    plan.adopted_dir().join(JOURNAL)
+}
+
+/// Replace `path` so a crash leaves either the old contents or the new, never a
+/// partial file: a temp file beside it is synced, renamed over it, and the
+/// folder is synced. A temp file left by an earlier crash is discarded first,
+/// so it can never block a retry.
+fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let directory = path.parent().ok_or("path has no folder")?;
+    fs::create_dir_all(directory).map_err(io)?;
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(".tmp");
+    let temporary = PathBuf::from(temporary);
+    match fs::remove_file(&temporary) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(io(error)),
+    }
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(io)?;
+    file.write_all(contents)
+        .and_then(|_| file.sync_all())
+        .map_err(io)?;
+    fs::rename(&temporary, path).map_err(io)?;
+    File::open(directory)
+        .and_then(|folder| folder.sync_all())
+        .map_err(io)
+}
 
 fn write_journal(plan: &Plan, step: Step, snapshot: Option<&Path>) -> Result<(), String> {
-    fs::create_dir_all(plan.adopted_dir()).map_err(io)?;
-    let mut file = OpenOptions::new().create(true).truncate(true).write(true)
-        .open(journal_path(plan)).map_err(io)?;
-    let journal = Journal { step, source: plan.source.clone(), snapshot: snapshot.map(Path::to_path_buf) };
-    file.write_all(serde_json::to_string(&journal).map_err(|error| error.to_string())?.as_bytes())
-        .and_then(|_| file.sync_all()).map_err(io)?;
-    File::open(plan.adopted_dir()).and_then(|directory| directory.sync_all()).map_err(io)
+    let journal = Journal {
+        step,
+        source: plan.source.clone(),
+        snapshot: snapshot.map(Path::to_path_buf),
+    };
+    write_atomically(
+        &journal_path(plan),
+        serde_json::to_string(&journal)
+            .map_err(|error| error.to_string())?
+            .as_bytes(),
+    )
 }
 
 fn move_to(source: &Path, destination: &Path) -> Result<(), String> {
-    if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(io)?; }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(io)?;
+    }
     fs::rename(source, destination).map_err(io)
 }
 
 fn write_service(plan: &Plan) -> Result<(), String> {
-    fs::create_dir_all(&plan.app_dir).map_err(io)?;
-    let temporary = plan.app_dir.join("service.json.tmp");
-    let mut file = OpenOptions::new().create_new(true).write(true).open(&temporary).map_err(io)?;
     let payload = serde_json::json!({
         "state_dir": plan.source.state,
         "workspace": plan.source.workspace,
         "port": plan.source.port,
     });
-    file.write_all(payload.to_string().as_bytes()).and_then(|_| file.sync_all()).map_err(io)?;
-    fs::rename(temporary, plan.app_dir.join("service.json")).map_err(io)
+    write_atomically(
+        &plan.app_dir.join("service.json"),
+        payload.to_string().as_bytes(),
+    )
 }
 
 fn skipped_env_names(path: &Path) -> Result<Vec<String>, String> {
@@ -185,30 +269,33 @@ fn skipped_env_names(path: &Path) -> Result<Vec<String>, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
         Err(error) => return Err(io(error)),
     };
-    Ok(contents.lines().filter_map(|line| {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { return None; }
-        line.split_once('=').map(|(name, _)| name.trim()).filter(|name| !name.is_empty()).map(str::to_owned)
-    }).collect())
+    Ok(contents
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            line.split_once('=')
+                .map(|(name, _)| name.trim())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+        })
+        .collect())
 }
 
-fn is_provider_key_name(name: &str) -> bool { name.ends_with("_API_KEY") }
+fn is_provider_key_name(name: &str) -> bool {
+    name.ends_with("_API_KEY")
+}
 
 fn provider_key_names(path: &Path, plist_names: &[String]) -> Result<BTreeSet<String>, String> {
     let mut names: BTreeSet<String> = plist_names.iter().cloned().collect();
-    names.extend(skipped_env_names(path)?.into_iter().filter(|name| is_provider_key_name(name)));
+    names.extend(
+        skipped_env_names(path)?
+            .into_iter()
+            .filter(|name| is_provider_key_name(name)),
+    );
     Ok(names)
-}
-
-fn key_store_count(root: &Path) -> Result<usize, String> {
-    if !root.exists() { return Ok(0); }
-    let mut count = 0;
-    for entry in fs::read_dir(root).map_err(io)? {
-        let path = entry.map_err(io)?.path();
-        if path.is_dir() { count += key_store_count(&path)?; }
-        else { count += 1; }
-    }
-    Ok(count)
 }
 
 /// Applies the durable adoption order. The source state root is never renamed:
@@ -219,7 +306,11 @@ pub fn adopt(
     supported_schema: u32,
     cancel_requested: &AtomicBool,
 ) -> Result<(), String> {
-    plan.preflight(supported_schema).map_err(|error| format!("adoption refused before changes: {error}"))?;
+    plan.preflight(supported_schema)
+        .map_err(|error| format!("adoption refused before changes: {error}"))?;
+    lifecycle
+        .check_ready(&plan.source.state, &plan.expected_key_names()?)
+        .map_err(|error| format!("adoption refused before changes: {error}"))?;
     let started = lifecycle.begin_drain()?;
     let operation_id = started.operation_id.clone();
     let mut status = started;
@@ -230,9 +321,14 @@ pub fn adopt(
         }
         if status.operation_id != operation_id || !status.active {
             let _ = lifecycle.cancel_drain(&operation_id);
-            return Err("adoption drain changed before completion; the source service is still running".into());
+            return Err(
+                "adoption drain changed before completion; the source service is still running"
+                    .into(),
+            );
         }
-        if status.active_processes == 0 { break; }
+        if status.active_processes == 0 {
+            break;
+        }
         thread::sleep(Duration::from_millis(250));
         status = lifecycle.drain_status(&operation_id)?;
     }
@@ -240,23 +336,41 @@ pub fn adopt(
     if let Err(error) = lifecycle.bootout_old() {
         return match lifecycle.start_old() {
             Ok(()) => Err(format!("{error}; the source service was restarted")),
-            Err(restart_error) => Err(format!("{error}; the source service could not be restarted: {restart_error}")),
+            Err(restart_error) => Err(format!(
+                "{error}; the source service could not be restarted: {restart_error}"
+            )),
         };
     }
     write_journal(plan, Step::Stopped, None)?;
-    let snapshot = match lifecycle.backup(&plan.source.state) { Ok(snapshot) => snapshot, Err(error) => return rollback(plan, lifecycle, error, None) };
+    let snapshot = match lifecycle.backup(&plan.source.state) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return rollback(plan, lifecycle, error, None),
+    };
     write_journal(plan, Step::BackedUp, Some(&snapshot))?;
-    if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) { return rollback(plan, lifecycle, error, None); }
+    if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
+        return rollback(plan, lifecycle, error, None);
+    }
     if plan.source.config.exists() {
-        if let Err(error) = move_to(&plan.source.config, &plan.adopted_dir().join("config.json")) { return rollback(plan, lifecycle, error, None); }
+        if let Err(error) = move_to(&plan.source.config, &plan.adopted_dir().join("config.json")) {
+            return rollback(plan, lifecycle, error, None);
+        }
     }
     if plan.source.env_file.exists() {
         let names = skipped_env_names(&plan.source.env_file)?;
-        if let Err(error) = move_to(&plan.source.env_file, &plan.adopted_dir().join("service.env")) { return rollback(plan, lifecycle, error, None); }
-        if !names.is_empty() { log::info!("adoption skipped source .env keys: {}", names.join(", ")); }
+        if let Err(error) = move_to(
+            &plan.source.env_file,
+            &plan.adopted_dir().join("service.env"),
+        ) {
+            return rollback(plan, lifecycle, error, None);
+        }
+        if !names.is_empty() {
+            log::info!("adoption skipped source .env keys: {}", names.join(", "));
+        }
     }
     write_journal(plan, Step::MetadataMoved, Some(&snapshot))?;
-    if let Err(error) = write_service(plan) { return rollback(plan, lifecycle, error, None); }
+    if let Err(error) = write_service(plan) {
+        return rollback(plan, lifecycle, error, None);
+    }
     write_journal(plan, Step::ServiceWritten, Some(&snapshot))?;
     if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.port, &plan.app_dir) {
         return rollback(plan, lifecycle, error, Some(&snapshot));
@@ -272,13 +386,21 @@ pub fn adopt(
 
 fn restore_files(plan: &Plan) -> Result<(), String> {
     let service = plan.app_dir.join("service.json");
-    if service.exists() { fs::remove_file(service).map_err(io)?; }
+    if service.exists() {
+        fs::remove_file(service).map_err(io)?;
+    }
     let old_plist = plan.adopted_dir().join(PLIST);
-    if old_plist.exists() { move_to(&old_plist, &plan.source.plist)?; }
+    if old_plist.exists() {
+        move_to(&old_plist, &plan.source.plist)?;
+    }
     let old_config = plan.adopted_dir().join("config.json");
-    if old_config.exists() { move_to(&old_config, &plan.source.config)?; }
+    if old_config.exists() {
+        move_to(&old_config, &plan.source.config)?;
+    }
     let old_env = plan.adopted_dir().join("service.env");
-    if old_env.exists() { move_to(&old_env, &plan.source.env_file)?; }
+    if old_env.exists() {
+        move_to(&old_env, &plan.source.env_file)?;
+    }
     Ok(())
 }
 
@@ -286,38 +408,80 @@ fn restore_files(plan: &Plan) -> Result<(), String> {
 /// start is always stopped and restored before the source service starts.
 pub fn interrupted_plan(app_dir: &Path) -> Result<Option<Plan>, String> {
     let path = app_dir.join("adopted").join(JOURNAL);
-    let raw = match fs::read_to_string(&path) { Ok(raw) => raw, Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None), Err(error) => return Err(io(error)) };
-    let journal: Journal = serde_json::from_str(&raw).map_err(|error| format!("adoption journal is unreadable: {error}"))?;
-    if journal.step == Step::Registered { Ok(None) } else { Ok(Some(Plan { source: journal.source, app_dir: app_dir.to_path_buf() })) }
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(io(error)),
+    };
+    let journal: Journal = serde_json::from_str(&raw)
+        .map_err(|error| format!("adoption journal is unreadable: {error}"))?;
+    if journal.step == Step::Registered {
+        Ok(None)
+    } else {
+        Ok(Some(Plan {
+            source: journal.source,
+            app_dir: app_dir.to_path_buf(),
+        }))
+    }
 }
 
 pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), String> {
     let journal = fs::read_to_string(journal_path(plan)).map_err(io)?;
-    let journal: Journal = serde_json::from_str(&journal).map_err(|error| format!("adoption journal is unreadable: {error}"))?;
-    if journal.step == Step::Registered { return Ok(()); }
-    let snapshot = if journal.step >= Step::ServiceWritten { Some(journal.snapshot.as_deref().ok_or("interrupted adoption has no backup snapshot")?) } else { None };
-    rollback(plan, lifecycle, "recovering interrupted adoption".into(), snapshot).map(|_| ())
+    let journal: Journal = serde_json::from_str(&journal)
+        .map_err(|error| format!("adoption journal is unreadable: {error}"))?;
+    if journal.step == Step::Registered {
+        return Ok(());
+    }
+    let snapshot = if journal.step >= Step::ServiceWritten {
+        Some(
+            journal
+                .snapshot
+                .as_deref()
+                .ok_or("interrupted adoption has no backup snapshot")?,
+        )
+    } else {
+        None
+    };
+    rollback(
+        plan,
+        lifecycle,
+        "recovering interrupted adoption".into(),
+        snapshot,
+    )
+    .map(|_| ())
 }
 
-fn rollback(plan: &Plan, lifecycle: &mut impl Lifecycle, cause: String, snapshot: Option<&Path>) -> Result<(), String> {
+fn rollback(
+    plan: &Plan,
+    lifecycle: &mut impl Lifecycle,
+    cause: String,
+    snapshot: Option<&Path>,
+) -> Result<(), String> {
     if let Some(snapshot) = snapshot {
-        lifecycle.stop_new(&plan.source.state, plan.source.port)
+        lifecycle
+            .stop_new(&plan.source.state, plan.source.port)
             .map_err(|error| format!("{cause}; app service could not be stopped: {error}"))?;
         lifecycle.restore_backup(&plan.source.state, snapshot)
             .map_err(|error| format!("{cause}; backup could not be restored, so the old install was not restarted: {error}"))?;
     }
     restore_files(plan)?;
-    lifecycle.start_old().map_err(|error| format!("{cause}; old install could not be restored: {error}"))?;
+    lifecycle
+        .start_old()
+        .map_err(|error| format!("{cause}; old install could not be restored: {error}"))?;
     Err(format!("{cause}; the old install was restored"))
 }
 
 fn schema_version(database: &Path) -> Option<u32> {
     let bytes = fs::read(database).ok()?;
-    if bytes.len() < 64 || &bytes[..16] != b"SQLite format 3\0" { return None; }
+    if bytes.len() < 64 || &bytes[..16] != b"SQLite format 3\0" {
+        return None;
+    }
     Some(u32::from_be_bytes(bytes[60..64].try_into().ok()?))
 }
 
-fn io(error: std::io::Error) -> String { error.to_string() }
+fn io(error: std::io::Error) -> String {
+    error.to_string()
+}
 
 #[cfg(test)]
 mod tests {
@@ -325,78 +489,212 @@ mod tests {
     use std::collections::VecDeque;
     use tempfile::TempDir;
 
-    struct Fake { events: Vec<&'static str>, fail: Option<&'static str>, statuses: VecDeque<DrainStatus>, real_state: bool }
+    struct Fake {
+        ready_asked: Vec<BTreeSet<String>>,
+        events: Vec<&'static str>,
+        fail: Option<&'static str>,
+        statuses: VecDeque<DrainStatus>,
+        real_state: bool,
+    }
     impl Fake {
-        fn status(&mut self) -> DrainStatus { self.statuses.pop_front().unwrap_or(DrainStatus { operation_id: "a".into(), active_processes: 0, active: true }) }
+        fn status(&mut self) -> DrainStatus {
+            self.statuses.pop_front().unwrap_or(DrainStatus {
+                operation_id: "a".into(),
+                active_processes: 0,
+                active: true,
+            })
+        }
     }
 
     fn copy_state(from: &Path, to: &Path) {
         fs::create_dir_all(to).unwrap();
         for entry in fs::read_dir(from).unwrap() {
-            let path = entry.unwrap().path(); let name = path.file_name().unwrap().to_owned();
-            if name == "backups" { continue; }
-            if path.is_dir() { copy_state(&path, &to.join(&name)); } else { fs::copy(&path, to.join(&name)).unwrap(); }
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_owned();
+            if name == "backups" {
+                continue;
+            }
+            if path.is_dir() {
+                copy_state(&path, &to.join(&name));
+            } else {
+                fs::copy(&path, to.join(&name)).unwrap();
+            }
         }
     }
     impl Lifecycle for Fake {
-        fn begin_drain(&mut self) -> Result<DrainStatus, String> { self.events.push("begin_drain"); Ok(self.status()) }
-        fn drain_status(&mut self, _: &str) -> Result<DrainStatus, String> { self.events.push("drain_status"); Ok(self.status()) }
-        fn cancel_drain(&mut self, _: &str) -> Result<(), String> { self.events.push("cancel_drain"); Ok(()) }
-        fn complete_drain(&mut self, _: &str) -> Result<(), String> { self.events.push("complete_drain"); Ok(()) }
-        fn bootout_old(&mut self) -> Result<(), String> { self.events.push("bootout_old"); if self.fail == Some("bootout_old") { Err("bootout failed".into()) } else { Ok(()) } }
+        fn check_ready(&mut self, _: &Path, key_names: &BTreeSet<String>) -> Result<(), String> {
+            self.ready_asked.push(key_names.clone());
+            if self.fail == Some("check_ready") {
+                Err("OPENAI_API_KEY is not stored in CORSIA.".into())
+            } else {
+                Ok(())
+            }
+        }
+        fn begin_drain(&mut self) -> Result<DrainStatus, String> {
+            self.events.push("begin_drain");
+            Ok(self.status())
+        }
+        fn drain_status(&mut self, _: &str) -> Result<DrainStatus, String> {
+            self.events.push("drain_status");
+            Ok(self.status())
+        }
+        fn cancel_drain(&mut self, _: &str) -> Result<(), String> {
+            self.events.push("cancel_drain");
+            Ok(())
+        }
+        fn complete_drain(&mut self, _: &str) -> Result<(), String> {
+            self.events.push("complete_drain");
+            Ok(())
+        }
+        fn bootout_old(&mut self) -> Result<(), String> {
+            self.events.push("bootout_old");
+            if self.fail == Some("bootout_old") {
+                Err("bootout failed".into())
+            } else {
+                Ok(())
+            }
+        }
         fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
             self.events.push("backup");
-            if self.fail == Some("backup") { return Err("backup failed".into()); }
+            if self.fail == Some("backup") {
+                return Err("backup failed".into());
+            }
             let snapshot = state.join("backups/fake-adoption");
-            if self.real_state { copy_state(state, &snapshot); }
+            if self.real_state {
+                copy_state(state, &snapshot);
+            }
             Ok(snapshot)
         }
         fn start_new(&mut self, state: &Path, _: u16, _: &Path) -> Result<(), String> {
             self.events.push("start_new");
-            if self.real_state { fs::write(state.join("counts.txt"), "migrated").unwrap(); }
-            if matches!(self.fail, Some("start_new") | Some("start_new_restore_backup")) { Err("new start failed".into()) } else { Ok(()) }
+            if self.real_state {
+                fs::write(state.join("counts.txt"), "migrated").unwrap();
+            }
+            if matches!(
+                self.fail,
+                Some("start_new") | Some("start_new_restore_backup")
+            ) {
+                Err("new start failed".into())
+            } else {
+                Ok(())
+            }
         }
-        fn stop_new(&mut self, _: &Path, _: u16) -> Result<(), String> { self.events.push("stop_new"); if self.fail == Some("stop_new") { Err("new stop failed".into()) } else { Ok(()) } }
+        fn stop_new(&mut self, _: &Path, _: u16) -> Result<(), String> {
+            self.events.push("stop_new");
+            if self.fail == Some("stop_new") {
+                Err("new stop failed".into())
+            } else {
+                Ok(())
+            }
+        }
         fn restore_backup(&mut self, state: &Path, snapshot: &Path) -> Result<(), String> {
             self.events.push("restore_backup");
-            if matches!(self.fail, Some("restore_backup") | Some("start_new_restore_backup")) { return Err("restore failed".into()); }
-            if self.real_state { copy_state(snapshot, state); }
+            if matches!(
+                self.fail,
+                Some("restore_backup") | Some("start_new_restore_backup")
+            ) {
+                return Err("restore failed".into());
+            }
+            if self.real_state {
+                copy_state(snapshot, state);
+            }
             Ok(())
         }
-        fn start_old(&mut self) -> Result<(), String> { self.events.push("start_old"); Ok(()) }
+        fn start_old(&mut self) -> Result<(), String> {
+            self.events.push("start_old");
+            Ok(())
+        }
     }
 
-    fn fake(fail: Option<&'static str>) -> Fake { Fake { events: vec![], fail, statuses: VecDeque::new(), real_state: false } }
-    fn uncancelled() -> AtomicBool { AtomicBool::new(false) }
+    fn fake(fail: Option<&'static str>) -> Fake {
+        Fake {
+            ready_asked: vec![],
+            events: vec![],
+            fail,
+            statuses: VecDeque::new(),
+            real_state: false,
+        }
+    }
+    fn uncancelled() -> AtomicBool {
+        AtomicBool::new(false)
+    }
 
     fn plan(legacy_v1: bool) -> (TempDir, Plan) {
-        let home = tempfile::Builder::new().prefix("corsia-adoption-").tempdir_in("/private/tmp").unwrap();
+        let home = tempfile::Builder::new()
+            .prefix("corsia-adoption-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
         let source = home.path().join("source");
-        let state = if legacy_v1 { source.join("workspace/.corsia") } else { home.path().join("Library/Application Support/com.cebertowicz.corsia/state") };
+        let state = if legacy_v1 {
+            source.join("workspace/.corsia")
+        } else {
+            home.path()
+                .join("Library/Application Support/com.cebertowicz.corsia/state")
+        };
         fs::create_dir_all(state.join("keys")).unwrap();
         fs::write(state.join("keys/provider"), "stored").unwrap();
-        let mut database = vec![0; 64]; database[..16].copy_from_slice(b"SQLite format 3\0"); database[60..64].copy_from_slice(&1u32.to_be_bytes());
+        let mut database = vec![0; 64];
+        database[..16].copy_from_slice(b"SQLite format 3\0");
+        database[60..64].copy_from_slice(&1u32.to_be_bytes());
         fs::write(state.join("corsia.db"), database).unwrap();
-        let plist = source.join("com.corsia.prod.plist"); let config = source.join("config.json");
-        fs::create_dir_all(plist.parent().unwrap()).unwrap(); fs::write(&plist, "plist").unwrap(); fs::write(&config, "{}").unwrap();
-        let app_dir = home.path().join("Library/Application Support/CORSIA"); let env_file = home.path().join(".corsia/.env");
-        (home, Plan { source: SourceInstall { plist, config, state, workspace: source.join("workspace"), port: 47_895, lifecycle_script: source.join("scripts/corsia"), python: PathBuf::from("/usr/bin/python3"), env_file, plist_provider_key_names: vec![], legacy_v1 }, app_dir })
+        let plist = source.join("com.corsia.prod.plist");
+        let config = source.join("config.json");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::write(&plist, "plist").unwrap();
+        fs::write(&config, "{}").unwrap();
+        let app_dir = home.path().join("Library/Application Support/CORSIA");
+        let env_file = home.path().join(".corsia/.env");
+        (
+            home,
+            Plan {
+                source: SourceInstall {
+                    plist,
+                    config,
+                    state,
+                    workspace: source.join("workspace"),
+                    port: 47_895,
+                    lifecycle_script: source.join("scripts/corsia"),
+                    python: PathBuf::from("/usr/bin/python3"),
+                    env_file,
+                    plist_provider_key_names: vec![],
+                    legacy_v1,
+                },
+                app_dir,
+            },
+        )
     }
 
     #[test]
     fn adopts_v2_in_place_and_records_the_exact_state_root() {
-        let (_home, plan) = plan(false); let mut fake = fake(None); let cancelled = uncancelled();
+        let (_home, plan) = plan(false);
+        let mut fake = fake(None);
+        let cancelled = uncancelled();
         adopt(&plan, &mut fake, 1, &cancelled).unwrap();
-        let service: serde_json::Value = serde_json::from_slice(&fs::read(plan.app_dir.join("service.json")).unwrap()).unwrap();
-        assert_eq!(service["state_dir"], plan.source.state.to_string_lossy().as_ref());
+        let service: serde_json::Value =
+            serde_json::from_slice(&fs::read(plan.app_dir.join("service.json")).unwrap()).unwrap();
+        assert_eq!(
+            service["state_dir"],
+            plan.source.state.to_string_lossy().as_ref()
+        );
         assert!(plan.source.state.join("corsia.db").exists());
         assert!(plan.adopted_dir().join(PLIST).exists());
-        assert_eq!(fake.events, ["begin_drain", "complete_drain", "bootout_old", "backup", "start_new"]);
+        assert_eq!(
+            fake.events,
+            [
+                "begin_drain",
+                "complete_drain",
+                "bootout_old",
+                "backup",
+                "start_new"
+            ]
+        );
     }
 
     #[test]
     fn legacy_state_is_also_pinned_in_place() {
-        let (_home, plan) = plan(true); let mut fake = fake(None); let cancelled = uncancelled();
+        let (_home, plan) = plan(true);
+        let mut fake = fake(None);
+        let cancelled = uncancelled();
         adopt(&plan, &mut fake, 1, &cancelled).unwrap();
         assert!(plan.source.state.join("corsia.db").exists());
         assert!(!plan.app_dir.join("state").exists());
@@ -404,23 +702,62 @@ mod tests {
 
     #[test]
     fn post_start_failure_stops_new_restores_backup_before_old_start() {
-        let (_home, plan) = plan(false); let mut fake = fake(Some("start_new")); let cancelled = uncancelled();
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("restored"));
-        assert_eq!(fake.events, ["begin_drain", "complete_drain", "bootout_old", "backup", "start_new", "stop_new", "restore_backup", "start_old"]);
-        assert!(plan.source.plist.exists()); assert!(plan.source.config.exists());
+        let (_home, plan) = plan(false);
+        let mut fake = fake(Some("start_new"));
+        let cancelled = uncancelled();
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("restored"));
+        assert_eq!(
+            fake.events,
+            [
+                "begin_drain",
+                "complete_drain",
+                "bootout_old",
+                "backup",
+                "start_new",
+                "stop_new",
+                "restore_backup",
+                "start_old"
+            ]
+        );
+        assert!(plan.source.plist.exists());
+        assert!(plan.source.config.exists());
     }
 
     #[test]
     fn backup_restore_failure_never_starts_the_old_service() {
-        let (_home, plan) = plan(false); let mut fake = fake(Some("start_new_restore_backup")); let cancelled = uncancelled();
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("not restarted"));
-        assert_eq!(fake.events, ["begin_drain", "complete_drain", "bootout_old", "backup", "start_new", "stop_new", "restore_backup"]);
+        let (_home, plan) = plan(false);
+        let mut fake = fake(Some("start_new_restore_backup"));
+        let cancelled = uncancelled();
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("not restarted"));
+        assert_eq!(
+            fake.events,
+            [
+                "begin_drain",
+                "complete_drain",
+                "bootout_old",
+                "backup",
+                "start_new",
+                "stop_new",
+                "restore_backup"
+            ]
+        );
     }
 
     #[test]
     fn recovery_after_service_write_restores_before_starting_old() {
-        let (_home, plan) = plan(false); fs::create_dir_all(plan.adopted_dir()).unwrap();
-        move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap(); write_journal(&plan, Step::ServiceWritten, Some(&plan.source.state.join("backups/fake-adoption"))).unwrap();
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
+        write_journal(
+            &plan,
+            Step::ServiceWritten,
+            Some(&plan.source.state.join("backups/fake-adoption")),
+        )
+        .unwrap();
         let mut fake = fake(None);
         assert!(recover(&plan, &mut fake).unwrap_err().contains("restored"));
         assert_eq!(fake.events, ["stop_new", "restore_backup", "start_old"]);
@@ -428,39 +765,134 @@ mod tests {
     }
 
     #[test]
+    fn a_torn_journal_temp_beside_a_valid_journal_still_recovers() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
+        write_journal(
+            &plan,
+            Step::ServiceWritten,
+            Some(&plan.source.state.join("backups/fake-adoption")),
+        )
+        .unwrap();
+        fs::write(
+            plan.adopted_dir().join("adoption.json.tmp"),
+            b"{\"step\": \"serv",
+        )
+        .unwrap();
+        let interrupted = interrupted_plan(&plan.app_dir)
+            .unwrap()
+            .expect("the valid journal is still found");
+        let mut fake = fake(None);
+        assert!(recover(&interrupted, &mut fake)
+            .unwrap_err()
+            .contains("restored"));
+        assert_eq!(fake.events, ["stop_new", "restore_backup", "start_old"]);
+        assert!(plan.source.plist.exists());
+    }
+
+    #[test]
+    fn stale_temp_files_from_a_crash_never_block_a_retry() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        fs::write(plan.app_dir.join("service.json.tmp"), b"partial").unwrap();
+        fs::write(plan.adopted_dir().join("adoption.json.tmp"), b"partial").unwrap();
+        write_service(&plan).unwrap();
+        write_journal(&plan, Step::Stopped, None).unwrap();
+        let service: serde_json::Value =
+            serde_json::from_slice(&fs::read(plan.app_dir.join("service.json")).unwrap()).unwrap();
+        assert_eq!(service["port"], plan.source.port);
+        assert!(
+            !plan.app_dir.join("service.json.tmp").exists()
+                && !plan.adopted_dir().join("adoption.json.tmp").exists()
+        );
+        assert!(interrupted_plan(&plan.app_dir).unwrap().is_some());
+    }
+
+    #[test]
     fn bootout_failure_restarts_the_old_service_and_never_snapshots() {
-        let (_home, plan) = plan(false); let mut fake = fake(Some("bootout_old")); let cancelled = uncancelled();
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("restarted"));
-        assert_eq!(fake.events, ["begin_drain", "complete_drain", "bootout_old", "start_old"]);
+        let (_home, plan) = plan(false);
+        let mut fake = fake(Some("bootout_old"));
+        let cancelled = uncancelled();
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("restarted"));
+        assert_eq!(
+            fake.events,
+            ["begin_drain", "complete_drain", "bootout_old", "start_old"]
+        );
     }
 
     #[test]
     fn backup_failure_restores_files_and_restarts_old_without_touching_the_app() {
-        let (_home, plan) = plan(false); let mut fake = fake(Some("backup")); let cancelled = uncancelled();
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("restored"));
-        assert_eq!(fake.events, ["begin_drain", "complete_drain", "bootout_old", "backup", "start_old"]);
-        assert!(plan.source.plist.exists()); assert!(!plan.app_dir.join("service.json").exists());
+        let (_home, plan) = plan(false);
+        let mut fake = fake(Some("backup"));
+        let cancelled = uncancelled();
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("restored"));
+        assert_eq!(
+            fake.events,
+            [
+                "begin_drain",
+                "complete_drain",
+                "bootout_old",
+                "backup",
+                "start_old"
+            ]
+        );
+        assert!(plan.source.plist.exists());
+        assert!(!plan.app_dir.join("service.json").exists());
     }
 
     #[test]
     fn app_release_failure_never_restores_or_starts_the_old_service() {
-        let (_home, plan) = plan(false); let mut fake = fake(Some("stop_new"));
+        let (_home, plan) = plan(false);
+        let mut fake = fake(Some("stop_new"));
         fs::create_dir_all(plan.adopted_dir()).unwrap();
         move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
-        write_journal(&plan, Step::NewStarted, Some(&plan.source.state.join("backups/fake-adoption"))).unwrap();
-        assert!(recover(&plan, &mut fake).unwrap_err().contains("could not be stopped"));
+        write_journal(
+            &plan,
+            Step::NewStarted,
+            Some(&plan.source.state.join("backups/fake-adoption")),
+        )
+        .unwrap();
+        assert!(recover(&plan, &mut fake)
+            .unwrap_err()
+            .contains("could not be stopped"));
         assert_eq!(fake.events, ["stop_new"]);
     }
 
     #[test]
     fn every_interrupted_step_ends_with_one_old_start_and_restored_files() {
-        for step in [Step::Stopped, Step::BackedUp, Step::MetadataMoved, Step::ServiceWritten, Step::NewStarted] {
-            let (_home, plan) = plan(false); fs::create_dir_all(plan.adopted_dir()).unwrap();
-            if step >= Step::MetadataMoved { move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap(); }
-            write_journal(&plan, step, Some(&plan.source.state.join("backups/fake-adoption"))).unwrap();
+        for step in [
+            Step::Stopped,
+            Step::BackedUp,
+            Step::MetadataMoved,
+            Step::ServiceWritten,
+            Step::NewStarted,
+        ] {
+            let (_home, plan) = plan(false);
+            fs::create_dir_all(plan.adopted_dir()).unwrap();
+            if step >= Step::MetadataMoved {
+                move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
+            }
+            write_journal(
+                &plan,
+                step,
+                Some(&plan.source.state.join("backups/fake-adoption")),
+            )
+            .unwrap();
             let mut fake = fake(None);
-            assert!(recover(&plan, &mut fake).unwrap_err().contains("restored"), "{step:?}");
-            let expected: &[&str] = if step >= Step::ServiceWritten { &["stop_new", "restore_backup", "start_old"] } else { &["start_old"] };
+            assert!(
+                recover(&plan, &mut fake).unwrap_err().contains("restored"),
+                "{step:?}"
+            );
+            let expected: &[&str] = if step >= Step::ServiceWritten {
+                &["stop_new", "restore_backup", "start_old"]
+            } else {
+                &["start_old"]
+            };
             assert_eq!(fake.events, expected, "{step:?}");
             assert!(plan.source.plist.exists(), "{step:?}");
         }
@@ -469,14 +901,31 @@ mod tests {
     #[test]
     fn t9_mac_studio_shape_keeps_counts_state_path_and_sign_in_through_adoption() {
         let (_home, plan) = plan(false);
-        fs::write(plan.source.state.join("counts.txt"), "threads=12\nplans=3\nagents=5").unwrap();
-        fs::create_dir_all(plan.source.state.join("auth")).unwrap(); fs::write(plan.source.state.join("auth/session"), "signed-in").unwrap();
-        let mut fake = fake(None); fake.real_state = true; let cancelled = uncancelled();
+        fs::write(
+            plan.source.state.join("counts.txt"),
+            "threads=12\nplans=3\nagents=5",
+        )
+        .unwrap();
+        fs::create_dir_all(plan.source.state.join("auth")).unwrap();
+        fs::write(plan.source.state.join("auth/session"), "signed-in").unwrap();
+        let mut fake = fake(None);
+        fake.real_state = true;
+        let cancelled = uncancelled();
         adopt(&plan, &mut fake, 1, &cancelled).unwrap();
-        let service: serde_json::Value = serde_json::from_slice(&fs::read(plan.app_dir.join("service.json")).unwrap()).unwrap();
-        assert_eq!(service["state_dir"], plan.source.state.to_string_lossy().as_ref());
-        assert_eq!(fs::read_to_string(plan.source.state.join("auth/session")).unwrap(), "signed-in");
-        assert!(!plan.source.plist.exists(), "the old service definition moved only after adoption");
+        let service: serde_json::Value =
+            serde_json::from_slice(&fs::read(plan.app_dir.join("service.json")).unwrap()).unwrap();
+        assert_eq!(
+            service["state_dir"],
+            plan.source.state.to_string_lossy().as_ref()
+        );
+        assert_eq!(
+            fs::read_to_string(plan.source.state.join("auth/session")).unwrap(),
+            "signed-in"
+        );
+        assert!(
+            !plan.source.plist.exists(),
+            "the old service definition moved only after adoption"
+        );
     }
 
     #[test]
@@ -484,78 +933,168 @@ mod tests {
         let (_home, plan) = plan(false);
         let original = "threads=12\nplans=3\nagents=5";
         fs::write(plan.source.state.join("counts.txt"), original).unwrap();
-        fs::create_dir_all(plan.source.state.join("auth")).unwrap(); fs::write(plan.source.state.join("auth/session"), "signed-in").unwrap();
-        let mut fake = fake(Some("start_new")); fake.real_state = true; let cancelled = uncancelled();
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("restored"));
-        assert_eq!(fs::read_to_string(plan.source.state.join("counts.txt")).unwrap(), original);
-        assert_eq!(fs::read_to_string(plan.source.state.join("auth/session")).unwrap(), "signed-in");
+        fs::create_dir_all(plan.source.state.join("auth")).unwrap();
+        fs::write(plan.source.state.join("auth/session"), "signed-in").unwrap();
+        let mut fake = fake(Some("start_new"));
+        fake.real_state = true;
+        let cancelled = uncancelled();
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("restored"));
+        assert_eq!(
+            fs::read_to_string(plan.source.state.join("counts.txt")).unwrap(),
+            original
+        );
+        assert_eq!(
+            fs::read_to_string(plan.source.state.join("auth/session")).unwrap(),
+            "signed-in"
+        );
         assert_eq!(fake.events.last(), Some(&"start_old"));
-        let restore = fake.events.iter().position(|event| *event == "restore_backup").unwrap();
+        let restore = fake
+            .events
+            .iter()
+            .position(|event| *event == "restore_backup")
+            .unwrap();
         assert!(restore < fake.events.len() - 1);
         assert!(plan.source.plist.exists() && !plan.app_dir.join("service.json").exists());
     }
 
     #[test]
     fn missing_provider_key_refuses_before_drain_without_reading_values() {
-        let (_home, plan) = plan(false); fs::create_dir_all(plan.source.env_file.parent().unwrap()).unwrap();
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.source.env_file.parent().unwrap()).unwrap();
         fs::write(&plan.source.env_file, "OPENAI_API_KEY=never-log-this\n").unwrap();
-        fs::remove_file(plan.source.state.join("keys/provider")).unwrap();
-        let mut fake = fake(None); let cancelled = uncancelled();
+        let mut fake = fake(Some("check_ready"));
+        let cancelled = uncancelled();
         let error = adopt(&plan, &mut fake, 1, &cancelled).unwrap_err();
-        assert!(error.contains("provider keys")); assert!(!error.contains("never-log-this")); assert!(fake.events.is_empty());
+        // The backend is asked by name and its refusal stops adoption before
+        // the source service is drained.
+        assert_eq!(
+            fake.ready_asked,
+            vec![BTreeSet::from(["OPENAI_API_KEY".to_string()])]
+        );
+        assert!(error.contains("adoption refused before changes"));
+        assert!(error.contains("OPENAI_API_KEY"));
+        assert!(!error.contains("never-log-this"));
+        assert!(fake.events.is_empty());
     }
 
     #[test]
     fn skipped_env_audit_contains_names_never_values() {
-        let (_home, plan) = plan(false); fs::create_dir_all(plan.source.env_file.parent().unwrap()).unwrap();
-        fs::write(&plan.source.env_file, "TUNING=true\nAPI_KEY=secret-value\n# comment\n").unwrap();
-        let names = skipped_env_names(&plan.source.env_file).unwrap(); let logged = format!("adoption skipped source .env keys: {}", names.join(", "));
-        assert_eq!(names, ["TUNING", "API_KEY"]); assert!(!logged.contains("true")); assert!(!logged.contains("secret-value"));
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.source.env_file.parent().unwrap()).unwrap();
+        fs::write(
+            &plan.source.env_file,
+            "TUNING=true\nAPI_KEY=secret-value\n# comment\n",
+        )
+        .unwrap();
+        let names = skipped_env_names(&plan.source.env_file).unwrap();
+        let logged = format!("adoption skipped source .env keys: {}", names.join(", "));
+        assert_eq!(names, ["TUNING", "API_KEY"]);
+        assert!(!logged.contains("true"));
+        assert!(!logged.contains("secret-value"));
     }
 
     #[test]
     fn drain_waits_for_live_count_before_bootout() {
-        let (_home, plan) = plan(false); let mut fake = fake(None); let cancelled = uncancelled();
+        let (_home, plan) = plan(false);
+        let mut fake = fake(None);
+        let cancelled = uncancelled();
         fake.statuses = VecDeque::from([
-            DrainStatus { operation_id: "a".into(), active_processes: 1, active: true },
-            DrainStatus { operation_id: "a".into(), active_processes: 0, active: true },
+            DrainStatus {
+                operation_id: "a".into(),
+                active_processes: 1,
+                active: true,
+            },
+            DrainStatus {
+                operation_id: "a".into(),
+                active_processes: 0,
+                active: true,
+            },
         ]);
         adopt(&plan, &mut fake, 1, &cancelled).unwrap();
-        assert_eq!(fake.events, ["begin_drain", "drain_status", "complete_drain", "bootout_old", "backup", "start_new"]);
+        assert_eq!(
+            fake.events,
+            [
+                "begin_drain",
+                "drain_status",
+                "complete_drain",
+                "bootout_old",
+                "backup",
+                "start_new"
+            ]
+        );
     }
 
     #[test]
     fn replacement_drain_is_cancelled_without_booting_out_source() {
-        let (_home, plan) = plan(false); let mut fake = fake(None); let cancelled = uncancelled();
+        let (_home, plan) = plan(false);
+        let mut fake = fake(None);
+        let cancelled = uncancelled();
         fake.statuses = VecDeque::from([
-            DrainStatus { operation_id: "a".into(), active_processes: 1, active: true },
-            DrainStatus { operation_id: "different".into(), active_processes: 0, active: true },
+            DrainStatus {
+                operation_id: "a".into(),
+                active_processes: 1,
+                active: true,
+            },
+            DrainStatus {
+                operation_id: "different".into(),
+                active_processes: 0,
+                active: true,
+            },
         ]);
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("changed"));
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("changed"));
         assert_eq!(fake.events, ["begin_drain", "drain_status", "cancel_drain"]);
     }
 
     #[test]
     fn quit_cancels_exact_drain_without_booting_out_source() {
-        let (_home, plan) = plan(false); let mut fake = fake(None); let cancelled = AtomicBool::new(true);
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("cancelled"));
+        let (_home, plan) = plan(false);
+        let mut fake = fake(None);
+        let cancelled = AtomicBool::new(true);
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("cancelled"));
         assert_eq!(fake.events, ["begin_drain", "cancel_drain"]);
     }
 
     #[test]
     fn future_schema_refuses_before_stop() {
-        let (_home, plan) = plan(false); let mut database = fs::read(plan.source.state.join("corsia.db")).unwrap(); database[60..64].copy_from_slice(&2u32.to_be_bytes()); fs::write(plan.source.state.join("corsia.db"), database).unwrap();
-        let mut fake = fake(None); let cancelled = uncancelled();
-        assert!(adopt(&plan, &mut fake, 1, &cancelled).unwrap_err().contains("newer")); assert!(fake.events.is_empty());
+        let (_home, plan) = plan(false);
+        let mut database = fs::read(plan.source.state.join("corsia.db")).unwrap();
+        database[60..64].copy_from_slice(&2u32.to_be_bytes());
+        fs::write(plan.source.state.join("corsia.db"), database).unwrap();
+        let mut fake = fake(None);
+        let cancelled = uncancelled();
+        assert!(adopt(&plan, &mut fake, 1, &cancelled)
+            .unwrap_err()
+            .contains("newer"));
+        assert!(fake.events.is_empty());
     }
 
     #[test]
     fn source_plist_controls_the_adopted_paths() {
-        let home = tempfile::Builder::new().prefix("corsia-adoption-plist-").tempdir_in("/private/tmp").unwrap();
-        let plist = home.path().join("Library/LaunchAgents/com.corsia.prod.plist"); fs::create_dir_all(plist.parent().unwrap()).unwrap(); fs::create_dir_all(home.path().join(".corsia")).unwrap();
-        fs::write(home.path().join(".corsia/config.json"), "{\"workspace\":\"/work\"}").unwrap();
+        let home = tempfile::Builder::new()
+            .prefix("corsia-adoption-plist-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        let plist = home
+            .path()
+            .join("Library/LaunchAgents/com.corsia.prod.plist");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::create_dir_all(home.path().join(".corsia")).unwrap();
+        fs::write(
+            home.path().join(".corsia/config.json"),
+            "{\"workspace\":\"/work\"}",
+        )
+        .unwrap();
         fs::write(&plist, r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>/source/backend</string><key>ProgramArguments</key><array><string>/source/.venv/bin/python</string></array><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>/work</string><key>CORSIA_STATE_DIR</key><string>/state</string><key>BACKEND_PORT</key><string>47895</string><key>OPENAI_API_KEY</key><string>not-exposed</string></dict></dict></plist>"#).unwrap();
         let source = source_from_plist(home.path(), &plist).unwrap();
-        assert_eq!(source.workspace, PathBuf::from("/work")); assert_eq!(source.state, PathBuf::from("/state")); assert_eq!(source.port, 47_895); assert_eq!(source.plist_provider_key_names, ["OPENAI_API_KEY"]);
+        assert_eq!(source.workspace, PathBuf::from("/work"));
+        assert_eq!(source.state, PathBuf::from("/state"));
+        assert_eq!(source.port, 47_895);
+        assert_eq!(source.plist_provider_key_names, ["OPENAI_API_KEY"]);
     }
 }

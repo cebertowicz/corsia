@@ -397,6 +397,20 @@ impl adoption::Lifecycle for SourceLifecycle {
         release_proof::prove_released(pid, self.source.port, &self.source.python, &self.source.state.join("corsia.db"))
     }
 
+    fn check_ready(&mut self, state: &Path, key_names: &std::collections::BTreeSet<String>) -> Result<(), String> {
+        let backend = self.backend_dir()?;
+        let program = "import sys; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import preflight_main; sys.exit(preflight_main(sys.argv[2:]))";
+        let output = Command::new(&self.source.python).args(["-c", program]).arg(&backend).arg(state).args(key_names)
+            .current_dir(&backend).output()
+            .map_err(|error| format!("could not check the existing install: {error}"))?;
+        match output.status.code() {
+            Some(0) => Ok(()),
+            // Exit 3 carries a refusal written to be shown: names and byte counts only.
+            Some(3) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+            _ => Err(format!("could not check the existing install: exited {}", output.status)),
+        }
+    }
+
     fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
         let backend = self.source.lifecycle_script.parent().and_then(Path::parent).ok_or("source lifecycle script has no checkout")?.join("backend");
         let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import create_adoption_snapshot; print(create_adoption_snapshot(Path(sys.argv[2])))";

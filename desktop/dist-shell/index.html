@@ -199,8 +199,8 @@
 				questionTitle: 'Use the CORSIA already on this computer?',
 				questionLine: (_installDir, workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It waits for running work to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
 
-				checkingTitle: 'Checking for running tasks…',
-				waitingTitle: (count) => `Waiting for ${count} running ${count === 1 ? 'task' : 'tasks'} to finish…`,
+				waitingTitle: 'Waiting for running work to finish…',
+				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
 				backingUpTitle: 'Backing up your data…',
 
 				failureTitle: 'CORSIA couldn’t switch over',
@@ -348,12 +348,19 @@
 			async function retryFailure() {
 				if (adoptionPrompt) {
 					showStarting();
-					status.textContent = ADOPTION_COPY.checkingTitle;
+					status.textContent = ADOPTION_COPY.waitingTitle;
 					const countPoll = setInterval(async () => {
 						try {
 							const count = await invoke('adoption_waiting_count');
 							if (count === null) return;
-							status.textContent = count > 0 ? ADOPTION_COPY.waitingTitle(count) : ADOPTION_COPY.backingUpTitle;
+							if (count > 0) {
+								status.textContent = ADOPTION_COPY.waitingTitle;
+								line.textContent = ADOPTION_COPY.waitingCount(count);
+								line.hidden = false;
+							} else {
+								status.textContent = ADOPTION_COPY.backingUpTitle;
+								line.hidden = true;
+							}
 						} catch { /* the next reading replaces this one */ }
 					}, 1000);
 					try {
