@@ -176,7 +176,6 @@ from infra.migration_116_to_117_script_schedules import migrate_116_to_117
 from infra.migration_117_to_118_corsia_agent import migrate_117_to_118
 from infra.migration_118_to_119_lesson_placement_checks import migrate_118_to_119
 from infra.migration_119_to_120_withdraw_retired_user_asks import migrate_119_to_120
-from infra.migration_120_to_121_stamp_deferred_ask_hold import migrate_120_to_121
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -781,7 +780,6 @@ MIGRATIONS[116] = migrate_116_to_117
 MIGRATIONS[117] = migrate_117_to_118
 MIGRATIONS[118] = migrate_118_to_119
 MIGRATIONS[119] = migrate_119_to_120
-MIGRATIONS[120] = migrate_120_to_121
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

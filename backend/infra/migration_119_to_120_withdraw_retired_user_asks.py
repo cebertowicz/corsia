@@ -1,16 +1,18 @@
 """Schema 119 -> 120: withdraw open asks on retired tasks."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 _TABLES = (
-    "plan_node_artifact_links", "plan_node_events", "plan_node_holds", "plan_nodes",
+    "artifact_identities", "plan_node_artifact_links", "plan_node_events", "plan_node_holds", "plan_nodes",
 )
 
 
 def migrate_119_to_120(conn: sqlite3.Connection) -> None:
-    """Withdraw open asks on terminal or archived tasks without changing attention."""
+    """Finalize retired asks and bind uniquely deferred asks to their open hold."""
     withdraw_retired_user_asks(conn)
+    stamp_deferred_ask_holds(conn)
 
 
 def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
@@ -39,8 +41,35 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     for row in rows:
         # clear_hold_write only appends the hold event and touches the node: it neither
         # validates live state nor reconciles admission, so it is migration-safe.
+        from plans.ask_endings import detail
+
         clear_hold_write(
             str(row["node_id"]), str(row["hold_id"]), expected_kind="blocked",
-            actor_id=None, provenance="migration.119_to_120", detail={"ended": "closed"}, db=conn,
+            actor_id=None, provenance="migration.119_to_120", detail=detail(why="task_ended"), db=conn,
         )
     return len(rows)
+
+
+def stamp_deferred_ask_holds(conn: sqlite3.Connection) -> int:
+    """Stamp only deferred artifacts with exactly one positively open ask."""
+    rows = conn.execute(
+        "SELECT id,metadata FROM artifact_identities WHERE json_extract(metadata, '$.attention_state')='deferred'"
+    ).fetchall()
+    stamped = 0
+    for row in rows:
+        holds = conn.execute(
+            """SELECT h.id FROM plan_node_holds h JOIN plan_node_artifact_links l
+                 ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
+                WHERE h.kind='blocked' AND h.owner_kind='user' AND h.owner_id=? AND h.cleared_at IS NULL
+                ORDER BY h.created_at,h.id""", (str(row["id"]),),
+        ).fetchall()
+        if len(holds) != 1:
+            continue
+        metadata = json.loads(row["metadata"] or "{}")
+        hold_id = str(holds[0]["id"])
+        if metadata.get("deferred_hold_id") == hold_id:
+            continue
+        metadata["deferred_hold_id"] = hold_id
+        conn.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (json.dumps(metadata, sort_keys=True), row["id"]))
+        stamped += 1
+    return stamped

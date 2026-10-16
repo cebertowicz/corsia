@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import plans.ask_endings as ask_endings
 import plans.service as service
 from plans.node_states import open_user_block_sql
 
@@ -38,18 +39,13 @@ NOT_ASKABLE = (
 #: The user outcomes that end an ask, as the agent is told them. Defer keeps
 #: the task held.
 _ENDS_ASK = {
-    "answer": ("answered", "answered"), "acknowledge": ("acknowledged", "acknowledged"),
-    "dismiss": ("dismissed", "dismissed"), "supersede": ("replaced", "replaced"),
+    "answer": ("resolved_by_user", "answered"), "acknowledge": ("resolved_by_user", "acknowledged"),
+    "dismiss": ("resolved_by_user", "dismissed"), "supersede": ("replaced", "replaced"),
     "retire": ("retired", "retired"), "reject_with_reason": ("rejected", "rejected"),
     "request_revision": ("revision_requested", "asked for a revision of"),
     "answer_internally": ("answered_internally", "answered"),
 }
-# The one vocabulary for agent-facing ask cards. The hold's clearance event,
-# never artifact metadata, records these terminal path outcomes.
-ASK_ENDINGS = frozenset({
-    "withdrawn", "closed", "replaced", "retired", "rejected",
-    "revision_requested", "answered_internally",
-})
+ASK_ENDINGS = ask_endings.ASK_ENDINGS
 _PROVENANCE = "user.ask_cleared"
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
@@ -227,7 +223,7 @@ def withdraw_node_asks(
     for row in rows:
         holds.clear_write(
             node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
-            provenance=provenance, detail={"ended": "closed"}, db=db,
+            provenance=provenance, detail=ask_endings.detail(why="task_ended", actor_id=actor_id), db=db,
         )
     return len(rows)
 
@@ -244,15 +240,15 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
     if outcome not in _ENDS_ASK:
         return 0
     with service._connection(db) as connection, service._write(connection):
-        ended, wake_verb = _ENDS_ASK[outcome]
+        why, wake_verb = _ENDS_ASK[outcome]
         return _release(
-            connection, artifact_id, ended, wake_verb=wake_verb,
+            connection, artifact_id, why, wake_verb=wake_verb,
             retired=outcome == "retire", release=release,
         )
 
 
 def _release(
-    db, artifact_id: str, done: str, *, wake_verb: str, retired: bool = False,
+    db, artifact_id: str, why: str, *, wake_verb: str, retired: bool = False,
     release: AskRelease | None = None,
 ) -> int:
     from plans import admission_projection, holds, plan_wake
@@ -279,8 +275,9 @@ def _release(
         (artifact_id,),
     ).fetchall()
     detail = dict(release.detail) if release is not None else {}
-    if done in ASK_ENDINGS:
-        detail["ended"] = done
+    ending = ask_endings.detail(why=why)
+    if ending is not None:
+        detail.update(ending)
     causes = [
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",

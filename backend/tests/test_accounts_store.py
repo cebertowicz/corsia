@@ -462,7 +462,7 @@ class TestAccountsMigration:
         from infra.migration_25_to_26_accounts import migrate_25_to_26
         from infra.schema import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 121
+        assert SCHEMA_VERSION == 120
         assert MIGRATIONS[25] is migrate_25_to_26
 
     def test_migrated_shape_matches_a_freshly_created_one(self, tmp_path):

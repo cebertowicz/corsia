@@ -6,6 +6,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping
 
+import plans.ask_endings as ask_endings
 import plans.errors as errors
 import plans.service as service
 from plans.blocked_wait import WAIT_OWNERS
@@ -169,7 +170,10 @@ def clear(
         clear_write(
             node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
             provenance=provenance,
-            detail=None if is_user_audit_id(actor_id) else {"ended": "withdrawn"},
+            detail=ask_endings.detail(
+                why="resolved_by_user" if is_user_audit_id(actor_id) else "withdrawn",
+                actor_id=actor_id,
+            ),
             db=db,
         )
     else:
@@ -317,7 +321,7 @@ def block_hold(
                 return node
             clear_write(
                 node_id, str(existing["id"]), expected_kind="blocked", actor_id=actor_id,
-                provenance=provenance, detail={"ended": "replaced"}, db=db,
+                provenance=provenance, detail=ask_endings.detail(why="replaced", actor_id=actor_id), db=db,
             )
             return place_hold(
                 node_id, kind="blocked", reason_key=reason_key, reason=reason,

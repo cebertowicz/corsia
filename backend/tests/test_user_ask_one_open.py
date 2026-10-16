@@ -135,6 +135,7 @@ def test_open_ask_artifacts_filters_on_the_canonical_active_hold_read(db):
 
 @pytest.mark.parametrize("operation", ("close_node", "archive_node"))
 def test_user_terminal_actions_close_an_open_ask_card(db, operation):
+    from registry import attention
     from registry.chat_cards import ask_cards
 
     user = PlanActor(None, "user-1", "project-1", kind="user")
@@ -163,4 +164,5 @@ def test_user_terminal_actions_close_an_open_ask_card(db, operation):
     ).fetchone()["payload_json"]
     assert json.loads(payload)["detail"] == {"ended": "closed"}
     assert ask_cards(db, {hold["id"]: artifact_id})[hold["id"]]["state"] == "closed"
+    assert attention.list_raised(db=db) == []
     assert _ask_release_wakes(db) == []

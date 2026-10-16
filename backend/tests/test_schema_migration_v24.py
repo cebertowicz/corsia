@@ -41,7 +41,7 @@ def _legacy_database(tmp_path):
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 121
+    assert SCHEMA_VERSION == 120
 
 
 def test_migration_renames_the_column_without_changing_the_value(tmp_path):
