@@ -149,6 +149,7 @@ mkdir -p "$BUNDLE_ROOT/scripts"
 install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
 rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 
+node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
 (
   cd "$ROOT/desktop/src-tauri"
   "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\",\"bundle\":{\"macOS\":{\"bundleVersion\":\"$macos_bundle_version\"}}}"
