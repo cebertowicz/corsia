@@ -23,7 +23,8 @@ on:
 
 # The release owner bumps this after each stable release.
 env:
-  NEXT_RELEASE_VERSION: '0.4.0'
+  NEXT_RELEASE_VERSION: '0.4.1'
+  DEV_UPDATER_ENDPOINT: https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json
 
 jobs:
   verify:
@@ -75,10 +76,18 @@ jobs:
               }
               release_tag="v$version"
               artifact_name="corsia-unsigned-macos-app-$release_tag"
+              artifact_names="$(GH_TOKEN="${{ github.token }}" gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$artifact_name&per_page=100" --jq '.artifacts[] | select(.expired == false) | .name')"
               artifact_exists=false
-              GH_TOKEN="${{ github.token }}" gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" --jq '.artifacts[].name' | grep -Fx "$artifact_name" >/dev/null && artifact_exists=true || true
+              if grep -Fx "$artifact_name" <<<"$artifact_names" >/dev/null; then
+                artifact_exists=true
+              fi
               release_exists=false
-              GH_TOKEN="${{ github.token }}" gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && release_exists=true || true
+              if release_response="$(GH_TOKEN="${{ github.token }}" gh api "repos/$GITHUB_REPOSITORY/releases/tags/$release_tag" 2>&1)"; then
+                release_exists=true
+              elif [[ "$release_response" != *"HTTP 404"* ]]; then
+                echo "unable to check for existing release $release_tag: $release_response" >&2
+                exit 1
+              fi
               if [ "$artifact_exists" = true ] || [ "$release_exists" = true ]; then
                 if [ "${{ inputs.force }}" != true ]; then
                   echo "Dev version $release_tag already has an artifact or prerelease; skipping build (set force=true to rebuild)."
@@ -126,10 +135,8 @@ jobs:
           desktop/scripts/test-stamp-release-version.sh
           desktop/scripts/stamp-release-version.sh "$RELEASE_TAG"
           if [ "$CHANNEL" = dev ]; then
-            dev_endpoint="https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json"
-            desktop/scripts/test-stamp-updater-endpoint.sh
-            desktop/scripts/stamp-updater-endpoint.sh "$dev_endpoint"
-            node -e 'const fs=require("fs"); const endpoint=JSON.parse(fs.readFileSync("desktop/src-tauri/tauri.conf.json")).plugins.updater.endpoints; if (endpoint.length !== 1 || endpoint[0] !== process.argv[1]) process.exit(1)' "$dev_endpoint"
+            desktop/scripts/test-stamp-updater-endpoint.sh "$DEV_UPDATER_ENDPOINT"
+            desktop/scripts/stamp-updater-endpoint.sh "$DEV_UPDATER_ENDPOINT"
           fi
           # The marketing version is the release tag without v. Previews use
           # 0.x.y-dev.N but macOS requires an integer-only build sequence.

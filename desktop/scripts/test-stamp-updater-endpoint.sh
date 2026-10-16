@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+[ "$#" -eq 1 ] || { echo "usage: $0 <https updater endpoint>" >&2; exit 64; }
+dev_endpoint="$1"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 temp="$(mktemp -d "${TMPDIR:-/tmp}/corsia-updater-endpoint.XXXXXX")"
 cleanup() { rm -rf "$temp"; }
@@ -10,7 +12,6 @@ mkdir -p "$temp/desktop/src-tauri" "$temp/desktop/scripts"
 cp "$root/desktop/src-tauri/tauri.conf.json" "$temp/desktop/src-tauri/"
 cp "$root/desktop/scripts/stamp-updater-endpoint.sh" "$temp/desktop/scripts/"
 
-dev_endpoint="https://github.com/cebertowicz/corsia/releases/download/dev-channel/latest.json"
 (
   cd "$temp"
   desktop/scripts/stamp-updater-endpoint.sh "$dev_endpoint"
