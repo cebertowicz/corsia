@@ -30,7 +30,6 @@ impl Default for RemoteConnection {
         Self::launch(None)
     }
 }
-
 impl RemoteConnection {
     pub fn launch(saved: Option<&RemoteRecord>) -> Self {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
