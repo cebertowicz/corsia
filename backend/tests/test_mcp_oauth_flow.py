@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import threading
 from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 
 from infra.database import get_db
@@ -119,7 +121,8 @@ async def test_a_superseded_flows_callback_is_refused_and_stores_nothing(env, fi
     assert store.load(env.app_id).signed_in_by == env.other_user_id
 
 
-async def test_a_flow_superseded_during_the_code_exchange_stores_nothing(env, monkeypatch):  # Governance 2
+@pytest.mark.parametrize("ender", ["other_session", "cancel"])
+async def test_a_flow_superseded_or_cancelled_during_the_code_exchange_stores_nothing(env, monkeypatch, ender):  # Governance 2
     link_a = (await env.start())["authorization_url"]
     exchanging, release = asyncio.Event(), asyncio.Event()
     real = protocol.exchange_code
@@ -132,11 +135,52 @@ async def test_a_flow_superseded_during_the_code_exchange_stores_nothing(env, mo
     monkeypatch.setattr(protocol, "exchange_code", slow_exchange)
     callback = asyncio.create_task(browse(env.fake.consent(link_a)))
     await exchanging.wait()
-    await env.start(other=True)
+    if ender == "cancel":
+        assert await flow.cancel(env.app_id, actor=("person", env.user_id)) is True
+    else:
+        await env.start(other=True)
     release.set()
     assert (await callback).status_code == 200
     assert store.load(env.app_id) is None and env.connects == []
-    assert flow.status(env.app_id)["status"] == "pending" and "sign_in_completed" not in env.audit()
+    assert flow.status(env.app_id)["status"] == ("idle" if ender == "cancel" else "pending")
+    assert "sign_in_completed" not in env.audit()
+
+
+@pytest.mark.parametrize("ender", ["other_session", "cancel"])
+async def test_a_cancel_or_press_landing_while_the_grant_is_written_is_ordered_after_it(env, monkeypatch, ender):  # Governance 2
+    """One per-app lock orders every change to the current flow and the grant: no reply says cancelled or
+    superseded for a sign-in whose grant was kept."""
+    link = (await env.start())["authorization_url"]
+    writing, release = threading.Event(), threading.Event()
+    real = flow._keep
+
+    def slow_keep(grant):
+        writing.set()
+        release.wait(5)
+        return real(grant)
+
+    monkeypatch.setattr(flow, "_keep", slow_keep)
+    callback = asyncio.create_task(browse(env.fake.consent(link)))
+    assert await asyncio.to_thread(writing.wait, 5)
+    if ender == "cancel":
+        ending = asyncio.create_task(flow.cancel(env.app_id, actor=("person", env.user_id)))
+    else:
+        ending = asyncio.create_task(env.start(other=True))
+    await asyncio.sleep(0.05)
+    waited = not ending.done()
+    release.set()
+    assert (await callback).status_code == 200
+    answer = await ending
+    assert waited
+    assert store.load(env.app_id).signed_in_by == env.user_id
+    actions = env.audit()
+    assert actions.count("sign_in_completed") == 1
+    assert "sign_in_cancelled" not in actions and "sign_in_superseded" not in actions
+    if ender == "cancel":
+        assert answer is False and flow.status(env.app_id) == {"status": "idle"}
+    else:
+        assert answer["reopened"] is False and flow.status(env.app_id)["status"] == "pending"
+        assert flow._flows[env.app_id].user_id == env.other_user_id
 
 
 async def signed_in_twice(env, *, account: str | None = None) -> tuple[store.Grant, store.Grant]:
@@ -443,3 +487,74 @@ async def test_a_redirect_to_another_host_during_discovery_fails(env):  # C-R9
     with pytest.raises(SignInError):
         await env.start()
     assert flow._flows == {}
+
+
+REMOTE_MCP = "https://mcp.example.test/mcp"
+REMOTE_AS = "https://as.example.test"
+LOCAL = "http://127.0.0.1:9"
+
+
+def remote_provider(local_field: str | None) -> tuple[list[str], httpx.AsyncClient]:
+    """A remote https app whose metadata may point one field at a port on this Mac; records every request."""
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.path.startswith("/.well-known/oauth-protected-resource"):
+            issuer = LOCAL if local_field == "issuer" else REMOTE_AS
+            return httpx.Response(200, json={"resource": REMOTE_MCP, "authorization_servers": [issuer]})
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            meta = {
+                "issuer": REMOTE_AS, "authorization_endpoint": f"{REMOTE_AS}/authorize",
+                "token_endpoint": f"{REMOTE_AS}/token", "revocation_endpoint": f"{REMOTE_AS}/revoke",
+                "userinfo_endpoint": f"{REMOTE_AS}/userinfo", "registration_endpoint": f"{REMOTE_AS}/register",
+            }
+            if local_field and local_field != "issuer":
+                meta[local_field] = f"{LOCAL}/{local_field}"
+            return httpx.Response(200, json=meta)
+        return httpx.Response(404)
+
+    return seen, httpx.AsyncClient(transport=httpx.MockTransport(handle), follow_redirects=False)
+
+
+@pytest.mark.parametrize("local_field", ["issuer", "authorization_endpoint", "token_endpoint"])
+async def test_a_remote_app_cannot_point_a_required_endpoint_at_this_mac(local_field):  # SSRF
+    seen, client = remote_provider(local_field)
+    async with client:
+        with pytest.raises(SignInError):
+            await protocol.discover(client, REMOTE_MCP)
+    assert seen and not any(url.startswith(LOCAL) for url in seen)
+
+
+@pytest.mark.parametrize("local_field", ["revocation_endpoint", "userinfo_endpoint", "registration_endpoint"])
+async def test_a_remote_apps_optional_endpoint_on_this_mac_is_dropped(local_field):  # SSRF
+    seen, client = remote_provider(local_field)
+    async with client:
+        disc = await protocol.discover(client, REMOTE_MCP)
+    assert getattr(disc, local_field) is None and not any(url.startswith(LOCAL) for url in seen)
+
+
+async def test_a_remote_grant_never_refreshes_or_revokes_at_this_mac():  # SSRF
+    seen, client = remote_provider(None)
+    async with client:
+        with pytest.raises(protocol.RefreshUnavailable):
+            await protocol.refresh_tokens(
+                client, token_endpoint=f"{LOCAL}/token", client_id="c", refresh_token="r" * 12, resource=REMOTE_MCP,
+                server_url=REMOTE_MCP,
+            )
+        assert await protocol.revoke(
+            client, f"{LOCAL}/revoke", token="t" * 12, token_type_hint="refresh_token", client_id="c",
+            server_url=REMOTE_MCP,
+        ) == "unreachable"
+    assert seen == []
+
+
+async def test_an_app_on_this_mac_may_use_plain_http_on_this_mac():
+    seen, client = remote_provider(None)
+    assert protocol.check_url(f"{LOCAL}/token", server_url=f"{LOCAL}/mcp") == f"{LOCAL}/token"
+    with pytest.raises(SignInError):
+        protocol.check_url("http://example.test/token", server_url=f"{LOCAL}/mcp")
+    with pytest.raises(SignInError):
+        protocol.check_url("https://localhost:9/token", server_url=REMOTE_MCP)
+    await client.aclose()
+    assert seen == []

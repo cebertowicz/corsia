@@ -3,7 +3,6 @@
 import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from loguru import logger
@@ -12,7 +11,7 @@ from infra.db_async import run_in_db
 from tools.base import Tool
 from tools.mcp_config import (
     MCPConfigError, _active_auth, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
-    timeout_seconds,
+    timeout_seconds, url_origin,
 )
 from tools.mcp_local_transport import (
     _mcp_cache_dir,
@@ -29,10 +28,10 @@ class _StoredHeadersAuth(httpx.Auth):
 
     def __init__(self, headers: dict[str, str], origin: str | None = None) -> None:
         self._headers = headers
-        self._origin = _url_origin(origin) if origin is not None else None
+        self._origin = url_origin(origin) if origin is not None else None
 
     def auth_flow(self, request):
-        request_origin = _url_origin(str(request.url))
+        request_origin = url_origin(str(request.url))
         if self._origin is None:
             self._origin = request_origin
         if request_origin != self._origin:
@@ -51,14 +50,6 @@ class _StoredHeadersAuth(httpx.Auth):
         if isinstance(value, list):
             return [self.redact(item) for item in value]
         return value
-
-
-def _url_origin(url: str) -> tuple[str, str, int] | None:
-    parsed = urlsplit(url)
-    if not parsed.scheme or not parsed.hostname:
-        return None
-    scheme = parsed.scheme.lower()
-    return (scheme, parsed.hostname.lower(), parsed.port or (443 if scheme == "https" else 80))
 
 
 class MCPConnectionError(MCPConfigError):

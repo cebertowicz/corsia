@@ -24,7 +24,7 @@ from infra.db_async import run_in_db
 import tools.mcp_oauth_protocol as protocol
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
 import tools.mcp_oauth_store as store
-from tools.mcp_config import MCPConfigError
+from tools.mcp_config import MCPConfigError, url_origin
 
 # Refresh a little before expiry; and never twice in this many seconds (a 401 storm).
 _SKEW = 30.0
@@ -42,7 +42,7 @@ class OAuthGrantAuth(httpx.Auth):
     def __init__(self, app_id: str, server_url: str) -> None:
         self._app_id = app_id
         self._server_url = server_url
-        self._origin = protocol.origin_of(server_url)
+        self._origin = url_origin(server_url)
         self._grant: store.Grant | None = None
         self._loaded = False
         self._last_refresh = float("-inf")
@@ -61,7 +61,7 @@ class OAuthGrantAuth(httpx.Auth):
         return self._grant
 
     async def async_auth_flow(self, request: httpx.Request):
-        if protocol.origin_of(str(request.url)) != self._origin:
+        if url_origin(str(request.url)) != self._origin:
             raise MCPConfigError("MCP endpoint changed origin; the sign-in was not sent")
         grant = await self._current()
         if grant is not None and grant.expires_at - _SKEW <= time.time():
@@ -105,7 +105,7 @@ class OAuthGrantAuth(httpx.Auth):
             try:
                 async with protocol.new_client() as http:
                     tokens = await protocol.refresh_tokens(
-                        http, token_endpoint=stored.token_endpoint, client_id=stored.client_id,
+                        http, token_endpoint=stored.token_endpoint, client_id=stored.client_id, server_url=stored.server_url,
                         refresh_token=stored.refresh_token, resource=stored.resource,
                         client_secret=stored.client_secret,
                     )

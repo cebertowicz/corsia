@@ -6,11 +6,12 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from api.connected_app_access import audit_actor as _audit_actor, person_only, refusal as _refusal
 from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
 from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
-from tools.mcp_oauth_flow import oauth_settings
+from tools.mcp_oauth_listener import oauth_settings
 from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 
 connected_apps_router = APIRouter()
@@ -24,21 +25,6 @@ BODY_SHAPE = (
     'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '
     '"key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]}; use "url" instead of "command" for a hosted app.'
 )
-
-
-def _refusal(detail: str, status: int = 422) -> HTTPException:
-    """Return a connected-app validation error with an explicit safe agent remedy."""
-    headers = {"X-Corsia-Agent-Remedy": detail} if status == 403 else None
-    return HTTPException(status, detail, headers=headers)
-
-
-def _audit_actor(user: dict) -> tuple[str, str]:
-    """Return a durable, value-free actor identity for connected-app audit rows."""
-    if is_person_session(user):
-        actor = user.get("id")
-        return "person", actor if isinstance(actor, str) and actor else "unknown"
-    actor = user.get("thread_id") or user.get("id")
-    return "agent", actor if isinstance(actor, str) and actor else "unknown"
 
 
 def _app_error(exc: Exception) -> HTTPException:
@@ -312,19 +298,13 @@ async def update_server_reach(app_id: str, body: dict[str, Any], user: dict = De
     return result
 
 
-def _human_decision(user: dict, action: str, app_id: str) -> None:
-    if is_person_session(user):
-        return
-    from connections.app_lifecycle_support import record_refusal
-
-    record_refusal(app_id, f"refused_{action}", actor=_audit_actor(user), db=_db())
-    raise _refusal("Only the signed-in person can approve or decline an app; open Connected apps.", 403)
+_DECIDE_ONLY = "Only the signed-in person can approve or decline an app; open Connected apps."
 
 
 @connected_apps_router.post("/servers/{app_id}/approve")
 async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Approve an inert proposal; connection/reload is deliberately not part of this route."""
-    _human_decision(user, "approve", app_id)
+    person_only(user, "approve", app_id, copy=_DECIDE_ONLY, db=_db())
     try:
         from connections.app_lifecycle import approve_proposal
         result = await run_in_db(
@@ -340,7 +320,7 @@ async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dic
 @connected_apps_router.post("/servers/{app_id}/decline")
 async def decline_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Decline an inert proposal and retain an earlier approved config if there was one."""
-    _human_decision(user, "decline", app_id)
+    person_only(user, "decline", app_id, copy=_DECIDE_ONLY, db=_db())
     try:
         from connections.app_lifecycle import decline_proposal
         result = await run_in_db(

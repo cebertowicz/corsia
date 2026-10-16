@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from tools.mcp_config import url_origin
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
 from tools.mcp_oauth_errors import SignInError, from_provider_error
 
@@ -45,21 +46,26 @@ def new_client(**options) -> httpx.AsyncClient:
     return httpx.AsyncClient(follow_redirects=False, timeout=options.pop("timeout", TIMEOUT), **options)
 
 
-def check_url(url: object) -> str:
-    """``url`` when it is an HTTPS address (or plain HTTP on this Mac) without credentials or fragment."""
+def _on_this_mac(url: str) -> bool:
+    return urlsplit(url).hostname in _LOOPBACK
+
+
+def check_url(url: object, *, server_url: str) -> str:
+    """``url`` when a request to it is safe for the app at ``server_url``; :class:`SignInError` otherwise.
+
+    HTTPS without credentials or fragment. An address on this Mac (plain HTTP allowed) only for an app that is
+    itself on this Mac: a remote app never steers a request, code or token to a local port.
+    """
     if not isinstance(url, str):
         raise SignInError("unknown")
     parts = urlsplit(url)
-    secure = parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in _LOOPBACK)
+    local = parts.hostname in _LOOPBACK
+    if local and not _on_this_mac(server_url):
+        raise SignInError("unknown")
+    secure = parts.scheme == "https" or (parts.scheme == "http" and local)
     if not secure or not parts.hostname or parts.username or parts.password or parts.fragment:
         raise SignInError("unknown")
     return url
-
-
-def origin_of(url: str) -> tuple[str, str, int]:
-    parts = urlsplit(url)
-    scheme = parts.scheme.lower()
-    return scheme, (parts.hostname or "").lower(), parts.port or (443 if scheme == "https" else 80)
 
 
 def note_secrets(raw: str) -> None:
@@ -88,9 +94,11 @@ def _json(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-async def _get_json(client: httpx.AsyncClient, url: str) -> dict | None:
+async def _get_json(client: httpx.AsyncClient, url: str, *, server_url: str) -> dict | None:
     try:
-        response, raw = await _send(client, "GET", check_url(url), headers={"Accept": "application/json"})
+        response, raw = await _send(
+            client, "GET", check_url(url, server_url=server_url), headers={"Accept": "application/json"},
+        )
     except (httpx.HTTPError, SignInError):
         return None
     return _json(raw) if response.status_code == 200 else None
@@ -127,7 +135,7 @@ def _challenge_metadata_url(response: httpx.Response) -> str | None:
 
 async def _protected_resource(client: httpx.AsyncClient, server_url: str) -> dict | None:
     for url in _resource_metadata_urls(server_url):
-        data = await _get_json(client, url)
+        data = await _get_json(client, url, server_url=server_url)
         if data and isinstance(data.get("authorization_servers"), list) and data["authorization_servers"]:
             return data
     try:
@@ -138,8 +146,8 @@ async def _protected_resource(client: httpx.AsyncClient, server_url: str) -> dic
     except httpx.HTTPError:
         return None
     advertised = _challenge_metadata_url(probe) if probe.status_code == 401 else None
-    if advertised and origin_of(advertised) == origin_of(server_url):
-        data = await _get_json(client, advertised)
+    if advertised and url_origin(advertised) == url_origin(server_url):
+        data = await _get_json(client, advertised, server_url=server_url)
         if data and isinstance(data.get("authorization_servers"), list) and data["authorization_servers"]:
             return data
     return None
@@ -165,19 +173,19 @@ async def supports_oauth(client: httpx.AsyncClient, server_url: str) -> bool:
 
 async def discover(client: httpx.AsyncClient, server_url: str) -> Discovery:
     """RFC 9728 then RFC 8414 or OIDC discovery for one hosted server."""
-    check_url(server_url)
+    check_url(server_url, server_url=server_url)
     resource_meta = await _protected_resource(client, server_url)
     if resource_meta is None:
         raise SignInError("unknown")
     declared = resource_meta.get("resource")
-    resource = declared if isinstance(declared, str) and origin_of(declared) == origin_of(server_url) else server_url
+    resource = declared if isinstance(declared, str) and url_origin(declared) == url_origin(server_url) else server_url
     issuer = resource_meta["authorization_servers"][0]
     if not isinstance(issuer, str):
         raise SignInError("unknown")
-    check_url(issuer)
+    check_url(issuer, server_url=server_url)
     metadata = None
     for url in _authorization_server_urls(issuer):
-        metadata = await _get_json(client, url)
+        metadata = await _get_json(client, url, server_url=server_url)
         if metadata:
             break
     if not metadata or metadata.get("issuer") != issuer:
@@ -189,20 +197,20 @@ async def discover(client: httpx.AsyncClient, server_url: str) -> Discovery:
     return Discovery(
         resource=resource,
         issuer=issuer,
-        authorization_endpoint=check_url(metadata.get("authorization_endpoint")),
-        token_endpoint=check_url(metadata.get("token_endpoint")),
-        revocation_endpoint=_optional_url(metadata.get("revocation_endpoint")),
-        registration_endpoint=_optional_url(metadata.get("registration_endpoint")),
-        userinfo_endpoint=_optional_url(metadata.get("userinfo_endpoint")),
+        authorization_endpoint=check_url(metadata.get("authorization_endpoint"), server_url=server_url),
+        token_endpoint=check_url(metadata.get("token_endpoint"), server_url=server_url),
+        revocation_endpoint=_optional_url(metadata.get("revocation_endpoint"), server_url),
+        registration_endpoint=_optional_url(metadata.get("registration_endpoint"), server_url),
+        userinfo_endpoint=_optional_url(metadata.get("userinfo_endpoint"), server_url),
         scope=" ".join(scopes) if isinstance(scopes, list) and all(isinstance(item, str) for item in scopes) and scopes else None,
         iss_supported=metadata.get("authorization_response_iss_parameter_supported") is True,
         metadata_document_supported=metadata.get("client_id_metadata_document_supported") is True,
     )
 
 
-def _optional_url(url: object) -> str | None:
+def _optional_url(url: object, server_url: str) -> str | None:
     try:
-        return check_url(url) if url else None
+        return check_url(url, server_url=server_url) if url else None
     except SignInError:
         return None
 
@@ -223,7 +231,7 @@ async def register_client(
     if pasted_client_id:
         return ClientRegistration(pasted_client_id, "pasted")
     if metadata_url and disc.metadata_document_supported:
-        return ClientRegistration(check_url(metadata_url), "metadata")
+        return ClientRegistration(check_url(metadata_url, server_url=disc.resource), "metadata")
     if not disc.registration_endpoint:
         raise SignInError("address_mismatch")
     try:
@@ -325,14 +333,14 @@ async def exchange_code(
 
 async def refresh_tokens(
     client: httpx.AsyncClient, *, token_endpoint: str, client_id: str, refresh_token: str, resource: str,
-    client_secret: str | None = None,
+    server_url: str, client_secret: str | None = None,
 ) -> Tokens:
     """Trade a refresh token for new tokens, or say why the sign-in cannot continue."""
     form = {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id, "resource": resource}
     if client_secret:
         form["client_secret"] = client_secret
     try:
-        response, raw = await _send(client, "POST", check_url(token_endpoint), data=form)
+        response, raw = await _send(client, "POST", check_url(token_endpoint, server_url=server_url), data=form)
     except (httpx.HTTPError, SignInError):
         raise RefreshUnavailable from None
     data = _json(raw)
@@ -348,7 +356,7 @@ async def refresh_tokens(
 
 async def revoke(
     client: httpx.AsyncClient, endpoint: str | None, *, token: str, token_type_hint: str, client_id: str,
-    client_secret: str | None = None,
+    server_url: str, client_secret: str | None = None,
 ) -> str | None:
     """Tell the provider to forget a token (RFC 7009). None once it answered success, else a fixed reason.
 
@@ -361,7 +369,9 @@ async def revoke(
     if client_secret:
         form.update(client_secret=client_secret)
     try:
-        response, _body = await _send(client, "POST", check_url(endpoint), data=form, timeout=REVOKE_TIMEOUT)
+        response, _body = await _send(
+            client, "POST", check_url(endpoint, server_url=server_url), data=form, timeout=REVOKE_TIMEOUT,
+        )
     except (httpx.HTTPError, SignInError):
         return "unreachable"
     return None if response.status_code == 200 else "refused"

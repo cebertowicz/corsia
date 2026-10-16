@@ -14,7 +14,12 @@ from collections.abc import Awaitable, Callable
 from html import escape
 from urllib.parse import parse_qs, urlsplit
 
+from tools.mcp_config import MCPConfigError
+
 BIND_HOST = "127.0.0.1"
+DEFAULT_PATH = "/callback"
+# Only names that reach the listener, which binds 127.0.0.1 alone.
+_LOOPBACK_HOSTS = (BIND_HOST, "localhost")
 REQUEST_CAP = 25
 _HEAD_LIMIT = 8192
 _READ_TIMEOUT = 5.0
@@ -25,6 +30,37 @@ _VALUE_MAX = 2048
 #: after this reply; a refusal class is counted and the flow keeps listening.
 Handler = Callable[[dict[str, str]], Awaitable[tuple[int, str, bool, str | None]]]
 CapReached = Callable[[], Awaitable[None]]
+
+
+def oauth_settings(config: dict) -> tuple[str | None, str, int, str]:
+    """The pasted client ID and the callback host, port and path a server's config asks for.
+
+    The host may only be a name the listener answers on; anything else is refused before any listener opens.
+    """
+    client_id = config.get("oauth_client_id")
+    if client_id is not None and (not isinstance(client_id, str) or not 0 < len(client_id) <= 512 or not client_id.isprintable() or " " in client_id):
+        raise MCPConfigError("oauth_client_id must be the client ID text")
+    callback = config.get("oauth_callback") or {}
+    if not isinstance(callback, dict) or set(callback) - {"host", "port", "path"}:
+        raise MCPConfigError("oauth_callback may set only host, port and path")
+    host, port, path = callback.get("host", BIND_HOST), callback.get("port", 0), callback.get("path", DEFAULT_PATH)
+    if host not in _LOOPBACK_HOSTS:
+        raise MCPConfigError("the sign-in callback host must be 127.0.0.1 or localhost")
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
+        raise MCPConfigError("the sign-in callback port must be a number from 1 to 65535")
+    if not isinstance(path, str) or not path.startswith("/") or len(path) > 200 or "?" in path or "#" in path or not path.isprintable():
+        raise MCPConfigError("the sign-in callback path must start with /")
+    return client_id, host, port, path
+
+
+def allowed_hosts(flow_host: str) -> Callable[[int], set[str]]:
+    """The ``Host`` values a listener bound to a port answers: this address, and the name the flow asked for."""
+    def hosts(port: int) -> set[str]:
+        allowed = {f"{BIND_HOST}:{port}"}
+        if flow_host != BIND_HOST:
+            allowed.add(f"{flow_host}:{port}")
+        return allowed
+    return hosts
 
 
 def _page(title: str, message: str) -> bytes:

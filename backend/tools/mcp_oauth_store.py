@@ -1,7 +1,7 @@
 """Where a hosted app's OAuth sign-in lives: the key store, nowhere else.
 
 A sign-in belongs to the connected app, like the app's key: every agent the app
-reaches uses it. One entry per app, ``mcp-oauth-<app slug>-<10 hex of hash(app)>``,
+reaches uses it. One entry per app, ``mcp-oauth--<app slug>-<10 hex of hash(app)>``,
 holds the whole grant (tokens, expiry, issuer, resource, client registration, and
 which person signed in, for the audit trail) as one base64url JSON value. A
 refresh rotates the access and refresh token in that single write, so there is no
@@ -26,7 +26,7 @@ from dataclasses import asdict, dataclass, field, fields
 from infra import key_store
 from infra.database import get_db
 from infra.key_store_mcp import OAUTH_PREFIX, OAUTH_VALUE_MAX, is_oauth_entry_name
-from tools.mcp_oauth_protocol import origin_of
+from tools.mcp_config import url_origin
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
 
 _SLUG = 10
@@ -65,8 +65,10 @@ class Grant:
 
     def issued_for(self, url: str) -> bool:
         """Whether this grant was issued for ``url``'s origin. It is never sent, refreshed or shown for another."""
-        origin = origin_of(url)
-        return origin_of(self.server_url) == origin and (not self.resource or origin_of(self.resource) == origin)
+        origin = url_origin(url)
+        return origin is not None and url_origin(self.server_url) == origin and (
+            not self.resource or url_origin(self.resource) == origin
+        )
 
 
 def grant_lock(app_id: str) -> asyncio.Lock:

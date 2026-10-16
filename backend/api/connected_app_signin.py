@@ -6,7 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
-from infra.auth import is_person_session, require_user, token_from_request
+from api.connected_app_access import person_only, refusal as _refusal
+from infra.auth import require_user, token_from_request
 from infra.db_async import run_in_db
 
 signin_router = APIRouter()
@@ -33,15 +34,7 @@ def sign_in_here(request: Request) -> bool:
 
 
 def _person_only(user: dict, action: str, app_id: str) -> tuple[str, str]:
-    from api.connected_apps import _audit_actor, _refusal
-
-    actor = _audit_actor(user)
-    if not is_person_session(user):
-        from connections.app_lifecycle_support import record_refusal
-
-        record_refusal(app_id, f"refused_{action}", actor=actor, db=_db())
-        raise _refusal(_NOT_PERSON, 403)
-    return actor
+    return person_only(user, action, app_id, copy=_NOT_PERSON, db=_db())
 
 
 def _session_hash(token: str | None, authorization: str | None) -> str:
@@ -52,7 +45,6 @@ def _session_hash(token: str | None, authorization: str | None) -> str:
 
 
 def _load(app_id: str) -> tuple[str, dict[str, Any], str]:
-    from api.connected_apps import _refusal
     from connections.app_reach import PENDING_STATE, AppNotFoundError, get_app
 
     try:
@@ -71,7 +63,6 @@ async def start_sign_in(
     token: str | None = Query(None), authorization: str | None = Header(None),
 ) -> dict[str, object]:
     """Open this session's sign-in (or reopen its pending one) and return the consent link for its own browser."""
-    from api.connected_apps import _refusal
     from infra.config import CLIENT_METADATA_URL
     import tools.mcp_oauth_flow as flow
     from tools.mcp_config import MCPConfigError

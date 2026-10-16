@@ -7,7 +7,9 @@ session's press ends it and starts that session's own, so no session is ever
 handed another's consent link. A flow owns a loopback listener, a single-use
 ``state``, the PKCE verifier and the starting session; it ends on a valid
 callback, the five-minute expiry, a cancel, a newer flow, or the listener's
-request cap. Only the app's current flow may store a grant. A completed sign-in
+request cap. Only the app's current flow may store a grant; ``store.grant_lock``
+guards both, so a cancel or another session's press lands wholly before a
+sign-in's write (nothing stored) or after it (nothing left to end). A completed sign-in
 replaces the app's grant and only then revokes the one it replaced; a
 cancelled, expired or failed one leaves the existing grant working. Failures are
 fixed classes (``tools.mcp_oauth_errors``); every outcome is audited with its
@@ -28,41 +30,17 @@ from infra.db_async import run_in_db
 import tools.mcp_oauth_protocol as protocol
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
 import tools.mcp_oauth_store as store
-from tools.mcp_config import MCPConfigError
+from tools.mcp_config import MCPConfigError, url_origin
 from tools.mcp_oauth_errors import SignInError
-from tools.mcp_oauth_listener import BIND_HOST, CallbackListener
+from tools.mcp_oauth_listener import CallbackListener, allowed_hosts, oauth_settings
 
 EXPIRY_SECONDS = 300.0
-DEFAULT_PATH = "/callback"
-# Only names that reach the listener, which binds 127.0.0.1 alone.
-_LOOPBACK_HOSTS = (BIND_HOST, "localhost")
 _SUCCESS_PAGE = "{app} is connected to CORSIA. You can close this tab and go back to CORSIA."
 _FAILURE_PAGE = "Sign-in didn't finish. Go back to CORSIA to see why."
 _REFUSED_PAGE = "This isn't the sign-in CORSIA is waiting for."
 
 #: Who acted, as the audit trail records it: ("person", user id), ("agent", thread id) or ("system", what).
 Actor = tuple[str, str]
-
-
-def oauth_settings(config: dict) -> tuple[str | None, str, int, str]:
-    """The pasted client ID and the callback host, port and path a server's config asks for.
-
-    The host may only be a name the listener answers on; anything else is refused before any listener opens.
-    """
-    client_id = config.get("oauth_client_id")
-    if client_id is not None and (not isinstance(client_id, str) or not 0 < len(client_id) <= 512 or not client_id.isprintable() or " " in client_id):
-        raise MCPConfigError("oauth_client_id must be the client ID text")
-    callback = config.get("oauth_callback") or {}
-    if not isinstance(callback, dict) or set(callback) - {"host", "port", "path"}:
-        raise MCPConfigError("oauth_callback may set only host, port and path")
-    host, port, path = callback.get("host", BIND_HOST), callback.get("port", 0), callback.get("path", DEFAULT_PATH)
-    if host not in _LOOPBACK_HOSTS:
-        raise MCPConfigError("the sign-in callback host must be 127.0.0.1 or localhost")
-    if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
-        raise MCPConfigError("the sign-in callback port must be a number from 1 to 65535")
-    if not isinstance(path, str) or not path.startswith("/") or len(path) > 200 or "?" in path or "#" in path or not path.isprintable():
-        raise MCPConfigError("the sign-in callback path must start with /")
-    return client_id, host, port, path
 
 
 @dataclass
@@ -94,7 +72,6 @@ class Result:
 
 _flows: dict[str, Flow] = {}
 _results: dict[str, Result] = {}
-_lock = asyncio.Lock()
 _background: set[asyncio.Task] = set()
 
 
@@ -128,15 +105,6 @@ def last_words(app_id: str) -> str | None:
     return last.words if last else None
 
 
-def _allowed_hosts(flow_host: str):
-    def hosts(port: int) -> set[str]:
-        allowed = {f"{BIND_HOST}:{port}"}
-        if flow_host != BIND_HOST:
-            allowed.add(f"{flow_host}:{port}")
-        return allowed
-    return hosts
-
-
 async def audit(app_id: str, action: str, actor: Actor) -> None:
     """Record one value-free sign-in event. A failed write is logged, not raised: it must not undo the sign-in."""
     from connections.app_lifecycle_support import record_sign_in_event
@@ -149,7 +117,10 @@ async def audit(app_id: str, action: str, actor: Actor) -> None:
 
 def provider_origin(url: str) -> str:
     """``url``'s scheme, host and any non-default port: where a person finds the provider."""
-    scheme, host, port = protocol.origin_of(url)
+    origin = url_origin(url)
+    if origin is None:
+        return ""
+    scheme, host, port = origin
     default = 443 if scheme == "https" else 80
     return f"{scheme}://{host}" + ("" if port == default else f":{port}")
 
@@ -160,7 +131,7 @@ async def tell_provider(grant: store.Grant) -> str | None:
     async with protocol.new_client(timeout=protocol.REVOKE_TIMEOUT) as http:
         return await protocol.revoke(
             http, grant.revocation_endpoint, token=token, token_type_hint=hint, client_id=grant.client_id,
-            client_secret=grant.client_secret,
+            server_url=grant.server_url, client_secret=grant.client_secret,
         )
 
 
@@ -172,8 +143,11 @@ def revoke_outcome(event: str, grant: store.Grant, failure: str | None) -> str:
 async def start(
     app_id: str, app_name: str, config: dict, *, user_id: str, session_hash: str, metadata_url: str,
 ) -> dict[str, object]:
-    """Begin this session's sign-in, or reopen its own pending one (C-R8a); either clears the last failure."""
-    async with _lock:
+    """Begin this session's sign-in, or reopen its own pending one (C-R8a); either clears the last failure.
+
+    Holds the app's lock throughout, so starts are one at a time and no grant is written meanwhile.
+    """
+    async with store.grant_lock(app_id):
         _results.pop(app_id, None)
         existing = _flows.get(app_id)
         if existing is not None and existing.expires_at > time.time() and _started_by(existing, user_id, session_hash):
@@ -182,12 +156,14 @@ async def start(
         if not isinstance(server_url, str):
             raise MCPConfigError("only an app at a web address can be signed in to")
         pasted, host, port, path = oauth_settings(config)
-        if existing is not None and existing.expires_at <= time.time():
-            await _end(existing, SignInError("timed_out"))
-        elif existing is not None:
-            # Another session's flow: it ends, and its callback is refused, before this one takes its place.
-            await _close(existing)
-            await audit(app_id, "sign_in_superseded", ("person", user_id))
+        if existing is not None and _detach(existing):
+            # An expired flow, or another session's: it ends, and its callback is refused, before this one takes
+            # its place (and, with a fixed callback port, before this one's listener needs the port).
+            await _wind_down(existing)
+            if existing.expires_at <= time.time():
+                await audit(app_id, "sign_in_expired", ("system", "sign_in"))
+            else:
+                await audit(app_id, "sign_in_superseded", ("person", user_id))
         flow = await _open_flow(app_id, app_name, server_url, user_id, session_hash, pasted, host, port, path, metadata_url)
         _flows[app_id] = flow
         flow.timer = asyncio.create_task(_expire(flow))
@@ -209,7 +185,7 @@ async def _open_flow(
     async def on_cap() -> None:
         await _end(holder["flow"], SignInError("unknown"))
 
-    listener = CallbackListener(path=path, allowed_hosts=_allowed_hosts(host), handler=handler, on_cap=on_cap, port=port)
+    listener = CallbackListener(path=path, allowed_hosts=allowed_hosts(host), handler=handler, on_cap=on_cap, port=port)
     try:
         bound = await listener.start()
     except OSError:
@@ -239,18 +215,31 @@ async def _expire(flow: Flow) -> None:
     await _end(flow, SignInError("timed_out"))
 
 
-async def _close(flow: Flow) -> bool:
-    """Forget a flow once and stop its listener and timer. False when it had already ended."""
+def _detach(flow: Flow) -> bool:
+    """Forget ``flow`` if it is still its app's current one; False when it had already ended. Caller holds the lock."""
     if _flows.get(flow.app_id) is not flow:
         return False
     del _flows[flow.app_id]
+    return True
+
+
+async def _close(flow: Flow) -> bool:
+    """Forget a flow once, under the app's lock, and wind it down. False when it had already ended."""
+    async with store.grant_lock(flow.app_id):
+        detached = _detach(flow)
+    if detached:
+        await _wind_down(flow)
+    return detached
+
+
+async def _wind_down(flow: Flow) -> None:
+    """Stop a forgotten flow's timer and listener, and audit what the listener refused."""
     if flow.timer is not None and flow.timer is not asyncio.current_task():
         flow.timer.cancel()
     if flow.listener is not None:
         await flow.listener.stop()
         for kind, count in sorted(flow.listener.refused.items()):
             await audit(flow.app_id, f"sign_in_refused:{kind}:{count}", ("system", "sign_in_listener"))
-    return True
 
 
 async def _end(flow: Flow, failure: SignInError | None) -> None:
@@ -263,21 +252,27 @@ async def _end(flow: Flow, failure: SignInError | None) -> None:
 
 
 async def cancel(app_id: str, *, actor: Actor) -> bool:
-    """End a pending sign-in and forget the last failure: Cancel, sign-out, Remove or shutdown. False if none pending."""
-    _results.pop(app_id, None)
-    flow = _flows.get(app_id)
-    if flow is None or not await _close(flow):
-        return False
+    """End a pending sign-in and forget the last failure: Cancel, sign-out, Remove or shutdown. False if none pending.
+
+    A cancel that arrives while a completing sign-in writes its grant waits for the write, then finds nothing pending.
+    """
+    async with store.grant_lock(app_id):
+        _results.pop(app_id, None)
+        flow = _flows.get(app_id)
+        if flow is None or not _detach(flow):
+            return False
+    await _wind_down(flow)
     await audit(app_id, "sign_in_cancelled", actor)
     return True
 
 
 def _session_valid(session_hash: str, user_id: str) -> bool:
-    from infra.database import get_db
-    from infra.time import utc_now_iso
+    """Whether the session that started a flow is still the same person's live session, resolved like any request."""
+    from infra.accounts import resolve_token_digest
+    from infra.auth import is_person_session
 
-    row = get_db().execute("SELECT user_id, expires_at FROM auth_tokens WHERE token_hash = ?", (session_hash,)).fetchone()
-    return row is not None and row["user_id"] == user_id and not (row["expires_at"] and row["expires_at"] <= utc_now_iso())
+    user = resolve_token_digest(session_hash)
+    return user is not None and user["id"] == user_id and is_person_session(user)
 
 
 async def _callback(flow: Flow, query: dict[str, str]) -> tuple[int, str, bool, str | None]:
@@ -300,7 +295,6 @@ async def _callback(flow: Flow, query: dict[str, str]) -> tuple[int, str, bool, 
     if failure is not None:
         await _end(flow, failure)
         return 200, _FAILURE_PAGE, True, None
-    await _end(flow, None)
     await audit(flow.app_id, "sign_in_completed", ("person", flow.user_id))
     _connect_in_background(flow.app_id)
     return 200, _SUCCESS_PAGE.format(app=flow.app_name), True, None
@@ -315,8 +309,9 @@ def protocol_error(query: dict[str, str]) -> SignInError:
 async def _finish(flow: Flow, code: str) -> SignInError | None:
     """Exchange the code and keep the grant as the app's, signed in by the flow's starter. None on success.
 
-    Nothing is stored unless this is still the app's current flow and the app still exists. Only once the new
-    grant is stored is the one it replaced revoked.
+    Nothing is stored unless this is still the app's current flow and the app still exists; the flow is checked
+    and ended in the same hold of the app's lock as the write. Only once the new grant is stored is the one it
+    replaced revoked.
     """
     if not await run_in_db(_session_valid, flow.session_hash, flow.user_id):
         return SignInError("unknown")
@@ -345,6 +340,8 @@ async def _finish(flow: Flow, code: str) -> SignInError | None:
             replaced = await run_in_db(_keep, grant)
         except store.GrantStoreError:
             return SignInError("unknown")
+        _detach(flow)
+    await _wind_down(flow)
     if replaced is not None:
         await _retire(replaced, grant)
     return None
