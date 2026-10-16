@@ -116,17 +116,24 @@ def create_pending_app(
     reach: object,
     *,
     actor_thread_id: str,
+    app_id: str | None = None,
+    asked_by_thread_id: str | None = None,
     audit_actor: tuple[str, str] | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
     """Persist an agent's new app proposal without starting it."""
     if not isinstance(actor_thread_id, str) or not actor_thread_id:
         raise AppReachError("missing proposing thread")
+    if asked_by_thread_id is not None:
+        if not isinstance(asked_by_thread_id, str) or not asked_by_thread_id or not isinstance(config, dict):
+            raise AppReachError("invalid asking thread")
+        config = {**config, "asked_by_thread_id": asked_by_thread_id}
     return create_app(
         name,
         config,
         reach,
         state=PENDING_STATE,
+        app_id=app_id,
         created_by_thread_id=actor_thread_id,
         pending_actor_thread_id=actor_thread_id,
         audit_actor=audit_actor,

@@ -297,38 +297,51 @@ async def test_seven_servers_and_39_tools_in_fresh_codex_registries(
 ):
     from core.agent import CORSIAAgent
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
-    from tools.mcp_runtime import start_mcp_runtime, stop_mcp_runtime
+    from tools import mcp_runtime
 
-    # Preserve any session-scoped integration app's runtime while this test
-    # exercises independent startup/shutdown cycles on its own event loop.
-    monkeypatch.setattr("tools.mcp_runtime._stack", None)
-    monkeypatch.setattr("tools.mcp_runtime._stopped", False)
-    monkeypatch.setattr("tools.mcp_runtime._lock", asyncio.Lock())
-    monkeypatch.setattr("tools.mcp_runtime._registry", ToolRegistry())
+    monkeypatch.setattr(mcp_runtime, "_stopped", False)
+    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
+    monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
+    monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
+    monkeypatch.setattr(mcp_runtime, "_app_tools", {})
+    monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_states", {})
+    monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    http_mcp.names = ["read_one", "read_two"]
+    first = server_config(tmp_path, http_mcp, allowed_tools=["read_one"], tool_prefix="first_")
+    second = server_config(tmp_path, http_mcp, allowed_tools=["read_two"], tool_prefix="second_")
+    apps = {
+        "app-1": ("First", {**first, "connected_app_id": "app-1"}),
+        "app-2": ("Second", {**second, "connected_app_id": "app-2"}),
+    }
 
-    sizes = [8, 7, 3, 4, 7, 7, 3]
-    http_mcp.names = [f"read_{index}" for index in range(8)] + ["write_record"]
-    config = server_config(tmp_path, http_mcp)
-    servers = {f"service_{index}": {**config, "tool_prefix": f"service_{index}_",
-                "allowed_tools": [f"read_{item}" for item in range(count)], "always_load": True}
-               for index, count in enumerate(sizes)}
-    # A restart discards the old sessions and discovers them anew. New registry
-    # builds include them before preflight/context accounting in both runs.
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_ids":
+            return list(apps)
+        if fn.__name__ == "load_runtime_app_config":
+            return apps[args[0]]
+        if fn.__name__ == "missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    expected = {"first_read_one", "second_read_two"}
     for _ in range(2):
-        try:
-            assert await start_mcp_runtime(servers) == {}
-            native = CORSIAAgent(tmp_path)
-            await native._connect_mcp()
-            for _ in range(2):
-                registry = build_tool_registry(str(tmp_path))
-                definitions = dynamic_tool_definitions(registry)
-                names = {item["function"]["name"] for item in definitions
-                         if item["function"]["name"].startswith("service_")}
-                assert len(names) == 39
-                assert names == set(native.tools.tool_names)
-                for index in range(7):
-                    assert await registry.get(f"service_{index}_read_0").execute() == "ok"
-                assert http_mcp.token not in json.dumps(definitions)
-        finally:
-            await stop_mcp_runtime()
+        results = await mcp_runtime.start_connected_app_runtime()
+        assert {app_id: result["state"] for app_id, result in results.items()} == {
+            "app-1": "working", "app-2": "working",
+        }
+        native = CORSIAAgent(tmp_path)
+        await native._connect_mcp()
+        harness = build_tool_registry(str(tmp_path))
+        assert set(native.tools.tool_names) == expected
+        assert {name for name in harness.tool_names if name in expected} == expected
+        assert await native.tools.get("first_read_one").execute() == "ok"
+        assert await harness.get("second_read_two").execute() == "ok"
+        definitions = dynamic_tool_definitions(harness)
+        assert http_mcp.token not in json.dumps(definitions)
+        await mcp_runtime.stop_mcp_runtime()
+
     assert not [task for task in asyncio.all_tasks() if task.get_name().startswith("mcp:")]

@@ -77,12 +77,24 @@ def test_plain_write_does_not_lift_headers_but_the_migration_shape_can():
     {"secret_env": "TOKEN"},
     {"secret_env": ["TOKEN", "TOKEN"]},
     {"secret_env": ["TOKEN"], "env": {"TOKEN": "value-one"}},
-    {"secret_headers": ["Authorization"]},
-    {"secret_headers": ["cookie"]},
+    {"secret_headers": ["Proxy-Authorization"]},
+    {"secret_headers": ["Authorization", "Authorization"]},
 ])
 def test_malformed_references_are_refused(bad):
     with pytest.raises(MCPConfigError):
         mcp_secrets.check_references({"command": "fixture", **bad})
+
+
+def test_authorization_and_cookie_headers_lift_to_references():
+    clean, lifted = mcp_secrets.split_secrets(
+        "svc", {"url": "https://example.test/mcp", "headers": {"Authorization": "Bearer example", "Cookie": "session=example"}},
+        headers=True,
+    )
+
+    assert "headers" not in clean
+    assert clean["secret_headers"] == ["Authorization", "Cookie"]
+    mcp_secrets.check_references(clean)
+    assert set(lifted.values()) == {"Bearer example", "session=example"}
 
 
 def test_resolve_returns_stored_values_and_names_missing_variables_without_values(store):

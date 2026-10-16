@@ -57,8 +57,8 @@ def test_prepare_import_keeps_secret_out_of_status_and_rejects_literal_auth(tmp_
 
     assert additions["good"]["env"] == {"TOKEN": "masked"}
     assert statuses[0] == {"name": "good", "kind": "stdio", "status": "pending"}
-    assert statuses[1]["name"] == "bad"
-    assert statuses[1]["status"].startswith("failed:")
+    assert additions["bad"]["headers"] == {"Authorization": "http-secret"}
+    assert statuses[1] == {"name": "bad", "kind": "remote", "status": "pending"}
     assert "http-secret" not in json.dumps(statuses)
 
 
@@ -72,15 +72,15 @@ def test_prepare_import_refuses_duplicate_server_names_from_multiple_clients(tmp
 
     assert additions == {}
     assert statuses == [
-        {"name": "same", "status": "failed: selected server name conflicts with another selection"},
-        {"name": "same", "status": "failed: selected server name conflicts with another selection"},
+        {"name": "same", "status": "failed: selected app name conflicts with another selection"},
+        {"name": "same", "status": "failed: selected app name conflicts with another selection"},
     ]
 
 
 def test_legacy_import_writer_is_refused_without_writing_settings():
     from tools.mcp_config import MCPConfigError
 
-    with pytest.raises(MCPConfigError, match="add the app in Connected apps"):
+    with pytest.raises(MCPConfigError, match="Connected apps"):
         mcp_import.save_import({"server": {"command": "existing"}})
 
 
@@ -88,9 +88,86 @@ def test_import_route_is_refused_with_connected_apps_remedy():
     from fastapi import HTTPException
     from api import mcp
 
-    with pytest.raises(HTTPException, match="add the app in Connected apps") as error:
-        asyncio.run(mcp.import_servers({"servers": [{"source": "cursor", "name": "server"}]}, {}))
-    assert error.value.status_code == 410
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(mcp.import_servers({"servers": [{"source": "cursor", "name": "server", "url": "https://bad.test"}]}, {}))
+    assert error.value.status_code == 422
+
+
+def test_import_selected_creates_pending_app_and_keeps_key_out_of_row(tmp_path):
+    import sqlite3
+
+    from connections.app_reach import get_app
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    project = tmp_path / "corsia"
+    project.mkdir()
+    db.execute(
+        "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,?,?)",
+        ("project", "Corsia", str(project), "t", "t"),
+    )
+    db.commit()
+    _json(tmp_path / ".claude.json", {
+        "projects": {str(project): {"mcpServers": {
+            "GitHub": {"type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "import-secret"}},
+        }}},
+    })
+
+    result = mcp_import.import_selected([{"source": "claude_code", "name": "GitHub"}], db=db, home=tmp_path, actor="agent")
+
+    assert result["rows"][0]["state"] == "awaiting_approval"
+    app = get_app(result["rows"][0]["id"], db=db)
+    rendered = json.dumps(app)
+    assert "import-secret" not in rendered
+    assert app["config"]["key_refs"] == [{"kind": "header", "name": "Authorization"}]
+    assert app["reach"] == {"mode": "selected", "project_ids": ["project"], "outside_projects": False}
+    assert db.execute("SELECT value FROM settings WHERE key='tools'").fetchone() is None
+
+
+def test_project_reach_uses_real_paths_components_and_deepest_match(tmp_path):
+    import sqlite3
+
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    outer = tmp_path / "a" / "b"
+    nested = outer / "nested"
+    sibling = tmp_path / "a" / "bc"
+    nested.mkdir(parents=True)
+    sibling.mkdir()
+    for project_id, path in (("outer", outer), ("nested", nested)):
+        db.execute("INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,?,?)", (project_id, project_id, str(path), "t", "t"))
+    db.commit()
+    alias = tmp_path / "alias"
+    alias.symlink_to(nested, target_is_directory=True)
+
+    reach, missing = mcp_import._project_reach(alias / "work", db=db)
+    sibling_reach, sibling_missing = mcp_import._project_reach(sibling, db=db)
+
+    assert reach == {"mode": "selected", "project_ids": ["nested"], "outside_projects": False}
+    assert missing is None
+    assert sibling_reach is None
+    assert sibling_missing == "bc"
+
+
+def test_key_descriptor_rejects_non_env_or_header_kind_and_empty_headers_do_not_redact():
+    import sqlite3
+
+    from connections.app_reach import AppReachError, key_ref_descriptors
+    from infra.database import initialize_schema
+    from tools.mcp import _StoredHeadersAuth
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+
+    with pytest.raises(AppReachError):
+        key_ref_descriptors("app", {"key_refs": [{"kind": "runtime_app_config", "name": "bad"}]}, db=db)
+    assert _StoredHeadersAuth({"X-Empty": ""}, "https://example.test").redact("safe") == "safe"
 
 
 def test_conductor_routes_are_open():

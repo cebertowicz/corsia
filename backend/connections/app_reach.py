@@ -184,6 +184,19 @@ def _requesting_agent_name(thread_id: str | None, *, db: sqlite3.Connection) -> 
     return name.strip() if isinstance(name, str) and name.strip() else None
 
 
+def _asked_by(thread_id: str | None, *, db: sqlite3.Connection) -> dict[str, str] | None:
+    """Resolve an asserted requester from the registry, never caller-supplied labels."""
+    if not isinstance(thread_id, str) or not thread_id:
+        return None
+    row = db.execute(
+        "SELECT t.title AS name,p.name AS project FROM threads t LEFT JOIN projects p ON p.id=t.project_id "
+        "WHERE t.id=?", (thread_id,),
+    ).fetchone()
+    if row is None or not isinstance(row["name"], str) or not row["name"].strip():
+        return None
+    return {"name": row["name"].strip(), "project": row["project"] if isinstance(row["project"], str) else ""}
+
+
 def _proposal_expired(state: str, state_since: str) -> bool:
     """Whether this pending proposal has exceeded its seven-day review window."""
     if state != PENDING_STATE:
@@ -207,11 +220,13 @@ def get_app(app_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
     ).fetchone()
     if row is None:
         raise AppNotFoundError("connected app not found")
+    stored_config = json.loads(row["config_json"])
+    asked_by_thread_id = stored_config.pop("asked_by_thread_id", None) if isinstance(stored_config, dict) else None
     expired = _proposal_expired(row["state"], row["state_since"])
     return {
         "id": row["id"],
         "name": row["name"],
-        "config": json.loads(row["config_json"]),
+        "config": stored_config,
         "state": "expired" if expired else row["state"],
         "state_since": row["state_since"],
         "revision": row["revision"],
@@ -225,6 +240,8 @@ def get_app(app_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
         "pending_previous_state": row["pending_previous_state"],
         "pending_actor_thread_id": row["pending_actor_thread_id"],
         "pending_actor_name": _requesting_agent_name(row["pending_actor_thread_id"], db=db),
+        **({"asked_by": asker, "asked_by_claim": "agent"}
+           if (asker := _asked_by(asked_by_thread_id, db=db)) is not None else {}),
     }
 
 

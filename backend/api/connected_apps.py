@@ -187,6 +187,11 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
     name = body.get("name")
     config = _config(body)
     human = is_person_session(user)
+    asked_by_thread_id = body.get("asked_by_thread_id")
+    if asked_by_thread_id is not None and (not isinstance(asked_by_thread_id, str) or not asked_by_thread_id):
+        raise _refusal("asked_by_thread_id must be a nonempty thread id")
+    if human and asked_by_thread_id is not None:
+        raise _refusal("asked_by_thread_id is for a workspace agent proposal only", 403)
     if not human and "reach" in body:
         raise _refusal("Connected-app reach comes from your current thread; remove reach and retry.", 403)
     if human:
@@ -199,11 +204,21 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
             return create_app(name, config, reach, audit_actor=_audit_actor(user), db=_db())
     else:
         def create() -> dict[str, object]:
+            from connections.account_policy import AccountAdmissionError, thread_scope
             from connections.app_lifecycle import create_pending_app
+            from infra.corsia_agent import is_corsia_agent
+
             thread_id, scope = _agent_thread(user, _db())
+            if asked_by_thread_id is not None:
+                if not is_corsia_agent(thread_id, db=_db()):
+                    raise _refusal("Only the workspace CORSIA agent can name an asking agent.", 403)
+                try:
+                    thread_scope(asked_by_thread_id, db=_db())
+                except AccountAdmissionError:
+                    raise _refusal("The asking agent thread no longer exists; use its current thread id.") from None
             return create_pending_app(
                 name, config, _agent_reach(thread_id, scope, db=_db()), actor_thread_id=thread_id,
-                audit_actor=_audit_actor(user), db=_db(),
+                asked_by_thread_id=asked_by_thread_id, audit_actor=_audit_actor(user), db=_db(),
             )
     try:
         result = await run_in_db(create)

@@ -186,6 +186,40 @@ def test_workspace_corsia_proposes_an_app_for_all_projects(connected_apps_client
     assert created.json()["reach"] == {"mode": "all", "project_ids": [], "outside_projects": False}
 
 
+def test_workspace_agent_asked_by_provenance_is_server_resolved(connected_apps_client) -> None:
+    client, db, actor = connected_apps_client
+    actor["thread_id"] = "workspace"
+    db.execute("UPDATE threads SET title='Asked agent' WHERE id='thread-a'")
+    db.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
+        ('{"session_id":"workspace"}',),
+    )
+    db.commit()
+
+    response = client.post(
+        "/api/mcp/servers",
+        json={"name": "A", "config": {"command": "a"}, "key_refs": [], "asked_by_thread_id": "thread-a"},
+    )
+
+    assert response.status_code == 201
+    row = get_app(response.json()["id"], db=db)
+    assert row["asked_by"] == {"name": "Asked agent", "project": "project-a"}
+    assert row["asked_by_claim"] == "agent"
+
+    actor["thread_id"] = "thread-a"
+    refused = client.post(
+        "/api/mcp/servers",
+        json={"name": "B", "config": {"command": "b"}, "key_refs": [], "asked_by_thread_id": "thread-b"},
+    )
+    assert refused.status_code == 403
+    actor["thread_id"] = "workspace"
+    unknown = client.post(
+        "/api/mcp/servers",
+        json={"name": "C", "config": {"command": "c"}, "key_refs": [], "asked_by_thread_id": "missing"},
+    )
+    assert unknown.status_code == 422
+
+
 def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client) -> None:
     client, _db, actor = connected_apps_client
     actor.clear()

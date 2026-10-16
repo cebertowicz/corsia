@@ -3,6 +3,7 @@
 import asyncio
 from contextlib import AsyncExitStack
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from loguru import logger
@@ -26,23 +27,37 @@ from tools.registry import ToolRegistry, _is_reserved_execution_param
 class _StoredHeadersAuth(httpx.Auth):
     """Send managed header keys while keeping their values out of transport logs."""
 
-    def __init__(self, headers: dict[str, str]) -> None:
+    def __init__(self, headers: dict[str, str], origin: str | None = None) -> None:
         self._headers = headers
+        self._origin = _url_origin(origin) if origin is not None else None
 
     def auth_flow(self, request):
+        request_origin = _url_origin(str(request.url))
+        if self._origin is None:
+            self._origin = request_origin
+        if request_origin != self._origin:
+            raise MCPConfigError("MCP endpoint changed origin; stored app keys were not sent")
         request.headers.update(self._headers)
         yield request
 
     def redact(self, value):
         if isinstance(value, str):
             for header_value in self._headers.values():
-                value = value.replace(header_value, "[REDACTED]")
+                if header_value:
+                    value = value.replace(header_value, "[REDACTED]")
             return value
         if isinstance(value, dict):
             return {self.redact(key): self.redact(item) for key, item in value.items()}
         if isinstance(value, list):
             return [self.redact(item) for item in value]
         return value
+
+
+def _url_origin(url: str) -> tuple[str, str, int] | None:
+    parsed = urlsplit(url)
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    return (parsed.scheme.lower(), parsed.hostname.lower(), parsed.port or (443 if parsed.scheme == "https" else 80))
 
 
 class MCPConnectionError(MCPConfigError):
@@ -211,23 +226,46 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         except OSError as error:
             raise MCPConfigError(_mcp_oserror_detail(error)) from None
     elif config.get("url"):
+        from mcp.client.sse import sse_client
         from mcp.client.streamable_http import streamable_http_client
 
         options, auth = http_options(config)
         if secret_headers:
             if auth is not None:
                 raise MCPConfigError("stored header keys cannot be combined with bearer_file")
-            auth = _StoredHeadersAuth(secret_headers)
+            auth = _StoredHeadersAuth(secret_headers, config["url"])
             options["auth"] = auth
         protect_transport_logs(auth)
-        client = await stack.enter_async_context(httpx.AsyncClient(**options))
-        read, write, _ = await stack.enter_async_context(
-            streamable_http_client(config["url"], http_client=client),
-        )
+        transport = config.get("transport", "http")
+        if transport == "sse":
+            read, write = await stack.enter_async_context(
+                sse_client(config["url"], headers=options["headers"], auth=auth),
+            )
+            session = await stack.enter_async_context(ClientSession(read, write))
+            initialized = await session.initialize()
+        elif transport == "http":
+            client = await stack.enter_async_context(httpx.AsyncClient(**options))
+            read, write, _ = await stack.enter_async_context(
+                streamable_http_client(config["url"], http_client=client),
+            )
+            session = await stack.enter_async_context(ClientSession(read, write))
+            try:
+                initialized = await session.initialize()
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code not in {404, 405}:
+                    raise
+                read, write = await stack.enter_async_context(
+                    sse_client(config["url"], headers=options["headers"], auth=auth),
+                )
+                session = await stack.enter_async_context(ClientSession(read, write))
+                initialized = await session.initialize()
+        else:
+            raise MCPConfigError("MCP transport is not supported")
     else:
         raise MCPConfigError("configure an MCP command or URL")
-    session = await stack.enter_async_context(ClientSession(read, write))
-    initialized = await session.initialize()
+    if not config.get("url"):
+        session = await stack.enter_async_context(ClientSession(read, write))
+        initialized = await session.initialize()
     instructions = getattr(initialized, "instructions", None)
     return session, auth, instructions if isinstance(instructions, str) else None
 
