@@ -14,6 +14,7 @@ from pathlib import Path
 import tomllib
 from typing import Any
 
+from connections.app_source_folder import clean_folder_label
 from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
 from tools.mcp_import_reach import project_reach
@@ -29,7 +30,7 @@ log = logging.getLogger("corsia.key_audit")
 # The import conversation is assembled from these canonical person-facing lines.
 IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
-IMPORT_FOLDER_OUTSIDE_PROJECT = "To use it in a project, connect it from that project's settings."
+IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
 IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
 IMPORT_NEEDS_SIGN_IN = "I can't bring over **{App}** ({client}) yet: it needs you to sign in, and CORSIA can't do that yet."
 
@@ -191,7 +192,7 @@ def detected_sources(home: Path | None = None) -> list[dict[str, Any]]:
             item: dict[str, str] = {"name": name, "kind": kind}
             if folder is not None:
                 # Path.name is the only persisted/displayed part of a project path.
-                item["folder"] = folder.name or folder.resolve(strict=False).name
+                item["folder"] = clean_folder_label(folder.name or folder.resolve(strict=False).name) or ""
             servers.append(item)
         if servers:
             results.append({"source": source, "app": _SOURCE_LABELS[source], "servers": servers})
@@ -342,8 +343,8 @@ def import_selected(
             continue
         reach, outside_folder = project_reach(folder, db=db)
         if reach is None:
-            rows.append({"name": name, "status": "outside_project", "folder": outside_folder or ""})
-            continue
+            # The folder is display-only: it reaches nothing until the person chooses a place (G-P1).
+            reach = {"mode": "selected", "project_ids": [], "outside_projects": False}
         try:
             copied = _copyable_config(source, source_config)
             app_id = str(uuid.uuid4())
@@ -353,12 +354,16 @@ def import_selected(
             with write_transaction(db, scope="mcp_import"):
                 result = create_pending_app(
                     name, config, reach, actor_thread_id=actor, app_id=app_id,
-                    audit_actor=("agent", actor), db=db,
+                    source_folder=outside_folder, audit_actor=("agent", actor), db=db,
                 )
                 for entry_name, value in lifted.items():
                     key_store.set_managed_value(entry_name, value, db=db)
                     audit_import_key_write(actor, _SOURCE_LABELS[source], name)
-            rows.append({"id": str(result["id"]), "name": name, "state": "awaiting_approval"})
+            row = {"id": str(result["id"]), "name": name, "state": "awaiting_approval"}
+            if outside_folder is not None:
+                row["folder"] = clean_folder_label(outside_folder) or ""
+                row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE.format(App=name)
+            rows.append(row)
         except AppNameOverlapError:
             rows.append({"name": name, "status": "already_exists"})
         except (MCPConfigError, key_store.KeyStoreError):

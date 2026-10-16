@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { saveConnectedAppReach, type ConnectedApp } from '$lib/api/connectedApps';
+	import { approveConnectedApp, saveConnectedAppReach, type ConnectedApp } from '$lib/api/connectedApps';
 
-	let { app, onClose, onSaved }: { app: ConnectedApp; onClose: () => void; onSaved: (app: ConnectedApp) => void } = $props();
+	/** Shown with the approve sheet for an app that runs on this Mac (copy sheet: Mac notice). */
+	const MAC_APP_NOTICE = "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys.";
+
+	let { app, approve = false, onClose, onSaved }: { app: ConnectedApp; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedApp) => void } = $props();
 	let mode = $state<'all' | 'selected'>(app.reach.mode);
 	let selected = $state(new Set(app.reach.project_ids));
 	let outsideProjects = $state(app.reach.outside_projects);
@@ -28,9 +31,12 @@
 		}
 		const from = originalNames.join(', ');
 		const to = selectedNames.join(', ');
+		if (originalNames.length === 0) return `Agents in ${to} will be able to use ${app.name}.`;
 		return `${app.name} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;
 	});
-	const disabledLine = $derived(`Select at least one project, or remove ${app.name}.`);
+	const disabledLine = $derived(approve ? 'Select at least one project.' : `Select at least one project, or remove ${app.name}.`);
+	/** The one effect line: what the choice does, or the plain reason the button is off. Never an error colour. */
+	const effectLine = $derived(mode === 'all' ? wideningLine : hasSelection ? narrowingLine : disabledLine);
 
 	function selectAllProjects(): void {
 		mode = 'all';
@@ -55,7 +61,7 @@
 			const reach = mode === 'all'
 				? { mode: 'all' as const, project_ids: [], outside_projects: false }
 				: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects };
-			onSaved(await saveConnectedAppReach(app, reach));
+			onSaved(await (approve ? approveConnectedApp(app, reach) : saveConnectedAppReach(app, reach)));
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Could not update this app. Try again.';
 		} finally {
@@ -68,39 +74,42 @@
 	<div class="where-it-works">
 		<label class="choice">
 			<input type="radio" name="reach" checked={mode === 'all'} onchange={selectAllProjects} />
-			<span><strong>All projects</strong><small>Includes new projects and Outside projects</small></span>
+			<span class="label">All projects</span>
+			<span class="second">Includes new projects and Outside projects</span>
 		</label>
-		{#if mode === 'all'}
-			<p class="impact">{wideningLine}</p>
-		{/if}
 		<label class="choice">
 			<input type="radio" name="reach" checked={mode === 'selected'} onchange={selectIndividually} />
-			<span><strong>Select individually</strong></span>
+			<span class="label">Select individually</span>
 		</label>
 		{#if mode === 'selected'}
 			<div class="checklist">
 				{#each $projects as project}
-					<label><input type="checkbox" checked={selected.has(project.id)} onchange={() => toggleProject(project.id)} /> {project.name}</label>
+					<label class="choice"><input type="checkbox" checked={selected.has(project.id)} onchange={() => toggleProject(project.id)} /><span class="label">{project.name}</span></label>
 				{/each}
-				<label><input type="checkbox" checked={outsideProjects} onchange={() => (outsideProjects = !outsideProjects)} /> Outside projects</label>
+				<label class="choice"><input type="checkbox" checked={outsideProjects} onchange={() => (outsideProjects = !outsideProjects)} /><span class="label">Outside projects</span></label>
 			</div>
-			{#if !hasSelection}<p class="error" role="status">{disabledLine}</p>{/if}
-			{#if hasSelection}<p class="impact">{narrowingLine}</p>{/if}
 		{/if}
-		{#if error}<p class="error" role="alert">{error}</p>{/if}
+		<div class="effect">
+			{#if approve && app.transport === 'stdio'}<p class="second">{MAC_APP_NOTICE}</p>{/if}
+			<p class="second" role="status">{effectLine}</p>
+			{#if error}<p class="error" role="alert">{error}</p>{/if}
+		</div>
 	</div>
 	{#snippet foot()}
-		<div class="actions"><Button onclick={onClose}>Cancel</Button><Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>Save</Button></div>
+		<Button variant="ghost" onclick={onClose}>Cancel</Button>
+		<span style="flex: 1"></span>
+		<Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>{approve ? 'Approve' : 'Save'}</Button>
 	{/snippet}
 </Modal>
 
 <style>
 	.where-it-works { display: grid; gap: var(--space-3); }
-	.choice { display: flex; gap: var(--space-3); align-items: flex-start; cursor: pointer; color: var(--text-primary); }
-	.choice span { display: grid; gap: var(--space-1); }
-	.choice small, .impact { color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.45; margin: 0; }
-	.checklist { display: grid; gap: var(--space-2); padding-left: var(--space-6); color: var(--text-secondary); }
-	.checklist label { display: flex; gap: var(--space-2); align-items: center; }
+	.choice { display: grid; grid-template-columns: auto 1fr; column-gap: var(--space-3); align-items: start; cursor: pointer; color: var(--text-primary); }
+	.choice input { accent-color: var(--accent); margin: 0; margin-top: calc((1lh - var(--space-4)) / 2); width: var(--space-4); height: var(--space-4); line-height: inherit; }
+	.label { font-size: var(--text-body); font-weight: var(--fw-regular); line-height: var(--lh-snug); }
+	.choice .second { grid-column: 2; }
+	.second { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); }
+	.checklist { display: grid; gap: var(--space-2); padding-left: var(--space-6); }
+	.effect { display: grid; gap: var(--space-2); }
 	.error { margin: 0; color: var(--red); font-size: var(--text-footnote); }
-	.actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 </style>
