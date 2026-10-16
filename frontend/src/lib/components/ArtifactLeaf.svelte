@@ -279,7 +279,6 @@
 					onSelect={selectTab}
 					onClose={requestCloseTab}
 					onCollapse={collapse}
-					showCollapse={false}
 				/>
 			</div>
 		{/if}
@@ -352,7 +351,7 @@
 		width: 24px; height: 24px; border-radius: var(--radius-xs);
 		color: var(--text-tertiary);
 	}
-	.rail-ico.active { color: var(--violet-text); background: var(--accent-bg); }
+	.rail-ico.active { color: var(--accent-scope-text); background: var(--accent-bg); }
 	.rail-ico.err { color: var(--red); }
 	.rail-dot {
 		position: absolute; top: 1px; right: 1px;
@@ -367,10 +366,9 @@
 		background: var(--bg-primary);
 	}
 	.leaf.compact { flex: 1; border-left: none; }
-	.canvas-header-strip {
-		position: absolute; inset: 0 88px auto 0; z-index: 11;
-		height: var(--header-bottom);
-	}
+	/* The tab and collapse controls belong to the leaf panel, after the shared
+	   shell header. Keeping this in normal leaf flow makes that boundary explicit. */
+	.canvas-header-strip { flex: 0 0 40px; min-height: 40px; }
 	.canvas-header-strip :global(.strip) {
 		height: 100%; padding-left: 10px; padding-right: 6px;
 		border-bottom: 0; background: transparent;
@@ -396,5 +394,5 @@
 		border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 		padding: 6px 12px; cursor: pointer;
 	}
-	.gone button:hover { border-color: var(--accent); color: var(--violet-text); }
+	.gone button:hover { border-color: var(--accent); color: var(--accent-scope-text); }
 </style>

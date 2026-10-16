@@ -238,7 +238,7 @@
 		flex: 0 1 calc(100% - 648px);
 		margin-right: var(--space-2);
 	}
-	.h-cond-glyph { color: var(--violet-text); flex-shrink: 0; }
+	.h-cond-glyph { color: var(--accent-scope-text); flex-shrink: 0; }
 	.h-cond-tag { color: var(--text-tertiary); font-weight: var(--fw-medium); flex-shrink: 0; }
 	.h-cond-tag::before { content: '· '; }
 
@@ -249,7 +249,7 @@
 		white-space: nowrap; transition: background var(--dur-tight), color var(--dur-tight);
 	}
 	.h-act:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--violet-text); }
+	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--accent-scope-text); }
 
 	.h-overflow { display: none; align-items: center; justify-content: center; width: 34px; height: 32px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-overflow:hover, .h-overflow.open { background: var(--bg-hover); color: var(--text-primary); }
@@ -266,7 +266,7 @@
 	@keyframes hSheetIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 	.h-ov-item { text-align: left; padding: 9px 11px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-medium); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-ov-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-ov-item.active { color: var(--violet-text); }
+	.h-ov-item.active { color: var(--accent-scope-text); }
 
 	@media (max-width: 1100px) { .h-act.wide-only { display: none; } }
 

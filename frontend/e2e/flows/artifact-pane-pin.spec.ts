@@ -55,8 +55,7 @@ test.describe('@flow:artifact-pin @surface:chat artifact pane pinning', () => {
 		await expect(names).toHaveText([churn, keeper]);
 
 		const keeperRow = page.locator('.row-outer').filter({ hasText: keeper });
-		await keeperRow.hover();
-		await keeperRow.getByRole('button', { name: /^More actions for / }).click();
+		await keeperRow.click({ button: 'right' });
 		await page.getByRole('menuitem', { name: 'Pin to pane' }).click();
 
 		// Pinned rows lead the pane regardless of recency.
@@ -81,8 +80,7 @@ test.describe('@flow:artifact-pin @surface:chat artifact pane pinning', () => {
 		// Unpinning drops the priority tier, but the toggle itself updates the
 		// registration, so the row just acted on leads the recency tier.
 		const stillPinned = page.locator('.row-outer').filter({ hasText: keeper });
-		await stillPinned.hover();
-		await stillPinned.getByRole('button', { name: /^More actions for / }).click();
+		await stillPinned.click({ button: 'right' });
 		await page.getByRole('menuitem', { name: 'Unpin from pane' }).click();
 		await expect(names).toHaveText([keeper, churn]);
 		await expect(page.locator('.row-outer .pin-mark')).toHaveCount(0);

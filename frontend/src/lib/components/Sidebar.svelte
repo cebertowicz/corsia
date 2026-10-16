@@ -378,7 +378,7 @@
 	}
 	.rail-scope-btn { cursor: pointer; }
 	.rail-scope-btn:hover { color: var(--text-secondary); }
-	.rail-scope-here svg { color: var(--violet-text); opacity: 0.9; }
+	.rail-scope-here svg { color: var(--accent-scope-text); opacity: 0.9; }
 
 	@media (max-width: 768px) {
 		.sidebar {

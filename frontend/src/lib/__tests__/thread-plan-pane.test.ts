@@ -7,8 +7,9 @@ import { resetPlanRuntimeForTests } from "$lib/stores/plans.svelte";
 import { resetObserversForTests } from "$lib/stores/planQuery.svelte";
 import { token } from "$lib/stores/auth";
 import { connectionState } from "$lib/stores/connection";
+import { activeThreadId } from "$lib/stores/threads";
 import type { OperatorEnvelope } from "$lib/api/plans";
-import { decisionItem, queueBody } from "./fixtures/attentionQueue";
+import { SOURCE, decisionItem, queueBody } from "./fixtures/attentionQueue";
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from "./fixtures/operatorPlan";
 import {
   blockedPlanTree,
@@ -178,6 +179,7 @@ beforeEach(() => {
   resetObserversForTests();
   token.set("test-bearer");
   connectionState.set("connected");
+  activeThreadId.set(null);
   wsListeners = new Map();
   vi.unstubAllGlobals();
 });
@@ -476,6 +478,67 @@ describe("ThreadPlanPane", () => {
     stop();
     expect(requests).toBeGreaterThan(1);
     expect(host.querySelector(".decision-chip")).toBeFalsy();
+  });
+
+  it("opens a refreshed non-head decision row in this thread", async () => {
+    const { __reset, activeId, expandedId, queue } =
+      await import("$lib/stores/attentionDock.svelte");
+    __reset();
+    activeThreadId.set("t1");
+    const source = { ...SOURCE, thread_id: "t1", thread_label: "This thread" };
+    const head = decisionItem({ id: "decision-head", title: "Head decision", source });
+    const clicked = decisionItem({ id: "decision-tail", title: "Stale tail decision", source });
+    const refreshed = decisionItem({ id: "decision-tail", title: "Refreshed tail decision", source });
+    queue.set(queueBody(head, 2, [head, clicked]));
+    const payload = envelope("t1");
+    const network = routedFetch({
+      "/api/plans/operator": () => ok(payload, '"r1"'),
+      "/api/attention/queue": () => ok(queueBody(head, 2, [head, refreshed])),
+    });
+    component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
+    await settle();
+
+    const rows = [...host.querySelectorAll<HTMLButtonElement>(".decision-row")];
+    expect(rows).toHaveLength(2);
+    expect(rows[1].textContent).toContain("Stale tail decision");
+    rows[1].click();
+    await settle();
+
+    expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
+    expect(host.textContent).toContain("Refreshed tail decision");
+    let active: string | null = null;
+    let expanded: string | null = null;
+    const stopActive = activeId.subscribe((value) => (active = value));
+    const stopExpanded = expandedId.subscribe((value) => (expanded = value));
+    stopActive();
+    stopExpanded();
+    expect(active).toBe("decision-tail");
+    expect(expanded).toBe("decision-tail");
+    __reset();
+  });
+
+  it("renders attention rows only for its own active thread", async () => {
+    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    __reset();
+    activeThreadId.set("t1");
+    const own = decisionItem({
+      id: "decision-t1", title: "Decision for this thread",
+      source: { ...SOURCE, thread_id: "t1", thread_label: "This thread" },
+    });
+    const other = decisionItem({
+      id: "decision-t2", title: "Decision for another thread",
+      source: { ...SOURCE, thread_id: "t2", thread_label: "Another thread" },
+    });
+    queue.set(queueBody(own, 2, [own, other]));
+    routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });
+    component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
+    await settle();
+
+    const rows = [...host.querySelectorAll<HTMLButtonElement>(".decision-row")];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("Decision for this thread");
+    expect(host.textContent).not.toContain("Decision for another thread");
+    __reset();
   });
 
   it("clears a stale right-pane decision handoff instead of swallowing the click", async () => {

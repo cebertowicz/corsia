@@ -3,7 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from './PlanTree.svelte';
 	import PlanDrillView from './PlanDrillView.svelte';
-	import { requestFocus } from '$lib/stores/attentionDock.svelte';
+	import { activeId, requestFocus } from '$lib/stores/attentionDock.svelte';
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
 	import { foldedOf, hasFolded } from './planFoldLevels';
@@ -11,7 +11,7 @@
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId } from '$lib/stores/threads';
-	import { expand, visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { expand, reload, visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
@@ -35,7 +35,11 @@
 	const offline = $derived($connectionState !== 'connected' && hasPayload);
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const decisionCount = $derived(query.payload?.attention.awaiting_count ?? 0);
-	const activeDecisionItems = $derived($activeThreadId === threadId ? $visibleQueue.items : []);
+	const activeDecisionItems = $derived(
+		$activeThreadId === threadId
+			? $visibleQueue.items.filter((item) => item.detail.source?.thread_id === threadId)
+			: [],
+	);
 	const showDecisionRows = $derived(activeDecisionItems.length > 0);
 	/**
 	 * Every step finished and folded (FW7): the empty state's calm, plus the
@@ -141,9 +145,15 @@
 		openPlanAsk(threadId, artifact, nodeTitle, () => { void openDecisions(); });
 	}
 
-	function openDecision(item: AttentionQueueItem): void {
+	async function openDecision(item: AttentionQueueItem): Promise<void> {
 		if (decisionBusy) return;
-		expand(item, false);
+		decisionBusy = true;
+		await reload();
+		const refreshed = $visibleQueue.items.find((candidate) => candidate.external_id === item.external_id);
+		decisionBusy = false;
+		if (!refreshed) return;
+		activeId.set(refreshed.external_id);
+		expand(refreshed, false);
 	}
 
 	async function openDecisions(): Promise<void> {
@@ -312,7 +322,7 @@
 	.decision-title { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 	.decision-subline { color: var(--amber-text); font-size: var(--text-caption); }
 	.decision-open { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
-	.decision-row:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.decision-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.decision-indicator {
 		display: flex; align-items: center; min-height: 38px; padding: 6px 8px 6px 4px; border: 0;
 		border-radius: var(--radius-xs); background: transparent; color: var(--amber-text);

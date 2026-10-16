@@ -3,6 +3,7 @@
 	import { formatTime } from '$lib/time';
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
 	import { models, type Model } from '$lib/stores/models';
+	import { canonicalName } from '$lib/stores/modelGroups';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
@@ -93,7 +94,7 @@
 		if (raw.startsWith('claude-code/') || raw.startsWith('codex/')) return formatExternalModelName(raw);
 		if (raw.startsWith('omlx@')) {
 			const stored = catalog.find((entry) => entry.litellm_model === raw || entry.id === raw);
-			return stored?.display_name ?? stored?.name ?? modelTail(raw);
+			return stored ? canonicalName(stored) : modelTail(raw);
 		}
 		return modelTail(raw);
 	}
@@ -101,8 +102,7 @@
 	function messageFooterLabel(metadata: any, catalog: Model[]): string | null {
 		const harness = harnessLabel(metadata);
 		const model = modelLabel(metadata, catalog);
-		// Native history belongs to its stored catalog identity, not to whichever
-		// composer model the user selected later.
+		// Native history displays its stored catalog identity, falling back to its model tail.
 		if (String(metadata?.model ?? metadata?.model_name ?? '').startsWith('omlx@') && model) return model;
 		if (harness && model) return `${harness} · ${model}`;
 		return model ?? harness;
@@ -207,7 +207,7 @@
 	.msg-model-badge { font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
 	.meta-separator { color: var(--text-tertiary); }
 	.typewriter-cursor {
-		display: inline; color: var(--violet-text); font-weight: 300;
+		display: inline; color: var(--accent-scope-text); font-weight: 300;
 		animation: blink-cursor 0.8s step-end infinite;
 	}
 	@keyframes blink-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

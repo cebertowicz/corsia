@@ -10,8 +10,7 @@
 		type?: 'button' | 'submit';
 		class?: string;
 		style?: string;
-		/** The button opens a menu: announced as a menu button with its open state. */
-		menuOpen?: boolean;
+
 		onclick?: (e: MouseEvent) => void;
 		children: Snippet;
 	}
@@ -19,7 +18,7 @@
 	const {
 		ariaLabel, variant = 'default', size = 'md',
 		disabled = false, title, type = 'button',
-		class: extraClass = '', style, menuOpen,
+		class: extraClass = '', style,
 		onclick, children,
 	}: Props = $props();
 </script>
@@ -29,9 +28,7 @@
 	class="ico-btn {variant} {size} {extraClass}"
 	{style}
 	aria-label={ariaLabel}
-	aria-haspopup={menuOpen === undefined ? undefined : 'menu'}
-	aria-expanded={menuOpen}
-	{title}
+		{title}
 	{disabled}
 	{onclick}
 >

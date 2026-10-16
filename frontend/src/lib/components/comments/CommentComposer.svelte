@@ -55,7 +55,7 @@
 	.actions { display: flex; justify-content: flex-end; gap: 8px; }
 	button { font-size: var(--text-caption); font-weight: var(--fw-semibold); cursor: pointer; }
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
-	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent); color: var(--on-accent); }
+	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-on-fill); }
 	.submit:disabled { opacity: .4; cursor: default; }
 	.selection-reason { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>

@@ -357,7 +357,7 @@
 	.dock-action { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
 	@media (hover: hover) { .dock-bar:hover .dock-action { color: var(--text-primary); } }
 	.dock-chevron { flex: none; color: var(--text-tertiary); }
-	.dock-bar:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+	.dock-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.dock-bar[aria-disabled='true'] { cursor: default; opacity: 0.75; }
 	/* These notes float over the live transcript exactly as .dock-bar does, and
 	   .dock-deferred renders in the host-access-awaiting state this band widens.

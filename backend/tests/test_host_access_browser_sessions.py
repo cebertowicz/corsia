@@ -7,7 +7,7 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from host_access import browser_cli, browser_sessions as sessions
+from host_access import browser_cdp, browser_cli, browser_sessions as sessions
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 
 
@@ -33,6 +33,19 @@ async def test_visible_browser_mode_is_pinned_when_the_session_starts(synthetic_
     visible, headless = fake.calls
     assert "--headed" in visible
     assert "--headed" not in headless
+    await fake.owner.shutdown()
+
+
+async def test_first_open_does_not_probe_a_page_before_one_exists(synthetic_browser, monkeypatch):
+    fake = synthetic_browser
+
+    async def no_page_yet(_run):
+        raise sessions.BrowserSessionError("no page exists before open")
+
+    monkeypatch.setattr(browser_cdp, "page_endpoint", no_page_yet)
+    assert await fake.owner.run("thread", ["open", "about:blank"]) == "ok"
+    with pytest.raises(sessions.BrowserSessionError, match="no page exists"):
+        await fake.owner.run("thread", ["open", "about:blank"])
     await fake.owner.shutdown()
 
 

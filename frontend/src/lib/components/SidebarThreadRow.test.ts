@@ -1,5 +1,5 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarThreadRow from './SidebarThreadRow.svelte';
 import { checkpointsByThread, type CheckpointStatus } from '$lib/stores/checkpoints';
@@ -7,6 +7,7 @@ import { threadPlanStates } from '$lib/stores/threadPlanStates';
 import { _resetTurnStateForTests, applyLifecycle } from '$lib/ws/turnState';
 import type { Thread } from '$lib/stores/threads';
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
+import * as productEvents from '$lib/product_events';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -33,7 +34,7 @@ function setCheckpoint(
 	}]]));
 }
 
-function render(renaming = false): void {
+function render(renaming = false, onOpenAttention?: (threadId: string, title: string) => void): void {
 	component = mount(SidebarThreadRow, {
 		target: host,
 		props: {
@@ -52,6 +53,7 @@ function render(renaming = false): void {
 			onTouchStart: () => {},
 			onTouchEnd: () => {},
 			onSelect: () => {},
+			onOpenAttention,
 			onOpenContextMenu: () => {},
 			onPin: () => {},
 			onArchive: () => {},
@@ -79,6 +81,7 @@ afterEach(() => {
 	checkpointsByThread.set(new Map());
 	threadPlanStates.set({});
 	_resetTurnStateForTests();
+	vi.restoreAllMocks();
 });
 
 describe('SidebarThreadRow update summary', () => {
@@ -98,6 +101,36 @@ describe('SidebarThreadRow update summary', () => {
 	it('keeps a row single-line when no update summary exists', () => {
 		render();
 		expect(host.querySelector('.thread-update-summary')).toBeNull();
+	});
+
+	it('restores the Needs you action with its structured attention label and analytics', () => {
+		const onOpenAttention = vi.fn();
+		const analytics = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
+		threadPlanStates.set({ [thread.id]: {
+			state: 'needs_input', label_key: null, paused: false,
+			attention_items: [{ kind: 'decision', title: 'Choose a model', node_id: 'n' }],
+		} });
+		render(false, onOpenAttention);
+
+		const control = host.querySelector<HTMLButtonElement>('button.thread-update-summary.needs-you');
+		expect(control?.textContent).toBe('Needs you · Choose a model');
+		control?.click();
+		expect(onOpenAttention).toHaveBeenCalledWith(thread.id, 'Needs you · Choose a model');
+		expect(analytics).toHaveBeenCalledWith('sidebar', 'attention_opened', expect.objectContaining({
+			thread_id: thread.id, state: 'needs_input', word: 'Decide', count: 1,
+		}));
+		expect(host.querySelector('.plan-state.needs_input')).toBeNull();
+	});
+
+	it('renders static Needs you text when the user owes an unitemized move', () => {
+		threadPlanStates.set({ [thread.id]: {
+			state: 'blocked_on_you', label_key: null, paused: false, attention_items: [],
+		} });
+		render();
+
+		expect(host.querySelector('button.thread-update-summary.needs-you')).toBeNull();
+		expect(host.querySelector('.thread-update-summary.needs-you.static')?.textContent).toBe('Needs you');
+		expect(host.querySelector('.plan-state.blocked_on_you')).toBeNull();
 	});
 });
 
