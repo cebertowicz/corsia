@@ -1,7 +1,7 @@
 """Durable ownership for one local-model setup flight.
 
 The backend process may restart while oMLX continues its download.  This record
-keeps the exact profile and oMLX task id under the state root; the adjacent
+keeps the exact model and oMLX task id under the state root; the adjacent
 advisory lock makes a second backend wait rather than issue another download.
 """
 
@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 from typing import IO
 
+from llm.local_model import LocalModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +26,19 @@ _LOCK_NAME = "local-setup-operation.lock"
 
 @dataclass(frozen=True)
 class Operation:
-    profile_id: str
+    repository: str
+    download_size_bytes: int
+    context_window: int
     kind: str
     task_id: str | None = None
+
+    @classmethod
+    def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None) -> Operation:
+        return cls(model.repository, model.download_size_bytes, model.context_window, kind, task_id)
+
+    @property
+    def model(self) -> LocalModel:
+        return LocalModel(self.repository, self.download_size_bytes, self.context_window)
 
 
 def _state_root() -> Path:
@@ -51,17 +63,25 @@ def read() -> Operation | None:
     except (OSError, ValueError) as error:
         logger.warning("local setup operation record is unreadable; treating it as absent: %s", error)
         return None
-    profile_id = payload.get("profile_id") if isinstance(payload, dict) else None
-    kind = payload.get("kind") if isinstance(payload, dict) else None
-    task_id = payload.get("task_id") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        payload = {}
+    repository = payload.get("repository")
+    size = payload.get("download_size_bytes")
+    window = payload.get("context_window")
+    kind = payload.get("kind")
+    task_id = payload.get("task_id")
+    # A record from before the recommender named a profile id instead of a model:
+    # malformed here, so it is discarded and the next request starts afresh.
     if (
-        not isinstance(profile_id, str)
+        not isinstance(repository, str)
+        or not isinstance(size, int) or isinstance(size, bool)
+        or not isinstance(window, int) or isinstance(window, bool)
         or not isinstance(kind, str)
         or (task_id is not None and not isinstance(task_id, str))
     ):
         logger.warning("local setup operation record is malformed; treating it as absent")
         return None
-    return Operation(profile_id=profile_id, kind=kind, task_id=task_id)
+    return Operation(repository, size, window, kind, task_id)
 
 
 def write(operation: Operation) -> None:

@@ -781,11 +781,11 @@ class TestRecheck:
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").json() == result
-        assert calls == [{"no_subscription_only": False, "automatic": False, "profile_id": None}]
+        assert calls == [{"no_subscription_only": False, "automatic": False}]
         assert client.post("/api/providers/local/setup", json={
             "no_subscription_only": True, "automatic": True,
         }).json() == result
-        assert calls[-1] == {"no_subscription_only": True, "automatic": True, "profile_id": None}
+        assert calls[-1] == {"no_subscription_only": True, "automatic": True}
 
     def test_local_cancel_route_uses_the_canonical_flight_owner(self, isolated_db, client, monkeypatch):
         calls = []
@@ -828,18 +828,28 @@ class TestRecheck:
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio
 
-        from llm import local_setup
+        from llm import local_model, local_setup
 
         monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+        monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: True)
+        monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
+        monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: False)
+        not_checked = {"state": "not_checked", "model": None, "message": None}
         assert client.get("/api/providers/local/setup").json() == {
-            "state": "idle", "stage": None, "result": None, "omlx_is_persons_own": ANY,
-            "recommended_profile": ANY}
+            "state": "idle", "stage": None, "result": None, "omlx_is_persons_own": False,
+            "local_model": not_checked}
 
         failure = {"ok": False, "message": "oMLX failed"}
         local_setup._flight.result = failure
         assert client.get("/api/providers/local/setup").json() == {
-            "state": "failed", "stage": None, "result": failure, "omlx_is_persons_own": ANY,
-            "recommended_profile": ANY}
+            "state": "failed", "stage": None, "result": failure, "omlx_is_persons_own": False,
+            "local_model": not_checked}
+
+        # A finished setup's model is what the conductor's offer and Welcome read.
+        installed = local_model.LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)
+        local_model.record_set_up(installed)
+        assert client.get("/api/providers/local/setup").json()["local_model"] == {
+            "state": "picked", "model": installed.view(), "message": None}
 
         local_setup._flight.result = {"ok": True}
         assert client.get("/api/providers/local/setup").json()["state"] == "succeeded"

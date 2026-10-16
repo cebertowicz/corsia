@@ -41,7 +41,7 @@ def test_local_setup_starts_server_flight_then_follows_distinct_stages_to_ready(
 
     assert calls[0] == (
         "POST", "/api/providers/local/setup", "service-token", cli_local.SETUP_TIMEOUT_SECONDS,
-        {"no_subscription_only": True, "automatic": False, "profile": None},
+        {"no_subscription_only": True, "automatic": False},
     )
     assert {call[:2] for call in calls[1:]} == {("GET", "/api/providers/local/setup")}
     assert capsys.readouterr().out == "Downloading\nLocal model is ready.\n"
@@ -245,46 +245,23 @@ def test_local_setup_does_not_call_a_skipped_flight_ready(monkeypatch, capsys):
     assert capsys.readouterr().out == "No models.\n"
 
 
-def test_a_named_profile_is_sent_and_its_resume_names_the_same_profile(monkeypatch, capsys):
-    import cli_local
+def test_the_parser_has_no_model_choice_because_omlx_picks_it():
+    import pytest
 
-    still = "Run `corsia local setup --profile qwen-27b-oq8e` to follow it again."
-    calls = _patch_follow(monkeypatch, [
-        {"state": "downloading", "stage": None, "result": {"ok": True, "downloading": True, "next_action": still}},
-    ])
-
-    assert cli_local.cmd_setup(_args(profile="qwen-27b-oq8e")) == cli_local.EXIT_STILL_DOWNLOADING
-    assert calls[0][-1]["profile"] == "qwen-27b-oq8e"
-    assert capsys.readouterr().out.splitlines()[-1] == still
-
-
-def test_a_named_profile_follow_timeout_names_the_profile_to_rerun(monkeypatch, capsys):
-    import cli_local
-
-    monkeypatch.setattr(cli_local, "FOLLOW_TIMEOUT_SECONDS", -1)
-    _patch_follow(monkeypatch, [])
-    assert cli_local.cmd_setup(_args(profile="qwen-27b-oq8e")) == 1
-    assert "Run `corsia local setup --profile qwen-27b-oq8e` again" in capsys.readouterr().out
-
-
-def test_a_refused_profile_prints_the_servers_reason(monkeypatch, capsys):
-    import io
-
-    import cli_local
-
-    body = io.BytesIO(b'{"detail": "Qwen3.8 Flash Next oQ6e needs a Mac with at least 192 GB of memory."}')
-    error = urllib.error.HTTPError("http://127.0.0.1", 400, "Bad Request", {}, body)
-    monkeypatch.setattr(cli_local, "_read_token", lambda: "service-token")
-    monkeypatch.setattr(cli_local, "request_json", lambda *_args: (_ for _ in ()).throw(error))
-
-    assert cli_local.cmd_setup(_args(profile="flash-next-oq6e")) == 2
-    assert capsys.readouterr().out == "Qwen3.8 Flash Next oQ6e needs a Mac with at least 192 GB of memory.\n"
-
-
-def test_the_parser_accepts_a_profile():
     import cli_local
 
     parser = argparse.ArgumentParser()
     cli_local.build_parser(parser.add_subparsers(dest="cmd"))
-    assert parser.parse_args(["local", "setup", "--profile", "qwen-27b-oq4e"]).profile == "qwen-27b-oq4e"
-    assert parser.parse_args(["local", "setup"]).profile is None
+    assert not hasattr(parser.parse_args(["local", "setup"]), "profile")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["local", "setup", "--profile", "qwen-27b-oq4e"])
+
+
+def test_a_mac_no_recommended_model_fits_exits_without_a_provider(monkeypatch, capsys):
+    import cli_local
+    from llm.local_setup_prepare import NO_LOCAL_MODEL
+
+    _patch_follow(monkeypatch, [], post={"ok": True, "skipped": "none_fits", "message": NO_LOCAL_MODEL})
+
+    assert cli_local.cmd_setup(_args()) == cli_local.EXIT_NO_PROVIDER
+    assert capsys.readouterr().out == f"{NO_LOCAL_MODEL}\n"

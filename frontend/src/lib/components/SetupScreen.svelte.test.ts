@@ -10,6 +10,8 @@ vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => u
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
 	status, headers: { 'Content-Type': 'application/json' },
 });
+/** What `/api/setup/local-model` answers once CORSIA's oMLX has picked a model. */
+const picked = (name = 'Example model') => json({ state: 'picked', model: { name, repository: 'example/model', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null });
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -19,7 +21,8 @@ beforeEach(() => {
 	token.set(null); user.set(null); calls = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input); calls.push(url);
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+		if (url.startsWith('/api/setup/local-model')) return picked();
 		if (url === '/api/setup/local-download') return json({ in_progress: true });
 		return json({ sources: [] });
 	}));
@@ -53,7 +56,7 @@ async function createAccountFromWelcome() {
 }
 
 describe('SetupScreen', () => {
-	it('reads only setup status before showing the Welcome decision', async () => {
+	it('reads setup status and starts the local model pick before showing the Welcome decision', async () => {
 		await settle();
 		expect(host.textContent).toContain('Welcome to CORSIA');
 		expect(host.textContent).toContain(
@@ -61,7 +64,7 @@ describe('SetupScreen', () => {
 		);
 		const mark = host.querySelector('img[src="/icons/corsia-mark.svg"]');
 		expect(mark?.getAttribute('alt')).toBe('');
-		expect(calls).toEqual(['/api/setup/status']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-model']);
 	});
 
 	it('routes the setup_complete response to sign-in', async () => {
@@ -110,7 +113,8 @@ describe('SetupScreen', () => {
 		calls = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			return json({ sources: [] });
 		}));
@@ -136,7 +140,8 @@ describe('SetupScreen', () => {
 		const bodies: string[] = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			if (url === '/api/setup/local-download') { bodies.push(String(init?.body)); return json({ in_progress: true }); }
 			return json({ sources: [] });
 		}));
@@ -157,7 +162,8 @@ describe('SetupScreen', () => {
 		calls = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: false, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: false });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			if (url === '/api/setup/local-download') return json({ code: 'consent_required' }, 409);
 			return json({ sources: [] });
 		}));
@@ -168,7 +174,7 @@ describe('SetupScreen', () => {
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
 		await settle();
 
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-model', '/api/setup/classifier', '/api/setup/local-download']);
 		expect(host.textContent).toContain('CORSIA will read:');
 		expect(host.textContent).not.toContain('Create your account');
 	});
@@ -178,7 +184,8 @@ describe('SetupScreen', () => {
 		calls = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_size_gb: 30, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			return json({ sources: [] });
 		}));
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
@@ -259,7 +266,8 @@ describe('SetupScreen', () => {
 		calls = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, free_disk_gb: 20, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, free_disk_gb: 20, work_folder: '~/CORSIA' });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			return json({ sources: [] });
 		}));
@@ -276,11 +284,135 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Create your account');
 	});
 
+	describe('the local model pick on Welcome', () => {
+		/** A pick POST still waiting for oMLX: the route answers only once the pick settles. */
+		const held = () => new Promise<never>(() => {});
+		const failed = { state: 'failed', model: null, message: 'oMLX could not reach Hugging Face.' };
+		const pickedView = { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null };
+		const getStarted = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
+		const localSwitch = () => host.querySelector<HTMLButtonElement>('button[aria-label="Also run AI on this computer"]');
+
+		/** Open Welcome; each pick POST answers the next of `posts` ('error' is a 502; a promise answers when it settles). */
+		async function openWelcome({ posts, statusExtra = {} }: { posts: unknown[]; statusExtra?: Record<string, unknown> }) {
+			if (component) await unmount(component);
+			calls = [];
+			const postQueue = [...posts];
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input); calls.push(init?.method === 'POST' ? `POST ${url}` : url);
+				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, free_disk_gb: 500, work_folder: '~/CORSIA', ...statusExtra });
+				if (url === '/api/setup/local-model/stop') return json({ state: 'not_checked', model: null, message: null });
+				if (url === '/api/setup/local-model') {
+					const next = init?.method === 'POST' ? await postQueue.shift() : pickedView;
+					return next === 'error' ? json({ detail: 'Bad gateway' }, 502) : json(next);
+				}
+				if (url === '/api/setup/local-download') return json({ in_progress: true });
+				return json({ sources: [] });
+			}));
+			component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+			flushSync();
+			await settle();
+		}
+
+		it('holds the specifics line with a spinner while oMLX picks, then shows the picked model in its place', async () => {
+			let answer: (view: unknown) => void = () => {};
+			await openWelcome({ posts: [new Promise((done) => { answer = done; })] });
+			expect(calls).toEqual(['/api/setup/status', 'POST /api/setup/local-model']);
+			expect(host.querySelector('.checking .spinner')).not.toBeNull();
+			expect(host.textContent).toContain('Finding the model that fits this computer…');
+			expect(host.textContent).toContain('The download starts in the background when you press Get started.');
+			expect(getStarted()).toHaveProperty('disabled', false);
+
+			answer(pickedView);
+			await settle();
+			expect(host.textContent).toContain('Qwen 3.8 · 30 GB · runs in oMLX');
+			expect(host.textContent).not.toContain('Finding the model');
+			// The held answer is the only read: nothing polls the pick.
+			expect(calls).toEqual(['/api/setup/status', 'POST /api/setup/local-model']);
+		});
+
+		it('starts the download on Get started while the pick still runs, since the download waits for it', async () => {
+			await openWelcome({ posts: [held()] });
+			getStarted()?.click();
+			await settle();
+			expect(calls).toContain('POST /api/setup/local-download');
+			expect(host.textContent).toContain('Create your account');
+		});
+
+		it('says it couldn’t check, keeps the switch on, and Try again asks oMLX again', async () => {
+			await openWelcome({ posts: [failed, pickedView] });
+			expect(host.textContent).toContain('CORSIA couldn’t check which local AI model fits this computer.');
+			expect(host.textContent).toContain('You can go on and add a local model from the app later.');
+			expect(host.textContent).not.toContain('The download starts in the background');
+			expect(localSwitch()?.getAttribute('aria-pressed')).toBe('true');
+			expect(getStarted()).toHaveProperty('disabled', false);
+
+			Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Try again')?.click();
+			await settle();
+			expect(calls.filter((url) => url === 'POST /api/setup/local-model')).toHaveLength(2);
+			expect(host.textContent).toContain('Qwen 3.8 · 30 GB · runs in oMLX');
+			expect(host.textContent).not.toContain('couldn’t check');
+		});
+
+		it('treats a pick route that can’t answer as couldn’t check, and goes on without a download', async () => {
+			await openWelcome({ posts: ['error'] });
+			expect(host.textContent).toContain('CORSIA couldn’t check which local AI model fits this computer.');
+			getStarted()?.click();
+			await settle();
+			expect(calls).not.toContain('POST /api/setup/local-download');
+			expect(host.textContent).toContain('Create your account');
+		});
+
+		it('stops the pick when the switch goes off, and Get started then downloads nothing', async () => {
+			await openWelcome({ posts: [pickedView] });
+			localSwitch()?.click();
+			await settle();
+			expect(calls).toContain('POST /api/setup/local-model/stop');
+			expect(localSwitch()?.getAttribute('aria-pressed')).toBe('false');
+			getStarted()?.click();
+			await settle();
+			expect(calls).not.toContain('POST /api/setup/local-download');
+			expect(host.textContent).toContain('Create your account');
+		});
+
+		it('picks again when the switch comes back on', async () => {
+			await openWelcome({ posts: [pickedView, pickedView] });
+			localSwitch()?.click();
+			await settle();
+			localSwitch()?.click();
+			await settle();
+			expect(calls.filter((url) => url.startsWith('POST /api/setup/local-model'))).toEqual(['POST /api/setup/local-model', 'POST /api/setup/local-model/stop', 'POST /api/setup/local-model']);
+			expect(host.textContent).toContain('Qwen 3.8 · 30 GB · runs in oMLX');
+		});
+
+		it('shows no switch when nothing fits this computer, and downloads nothing', async () => {
+			await openWelcome({ posts: [{ state: 'none_fits', model: null, message: 'This Mac can’t run a local model well.' }] });
+			expect(host.textContent).toContain('This computer doesn’t have enough memory to run an AI model itself.');
+			expect(localSwitch()).toBeNull();
+			getStarted()?.click();
+			await settle();
+			expect(calls).not.toContain('POST /api/setup/local-download');
+		});
+
+		it('asks for no pick on a computer with too little memory', async () => {
+			await openWelcome({ posts: [], statusExtra: { local_eligible: false } });
+			expect(calls).toEqual(['/api/setup/status']);
+			expect(localSwitch()).toBeNull();
+		});
+
+		it('asks for no pick when an oMLX CORSIA doesn’t manage is here', async () => {
+			await openWelcome({ posts: [], statusExtra: { existing_omlx: true } });
+			expect(calls).toEqual(['/api/setup/status']);
+			expect(localSwitch()).not.toBeNull();
+			expect(host.textContent).not.toContain('runs in oMLX');
+		});
+	});
+
 	it('prefills the one data owner read-only, with no helper caption', async () => {
 		if (component) await unmount(component);
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_size_gb: 30, work_folder: '~/CORSIA', required_username: 'legacy-owner' });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA', required_username: 'legacy-owner' });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			return json({ sources: [] });
 		}));
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
@@ -324,7 +456,8 @@ describe('SetupScreen', () => {
 			const url = String(input); calls.push(url);
 			if (url === '/api/setup/first-account') return json({ detail: 'username is already in use' }, 422);
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			return json({ sources: [] });
 		}));
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
@@ -377,7 +510,8 @@ describe('SetupScreen', () => {
 		let localSetupStarts = 0;
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false });
+			if (url.startsWith('/api/setup/local-model')) return picked();
 			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_error: 'Download failed' }] });
 			if (url === '/api/providers/local/setup') {
@@ -418,7 +552,8 @@ describe('SetupScreen', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
 			calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true });
+			if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
@@ -452,7 +587,7 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Codex');
 		expect(text).toContain('Downloading in the background');
 		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42% · about 10 min left');
-		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
+		expect(text).toContain('Ready when the download finishes, about 10 min. You can close this window; CORSIA keeps going.');
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Cancel')).toBe(true);
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
@@ -472,7 +607,8 @@ describe('SetupScreen', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			onRequest?.(url, init);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true });
+			if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/classifier/recheck') return json(classifier);
 			if (url === '/api/setup/classifier') {
@@ -609,7 +745,8 @@ describe('SetupScreen', () => {
 		const onFinished = vi.fn();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, ready_ai: 'Claude Code' });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, ready_ai: 'Claude Code' });
+			if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
@@ -631,7 +768,8 @@ describe('SetupScreen', () => {
 		if (component) await unmount(component);
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, ready_ai: 'Claude Code' });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, ready_ai: 'Claude Code' });
+			if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			return json({ sources: [] });
 		}));
@@ -665,7 +803,8 @@ describe('SetupScreen', () => {
 				const url = String(input);
 				const method = init?.method ?? 'GET';
 				fake.posted.push(`${method} ${url}`);
-				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_name: 'Qwen 3.8', model_size_gb: 30 });
+				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false });
+				if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 				if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 				if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: fake.sources });
 				if ((url === '/api/providers/cli/claude-code/install' || url === '/api/providers/cli/claude-code/update') && method === 'POST') return json(fake.installPost.body, fake.installPost.status);

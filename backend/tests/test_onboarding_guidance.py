@@ -182,6 +182,19 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
 
 
+def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+
+    # Setup takes the model oMLX's recommender picks; the profile field and CLI flag are gone.
+    assert "recommended_profile" not in offer and "--profile" not in offer and '"profile"' not in offer
+    for state in ("low_memory", "none_fits", "own_omlx", "picked", "not_checked", "checking", "failed"):
+        assert f"`{state}`" in offer
+    assert "make the offer without a name or size" in offer
+    # Onboarding copy says "computer"; "Mac" is only for Apple facts.
+    assert "Mac" not in offer
+    assert "with body `{}`" in offer
+
+
 FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
 HANDOFF = "That's everything. So, what's taking up your time this week?"
 

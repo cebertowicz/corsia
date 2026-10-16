@@ -1,11 +1,22 @@
 import type { SetupJob } from './components/SetupShell.svelte';
 import { sourceIsReady, type ModelSource } from './conductorSources';
 
-export function remainingTime(seconds: number | null | undefined): string | undefined {
+export function measuredDownloadTime(seconds: number | null | undefined): string | undefined {
 	if (seconds == null || seconds < 0) return undefined;
-	if (seconds < 90) return 'about 1 min left';
-	if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} min left`;
-	return `about ${Math.round(seconds / 3600)} hr left`;
+	if (seconds < 90) return 'about 1 min';
+	if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} min`;
+	return `about ${Math.round(seconds / 3600)} hr`;
+}
+
+export function remainingTime(seconds: number | null | undefined): string | undefined {
+	const measured = measuredDownloadTime(seconds);
+	return measured ? `${measured} left` : undefined;
+}
+
+export function welcomeModelMeta(name: string, size: string, etaSeconds: number | null | undefined, stalled: boolean | undefined): string {
+	return [name, size, 'runs in oMLX', stalled ? 'Download paused' : measuredDownloadTime(etaSeconds)]
+		.filter(Boolean)
+		.join(' · ');
 }
 
 export function localJob(source: ModelSource | undefined, downloading: boolean, modelName: string | undefined, page: string, signedIn: boolean, startError: string, onCancel: () => void): SetupJob | undefined {
@@ -22,7 +33,10 @@ export function localJob(source: ModelSource | undefined, downloading: boolean, 
 
 export function setupFinishNote(source: ModelSource | undefined, downloading: boolean, startError: string): string {
 	if (startError || source?.setup_error) return 'The local model couldn’t start. Try again, or choose another source.';
-	return downloading ? 'Ready when the download finishes. You can close this window; CORSIA keeps going.' : 'Connect Claude Code or Codex, or add an API key, to continue.';
+	if (!downloading) return 'Connect Claude Code or Codex, or add an API key, to continue.';
+	if (source?.download_stalled) return 'Download paused. It will resume when progress returns.';
+	const eta = measuredDownloadTime(source?.download_eta_seconds);
+	return eta ? `Ready when the download finishes, ${eta}. You can close this window; CORSIA keeps going.` : 'Ready when the download finishes. You can close this window; CORSIA keeps going.';
 }
 
 export function setupSourceMeta(source: ModelSource, startError: string, modelSize: string): string {

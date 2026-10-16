@@ -12,18 +12,19 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
+	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
 	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
-	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
+	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
 	const classifier = createSetupClassifier();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: () => refreshSources() });
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
-	let localWanted = $state(true);
+	const localPick = createSetupLocalPick();
 	let statusError = $state('');
 	let name = $state('');
 	let username = $state('');
@@ -55,7 +56,7 @@
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
-	const localJob = $derived(buildLocalJob(local, localDownloading, status.model_name, page, Boolean(get(token)), localStartError, () => void cancelDownload()));
+	const localJob = $derived(buildLocalJob(local, localDownloading, localPick.pick?.model?.name, page, Boolean(get(token)), localStartError, () => void cancelDownload()));
 	const canFinish = $derived(sources.some(sourceIsReady));
 	const jobs = $derived<SetupJob[]>([
 		...(localJob ? [localJob] : []),
@@ -65,8 +66,8 @@
 		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
 	]);
 	const finishNote = $derived(setupFinishNote(local, localDownloading, localStartError));
-	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
-	const downloadModelLabel = $derived(status.model_name || 'local model');
+	const modelSize = $derived(localPick.pick?.model ? `${localPick.pick.model.download_size_gb} GB` : local?.download_size || 'a local model');
+	const downloadModelLabel = $derived(localPick.pick?.model?.name || 'The local model');
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
 	type SetupPrimary = { label: string; disabled?: boolean; loading?: boolean; note?: string };
 	type SetupView = { title: string; lede?: string; primary?: SetupPrimary; onPrimary?: () => void; mark?: boolean };
@@ -103,9 +104,8 @@
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.apple_silicon === false || status.macos_supported === false || status.app_location === 'disk_image') page = 'hard-stop';
 			else {
-				localWanted = status.local_eligible !== false
-					&& (status.free_disk_gb ?? Infinity) >= (status.model_size_gb ?? 0);
 				page = 'welcome';
+				localPick.open(status.local_eligible !== false, Boolean(status.existing_omlx));
 			}
 		} catch {
 			statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.';
@@ -116,7 +116,7 @@
 	type LocalDownloadStart = 'started' | 'consent_required' | 'failed';
 
 	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
-		if (!localWanted && !consentExisting) return 'started';
+		if (!localPick.downloads(status.free_disk_gb) && !consentExisting) return 'started';
 		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting }) });
 		const result = await response.json().catch(() => null);
 		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
@@ -137,7 +137,7 @@
 				page = 'models';
 				return;
 			}
-			if (start === 'started') localDownloadPending = localWanted;
+			if (start === 'started') localDownloadPending = localPick.downloads(status.free_disk_gb);
 			else localStartError = 'The local model download couldn’t start.';
 		} catch {
 			localStartError = 'The local model download couldn’t start.';
@@ -148,7 +148,7 @@
 	async function decideExistingOmlx(useIt: boolean) {
 		if (!useIt) {
 			existingOmlxConsent = false;
-			localWanted = false;
+			localPick.wanted = false;
 			page = 'account';
 			return;
 		}
@@ -357,8 +357,8 @@
 	{/snippet}
 
 	{#if page === 'welcome'}
-		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} modelSizeGb={status.model_size_gb} {modelSize} modelLabel={downloadModelLabel}
-			wanted={localWanted} onWantedChange={(next) => localWanted = next} onRecheck={readStatus} />
+		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
+			onWantedChange={(next) => localPick.change(next, Boolean(status.existing_omlx))} onRecheck={readStatus} onRetry={() => void localPick.start()} />
 	{:else if page === 'account'}
 		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />
 	{:else if page === 'models' && existingOmlxConsent}

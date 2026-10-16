@@ -172,13 +172,12 @@ def _ready_ai() -> str | None:
 
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
-    from llm.local_setup_gates import host_ram_bytes, profile_eligibility
-    from llm.local_profiles import DEFAULT_PROFILE
+    from llm.local_setup_gates import local_memory_ok
 
-    ram_bytes = host_ram_bytes()
     apple_silicon = platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
     macos_supported = _macos_supported()
-    profile_eligible = profile_eligibility(DEFAULT_PROFILE, ram_bytes).eligible
+    # Only the 24 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
+    memory_ok = local_memory_ok()
     try:
         free_disk_gb = round(shutil.disk_usage(config.STATE_ROOT).free / 1000**3, 1)
     except OSError:
@@ -186,13 +185,11 @@ def _setup_status() -> dict:
     return {
         "apple_silicon": apple_silicon,
         "macos_supported": macos_supported,
-        "ram_tier": "eligible" if profile_eligible else "below_minimum",
+        "ram_tier": "eligible" if memory_ok else "below_minimum",
         "free_disk_gb": free_disk_gb,
         "app_location": _app_location_class(),
-        "local_eligible": apple_silicon and macos_supported and profile_eligible,
+        "local_eligible": apple_silicon and macos_supported and memory_ok,
         "work_folder": _work_folder_display(config.WORKSPACE),
-        "model_name": DEFAULT_PROFILE.display_name,
-        "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
         "required_username": _required_username(),
         "existing_omlx": existing_omlx_requires_consent(),
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
@@ -210,9 +207,52 @@ async def setup_status(request: Request) -> dict | Response:
     return await run_in_db(_setup_status)
 
 
+async def _before_first_account(request: Request, *, post: bool) -> Response | None:
+    """The pre-auth refusal for this request, else None."""
+    if not (_trusted_json_post(request) if post else _trusted_request(request)):
+        return Response(status_code=403)
+    if await run_in_db(accounts.has_users):
+        return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
+    return None
+
+
+@router.get("/local-model", response_model=None)
+async def local_model_pick(request: Request) -> dict | Response:
+    """Welcome's local row: checking, the model CORSIA's oMLX picked, or why there is none."""
+    if refused := await _before_first_account(request, post=False):
+        return refused
+    from llm.local_setup_prepare import pick_view
+
+    return await pick_view()
+
+
+@router.post("/local-model", response_model=None)
+async def local_model_prepare(request: Request) -> dict | Response:
+    """Start the pick when Welcome opens with the switch on, or Try again after it failed.
+
+    Answers once the pick settles: nothing can push it to Welcome before the first account.
+    """
+    if refused := await _before_first_account(request, post=True):
+        return refused
+    from llm.local_setup_prepare import begin_prepare, settled_view
+
+    await begin_prepare()
+    return await settled_view()
+
+
+@router.post("/local-model/stop", response_model=None)
+async def local_model_stop(request: Request) -> dict | Response:
+    """The switch went off: stop the pick and the oMLX it started; nothing was downloaded."""
+    if refused := await _before_first_account(request, post=True):
+        return refused
+    from llm.local_setup_prepare import stop_prepare
+
+    return await stop_prepare()
+
+
 @router.post("/local-download", response_model=None)
 async def local_download(request: Request) -> dict | Response:
-    """Join the one eligibility-selected local setup flight before first login."""
+    """Join the one local setup flight before first login; it downloads only the pick."""
     if not _trusted_json_post(request):
         return Response(status_code=403)
     if await run_in_db(accounts.has_users):
