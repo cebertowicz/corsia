@@ -212,6 +212,11 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
         devices_api.require_human_user,
         lambda: {"id": "person", "token_kind": "session"},
     )
+    monkeypatch.setattr(
+        DevicesApp,
+        "_has_human_session",
+        staticmethod(lambda _scope: True),
+    )
     main_client = TestClient(app, client=("127.0.0.1", 1234))
     devices_client = TestClient(DevicesApp(app), client=("127.0.0.1", 1234))
 
@@ -249,6 +254,11 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
         app.dependency_overrides,
         devices_api.require_human_user,
         lambda: {"id": "person", "token_kind": "session"},
+    )
+    monkeypatch.setattr(
+        DevicesApp,
+        "_has_human_session",
+        staticmethod(lambda _scope: True),
     )
     main_client = TestClient(app, client=("127.0.0.1", 1234))
     devices_client = TestClient(DevicesApp(app), client=("127.0.0.1", 1234))

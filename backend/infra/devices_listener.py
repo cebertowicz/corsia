@@ -20,7 +20,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+from starlette.responses import JSONResponse
 
+from infra.auth import authenticate, is_person_session, token_from_request
 from infra.config import STATE_ROOT
 from infra.dns_sd import DNSServiceAnnouncement
 
@@ -96,16 +98,45 @@ class DevicesServer(uvicorn.Server):
         # keep that external wait out of an explicit Devices stop.
 
 
+_PUBLIC_API_ROUTES = frozenset({
+    ("GET", "/api/health"),
+    ("GET", "/api/version"),
+    ("GET", "/api/auth/status"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/devices/pair/start"),
+    ("POST", "/api/devices/pair/finish"),
+})
+
+
 class DevicesApp:
-    """Tag scopes structurally before the shared app receives them."""
+    """Tag Devices scopes and limit their HTTP access to pairing-safe routes."""
 
     def __init__(self, app):
         self._app = app
         self.stopping = False
 
+    @staticmethod
+    def _has_human_session(scope) -> bool:
+        headers = dict(scope.get("headers", ()))
+        authorization = headers.get(b"authorization", b"").decode("latin-1")
+        token = token_from_request(None, authorization)
+        user = authenticate(token)
+        return user is not None and is_person_session(user)
+
     async def __call__(self, scope, receive, send):
         tagged = dict(scope)
         tagged["corsia_listener"] = "devices"
+        path = tagged.get("path", "")
+        if (
+            tagged.get("type") == "http"
+            and (path == "/api" or path.startswith("/api/"))
+            and (tagged.get("method"), path) not in _PUBLIC_API_ROUTES
+            and not self._has_human_session(tagged)
+        ):
+            await JSONResponse({"reason": "sign_in_required"}, status_code=401)(
+                tagged, receive, send,
+            )
+            return
         try:
             await self._app(tagged, receive, send)
         except asyncio.CancelledError:
