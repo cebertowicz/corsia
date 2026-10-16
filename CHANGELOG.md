@@ -11,11 +11,10 @@ Released 2026-10-16.
 
 - This update adds `flatbuffers`, `onnxruntime`, `protobuf`, and `publicsuffixlist`; the update installs them as part of its normal dependency setup.
 
-### Updates and Interface
+### Updates
 
 - Updates now have a complete in-app journey: notice, decision, progress, result, and release notes. You can schedule an update overnight, once or automatically, and a completed restart clears an old staged-update failure.
 - Update failures retain a clear cause, update progress stays in one notice, and notices stay readable and out of the way while work continues.
-- Phone layouts clear the header reliably around safe areas, keep their blur while content scrolls underneath, and restore the faded blur. Installed iOS apps keep the frosted header intact.
 
 ### Shared Browser
 
@@ -34,7 +33,7 @@ Released 2026-10-16.
 
 - The chat view is tidied: the sidebar, chat, plan and document panes share one style for each repeated element, with dated boxes and heavy borders removed and no information or action lost.
 - Project colours keep text readable on every coloured control, in light and dark themes.
-- In installed iOS 27 apps, the phone header and first sidebar row sit below the system's top-edge blur, and chat text no longer shows through the header title.
+- On phones, the header clears the screen's safe areas and keeps its faded frosted blur while content scrolls underneath. In installed iOS 27 apps, the header and first sidebar row sit below the system's top-edge blur, and chat text no longer shows through the header title.
 - The decision drawer's footer no longer covers its options on phones.
 - Plan decisions stay listed while the decision queue is still loading, and a decision row opens the decision it names.
 - Document row menus, collapse and expand, and keyboard access to row actions work reliably.
