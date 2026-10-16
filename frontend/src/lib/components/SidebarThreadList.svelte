@@ -344,17 +344,15 @@
 		padding-bottom: 96px;
 	}
 	.list-section-label {
-		font-size: var(--text-caption); font-weight: 700; text-transform: uppercase;
-		letter-spacing: 0.1em;
-		color: color-mix(in srgb, var(--violet) 55%, var(--text-tertiary));
-		padding: 8px 12px 4px;
+		font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary);
+		padding: 8px 10px 4px;
 	}
 	.empty-threads {
 		padding: 24px 16px; text-align: center; color: var(--text-tertiary); font-size: var(--text-subhead);
 	}
 	@media (max-width: 768px) {
 		.list-section-label {
-			padding: 8px 12px 4px;
+			padding: 8px 10px 4px;
 		}
 		.thread-list {
 			padding-bottom: 120px;

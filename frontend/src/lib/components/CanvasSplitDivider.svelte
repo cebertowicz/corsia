@@ -87,6 +87,6 @@
 	.divider:focus-visible::after,
 	.divider.dragging::after {
 		width: 2px;
-		box-shadow: 0 0 0 2px var(--accent-bg);
+		box-shadow: 0 0 0 2px var(--accent-wash);
 	}
 </style>

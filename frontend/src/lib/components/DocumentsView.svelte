@@ -229,7 +229,7 @@
 	}
 
 	const ACT_COLOR: Record<string, string> = {
-		added: 'var(--green)', described: 'var(--violet)'
+		added: 'var(--green)', described: 'var(--purple)'
 	};
 </script>
 
@@ -392,7 +392,7 @@
 	.clr { background: none; border: none; color: var(--text-tertiary); cursor: pointer; font-size: var(--text-footnote); padding: 0 2px; }
 	.addwrap { position: relative; }
 	.add { font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); background: none; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 7px 12px; cursor: pointer; white-space: nowrap; }
-	.add:hover, .add.open { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+	.add:hover, .add.open { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 	.add-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 210px; padding: 5px; display: flex; flex-direction: column; gap: 1px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--glass-rim), var(--shadow-chip); }
 	.add-item { text-align: left; padding: 8px 10px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; font-size: var(--text-subhead); color: var(--text-primary); }
 	.add-item:hover { background: var(--bg-hover); }
@@ -400,7 +400,7 @@
 	.chips { display: flex; align-items: center; gap: 6px; }
 	.chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); padding: 4px 12px; cursor: pointer; transition: color var(--dur-tight), background var(--dur-tight), border-color var(--dur-tight); }
 	.chip:hover { color: var(--text-primary); }
-	.chip.on { color: var(--accent); background: var(--accent-bg); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+	.chip.on { color: var(--accent-text); background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 	.chip-n { font-family: var(--font-mono); font-size: var(--text-caption); color: var(--text-tertiary); }
 	.chip-dot { width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--amber); }
 
@@ -414,7 +414,7 @@
 		padding: 6px 10px;
 		border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
 		border-radius: var(--radius-sm);
-		background: var(--accent-bg);
+		background: var(--accent-wash);
 		color: var(--text-primary);
 		font-size: var(--text-footnote);
 	}
@@ -453,7 +453,7 @@
 
 	.row { display: flex; align-items: center; gap: 9px; padding: 7px 6px 7px 24px; border-radius: var(--radius-sm); cursor: pointer; transition: background var(--dur-tight); }
 	.row:hover { background: var(--lg-row-hover, var(--bg-hover)); }
-	.row.sel { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
+	.row.sel { background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--accent); }
 	.row-ico { flex-shrink: 0; color: var(--text-tertiary); }
 	.row-ico.skill { color: var(--teal); }
 	.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -463,7 +463,7 @@
 	.row-meta { flex-shrink: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.row-open { flex-shrink: 0; display: flex; padding: 5px; border-radius: var(--radius-xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; opacity: 0; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
 	.row:hover .row-open, .row.sel .row-open { opacity: 1; }
-	.row-open:hover { background: var(--bg-hover); color: var(--accent); }
+	.row-open:hover { background: var(--bg-hover); color: var(--accent-text); }
 	.row-attach {
 		flex-shrink: 0;
 		display: inline-flex;
@@ -474,7 +474,7 @@
 		border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
 		border-radius: var(--radius-xs);
 		background: transparent;
-		color: var(--accent);
+		color: var(--accent-text);
 		cursor: pointer;
 		font: inherit;
 		font-size: var(--text-caption);
@@ -484,7 +484,7 @@
 		opacity: 1;
 		pointer-events: auto;
 	}
-	.row-attach:hover:not(:disabled) { background: var(--accent-bg); }
+	.row-attach:hover:not(:disabled) { background: var(--accent-wash); }
 	.row-attach:disabled {
 		cursor: not-allowed;
 		opacity: 0.5;

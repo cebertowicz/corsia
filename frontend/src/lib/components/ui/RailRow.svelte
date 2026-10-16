@@ -107,15 +107,15 @@
 	/* On every row, so the bar cross-fades with the wash instead of popping when the current row changes. */
 	.row::before {
 		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; pointer-events: none;
-		background: var(--accent-line); border-radius: 0 2px 2px 0; opacity: 0; transition: opacity var(--dur-tight) ease;
+		background: var(--accent); border-radius: 0 2px 2px 0; opacity: 0; transition: opacity var(--dur-tight) ease;
 	}
 	.row.current::before { opacity: 1; }
 	.lead { flex: none; width: 16px; height: 1.5em; display: grid; place-items: center; }
 	.lead-state { grid-area: 1 / 1; display: grid; place-items: center; }
 	.lead :global(svg) { flex: none; opacity: 0.85; }
-	.row.current .lead { color: var(--accent-line); }
+	.row.current .lead { color: var(--accent); }
 	.row.current .lead :global(svg) { opacity: 1; }
-	.row.done .lead, .row.busy .lead { color: var(--accent-line); }
+	.row.done .lead, .row.busy .lead { color: var(--accent); }
 	.reddot { width: calc(var(--space-1) * 2); height: calc(var(--space-1) * 2); border-radius: var(--radius-circle); background: var(--red); }
 	.done-check path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw-check var(--dur-tight) var(--ease-snap) forwards; }
 	.spinner { animation: spin var(--dur-hero-plus) linear infinite; }
@@ -140,8 +140,8 @@
 	}
 	.act:hover { background: var(--accent-wash); }
 	.act:focus-visible { outline: none; }
-	.act:focus-visible .act-label { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+	.act:focus-visible .act-label { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.hair { display: block; height: calc(var(--space-1) / 2); margin-top: var(--space-1); border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
-	.hair i { display: block; height: 100%; background: var(--accent-line); border-radius: inherit; transition: width var(--dur-standard) var(--ease-material); }
+	.hair i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur-standard) var(--ease-material); }
 	@media (prefers-reduced-motion: reduce) { .details { transition: opacity var(--dur-tight) var(--ease-snap); } .details.open { grid-template-rows: 1fr; } .hair i { transition: none; } }
 </style>

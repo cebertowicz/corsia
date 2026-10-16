@@ -145,6 +145,16 @@
 		min-height: 0;
 		overflow-y: auto;
 	}
+	/* The band's bottom gutter is exactly the gap down to the composer card, so a
+	   transcript scrolled mid-way showed through between the dock's row and the
+	   card. When the dock is the band's lowest row, that strip (and only it: the
+	   occupants keep the content box, the side gutters keep their shadow room) is
+	   filled in the transcript's colour, as the dock's own row is. */
+	.chat-attention-stack:has(> :global(.attention-dock:last-child)) {
+		background: linear-gradient(var(--bg-primary), var(--bg-primary)) center bottom /
+			calc(100% - 2 * var(--chat-attention-shadow-gutter)) var(--chat-attention-shadow-gutter)
+			no-repeat;
+	}
 	.chat-attention-stack > :global(*) {
 		pointer-events: auto;
 		/* Grid items default to `min-width: auto`, i.e. they refuse to shrink
@@ -161,6 +171,10 @@
 			   is focused. The full-width attention surfaces sit above one stable
 			   three-slot utility rail: host access / live edge / Plan. */
 			--chat-attention-keyboard-inset: var(--kb-toolbar-inset, 0px);
+			/* The transcript and composer keep a 12px side inset here, so the band
+			   shares their edges; the gutter stays one side inset, as above. */
+			--chat-attention-shadow-gutter: 12px;
+			width: calc(100% - 24px);
 			grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 			grid-template-rows: none;
 			grid-auto-rows: auto;
@@ -207,6 +221,17 @@
 		}
 		.chat-attention-stack:has(> :global(:nth-child(2))) > :global(*:first-child) {
 			overflow-y: visible;
+		}
+		/* Rail chips render below the dock here whatever their source order, so
+		   the strip is filled only when the dock is alone; under a rail it would
+		   be a band beside the chips. */
+		.chat-attention-stack:has(> :global(.attention-dock:last-child)) {
+			background: none;
+		}
+		.chat-attention-stack:has(> :global(.attention-dock:only-child)) {
+			background: linear-gradient(var(--bg-primary), var(--bg-primary)) center bottom /
+				calc(100% - 2 * var(--chat-attention-shadow-gutter)) var(--chat-attention-shadow-gutter)
+				no-repeat;
 		}
 	}
 	/* An out-of-flow slot no longer shortens the message list, so the list must

@@ -23,5 +23,5 @@
 	h4 { margin: 0; color: var(--text-primary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	ul { margin: 0; padding-left: var(--space-5); }
 	li + li { margin-top: var(--space-1); }
-	.show-all { justify-self: start; border: 0; background: transparent; padding: 0; color: var(--accent); font: inherit; cursor: pointer; }
+	.show-all { justify-self: start; border: 0; background: transparent; padding: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
 </style>

@@ -7,6 +7,8 @@
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { installLinkTargetResolver } from '$lib/linkTargetResolver';
+	import { theme } from '$lib/stores/theme';
+	import { ACCENT_ROLE_TOKENS, accentRoles, type AccentRoles } from '$lib/utils/projectColors';
 
 	let { children } = $props();
 
@@ -31,19 +33,13 @@
 	$effect(() => {
 		const s = $uiScope;
 		const root = document.documentElement;
-		const keys = ['--accent', '--accent-hover', '--violet', '--violet-2', '--violet-text', '--violet-bg', '--violet-line', '--accent-bg', '--accent-subtle'];
-		if (s) {
-			root.style.setProperty('--accent', s.color);
-			root.style.setProperty('--accent-hover', s.color);
-			root.style.setProperty('--violet', s.color);
-			root.style.setProperty('--violet-2', s.color);
-			root.style.setProperty('--violet-text', s.color);
-			root.style.setProperty('--violet-bg', `color-mix(in srgb, ${s.color} 12%, transparent)`);
-			root.style.setProperty('--violet-line', `color-mix(in srgb, ${s.color} 30%, transparent)`);
-			root.style.setProperty('--accent-bg', `color-mix(in srgb, ${s.color} 10%, transparent)`);
-			root.style.setProperty('--accent-subtle', `color-mix(in srgb, ${s.color} 12%, transparent)`);
-		} else {
-			keys.forEach((k) => root.style.removeProperty(k));
+		// The project's colour is the accent and every role comes from it; without a scope, or with a
+		// colour that does not parse, the tokens' CORSIA-blue defaults apply again.
+		const roles = s ? accentRoles(s.color, $theme) : null;
+		root.toggleAttribute('data-project-accent', !!roles);
+		for (const [role, token] of Object.entries(ACCENT_ROLE_TOKENS) as [keyof AccentRoles, string][]) {
+			if (roles) root.style.setProperty(token, roles[role]);
+			else root.style.removeProperty(token);
 		}
 	});
 </script>

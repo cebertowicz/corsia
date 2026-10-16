@@ -44,7 +44,7 @@
 	.send-label,
 	.send-kind,
 	.send-title {
-		font-family: var(--font-mono);
+		font-family: inherit;
 		font-size: var(--text-footnote);
 	}
 	.send-label {

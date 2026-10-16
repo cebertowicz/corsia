@@ -293,7 +293,7 @@
 
 	.switch-marker {
 		font-size: var(--text-caption);
-		color: var(--accent);
+		color: var(--accent-text);
 	}
 
 	.switch-marker.failed {
@@ -351,7 +351,7 @@
 	}
 
 	.rollover-settings { padding: 2px 10px 6px 32px; }
-	.rollover-settings button { padding: 0; color: var(--accent); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
+	.rollover-settings button { padding: 0; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
 
 	.row-note {
 		min-width: 0;

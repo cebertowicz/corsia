@@ -94,7 +94,7 @@
 	.cap {
 		display: flex; align-items: center; gap: 6px; padding: 4px 8px 8px;
 		font-size: var(--text-caption); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-		color: color-mix(in srgb, var(--violet) 55%, var(--text-tertiary));
+		color: color-mix(in srgb, var(--accent) 55%, var(--text-tertiary));
 	}
 	.cap .ct { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 </style>

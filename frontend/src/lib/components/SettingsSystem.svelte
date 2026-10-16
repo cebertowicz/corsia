@@ -201,7 +201,7 @@
 	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
 	.theme-opt { padding: 6px 16px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.theme-opt:hover { color: var(--text-primary); }
-	.theme-opt.active { background: var(--accent); color: #fff; }
+	.theme-opt.active { background: var(--accent-fill); color: var(--accent-on-fill); }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
 	.settings-error { background: color-mix(in srgb, var(--red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); color: var(--red); border-radius: var(--radius-xs); padding: 10px 14px; font-size: var(--text-subhead); margin-bottom: 16px; }
