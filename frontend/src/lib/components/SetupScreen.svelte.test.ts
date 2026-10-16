@@ -617,6 +617,9 @@ describe('SetupScreen', () => {
 				return json(typeof next === 'function' ? await (next as () => Promise<unknown>)() : next);
 			}
 			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
+			if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'corsia-thread' } });
+			if (url === '/api/models?thread_id=corsia-thread') return json({ models: [{ id: 'claude-code/sonnet', name: 'Sonnet', size: '', backend: 'harness', speed: '', connection: 'claude-code', status: 'ready' }] });
+			if (url.startsWith('/api/threads/corsia-thread?token=')) return json({ model: 'claude-code/sonnet', model_updated_at: '2026-10-16T00:00:00Z' });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
 				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
 				{ source: 'claude-code', name: 'Claude Code', state: sourceReady ? 'ready' : 'needs_auth', accounts: [{ state: sourceReady ? 'ready' : 'needs_auth' }] },
@@ -740,7 +743,7 @@ describe('SetupScreen', () => {
 		expect(host.textContent).not.toMatch(/classifier|learns from/i);
 	});
 
-	it('skips the AI step when a source is already Ready, with Start using CORSIA on the account step', async () => {
+	it('finishes setup when a ready source has no matching catalog model', async () => {
 		if (component) await unmount(component);
 		const onFinished = vi.fn();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -749,6 +752,9 @@ describe('SetupScreen', () => {
 			if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
+			if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'corsia-thread' } });
+			if (url === '/api/models?thread_id=corsia-thread') return json({ models: [{ id: 'claude-code/sonnet', name: 'Sonnet', size: '', backend: 'harness', speed: '', connection: 'claude-code', status: 'ready' }] });
+			if (url.startsWith('/api/threads/corsia-thread?token=')) return json({ model: 'claude-code/sonnet', model_updated_at: '2026-10-16T00:00:00Z' });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
 				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
 				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
@@ -916,6 +922,7 @@ describe('SetupScreen', () => {
 			expect(row('Claude Code').textContent).toContain('Finish signing in to your Claude account in the browser window that just opened.');
 			expect(row('Claude Code').textContent).not.toContain('Installed.');
 		});
+
 
 		it('shows an install failure with its reason, Try again and the install page', async () => {
 			const { openExternalUrl } = await import('$lib/linkTargetResolver');
