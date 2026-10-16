@@ -493,18 +493,18 @@ fn configure_work_folder(
     service: tauri::State<'_, AppServiceState>,
     path: PathBuf,
 ) -> Result<(), String> {
-    let state_dir = default_state_dir(&app)?;
+    let app_dir = default_app_dir(&app)?;
     let home = app
         .path()
         .home_dir()
         .map_err(|error| format!("could not resolve the home folder: {error}"))?;
     first_run::ensure_folder_writable(&path)?;
-    let port = first_run::recorded_port(&state_dir).unwrap_or(DEFAULT_SERVICE_PORT);
+    let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
     let resources = bundled_resource_dir(&app).ok();
     first_run::apply_chosen_folder(
         &path,
         &first_run::default_workspace(&home),
-        &state_dir,
+        &app_dir,
         port,
         || setup_account_exists(port),
         |workspace| {
@@ -515,12 +515,12 @@ fn configure_work_folder(
             )
         },
         restart_service,
-        || wait_for_service(port, &state_dir),
+        || wait_for_service(port, &app_dir),
     )?;
     *service
-        .state_dir
+        .app_dir
         .lock()
-        .map_err(|_| "service state is unavailable")? = Some(state_dir);
+        .map_err(|_| "service state is unavailable")? = Some(app_dir);
     Ok(())
 }
 

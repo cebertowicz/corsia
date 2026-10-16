@@ -111,6 +111,25 @@ mod tests {
 
     #[test]
     fn update_lock_admits_one_holder_and_frees_on_drop() {
+        // A flock lives until the last copy of its descriptor closes, and a
+        // concurrent test's fork briefly holds a copy, so the check runs in a
+        // test process of its own.
+        const NAME: &str = "app_paths::tests::update_lock_admits_one_holder_and_frees_on_drop";
+        if std::env::var_os("CORSIA_UPDATE_LOCK_ALONE").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", NAME, "--test-threads=1"])
+                .env("CORSIA_UPDATE_LOCK_ALONE", "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
         let temp = tempfile::tempdir().unwrap();
         let state = temp.path().join("state");
 

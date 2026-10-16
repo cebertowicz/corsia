@@ -324,7 +324,7 @@ pub fn apply(
 pub fn apply_chosen_folder(
     workspace: &Path,
     default_workspace: &Path,
-    state_dir: &Path,
+    app_dir: &Path,
     port: u16,
     account_exists: impl FnOnce() -> Result<bool, String>,
     init_git: impl FnOnce(&Path) -> Result<(), String>,
@@ -334,7 +334,7 @@ pub fn apply_chosen_folder(
     if account_exists()? {
         return Err("Your account is already set up, so CORSIA left its work folder unchanged.".into());
     }
-    apply(workspace, state_dir, port, init_git)?;
+    apply(workspace, app_dir, port, init_git)?;
     restart()?;
     wait_for_health()?;
     remove_default_folder_if_fresh(default_workspace, workspace)?;
@@ -603,7 +603,7 @@ mod tests {
         apply_chosen_folder(
             &chosen,
             &default_folder,
-            &home.state(),
+            &home.app_dir(),
             47_895,
             || Ok(false),
             |workspace| {
@@ -625,7 +625,7 @@ mod tests {
             ]
         );
         let recorded: serde_json::Value =
-            serde_json::from_slice(&fs::read(home.state().join(SERVICE_FILE)).unwrap()).unwrap();
+            serde_json::from_slice(&fs::read(home.app_dir().join(SERVICE_FILE)).unwrap()).unwrap();
         assert_eq!(recorded["workspace"], chosen.to_str().unwrap());
         assert!(!default_folder.exists(), "only the fresh default Git folder is removed");
     }
@@ -637,7 +637,7 @@ mod tests {
         let result = apply_chosen_folder(
             &chosen,
             &home.0.join("corsia"),
-            &home.state(),
+            &home.app_dir(),
             47_895,
             || Ok(true),
             |_| panic!("must not initialise after account creation"),
@@ -647,7 +647,7 @@ mod tests {
 
         assert!(result.unwrap_err().contains("already set up"));
         assert!(!chosen.exists());
-        assert!(!home.state().join(SERVICE_FILE).exists());
+        assert!(!home.app_dir().join(SERVICE_FILE).exists());
     }
 
     #[test]

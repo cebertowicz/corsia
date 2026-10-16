@@ -882,7 +882,8 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 1024];
             let _ = stream.read(&mut request);
-            thread::sleep(Duration::from_millis(150));
+            // Stay silent until the client gives up and hangs up.
+            let _ = stream.read(&mut request);
         });
         let temp = tempfile::tempdir().unwrap();
         let archive = temp.path().join("archive");
@@ -895,7 +896,10 @@ mod tests {
             |_| Ok(u64::MAX),
         ));
 
-        assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("no response")));
+        assert!(
+            matches!(&result, Err(StageError::Fetch(reason)) if reason.contains("no response")),
+            "{result:?}"
+        );
         assert!(!archive.exists());
     }
 
@@ -987,7 +991,8 @@ mod tests {
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nConnection: keep-alive\r\n\r\nA")
                 .unwrap();
-            thread::sleep(Duration::from_millis(150));
+            // Stay silent until the client gives up and hangs up.
+            let _ = stream.read(&mut request);
         });
         let temp = tempfile::tempdir().unwrap();
         let archive = temp.path().join("archive");
@@ -996,10 +1001,13 @@ mod tests {
             &archive,
             3,
             Duration::from_secs(2),
-            Duration::from_millis(25),
+            Duration::from_secs(1),
             |_| Ok(u64::MAX),
         ));
-        assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("stalled")));
+        assert!(
+            matches!(&result, Err(StageError::Fetch(reason)) if reason.contains("stalled")),
+            "{result:?}"
+        );
         assert!(!archive.exists());
     }
 }
