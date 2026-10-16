@@ -158,9 +158,12 @@
 		{#if decisionCount > 0}
 			<Section title="Needs you">
 				<button class="needs-you" onclick={() => (onNeedsYou ? onNeedsYou() : void openDecision())}>
-					<span>
-						<strong>{decisionCount}</strong>
-						{decisionCount === 1 ? 'decision' : 'decisions'}
+					<span class="needs-you-label">
+						<span class="needs-you-mark" aria-hidden="true"></span>
+						<span>
+							<strong>{decisionCount}</strong>
+							{decisionCount === 1 ? 'decision' : 'decisions'}
+						</span>
 					</span>
 					<span>Open ›</span>
 				</button>
@@ -292,13 +295,22 @@
 		.activity-measures:hover { background: var(--bg-hover); color: var(--text-primary); }
 		.all-projects:hover, .section-toggle:hover { color: var(--text-primary); }
 	}
+	/* Needs you is the chat view's frosted card with its amber mark (AttentionDock). */
 	.needs-you {
 		display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 52px;
-		padding: var(--space-3); border: 1px solid var(--accent-line); border-radius: var(--radius-sm);
-		background: var(--accent-wash); color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+		padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-xl);
+		background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip);
+		color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+		transition: background var(--dur-tight) var(--ease-snap);
 	}
+	.needs-you-label { display: flex; align-items: center; gap: var(--space-2); }
+	.needs-you-mark { width: 8px; height: 8px; flex: none; border-radius: var(--radius-circle); background: var(--amber); }
 	.needs-you strong { font-variant-numeric: tabular-nums; }
-	.needs-you > span:last-child { color: var(--accent-text); font-size: var(--text-footnote); font-weight: var(--fw-medium); }
+	.needs-you > span:last-child { color: var(--text-tertiary); font-size: var(--text-caption); transition: color var(--dur-tight) var(--ease-snap); }
+	@media (hover: hover) {
+		.needs-you:hover { background: var(--bg-hover); }
+		.needs-you:hover > span:last-child { color: var(--text-primary); }
+	}
 	.needs-you:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.activity-work { margin-top: var(--space-6); }
 	.activity-work > h2 {
