@@ -3,8 +3,8 @@
  *
  * Coverage for the artifact-pane-hierarchy cutover's client projection:
  * node kinds (artifact / worktree-group), grouping disclosure, capability-driven
- * row actions and disabled states, the needs_attention repair-failure cluster
- * (distinct from the conductor "Needs you" queue), pane removal, and hide.
+ * row actions and disabled states, the needs_attention repair-failure cluster,
+ * pane removal, and hide.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -250,7 +250,7 @@ describe('ArtifactPane — hide (remove from pane)', () => {
 });
 
 describe('ArtifactPane — needs_attention cluster', () => {
-	it('renders a distinct "Needs attention" header separate from any "Needs you" header', () => {
+	it('renders its repair-failure header', () => {
 		mountPane({
 			nodes: [docNode()],
 			needs_attention: [{ kind: 'repair-failure', artifact_id: 'a1', reason: 'permission denied reading file', retryable: true }],
@@ -259,8 +259,7 @@ describe('ArtifactPane — needs_attention cluster', () => {
 
 		expect(host.textContent).toContain('Needs attention');
 		expect(host.textContent).toContain('permission denied reading file');
-		const needsYou = [...host.querySelectorAll('.lane-cap')].filter((el) => el.textContent?.trim().toLowerCase() === 'needs you');
-		expect(needsYou).toHaveLength(0);
+		expect(host.querySelector('.lane-cap.needs-attention')).toBeTruthy();
 	});
 
 	it('cross-references the artifact name from nodes[] for a needs_attention row', () => {
