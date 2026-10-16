@@ -216,6 +216,28 @@ def test_a_cleared_round_reads_its_outcome_not_needs_review(db, outcome, expecte
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == expected
 
 
+def test_a_replaced_round_cleared_before_endings_were_recorded_still_reads_replaced(db):
+    from plans import holds
+    from registry import models
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    hold_id = _ask(db, plan_id, node_id, ask)
+    # An older person's 'replaced' clear wrote no ending to the clearance event,
+    # only its outcome to the artifact's attention metadata.
+    holds.clear_write(
+        node_id, hold_id, expected_kind="blocked", actor_id=None,
+        provenance="user.ask_cleared", db=db,
+    )
+    row = db.execute("SELECT integration,type,external_id FROM artifact_identities WHERE id=?", (ask,)).fetchone()
+    models.update_metadata(
+        row["integration"], row["type"], row["external_id"],
+        {"attention_state": "cleared", "attention_outcome": "supersede"}, db=db,
+    )
+
+    assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == "replaced"
+
+
 _CARD_STATE_BY_ENDING = {
     "withdrawn": "withdrawn", "closed": "closed", "replaced": "replaced",
     "retired": "unavailable", "rejected": "rejected",

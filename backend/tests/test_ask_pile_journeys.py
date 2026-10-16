@@ -376,6 +376,19 @@ def test_each_disposition_releases_the_task_with_exactly_one_asker_input(
     assert _metadata(db, artifact_id)["disposition_outcome"] == outcome
 
 
+def test_an_asker_with_no_model_selected_takes_only_the_route_back(db):
+    """A model-less asker gets no plan wake, so the route-back is its one input."""
+    from parent_review.disposition import REJECT_WITH_REASON, dispose
+
+    db.execute("UPDATE threads SET model='' WHERE id='owner'")
+    _plan_id, _node_id, artifact_id, _hold_id = _asked(db)
+
+    result = dispose(artifact_id, REJECT_WITH_REASON, reason="Not yet", db=db)
+
+    assert len(_asker_inputs(db)) == 1
+    assert result.route_disposition is not None
+
+
 def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db):
     from parent_review.disposition import REJECT_WITH_REASON, dispose
     from registry.ownership import rehome_artifact

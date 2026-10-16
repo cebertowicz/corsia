@@ -15,6 +15,7 @@ truth, so a renamed or retired artifact reads as it is now.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
@@ -31,10 +32,18 @@ VERDICTS = frozenset({"approved", "approved_with_changes", "changes_requested"})
 #: one whose artifact is gone.
 NEEDS_REVIEW = "needs_review"
 ANSWERED = "answered"
+REPLACED = "replaced"
 UNAVAILABLE = "unavailable"
 
 UNAVAILABLE_TITLE = "No longer available"
 
+
+def _payload(raw: object) -> dict:
+    try:
+        parsed = json.loads(str(raw)) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _file_name(artifact: Mapping[str, Any]) -> str | None:
@@ -89,13 +98,17 @@ def card_for(
     return card
 
 
-def ask_state(hold: Mapping[str, Any]) -> tuple[str, dict[str, int] | None]:
+def ask_state(
+    hold: Mapping[str, Any], artifact: Mapping[str, Any] | None = None,
+) -> tuple[str, dict[str, int] | None]:
     """The round state one ask reads as, with the feedback counts its verdict carried.
 
     ``hold`` is one ``plans.public.ask_holds`` entry. Open reads as needing
-    review. A cleared ask reads as its verdict when the review bar recorded one.
-    Otherwise it reads its terminal path from the hold's clearance event, and
-    falls back to answered only for older rows that recorded no ending.
+    review. A cleared ask reads its terminal path from the hold's clearance
+    event, else its verdict when the review bar recorded one. A clearance that
+    recorded neither predates recorded endings: a person's 'replaced' clear then
+    wrote its outcome only to the artifact's attention metadata, so that is read
+    as replaced and anything else as answered.
     """
     from plans.public import ASK_ENDINGS
 
@@ -110,6 +123,9 @@ def ask_state(hold: Mapping[str, Any]) -> tuple[str, dict[str, int] | None]:
     verdict = answer.get("verdict")
     if verdict in VERDICTS:
         return verdict, _counts(answer.get("feedback_counts"))
+    attention = _payload(artifact.get("metadata")) if artifact else {}
+    if attention.get("attention_state") == "cleared" and attention.get("attention_outcome") == "supersede":
+        return REPLACED, None
     return ANSWERED, None
 
 
@@ -124,7 +140,7 @@ def ask_cards(db, asks: Mapping[str, str]) -> dict[str, dict[str, Any]]:
         if hold is None:
             continue
         artifact = registry_models.get_artifact(artifact_id, db=db)
-        state, feedback = ask_state(hold)
+        state, feedback = ask_state(hold, artifact)
         cards[hold_id] = card_for(
             artifact, artifact_id, kind="ask", hold_id=hold_id, state=state, feedback=feedback,
         )
