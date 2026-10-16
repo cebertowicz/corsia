@@ -73,16 +73,19 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('.waiting-copy b')).toBeNull();
 	});
 
-	it('offers only Remove on an expired request', async () => {
+	it('offers only Dismiss on an expired request', async () => {
 		const expired = { ...awaiting, state: 'expired', reach: { mode: 'selected', project_ids: [], outside_projects: false } };
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [expired] }) })));
+		const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ servers: [expired] }) }));
+		vi.stubGlobal('fetch', fetch);
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Request expired'));
 		expect(host.textContent).not.toContain('Choose where it works…');
 		expect(host.textContent).not.toContain('Reconnect');
 		(host.querySelector('.app-row button') as HTMLButtonElement).click();
 		flushSync();
-		expect([...host.querySelectorAll('.app-row .actions button')].map((button) => button.textContent?.trim())).toEqual(['Remove']);
+		expect([...host.querySelectorAll('.app-row .actions button')].map((button) => button.textContent?.trim())).toEqual(['Dismiss']);
+		(host.querySelector('.app-row .actions button') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
 	});
 
 	it('shows a pending change on a working app as Approve and Decline, with no place action', async () => {

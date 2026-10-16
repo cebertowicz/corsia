@@ -134,8 +134,8 @@
 								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} />
 							<div class="actions">
 								{#if app.state === 'expired'}
-									<!-- A request that ran out can't be placed, reconnected or approved; removing it is the only action that works. -->
-									<Button variant="danger" loading={actionId === app.id} onclick={() => run(app, 'remove')}>Remove</Button>
+									<!-- A request that ran out can't be placed, reconnected or approved; Dismiss runs Decline's cleanup (copy sheet). -->
+									<Button loading={actionId === app.id} onclick={() => run(app, 'decline')}>Dismiss</Button>
 								{:else}
 									<Button onclick={() => { whereApprove = false; whereApp = app; }}>Where it works…</Button>
 									<Button loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>
