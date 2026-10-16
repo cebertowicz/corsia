@@ -186,14 +186,12 @@ describe('first-run entry across auth readiness', () => {
 		await settle();
 		resolveLookup();
 		await settle();
-		catalogModels = [{ id: 'fixture-model', name: 'Fixture model', size: 'test', backend: 'test', speed: 'test', status: 'ready' }];
-		models.set(catalogModels);
-		scopeLookups.set('workspace', Promise.resolve(json({ target: { thread_id: 'fixture-conductor', model: 'fixture-model', updated_at: '2026-10-01T00:00:00Z' }, first_run_pending: false })));
+		scopeLookups.set('workspace', Promise.resolve(json({ target: { thread_id: 'fixture-conductor' }, first_run_pending: false })));
 		requestCorsiaMessage('Connect a Google account for all my projects');
 		await vi.waitFor(() => expect(get(pendingCorsiaMessage)).toBeNull());
 		await vi.waitFor(() => expect(get(activeThreadId)).toBe('fixture-conductor'));
-		await vi.waitFor(() => expect(get(activeModelId)).toBe('fixture-model'));
-		expect(get(models).map((model) => model.id)).toContain('fixture-model');
+		expect(get(activeModelId)).toBeNull();
+		expect(get(models)).toEqual([]);
 		await vi.waitFor(() => expect(FakeSocket.instances[0].sent.filter((frame) => frame.type === 'message')).toHaveLength(1));
 		const messageFrame = FakeSocket.instances[0].sent.find((frame) => frame.type === 'message');
 		expect(messageFrame).toMatchObject({

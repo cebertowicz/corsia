@@ -12,10 +12,18 @@
 
 	async function deliver(request: CorsiaMessageRequest): Promise<void> {
 		try {
-			if (!await goConductor() || !active()) return;
+			if (!await goConductor() || !active()) {
+				console.warn('CORSIA request was not sent because its conversation could not open');
+				return;
+			}
 			await tick();
-			if (!active() || !chatPanel) return;
-			await chatPanel.setAndSend(request.text);
+			if (!active() || !chatPanel) {
+				console.warn('CORSIA request was not sent because its composer is unavailable');
+				return;
+			}
+			if (!await chatPanel.setAndSend(request.text)) {
+				console.warn('CORSIA request was not sent; its text remains in the composer');
+			}
 		} finally {
 			if (!active()) return;
 			takeCorsiaMessage(request.id);

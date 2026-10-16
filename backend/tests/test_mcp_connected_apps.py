@@ -141,7 +141,7 @@ def test_agent_proposal_needs_person_and_preserves_active_config(connected_apps_
 
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
-    accepted = client.post(f"/api/mcp/servers/{original['id']}/approve")
+    accepted = client.post(f"/api/mcp/servers/{original['id']}/approve", json={"expected_revision": 2})
     assert accepted.status_code == 200
     approved = get_app(original["id"], db=db)
     assert approved["config"]["command"] == "new"
@@ -367,7 +367,7 @@ def test_expired_proposal_is_listed_and_cannot_be_approved(connected_apps_client
 
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
-    refused = client.post(f"/api/mcp/servers/{proposal['id']}/approve")
+    refused = client.post(f"/api/mcp/servers/{proposal['id']}/approve", json={"expected_revision": 1})
     assert refused.status_code == 409
     assert refused.json()["detail"] == "This request expired after seven days. Ask Planning to send it again."
     assert db.execute("SELECT 1 FROM connected_apps WHERE id=?", (proposal["id"],)).fetchone() is None

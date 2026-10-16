@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
+from api.connected_app_errors import app_error as _app_error, refusal as _refusal
 from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
@@ -26,12 +27,6 @@ BODY_SHAPE = (
 )
 
 
-def _refusal(detail: str, status: int = 422) -> HTTPException:
-    """Return a connected-app validation error with an explicit safe agent remedy."""
-    headers = {"X-Corsia-Agent-Remedy": detail} if status == 403 else None
-    return HTTPException(status, detail, headers=headers)
-
-
 def _audit_actor(user: dict) -> tuple[str, str]:
     """Return a durable, value-free actor identity for connected-app audit rows."""
     if is_person_session(user):
@@ -39,27 +34,6 @@ def _audit_actor(user: dict) -> tuple[str, str]:
         return "person", actor if isinstance(actor, str) and actor else "unknown"
     actor = user.get("thread_id") or user.get("id")
     return "agent", actor if isinstance(actor, str) and actor else "unknown"
-
-
-def _app_error(exc: Exception) -> HTTPException:
-    from connections.app_reach import (
-        AppNotFoundError,
-        AppPendingApprovalError,
-        AppProposalExpiredError,
-        AppRevisionConflictError,
-    )
-
-    if isinstance(exc, HTTPException):
-        return exc
-    if isinstance(exc, AppNotFoundError):
-        return _refusal("connected app not found", 404)
-    if isinstance(exc, AppRevisionConflictError):
-        return _refusal("connected app changed; refresh it and retry", 409)
-    if isinstance(exc, AppProposalExpiredError):
-        return _refusal(str(exc), 409)
-    if isinstance(exc, AppPendingApprovalError):
-        return _refusal("approve or decline the change first", 409)
-    return _refusal(str(exc))
 
 
 async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], app_id: str) -> dict[str, object]:
@@ -129,6 +103,8 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     config = body.get("config")
     if isinstance(config, dict) and {"key_refs", "asked_by_thread_id"}.intersection(config):
         raise _refusal(f"key_refs and asked_by_thread_id go beside config, not inside it. {BODY_SHAPE}")
+    if isinstance(config, dict) and "source_folder" in config:
+        raise _refusal(f"source_folder is set by CORSIA when it imports an app, not inside config. {BODY_SHAPE}")
     if not isinstance(config, dict):
         raise _refusal(f"config must be an object. {BODY_SHAPE}")
     command, url, args = config.get("command"), config.get("url"), config.get("args", [])
@@ -315,13 +291,22 @@ def _human_decision(user: dict, action: str, app_id: str) -> None:
 
 
 @connected_apps_router.post("/servers/{app_id}/approve")
-async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """Approve an inert proposal; connection/reload is deliberately not part of this route."""
+async def approve_server(
+    app_id: str, body: dict[str, Any] | None = Body(None), user: dict = Depends(require_user),
+) -> dict[str, object]:
+    """Approve a proposal, optionally choosing where it works in the same revision-checked write."""
     _human_decision(user, "approve", app_id)
+    body = body or {}
+    if not set(body) <= {"reach", "expected_revision"}:
+        raise _refusal("approval takes only reach and expected_revision")
+    revision = _expected_revision(body)
     try:
         from connections.app_lifecycle import approve_proposal
         result = await run_in_db(
-            lambda: approve_proposal(app_id, audit_actor=_audit_actor(user), db=_db())
+            lambda: approve_proposal(
+                app_id, reach=body.get("reach"), expected_revision=revision,
+                audit_actor=_audit_actor(user), db=_db(),
+            )
         )
     except Exception as exc:
         raise _app_error(exc) from None

@@ -47,6 +47,10 @@ def _isolate_lifespan(monkeypatch) -> None:
     import tools.mcp_runtime as mcp_runtime
     from tools.registry import ToolRegistry
 
+    # llm.local_sources binds get_servers at import. Importing it first keeps the
+    # stub below from becoming its permanent binding when startup imports it.
+    import llm.local_sources  # noqa: F401
+
     class _NoopProcessOwner(_ProcessOwnerTestContract):
         async def terminate_turn(
             self,
@@ -76,7 +80,7 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
-    monkeypatch.setattr(network_discovery, "get_servers", lambda: [])
+    monkeypatch.setattr(network_discovery, "get_servers", lambda **_filters: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
     monkeypatch.setattr(harness_models, "_REFRESH_TASKS", {})
     monkeypatch.setattr(mcp_runtime, "_stack", None, raising=False)

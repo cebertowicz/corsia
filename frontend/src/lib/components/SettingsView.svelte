@@ -33,8 +33,9 @@
 		});
 	});
 
-	const sections: { id: SettingsSection; label: string; icon: string }[] = [
+	const sections: { id: SettingsSection; label: string; shortLabel?: string; icon: string }[] = [
 		{ id: 'providers', label: 'Providers', icon: 'M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z' },
+		{ id: 'connected-apps', label: 'Connected apps', shortLabel: 'Apps', icon: 'M10.5 13.5l3-3m-5.5 6.5l-1 1a3 3 0 01-4.243-4.243l3-3a3 3 0 014.243 0M16 8l1-1a3 3 0 114.243 4.243l-3 3a3 3 0 01-4.243 0' },
 		{ id: 'system',    label: 'System',    icon: 'M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z' },
 		{ id: 'keys',      label: 'Keys',      icon: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4' },
 		{ id: 'debug',     label: 'Debug',     icon: 'M8 2v4M16 2v4M9 18h6M7 9h10v8a3 3 0 01-3 3h-4a3 3 0 01-3-3zM3 12h4M17 12h4M5 5l3 3M19 5l-3 3' },
@@ -75,6 +76,7 @@
 		{:else if $settingsActiveSection === 'system'}
 			<SettingsSystem {systemStatus} onSwitchSection={(s) => { settingsActiveSection.set(s as SettingsSection); }} />
 			<SystemBulletinsSetting />
+		{:else if $settingsActiveSection === 'connected-apps'}
 			<ConnectedAppsSettings />
 		{:else if $settingsActiveSection === 'keys'}
 			<SettingsKeys />
@@ -93,7 +95,7 @@
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
 					<path d={s.icon}/>
 				</svg>
-				{s.label}
+				{s.shortLabel ?? s.label}
 			</button>
 		{/each}
 	</div>
