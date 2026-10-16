@@ -74,6 +74,8 @@ VALID_CATEGORIES_SET = frozenset(VALID_CATEGORIES)
 LABEL_REVIEW_LOCAL = "qa/review-local"
 LABEL_REVIEW_PARALLEL = "qa/review-parallel"
 LABEL_OVERRIDE = "qa/override-reviewer"
+# A maintainer adds it to approve the automated review of a fork pull request head.
+LABEL_REVIEW = "review"
 
 STATUS_CHECK_CONTEXT = "qa/llm-reviewer"
 STATUS_PRESENCE_CONTEXT = "qa/llm-reviewer-present"
