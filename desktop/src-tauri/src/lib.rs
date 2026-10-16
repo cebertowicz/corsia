@@ -542,10 +542,10 @@ struct RemoteNames {
 }
 
 #[derive(Serialize)]
-#[serde(tag = "ok", rename_all = "snake_case")]
+#[serde(untagged)]
 enum RemotePairResponse {
-    True { name: String },
-    False { reason: String, app_version: Option<String>, host_version: Option<String> },
+    Success { ok: bool, name: String },
+    Failure { ok: bool, reason: String, app_version: Option<String>, host_version: Option<String> },
 }
 
 #[tauri::command]
@@ -571,7 +571,7 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
         PairError::TooOld => "too_old",
         PairError::Protocol(_) => "server",
     };
-    RemotePairResponse::False { reason: reason.into(), app_version: None, host_version: None }
+    RemotePairResponse::Failure { ok: false, reason: reason.into(), app_version: None, host_version: None }
 }
 
 #[tauri::command]
@@ -588,7 +588,7 @@ async fn remote_pair(
         remote_config::Locator::Address { host, port } => (host.clone(), *port),
         remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
             Ok(address) => address,
-            Err(_) => return Ok(RemotePairResponse::False { reason: "network".into(), app_version: None, host_version: None }),
+            Err(_) => return Ok(RemotePairResponse::Failure { ok: false, reason: "network".into(), app_version: None, host_version: None }),
         },
     };
     let paired = match pairing::pair(&host, port, &request.code).await {
@@ -597,8 +597,8 @@ async fn remote_pair(
     };
     match version_check::check(&paired.host, paired.port, &paired.trust).await {
         Ok(version_check::Compat::Ok) => {}
-        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(RemotePairResponse::False { reason: "incompatible".into(), app_version: Some(app_version), host_version: host }),
-        Ok(version_check::Compat::TooOld) => return Ok(RemotePairResponse::False { reason: "too_old".into(), app_version: None, host_version: None }),
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(RemotePairResponse::Failure { ok: false, reason: "incompatible".into(), app_version: Some(app_version), host_version: host }),
+        Ok(version_check::Compat::TooOld) => return Ok(RemotePairResponse::Failure { ok: false, reason: "too_old".into(), app_version: None, host_version: None }),
         Err(error) => return Ok(remote_pair_error(error)),
     }
     let proxy = proxy::start(locator.clone(), paired.trust.clone(), 0, || {}).await.map_err(|error| format!("could not start remote proxy: {error:?}"))?;
@@ -609,7 +609,7 @@ async fn remote_pair(
     if let Some(window) = app.get_webview_window("main") {
         window.eval(format!("window.location.replace('http://127.0.0.1:{}');", remote_config::load_remote(&app_dir)?.expect("saved remote").proxy_port)).map_err(|error| error.to_string())?;
     }
-    Ok(RemotePairResponse::True { name: paired.name })
+    Ok(RemotePairResponse::Success { ok: true, name: paired.name })
 }
 
 #[tauri::command]
