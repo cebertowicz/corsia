@@ -32,16 +32,16 @@ export function projectAccent(id: string | null | undefined, accentColor?: strin
 }
 
 /**
- * The surfaces accent text sits on in each theme (`--bg-primary`, `--bg-tertiary`, `--bg-hover`), copied from
- * `app-tokens.css` and pinned to it by `projectColors.test.ts`. The limiting one is the darkest in light (stepped text
- * darkens) and the lightest in dark (stepped text lightens), so text that passes all of them passes on every pane.
+ * The surfaces accent text sits on in each theme (`--bg-primary`, `--bg-tertiary`, `--bg-hover` and `--bg-active`),
+ * copied from `app-tokens.css` and pinned to it by `projectColors.test.ts`. The limiting one is the darkest in light
+ * (stepped text darkens) and the lightest in dark (stepped text lightens), so text that passes all of them passes on
+ * every pane. `--bg-active` is a pane because `app.css` paints it behind anything pressed (`.press-tint:active`,
+ * `.pressable-row:active`), including the rows and buttons that carry accent text.
  */
 export const ACCENT_TEXT_SURFACES: Record<'light' | 'dark', string[]> = {
-	light: ['#ffffff', '#f0f0f2', '#e8e8ec'],
-	dark: ['#0a0a0b', '#1c1c1f', '#242428'],
+	light: ['#ffffff', '#f0f0f2', '#e8e8ec', '#e0e0e5'],
+	dark: ['#0a0a0b', '#1c1c1f', '#242428', '#2a2a2f'],
 };
-const ON_FILL_LIGHT = '#ffffff';
-
 export interface AccentRoles {
 	base: string;
 	text: string;
@@ -67,9 +67,8 @@ const warnedUnparsed = new Set<string>();
  * What a project's colour becomes when it is the accent, every role from this one place.
  * The colour is treated as opaque: an alpha component is dropped, and every role is opaque (the base is the colour
  * itself, or its opaque hex when it carried an alpha). Text is the same hue stepped until it reads (4.5:1) on every
- * pane. The fill is the colour itself, and the ink on it is the shared `inkOn` choice; near the crossover where neither
- * ink reaches 4.5:1, the fill steps away from its ink until it does, so the ink is always
- * chosen for the exact colour behind it.
+ * pane. The fill is always the colour itself — the project's colour is what a person chose, so it is never stepped or
+ * darkened — and the ink on it is the shared APCA `inkOn` choice for that exact fill.
  * Null when the colour does not parse (the API validates it, so this should not happen): the default accent applies,
  * with one console warning per value.
  */
@@ -89,10 +88,7 @@ export function accentRoles(colour: string, theme: 'light' | 'dark'): AccentRole
 	const surfaces = ACCENT_TEXT_SURFACES[theme].map((hex) => parseColor(hex)!);
 	const text = toHex(stepToContrast(own, surfaces, theme, 4.5));
 	const onFill = inkOn(base);
-	// White ink needs a darker fill and near-black ink a lighter one: the same stepping
-	// direction as text in the light and dark themes respectively.
-	const fill = toHex(stepToContrast(own, [parseColor(onFill)!], onFill === ON_FILL_LIGHT ? 'light' : 'dark', 4.5));
-	return { base, text, wash, line, fill, onFill };
+	return { base, text, wash, line, fill: base, onFill };
 }
 
 export const ACCENT_SWATCHES = [
