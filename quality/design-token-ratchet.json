@@ -879,6 +879,13 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
+    "frontend/src/lib/components/ConnectedAppsSettings.svelte": {
+      "raw_colors": 0,
+      "raw_px": 2,
+      "heavy_borders": 0,
+      "raw_shadows": 0,
+      "row_menu_buttons": 0
+    },
     "frontend/src/lib/components/ContextSheet.svelte": {
       "raw_colors": 0,
       "raw_px": 3,
@@ -888,7 +895,7 @@
     },
     "frontend/src/lib/components/ContextSheetSources.svelte": {
       "raw_colors": 0,
-      "raw_px": 3,
+      "raw_px": 2,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1532,7 +1539,7 @@
     },
     "frontend/src/lib/components/SettingsDebug.svelte": {
       "raw_colors": 0,
-      "raw_px": 37,
+      "raw_px": 35,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2519,7 +2526,7 @@
     },
     "frontend/src/lib/components/ui/Button.svelte": {
       "raw_colors": 0,
-      "raw_px": 8,
+      "raw_px": 7,
       "heavy_borders": 1,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2694,7 +2701,7 @@
     },
     "frontend/src/lib/components/v7/HostSection.svelte": {
       "raw_colors": 0,
-      "raw_px": 22,
+      "raw_px": 20,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -4303,14 +4310,14 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/utils/contrast.ts": {
-      "raw_colors": 3,
+      "raw_colors": 2,
       "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/utils/projectColors.ts": {
-      "raw_colors": 25,
+      "raw_colors": 26,
       "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
@@ -4429,13 +4436,6 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/ws/streamState.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/ws/threadSwitchFields.ts": {
       "raw_colors": 0,
       "raw_px": 0,
       "heavy_borders": 0,
