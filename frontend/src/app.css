@@ -99,7 +99,7 @@ body { max-width: 100vw; }
 .md-content ul { margin: 0 0 12px; padding-left: 3.5em; list-style-position: outside; }
 .md-content ol { margin: 0 0 12px; padding-left: 3.5em; list-style-position: outside; }
 .md-content li { margin-bottom: 4px; }
-.md-content a { color: var(--accent); text-decoration: none; }
+.md-content a { color: var(--violet-text); text-decoration: none; }
 .md-content a:hover { text-decoration: underline; }
 .md-content strong { font-weight: 600; }
 .md-content code {

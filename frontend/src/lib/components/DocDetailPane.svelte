@@ -145,7 +145,7 @@
 	.dd-sec { display: flex; flex-direction: column; gap: 6px; }
 	.dd-cap { display: flex; align-items: center; gap: 6px; font-size: var(--text-caption); font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: var(--ls-cap); color: var(--text-tertiary); }
 	.dd-badge { font-size: var(--text-caption); font-weight: var(--fw-semibold); text-transform: none; letter-spacing: 0; color: var(--text-tertiary); background: color-mix(in srgb, var(--text-primary) 7%, transparent); border-radius: var(--radius-2xs); padding: 1px 6px; }
-	.dd-badge.ai { color: var(--accent); background: var(--accent-bg); }
+	.dd-badge.ai { color: var(--violet-text); background: var(--accent-bg); }
 	.dd-badge.pending { color: var(--amber); background: var(--amber-bg); }
 	.dd-pencil { display: flex; padding: 3px; margin-left: auto; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; }
 	.dd-pencil:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -157,7 +157,7 @@
 	.dd-edit-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
 	.dd-ghost { font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--text-secondary); background: none; border: none; padding: 5px 8px; cursor: pointer; }
 	.dd-ghost:hover { color: var(--text-primary); }
-	.dd-primary { font-size: var(--text-caption); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 12px; cursor: pointer; }
+	.dd-primary { font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--on-accent); background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 12px; cursor: pointer; }
 	.dd-primary:disabled { opacity: 0.6; cursor: default; }
 
 	.dd-prov { display: flex; align-items: center; gap: 7px; }
@@ -169,7 +169,7 @@
 	.dd-stat-v { font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-primary); font-family: var(--font-mono); }
 	.dd-stat-k { font-size: var(--text-caption); color: var(--text-tertiary); }
 
-	.dd-open { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-sm); padding: 9px 14px; cursor: pointer; }
+	.dd-open { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--on-accent); background: var(--accent); border: none; border-radius: var(--radius-sm); padding: 9px 14px; cursor: pointer; }
 	.dd-open:hover:not(:disabled) { filter: brightness(1.06); }
 	.dd-open:disabled { opacity: 0.45; cursor: default; }
 

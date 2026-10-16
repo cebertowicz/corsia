@@ -120,35 +120,15 @@
 .row-chip.open .chevron {
 	transform: rotate(180deg);
 }
-.model-chip {
-	font-size: var(--text-footnote); font-weight: 600;
-	letter-spacing: 0.02em;
-	color: var(--violet);
-	min-width: 0;
-}
-.model-chip.unloaded {
-	color: var(--amber);
-}
-.model-chip.unloaded:hover, .model-chip.unloaded.open {
-	color: var(--amber-2, var(--amber));
-	background: var(--amber-bg);
-}
-.effort-chip {
-	font-size: var(--text-caption); font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	color: var(--sky);
-}
-.effort-chip:hover, .effort-chip.open {
-	color: var(--sky-2, var(--sky));
-	background: var(--sky-bg);
-}
-.context-chip {
-	font-size: var(--text-caption); font-weight: 600;
-	font-family: var(--font-mono);
-	color: var(--text-tertiary);
-}
-.context-chip:hover, .context-chip.open { color: var(--text-secondary); }
+/* Model and reasoning are one chosen-model control pair, so both use the project accent. */
+.model-chip { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.02em; color: var(--violet); min-width: 0; }
+.model-chip.unloaded { color: var(--amber); }
+.model-chip.unloaded:hover, .model-chip.unloaded.open { color: var(--amber); background: var(--amber-bg); }
+.effort-chip { font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--violet); }
+.effort-chip:hover, .effort-chip.open { color: var(--violet-text, var(--violet)); background: var(--violet-bg); }
+.context-chip, .cc-model-chip { font-size: var(--text-footnote); font-weight: 500; color: var(--text-secondary); }
+.context-chip:hover, .context-chip.open { color: var(--text-primary); }
+.context-chip { font-variant-numeric: tabular-nums; }
 .context-chip.warn { color: var(--amber); }
 .context-chip.crit { color: var(--red); }
 .ctx-ring { flex-shrink: 0; }
@@ -159,9 +139,6 @@
 	flex-shrink: 0; opacity: 0.7;
 }
 .cc-model-chip {
-	font-size: var(--text-footnote); font-weight: 600;
-	letter-spacing: 0.02em;
-	color: var(--teal);
 	max-width: 180px; min-width: 0;
 	cursor: default;
 }
@@ -178,6 +155,12 @@
 	flex: 0 1000 auto; min-width: 26px;
 	flex-wrap: wrap; height: 22px; overflow: hidden;
 }
+/* On a narrow composer the percentage yields before the fixed 44px controls.
+   Both themes keep the same ring-only control, with the normal row gap to Send. */
+@container action-row (max-width: 360px) {
+	.context-chip { flex: 0 0 26px; flex-wrap: nowrap; padding-inline: 6px; }
+	.context-chip .ctx-pct { display: none; }
+}
 
 .plus-btn {
 	width: 32px; height: 32px; border-radius: var(--radius-circle);
@@ -188,7 +171,7 @@
 }
 .plus-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .plus-btn:disabled { opacity: 0.3; cursor: default; }
-.plus-btn.open { color: var(--accent); }
+.plus-btn.open { color: var(--violet-text); }
 .plus-btn.open .plus-icon { transform: rotate(45deg); }
 .plus-icon { transition: transform var(--dur-standard); }
 
@@ -281,7 +264,7 @@
 }
 .model-list-item:disabled:hover { background: none; }
 .model-list-item.active {
-	color: var(--violet);
+	color: var(--violet-text);
 	background: color-mix(in srgb, var(--violet) 10%, transparent);
 }
 .model-status-dot {
@@ -317,7 +300,7 @@
 
 .send-btn {
 	width: 40px; height: 40px; border-radius: var(--radius-circle);
-	background: var(--violet); border: none; color: white;
+	background: var(--violet); border: none; color: var(--on-accent);
 	cursor: pointer; display: flex; align-items: center;
 	justify-content: center; flex-shrink: 0;
 	transition: background var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight) ease;

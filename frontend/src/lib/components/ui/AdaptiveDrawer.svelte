@@ -302,7 +302,7 @@
 		font-size: var(--text-caption);
 		font-weight: var(--fw-semibold);
 		font-variant-numeric: tabular-nums;
-		color: var(--accent);
+		color: var(--violet-text);
 	}
 	/* A leading action centres the title between it and Done. */
 	.drawer-head.centered { display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; }
@@ -321,7 +321,7 @@
 		font: inherit;
 		font-size: var(--text-subhead);
 		font-weight: var(--fw-semibold);
-		color: var(--accent);
+		color: var(--violet-text);
 		background: none;
 		border: none;
 		padding: 6px 8px;

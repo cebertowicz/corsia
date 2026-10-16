@@ -128,7 +128,7 @@
 	.error p { margin: 0; }
 	.error ul { margin: 2px 0 0; padding-left: 16px; }
 	.chip.failed { box-shadow: inset 0 0 0 1px var(--red); }
-	.send { position: relative; height: 28px; padding: 0 12px; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent); color: #fff; font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-semibold); cursor: pointer; transition: filter var(--dur-tight) var(--ease-snap); }
+	.send { position: relative; height: 28px; padding: 0 12px; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent); color: var(--on-accent); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-semibold); cursor: pointer; transition: filter var(--dur-tight) var(--ease-snap); }
 	.send:hover:not(:disabled) { filter: brightness(1.08); }
 	.send:disabled { background: var(--accent-bg); border-color: var(--border); color: var(--text-tertiary); cursor: not-allowed; }
 	.send[aria-busy="true"] { cursor: wait; }

@@ -73,9 +73,9 @@
 		padding: 12px 8px; background: none; border: none; cursor: pointer;
 		font: inherit; font-size: var(--text-body); color: var(--text-primary); text-align: left;
 	}
-	.sheet-row.active .sheet-pick { color: var(--accent); font-weight: var(--fw-medium); }
+	.sheet-row.active .sheet-pick { color: var(--violet-text); font-weight: var(--fw-medium); }
 	.sheet-ico { display: flex; flex-shrink: 0; color: var(--text-tertiary); }
-	.sheet-row.active .sheet-ico { color: var(--accent); }
+	.sheet-row.active .sheet-ico { color: var(--violet-text); }
 	.sheet-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.sheet-dot {
 		flex-shrink: 0; width: 8px; height: 8px;

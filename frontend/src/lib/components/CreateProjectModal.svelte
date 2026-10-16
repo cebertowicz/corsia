@@ -124,7 +124,7 @@
 	.btn.push { margin-left: auto; }
 	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
 	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent); color: #fff; }
+	.btn.primary { background: var(--accent); color: var(--on-accent); }
 	.btn.primary:hover:not(:disabled) { background: var(--accent-hover, var(--accent)); }
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

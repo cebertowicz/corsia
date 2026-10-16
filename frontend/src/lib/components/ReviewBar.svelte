@@ -260,7 +260,14 @@
 	.review-bar.receipt, .review-bar.stale { min-height: calc(var(--space-7) * 2); }
 	/* The ask block is two lines at every width. Line 1: the asker, the ask on one line and the expand chevron (D8).
 	   Line 2: a status slot on the left and the answer on the right. */
-	.review-bar.ask { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+	/* The canvas already owns the document-review surface. Keep this row in its
+	   existing header chrome; raised needs-you cards live only on chat objects. */
+	.review-bar.ask {
+		flex-direction: column; align-items: stretch; gap: 0;
+		padding: 0 var(--space-1) 0 0;
+		border: 0; border-radius: 0;
+		background: transparent; box-shadow: none;
+	}
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -112,7 +112,7 @@
 	.group { margin-bottom: 18px; }
 	.group:last-child { margin-bottom: 4px; }
 	.cap-row { display: flex; align-items: center; gap: 6px; }
-	.cap-actions { flex: none; padding-bottom: 8px; }
+	.cap-actions { flex: none; padding: 0 8px 8px 0; }
 	.cap {
 		display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; width: 100%; text-align: left;
 		background: none; border: none; cursor: pointer; padding: 2px 8px 8px;
@@ -143,6 +143,6 @@
 		border-top: 1px solid var(--border-subtle);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.proj-new:hover { background: var(--lg-row-hover, var(--bg-hover)); color: var(--accent); }
+	.proj-new:hover { background: var(--lg-row-hover, var(--bg-hover)); color: var(--violet-text); }
 	.proj-new-plus { font-size: var(--text-callout); line-height: 1; width: 9px; text-align: center; }
 </style>
