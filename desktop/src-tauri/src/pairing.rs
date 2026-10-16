@@ -420,4 +420,66 @@ mod tests {
             decode_hex("944a40f6df11c32fd42a3a2652610d84113da85571c5d6f62a9e8867423be7e0")
         );
     }
+
+    #[tokio::test]
+    #[ignore = "requires CORSIA_E2E_PORT and CORSIA_E2E_CODE from a disposable real-TLS host"]
+    async fn disposable_tls_host_pairs_checks_version_and_proxies_health() {
+        let port = std::env::var("CORSIA_E2E_PORT").unwrap().parse().unwrap();
+        let main_port = std::env::var("CORSIA_E2E_MAIN_PORT").unwrap().parse().unwrap();
+        let code = std::env::var("CORSIA_E2E_CODE").unwrap();
+        assert_eq!(
+            pair("127.0.0.1", main_port, "0000").await,
+            Err(PairError::Unreachable(Unreachable::Server))
+        );
+        let paired = pair("127.0.0.1", port, &code).await.unwrap();
+        assert_eq!(
+            crate::version_check::check("127.0.0.1", port, &paired.trust).await.unwrap(),
+            crate::version_check::Compat::Ok
+        );
+        let proxy = crate::proxy::start(
+            crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            paired.trust.clone(),
+            0,
+            || panic!("a matching disposable host key must not trigger key_changed"),
+        )
+        .await
+        .unwrap();
+        let response = reqwest::get(format!("http://127.0.0.1:{}/api/health", proxy.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        proxy.stop();
+
+        let mut wrong_trust = paired.trust;
+        let crate::trust::Trust::Pinned { spki_sha256 } = &mut wrong_trust else {
+            panic!("the disposable self-signed host must pair through its captured pin");
+        };
+        spki_sha256[0] ^= 1;
+        let key_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed_key_change = std::sync::Arc::clone(&key_changed);
+        let wrong_proxy = crate::proxy::start(
+            crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            wrong_trust,
+            0,
+            move || observed_key_change.store(true, std::sync::atomic::Ordering::SeqCst),
+        )
+        .await
+        .unwrap();
+        let response = reqwest::get(format!("http://127.0.0.1:{}/api/health", wrong_proxy.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert!(key_changed.load(std::sync::atomic::Ordering::SeqCst));
+        wrong_proxy.stop();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires CORSIA_E2E_PORT after its disposable real-TLS host has stopped"]
+    async fn stopped_disposable_tls_host_is_classified_as_server() {
+        let port = std::env::var("CORSIA_E2E_PORT").unwrap().parse().unwrap();
+        assert_eq!(
+            pair("127.0.0.1", port, "0000").await,
+            Err(PairError::Unreachable(Unreachable::Server))
+        );
+    }
 }
