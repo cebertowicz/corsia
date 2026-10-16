@@ -1,0 +1,18 @@
+{
+  "producer": "rust spake2 0.4.0",
+  "code": "K7QX",
+  "pw_hex": "e2df188b39f2a6ec9638bdec0a1bd09714a15ecf9fee4a1ff9f5d9d08b2808f1",
+  "identity_hex": "636f727369612d706169722d7631",
+  "python_first": {
+    "python_message_hex": "5301a813a43bfa92fa6f6277aef54f3be4bc559579a75f97161a97fe09ef3dd648",
+    "rust_message_hex": "53938b2ea33965e4128e10c8c27f14fa1acb136db45f716a99e13a9a0053805ed5",
+    "derived_key_hex": "55af82671125e34d2bf27b29287fdfbb6cb3cfaca2962618194eb0986df05bfb"
+  },
+  "rust_first": {
+    "derived_key_hex": "84ce409adc18420374ae8918765c345c6652e092b125bf2458e520dcd522974c"
+  },
+  "wrong_code": {
+    "python_code": "ZZZZ",
+    "keys_differ": true
+  }
+}

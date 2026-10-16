@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
+from pathlib import Path
 
 import api.devices as devices_api
 from fastapi.testclient import TestClient
@@ -22,6 +24,29 @@ def _encoded(value: bytes) -> str:
 def _client_pairing(code: str) -> SPAKE2_Symmetric:
     secret = hashlib.sha256(PAIRING_IDENTITY + b"\0" + code.encode()).digest()
     return SPAKE2_Symmetric(secret, idSymmetric=PAIRING_IDENTITY)
+
+
+def test_python_spake2_accepts_rust_04_public_vector():
+    """Rust 0.4's recorded public message remains parseable by Python 0.9.
+
+    The fixture records public SPAKE2 messages from the interop prototype.
+    It intentionally does not claim an equality check for the recorded derived
+    key: reproducing that value would require the private ephemeral scalar
+    from the original Rust process, which is not part of a public vector.
+    """
+    fixture = Path(__file__).with_name("fixtures") / "spake2-rust-0.4-vector.json"
+    vector = json.loads(fixture.read_text())
+    password = hashlib.sha256(PAIRING_IDENTITY + b"\0" + vector["code"].encode()).digest()
+    assert password.hex() == vector["pw_hex"]
+    assert bytes.fromhex(vector["identity_hex"]) == PAIRING_IDENTITY
+
+    rust_message = bytes.fromhex(vector["python_first"]["rust_message_hex"])
+    assert rust_message.startswith(b"S")
+    pairing = SPAKE2_Symmetric(password, idSymmetric=PAIRING_IDENTITY)
+    pairing.start()
+    assert len(pairing.finish(rust_message)) == 32
+    assert len(bytes.fromhex(vector["python_first"]["derived_key_hex"])) == 32
+    assert len(bytes.fromhex(vector["rust_first"]["derived_key_hex"])) == 32
 
 
 def _enable_pairing() -> str:
