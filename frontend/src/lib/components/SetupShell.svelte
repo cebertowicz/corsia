@@ -155,6 +155,14 @@
 			css: (t: number) => `height: ${t * height}px; opacity: ${t}; overflow: hidden`,
 		};
 	}
+
+	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
+			return fade(node, { duration: tight });
+		}
+		return peerFade(node, params, options);
+	}
 </script>
 
 <div class="setup-shell">
@@ -181,7 +189,7 @@
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
 			{#key page}
-				<section class="pane-scene" data-setup-page={page} in:peerFade out:peerFade onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
 					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body">{@render children?.()}</div>
