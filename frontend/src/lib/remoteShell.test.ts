@@ -84,7 +84,7 @@ describe('the approved lines', () => {
 	it('says what is wrong with the computer, for the choose screen', () => {
 		expect(unreachableLine('server', 'studio.local', {})).toBe('studio.local answered, but CORSIA isn’t running there.');
 		// Setup's approved r4 frame has one line for both; no network wording is approved.
-		expect(unreachableLine('network', 'studio.local', {})).toBe('studio.local answered, but CORSIA isn’t running there.');
+		expect(unreachableLine('network', 'studio.local', {})).toBe('CORSIA can’t reach studio.local. Check that it’s on and on the same network as this computer.');
 		expect(unreachableLine('incompatible', 'Studio', { app: '1.4', host: '1.2' })).toBe('This computer has CORSIA 1.4 and Studio has 1.2. Update the older one, then try again.');
 		expect(unreachableLine('too_old', 'Studio', {})).toBe('Studio has an older CORSIA. Update it, then try again.');
 		expect(unreachableLine('wrong_code', 'Studio', {})).toBeNull();

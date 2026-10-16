@@ -3,8 +3,8 @@ import { token } from '$lib/stores/auth';
 import { handleMessage } from '$lib/ws/handlers';
 import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
 
-// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
-const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
+// The fake clock lets a started reader's fetches and promise chains finish without waiting on real time.
+const settle = () => vi.advanceTimersByTimeAsync(0);
 
 const api = (patch: Partial<DevicesApi> = {}): DevicesApi => ({
 	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local',
@@ -51,6 +51,7 @@ describe('createDevices', () => {
 
 	beforeEach(() => {
 		token.set('t-1');
+		vi.useFakeTimers();
 		calls = []; responses = []; clock = 1_000_000;
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			calls.push({ url: String(input), method: init?.method ?? 'GET', body: init?.body as string | undefined, auth: (init?.headers as Record<string, string> | undefined)?.Authorization });
@@ -58,7 +59,7 @@ describe('createDevices', () => {
 			return typeof next === 'function' ? next() : next ?? json(api());
 		}));
 	});
-	afterEach(() => { vi.unstubAllGlobals(); token.set(null); });
+	afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); token.set(null); });
 
 	it('reads the host on first load and sends the person’s token', async () => {
 		const devices = createDevices({ now: () => clock });
@@ -131,10 +132,12 @@ describe('createDevices', () => {
 		const devices = createDevices({ now: () => clock });
 		responses.push(json(api({ code: { state: 'active', value: 'K7QX', expires_in_seconds: 540 } })));
 		const stop = devices.start();
-		await waitFor(() => expect(devices.view.pairing).toBe('code'));
+		await settle();
+		expect(devices.view.pairing).toBe('code');
 		responses.push(json(api({ code: { state: 'none' } })));
 		handleMessage({ type: 'devices_updated' }, vi.fn());
-		await waitFor(() => expect(devices.view).toMatchObject({ pairing: 'idle', code: null, endsInSeconds: null }));
+		await settle();
+		expect(devices.view).toMatchObject({ pairing: 'idle', code: null, endsInSeconds: null });
 		expect(calls).toHaveLength(2);
 		stop();
 		handleMessage({ type: 'devices_updated' }, vi.fn());
@@ -146,7 +149,8 @@ describe('createDevices', () => {
 		responses.push(json(api({ enabled: false, announced_name: null })));
 		await devices.read();
 		const stop = devices.start();
-		await waitFor(() => expect(calls).toHaveLength(2));
+		await settle();
+		expect(calls).toHaveLength(2);
 		responses.push(() => new Response(null, { status: 200 }));
 		void devices.setEnabled(true);
 		const before = calls.length;

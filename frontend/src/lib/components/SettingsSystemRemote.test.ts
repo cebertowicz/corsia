@@ -12,9 +12,6 @@ import SettingsSystem from './SettingsSystem.svelte';
 import { connectOpen } from '$lib/stores/remoteConnect';
 import { coreSettings } from '$lib/stores/settings';
 
-// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
-const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
-
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let invoke: ReturnType<typeof vi.fn>;
@@ -25,10 +22,13 @@ const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name:
 async function show() {
 	component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
 	flushSync();
-	await tick(); await new Promise((done) => setTimeout(done)); await tick();
+	await settle();
 }
+// Every timer here (the countdown, the re-read) runs on the fake clock.
+async function settle(ms = 0) { await tick(); await vi.advanceTimersByTimeAsync(ms); await tick(); }
 
 beforeEach(() => {
+	vi.useFakeTimers();
 	order.length = 0;
 	connectOpen.set(false);
 	coreSettings.set({ summary_default_model: null, summary_default_model_name: null, summary_generation_status: 'active', summary_generation_message: null, workspace_context_files: [], features: {} } as never);
@@ -42,6 +42,7 @@ afterEach(() => {
 	component = null; host.remove();
 	delete (window as unknown as Record<string, unknown>).__CORSIA_SHELL__;
 	coreSettings.set(null);
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
 
@@ -55,7 +56,8 @@ describe('Settings › System with a shell', () => {
 		expect(flat(host.textContent)).toContain('Your work stays on Steve’s Mac Studio. This app signs out and returns to setup.');
 		expect(order).toEqual([]);
 		button('Disconnect')?.click();
-		await waitFor(() => expect(order).toEqual(['logout', 'disconnect_remote']));
+		await settle();
+		expect(order).toEqual(['logout', 'disconnect_remote']);
 	});
 	it('Cancel leaves everything as it was', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
@@ -96,7 +98,9 @@ describe('the Devices row countdown', () => {
 		}));
 		await show();
 		expect(flat(host.textContent)).toContain('Ends in under a minute');
-		await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2), { timeout: 3000 });
-		await waitFor(() => expect(flat(host.textContent)).not.toContain('Ends in'));
+		expect(reads).toBe(1);
+		await settle(1500);
+		expect(reads).toBeGreaterThanOrEqual(2);
+		expect(flat(host.textContent)).not.toContain('Ends in');
 	});
 });
