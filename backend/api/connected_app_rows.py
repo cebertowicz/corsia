@@ -40,6 +40,8 @@ def _agent_next_step(
         return f"{label} needs a key. Press Set key next to {label} in {place}. Please don't paste it here."
     if state == "token_rejected":
         return f"{label} didn't accept its key. Press Replace key next to {label} in {place}."
+    if state == "needs_sign_in":
+        return f"Ask the person to press Sign in next to {label} in {place}. Please don't try to sign in yourself."
     if state == "disconnected":
         return f"{label} lost its connection. Open {label} in {place} and press Reconnect."
     if state == "failed":
@@ -68,7 +70,7 @@ def _place(app: dict[str, object], *, db) -> str:
     return "Workspace settings › Connected apps"
 
 
-def server_row(app: dict[str, object], *, on_here: bool, full: bool, db) -> dict[str, object]:
+def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person: bool = False) -> dict[str, object]:
     """Return a value-free app projection, limiting unreachable agent rows."""
     place = _place(app, db=db)
     if app["state"] in {"awaiting_approval", "expired"}:
@@ -87,6 +89,9 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db) -> dict
     from connections.app_reach import key_ref_descriptors
 
     key_refs = key_ref_descriptors(app["id"], config, db=db)
+    from api.connected_app_signin_rows import sign_in_view
+
+    sign_in = sign_in_view(config, app["id"], person=person, db=db)
     return {
         "id": app["id"],
         "name": app["name"],
@@ -108,6 +113,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db) -> dict
         "revision": app["revision"],
         "reach": app["reach"],
         "on_here": on_here,
+        **({"sign_in": sign_in} if sign_in is not None else {}),
     }
 
 

@@ -11,7 +11,7 @@ from loguru import logger
 from infra.db_async import run_in_db
 from tools.base import Tool
 from tools.mcp_config import (
-    MCPConfigError, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
+    MCPConfigError, _active_auth, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
     timeout_seconds,
 )
 from tools.mcp_local_transport import (
@@ -86,6 +86,8 @@ def mcp_failure_class(error: BaseException, config: dict) -> str:
         return mcp_failure_class(error.exceptions[0], config)
     if isinstance(error, MCPConnectionError):
         return error.failure_class
+    if getattr(_active_auth.get(), "challenged", False):
+        return "needs_sign_in"  # the server asked for an OAuth sign-in this connection did not have
     if isinstance(error, (TimeoutError, httpx.TimeoutException)):
         return "timed_out"
     if isinstance(error, OSError) and isinstance(config.get("command"), str):
@@ -204,10 +206,10 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
-
 async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
+    from tools.mcp_oauth_auth import OAuthGrantAuth
     from tools.mcp_secrets import resolve
 
     auth = None
@@ -237,6 +239,8 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
                 raise MCPConfigError("stored header keys cannot be combined with bearer_file")
             auth = _StoredHeadersAuth(secret_headers, config["url"])
             options["auth"] = auth
+        elif auth is None:
+            auth = options["auth"] = OAuthGrantAuth(config.get("connected_app_id", name), config["url"])
         protect_transport_logs(auth)
         transport = config.get("transport", "http")
         if transport == "sse":

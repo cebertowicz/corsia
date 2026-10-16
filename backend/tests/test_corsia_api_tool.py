@@ -57,7 +57,7 @@ async def test_real_handlers_without_a_credential(isolated_db):
 
 BLOCKLIST_ROWS = {
     "B1": 1, "B2": 1, "B3": 1, "B4": 3, "B5": 2, "B6": 1, "B8": 4,
-    "B9": 1, "B10": 1, "B11": 11, "B12": 1, "B15": 1,
+    "B9": 1, "B10": 1, "B11": 11, "B12": 1, "B15": 1, "B16": 1,
 }
 
 
@@ -158,6 +158,8 @@ async def test_previously_refused_settings_read_succeeds(isolated_db):
     ("DELETE", "/api/security/alert"),
     ("PUT", "/api/corsia-agent"),
     ("POST", "/api/threads/t/messages/m/retry"), ("POST", "/api/threads/t/messages/m/cancel"),
+    ("POST", "/api/mcp/servers/s/sign-in"), ("GET", "/api/mcp/servers/s/sign-in"),
+    ("DELETE", "/api/mcp/servers/s/sign-in"), ("POST", "/api/mcp/servers/s/sign-out"),
 ])
 def test_each_blocklist_family_is_refused(method, path):
     assert off_limits(path, method), (method, path)
@@ -187,6 +189,7 @@ def test_every_blocklist_row_has_a_refused_representative():
         ("DELETE", "/api/security/alert"),
         ("POST", "/api/threads/t/messages/m/retry"),
         ("POST", "/api/mcp/servers/app/approve"),
+        ("POST", "/api/mcp/servers/app/sign-in"),
     ]:
         for index, (_, method_pattern, path_pattern, _) in enumerate(OFF_LIMITS_ROWS):
             if re.fullmatch(method_pattern, method) and re.search(path_pattern, path):
