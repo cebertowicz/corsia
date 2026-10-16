@@ -143,6 +143,11 @@ rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$B
 install -m 0755 "$ROOT/desktop/scripts/corsia" "$BUNDLE_ROOT/bin/corsia"
 install -m 0755 "$ROOT/desktop/scripts/corsia-service" "$BUNDLE_ROOT/bin/corsia-service"
 install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
+# The lifecycle script and its parts, beside backend/, so scripts/corsia runs in
+# app mode (corsia.d/app_mode.sh) and Update stages and swaps this app.
+mkdir -p "$BUNDLE_ROOT/scripts"
+install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
+rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 
 (
   cd "$ROOT/desktop/src-tauri"

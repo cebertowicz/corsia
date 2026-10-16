@@ -56,7 +56,8 @@
       "../bundle/licenses": "licenses",
       "../bundle/python": "python",
       "../bundle/backend": "backend",
-      "../bundle/frontend": "frontend"
+      "../bundle/frontend": "frontend",
+      "../bundle/scripts": "scripts"
     },
     "icon": [
       "icons/icon.icns",

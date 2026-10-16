@@ -109,9 +109,9 @@ pub fn retry_quit(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn service_port(app: &tauri::AppHandle, service: &super::AppServiceState) -> u16 {
-    service.state_dir.lock().ok().and_then(|dir| dir.clone())
-        .or_else(|| super::default_state_dir(app).ok())
+pub(super) fn service_port(app: &tauri::AppHandle, service: &super::AppServiceState) -> u16 {
+    service.app_dir.lock().ok().and_then(|dir| dir.clone())
+        .or_else(|| super::default_app_dir(app).ok())
         .as_deref().and_then(super::first_run::recorded_port)
         .unwrap_or(super::DEFAULT_SERVICE_PORT)
 }

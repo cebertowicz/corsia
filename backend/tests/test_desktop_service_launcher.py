@@ -14,14 +14,22 @@ from pathlib import Path
 import pytest
 
 
-LAUNCHER = Path(__file__).resolve().parents[2] / "desktop" / "scripts" / "corsia-service"
+BACKEND = Path(__file__).resolve().parents[1]
+LAUNCHER = BACKEND.parent / "desktop" / "scripts" / "corsia-service"
 
 
-def _bundle_with_recording_python(tmp_path: Path) -> Path:
-    resources = tmp_path / "Resources"
+def _bundle_with_recording_python(contents: Path) -> Path:
+    resources = contents / "Resources"
     (resources / "bin").mkdir(parents=True)
     (resources / "python" / "bin").mkdir(parents=True)
-    (tmp_path / "Info.plist").write_text(
+    # The launcher asks the bundled backend for its state root, so the fake
+    # bundle carries the real resolver, in app-bundle position.
+    infra = resources / "backend" / "infra"
+    infra.mkdir(parents=True)
+    (infra / "__init__.py").write_text("")
+    for module in ("platform_paths.py", "fs_durability.py"):
+        shutil.copy(BACKEND / "infra" / module, infra / module)
+    (contents / "Info.plist").write_text(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
         "<plist version=\"1.0\"><dict>"
@@ -45,6 +53,8 @@ def _bundle_with_recording_python(tmp_path: Path) -> Path:
         '    printf "BACKEND_PORT=%s\\n" "${BACKEND_PORT-unset}"\n'
         '    printf "CORSIA_WORKSPACE=%s\\n" "${CORSIA_WORKSPACE-unset}"\n'
         '    printf "CORSIA_SERVICE_GENERATION=%s\\n" "${CORSIA_SERVICE_GENERATION-unset}"\n'
+        '    printf "CORSIA_STATE_DIR=%s\\n" "${CORSIA_STATE_DIR-unset}"\n'
+        '    printf "CORSIA_DESKTOP_BUNDLE=%s\\n" "${CORSIA_DESKTOP_BUNDLE-unset}"\n'
         '    printf "PATH=%s\\n" "$PATH"\n'
         '    printf "GIT_CONFIG_NOSYSTEM=%s\\n" "${GIT_CONFIG_NOSYSTEM-unset}"\n'
         '    printf "GIT_TERMINAL_PROMPT=%s\\n" "${GIT_TERMINAL_PROMPT-unset}"\n'
@@ -56,14 +66,29 @@ def _bundle_with_recording_python(tmp_path: Path) -> Path:
     return launcher
 
 
+def _home(state: Path) -> Path:
+    """Each test state root gets its own HOME, so its app folder is its own."""
+    return state.with_name(f"{state.name}-home")
+
+
+def _app_dir(state: Path) -> Path:
+    return _home(state) / "Library" / "Application Support" / "CORSIA"
+
+
 def _launch(
-    launcher: Path, state: Path, *arguments: str, env: dict[str, str] | None = None
+    launcher: Path,
+    state: Path,
+    *arguments: str,
+    env: dict[str, str] | None = None,
+    home: Path | None = None,
+    state_override: bool = True,
 ) -> str:
     subprocess.run(
         [str(launcher), *arguments],
         env={
             "PATH": "/usr/bin:/bin",
-            "CORSIA_STATE_DIR": str(state),
+            "HOME": str(home or _home(state)),
+            **({"CORSIA_STATE_DIR": str(state)} if state_override else {}),
             "CORSIA_TEST_LAUNCHCTL": str(launcher.parent / "launchctl"),
             **(env or {}),
         },
@@ -74,9 +99,45 @@ def _launch(
 
 
 def _service_file(state: Path, content: str | dict) -> None:
-    state.mkdir(parents=True, exist_ok=True)
+    """Write service.json where the app shell does: the app folder, not state."""
+    app_dir = _app_dir(state)
+    app_dir.mkdir(parents=True, exist_ok=True)
     text = content if isinstance(content, str) else json.dumps(content)
-    (state / "service.json").write_text(text)
+    (app_dir / "service.json").write_text(text)
+
+
+def test_launcher_defaults_state_to_the_app_folder_child_and_exports_no_override(tmp_path):
+    launcher = _bundle_with_recording_python(tmp_path / "CORSIA.app" / "Contents")
+    state = tmp_path / "state"
+    app_dir = _app_dir(state)
+    _service_file(state, {"workspace": "/w", "port": 18788})
+
+    log = _launch(launcher, app_dir / "state", home=_home(state), state_override=False)
+
+    assert f"state_dir={app_dir / 'state'} " in log.splitlines()[0]
+    assert "CORSIA_WORKSPACE=/w" in log
+    # The backend derives the same root itself; the rule lives in one place.
+    assert "CORSIA_STATE_DIR=unset" in log
+    assert "CORSIA_DESKTOP_BUNDLE=unset" in log
+
+
+def test_launcher_moves_a_preview_flat_folder_into_state_before_starting(tmp_path):
+    launcher = _bundle_with_recording_python(tmp_path / "CORSIA.app" / "Contents")
+    state = tmp_path / "state"
+    app_dir = _app_dir(state)
+    _service_file(state, {"workspace": "/w", "port": 18788})
+    (app_dir / "corsia.db").write_text("preview database")
+    (app_dir / "logs").mkdir()
+    (app_dir / "logs" / "service.log").write_text("preview log\n")
+
+    log = _launch(launcher, app_dir / "state", home=_home(state), state_override=False)
+
+    assert (app_dir / "state" / "corsia.db").read_text() == "preview database"
+    assert not (app_dir / "corsia.db").exists()
+    assert not (app_dir / "logs").exists()
+    # The moved log keeps its history and the new start appends to it.
+    assert log.startswith("preview log\n")
+    assert (app_dir / "service.json").is_file()
 
 
 def test_launcher_starts_without_arguments_on_loopback_and_uses_bundle_generation(tmp_path):
@@ -107,7 +168,7 @@ def test_launcher_prefers_its_bundled_git_and_disables_system_config(tmp_path):
     (git_core / "git").write_text("#!/bin/sh\n")
     (git_core / "git").chmod(0o755)
     # The person's login PATH reaches the system Git first.
-    (resources / "backend").mkdir()
+    (resources / "backend").mkdir(exist_ok=True)
     (resources / "backend" / "cli_location.py").write_text(
         "def login_shell_path():\n    return '/usr/bin:/opt/homebrew/bin'\n"
     )

@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from infra.config import FRONTEND_DIR, STATE_ROOT, WORKSPACE
+from infra.platform_paths import app_bundle_root
 
 FRONTEND_ROOT = FRONTEND_DIR.parent
 _SERVING_ROOT = FRONTEND_ROOT.parent
@@ -21,9 +22,9 @@ _CORSIA_SCRIPT = _SERVING_ROOT / "scripts" / "corsia"
 
 def ensure_frontend_built() -> None:
     """Require frontend assets paired to this checkout before lifespan proceeds."""
-    # Desktop bundles carry one immutable frontend release, so they must not
-    # invoke the checkout-only release owner that is absent from app resources.
-    if os.environ.get("CORSIA_DESKTOP_BUNDLE") == "1" or not FRONTEND_ROOT.is_dir():
+    # An app bundle carries one immutable, signed frontend release, so there is
+    # nothing to pair or rebuild (its ensure-current-release is a no-op too).
+    if app_bundle_root() is not None or not FRONTEND_ROOT.is_dir():
         return
 
     env = os.environ.copy()
