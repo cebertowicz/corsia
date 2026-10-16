@@ -186,8 +186,10 @@ async def serve_frontend(path: str):
             {"status": "CORSIA UI backend running",
              "frontend": "not built yet — export CORSIA_BACKEND_URL, then use vite dev"},
         )
-    file_path = FRONTEND_DIR / path
-    if file_path.is_file():
+    # Only files inside the build are served; any other path gets the app page.
+    root = FRONTEND_DIR.resolve()
+    file_path = (root / path).resolve()
+    if file_path.is_relative_to(root) and file_path.is_file():
         import mimetypes
         content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
         content = file_path.read_bytes()
