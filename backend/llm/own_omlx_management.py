@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,8 @@ log = logging.getLogger(__name__)
 
 _RECORD_NAME = "own-omlx-management.json"
 _USE_MINE_NAME = "own-omlx-use-mine"
+#: Mutators run on worker threads (``asyncio.to_thread``); each read-modify-write holds this.
+_LOCK = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,14 @@ class Management:
     #: Their oMLX's version when it is too old to ask which model fits, else None.
     cannot_check: str | None = None
     restore_failed: bool = False
+    #: Whether the person chose "Let CORSIA manage it". A consented legacy flow's restore
+    #: record is active without it, and never counts as consent to manage.
+    consented: bool = False
+
+    @property
+    def manages(self) -> bool:
+        """Whether CORSIA manages their oMLX now: chosen by the person, and not stopping."""
+        return self.active and self.consented
 
 
 def record_path() -> Path:
@@ -94,6 +105,7 @@ def read() -> Management | None:
         key_registered=raw.get("key_registered") is True,
         cannot_check=cannot_check if isinstance(cannot_check, str) else None,
         restore_failed=raw.get("restore_failed") is True,
+        consented=raw.get("consented") is True,
     )
 
 
@@ -101,7 +113,7 @@ def _write(record: Management) -> None:
     target = record_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = {**asdict(record), "model": to_record(record.model) if record.model else None}
-    staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    staged = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         staged.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
         os.replace(staged, target)
@@ -112,7 +124,7 @@ def _write(record: Management) -> None:
 def active() -> bool:
     """Whether CORSIA manages the person's oMLX now: stopping, or never managing, reads False."""
     record = read()
-    return record is not None and record.active
+    return record is not None and record.manages
 
 
 def uses_mine() -> bool:
@@ -129,16 +141,18 @@ def choose_use_mine() -> None:
 
 def consent() -> None:
     """The person chose to let CORSIA manage their oMLX; values recorded earlier are kept."""
-    record = read() or Management()
-    _write(replace(record, active=True, restore_failed=False))
-    _use_mine_path().unlink(missing_ok=True)
+    with _LOCK:
+        record = read() or Management()
+        _write(replace(record, active=True, consented=True, restore_failed=False))
+        _use_mine_path().unlink(missing_ok=True)
 
 
 def update(**changes: Any) -> None:
     """Change fields of an active record (the flight's model, key and version findings)."""
-    record = read()
-    if record is not None and record.active:
-        _write(replace(record, **changes))
+    with _LOCK:
+        record = read()
+        if record is not None and record.manages:
+            _write(replace(record, **changes))
 
 
 def record_originals(global_values: dict[str, Any], model_values: dict[str, dict[str, Any]]) -> None:
@@ -146,43 +160,47 @@ def record_originals(global_values: dict[str, Any], model_values: dict[str, dict
 
     ``model_values`` maps an oMLX model id to that model's values. A consented
     legacy flow can write before choosing management, so its first write creates
-    the active restore record. The caller sends nothing when recording fails.
+    the active restore record, which is not consent to manage (``consented``
+    stays as it was). The caller sends nothing when recording fails.
     """
-    record = read() or Management()
-    if not record.active:
-        record = replace(record, active=True)
-    models = {key: dict(values) for key, values in record.originals_models.items()}
-    for model_id, values in model_values.items():
-        models[model_id] = {**values, **models.get(model_id, {})}
-    _write(replace(
-        record,
-        originals_global={**global_values, **record.originals_global},
-        originals_models=models,
-    ))
+    with _LOCK:
+        record = read() or Management()
+        if not record.active:
+            record = replace(record, active=True)
+        models = {key: dict(values) for key, values in record.originals_models.items()}
+        for model_id, values in model_values.items():
+            models[model_id] = {**values, **models.get(model_id, {})}
+        _write(replace(
+            record,
+            originals_global={**global_values, **record.originals_global},
+            originals_models=models,
+        ))
 
 
 def begin_stop() -> Management | None:
     """Stop managing now: no further change is offered or sent. Returns what to restore."""
-    record = read()
-    if record is None:
-        return None
-    stopped = replace(record, active=False)
-    _write(stopped)
-    choose_use_mine()
-    return stopped
+    with _LOCK:
+        record = read()
+        if record is None:
+            return None
+        stopped = replace(record, active=False)
+        _write(stopped)
+        choose_use_mine()
+        return stopped
 
 
 def restore_failed(*, global_restored: bool = False, models_restored: tuple[str, ...] = ()) -> None:
     """A restore didn't finish: keep what is still to put back, marked, so Settings offers Try again."""
-    record = read()
-    if record is not None:
-        _write(replace(
-            record,
-            originals_global={} if global_restored else record.originals_global,
-            originals_models={key: values for key, values in record.originals_models.items()
-                              if key not in models_restored},
-            restore_failed=True,
-        ))
+    with _LOCK:
+        record = read()
+        if record is not None:
+            _write(replace(
+                record,
+                originals_global={} if global_restored else record.originals_global,
+                originals_models={key: values for key, values in record.originals_models.items()
+                                  if key not in models_restored},
+                restore_failed=True,
+            ))
 
 
 def finish_stop() -> None:

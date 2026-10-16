@@ -280,6 +280,23 @@ def test_without_management_only_concurrent_requests_is_ever_offered(client, oml
     assert omlx.writes == [("POST", "/global-settings", {"max_concurrent_requests": 1})]
 
 
+def test_an_approved_change_without_management_is_not_consent_to_manage(client, omlx):  # noqa: F811
+    asyncio.run(omlx_global_settings.record_observation(SERVER))
+    assert client.post(APPLY, json={"fingerprint": _fingerprint()}).status_code == 200
+
+    record = own_omlx_management.read()
+    assert record.originals_global == {"max_concurrent_requests": 4}
+    assert not own_omlx_management.active()
+    assert omlx_global_settings.writable_global_settings() == omlx_global_settings.WRITABLE_GLOBAL_SETTINGS
+    assert local_sources.omlx_management()["state"] == "not_managed"
+    own_omlx_management.update(model=MODEL)
+    assert own_omlx_management.read().model is None
+
+    own_omlx_management.consent()
+    assert own_omlx_management.active()
+    assert own_omlx_management.read().originals_global == {"max_concurrent_requests": 4}
+
+
 def test_a_model_corsia_did_not_set_up_gets_only_the_oMLX_wide_settings(client, omlx):  # noqa: F811
     _manage(model=None)
 

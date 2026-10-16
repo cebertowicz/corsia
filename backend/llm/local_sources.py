@@ -165,19 +165,20 @@ def omlx_management(record: Any = _UNSET) -> dict[str, Any]:
     ``restore_failed`` covers a stop that did not finish, so Settings offers it again.
     ``cannot_check`` is their oMLX's version while CORSIA manages one too old to recommend.
     ``forgets_key``: stopping removes the admin key, which CORSIA stored only to manage it.
+    A restore record the person never chose management for reads as not managed.
     """
     from llm import local_model, own_omlx_management
 
     if record is _UNSET:
         record = own_omlx_management.read()
-    if record is None:
+    if record is None or (record.active and not record.consented):
         return {"state": "not_managed", "cannot_check": None, "required_version": local_model.OMLX_PIN,
                 "restores": [], "forgets_key": False}
     restores = [*_restore_lines(record.originals_global),
                 *(line for model, values in sorted(record.originals_models.items())
                   for line in _restore_lines(values, model))]
-    return {"state": "managed" if record.active else "restore_failed",
-            "cannot_check": record.cannot_check if record.active else None,
+    return {"state": "managed" if record.manages else "restore_failed",
+            "cannot_check": record.cannot_check if record.manages else None,
             "required_version": local_model.OMLX_PIN, "restores": restores,
             "forgets_key": record.key_registered}
 

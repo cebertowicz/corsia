@@ -33,7 +33,7 @@ USE_MINE = "You chose Use mine, so CORSIA changes nothing on your oMLX"
 def _allowed(entries: list[dict[str, Any]]) -> bool:
     """Whether every row is one CORSIA may write now: never a key, network, folder or other model."""
     record = own_omlx_management.read()
-    model = record.model.model if record is not None and record.active and record.model else None
+    model = record.model.model if record is not None and record.manages and record.model else None
     writable = writable_global_settings()
     for row in entries:
         if "model" in row:

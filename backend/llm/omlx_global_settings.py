@@ -54,7 +54,7 @@ def _managed_model(record: Any = _UNSET) -> LocalModel | None:
         from llm import own_omlx_management
 
         record = own_omlx_management.read()
-    return record.model if record is not None and record.active else None
+    return record.model if record is not None and record.manages else None
 
 
 def writable_global_settings(record: Any = _UNSET) -> frozenset[str]:
@@ -63,7 +63,7 @@ def writable_global_settings(record: Any = _UNSET) -> frozenset[str]:
         from llm import own_omlx_management
 
         record = own_omlx_management.read()
-    return MANAGED_GLOBAL_SETTINGS if record is not None and record.active else WRITABLE_GLOBAL_SETTINGS
+    return MANAGED_GLOBAL_SETTINGS if record is not None and record.manages else WRITABLE_GLOBAL_SETTINGS
 
 
 def model_recommendations(model: LocalModel, thinking_default: object = None) -> dict[str, Any]:
