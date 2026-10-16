@@ -302,6 +302,41 @@ def test_review_validation_rejects_encoded_output_over_byte_limit() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["application", "action"])
+@pytest.mark.parametrize(
+    ("harness", "account_id"),
+    [("claude-code", "account-7"), ("native", None)],
+)
+async def test_usage_row_carries_only_the_target_account_id(
+    monkeypatch, kind: str, harness: str, account_id: str | None
+) -> None:
+    from host_access import reviewer
+
+    target = replace(_target(harness), account_id=account_id)
+    recorded, _events = _patch_review_accounting(monkeypatch, reviewer)
+
+    async def invoke(target, **kwargs):
+        kwargs["telemetry_sink"](_telemetry(target, prompt_tokens=5, usage_available=True))
+        if kind == "application":
+            return kwargs["validator"](_application_output())
+        return kwargs["validator"](_action_output())
+
+    if kind == "application":
+        await reviewer.review_application(
+            target, _application(), binary="/bin/claude", invoke=invoke,
+            usage_thread_id="root-1",
+        )
+    else:
+        await reviewer.review_action(
+            target, _application(), {"kind": "shell"}, binary="/bin/claude",
+            invoke=invoke, usage_thread_id="root-1",
+        )
+
+    assert recorded[0][1]["vendor_account_id"] == account_id
+    assert recorded[0][1]["source"] == f"host_access_{kind}_review"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("verdict", ["allow", "reject"])
 async def test_application_review_quotes_data_and_accounts_for_every_verdict(
     monkeypatch,
@@ -646,6 +681,7 @@ async def test_provider_usage_is_recorded_before_strict_schema_failure(
         "source": "host_access_application_review",
         "ttft_ms": None,
         "harness": "claude-code",
+        "vendor_account_id": None,
     }
     assert args[2] == {
         "prompt_tokens": 113,

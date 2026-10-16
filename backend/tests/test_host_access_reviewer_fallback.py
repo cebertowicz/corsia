@@ -49,6 +49,7 @@ class _Outage:
 
         self.models: dict[str, tuple[str, str | None]] = {}
         self.calls: list[str] = []
+        self.accounts: dict[str, str] = {}
         monkeypatch.setattr(reviewer_account, "resolve_scope_reviewer_account", self._resolve)
 
     def _resolve(self, target, project_id, *, db):
@@ -61,7 +62,7 @@ class _Outage:
             error.reason = reason
             error.resets_at = resets_at
             raise error
-        return "account-1"
+        return self.accounts.get(target.catalog_id, "account-1")
 
 
 @pytest.fixture
@@ -338,6 +339,47 @@ async def test_the_completed_review_event_says_whether_the_fallback_reviewed(out
     completed = [props for _feature, action, props in events if action == "completed"]
     assert [(props["catalog_id"], props["reviewer_fallback"]) for props in completed] == [
         (REQUESTER if out else OUT, out),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("out", [True, False])
+async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(outage, monkeypatch, out):
+    from host_access import review_telemetry
+    from llm.isolated_structured import IsolatedStructuredTelemetry
+
+    rows: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        review_telemetry, "record_llm_usage", lambda *a, **k: rows.append((a, k))
+    )
+    monkeypatch.setattr(review_telemetry, "emit_product_event", lambda *a, **k: None)
+    outage.accounts[OUT] = "account-opus"
+    outage.accounts[REQUESTER] = "account-sonnet"
+    _configure(fallback=True)
+    if out:
+        outage.models[OUT] = ("usage_limited", RESET)
+
+    async def fake(target, **kwargs):
+        kwargs["telemetry_sink"](IsolatedStructuredTelemetry(
+            catalog_id=target.catalog_id, harness=target.harness, transport_model=target.transport_model,
+            reported_model=target.expected_reported_model, prompt_tokens=5, completion_tokens=2,
+            cache_creation_tokens=0, cache_read_tokens=0, total_tokens=7, cost_usd=None,
+            cost_source=None, elapsed_ms=3, usage_available=True,
+        ))
+        return kwargs["validator"]({
+            "schema_version": 3,
+            "verdict": "allow",
+            "reason_category": "not_applicable",
+            "reason": "The request is bounded.",
+            "user_attestation": "This grants a short, reviewed session.",
+        })
+
+    monkeypatch.setattr("host_access.reviewer.invoke_isolated_structured", fake)
+
+    await _request()
+
+    assert [(args[1], kwargs["vendor_account_id"]) for args, kwargs in rows] == [
+        (REQUESTER, "account-sonnet") if out else (OUT, "account-opus"),
     ]
 
 
