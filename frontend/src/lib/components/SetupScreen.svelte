@@ -10,8 +10,7 @@
 	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
-	import { connect } from '$lib/ws';
-	import { selectSetupFirstModel } from '$lib/setupFirstModel';
+	import { connect } from '$lib/ws'; import { selectSetupFirstModel } from '$lib/setupFirstModel';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
