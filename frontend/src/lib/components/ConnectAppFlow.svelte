@@ -89,7 +89,7 @@
 			window.open(url, '_blank', 'noopener,noreferrer');
 			onClose();
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'Could not start Google sign-in. Try again.';
+			error = cause instanceof Error ? cause.message : "Couldn't start Google sign-in. Try again.";
 		} finally {
 			submitting = false;
 		}
