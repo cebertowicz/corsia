@@ -181,7 +181,7 @@
 				</div>
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
-					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel} aria-label={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
+					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
 				</div>{/if}
 			</div>

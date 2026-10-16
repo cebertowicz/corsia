@@ -371,6 +371,8 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_decision 2,600 -> 3,000 (pick-any): `pick` and the list form of `recommendation` are published at the field, because an agent never told of them raises combination options instead.
 # plan_update 8,975 -> 9,076 (+101): `mark_done` also settles a step assigned to the user, so the line says
 # so, asks for evidence in plain words because the person reads it, and sends approvals to a decision.
+# plan_decision 3,000 -> 3,100: `rationale` publishes its purpose and 240-character limit at the field,
+# because the recommended option now shows it inline and an agent never told writes a second tradeoff.
 _PUBLISHED_BYTES = {"plan_update": 9_076, "plan_decision": 3_100}
 
 

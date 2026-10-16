@@ -899,9 +899,8 @@ interface Props {
 - `idle`, `default` → neutral (`--bg-tertiary` + `--text-tertiary`)
 
 **Don't:** Build a per-component badge with hardcoded `rgba(...)` (Timeline
-does this for active badges — flagged in §8.2). Use StatePill, or — when
-you genuinely need a smaller / non-state pill — propose adding `Badge`
-(see §4.5).
+does this for active badges — flagged in §8.2). Show the state as a dot or
+coloured text (§0.1 Status).
 
 ### 3.6 Section
 
@@ -925,6 +924,11 @@ sidebar section caps (PROJECTS, CONVERSATIONS) — those have a slightly
 different aesthetic; see §5.2.
 
 ### 3.7 Message
+
+**Superseded by §0:** a tinted banner is out (§0.2 items 1 and 2). New and
+revised screens state a result as coloured text in the §0.1 Status colours,
+with no fill or border. The banner below is the existing primitive, kept until
+each screen's pass replaces it.
 
 `ui/Message.svelte`. Inline status banner — pairs with form actions and
 modal bodies.
@@ -1106,6 +1110,10 @@ navigate sessions from anywhere.
 
 Material: `--glass-thick`. **Must include `box-shadow: var(--glass-rim)`.**
 
+**Superseded by §0:** sidebar group labels use the §0.1 Section label
+(sentence case, `--text-tertiary`, as `SidebarThreadList.svelte` draws it).
+The caps below are the older treatment.
+
 Section caps inside the sidebar (PROJECTS, PINNED, CONVERSATIONS) are
 unified at 10.5px / weight 700 / 0.1em letter-spacing /
 `color-mix(in srgb, var(--accent) 55%, var(--text-tertiary))`. PROJECTS
@@ -1246,8 +1254,8 @@ The following are *don'ts*. Violations should be caught in review.
    Variable Convention rule. Numeric fallbacks (`var(--radius-xs, 4px)`)
    are fine.
 10. **Defining tokens inside components.** Tokens belong in `app-tokens.css`.
-11. **Nesting Modal inside Modal** for confirm-deletes. Use inline
-    `<Message>` + danger button instead.
+11. **Nesting Modal inside Modal** for confirm-deletes. Use an inline
+    confirm line (coloured text, §0.1 Status) + danger button instead.
 12. **Skipping the rim** on a glass surface.
 13. **Inlining new easing curves and durations.** New transitions pick a
     curve from §2.7.1 and a duration from §2.7.2, or propose adding to
