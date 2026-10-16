@@ -619,10 +619,9 @@ def test_an_installed_asset_wakes_the_correction_worker_on_the_app_loop(monkeypa
     import asyncio
 
     import infra.app_loop as app_loop
-    import jobs.corrections_realtime as realtime
 
     scans: list[str] = []
-    monkeypatch.setattr(realtime, "startup_scan", lambda: scans.append("scan"))
+    monkeypatch.setattr(signals, "_waker", lambda: scans.append("scan"))
     monkeypatch.setattr(app_loop, "submit", lambda coroutine: asyncio.run(coroutine))
 
     signals.wake_corrections()
@@ -637,6 +636,7 @@ def test_waking_the_worker_without_a_loop_is_not_an_error(monkeypatch):
         coroutine.close()
         raise app_loop.AppLoopUnavailable("no loop")
 
+    monkeypatch.setattr(signals, "_waker", lambda: None)
     monkeypatch.setattr(app_loop, "submit", unavailable)
 
     signals.wake_corrections()

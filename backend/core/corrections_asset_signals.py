@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
 State = dict[str, Any]
+
+_waker: Callable[[], None] | None = None
+
+
+def set_corrections_waker(waker: Callable[[], None]) -> None:
+    """Startup registers the correction worker's scan, so core never imports jobs."""
+    global _waker
+    _waker = waker
 
 
 def broadcast_update() -> None:
@@ -20,10 +28,14 @@ def broadcast_update() -> None:
 def wake_corrections() -> None:
     """A newly installed asset: have the correction worker read whatever it left pending."""
     import infra.app_loop as app_loop
-    from jobs.corrections_realtime import startup_scan
+
+    waker = _waker
+    if waker is None:
+        logger.info("Corrections worker not woken: not registered yet; its startup scan reads the backlog")
+        return
 
     async def _on_loop() -> None:
-        startup_scan()
+        waker()
 
     try:
         app_loop.submit(_on_loop())

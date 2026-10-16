@@ -116,8 +116,10 @@ async def _start_runtime_services() -> None:
     state._nightly_job_task = asyncio.create_task(nightly_job_loop())
     from core.corrections_asset_download import FLIGHT as classifier_download
     from core.corrections_asset_download import recover_interrupted_install
+    from core.corrections_asset_signals import set_corrections_waker
     from jobs.corrections_realtime import startup_scan
 
+    set_corrections_waker(startup_scan)
     recover_interrupted_install()
     classifier_download.resume()
     startup_scan()
