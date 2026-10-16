@@ -89,7 +89,7 @@ async def issue_code(request: Request, _user: dict = Depends(require_human_user)
     except PairingError as error:
         raise _pairing_error(error) from error
     _emit("pairing_code_issued")
-    return {"code": code, **runtime.snapshot(include_code=True)}
+    return {**runtime.snapshot(include_code=True), "code": code}
 
 
 @router.post("/pair/start")

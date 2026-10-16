@@ -518,7 +518,8 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
 
     assert direct_enable.status_code == direct_code.status_code == 200
     assert direct_enable.json()["code"]["state"] == "active"
-    assert direct_code.json()["code"]
+    assert isinstance(direct_code.json()["code"], str)
+    assert len(direct_code.json()["code"]) == 4
     assert updates == [{"type": "devices_updated"}, {"type": "devices_updated"}]
     assert writes == [(set_devices_enabled, (True,))]
     for refused in (forwarded_enable, forwarded_code, devices_enable, devices_code):
