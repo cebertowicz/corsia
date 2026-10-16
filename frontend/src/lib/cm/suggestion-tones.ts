@@ -1,7 +1,5 @@
 import { AGENT_COLORS } from '$lib/docPresence';
-import { type Rgb, contrastRatio, over, parseHex as parse, stepToContrast, toHex } from '$lib/utils/contrast';
-
-export { contrastRatio };
+import { type Rgb, over, parseHex as parse, stepToContrast, toHex } from '$lib/utils/contrast';
 
 /** Document backgrounds from `app-tokens.css` (`--bg-primary`), and the focus tint an agent colour casts over them. */
 const BACKGROUND = { light: '#ffffff', dark: '#0a0a0b' } as const;

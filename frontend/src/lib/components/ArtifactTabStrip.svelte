@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 
-	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse, showCollapse = true }: {
+	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
 		tabs: ArtifactTab[];
 		/** Tabs the backend has said are images; they get the image glyph instead of the document one. */
 		imageTabIds?: ReadonlySet<string>;
@@ -9,8 +9,6 @@
 		onSelect: (instanceId: string) => void;
 		onClose: (instanceId: string) => void;
 		onCollapse: () => void;
-		/** The shell panel control replaces this when the strip shares the app header. */
-		showCollapse?: boolean;
 	} = $props();
 
 	let stripEl = $state<HTMLElement | undefined>(undefined);
@@ -71,11 +69,9 @@
 			</div>
 		{/each}
 	</div>
-	{#if showCollapse}
-		<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse artifact panel" title="Collapse">
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
-		</button>
-	{/if}
+	<button class="collapse-btn" onclick={onCollapse} aria-label="Collapse artifact panel" title="Collapse">
+		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+	</button>
 </div>
 
 <style>

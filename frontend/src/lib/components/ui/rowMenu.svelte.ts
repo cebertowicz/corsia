@@ -46,7 +46,7 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 			return open;
 		},
 		close,
-				onContextMenu(event: MouseEvent, item: T) {
+		onContextMenu(event: MouseEvent, item: T) {
 			if (!canAct(item)) return;
 			event.preventDefault();
 			show(item, event.clientX, event.clientY, event.target as HTMLElement | null);

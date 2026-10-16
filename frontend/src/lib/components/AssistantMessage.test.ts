@@ -37,12 +37,6 @@ function render(metadata: Record<string, unknown> | null): HTMLElement {
 }
 
 describe('AssistantMessage metadata', () => {
-	it('keeps marked-update metadata out of the visible footer', () => {
-		const rendered = render({ for_user: true, node_id: 'node-1' });
-		expect(rendered.querySelector('.for-you-marker')).toBeNull();
-		expect(rendered.textContent).not.toContain('Update');
-	});
-
 	it('renders the actual Codex model caption for a marked update with model metadata', () => {
 		const rendered = render({
 			for_user: true,

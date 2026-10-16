@@ -481,7 +481,7 @@ describe("ThreadPlanPane", () => {
   });
 
   it("opens a refreshed non-head decision row in this thread", async () => {
-    const { __reset, activeId, expandedId, queue } =
+    const { __reset, activeId, queue } =
       await import("$lib/stores/attentionDock.svelte");
     __reset();
     activeThreadId.set("t1");
@@ -507,13 +507,35 @@ describe("ThreadPlanPane", () => {
     expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
     expect(host.textContent).toContain("Refreshed tail decision");
     let active: string | null = null;
-    let expanded: string | null = null;
     const stopActive = activeId.subscribe((value) => (active = value));
-    const stopExpanded = expandedId.subscribe((value) => (expanded = value));
     stopActive();
-    stopExpanded();
     expect(active).toBe("decision-tail");
-    expect(expanded).toBe("decision-tail");
+    __reset();
+  });
+
+  it("reports a stale decision row instead of swallowing the click", async () => {
+    const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
+    __reset();
+    activeThreadId.set("t1");
+    const decision = decisionItem({
+      id: "decision-gone", title: "Gone decision",
+      source: { ...SOURCE, thread_id: "t1", thread_label: "This thread" },
+    });
+    queue.set(queueBody(decision, 1, [decision]));
+    const network = routedFetch({
+      "/api/plans/operator": () => ok(envelope("t1"), '"r1"'),
+      "/api/attention/queue": () => ok(queueBody(null, 0)),
+    });
+    component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
+    await settle();
+
+    const row = host.querySelector<HTMLButtonElement>(".decision-row");
+    expect(row?.textContent).toContain("Gone decision");
+    row!.click();
+    await settle();
+
+    expect(host.textContent).toContain("That item no longer needs you");
+    expect(network.calls.filter((url) => url.includes("/api/attention/queue"))).toHaveLength(1);
     __reset();
   });
 

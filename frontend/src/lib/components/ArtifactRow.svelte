@@ -124,7 +124,7 @@
 			{@render rowContent()}
 		</button>
 	{:else}
-		<div class="row disabled" title={disabledReason ?? undefined}>
+		<div class="row disabled" role="button" tabindex="0" aria-disabled="true" title={disabledReason ?? undefined}>
 			{@render rowContent()}
 		</div>
 	{/if}

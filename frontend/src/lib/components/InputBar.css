@@ -121,10 +121,10 @@
 	transform: rotate(180deg);
 }
 /* Model and reasoning are one chosen-model control pair, so both use the project accent. */
-.model-chip { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.02em; color: var(--accent); min-width: 0; }
+.model-chip { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.02em; color: var(--accent-scope-text, var(--accent)); min-width: 0; }
 .model-chip.unloaded { color: var(--amber); }
 .model-chip.unloaded:hover, .model-chip.unloaded.open { color: var(--amber); background: var(--amber-bg); }
-.effort-chip { font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); }
+.effort-chip { font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-scope-text, var(--accent)); }
 .effort-chip:hover, .effort-chip.open { color: var(--accent-scope-text, var(--accent)); background: var(--accent-bg); }
 .context-chip, .cc-model-chip { font-size: var(--text-footnote); font-weight: 500; color: var(--text-secondary); }
 .context-chip:hover, .context-chip.open { color: var(--text-primary); }

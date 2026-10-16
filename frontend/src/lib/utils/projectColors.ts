@@ -1,4 +1,4 @@
-import { contrastRatio, parseColor, stepToContrast, toHex } from './contrast';
+import { inkOn, parseColor, stepToContrast, toHex } from './contrast';
 
 const PALETTE_HUES = [
 	210,
@@ -40,21 +40,19 @@ const ACCENT_TEXT_SURFACES: Record<'light' | 'dark', string[]> = {
 	dark: ['#0a0a0b', '#1c1c1f', '#242428'],
 };
 const ON_FILL_LIGHT = '#ffffff';
-const ON_FILL_DARK = '#0a0a0b';
 
 /**
  * What a project's colour becomes when it is the accent: the fill stays the colour itself,
  * text in it is the same hue stepped until it reads (4.5:1) on every pane, and ink on the
- * fill is white unless white falls under 4.5:1 on it, then near-black. Primary-action labels
- * are ordinary small text, so their on-fill contrast has the same 4.5:1 floor.
+ * fill takes the maximum-contrast ink from the shared `inkOn` rule. Primary-action labels
+ * are ordinary small text, so their on-fill contrast stays readable.
  */
 export function accentRoles(colour: string, theme: 'light' | 'dark'): { text: string; onFill: string } {
 	const own = parseColor(colour);
 	if (!own) return { text: colour, onFill: ON_FILL_LIGHT };
 	const surfaces = ACCENT_TEXT_SURFACES[theme].map((hex) => parseColor(hex)!);
 	const text = toHex(stepToContrast(own, surfaces, theme, 4.5));
-	const onFill = contrastRatio(own, parseColor(ON_FILL_LIGHT)!) >= 4.5 ? ON_FILL_LIGHT : ON_FILL_DARK;
-	return { text, onFill };
+	return { text, onFill: own ? inkOn(colour) : ON_FILL_LIGHT };
 }
 
 export const ACCENT_SWATCHES = [
