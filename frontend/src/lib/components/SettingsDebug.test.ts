@@ -8,13 +8,21 @@ import { coreSettings } from '$lib/stores/settings';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
-function profilerToggle(): HTMLInputElement {
+function toggleInCard(title: string): HTMLInputElement {
 	const card = [...host.querySelectorAll('.settings-card')].find(
-		(el) => el.querySelector('h3')?.textContent === 'CPU profiler',
+		(el) => el.querySelector('h3')?.textContent === title,
 	);
 	const input = card?.querySelector('input[type="checkbox"]');
-	if (!(input instanceof HTMLInputElement)) throw new Error('CPU profiler toggle not rendered');
+	if (!(input instanceof HTMLInputElement)) throw new Error(`${title} toggle not rendered`);
 	return input;
+}
+
+function profilerToggle(): HTMLInputElement {
+	return toggleInCard('CPU profiler');
+}
+
+function overlayToggle(): HTMLInputElement {
+	return toggleInCard('On-screen overlay');
 }
 
 beforeEach(() => {
@@ -30,6 +38,19 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	token.set(null);
 	coreSettings.set(null);
+});
+
+describe('SettingsDebug overlay toggle', () => {
+	it('waits for the backend feature truth instead of inventing an on default', async () => {
+		coreSettings.set({ features: {} } as never);
+		component = mount(SettingsDebug, { target: host });
+		flushSync();
+		expect(overlayToggle().checked).toBe(false);
+
+		coreSettings.set({ features: { debug_version_overlay: true } } as never);
+		await tick();
+		expect(overlayToggle().checked).toBe(true);
+	});
 });
 
 describe('SettingsDebug CPU profiler toggle', () => {

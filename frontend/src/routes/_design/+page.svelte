@@ -14,12 +14,11 @@
 	const framed =
 		typeof window !== 'undefined' &&
 		new URLSearchParams(window.location.search).get('frame') === 'attention-dock';
-	import AttentionCard from '$lib/components/AttentionCard.svelte';
 	import AttentionRollup from '$lib/components/AttentionRollup.svelte';
 	import ContextSheet from '$lib/components/ContextSheet.svelte';
 	import ThreadContextPanel from '$lib/components/ThreadContextPanel.svelte';
 	import { activeThreadId, threads } from '$lib/stores/threads';
-	import type { AttentionItem, ReviewResult } from '$lib/api/attention';
+	import type { AttentionItem } from '$lib/api/attention';
 	import type { ContextUsage } from '$lib/stores/threads';
 
 	// Demo items for the attention section
@@ -60,20 +59,7 @@
 			levels: []
 		}
 	];
-	const demoBlockingReview: ReviewResult = {
-		artifact_id: 'demo-1',
-		blocking_failure: true,
-		may_approve_to_user: false,
-		recommendation: 'request_revision',
-		findings: [{ severity: 'blocking', message: 'PR review criteria not met — at least one blocking finding.' }],
-	};
-	const demoCleanReview: ReviewResult = {
-		artifact_id: 'demo-2',
-		blocking_failure: false,
-		may_approve_to_user: true,
-		recommendation: 'approve_to_user',
-		findings: [],
-	};
+
 	const demoOpenContextSource = () => {};
 	const demoContextUsage: ContextUsage = {
 		model_context_window: 128000,
@@ -433,29 +419,6 @@
 		<AttentionDockShowcase />
 	</section>
 
-	<!-- ── Attention surfaces (coordination MVP S6b) ── -->
-	<section class="block">
-		<header class="block-head">
-			<h2>Attention Card — user mode (S2 clearing controls)</h2>
-			<p>Raised requires-user card with clearing actions. Solid surface, not glass. Close does not clear.</p>
-		</header>
-		<div class="card stack">
-			<AttentionCard item={demoRaised[0]} mode="user" />
-			<AttentionCard item={demoRaised[1]} mode="user" />
-			<AttentionCard item={demoRaised[2]} mode="user" />
-		</div>
-	</section>
-
-	<section class="block">
-		<header class="block-head">
-			<h2>Attention Card — parent mode (S4 disposition controls)</h2>
-			<p>Same card from the parent's perspective: approve / revise / answer-internally / reject + overflow.</p>
-		</header>
-		<div class="card stack">
-			<AttentionCard item={demoRaised[0]} mode="parent" demoReview={demoBlockingReview} />
-			<AttentionCard item={demoRaised[1]} mode="parent" demoReview={demoCleanReview} />
-		</div>
-	</section>
 
 	<section class="block">
 		<header class="block-head">
