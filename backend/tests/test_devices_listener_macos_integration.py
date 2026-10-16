@@ -57,11 +57,18 @@ async def _wait_for_registration(listener, timeout: float = 5) -> None:
 
 
 @pytest.mark.asyncio
-async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(monkeypatch):
+async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(monkeypatch, tmp_path):
     """Hold the preferred port, then exercise real bind, DNSService, and teardown APIs."""
     holder, primary, fallback = _reserve_adjacent_port_pair()
+    key_root = tmp_path / "devices-state"
+    ensure_host_key = devices_listener.ensure_host_key
+
+    def ensure_test_host_key():
+        return ensure_host_key(key_root)
+
     monkeypatch.setattr(devices_listener, "DEFAULT_PORT", primary)
     monkeypatch.setattr(devices_listener, "FALLBACK_PORTS", (fallback,))
+    monkeypatch.setattr(devices_listener, "ensure_host_key", ensure_test_host_key)
     listener = DevicesListener(app=_empty_asgi_app)
     announcement = None
 
@@ -70,6 +77,9 @@ async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(mo
         assert listener.port == fallback
         announcement = listener.announcement
         assert announcement is not None
+        key_path, cert_path = devices_listener._key_paths(key_root)
+        assert key_path.exists()
+        assert cert_path.exists()
         assert announcement.port == fallback
         assert announcement._ref is not None
 

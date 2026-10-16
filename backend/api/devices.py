@@ -11,7 +11,7 @@ from core.device_pairing import PairingError, transcript_prefix
 from core.devices_runtime import runtime
 from infra.auth import require_human_user
 from infra.db_async import run_in_db
-from infra.devices_listener import host_spki_sha256
+from infra.devices_listener import host_spki_sha256, local_hostname
 from infra.local_connection import is_direct_loopback
 from infra.product_events import emit_product_event
 from infra.settings import set_devices_enabled
@@ -123,9 +123,10 @@ async def pair_finish(body: dict):
     if not isinstance(exchange_id, str):
         raise HTTPException(400, "exchange_id must be a string")
     try:
-        confirm_s = runtime.pairing.finish(
+        confirm_s, name = runtime.pairing.finish(
             exchange_id=exchange_id,
             confirm_c=_decode(body.get("confirm_c"), "confirm_c"),
+            name=local_hostname(),
         )
     except PairingError as error:
         _emit("pairing_failed", reason=error.reason)
@@ -133,4 +134,4 @@ async def pair_finish(body: dict):
             _emit("pairing_paused")
         raise _pairing_error(error) from error
     _emit("pairing_succeeded")
-    return {"confirm_s": base64.b64encode(confirm_s).decode()}
+    return {"confirm_s": base64.b64encode(confirm_s).decode(), "name": name}
