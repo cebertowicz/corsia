@@ -1,7 +1,6 @@
 """Tool registry for dynamic tool management."""
 
 from contextlib import nullcontext
-from copy import deepcopy
 from dataclasses import replace
 import logging
 from typing import Any
@@ -11,6 +10,7 @@ from infra.tool_result_errors import is_error_result
 from tools.base import Tool
 from tools.post_update_reminder import remind_current_turn
 from tools.recorded_call import CompletedToolFailure, execute_recorded_call
+from tools.tool_execution_context import inject_context, mcp_reach_refusal, strip_reserved_context
 from tools.tool_surface import (
     TOOL_CALL,
     TOOLS_LOAD,
@@ -201,7 +201,10 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if dispatcher is not None and name == TOOL_CALL and tool:
             return tool
-        names = reachable_tool_names(self) if dispatcher else self.tool_names
+        names = (
+            reachable_tool_names(self, include_unreachable_mcp=True)
+            if dispatcher else self.tool_names
+        )
         if not tool or name not in names:
             return unknown_tool_error([name], names)
         return tool
@@ -238,7 +241,7 @@ class ToolRegistry:
 
             try:
                 model_params = tool.decode_string_arguments(
-                    self._strip_reserved_context(params)
+                    strip_reserved_context(params, _is_reserved_execution_param)
                 )
                 errors = tool.validate_params(model_params)
                 if errors:
@@ -256,7 +259,10 @@ class ToolRegistry:
                         "Error: Tool execution session identity is unavailable."
                         + _HINT
                     )
-                execution_params = self._inject_context(
+                reach_refusal = await mcp_reach_refusal(tool, thread_context)
+                if reach_refusal is not None:
+                    return reach_refusal
+                execution_params = inject_context(
                     model_params,
                     thread_context,
                     tool_name=name,
@@ -284,14 +290,6 @@ class ToolRegistry:
                 set_attrs(_tool_span, {"tool.error": safe_error[:200]})
                 return f"Error executing {name}: {safe_error}" + _HINT
 
-    @staticmethod
-    def _strip_reserved_context(params: dict[str, Any]) -> dict[str, Any]:
-        """Copy provider arguments without backend-owned identity or lease keys."""
-        return {
-            key: value
-            for key, value in deepcopy(params).items()
-            if not _is_reserved_execution_param(key)
-        }
 
     @staticmethod
     async def _load_thread_context() -> tuple[dict[str, Any] | None, str | None]:
@@ -366,27 +364,6 @@ class ToolRegistry:
             context["_host_access_turn_identity"] = turn_identity
         return context, None
 
-    @staticmethod
-    def _inject_context(
-        params: dict[str, Any],
-        thread_context: dict[str, Any],
-        *,
-        tool_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Return execution params with backend-owned authoritative identity."""
-        execution_params = dict(params)
-        execution_params.update({
-            "_thread_id": thread_context["id"],
-            "_thread_project_id": thread_context.get("project_id"),
-        })
-        turn_identity = thread_context.get("_host_access_turn_identity")
-        if turn_identity is not None:
-            execution_params["_host_access_turn_identity"] = turn_identity
-        if tool_name == "bash":
-            from infra.state.context import _current_tool_invocation_id
-
-            execution_params["_thread_invocation_id"] = _current_tool_invocation_id.get()
-        return execution_params
 
     @property
     def tool_names(self) -> list[str]:

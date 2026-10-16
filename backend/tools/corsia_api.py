@@ -15,6 +15,7 @@ from infra.internal_principal import internal_request
 from tools.base import Tool
 from tools.conductor_api_policy import (
     contains_forbidden_fields,
+    off_limits_reason,
     refused_body_field,
     refused_repo_link,
     registered_routes,
@@ -91,9 +92,14 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
     if route is None:
         raise ApiCallError(f"No CORSIA API route matches {scope['method']} {scope['path']}")
     if route_class(route) != "open":
-        raise ApiCallError("Route is off-limits for corsia_api (person-only); use the human surface and report the missing capability")
+        reason = off_limits_reason(scope["path"], scope["method"])
+        raise ApiCallError(
+            f"Route is off-limits for corsia_api (person-only): {reason}; "
+            "use the human surface and report the missing capability"
+        )
     status = 500
     response = bytearray()
+    response_headers: dict[bytes, bytes] = {}
     consumed = False
     completed = asyncio.Event()
 
@@ -106,9 +112,10 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
         return {"type": "http.disconnect"}
 
     async def send(message: dict) -> None:
-        nonlocal status
+        nonlocal status, response_headers
         if message["type"] == "http.response.start":
             status = message["status"]
+            response_headers = dict(message.get("headers", []))
         elif message["type"] == "http.response.body":
             if len(response) + len(message.get("body", b"")) > MAX_RESPONSE_BYTES:
                 raise ApiCallError("Response exceeds the native tool size limit; request a smaller page or summary")
@@ -121,6 +128,13 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
             await app(scope, receive, send)
     if status >= 400:
         result: dict[str, Any] = {"status": status, "error": "API request failed; check the route schema, target and current state"}
+        if status == 403 and (remedy := response_headers.get(b"x-corsia-agent-remedy")):
+            try:
+                text = remedy.decode("ascii")
+            except UnicodeDecodeError:
+                text = ""
+            if text and len(text) <= 512 and text.isprintable():
+                result["remedy"] = text
         if status == 422:
             try:
                 details = json.loads(response).get("detail", [])

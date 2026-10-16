@@ -57,10 +57,10 @@ def _comment(artifact: str) -> None:
 
 
 def _clear(client, artifact: str, **body):
-    return client.post(
-        f"/api/attention/{artifact}/clear",
-        json={"token": OWNER_TOKEN, **{"outcome": "answer", **body}},
-    )
+    payload = {"token": OWNER_TOKEN, **{"outcome": "answer", **body}}
+    if "hold_ids" not in payload:
+        payload["hold_ids"] = _review(client, artifact)["hold_ids"]
+    return client.post(f"/api/attention/{artifact}/clear", json=payload)
 
 
 def _review(client, artifact: str) -> dict:

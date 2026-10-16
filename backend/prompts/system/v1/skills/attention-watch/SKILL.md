@@ -100,7 +100,7 @@ Raise a decision in these steps, in order:
    - `context` (at most 1,200): opening "CORSIA's daily check found", then the figures with their period and what was found
    - `options`: `{"id": "A", "label": "Move it" or "Make the change", "detail": "<what it costs>"}` and `{"id": "B", "label": "Keep it as it is", "detail": "<what it costs>"}`. For a model, option A's detail names the exact model id from `model_catalog`.
    - `recommendation`: "A" or "B"
-   - `tradeoff` and `rationale` (each at most 800)
+   - `tradeoff` (at most 800) and `rationale` (at most 240)
    - `other_enabled`: true
 3. `parent_review`, then `raise`, each with `decision_id` and the `expected_revision` from the previous result. If `parent_review` is refused, `invalidate` the draft, record "<date>: could not raise a decision: <reason>", and report it as friction in CORSIA.
 4. Record "<date>: raised decision <decision id> (node <its node_id>, revision <revision after raise>): <title>".

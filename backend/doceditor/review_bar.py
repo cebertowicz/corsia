@@ -25,7 +25,9 @@ VERDICTS = {
 }
 NOTE_MAX = 2000
 NOTE_REQUIRED = "Say what should change: this round has no comments, suggestions or edits."
-STALE = "This review request was replaced."
+#: An answer whose request is no longer the open one: it ended, or a newer
+#: same-task ask replaced the one the person read (``answer``'s ``hold_ids``).
+STALE = "This review request has ended."
 
 
 class AnswerRefused(ValueError):
@@ -146,8 +148,33 @@ def round_state(db, artifact_id: str) -> dict:
     }
 
 
+def assert_current_ask(
+    db, artifact_id: str, hold_ids: list[str] | None, *, require_hold_ids: bool = False,
+) -> None:
+    """Refuse any person action that does not name exactly the open ask holds."""
+    from plans.public import ask_attention_state, raised_asks
+
+    if ask_attention_state(db, artifact_id) is None:
+        return
+    asks = raised_asks(db, artifact_id)
+    current = {str(ask["hold_id"]) for ask in asks}
+    if not current:
+        raise AnswerRefused("ask_stale", STALE)
+    if hold_ids is None:
+        if require_hold_ids:
+            raise AnswerRefused("ask_stale", STALE)
+        return
+    supplied = set(hold_ids)
+    if supplied != current or len(hold_ids) != len(supplied):
+        raise AnswerRefused("ask_stale", STALE)
+
+
 def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer:
     """Check the verdict against the round, then close the user's open feedback batch.
+
+    The caller has already run ``assert_current_ask``, so the asks the
+    person's bar showed are exactly the open set; an artifact with no open ask
+    is refused as stale rather than answered.
 
     Runs in the caller's write transaction, before the asks are released, so
     the feedback task exists when the release notice points at it.

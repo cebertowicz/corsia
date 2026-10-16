@@ -160,6 +160,7 @@
 			on('doc_comment_changed', (d) => shown(d) && load()),
 			on('turn_complete', (d) => mine(d) && load()),
 			on('attention_changed', () => conductorMode && refreshRaised()),
+			on('plans_changed', () => conductorMode && refreshRaised()),
 		];
 		return () => offs.forEach((off) => off && off());
 	});
