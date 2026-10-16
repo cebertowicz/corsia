@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import socket
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -11,7 +10,7 @@ from core.device_pairing import PairingError, transcript_prefix
 from core.devices_runtime import runtime
 from infra.auth import require_human_user
 from infra.db_async import run_in_db
-from infra.devices_listener import host_spki_sha256, local_hostname
+from infra.devices_listener import host_spki_sha256
 from infra.local_connection import is_direct_loopback
 from infra.product_events import emit_product_event
 from infra.settings import set_devices_enabled
@@ -21,11 +20,8 @@ router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 
 def _management_name() -> str:
-    """Return the host name suitable for the local-only management refusal."""
-    announcement = runtime.listener.announcement if runtime.listener is not None else None
-    if announcement is not None and announcement.announced_name:
-        return announcement.announced_name
-    return socket.gethostname().rstrip(".").removesuffix(".local")
+    """Return the canonical name suitable for the local-only management refusal."""
+    return runtime.remote_connect_name()
 
 
 def _require_local_management(request: Request) -> None:
@@ -126,7 +122,7 @@ async def pair_finish(body: dict):
         confirm_s, name = runtime.pairing.finish(
             exchange_id=exchange_id,
             confirm_c=_decode(body.get("confirm_c"), "confirm_c"),
-            name=local_hostname(),
+            name=runtime.remote_connect_name(),
         )
     except PairingError as error:
         _emit("pairing_failed", reason=error.reason)
