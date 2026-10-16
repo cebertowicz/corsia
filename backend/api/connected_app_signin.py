@@ -44,6 +44,13 @@ def _person_only(user: dict, action: str, app_id: str) -> tuple[str, str]:
     return actor
 
 
+def _session_hash(token: str | None, authorization: str | None) -> str:
+    """The digest of the caller's own session credential: what a pending flow is bound to."""
+    from infra.accounts import token_digest
+
+    return token_digest(token_from_request(token, authorization) or "")
+
+
 def _load(app_id: str) -> tuple[str, dict[str, Any], str]:
     from api.connected_apps import _refusal
     from connections.app_reach import PENDING_STATE, AppNotFoundError, get_app
@@ -63,9 +70,8 @@ async def start_sign_in(
     app_id: str, request: Request, user: dict = Depends(require_user),
     token: str | None = Query(None), authorization: str | None = Header(None),
 ) -> dict[str, object]:
-    """Open a sign-in (or reopen the pending one) and return the consent link for the person's own browser."""
+    """Open this session's sign-in (or reopen its pending one) and return the consent link for its own browser."""
     from api.connected_apps import _refusal
-    from infra.accounts import token_digest
     from infra.config import CLIENT_METADATA_URL
     import tools.mcp_oauth_flow as flow
     from tools.mcp_config import MCPConfigError
@@ -75,10 +81,10 @@ async def start_sign_in(
     if not sign_in_here(request):
         raise _refusal(_NOT_HERE, 409)
     name, config, _state = await run_in_db(_load, app_id)
-    raw = token_from_request(token, authorization)
     try:
         return await flow.start(
-            app_id, name, config, user_id=actor[1], session_hash=token_digest(raw or ""), metadata_url=CLIENT_METADATA_URL,
+            app_id, name, config, user_id=actor[1], session_hash=_session_hash(token, authorization),
+            metadata_url=CLIENT_METADATA_URL,
         )
     except SignInError as error:
         raise HTTPException(502, detail={"failure_class": error.failure_class}) from None
@@ -87,13 +93,16 @@ async def start_sign_in(
 
 
 @signin_router.get("/servers/{app_id}/sign-in")
-async def sign_in_status(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """The pending link, or how the last attempt ended, with the provider's own words only for an unknown class."""
+async def sign_in_status(
+    app_id: str, user: dict = Depends(require_user),
+    token: str | None = Query(None), authorization: str | None = Header(None),
+) -> dict[str, object]:
+    """How the sign-in stands: the pending link only for its own session, the provider's words only when unknown."""
     import tools.mcp_oauth_flow as flow
 
-    await run_in_db(_person_only, user, "sign_in_status", app_id)
+    actor = await run_in_db(_person_only, user, "sign_in_status", app_id)
     result = flow.status(app_id)
-    link = flow.pending_link(app_id)
+    link = flow.pending_link(app_id, user_id=actor[1], session_hash=_session_hash(token, authorization))
     return {
         **result,
         **({"authorization_url": link} if link else {}),
@@ -107,17 +116,17 @@ async def cancel_sign_in(app_id: str, user: dict = Depends(require_user)) -> dic
     import tools.mcp_oauth_flow as flow
 
     actor = await run_in_db(_person_only, user, "sign_in_cancel", app_id)
-    return {"cancelled": await flow.cancel(app_id, user_id=actor[1])}
+    return {"cancelled": await flow.cancel(app_id, actor=actor)}
 
 
 @signin_router.post("/servers/{app_id}/sign-out")
 async def sign_out(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """Revoke at the provider when it supports that, delete the sign-in here regardless, then wait for Sign in."""
+    """End the app's sign-in here, then revoke it at the provider when it supports that, then wait for Sign in."""
     from tools.connected_apps_runtime import apply_connected_app_runtime
     from tools.mcp_oauth_signout import sign_out as run_sign_out
 
     actor = await run_in_db(_person_only, user, "sign_out", app_id)
     await run_in_db(_load, app_id)
-    result = await run_sign_out(app_id, user_id=actor[1])
+    result = await run_sign_out(app_id, actor=actor)
     state = await apply_connected_app_runtime("sign_out", app_id)
     return {"id": app_id, **result, **state}

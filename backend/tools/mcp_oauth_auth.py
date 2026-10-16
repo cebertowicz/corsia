@@ -1,11 +1,13 @@
-"""Attach a stored sign-in to a hosted MCP server's requests, and keep it fresh.
+"""Attach the app's stored sign-in to a hosted MCP server's requests, and keep it fresh.
 
-The access token is read from the key store into this object and goes out only as
+The sign-in is the app's, so every agent the app reaches uses the same grant. The
+access token is read from the key store into this object and goes out only as
 an ``Authorization`` header on requests to the server's own origin (never after a
-redirect: the clients here follow none). One refresh at a time per (person, app)
-runs under a lock and is written as a single key-store transaction. A rejected
-refresh, or a rotated pair that cannot be written, ends the sign-in and moves the
-server to ``needs_sign_in``.
+redirect: the clients here follow none). One refresh at a time per app runs under
+the app's grant lock and is written as a single key-store transaction, so two
+refreshes never overwrite a rotated refresh token. A rejected refresh, or a
+rotated pair that cannot be written, ends the app's sign-in and moves the server
+to ``needs_sign_in``.
 """
 
 from __future__ import annotations
@@ -25,12 +27,7 @@ from tools.mcp_config import MCPConfigError
 # Refresh a little before expiry; and never twice in this many seconds (a 401 storm).
 _SKEW = 30.0
 _COOLDOWN = 5.0
-_locks: dict[tuple[str, str], asyncio.Lock] = {}
 _background: set[asyncio.Task] = set()
-
-
-def _lock_for(app_id: str, user_id: str) -> asyncio.Lock:
-    return _locks.setdefault((app_id, user_id), asyncio.Lock())
 
 
 def _has_challenge(response: httpx.Response) -> bool:
@@ -83,8 +80,8 @@ class OAuthGrantAuth(httpx.Auth):
 
     async def _refresh(self, grant: store.Grant, *, force: bool = False) -> store.Grant | None:
         """Refresh once for everyone waiting; None when the sign-in is over."""
-        async with _lock_for(grant.app_id, grant.user_id):
-            stored = await run_in_db(store.load, grant.app_id, grant.user_id)
+        async with store.grant_lock(grant.app_id):
+            stored = await run_in_db(store.load, grant.app_id)
             if stored is None:
                 self._grant = None
                 return None
@@ -129,20 +126,17 @@ class OAuthGrantAuth(httpx.Auth):
         return stored
 
     async def _lost(self, stored: store.Grant, why: str) -> None:
-        """End the sign-in locally, tell the audit trail, and move the server to needs_sign_in."""
+        """End the app's sign-in locally (the caller holds its lock), audit it, and move the server to needs_sign_in."""
         self._grant = None
-        await run_in_db(store.delete_all, stored.app_id)
+        await run_in_db(store.end, stored.app_id)
         await self._audit(f"refresh_failed:{why}")
         _spawn(_report_lost(stored.app_id))
         return None
 
     async def _audit(self, action: str) -> None:
-        from connections.app_lifecycle_support import record_event
+        from tools.mcp_oauth_flow import audit
 
-        try:
-            await run_in_db(record_event, self._app_id, action, actor=("system", "oauth_refresh"))
-        except Exception:
-            logger.warning("refresh audit write failed for app {}", self._app_id)
+        await audit(self._app_id, action, ("system", "oauth_refresh"))
 
     def redact(self, value):
         if isinstance(value, str):

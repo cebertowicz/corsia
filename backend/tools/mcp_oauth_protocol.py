@@ -1,9 +1,9 @@
 """The OAuth wire protocol for hosted MCP servers: discovery, registration, tokens, revocation.
 
 Plain ``httpx`` with redirects off and short timeouts. Everything a provider
-sends is untrusted: only named fields are read, bodies are never logged or put
-in an error, and every secret in a response is registered with the redactor from
-the raw text, before it is parsed.
+sends is untrusted: at most ``_BODY_MAX`` bytes of a body are read, only named
+fields are used, bodies are never logged or put in an error, and every secret in
+a response is registered with the redactor from the raw text, before it is parsed.
 """
 
 from __future__ import annotations
@@ -67,9 +67,20 @@ def note_secrets(raw: str) -> None:
     mcp_oauth_secrets.register(*_SECRET_FIELD.findall(raw))
 
 
-async def _read_json(response: httpx.Response) -> dict | None:
-    raw = response.text[:_BODY_MAX]
+async def _send(client: httpx.AsyncClient, method: str, url: str, **options) -> tuple[httpx.Response, str]:
+    """One provider request. At most ``_BODY_MAX`` bytes of its body are read; the rest is never received."""
+    kept = bytearray()
+    async with client.stream(method, url, **options) as response:
+        async for chunk in response.aiter_bytes():
+            kept += chunk[: _BODY_MAX - len(kept)]
+            if len(kept) >= _BODY_MAX:
+                break
+    raw = kept.decode("utf-8", errors="replace")
     note_secrets(raw)
+    return response, raw
+
+
+def _json(raw: str) -> dict | None:
     try:
         data = json.loads(raw)
     except ValueError:
@@ -79,12 +90,10 @@ async def _read_json(response: httpx.Response) -> dict | None:
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict | None:
     try:
-        response = await client.get(check_url(url), headers={"Accept": "application/json"})
+        response, raw = await _send(client, "GET", check_url(url), headers={"Accept": "application/json"})
     except (httpx.HTTPError, SignInError):
         return None
-    if response.status_code != 200:
-        return None
-    return await _read_json(response)
+    return _json(raw) if response.status_code == 200 else None
 
 
 @dataclass
@@ -122,8 +131,8 @@ async def _protected_resource(client: httpx.AsyncClient, server_url: str) -> dic
         if data and isinstance(data.get("authorization_servers"), list) and data["authorization_servers"]:
             return data
     try:
-        probe = await client.post(
-            server_url, json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+        probe, _body = await _send(
+            client, "POST", server_url, json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
             headers={"Accept": "application/json, text/event-stream"},
         )
     except httpx.HTTPError:
@@ -218,7 +227,7 @@ async def register_client(
     if not disc.registration_endpoint:
         raise SignInError("address_mismatch")
     try:
-        response = await client.post(disc.registration_endpoint, json={
+        response, raw = await _send(client, "POST", disc.registration_endpoint, json={
             "client_name": CLIENT_NAME,
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
@@ -228,7 +237,7 @@ async def register_client(
         })
     except httpx.HTTPError:
         raise SignInError("app_busy") from None
-    data = await _read_json(response)
+    data = _json(raw)
     if response.status_code not in (200, 201) or not data or not isinstance(data.get("client_id"), str):
         raise SignInError("address_mismatch")
     secret, token = data.get("client_secret"), data.get("registration_access_token")
@@ -306,12 +315,12 @@ async def exchange_code(
     if client_secret:
         form["client_secret"] = client_secret
     try:
-        response = await client.post(disc.token_endpoint, data=form)
+        response, raw = await _send(client, "POST", disc.token_endpoint, data=form)
     except httpx.TimeoutException:
         raise SignInError("app_busy") from None
     except httpx.HTTPError:
         raise SignInError("app_error") from None
-    return _tokens_from(await _read_json(response), response.status_code)
+    return _tokens_from(_json(raw), response.status_code)
 
 
 async def refresh_tokens(
@@ -323,10 +332,10 @@ async def refresh_tokens(
     if client_secret:
         form["client_secret"] = client_secret
     try:
-        response = await client.post(check_url(token_endpoint), data=form)
+        response, raw = await _send(client, "POST", check_url(token_endpoint), data=form)
     except (httpx.HTTPError, SignInError):
         raise RefreshUnavailable from None
-    data = await _read_json(response)
+    data = _json(raw)
     if data and data.get("error") in ("invalid_grant", "invalid_client", "unauthorized_client"):
         raise RefreshRejected
     if response.status_code in (400, 401, 403) and not (data and data.get("error")):
@@ -337,18 +346,21 @@ async def refresh_tokens(
         raise RefreshUnavailable from None
 
 
-async def revoke(client: httpx.AsyncClient, endpoint: str | None, *, token: str, client_id: str) -> bool:
-    """Tell the provider to forget a token (RFC 7009). True only when it answered success."""
+async def revoke(client: httpx.AsyncClient, endpoint: str | None, *, token: str, client_id: str) -> str | None:
+    """Tell the provider to forget a token (RFC 7009). None once it answered success, else a fixed reason.
+
+    The reason is ``not_supported`` (no revocation endpoint), ``unreachable`` or ``refused``; never its body.
+    """
     if not endpoint:
-        return False
+        return "not_supported"
     try:
-        response = await client.post(
-            check_url(endpoint), data={"token": token, "client_id": client_id, "token_type_hint": "refresh_token"},
-            timeout=REVOKE_TIMEOUT,
+        response, _body = await _send(
+            client, "POST", check_url(endpoint),
+            data={"token": token, "client_id": client_id, "token_type_hint": "refresh_token"}, timeout=REVOKE_TIMEOUT,
         )
     except (httpx.HTTPError, SignInError):
-        return False
-    return response.status_code == 200
+        return "unreachable"
+    return None if response.status_code == 200 else "refused"
 
 
 async def account_label(client: httpx.AsyncClient, disc: Discovery, access_token: str) -> str | None:
@@ -356,10 +368,12 @@ async def account_label(client: httpx.AsyncClient, disc: Discovery, access_token
     if not disc.userinfo_endpoint:
         return None
     try:
-        response = await client.get(disc.userinfo_endpoint, headers={"Authorization": f"Bearer {access_token}"}, timeout=REVOKE_TIMEOUT)
+        response, raw = await _send(
+            client, "GET", disc.userinfo_endpoint, headers={"Authorization": f"Bearer {access_token}"}, timeout=REVOKE_TIMEOUT,
+        )
     except httpx.HTTPError:
         return None
-    data = await _read_json(response) if response.status_code == 200 else None
+    data = _json(raw) if response.status_code == 200 else None
     for key in ("email", "preferred_username", "name"):
         value = data.get(key) if data else None
         if isinstance(value, str) and 0 < len(value) <= 120:

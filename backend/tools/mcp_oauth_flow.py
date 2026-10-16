@@ -1,11 +1,17 @@
-"""One person's sign-in to one hosted MCP server, from Sign in to a stored grant.
+"""One person's sign-in to one hosted MCP server, from Sign in to the app's stored grant.
 
-At most one pending flow per app (a second press reopens the same page). A flow
-owns a loopback listener, a single-use ``state``, the PKCE verifier and the
-starting person's session; it ends on a valid callback, the five-minute expiry,
-a cancel, or the listener's request cap. Failures are fixed classes
-(``tools.mcp_oauth_errors``); every outcome is audited with actor and app,
-never a value.
+The grant belongs to the app (``tools.mcp_oauth_store``); a pending flow belongs to
+the session that started it. At most one flow is pending per app: the same
+session pressing Sign in again reopens its own page (C-R8a), and another
+session's press ends it and starts that session's own, so no session is ever
+handed another's consent link. A flow owns a loopback listener, a single-use
+``state``, the PKCE verifier and the starting session; it ends on a valid
+callback, the five-minute expiry, a cancel, a newer flow, or the listener's
+request cap. Only the app's current flow may store a grant. A completed sign-in
+replaces the app's grant and only then revokes the one it replaced; a
+cancelled, expired or failed one leaves the existing grant working. Failures are
+fixed classes (``tools.mcp_oauth_errors``); every outcome is audited with its
+actor and app, never a value.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ import asyncio
 import hmac
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -24,20 +30,24 @@ import tools.mcp_oauth_secrets as mcp_oauth_secrets
 import tools.mcp_oauth_store as store
 from tools.mcp_config import MCPConfigError
 from tools.mcp_oauth_errors import SignInError
-from tools.mcp_oauth_listener import CallbackListener
+from tools.mcp_oauth_listener import BIND_HOST, CallbackListener
 
 EXPIRY_SECONDS = 300.0
 DEFAULT_PATH = "/callback"
-_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+# Only names that reach the listener, which binds 127.0.0.1 alone.
+_LOOPBACK_HOSTS = (BIND_HOST, "localhost")
 _SUCCESS_PAGE = "{app} is connected to CORSIA. You can close this tab and go back to CORSIA."
 _FAILURE_PAGE = "Sign-in didn't finish. Go back to CORSIA to see why."
 _REFUSED_PAGE = "This isn't the sign-in CORSIA is waiting for."
+
+#: Who acted, as the audit trail records it: ("person", user id), ("agent", thread id) or ("system", what).
+Actor = tuple[str, str]
 
 
 def oauth_settings(config: dict) -> tuple[str | None, str, int, str]:
     """The pasted client ID and the callback host, port and path a server's config asks for.
 
-    The host may only be a loopback name; anything else is refused before any listener opens.
+    The host may only be a name the listener answers on; anything else is refused before any listener opens.
     """
     client_id = config.get("oauth_client_id")
     if client_id is not None and (not isinstance(client_id, str) or not 0 < len(client_id) <= 512 or not client_id.isprintable() or " " in client_id):
@@ -45,9 +55,9 @@ def oauth_settings(config: dict) -> tuple[str | None, str, int, str]:
     callback = config.get("oauth_callback") or {}
     if not isinstance(callback, dict) or set(callback) - {"host", "port", "path"}:
         raise MCPConfigError("oauth_callback may set only host, port and path")
-    host, port, path = callback.get("host", "127.0.0.1"), callback.get("port", 0), callback.get("path", DEFAULT_PATH)
+    host, port, path = callback.get("host", BIND_HOST), callback.get("port", 0), callback.get("path", DEFAULT_PATH)
     if host not in _LOOPBACK_HOSTS:
-        raise MCPConfigError("the sign-in callback host must be 127.0.0.1, localhost or [::1]")
+        raise MCPConfigError("the sign-in callback host must be 127.0.0.1 or localhost")
     if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
         raise MCPConfigError("the sign-in callback port must be a number from 1 to 65535")
     if not isinstance(path, str) or not path.startswith("/") or len(path) > 200 or "?" in path or "#" in path or not path.isprintable():
@@ -103,10 +113,14 @@ def status(app_id: str) -> dict[str, object]:
     return {"status": "idle"}
 
 
-def pending_link(app_id: str) -> str | None:
-    """The consent link of a pending flow, for the starting person's own screen only."""
+def _started_by(flow: Flow, user_id: str, session_hash: str) -> bool:
+    return flow.user_id == user_id and hmac.compare_digest(flow.session_hash.encode(), session_hash.encode())
+
+
+def pending_link(app_id: str, *, user_id: str, session_hash: str) -> str | None:
+    """The consent link of a pending flow, for the session that started it and no other."""
     flow = _flows.get(app_id)
-    return flow.authorization_url if flow else None
+    return flow.authorization_url if flow is not None and _started_by(flow, user_id, session_hash) else None
 
 
 def last_words(app_id: str) -> str | None:
@@ -116,39 +130,65 @@ def last_words(app_id: str) -> str | None:
 
 def _allowed_hosts(flow_host: str):
     def hosts(port: int) -> set[str]:
-        allowed = {f"127.0.0.1:{port}"}
-        if flow_host != "127.0.0.1":
+        allowed = {f"{BIND_HOST}:{port}"}
+        if flow_host != BIND_HOST:
             allowed.add(f"{flow_host}:{port}")
         return allowed
     return hosts
 
 
-async def _audit(app_id: str, action: str, actor: tuple[str, str]) -> None:
-    from connections.app_lifecycle_support import record_event
+async def audit(app_id: str, action: str, actor: Actor) -> None:
+    """Record one value-free sign-in event. A failed write is logged, not raised: it must not undo the sign-in."""
+    from connections.app_lifecycle_support import record_sign_in_event
 
     try:
-        await run_in_db(record_event, app_id, action, actor=actor)
+        await run_in_db(record_sign_in_event, app_id, action, actor=actor)
     except Exception:
         logger.warning("sign-in audit write failed for app {}", app_id)
+
+
+def provider_origin(url: str) -> str:
+    """``url``'s scheme, host and any non-default port: where a person finds the provider."""
+    scheme, host, port = protocol.origin_of(url)
+    default = 443 if scheme == "https" else 80
+    return f"{scheme}://{host}" + ("" if port == default else f":{port}")
+
+
+async def tell_provider(grant: store.Grant) -> str | None:
+    """Revoke an ended grant at its provider (RFC 7009). None once told, else ``protocol.revoke``'s reason."""
+    token = grant.refresh_token or grant.access_token
+    async with protocol.new_client(timeout=protocol.REVOKE_TIMEOUT) as http:
+        return await protocol.revoke(http, grant.revocation_endpoint, token=token, client_id=grant.client_id)
+
+
+def revoke_outcome(event: str, grant: store.Grant, failure: str | None) -> str:
+    """The audit action for revoking an ended grant; on failure, the reason and the provider, never a token."""
+    return f"{event}_revoked" if failure is None else f"{event}_revoke_failed:{failure}:{provider_origin(grant.issuer)}"
 
 
 async def start(
     app_id: str, app_name: str, config: dict, *, user_id: str, session_hash: str, metadata_url: str,
 ) -> dict[str, object]:
-    """Begin a sign-in, or reopen the pending one (C-R8a). Returns the consent link and expiry."""
+    """Begin this session's sign-in, or reopen its own pending one (C-R8a). Returns the consent link and expiry."""
     async with _lock:
         existing = _flows.get(app_id)
-        if existing is not None and existing.expires_at > time.time():
+        if existing is not None and existing.expires_at > time.time() and _started_by(existing, user_id, session_hash):
             return {"authorization_url": existing.authorization_url, "expires_at": _iso(existing.expires_at), "reopened": True}
         server_url = config.get("url")
         if not isinstance(server_url, str):
             raise MCPConfigError("only an app at a web address can be signed in to")
         pasted, host, port, path = oauth_settings(config)
+        if existing is not None and existing.expires_at <= time.time():
+            await _end(existing, SignInError("timed_out"))
+        elif existing is not None:
+            # Another session's flow: it ends, and its callback is refused, before this one takes its place.
+            await _close(existing)
+            await audit(app_id, "sign_in_superseded", ("person", user_id))
         flow = await _open_flow(app_id, app_name, server_url, user_id, session_hash, pasted, host, port, path, metadata_url)
         _flows[app_id] = flow
         _results.pop(app_id, None)
         flow.timer = asyncio.create_task(_expire(flow))
-    await _audit(app_id, "sign_in_started", ("person", user_id))
+    await audit(app_id, "sign_in_started", ("person", user_id))
     return {"authorization_url": flow.authorization_url, "expires_at": _iso(flow.expires_at), "reopened": False}
 
 
@@ -196,35 +236,35 @@ async def _expire(flow: Flow) -> None:
     await _end(flow, SignInError("timed_out"))
 
 
-async def _end(flow: Flow, failure: SignInError | None) -> None:
-    """Close a flow once: stop its listener, record how it ended, and forget its secrets' owner."""
+async def _close(flow: Flow) -> bool:
+    """Forget a flow once and stop its listener and timer. False when it had already ended."""
     if _flows.get(flow.app_id) is not flow:
-        return
+        return False
     del _flows[flow.app_id]
     if flow.timer is not None and flow.timer is not asyncio.current_task():
         flow.timer.cancel()
     if flow.listener is not None:
         await flow.listener.stop()
         for kind, count in sorted(flow.listener.refused.items()):
-            await _audit(flow.app_id, f"sign_in_refused:{kind}:{count}", ("system", "sign_in_listener"))
-    if failure is None:
+            await audit(flow.app_id, f"sign_in_refused:{kind}:{count}", ("system", "sign_in_listener"))
+    return True
+
+
+async def _end(flow: Flow, failure: SignInError | None) -> None:
+    """Close a flow once and record how it ended."""
+    if not await _close(flow) or failure is None:
         return
     _results[flow.app_id] = Result(failure.failure_class, failure.words, time.time())
     action = "sign_in_expired" if failure.failure_class == "timed_out" else f"sign_in_failed:{failure.failure_class}"
-    await _audit(flow.app_id, action, ("system", "sign_in"))
+    await audit(flow.app_id, action, ("system", "sign_in"))
 
 
-async def cancel(app_id: str, *, user_id: str) -> bool:
-    """End a pending sign-in at the person's request. False when none was pending."""
+async def cancel(app_id: str, *, actor: Actor) -> bool:
+    """End a pending sign-in: a person's Cancel, a sign-out or Remove, or shutdown. False when none was pending."""
     flow = _flows.get(app_id)
-    if flow is None:
+    if flow is None or not await _close(flow):
         return False
-    del _flows[app_id]
-    if flow.timer is not None:
-        flow.timer.cancel()
-    if flow.listener is not None:
-        await flow.listener.stop()
-    await _audit(app_id, "sign_in_cancelled", ("person", user_id))
+    await audit(app_id, "sign_in_cancelled", actor)
     return True
 
 
@@ -257,7 +297,7 @@ async def _callback(flow: Flow, query: dict[str, str]) -> tuple[int, str, bool, 
         await _end(flow, failure)
         return 200, _FAILURE_PAGE, True, None
     await _end(flow, None)
-    await _audit(flow.app_id, "sign_in_completed", ("person", flow.user_id))
+    await audit(flow.app_id, "sign_in_completed", ("person", flow.user_id))
     _connect_in_background(flow.app_id)
     return 200, _SUCCESS_PAGE.format(app=flow.app_name), True, None
 
@@ -269,7 +309,11 @@ def protocol_error(query: dict[str, str]) -> SignInError:
 
 
 async def _finish(flow: Flow, code: str) -> SignInError | None:
-    """Exchange the code and keep the grant for the person who started the flow. None on success."""
+    """Exchange the code and keep the grant as the app's, signed in by the flow's starter. None on success.
+
+    Nothing is stored unless this is still the app's current flow and the app still exists. Only once the new
+    grant is stored is the one it replaced revoked.
+    """
     if not await run_in_db(_session_valid, flow.session_hash, flow.user_id):
         return SignInError("unknown")
     try:
@@ -283,18 +327,43 @@ async def _finish(flow: Flow, code: str) -> SignInError | None:
     except SignInError as error:
         return error
     grant = store.Grant(
-        app_id=flow.app_id, user_id=flow.user_id, server_url=flow.server_url, issuer=flow.disc.issuer,
+        app_id=flow.app_id, signed_in_by=flow.user_id, server_url=flow.server_url, issuer=flow.disc.issuer,
         resource=flow.disc.resource, token_endpoint=flow.disc.token_endpoint, client_id=flow.client.client_id,
         access_token=tokens.access_token, expires_at=tokens.expires_at,
         revocation_endpoint=flow.disc.revocation_endpoint, client_secret=flow.client.client_secret,
         registration_access_token=flow.client.registration_access_token, refresh_token=tokens.refresh_token,
         scope=tokens.scope, account=account,
     )
-    try:
-        await run_in_db(store.save_new, grant)
-    except store.GrantStoreError:
-        return SignInError("unknown")
+    async with store.grant_lock(flow.app_id):
+        if _flows.get(flow.app_id) is not flow:
+            return SignInError("cancelled")  # superseded or cancelled while the code was exchanged
+        try:
+            replaced = await run_in_db(_keep, grant)
+        except store.GrantStoreError:
+            return SignInError("unknown")
+    if replaced is not None:
+        await _retire(replaced, grant)
     return None
+
+
+def _keep(grant: store.Grant) -> store.Grant | None:
+    """Store ``grant`` as its app's in one write that first checks the app still exists. Returns the one replaced."""
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="mcp_sign_in_keep") as conn:
+        if conn.execute("SELECT 1 FROM connected_apps WHERE id = ?", (grant.app_id,)).fetchone() is None:
+            raise store.GrantStoreError("the app was removed")
+        return store.replace(grant, db=conn)
+
+
+async def _retire(old: store.Grant, new: store.Grant) -> None:
+    """Revoke the grant a completed sign-in replaced; its tokens are already gone from the store."""
+    actor = ("person", new.signed_in_by)
+    if old.client_id == new.client_id and old.account == new.account:
+        # Providers may revoke per client and account, which would end the new sign-in too.
+        await audit(new.app_id, "sign_in_replaced_not_revoked:same_client_and_account", actor)
+        return
+    await audit(new.app_id, revoke_outcome("sign_in_replaced", old, await tell_provider(old)), actor)
 
 
 def _connect_in_background(app_id: str) -> None:
@@ -312,7 +381,12 @@ def _connect_in_background(app_id: str) -> None:
 
 
 async def stop_all() -> None:
-    """End every pending flow (shutdown, tests)."""
-    for flow in list(_flows.values()):
-        await cancel(flow.app_id, user_id=flow.user_id)
+    """End every pending flow, closing its listener, and join its timer and any connect it began (shutdown, tests)."""
+    flows = list(_flows.values())
+    for flow in flows:
+        await cancel(flow.app_id, actor=("system", "shutdown"))
+    tasks = [flow.timer for flow in flows if flow.timer is not None] + list(_background)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
     _results.clear()

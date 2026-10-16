@@ -11,7 +11,7 @@ from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
 from tools.mcp_oauth_flow import oauth_settings
-from tools.mcp_oauth_signout import sign_out
+from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 
 connected_apps_router = APIRouter()
 connected_apps_router.include_router(signin_router)
@@ -353,20 +353,19 @@ async def decline_server(app_id: str, user: dict = Depends(require_user)) -> dic
 
 @connected_apps_router.delete("/servers/{app_id}")
 async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """Remove config; a person's delete also removes only this app's stable-id keys."""
+    """Remove config and its sign-in in one write, then revoke it; a person's delete also removes only this app's keys."""
     if not (human := is_person_session(user)):
         await run_in_db(_reaching_thread, user, app_id)
-    # Every remove signs out first (revoke, then delete): a sign-in has no label and no other
-    # surface, so one left behind by any remover could never be found or removed.
-    await sign_out(app_id, user_id=_audit_actor(user)[1])
+    actor = _audit_actor(user)
 
-    def delete() -> dict[str, object]:
+    def delete():
+        from functools import partial
         from connections.app_lifecycle import delete_app
 
-        return delete_app(app_id, remove_keys=human, audit_actor=_audit_actor(user), db=_db())
+        return delete_with_sign_in(app_id, partial(delete_app, app_id, remove_keys=human, audit_actor=actor), _db())
 
     try:
-        result = await run_in_db(delete)
+        result = await remove_app(app_id, lambda: run_in_db(delete), actor=actor)
     except Exception as exc:
         raise _app_error(exc) from None
     try:

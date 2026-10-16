@@ -13,10 +13,11 @@ from infra import state
 async def shutdown_owned_tasks(
     startup_tasks: list[asyncio.Task | None], logger,
 ):
-    """Cancel and join exact background and finite startup tasks, and stop held vendor sign-ins."""
+    """Cancel and join exact background and finite startup tasks, and stop held vendor and app sign-ins."""
     from connections.account_controls import stop_all_signins
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
+    from tools.mcp_oauth_flow import stop_all as stop_app_signins
 
     owned_tasks = [
         *((label, getattr(state, attr, None)) for label, attr in RUNTIME_LOOP_TASKS),
@@ -48,6 +49,9 @@ async def shutdown_owned_tasks(
     # A held vendor login must not outlive the backend: Codex's would keep its one callback port.
     exact_tasks.append(stop_all_signins())
     exact_labels.append("account sign-in")
+    # Likewise a pending connected-app sign-in's loopback listener and its expiry timer.
+    exact_tasks.append(stop_app_signins())
+    exact_labels.append("connected-app sign-in")
     exact_tasks.append(stop_corrections_classifier())
     exact_labels.append("corrections classifier")
     results, pending_cancel = await join_cleanup(exact_tasks)

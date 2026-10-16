@@ -4,8 +4,9 @@ Every secret an OAuth sign-in touches (access and refresh tokens, authorization
 codes, PKCE verifiers, a registered client secret) is registered here the moment
 it arrives, before anything parses it, because the SDK and HTTP libraries log
 tracebacks around token parsing. Registered values are scrubbed from the stdlib
-and loguru log streams, and from every string :func:`redact` is given. Only a
-bounded set of recent values is kept, in memory, never written anywhere.
+and loguru log streams, and from every string :func:`redact` is given. Values
+are kept in memory only, never written anywhere: each stored grant's secrets for
+as long as it is stored (:func:`hold`), and a bounded set of recent others.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
+from collections import OrderedDict
 
 from loguru import logger
 
@@ -22,31 +24,68 @@ _MIN_LENGTH = 8
 _MAX_VALUES = 256
 
 _lock = threading.Lock()
+# Passing values (states, verifiers, codes, ended grants): the most recently used last, the oldest dropped.
+_recent: OrderedDict[str, None] = OrderedDict()
+# The secrets of each app's stored grant, kept for as long as the grant is: never dropped for newer values.
+_held: dict[str, tuple[str, ...]] = {}
 _values: list[str] = []
 _installed = False
 
 
+def _usable(values: tuple[object, ...]) -> list[str]:
+    return [value for value in values if isinstance(value, str) and len(value) >= _MIN_LENGTH]
+
+
+def _refresh_values() -> None:
+    _values[:] = sorted({*_recent, *(value for held in _held.values() for value in held)}, key=len, reverse=True)
+
+
+def _remember(values: list[str]) -> None:
+    for value in values:
+        _recent[value] = None
+        _recent.move_to_end(value)
+    while len(_recent) > _MAX_VALUES:
+        _recent.popitem(last=False)
+
+
 def register(*values: object) -> None:
-    """Remember secret values so no log or message built later can carry them."""
+    """Remember secret values so no log or message built later can carry them. A repeat counts as new."""
     with _lock:
-        for value in values:
-            if isinstance(value, str) and len(value) >= _MIN_LENGTH and value not in _values:
-                _values.append(value)
-        del _values[:-_MAX_VALUES]
+        _remember(_usable(values))
+        _refresh_values()
+
+
+def hold(app_id: str, *values: object) -> None:
+    """Redact the secrets of ``app_id``'s stored grant for as long as it is stored, whatever comes after."""
+    with _lock:
+        released = [value for value in _held.get(app_id, ()) if value not in values]
+        _held[app_id] = tuple(_usable(values))
+        _remember(released)
+        _refresh_values()
+
+
+def release(app_id: str) -> None:
+    """``app_id``'s grant ended: its secrets stay redacted as recent values, no longer held."""
+    with _lock:
+        _remember(list(_held.pop(app_id, ())))
+        _refresh_values()
 
 
 def forget(*values: object) -> None:
-    """Stop redacting values that no longer exist (tests; a signed-out grant keeps redacting)."""
+    """Stop redacting values that no longer exist (tests; an ended grant keeps redacting)."""
     with _lock:
         for value in values:
-            if value in _values:
-                _values.remove(value)
+            if isinstance(value, str):
+                _recent.pop(value, None)
+        for app_id, held in list(_held.items()):
+            _held[app_id] = tuple(value for value in held if value not in values)
+        _refresh_values()
 
 
 def redact(text: str) -> str:
     """``text`` with every registered secret replaced."""
     with _lock:
-        known = sorted(_values, key=len, reverse=True)
+        known = list(_values)
     for value in known:
         if value in text:
             text = text.replace(value, MARK)

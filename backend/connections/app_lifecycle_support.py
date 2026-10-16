@@ -82,9 +82,12 @@ def record_refusal(app_id: str, action: str, *, actor: tuple[str, str], db: sqli
         _write_audit(conn, actor=actor, app_id=app_id, action=action, reach_from=None, reach_to=None)
 
 
-def record_event(app_id: str, action: str, *, actor: tuple[str, str], db: sqlite3.Connection | None = None) -> None:
-    """Durably retain one value-free sign-in event: its actor, the app and a fixed action text."""
-    record_refusal(app_id, action, actor=actor, db=db)
+def record_sign_in_event(
+    app_id: str, action: str, *, actor: tuple[str, str], db: sqlite3.Connection | None = None,
+) -> None:
+    """Durably retain one value-free event of a hosted app's sign-in: its actor, the app and a fixed action text."""
+    with write_transaction(db, scope="connected_app_audit_sign_in") as conn:
+        _write_audit(conn, actor=actor, app_id=app_id, action=action, reach_from=None, reach_to=None)
 
 
 def _config_json(config: object) -> str:
