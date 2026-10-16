@@ -33,7 +33,7 @@ from llm.local_setup_ownership import existing_install_is_foreign
 from llm.local_setup_ownership import omlx_log_detail, own_omlx_admin_key, own_omlx_port, require_free_disk
 from llm.local_setup_ownership import run_command as _run
 from llm.local_profiles import DEFAULT_PROFILE, LocalProfile, format_size, profile_by_id
-from llm import local_setup_download, local_setup_operation
+from llm import local_setup_cancel, local_setup_download, local_setup_operation
 from llm.local_setup_download import (
     DOWNLOAD_BACKGROUND_POLL_SECONDS,
     DOWNLOAD_FOLLOW_SECONDS,
@@ -167,38 +167,7 @@ def download_estimate() -> tuple[int | None, bool]:
 
 
 async def cancel_local_setup() -> dict:
-    """Cancel the live oMLX download; a completion race is deliberately a no-op."""
-    task = _flight.task
-    if task is None or task.done():
-        return {"ok": True, "cancelled": False}
-
-    operation = local_setup_operation.read()
-    task_id = operation.task_id if operation else None
-    if task_id and _flight.server_id:
-        from llm.providers.omlx_endpoints import admin_request
-
-        response = await admin_request(
-            {"server_id": _flight.server_id}, "POST", f"/hf/cancel/{task_id}", timeout=15.0,
-        )
-        # oMLX reports a just-finished task as absent or conflicting. It is already
-        # in the requested terminal state, so do not turn that race into an error.
-        if response.status_code not in (200, 202, 204, 404, 409):
-            raise RuntimeError(f"oMLX could not cancel the model download (HTTP {response.status_code}).")
-
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-    _flight.result = {"ok": True, "cancelled": True}
-    _flight.stage = None
-    _flight.following = False
-    _flight.download_eta_seconds = None
-    _flight.download_stalled = False
-    local_setup_operation.clear()
-    _notify_models_changed()
-    _emit("cancelled", profile=operation.profile_id if operation else DEFAULT_PROFILE.id)
-    return {"ok": True, "cancelled": True}
+    return await local_setup_cancel.cancel_setup(_flight, notify=_notify_models_changed, emit=_emit)
 
 
 def setup_status() -> dict[str, Any]:

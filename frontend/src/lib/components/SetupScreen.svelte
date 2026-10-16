@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button, Field, Message } from '$lib/components/ui';
-	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupShell, { type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
 	import { token, user } from '$lib/stores/auth';
@@ -13,6 +13,7 @@
 	import { connect } from '$lib/ws';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
+	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
@@ -52,27 +53,9 @@
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
-	function remainingTime(seconds: number | null | undefined): string | undefined {
-		if (seconds == null || seconds < 0) return undefined;
-		if (seconds < 90) return 'about 1 min left';
-		if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} min left`;
-		return `about ${Math.round(seconds / 3600)} hr left`;
-	}
-
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
-	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
-	const localJobMeta = $derived(local?.download_stalled ? 'Download paused' : local?.download_percent == null ? local?.setup_stage || 'Downloading' : [
-		`${local.download_percent}%`, remainingTime(local.download_eta_seconds),
-	].filter(Boolean).join(' · '));
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
-	const localJob = $derived<SetupJob | undefined>(
-		localDownloading
-			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localJobMeta, progress: localProgress,
-				action: page === 'models' && get(token) ? { label: 'Cancel', onclick: () => void cancelDownload() } : undefined }
-			: local?.setup_error || localStartError
-				? { label: status.model_name || local?.name || 'Local model', state: 'error', meta: 'Couldn’t download' }
-				: undefined,
-	);
+	const localJob = $derived(buildLocalJob(local, localDownloading, status.model_name, page, Boolean(get(token)), localStartError, () => void cancelDownload()));
 	const canFinish = $derived(sources.some(sourceIsReady));
 	const jobs = $derived<SetupJob[]>([
 		...(localJob ? [localJob] : []),
@@ -81,13 +64,7 @@
 		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
 		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
 	]);
-	const finishNote = $derived(
-		localStartError || local?.setup_error
-			? 'The local model couldn’t start. Try again, or choose another source.'
-			: localDownloading
-				? 'Ready when the download finishes. You can close this window; CORSIA keeps going.'
-				: 'Connect Claude Code or Codex, or add an API key, to continue.',
-	);
+	const finishNote = $derived(setupFinishNote(local, localDownloading, localStartError));
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
 	const downloadModelLabel = $derived(status.model_name || 'local model');
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
@@ -288,7 +265,7 @@
 		});
 		if (!showLocalRow || !local) return rows;
 		const ready = sourceIsReady(local);
-		rows.push({ key: 'omlx', name: 'This computer', meta: sourceMeta(local),
+		rows.push({ key: 'omlx', name: 'This computer', meta: setupSourceMeta(local, localStartError, modelSize),
 			pill: ready ? { state: 'success', label: 'Ready' } : localDownloading ? { state: 'loading', label: 'Downloading' } : undefined,
 			action: ready ? undefined : localDownloading ? { label: 'Cancel', run: cancelDownload, loading: localSetupBusy } : { label: local?.setup_error || localStartError ? 'Try again' : 'Download', run: retryLocalDownload, loading: localSetupBusy },
 			error: !localDownloading && !ready && Boolean(local?.setup_error || localStartError), detail: !localDownloading && !ready && (local?.setup_error || localStartError) ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : undefined });
@@ -335,22 +312,7 @@
 		}
 	}
 
-	function sourceMeta(source: ModelSource): string {
-		if (source.source === 'omlx') {
-			if (source.setup_downloading || source.setup_stage) {
-				if (source.download_stalled) return 'Download paused';
-				const eta = remainingTime(source.download_eta_seconds);
-				return source.download_percent == null && source.setup_stage ? source.setup_stage : ['Downloading in the background', eta].filter(Boolean).join(' · ');
-			}
-			if (source.setup_error || localStartError) return 'Download needs attention';
-			return `Local model · ${modelSize}`;
-		}
-		if (source.state === 'not_installed') return `${source.name} needs its official app installed first.`;
-		if (source.state === 'needs_auth') return 'Sign in to use your subscription';
-		if (sourceIsReady(source)) return 'Ready to use.';
-		return 'Check this source, then try again.';
-	}
-
+	// Source metadata is built by setupSourceMeta.
 	async function saveSetupReport() {
 		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 		if (!invoke) return;
