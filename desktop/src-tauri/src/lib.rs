@@ -922,6 +922,17 @@ pub fn run() {
                     sync_window_chrome(&window);
                 }
             }
+            // A saved remote owns launch: do not register or start the local
+            // service, whose login item was intentionally removed on pairing.
+            if let Ok(app_dir) = default_app_dir(app.handle()) {
+                if let Ok(Some(remote)) = remote_config::load_remote(&app_dir) {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let state = serde_json::json!({ "kind": "connecting", "name": remote.name });
+                        let _ = window.eval(format!("window.__corsiaShowRemoteState?.({state});"));
+                    }
+                    return Ok(());
+                }
+            }
             // The default window loads the static startup shell while Tauri
             // owns the first service launch. Retrying after a visible failure
             // stays available through start_local_service.
