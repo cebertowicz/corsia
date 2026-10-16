@@ -2,9 +2,11 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import {
-		approveConnectedApp, declineConnectedApp, loadConnectedApps, reconnectConnectedApp, removeConnectedApp,
+		approveConnectedApp, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
 	} from '$lib/api/connectedApps';
+	import { anyFirstSignIn, needsSignInAttention, SIGN_IN_LEDE, signInStateLine } from '$lib/appSignIn';
+	import AppSignInPanel from './AppSignInPanel.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
 
 	let apps = $state<ConnectedApp[]>([]);
@@ -14,8 +16,14 @@
 	let actionError = $state('');
 	let whereApp = $state<ConnectedApp | null>(null);
 	let openId = $state<string | null>(null);
+	let signInHere = $state(false);
+	let signedOut = $state<Set<string>>(new Set());
+	let confirmingOut = $state<string | null>(null);
+	const isOpen = (app: ConnectedApp): boolean => openId === app.id || app.state === 'awaiting_approval' || needsSignInAttention(app);
 
 	function stateLine(app: ConnectedApp): string {
+		const signIn = signInStateLine(app, signedOut.has(app.id));
+		if (signIn) return signIn;
 		switch (app.state) {
 			case 'awaiting_approval': return 'Waiting for your approval';
 			case 'connecting': return 'Connecting…';
@@ -41,9 +49,14 @@
 	async function load(): Promise<void> {
 		loading = true;
 		error = '';
-		try { apps = await loadConnectedApps(); }
+		try { ({ servers: apps, signInHere } = await loadConnectedAppsList()); }
 		catch (cause) { error = cause instanceof Error ? cause.message : 'Could not load connected apps.'; }
 		finally { loading = false; }
+	}
+
+	/** Re-read the rows without the loading state, so an open row keeps its place while a sign-in finishes. */
+	async function refresh(): Promise<void> {
+		try { ({ servers: apps, signInHere } = await loadConnectedAppsList()); } catch { /* the next refresh tries again */ }
 	}
 
 	async function run(app: ConnectedApp, action: 'approve' | 'decline' | 'reconnect' | 'remove'): Promise<void> {
@@ -64,7 +77,7 @@
 </script>
 
 <section class="connected-apps" data-settings-anchor="connected-apps" id="connected-apps">
-	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Apps here work in every project. A project can turn one off, or connect apps of its own, in its settings.</p></div></div>
+	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Apps here work in every project. A project can turn one off, or connect apps of its own, in its settings.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div></div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
@@ -74,13 +87,15 @@
 	{:else}
 		<div class="rows">
 			{#each apps as app (app.id)}
-				<article class:open={openId === app.id || app.state === 'awaiting_approval'} class="app-row">
-					<button class="summary press-tint" aria-expanded={openId === app.id || app.state === 'awaiting_approval'} onclick={() => openId = openId === app.id ? null : app.id}>
+				<article class:open={isOpen(app)} class="app-row">
+					<button class="summary press-tint" aria-expanded={isOpen(app)} onclick={() => openId = openId === app.id ? null : app.id}>
 						<span class="app-copy"><strong title={app.name}>{app.name}</strong><span>{stateLine(app)} · {placeLine(app)}</span></span><span aria-hidden="true">›</span>
 					</button>
-					{#if openId === app.id || app.state === 'awaiting_approval'}
+					{#if isOpen(app)}
 						<div class="details">
 							{#if actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
+							<AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
+								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} />
 							<div class="actions">
 								{#if app.state === 'awaiting_approval'}
 									<Button variant="primary" loading={actionId === app.id} onclick={() => run(app, 'approve')}>Approve</Button>
@@ -88,6 +103,7 @@
 								{:else}
 									<Button onclick={() => whereApp = app}>Where it works…</Button>
 									<Button loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>
+									{#if app.sign_in?.signed_in && confirmingOut !== app.id}<Button onclick={() => confirmingOut = app.id}>Sign out</Button>{/if}
 									<Button variant="danger" loading={actionId === app.id} onclick={() => run(app, 'remove')}>Remove</Button>
 								{/if}
 							</div>

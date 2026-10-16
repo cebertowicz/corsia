@@ -1,0 +1,178 @@
+"""The sign-in routes: person only (C-R7, C-R9), this-Mac only (C-R8), and what a row shows (C-R1)."""
+
+from __future__ import annotations
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from api import connected_app_signin as routes
+from api import connected_apps
+from api.connected_app_rows import _agent_next_step
+from auth_fixtures import OWNER_USER
+from connections.app_lifecycle import create_app
+from infra.auth import require_user
+from infra.database import get_db
+from oauth_fake_as import MCP_URL
+from oauth_fixtures import ALL_REACH, SESSION
+import tools.mcp_oauth_flow as flow
+from tools.mcp_oauth_errors import SignInError
+
+PERSON = {"id": OWNER_USER, "token_kind": "session"}
+AGENT = {"id": OWNER_USER, "thread_id": "thread-a", "token_kind": "internal"}
+AUTH = {"Authorization": f"Bearer {SESSION}"}
+
+
+@pytest.fixture
+def api(isolated_db, monkeypatch):
+    calls: dict[str, list] = {"start": [], "cancel": [], "signout": [], "runtime": []}
+    actor = {"who": PERSON}
+
+    async def start(app_id, name, config, *, user_id, session_hash, metadata_url):
+        calls["start"].append((app_id, user_id, session_hash, metadata_url))
+        return {"authorization_url": "http://127.0.0.1:7999/authorize?x=1", "expires_at": "t", "reopened": False}
+
+    async def cancel(app_id, *, user_id):
+        calls["cancel"].append(app_id)
+        return True
+
+    async def sign_out(app_id, *, user_id):
+        calls["signout"].append((app_id, user_id))
+        return {"had_sign_in": True, "provider_told": True, "provider_url": None}
+
+    async def runtime(action, app_id):
+        calls["runtime"].append((action, app_id))
+        return {"state": "needs_sign_in", "state_since": "t", "tool_count": 0, "failure_class": None}
+
+    monkeypatch.setattr(flow, "start", start)
+    monkeypatch.setattr(flow, "cancel", cancel)
+    monkeypatch.setattr("tools.mcp_oauth_signout.sign_out", sign_out)
+    monkeypatch.setattr("api.connected_apps.sign_out", sign_out)
+    monkeypatch.setattr("tools.connected_apps_runtime.apply_connected_app_runtime", runtime)
+    app_id = create_app("Linear", {"url": MCP_URL, "key_refs": []}, ALL_REACH, db=get_db())["id"]
+    local_id = create_app("Local", {"command": "x", "key_refs": []}, ALL_REACH, db=get_db())["id"]
+    server = FastAPI()
+    server.include_router(connected_apps.connected_apps_router, prefix="/api/mcp")
+    server.dependency_overrides[require_user] = lambda: actor["who"]
+
+    def client(host: str = "127.0.0.1", peer: str = "127.0.0.1") -> TestClient:
+        return TestClient(server, base_url=f"http://{host}:3001", client=(peer, 5000))
+
+    return client, actor, calls, app_id, local_id
+
+
+def audit(app_id: str) -> list[str]:
+    return [row["action"] for row in get_db().execute("SELECT action FROM connected_app_audit WHERE app_id=? ORDER BY rowid", (app_id,))]
+
+
+@pytest.mark.parametrize("method,path", [
+    ("post", "sign-in"), ("get", "sign-in"), ("delete", "sign-in"), ("post", "sign-out"),
+])
+def test_an_agent_is_refused_and_recorded_on_every_route(api, method, path):  # C-R7, C-R9
+    client, actor, calls, app_id, _ = api
+    actor["who"] = AGENT
+    response = getattr(client(), method)(f"/api/mcp/servers/{app_id}/{path}")
+    assert response.status_code == 403 and "Only the signed-in person" in response.text
+    assert not any(calls.values())
+    assert len(audit(app_id)) == 1 and audit(app_id)[0].startswith("refused_")
+
+
+def test_a_person_on_this_mac_starts_a_sign_in_with_their_own_session(api):  # C-R2, C-R8
+    client, _, calls, app_id, _ = api
+    response = client().post(f"/api/mcp/servers/{app_id}/sign-in", headers=AUTH)
+    assert response.status_code == 200 and response.json()["authorization_url"].startswith("http://127.0.0.1")
+    from infra.accounts import token_digest
+
+    assert calls["start"] == [(app_id, OWNER_USER, token_digest(SESSION), "")]
+
+
+def test_the_metadata_setting_reaches_the_flow_only_when_set(api, monkeypatch):  # C-R2
+    client, _, calls, app_id, _ = api
+    monkeypatch.setattr("infra.config.CLIENT_METADATA_URL", "https://example.test/client.json")
+    client().post(f"/api/mcp/servers/{app_id}/sign-in", headers=AUTH)
+    assert calls["start"][0][3] == "https://example.test/client.json"
+
+
+@pytest.mark.parametrize("host,peer,forwarded", [
+    ("corsia.example.test", "127.0.0.1", None),
+    ("127.0.0.1", "192.168.1.20", None),
+    ("127.0.0.1", "127.0.0.1", "203.0.113.9"),
+])
+def test_sign_in_is_offered_only_on_the_mac_corsia_runs_on(api, host, peer, forwarded):  # C-R8
+    client, _, calls, app_id, _ = api
+    headers = {**AUTH, **({"X-Forwarded-For": forwarded} if forwarded else {})}
+    response = client(host, peer).post(f"/api/mcp/servers/{app_id}/sign-in", headers=headers)
+    assert response.status_code == 409 and "Mac CORSIA runs on" in response.text and calls["start"] == []
+    assert client(host, peer).get("/api/mcp/servers", headers=headers).json()["sign_in_here"] is False
+
+
+def test_the_list_says_where_sign_in_works(api):  # C-R8
+    client, *_ = api
+    assert client().get("/api/mcp/servers", headers=AUTH).json()["sign_in_here"] is True
+
+
+def test_a_local_app_cannot_be_signed_in_to(api):  # scope
+    client, _, calls, _, local_id = api
+    assert client().post(f"/api/mcp/servers/{local_id}/sign-in", headers=AUTH).status_code == 422
+    assert calls["start"] == []
+
+
+def test_a_provider_failure_is_a_fixed_class_never_provider_text(api, monkeypatch):  # C-R9
+    client, _, _, app_id, _ = api
+
+    async def failing(*args, **kwargs):
+        raise SignInError("address_mismatch", "ignored words")
+
+    monkeypatch.setattr(flow, "start", failing)
+    response = client().post(f"/api/mcp/servers/{app_id}/sign-in", headers=AUTH)
+    assert response.status_code == 502 and response.json() == {"detail": {"failure_class": "address_mismatch"}}
+
+
+def test_a_person_can_cancel_and_sign_out(api):  # C-R6
+    client, _, calls, app_id, _ = api
+    assert client().delete(f"/api/mcp/servers/{app_id}/sign-in").json() == {"cancelled": True}
+    out = client().post(f"/api/mcp/servers/{app_id}/sign-out").json()
+    assert out["id"] == app_id and out["provider_told"] is True and out["state"] == "needs_sign_in"
+    assert calls["signout"] == [(app_id, OWNER_USER)] and calls["runtime"] == [("sign_out", app_id)]
+
+
+def test_a_persons_remove_signs_out_first_and_an_agents_does_not(api, monkeypatch):  # C-R6
+    client, actor, calls, app_id, _ = api
+
+    async def runtime_noop(_action, _app_id):
+        return {"state": "disconnected", "state_since": "t", "tool_count": 0, "failure_class": None}
+
+    monkeypatch.setattr(connected_apps, "_run_app_runtime", runtime_noop)
+    client().delete(f"/api/mcp/servers/{app_id}")
+    assert calls["signout"] == [(app_id, OWNER_USER)]
+    calls["signout"].clear()
+    actor["who"] = AGENT
+    other = create_app("Other", {"url": MCP_URL, "key_refs": []}, ALL_REACH, db=get_db())["id"]
+    client().delete(f"/api/mcp/servers/{other}")
+    assert calls["signout"] == []
+
+
+def test_a_row_shows_sign_in_facts_without_a_link_or_token(api):  # C-R1
+    client, actor, _, app_id, local_id = api
+    rows = {row["id"]: row for row in client().get("/api/mcp/servers", headers=AUTH).json()["servers"]}
+    assert rows[app_id]["sign_in"] == {"status": "idle", "signed_in": False}
+    assert "sign_in" not in rows[local_id]
+    assert "authorization_url" not in str(rows)
+
+
+def test_agents_are_told_to_ask_the_person_to_sign_in():  # C-R7
+    text = _agent_next_step("Linear", "needs_sign_in", None, [], on_here=True)
+    assert "Ask the person to press Sign in" in text and "try to sign in yourself" in text
+
+
+def test_same_mac_check_unit():  # C-R8
+    class Req:
+        def __init__(self, host, peer, headers=()):
+            self.headers = {"host": host, **dict(headers)}
+            self.client = type("C", (), {"host": peer})()
+
+    assert routes.sign_in_here(Req("127.0.0.1:3001", "127.0.0.1"))
+    assert routes.sign_in_here(Req("localhost:3001", "::1"))
+    assert routes.sign_in_here(Req("[::1]:3001", "::1"))
+    assert not routes.sign_in_here(Req("localhost.evil.example:3001", "127.0.0.1"))
+    assert not routes.sign_in_here(Req("127.0.0.1:3001", "10.0.0.5"))

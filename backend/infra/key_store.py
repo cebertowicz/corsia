@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 from infra import key_store_values
 from infra.database import get_db, write_transaction
-from infra.key_store_mcp import PREFIX as MCP_PREFIX, is_mcp_entry_name
+from infra.key_store_mcp import OAUTH_VALUE_MAX, PREFIX as MCP_PREFIX, is_mcp_entry_name, is_oauth_entry_name
 # VALUES_FILE and keys_dir are re-exported: callers find the values file through this module.
 from infra.key_store_values import VALUES_FILE as VALUES_FILE, KeyStoreError, keys_dir as keys_dir
 from infra.time import utc_now_iso
@@ -122,14 +122,14 @@ def _require_entry(name: str, db: sqlite3.Connection) -> None:
         raise KeyStoreError("No key has that name.")
 
 
-def validated_value(value: object) -> str:
+def validated_value(value: object, *, limit: int = VALUE_MAX) -> str:
     """The value as it would be stored, or :class:`KeyStoreError` for one the store refuses."""
     if not isinstance(value, str):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     cleaned = value.strip()
     if not cleaned:
         raise KeyStoreError("Paste the key first.")
-    if len(cleaned) > VALUE_MAX or not _VALUE_PATTERN.match(cleaned):
+    if len(cleaned) > limit or not _VALUE_PATTERN.match(cleaned):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     return cleaned
 
@@ -208,7 +208,7 @@ def set_managed_value(name: str, value: object, *, db: sqlite3.Connection | None
     """Store a value for an entry code owns. Server code only: no route calls it."""
     if not is_managed_name(name):
         raise KeyStoreError("No key has that name.")
-    _store(name, validated_value(value), db)
+    _store(name, validated_value(value, limit=OAUTH_VALUE_MAX if is_oauth_entry_name(name) else VALUE_MAX), db)
 
 
 def _store(name: str, cleaned: str, db: sqlite3.Connection | None) -> None:

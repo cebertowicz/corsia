@@ -4,13 +4,17 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
+from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
+from tools.mcp_oauth_flow import oauth_settings
+from tools.mcp_oauth_signout import sign_out
 
 connected_apps_router = APIRouter()
+connected_apps_router.include_router(signin_router)
 log = logging.getLogger(__name__)
 LOCAL_APP_NOTICE = (
     "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
@@ -137,6 +141,10 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     refs = _key_refs(body.get("key_refs"))
     if contains_forbidden_fields(config) or contains_forbidden_fields(refs):
         raise _refusal("Credential values are refused. Declare only the key names in key_refs; the person sets values in Settings > Keys.")
+    try:
+        oauth_settings(config)
+    except Exception as error:
+        raise _refusal(str(error)) from None
     return {**config, "key_refs": refs}
 
 
@@ -148,6 +156,7 @@ def _local_app_notice(config: object) -> str | None:
 
 @connected_apps_router.get("/servers")
 async def list_servers(
+    request: Request,
     project: str | None = Query(None),
     place: str | None = Query(None),
     user: dict = Depends(require_user),
@@ -174,10 +183,10 @@ async def list_servers(
             if project is not None:
                 if not project_exists(project, db=db):
                     raise _refusal("project not found", 404)
-                return [server_row(app, on_here=app_reaches_project(app, project), full=True, db=db) for app in apps]
+                return [server_row(app, on_here=app_reaches_project(app, project), full=True, db=db, person=True) for app in apps]
             if place == "workspace":
-                return [server_row(app, on_here=True, full=True, db=db) for app in apps if app["reach"]["mode"] == "all"]
-            return [server_row(app, on_here=True, full=True, db=db) for app in apps]
+                return [server_row(app, on_here=True, full=True, db=db, person=True) for app in apps if app["reach"]["mode"] == "all"]
+            return [server_row(app, on_here=True, full=True, db=db, person=True) for app in apps]
         thread_id, _scope = _agent_thread(user, db)
         return [
             server_row(app, on_here=reachable, full=reachable, db=db)
@@ -185,7 +194,7 @@ async def list_servers(
             for reachable in (app_reaches_thread(app["id"], thread_id, db=db),)
         ]
 
-    return {"servers": await run_in_db(read)}
+    return {"servers": await run_in_db(read), "sign_in_here": sign_in_here(request)}
 
 
 def _db():
@@ -338,7 +347,8 @@ async def decline_server(app_id: str, user: dict = Depends(require_user)) -> dic
 @connected_apps_router.delete("/servers/{app_id}")
 async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Remove config; a person's delete also removes only this app's stable-id keys."""
-    human = is_person_session(user)
+    if human := is_person_session(user):  # signs out first (revoke, then delete), so no sign-in outlives its app
+        await sign_out(app_id, user_id=user["id"])
 
     def delete() -> dict[str, object]:
         from connections.app_lifecycle import delete_app

@@ -69,6 +69,14 @@ async def _remove_connected_app(app_id: str) -> None:
         await stack.aclose()
 
 
+async def _await_sign_in(app_id: str) -> dict[str, object]:
+    """The person signed out or the provider ended the sign-in: withdraw the tools and wait for Sign in."""
+    await _remove_connected_app(app_id)
+    result = {"state": "needs_sign_in", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+    await _publish_app_state(app_id, result)
+    return result
+
+
 async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, object]:
     """Connect, reconnect or remove exactly one stable-id connected app."""
     async with _lock:
@@ -79,7 +87,12 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
         if _stopped:
             return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
-        if action == "reconnect":
+        if action == "sign_out":
+            return await _await_sign_in(app_id)
+        if action == "sign_in":
+            # A completed sign-in replaces any earlier session at once; it is not a rate-limited reconnect.
+            await _remove_connected_app(app_id)
+        elif action == "reconnect":
             now = time.monotonic()
             if now - _reconnect_at.get(app_id, float("-inf")) < 10:
                 raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
@@ -111,9 +124,11 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             if error := errors.get(name):
                 await stack.aclose()
                 _app_servers.pop(app_id, None)
+                failure = getattr(error, "failure_class", "protocol_error")
                 result = {
-                    "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-                    "failure_class": getattr(error, "failure_class", "protocol_error"),
+                    "state": "needs_sign_in" if failure == "needs_sign_in" else "failed",
+                    "state_since": utc_now_iso(), "tool_count": 0,
+                    "failure_class": None if failure == "needs_sign_in" else failure,
                 }
             else:
                 names = {
@@ -148,6 +163,11 @@ async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
 
     async with _lock:
         _stopped = False
+    import tools.mcp_oauth_secrets as mcp_oauth_secrets
+    import tools.mcp_oauth_store as mcp_oauth_store
+
+    mcp_oauth_secrets.install()
+    await run_in_db(mcp_oauth_store.register_stored)
     results = {}
     for app_id in await run_in_db(load_runtime_app_ids):
         results[app_id] = await apply_connected_app_runtime("connect", app_id)

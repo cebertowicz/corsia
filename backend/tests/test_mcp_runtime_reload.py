@@ -177,6 +177,8 @@ def _runtime_db(monkeypatch, mcp_runtime, apps):
             return apps[args[0]]
         if fn.__name__ == "load_missing_app_key_refs":
             return []
+        if fn.__name__ == "register_stored":
+            return 0
         if fn.__name__ == "record_runtime_app_state":
             return None
         raise AssertionError(fn.__name__)
@@ -207,6 +209,8 @@ def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, 
             return "GitHub", {"connected_app_id": app_id, "version": versions[app_id]}
         if fn.__name__ == "load_missing_app_key_refs":
             return []
+        if fn.__name__ == "register_stored":
+            return 0
         if fn.__name__ == "record_runtime_app_state":
             return None
         raise AssertionError(fn.__name__)
@@ -247,6 +251,8 @@ def test_connected_app_with_an_unset_key_never_attempts_a_connection(runtime, mo
             return "GitHub", {"connected_app_id": args[0], "secret_env": ["GITHUB_TOKEN"]}
         if fn.__name__ == "load_missing_app_key_refs":
             return ["GITHUB_TOKEN"]
+        if fn.__name__ == "register_stored":
+            return 0
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])
             return None
@@ -272,6 +278,8 @@ def test_connected_app_keeps_the_transport_failure_class(runtime, monkeypatch):
             return "GitHub", {"connected_app_id": args[0]}
         if fn.__name__ == "load_missing_app_key_refs":
             return []
+        if fn.__name__ == "register_stored":
+            return 0
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])
             return None
@@ -334,6 +342,8 @@ def test_runtime_error_after_connecting_publishes_failed_and_a_later_connect_ret
             return "GitHub", {"connected_app_id": args[0]}
         if fn.__name__ == "load_missing_app_key_refs":
             return []
+        if fn.__name__ == "register_stored":
+            return 0
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])
             return None
