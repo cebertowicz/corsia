@@ -31,7 +31,7 @@ SETUP_TITLES = [
     "Connect web search",
     "Set up GitHub",
     "Remote access",
-    "Set up your first agent or project",
+    "Set up your first project",
 ]
 SERVER = {"source": "claude-desktop", "app": "Claude Desktop", "servers": [{"name": "a", "kind": "stdio"}]}
 
@@ -206,7 +206,11 @@ class TestWakeAndSetupPlan:
 
         quoted_in_plan_first = set(re.findall(r"`([^`]+)`", plan_first))
         titles_in_plan_first = {q for q in quoted_in_plan_first if q[:1].isupper()}
-        assert titles_in_plan_first == set(seeded)
+        # v0.3.0 seeded task 7 under its old title; a setup still open across
+        # the upgrade renames it rather than closing it as no longer part of setup.
+        legacy_project = "Set up your first agent or project"
+        assert titles_in_plan_first == set(seeded) | {legacy_project}
+        assert f"`{legacy_project}` is task 7: `edit` its title to `Set up your first project`" in plan_first
         assert "`Getting started`" in first_run
         assert "operation=add" not in plan_first
         for criteria in seeded.values():

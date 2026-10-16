@@ -14,7 +14,7 @@ from __future__ import annotations
 # The consent hash binds the rendered title, context and option A label, so a changed word
 # here needs a new consent review.
 
-# --- task "Set up your first agent or project" ------------------------------------
+# --- task "Set up your first project" ------------------------------------
 
 FIND_PROJECTS = {
     "title": "Look for the projects you already work on?",
