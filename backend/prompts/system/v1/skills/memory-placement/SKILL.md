@@ -49,12 +49,12 @@ When a person corrects you, or a correction note arrives in your turn: fix the w
 **Tier.** Set one. You may raise a proposed tier, never lower a Serious one.
 - **Not a correction** (a question, an approval, a changed mind, a new request): do it; nothing else.
 - **Instruction** (a rule the person states): place their words in its permanent home (section 2). Never a trial.
-- **Note** (a one-off, low-stakes detail): fix it; nothing else.
+- **Note** (a one-off, low-stakes detail): fix it; if a delivered rule or fact was wrong, apply cause 1 too.
 - **Miss** (the work did not do what was asked, and they had to catch it): fix it, then find the cause.
-- **Serious** (the same miss again; a consequence such as lost data, something public, money or a deadline; a clearly furious person): find the cause now and search your watch items and records for the same pattern. Tone alone never sets it.
+- **Serious** (the same miss again; a consequence such as lost data, something public, money or a deadline; a clearly furious person): find the cause now and search your watch items and records for the same pattern. Anger deepens the review; it never by itself justifies a new rule.
 
 **Cause.** Ask in order and stop at the first yes. Write the remedy for the activity, not the one output.
-1. **Wrong rule:** a delivered rule, lesson or fact is false or stale. Fix it at its source now, at any tier; no trial, no watch.
+1. **Wrong rule:** a delivered rule, lesson or fact is false or stale. Fix it at its source now if you own it; otherwise send it to its owner (Whose is it). Never edit a generated System copy. No trial, no watch.
 2. **No foundation:** a high-stakes activity has no ground rules or no process. Set up both with `task-discipline`'s "No established workflow".
 3. **Rule gap:** the rules miss this case or cover it too narrowly. Amend them at the activity's level: a trial if it is your inference, the permanent home if the person said it.
 4. **Process gap:** no step applies or checks the rule at the right moment. Add the step to the workflow or gate.
@@ -64,7 +64,7 @@ When a person corrects you, or a correction note arrives in your turn: fix the w
 
 **Whose is it.** Name who owns the rule, step or gate that failed. If another owner does, fix only your output and your own part, and add no rule or check of yours to cover their gap. Send that owner one message with the correction, your cause answer and the evidence, never a task on their plan; a paused owner's message is held, not rerouted.
 
-**Watch or act.** A Miss with an unclear cause, or Not followed: record it as a continuity entry, then `place` that entry with verdict `trial`, rule 8's fields, and `trial.state` `watch`; its text is one general line naming the decision that went wrong. A watch is never delivered; its review asks whether it recurred. A repeat on a different task, or a Serious miss with a clear rule gap: `trial.state` `trial`. Either one placed in the turn the note arrived links to the correction.
+**Watch or act.** A Miss with an unclear cause, or Not followed: record it as a continuity entry, then `place` that entry with verdict `trial`, rule 8's fields, and `trial.state` `watch`; its text is one general line naming the decision that went wrong. A watch is never delivered; its review asks whether it recurred. A repeat on a different task, or a Serious miss with a clear rule gap: `trial.state` `trial`. Either one placed in the turn the note arrived links to the correction automatically; one placed in a later turn does not, so place it now.
 
 ## Wrong and right
 
