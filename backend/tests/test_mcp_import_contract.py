@@ -79,6 +79,25 @@ def test_url_only_claude_websocket_is_detected_but_needs_sign_in(tmp_path: Path)
         db.close()
 
 
+def test_credentialed_claude_websocket_remains_unsupported_not_needing_sign_in(tmp_path: Path) -> None:
+    _json(tmp_path / ".claude.json", {
+        "mcpServers": {"Realtime": {
+            "type": "ws", "url": "wss://example.test/mcp", "headers": {"Authorization": "secret"},
+        }},
+    })
+    db = _db()
+    try:
+        imported = mcp_import.import_selected(
+            [{"source": "claude_code", "name": "Realtime"}], db=db, home=tmp_path, actor="agent",
+        )
+
+        assert mcp_import.IMPORT_UNSUPPORTED == "CORSIA can't connect to that kind of app yet."
+        assert imported == {"rows": [{"name": "Realtime", "status": "cannot_connect"}]}
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_trailing_claude_project_folder_import_stays_in_its_project(tmp_path: Path) -> None:
     from api.connected_app_rows import app_reaches_project
     from connections.app_reach import get_app
