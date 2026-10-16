@@ -60,11 +60,11 @@ describe('SetupScreen', () => {
 		await settle();
 		expect(host.textContent).toContain('CORSIA will read:');
 		expect(host.textContent).toContain('your oMLX port setting');
-		expect(calls).toEqual(['/api/setup/status']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier']);
 
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Not now')?.click();
 		await settle();
-		expect(calls).toEqual(['/api/setup/status']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier']);
 		expect(host.textContent).toContain('Create your account');
 	});
 
@@ -86,7 +86,7 @@ describe('SetupScreen', () => {
 		await settle();
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
 		await settle();
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-download']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
 		expect(bodies).toEqual(['{"consent_existing":true}']);
 	});
 
@@ -106,7 +106,7 @@ describe('SetupScreen', () => {
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
 		await settle();
 
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-download']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
 		expect(host.textContent).toContain('CORSIA will read:');
 		expect(host.textContent).not.toContain('Create your account');
 	});
@@ -369,20 +369,29 @@ describe('SetupScreen', () => {
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
 	});
 
-	it('enables Start only when a source is ready beside a local download', async () => {
+	async function reachModels(classifier: unknown, options: { onRequest?: (url: string, init?: RequestInit) => void; sourceReady?: boolean; onFinished?: () => void; posts?: Array<unknown | (() => Promise<unknown>)> } = {}) {
+		const { onRequest, sourceReady = true, onFinished = vi.fn(), posts = [] } = options;
+		const queue = [...posts];
 		if (component) await unmount(component);
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
+			onRequest?.(url, init);
 			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/first-account') return json({ token: '[REDACTED]', user: { id: 'setup-user', name: 'First Person' } });
+			if (url === '/api/setup/classifier/recheck') return json(classifier);
+			if (url === '/api/setup/classifier') {
+				if (init?.method !== 'POST' || queue.length === 0) return json(classifier);
+				const next = queue.shift();
+				return json(typeof next === 'function' ? await (next as () => Promise<unknown>)() : next);
+			}
+			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
 				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
-				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
+				{ source: 'claude-code', name: 'Claude Code', state: sourceReady ? 'ready' : 'needs_auth', accounts: [{ state: sourceReady ? 'ready' : 'needs_auth' }] },
 			] });
 			return json({ sources: [] });
 		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished } });
 		flushSync();
 		await settle();
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
@@ -398,9 +407,104 @@ describe('SetupScreen', () => {
 		await tick();
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
 		await settle();
+	}
+	const startButton = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'));
+	const rail = () => host.querySelector('[aria-label="Setup progress"]')?.textContent ?? '';
+
+	it('enables Start when a source is ready beside a local download', async () => {
+		await reachModels({ state: 'idle' });
 
 		expect(host.textContent).toContain('Installing');
 		expect(host.textContent).toContain('Ready to use.');
-		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', false);
+		expect(startButton()).toHaveProperty('disabled', false);
+	});
+
+	it('shows the background download only in the rail, as Finishing setup with its percent', async () => {
+		await reachModels({ state: 'downloading', bytes_done: 250, bytes_total: 1000 });
+
+		expect(rail()).toContain('In the background');
+		expect(rail()).toContain('Finishing setup');
+		expect(rail()).toContain('Downloading · 25%');
+		expect(host.textContent).not.toMatch(/classifier|learns from/i);
+	});
+
+	it('never makes Start wait for the download', async () => {
+		const onFinished = vi.fn();
+		await reachModels({ state: 'downloading', bytes_done: 250, bytes_total: 1000 }, { onFinished });
+
+		expect(startButton()).toHaveProperty('disabled', false);
+		startButton()?.click();
+		await settle();
+		expect(onFinished).toHaveBeenCalledOnce();
+	});
+
+	const failedSpace = { state: 'failed', code: 'disk_full', reason: 'Needs 0.9 GB more free space.', retryable: true, bytes_needed: 872206596 };
+	const railButtons = () => Array.from(host.querySelectorAll('[aria-label="Setup progress"] button'));
+
+	it('shows a failed download as a red dot and a message in secondary text, with Try again as the only click target', async () => {
+		const posts: string[] = [];
+		await reachModels(failedSpace, { onRequest: (url, init) => { if (url === '/api/setup/classifier' && init?.method === 'POST') posts.push(url); } });
+		expect(rail()).toContain('Finishing setup');
+		expect(rail()).toContain('Needs 0.9 GB more free space.');
+		expect(rail()).not.toMatch(/try again.*try again|free space\.\s*Try again\./i);
+		expect(host.textContent).not.toMatch(/classifier|learns from/i);
+		expect(startButton()).toHaveProperty('disabled', false);
+		expect(host.querySelector('.reddot')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Setup progress"] .row.error.has-action')).not.toBeNull();
+
+		// The row is not a button; its fix is a real button with its own name and label.
+		expect(railButtons().filter((button) => button.textContent?.includes('Finishing setup'))).toHaveLength(0);
+		const retry = host.querySelector<HTMLButtonElement>('[aria-label="Try again: Finishing setup"]');
+		expect(retry?.tagName).toBe('BUTTON');
+		expect(retry?.textContent?.trim()).toBe('Try again');
+		expect(railButtons().filter((button) => button.getAttribute('aria-label') === 'Try again: Finishing setup')).toHaveLength(1);
+		const before = posts.length;
+		retry?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		await settle();
+
+		expect(posts.length).toBe(before + 1);
+	});
+
+	it('goes back to the spinner and Downloading the moment Try again is pressed, never red while it runs', async () => {
+		let release!: (state: unknown) => void;
+		const held = new Promise<unknown>((resolve) => { release = resolve; });
+		await reachModels(failedSpace, { posts: [failedSpace, () => held] });
+		expect(host.querySelector('.reddot')).not.toBeNull();
+
+		host.querySelector<HTMLButtonElement>('[aria-label="Try again: Finishing setup"]')?.click();
+		await settle();
+
+		expect(host.querySelector('.reddot')).toBeNull();
+		expect(host.querySelector('[aria-label="Try again: Finishing setup"]')).toBeNull();
+		expect(rail()).toContain('Downloading');
+		release({ state: 'downloading', bytes_done: 20, bytes_total: 1000 });
+		await settle();
+		expect(rail()).toContain('Downloading · 2%');
+		expect(host.querySelector('.reddot')).toBeNull();
+	});
+
+	it('looks again for room when the window regains focus, only while the download is stopped for space', async () => {
+		const rechecks: string[] = [];
+		const onRequest = (url: string) => { if (url === '/api/setup/classifier/recheck') rechecks.push(url); };
+		await reachModels(failedSpace, { onRequest });
+		window.dispatchEvent(new Event('focus'));
+		await settle();
+		expect(rechecks).toEqual(['/api/setup/classifier/recheck']);
+
+		rechecks.length = 0;
+		await reachModels({ state: 'failed', code: 'checksum_failed', reason: 'The download was damaged.', retryable: true }, { onRequest });
+		window.dispatchEvent(new Event('focus'));
+		await settle();
+		await reachModels({ state: 'downloading', bytes_done: 1, bytes_total: 1000 }, { onRequest });
+		window.dispatchEvent(new Event('focus'));
+		await settle();
+		expect(rechecks).toEqual([]);
+	});
+
+	it('leaves the rail free of it once the download is ready', async () => {
+		await reachModels({ state: 'ready' });
+
+		expect(rail()).not.toContain('Finishing setup');
+		expect(host.textContent).not.toMatch(/classifier|learns from/i);
 	});
 });
