@@ -353,7 +353,7 @@
 	}
 	@media (hover: hover) { .dock-bar:hover { background: var(--bg-hover); } }
 	.dock-row .dock-bar { flex: 1; min-width: 0; width: auto; }
-	/* "Needs you" is amber everywhere (sidebar, plan, artifact row, this row). */
+	/* "Needs you" is amber in the chat view (sidebar, plan, artifact row, this row). */
 	.dock-mark { display: flex; width: 36px; flex: none; align-items: center; justify-content: center; }
 	.dock-mark::before { content: ''; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--amber); }
 	.dock-text { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; }

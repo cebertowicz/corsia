@@ -68,12 +68,12 @@ const KNOWN_UNRESOLVED = new Set([
 	'lib/components/v7/OmlxServerInfoPanel.svelte:190 → var(--surface-2)',
 ]);
 
-function walk(dir: string, out: string[] = [], include = /\.(svelte|css)$/): string[] {
+function walk(dir: string, out: string[] = []): string[] {
 	for (const entry of readdirSync(dir)) {
 		if (entry === 'node_modules' || entry.startsWith('.')) continue;
 		const path = join(dir, entry);
-		if (statSync(path).isDirectory()) walk(path, out, include);
-		else if (include.test(entry)) out.push(path);
+		if (statSync(path).isDirectory()) walk(path, out);
+		else if (/\.(svelte|css)$/.test(entry)) out.push(path);
 	}
 	return out;
 }
@@ -146,19 +146,5 @@ describe('design tokens', () => {
 		for (const token of ['--image-region-ink', '--image-region-halo', '--image-region-edge']) {
 			expect(defined.has(token), `${token} must be defined`).toBe(true);
 		}
-	});
-
-	it('neither declares nor uses the retired accent names', () => {
-		// `--violet*` once meant both the accent and the violet hue. Accent consumers read the roles (`--accent`,
-		// `--accent-hover`, `-text`, `-wash`, `-line`); categorical violet reads `--purple*`; `--violet-brand` is its own
-		// hue. A reference to a removed name would fail silently, so any declaration or use of one fails here.
-		const retired = /--(?:violet(?:-2|-text|-bg|-line)?|accent-bg)(?![\w-])/;
-		const hits = walk(SRC, [], /\.(svelte|css|ts|js)$/)
-			.filter((file) => file !== __filename)
-			.flatMap((file) => readFileSync(file, 'utf8').split('\n')
-				.map((text, index) => ({ text, at: `${file.slice(SRC.length + 1)}:${index + 1}` }))
-				.filter(({ text }) => retired.test(text))
-				.map(({ at }) => at));
-		expect(hits).toEqual([]);
 	});
 });

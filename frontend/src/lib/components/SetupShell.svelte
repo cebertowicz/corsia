@@ -209,7 +209,7 @@
 <style>
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
 	/*
-	 * Setup keeps its own blue until its coherence pass moves it to the app accent. Each role has its own shade
+	 * Setup keeps its own blue until its coherence pass (#863) moves it to the app accent. Each role has its own shade
 	 * because one hex cannot be a fill, ink on that fill, text and a hairline at AA in both themes.
 	 */
 	.setup-shell {
