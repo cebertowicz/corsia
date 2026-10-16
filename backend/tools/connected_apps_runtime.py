@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-RuntimeAction = Literal["connect", "reconnect", "remove"]
+RuntimeAction = Literal["connect", "reconnect", "remove", "sign_in", "sign_out"]
 
 
 async def apply_connected_app_runtime(action: RuntimeAction, app_id: str) -> dict[str, object]:

@@ -73,7 +73,7 @@ def execution_envelope_for_consumed_action(
     build_argv: Callable[..., list[str]],
 ) -> Envelope:
     """Build the one envelope, applying external child confinement if trusted."""
-    from tools.shell_environment import own_gws_home, strip_external_browser_environment
+    from tools.shell_environment import strip_external_browser_environment
 
     external_agent = bool(getattr(consumed, "external_agent", False))
     if external_agent:
@@ -93,7 +93,6 @@ def execution_envelope_for_consumed_action(
             "leased": leased,
             "external_agent": external_agent,
             "agent_account": agent_account,
-            "gws_home": own_gws_home(env),
             "thread_id": thread_id,
             "policies": policies,
         },

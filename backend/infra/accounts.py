@@ -385,16 +385,13 @@ def resolve_token(
     Keep credential provenance so human-only decisions cannot mistake an API
     or service credential for a browser session. No credential value escapes.
     """
-    if not token:
+    return resolve_token_digest(token_digest(token), db) if token else None
+
+
+def resolve_token_digest(digest: str, db: sqlite3.Connection | None = None) -> dict | None:
+    """:func:`resolve_token` by digest, for a check that outlives the request (a sign-in callback)."""
+    sql = "SELECT user_id, kind, expires_at FROM auth_tokens WHERE token_hash = ?"
+    row = _db(db).execute(sql, (digest,)).fetchone()
+    if row is None or (row["expires_at"] and row["expires_at"] <= utc_now_iso()):
         return None
-    row = _db(db).execute(
-        "SELECT user_id, kind, expires_at FROM auth_tokens WHERE token_hash = ?",
-        (token_digest(token),),
-    ).fetchone()
-    if row is None:
-        return None
-    if row["expires_at"] and row["expires_at"] <= utc_now_iso():
-        return None
-    return {
-        "id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"],
-    }
+    return {"id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"]}
