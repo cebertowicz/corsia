@@ -84,7 +84,7 @@
 </script>
 
 <section class="connected-apps" data-settings-anchor="connected-apps" id="connected-apps">
-	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Apps here work in every project. A project can turn one off, or connect apps of its own, in its settings.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div></div>
+	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div></div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
