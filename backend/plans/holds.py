@@ -273,12 +273,20 @@ def block_hold(
 
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
+    A user hold on an artifact is a review request, so ``one_open_ask.already_open``
+    keeps it to one open request per document.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
             "a blocker anyone but the user clears is a wait, not a hold; "
             "block_node arms it with a deadline"
         )
+    if owner_kind == "user" and owner_id is not None:
+        from plans.one_open_ask import already_open
+
+        node = _validate_node(db, node_id, expected_revision)
+        if already_open(db, node_id, owner_id, reason_key=reason_key, reason=reason):
+            return node
     return place_hold(
         node_id,
         kind="blocked",
