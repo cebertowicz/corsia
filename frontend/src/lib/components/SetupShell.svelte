@@ -5,11 +5,13 @@
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 	import { peerFade } from '$lib/popoverMotion';
 
-	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip'; state: 'current' | 'todo' | 'done' };
+	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip' | 'computer' | 'code'; state: 'current' | 'todo' | 'done' };
 	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number; action?: { label: string; onclick: () => void } };
 
 	interface Props {
 		steps: SetupStep[];
+		/** The sidebar section's grey caps: Setup, or Connect on the connect-to-another-computer screens. */
+		section?: string;
 		jobs?: SetupJob[];
 		page: string;
 		title: string;
@@ -21,7 +23,7 @@
 		children?: Snippet;
 	}
 
-	const { steps, jobs = [], page, title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
+	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
@@ -168,7 +170,7 @@
 <div class="setup-shell">
 	<aside class="rail" aria-label="Setup progress">
 		<div class="traffic-space" data-tauri-drag-region></div>
-		<RailSection label="Setup" first>
+		<RailSection label={section} first>
 			{#each steps as step (step.label)}
 				<RailRow label={step.label} iconName={step.icon} state={step.state} />
 			{/each}
