@@ -81,6 +81,30 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
+	it('shows Save a report only with a working desktop invoke bridge', async () => {
+		if (component) await unmount(component);
+		const invoke = vi.fn(async () => undefined);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		vi.stubGlobal('fetch', vi.fn(async () => json({}, 500)));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Save a report')?.click();
+		await settle();
+		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+	});
+
+	it('does not show Save a report without a desktop invoke bridge', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('fetch', vi.fn(async () => json({}, 500)));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Save a report')).toBe(false);
+	});
+
 	it('shows existing oMLX consent before any adoption request, and Not now leaves it untouched', async () => {
 		if (component) await unmount(component);
 		calls = [];

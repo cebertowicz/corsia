@@ -312,9 +312,9 @@
 		}
 	}
 
-	// Source metadata is built by setupSourceMeta.
+	const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 	async function saveSetupReport() {
-		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+		const invoke = setupReportInvoke();
 		if (!invoke) return;
 		reportError = '';
 		try {
@@ -351,7 +351,7 @@
 	{#snippet secondary()}
 		{#if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
-		{:else if page === 'error'}
+		{:else if page === 'error' && setupReportInvoke()}
 			<Button variant="chip" onclick={() => void saveSetupReport()}>Save a report</Button>
 		{/if}
 	{/snippet}
