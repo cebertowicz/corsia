@@ -298,6 +298,46 @@ fn provider_key_names(path: &Path, plist_names: &[String]) -> Result<BTreeSet<St
     Ok(names)
 }
 
+/// Why adoption stopped, and whether it had touched anything yet. The window
+/// words its first line from `nothing_changed`, never from the reason text.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AdoptionError {
+    pub message: String,
+    /// True only for a failure before the source service was stopped, when
+    /// the old install was never touched. A plain `String` error converts to
+    /// false: claiming "untouched" falsely is worse than "restored".
+    #[serde(rename = "nothingChanged")]
+    pub nothing_changed: bool,
+}
+
+impl AdoptionError {
+    pub fn before_stop(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            nothing_changed: true,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl From<String> for AdoptionError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            nothing_changed: false,
+        }
+    }
+}
+
+impl From<&str> for AdoptionError {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
 /// Applies the durable adoption order. The source state root is never renamed:
 /// it is pinned in service.json and opened by the packaged backend in place.
 pub fn adopt(
@@ -305,54 +345,71 @@ pub fn adopt(
     lifecycle: &mut impl Lifecycle,
     supported_schema: u32,
     cancel_requested: &AtomicBool,
-) -> Result<(), String> {
-    plan.preflight(supported_schema)
-        .map_err(|error| format!("adoption refused before changes: {error}"))?;
+) -> Result<(), AdoptionError> {
+    // Everything up to the bootout leaves the old install untouched.
+    plan.preflight(supported_schema).map_err(|error| {
+        AdoptionError::before_stop(format!("adoption refused before changes: {error}"))
+    })?;
+    let key_names = plan
+        .expected_key_names()
+        .map_err(AdoptionError::before_stop)?;
     // The backend's refusal is a whole sentence that tells the person what to
     // do, so it is shown as written.
-    lifecycle.check_ready(&plan.source.state, &plan.expected_key_names()?)?;
-    let started = lifecycle.begin_drain()?;
+    lifecycle
+        .check_ready(&plan.source.state, &key_names)
+        .map_err(AdoptionError::before_stop)?;
+    let started = lifecycle
+        .begin_drain()
+        .map_err(AdoptionError::before_stop)?;
     let operation_id = started.operation_id.clone();
     let mut status = started;
     loop {
         if cancel_requested.load(Ordering::Acquire) {
-            lifecycle.cancel_drain(&operation_id)?;
-            return Err("adoption cancelled; the source service is still running".into());
+            lifecycle
+                .cancel_drain(&operation_id)
+                .map_err(AdoptionError::before_stop)?;
+            return Err(AdoptionError::before_stop(
+                "adoption cancelled; the source service is still running",
+            ));
         }
         if status.operation_id != operation_id || !status.active {
             let _ = lifecycle.cancel_drain(&operation_id);
-            return Err(
-                "adoption drain changed before completion; the source service is still running"
-                    .into(),
-            );
+            return Err(AdoptionError::before_stop(
+                "adoption drain changed before completion; the source service is still running",
+            ));
         }
         if status.active_processes == 0 {
             break;
         }
         thread::sleep(Duration::from_millis(250));
-        status = lifecycle.drain_status(&operation_id)?;
+        status = lifecycle
+            .drain_status(&operation_id)
+            .map_err(AdoptionError::before_stop)?;
     }
-    lifecycle.complete_drain(&operation_id)?;
+    lifecycle
+        .complete_drain(&operation_id)
+        .map_err(AdoptionError::before_stop)?;
     if let Err(error) = lifecycle.bootout_old() {
-        return match lifecycle.start_old() {
-            Ok(()) => Err(format!("{error}; the source service was restarted")),
-            Err(restart_error) => Err(format!(
-                "{error}; the source service could not be restarted: {restart_error}"
-            )),
-        };
+        return Err(match lifecycle.start_old() {
+            Ok(()) => format!("{error}; the source service was restarted"),
+            Err(restart_error) => {
+                format!("{error}; the source service could not be restarted: {restart_error}")
+            }
+        }
+        .into());
     }
     write_journal(plan, Step::Stopped, None)?;
     let snapshot = match lifecycle.backup(&plan.source.state) {
         Ok(snapshot) => snapshot,
-        Err(error) => return rollback(plan, lifecycle, error, None),
+        Err(error) => return rollback(plan, lifecycle, error, None).map_err(Into::into),
     };
     write_journal(plan, Step::BackedUp, Some(&snapshot))?;
     if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
-        return rollback(plan, lifecycle, error, None);
+        return rollback(plan, lifecycle, error, None).map_err(Into::into);
     }
     if plan.source.config.exists() {
         if let Err(error) = move_to(&plan.source.config, &plan.adopted_dir().join("config.json")) {
-            return rollback(plan, lifecycle, error, None);
+            return rollback(plan, lifecycle, error, None).map_err(Into::into);
         }
     }
     if plan.source.env_file.exists() {
@@ -361,7 +418,7 @@ pub fn adopt(
             &plan.source.env_file,
             &plan.adopted_dir().join("service.env"),
         ) {
-            return rollback(plan, lifecycle, error, None);
+            return rollback(plan, lifecycle, error, None).map_err(Into::into);
         }
         if !names.is_empty() {
             log::info!("adoption skipped source .env keys: {}", names.join(", "));
@@ -369,17 +426,17 @@ pub fn adopt(
     }
     write_journal(plan, Step::MetadataMoved, Some(&snapshot))?;
     if let Err(error) = write_service(plan) {
-        return rollback(plan, lifecycle, error, None);
+        return rollback(plan, lifecycle, error, None).map_err(Into::into);
     }
     write_journal(plan, Step::ServiceWritten, Some(&snapshot))?;
     if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.port, &plan.app_dir) {
-        return rollback(plan, lifecycle, error, Some(&snapshot));
+        return rollback(plan, lifecycle, error, Some(&snapshot)).map_err(Into::into);
     }
     if let Err(error) = write_journal(plan, Step::NewStarted, Some(&snapshot)) {
-        return rollback(plan, lifecycle, error, Some(&snapshot));
+        return rollback(plan, lifecycle, error, Some(&snapshot)).map_err(Into::into);
     }
     if let Err(error) = write_journal(plan, Step::Registered, Some(&snapshot)) {
-        return rollback(plan, lifecycle, error, Some(&snapshot));
+        return rollback(plan, lifecycle, error, Some(&snapshot)).map_err(Into::into);
     }
     Ok(())
 }
@@ -707,6 +764,7 @@ mod tests {
         let cancelled = uncancelled();
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("restored"));
         assert_eq!(
             fake.events,
@@ -732,6 +790,7 @@ mod tests {
         let cancelled = uncancelled();
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("not restarted"));
         assert_eq!(
             fake.events,
@@ -816,6 +875,7 @@ mod tests {
         let cancelled = uncancelled();
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("restarted"));
         assert_eq!(
             fake.events,
@@ -830,6 +890,7 @@ mod tests {
         let cancelled = uncancelled();
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("restored"));
         assert_eq!(
             fake.events,
@@ -940,6 +1001,7 @@ mod tests {
         let cancelled = uncancelled();
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("restored"));
         assert_eq!(
             fs::read_to_string(plan.source.state.join("counts.txt")).unwrap(),
@@ -973,8 +1035,9 @@ mod tests {
             fake.ready_asked,
             vec![BTreeSet::from(["OPENAI_API_KEY".to_string()])]
         );
-        assert_eq!(error, "OPENAI_API_KEY is not stored in CORSIA.");
-        assert!(!error.contains("never-log-this"));
+        assert_eq!(error.message(), "OPENAI_API_KEY is not stored in CORSIA.");
+        assert!(error.nothing_changed);
+        assert!(!error.message().contains("never-log-this"));
         assert!(fake.events.is_empty());
     }
 
@@ -1044,6 +1107,7 @@ mod tests {
         ]);
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("changed"));
         assert_eq!(fake.events, ["begin_drain", "drain_status", "cancel_drain"]);
     }
@@ -1055,8 +1119,52 @@ mod tests {
         let cancelled = AtomicBool::new(true);
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("cancelled"));
         assert_eq!(fake.events, ["begin_drain", "cancel_drain"]);
+    }
+
+    #[test]
+    fn only_a_failure_before_the_stop_reports_that_nothing_changed() {
+        // Before the old service is stopped: a refused preflight, a refused
+        // readiness check, and a cancelled wait all left it untouched.
+        let (_newer_home, newer) = plan(false);
+        let mut database = fs::read(newer.source.state.join("corsia.db")).unwrap();
+        database[60..64].copy_from_slice(&2u32.to_be_bytes());
+        fs::write(newer.source.state.join("corsia.db"), database).unwrap();
+        let refused = adopt(&newer, &mut fake(None), 1, &uncancelled()).unwrap_err();
+        assert!(refused.nothing_changed);
+
+        let (_ready_home, ready) = plan(false);
+        let refused = adopt(&ready, &mut fake(Some("check_ready")), 1, &uncancelled()).unwrap_err();
+        assert!(refused.nothing_changed);
+
+        let cancelled = adopt(&ready, &mut fake(None), 1, &AtomicBool::new(true)).unwrap_err();
+        assert!(cancelled.nothing_changed);
+
+        // After the stop: whatever failed, the old install was stopped and then
+        // brought back, so the window says "running again".
+        for step in ["bootout_old", "backup", "start_new"] {
+            let (_failing_home, failing_plan) = plan(false);
+            let mut failing = fake(Some(step));
+            failing.real_state = true;
+            let error = adopt(&failing_plan, &mut failing, 1, &uncancelled()).unwrap_err();
+            assert!(!error.nothing_changed, "{step} failed after the stop");
+        }
+    }
+
+    #[test]
+    fn the_failure_reaches_the_window_as_a_flag_not_as_text_to_match() {
+        let json = serde_json::to_value(AdoptionError::before_stop("x")).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "message": "x", "nothingChanged": true })
+        );
+        let json = serde_json::to_value(AdoptionError::from("y".to_string())).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "message": "y", "nothingChanged": false })
+        );
     }
 
     #[test]
@@ -1069,6 +1177,7 @@ mod tests {
         let cancelled = uncancelled();
         assert!(adopt(&plan, &mut fake, 1, &cancelled)
             .unwrap_err()
+            .message()
             .contains("newer"));
         assert!(fake.events.is_empty());
     }

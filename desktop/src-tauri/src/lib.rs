@@ -710,12 +710,14 @@ fn adoption_waiting_count(service: tauri::State<'_, AppServiceState>) -> Option<
 fn adopt_existing_install(
     app: tauri::AppHandle,
     service: tauri::State<'_, AppServiceState>,
-) -> Result<ServiceStartup, String> {
-    let home = app.path().home_dir().map_err(|error| format!("could not resolve the home folder: {error}"))?;
-    let app_dir = default_app_dir(&app)?;
-    let first_run = first_run::plan(&home, &app_dir)?;
+) -> Result<ServiceStartup, adoption::AdoptionError> {
+    // Nothing has been stopped until the plan below is running.
+    let before_stop = adoption::AdoptionError::before_stop;
+    let home = app.path().home_dir().map_err(|error| before_stop(format!("could not resolve the home folder: {error}")))?;
+    let app_dir = default_app_dir(&app).map_err(before_stop)?;
+    let first_run = first_run::plan(&home, &app_dir).map_err(before_stop)?;
     let first_run::FirstRun::Adoptable { source } = first_run else {
-        return Err("there is no source install ready to adopt".into());
+        return Err(before_stop("there is no source install ready to adopt".to_string()));
     };
     let port = source.port;
     let plan = adoption::Plan { source: source.clone(), app_dir: app_dir.clone() };

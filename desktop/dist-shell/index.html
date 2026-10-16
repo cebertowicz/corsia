@@ -204,7 +204,8 @@
 				backingUpTitle: 'Backing up your data…',
 
 				failureTitle: 'CORSIA couldn’t switch over',
-				failureLine: (reason) => `Your existing CORSIA is running again, as it was. ${reason}`,
+				// Before the old service is stopped nothing has changed, so "running again" would be false.
+				failureLine: (reason, nothingChanged) => `${nothingChanged ? 'Nothing was changed. Your existing CORSIA is still running.' : 'Your existing CORSIA is running again, as it was.'} ${reason}`,
 			};
 			let quitFailure = false;
 			let adoptionPrompt = false;
@@ -241,12 +242,15 @@
 				retry.focus();
 			}
 
-			async function showAdoptionFailure(reason) {
+			// `failure` is the backend's { message, nothingChanged }; a plain string means it had stopped.
+			async function showAdoptionFailure(failure) {
+				const reason = typeof failure === 'string' ? failure : failure?.message;
+				const nothingChanged = typeof failure === 'object' && failure?.nothingChanged === true;
 				quitFailure = false;
 				adoptionPrompt = false;
 				backgroundApproval.hidden = true;
 				status.textContent = ADOPTION_COPY.failureTitle;
-				line.textContent = ADOPTION_COPY.failureLine(typeof reason === 'string' ? reason : 'CORSIA couldn’t switch over.');
+				line.textContent = ADOPTION_COPY.failureLine(typeof reason === 'string' ? reason : 'CORSIA couldn’t switch over.', nothingChanged);
 				line.hidden = false;
 				log.hidden = false;
 				spinner.hidden = true;
