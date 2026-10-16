@@ -31,7 +31,7 @@ SETUP_TITLES = [
     "Connect web search",
     "Set up GitHub",
     "Remote access",
-    "Set up your first agent or project",
+    "Set up your first project",
 ]
 SERVER = {"source": "claude-desktop", "app": "Claude Desktop", "servers": [{"name": "a", "kind": "stdio"}]}
 
