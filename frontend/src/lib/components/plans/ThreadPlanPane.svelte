@@ -252,6 +252,12 @@
 					<span class="decision-open">{decisionBusy ? 'Loading…' : 'Open'}</span>
 				</button>
 			{/each}
+			{#if decisionCount > activeDecisionItems.length}
+				<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
+					<b>{decisionCount - activeDecisionItems.length}</b> {decisionCount - activeDecisionItems.length === 1 ? 'more decision' : 'more decisions'}
+					<span>{decisionBusy ? 'Loading…' : 'Open'}</span>
+				</button>
+			{/if}
 		{:else if decisionCount > 0}
 			<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
 				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}

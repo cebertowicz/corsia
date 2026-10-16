@@ -11,13 +11,13 @@
 </script>
 
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
 
 	/**
 	 * The one row-actions menu: a short list of verbs opened at a point (a
-	 * right-click, a long-press, or a row's trailing ⋯). A row owns its verbs
+	 * right-click, Shift+F10, or a long-press). A row owns its verbs
 	 * and what they do; this owns placement, focus, keys and the touch floor.
 	 */
 	let {
@@ -25,7 +25,6 @@
 		items,
 		x,
 		y,
-		origin = 'top left',
 		busy = false,
 		note = null,
 		error = null,
@@ -36,8 +35,6 @@
 		items: MenuItem[];
 		x: number;
 		y: number;
-		/** The corner that touches the anchor: `top right` under a trailing ⋯, `top left` at a pointer. */
-		origin?: 'top left' | 'top right';
 		/** An action is in flight: every item waits. */
 		busy?: boolean;
 		/** One quiet line under the items, such as a side effect of an action. */
@@ -51,8 +48,6 @@
 	const ITEM_H = 44;
 
 	let menuEl = $state<HTMLElement | undefined>(undefined);
-	// Read once: the closing motion runs after the opener has let go of its menu state.
-	const growFrom = untrack(() => origin);
 
 	// The note and error lines add height the item count cannot see, so the clamp uses the
 	// rendered height once there is one and the item estimate only before first layout.
@@ -108,8 +103,8 @@
 	style={`left: ${left}px; top: ${top}px;`}
 	onkeydown={onKeydown}
 	use:portal
-	in:menuPop|global={{ origin: growFrom }}
-	out:menuPop|global={{ origin: growFrom }}
+	in:menuPop|global={{ origin: 'top left' }}
+	out:menuPop|global={{ origin: 'top left' }}
 >
 	{#each items as item (item.id)}
 		<button

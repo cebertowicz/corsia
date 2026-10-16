@@ -136,7 +136,6 @@
 		items={menuItems}
 		x={menu.open.x}
 		y={menu.open.y}
-		origin={menu.open.origin}
 		busy={pending}
 		onSelect={select}
 		onClose={menu.close}

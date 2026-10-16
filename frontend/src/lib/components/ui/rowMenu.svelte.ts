@@ -7,15 +7,13 @@ export interface OpenRowMenu<T> {
 	item: T;
 	x: number;
 	y: number;
-	/** The menu corner that touches its anchor, so it grows out of the ⋯ or the pointer. */
-	origin: 'top left' | 'top right';
 	/** What had focus, so closing returns it there. */
 	trigger: HTMLElement | null;
 }
 
 /**
- * Opens a row's `ui/Menu` every way a row offers it: its trailing ⋯ button,
- * right-click, Shift+F10 or the context-menu key on a focused row, and a touch
+ * Opens a row's `ui/Menu` by right-click, Shift+F10 or the context-menu key on
+ * a focused row, and a touch
  * long-press whose following tap is swallowed so it does not also activate the
  * row. A row the user has nothing to do on leaves the browser's own menu alone.
  */
@@ -25,8 +23,8 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 	let pressFrom: { x: number; y: number } | null = null;
 	let swallowTap = false;
 
-	function show(item: T, x: number, y: number, trigger: HTMLElement | null, origin: OpenRowMenu<T>['origin'] = 'top left') {
-		open = { item, x, y, origin, trigger };
+	function show(item: T, x: number, y: number, trigger: HTMLElement | null) {
+		open = { item, x, y, trigger };
 	}
 
 	function cancelPress() {

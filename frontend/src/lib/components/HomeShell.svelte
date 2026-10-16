@@ -103,6 +103,7 @@
 
 	const easeOutQuint = cubicOut;
 	let mainEl = $state<HTMLElement | undefined>(undefined);
+	let artifactHeaderInset = $state<number | null>(null);
 	const mainDrawer = createMainDrawerController({
 		getMainEl: () => mainEl,
 		getSidebarOpen: () => sidebarOpen,
@@ -258,6 +259,7 @@
 		class="main"
 		class:open={sidebarOpen}
 		class:pane-open={paneVisible}
+		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
 		bind:this={mainEl}
 		use:toastAnchorSurface
 		ontransitionstart={mainDrawer.onTransitionStart}
@@ -303,6 +305,7 @@
 				onOpenLightbox={onOpenLightbox}
 				onAutoCreateThread={onAutoCreateThread}
 				onOpenDocuments={(documentId) => onDocuments('all', documentId)}
+				onArtifactHeaderInset={(width) => (artifactHeaderInset = width)}
 			/>
 		{:else if activeView === 'settings'}
 			<SettingsView onClose={onCloseSettings} {systemStatus} />
