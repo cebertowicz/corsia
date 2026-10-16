@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 //! macOS DNS-SD discovery for CORSIA hosts.
 //!
 //! This deliberately uses the operating system's DNS-SD API rather than raw
