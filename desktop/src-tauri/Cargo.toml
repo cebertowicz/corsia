@@ -49,6 +49,7 @@ hkdf = "0.12"
 hmac = "0.12"
 
 [dev-dependencies]
+tauri = { version = "2.10.3", features = ["macos-private-api", "test"] }
 base64 = "0.22"
 rand_chacha = "0.3"
 tempfile = "3"
