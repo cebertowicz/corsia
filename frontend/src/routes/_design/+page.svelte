@@ -59,7 +59,7 @@
 			levels: []
 		}
 	];
-	// Attention-card demos are retired; the rollup demo below remains a pull-only reference.
+
 	const demoOpenContextSource = () => {};
 	const demoContextUsage: ContextUsage = {
 		model_context_window: 128000,

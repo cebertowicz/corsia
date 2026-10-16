@@ -20,7 +20,6 @@
 		onBrowseDocuments?: (threadId: string) => void;
 	} = $props();
 
-
 	let data = $state<PaneData | null>(null);
 	let loaded = $state(false);
 	let fetchError = $state(false);
@@ -235,7 +234,6 @@
 			<button type="button" class="inline-retry" disabled={retryingLoad} onclick={retryLoad}>Retry</button>
 		</div>
 	{/if}
-
 
 	{#if data.needs_attention.length}
 		<div class="lane-cap needs-attention">Needs attention</div>

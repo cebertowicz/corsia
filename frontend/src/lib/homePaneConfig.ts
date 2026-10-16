@@ -25,7 +25,6 @@ const CHAT_SECTIONS: Section[] = [
 	{ title: 'Artifacts', kind: 'artifacts' },
 ];
 
-
 /**
  * The right pane's content for the current view, or null when the view has no pane.
  * Only workspace-scope Activity lists Projects; other non-chat views and the settings

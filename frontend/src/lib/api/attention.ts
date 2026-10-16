@@ -1,8 +1,4 @@
-/**
- * Attention API client.
- *
- * The remaining frontend attention surface is the pull-only parent rollup.
- */
+/** Attention API client types and parent roll-up request. */
 
 export interface AttentionItem {
 	external_id: string;
