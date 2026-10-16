@@ -7,12 +7,14 @@
 // is always fresh. Failure-tolerant: missing git → placeholder, never throws.
 
 import { execSync } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = dirname(__dirname);
+const PACKAGE = JSON.parse(readFileSync(join(FRONTEND, 'package.json'), 'utf8'));
+const SHELL_PROTOCOL = 1;
 
 function git(args) {
 	return execSync(`git ${args}`, {
@@ -63,6 +65,10 @@ function capture() {
 		commit_subject: commitSubject,
 		dirty,
 		build_iso: buildIso,
+		app: {
+			version: PACKAGE.version,
+			shell_protocol: SHELL_PROTOCOL,
+		},
 	};
 }
 

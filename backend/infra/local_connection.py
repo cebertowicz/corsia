@@ -22,7 +22,14 @@ def is_forwarded(connection: HTTPConnection) -> bool:
 
 
 def is_direct_loopback(connection: HTTPConnection) -> bool:
-    """True only for a loopback peer whose request was not forwarded."""
+    """True only for a main-listener loopback peer that was not forwarded.
+
+    The devices listener tags its own ASGI scope internally.  That structural
+    marker prevents a loopback forward into the LAN TLS listener from earning
+    local-only privileges; headers and request parameters cannot set it.
+    """
+    if connection.scope.get("corsia_listener") == "devices":
+        return False
     if is_forwarded(connection) or connection.client is None:
         return False
     try:

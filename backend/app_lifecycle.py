@@ -155,6 +155,9 @@ async def lifespan(app: FastAPI):
         startup_tasks[3] = asyncio.create_task(_startup_harness_discovery())
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
+        from core.devices_runtime import runtime as devices_runtime
+        from infra.settings import get_devices_enabled
+        await devices_runtime.restore(app, await run_in_db(get_devices_enabled))
         await start_documents()
         from llm.local_setup import resume_pending_setup
         await resume_pending_setup()
@@ -320,25 +323,25 @@ async def _shutdown_runtime_services(
     from loguru import logger as _log_shutdown
 
     pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
+    from app_shutdown_runtime import shutdown_devices
 
+    devices_failure, pending_cancel = await shutdown_devices(
+        _log_shutdown, pending_cancel, _run_cleanup_owner,
+    )
     host_access_failure, host_access_cancel = await _shutdown_host_access(
         _log_shutdown,
     )
     pending_cancel = pending_cancel or host_access_cancel
-
     checkpoint_failure, checkpoint_cancel = await _shutdown_checkpoints(
         _log_shutdown,
     )
     pending_cancel = pending_cancel or checkpoint_cancel
-
     (rollup_failure, refresh_failure), refresh_cancel = await shutdown_refresh_owners(
         _log_shutdown, _run_cleanup_owner,
     )
     pending_cancel = pending_cancel or refresh_cancel
-
     native_cancel = await shutdown_native_turns(_log_shutdown)
     pending_cancel = pending_cancel or native_cancel
-
     harness_failure, harness_cancel = await _shutdown_harnesses(_log_shutdown)
     pending_cancel = pending_cancel or harness_cancel
 
@@ -382,7 +385,7 @@ async def _shutdown_runtime_services(
         (
             checkpoint_failure, checkpoint_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
-            process_failure, host_access_failure, mcp_failure, handoff_failure,
+            process_failure, host_access_failure, devices_failure, mcp_failure, handoff_failure,
         ),
         process_failure=process_failure,
         pending_cancel=pending_cancel,
