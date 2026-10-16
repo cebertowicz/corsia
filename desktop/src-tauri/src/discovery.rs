@@ -8,6 +8,7 @@
 use std::fmt;
 
 const SERVICE_TYPE: &[u8] = b"_corsia._tcp\0";
+const LOCAL_DOMAIN: &[u8] = b"local.\0";
 
 /// A DNS-SD operation could not complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +36,7 @@ impl std::error::Error for DiscoveryError {}
 
 #[cfg(target_os = "macos")]
 mod system {
-    use super::{DiscoveryError, SERVICE_TYPE};
+    use super::{DiscoveryError, LOCAL_DOMAIN, SERVICE_TYPE};
     use std::{
         collections::BTreeSet,
         ffi::{CStr, CString},
@@ -290,7 +291,7 @@ mod system {
         } else {
             CStr::from_ptr(hosttarget)
                 .to_str()
-                .map(|host| (host.trim_end_matches('.').to_owned(), u16::from_be(port)))
+                .map(|host| (host.to_owned(), u16::from_be(port)))
                 .map_err(|_| DiscoveryError::NoAddress)
         };
         let context = &*(context as *const ResolveContext);
@@ -309,7 +310,7 @@ mod system {
                 0,
                 instance.as_ptr(),
                 SERVICE_TYPE.as_ptr().cast(),
-                ptr::null(),
+                LOCAL_DOMAIN.as_ptr().cast(),
                 Some(resolve_callback),
                 context.cast(),
             )
@@ -496,8 +497,11 @@ mod system {
         fn resolve_real_mdns_from_disposable_host() {
             let instance = std::env::var("CORSIA_MDNS_INSTANCE")
                 .expect("set CORSIA_MDNS_INSTANCE to the disposable host announcement");
-            let (host, port) = resolve_blocking(&instance, Duration::from_secs(5)).unwrap();
-            assert!(!host.is_empty());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let instance = CString::new(instance).unwrap();
+            let (hostname, port) = resolve_service(&instance, deadline).unwrap();
+            let host = resolve_address(&hostname, deadline).unwrap();
+            assert!(!host.is_unspecified());
             assert_ne!(port, 0);
         }
     }
