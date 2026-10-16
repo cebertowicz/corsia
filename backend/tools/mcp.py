@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import re
 import shlex
 import tempfile
 from contextlib import AsyncExitStack
@@ -20,6 +21,18 @@ from tools.mcp_config import (
 )
 from tools.registry import ToolRegistry, _is_reserved_execution_param
 
+
+_MCP_DENIED_PATH = re.compile(
+    r'''(?ix)
+    (?:operation\s+not\s+permitted|eperm)
+    [^'"\r\n]*?
+    (?P<quote>['"])(?P<path>/[^'"\r\n]+)(?P=quote)
+    ''',
+)
+
+
+def _mcp_denied_paths_in(text: str) -> tuple[Path, ...]:
+    return tuple(dict.fromkeys(Path(match.group("path")) for match in _MCP_DENIED_PATH.finditer(text)))
 
 class MCPToolWrapper(Tool):
     """Wrap one upstream tool without leaking backend identity or credentials."""
@@ -157,12 +170,13 @@ def _write_no_proctitle_shim(cache_dir: Path) -> Path:
     shim_path.write_text(_NO_PROCTITLE_SHIM, encoding="utf-8")
     return shim_path
 
-
 def _mcp_denial_guidance(text: str) -> str | None:
     """Clarify only path-aware denials imposed by the MCP private-state profile."""
-    from tools.host_path_policy import denial_guidance_for_output
+    from tools.host_path_policy import current_protected_host_path_policy
 
-    guidance = denial_guidance_for_output(text)
+    guidance = current_protected_host_path_policy().denial_guidance_for_paths(
+        _mcp_denied_paths_in(text),
+    )
     if not guidance:
         return None
     path, separator, message = guidance.partition(" — ")

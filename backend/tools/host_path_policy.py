@@ -248,10 +248,11 @@ class ProtectedHostPathPolicy:
         policy already words both outcomes, so reuse those exact messages
         rather than restating them.
         """
-        for path in denied_paths_in(text):
-            message = self.ordinary_denial(path, for_write=False)
-            if message is None:
-                message = self.denial(path, for_write=True)
+        return self.denial_guidance_for_paths(denied_paths_in(text))
+    def denial_guidance_for_paths(self, paths: Iterable[Path]) -> str | None:
+        """Name the first denied protected path from an already-parsed path list."""
+        for path in paths:
+            message = self.ordinary_denial(path, for_write=False) or self.denial(path, for_write=True)
             if message:
                 return f"{path} — {message}"
         return None
@@ -379,6 +380,7 @@ def path_review_classification(
 def denial_guidance_for_output(text: str) -> str | None:
     """Explain a sandbox refusal found in ``text`` against the live policy."""
     return current_protected_host_path_policy().denial_guidance_for_output(text)
+
 
 
 def denial_guidance_prefix(text: str) -> str:

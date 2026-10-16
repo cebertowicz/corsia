@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -56,38 +57,54 @@ async def test_mcp_wrapper_never_forwards_backend_execution_context():
 
 
 @pytest.mark.asyncio
-async def test_mcp_wrapper_preserves_successful_operation_not_permitted_text(monkeypatch):
-    def unexpected_guidance(_text: str):
+@pytest.mark.parametrize("output", [
+    "[Errno 1] Operation not permitted: '/private/state/corsia.db'",
+    "EPERM: operation not permitted, open '/private/state/corsia.db'",
+])
+async def test_mcp_wrapper_preserves_successful_operation_not_permitted_text(monkeypatch, output):
+    def unexpected_guidance(_paths):
         pytest.fail("successful MCP output must not be classified as a denial")
 
-    monkeypatch.setattr("tools.host_path_policy.denial_guidance_for_output", unexpected_guidance)
-    output = "Issue body: Operation not permitted can be expected here"
+    monkeypatch.setattr(
+        "tools.host_path_policy.current_protected_host_path_policy",
+        lambda: SimpleNamespace(denial_guidance_for_paths=unexpected_guidance),
+    )
 
     assert await _wrapper_for_output(output, is_error=False).execute() == output
 
 
 @pytest.mark.asyncio
-async def test_mcp_wrapper_preserves_nonprivate_eperm_error_text(monkeypatch):
+@pytest.mark.parametrize("output", [
+    "[Errno 1] Operation not permitted: '/ordinary/report.txt'",
+    '{"error": "EPERM: operation not permitted, open \'/ordinary/report.txt\'"}',
+])
+async def test_mcp_wrapper_preserves_nonprivate_eperm_error_text(monkeypatch, output):
+    seen_paths = []
+
+    def no_guidance(paths):
+        seen_paths.extend(paths)
+        return None
+
     monkeypatch.setattr(
-        "tools.host_path_policy.denial_guidance_for_output",
-        lambda _text: (
-            "/Users/example/Desktop/report — SSH private material is blocked in protected mode. "
-            "No host-access lease can open it."
-        ),
+        "tools.host_path_policy.current_protected_host_path_policy",
+        lambda: SimpleNamespace(denial_guidance_for_paths=no_guidance),
     )
-    output = "/Users/example/Desktop/report: Operation not permitted"
 
     assert await _wrapper_for_output(output, is_error=True).execute() == f"Error: {output}"
+    assert seen_paths == [Path("/ordinary/report.txt")]
 
 
 @pytest.mark.asyncio
 async def test_mcp_wrapper_rewrites_private_path_denial(monkeypatch):
     monkeypatch.setattr(
-        "tools.host_path_policy.denial_guidance_for_output",
-        lambda _text: "/state/corsia.db — requires reviewed host access",
+        "tools.host_path_policy.current_protected_host_path_policy",
+        lambda: SimpleNamespace(
+            denial_guidance_for_paths=lambda _paths: "/state/corsia.db — requires reviewed host access",
+        ),
     )
 
-    assert await _wrapper_for_output("/state/corsia.db: Operation not permitted", is_error=True).execute() == (
+    output = '{"error": "[Errno 1] Operation not permitted: \'/state/corsia.db\'"}'
+    assert await _wrapper_for_output(output, is_error=True).execute() == (
         "Error: /state/corsia.db — CORSIA private state is blocked for local MCP apps. "
         "Nothing was returned. Use the app's own working directory or a supported "
         "non-private integration."

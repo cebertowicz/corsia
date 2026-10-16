@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import stat
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -132,8 +133,10 @@ def test_mcp_safehouse_bare_operation_not_permitted_preserves_oserror_text():
 
 def test_mcp_safehouse_path_denial_names_private_state_recovery(monkeypatch):
     monkeypatch.setattr(
-        "tools.host_path_policy.denial_guidance_for_output",
-        lambda _text: "/state/keys/value — requires reviewed host access",
+        "tools.host_path_policy.current_protected_host_path_policy",
+        lambda: SimpleNamespace(
+            denial_guidance_for_paths=lambda _paths: "/state/keys/value — requires reviewed host access",
+        ),
     )
 
     assert _mcp_denial_guidance("denied") == (
@@ -141,6 +144,28 @@ def test_mcp_safehouse_path_denial_names_private_state_recovery(monkeypatch):
         "Nothing was returned. Use the app's own working directory or a supported "
         "non-private integration."
     )
+
+
+@pytest.mark.parametrize("template", [
+    "[Errno 1] Operation not permitted: '{path}'",
+    "EPERM: operation not permitted, open '{path}'",
+])
+@pytest.mark.parametrize("embedded", [False, True])
+def test_mcp_safehouse_native_error_paths_are_guided_only_when_private(
+    monkeypatch, tmp_path, template, embedded,
+):
+    _workspace, state = _configure_roots(monkeypatch, tmp_path)
+    private_path = state / "corsia.db"
+    non_private_path = tmp_path / "ordinary.txt"
+
+    def render(path: Path) -> str:
+        error = template.format(path=path)
+        return json.dumps({"error": error}) if embedded else error
+
+    private_guidance = _mcp_denial_guidance(render(private_path))
+    assert private_guidance is not None
+    assert "CORSIA private state is blocked for local MCP apps" in private_guidance
+    assert _mcp_denial_guidance(render(non_private_path)) is None
 
 
 @pytest.mark.asyncio
