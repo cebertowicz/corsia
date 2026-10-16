@@ -3,7 +3,9 @@
 The sign-in is the app's, so every agent the app reaches uses the same grant. The
 access token is read from the key store into this object and goes out only as
 an ``Authorization`` header on requests to the server's own origin (never after a
-redirect: the clients here follow none). One refresh at a time per app runs under
+redirect: the clients here follow none), and only while the app's address keeps
+the origin the grant was issued for: after the address moves, the server gets no
+grant and reads ``needs_sign_in`` until the person signs in there. One refresh at a time per app runs under
 the app's grant lock and is written as a single key-store transaction, so two
 refreshes never overwrite a rotated refresh token. A rejected refresh, or a
 rotated pair that cannot be written, ends the app's sign-in and moves the server
@@ -39,6 +41,7 @@ class OAuthGrantAuth(httpx.Auth):
 
     def __init__(self, app_id: str, server_url: str) -> None:
         self._app_id = app_id
+        self._server_url = server_url
         self._origin = protocol.origin_of(server_url)
         self._grant: store.Grant | None = None
         self._loaded = False
@@ -46,9 +49,14 @@ class OAuthGrantAuth(httpx.Auth):
         #: Set when the server demanded a sign-in this object cannot satisfy; read by the connector.
         self.challenged = False
 
+    async def _load(self) -> store.Grant | None:
+        """The app's grant when it was issued for this server's origin; None otherwise."""
+        grant = await run_in_db(store.load, self._app_id)
+        return grant if grant is not None and grant.issued_for(self._server_url) else None
+
     async def _current(self) -> store.Grant | None:
         if not self._loaded:
-            self._grant = await run_in_db(store.load, self._app_id)
+            self._grant = await self._load()
             self._loaded = True
         return self._grant
 
@@ -81,7 +89,7 @@ class OAuthGrantAuth(httpx.Auth):
     async def _refresh(self, grant: store.Grant, *, force: bool = False) -> store.Grant | None:
         """Refresh once for everyone waiting; None when the sign-in is over."""
         async with store.grant_lock(grant.app_id):
-            stored = await run_in_db(store.load, grant.app_id)
+            stored = await self._load()
             if stored is None:
                 self._grant = None
                 return None

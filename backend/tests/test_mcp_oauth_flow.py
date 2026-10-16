@@ -177,6 +177,34 @@ async def test_the_same_client_and_account_signing_in_again_does_not_revoke_the_
     assert "sign_in_replaced_not_revoked:same_client_and_account" in env.audit()
 
 
+@pytest.mark.parametrize("unknown", ["new", "both"])
+async def test_an_unknown_account_is_never_taken_as_the_same_one(env, unknown):  # Governance 1
+    if unknown == "both":
+        env.fake.account = None
+    await browse(env.fake.consent((await env.start())["authorization_url"]))
+    env.fake.account = None
+    await browse(env.fake.consent((await env.start(other=True))["authorization_url"]))
+    assert store.load(env.app_id).account is None and env.fake.revoked == []
+    assert "sign_in_replaced_not_revoked:same_client_account_unknown" in env.audit()
+    assert "sign_in_replaced_not_revoked:same_client_and_account" not in env.audit()
+
+
+async def test_the_revoke_authenticates_a_confidential_client_and_names_the_refresh_token(env):  # RFC 7009
+    first, _ = await signed_in_twice(env, account="second@example.test")
+    assert first.client_secret == DCR_SECRET
+    assert env.fake.revoke_forms == [{
+        "token": first.refresh_token, "token_type_hint": "refresh_token", "client_id": "dcr-client-1", "client_secret": DCR_SECRET,
+    }]
+
+
+async def test_a_grant_without_a_refresh_token_is_revoked_as_an_access_token(env):  # RFC 7009
+    await browse(env.fake.consent((await env.start())["authorization_url"]))
+    grant = store.load(env.app_id)
+    grant.refresh_token, grant.client_secret = None, None
+    assert await flow.tell_provider(grant) is None
+    assert env.fake.revoke_forms == [{"token": grant.access_token, "token_type_hint": "access_token", "client_id": "dcr-client-1"}]
+
+
 @pytest.mark.parametrize("ending", ["cancel", "expire", "decline", "fail"])
 async def test_a_sign_in_that_does_not_complete_leaves_the_existing_grant_working(env, monkeypatch, ending):  # Governance 1
     await browse(env.fake.consent((await env.start())["authorization_url"]))
@@ -364,6 +392,22 @@ async def test_declining_at_the_provider_reads_declined(env):  # C-R3
     link = (await env.start())["authorization_url"]
     assert (await browse(env.fake.consent(link, deny=True))).status_code == 200
     assert flow.status(env.app_id)["failure_class"] == "declined" and "sign_in_failed:declined" in env.audit()
+
+
+@pytest.mark.parametrize("then", ["sign_in", "sign_out"])
+async def test_a_failure_another_try_would_not_fix_is_cleared_by_sign_in_or_sign_out(env, then):  # no dead end
+    import tools.mcp_oauth_signout as signout
+
+    link = (await env.start())["authorization_url"]
+    await browse(env.fake.consent(link, deny=True).replace("error=access_denied", "error=invalid_scope"))
+    assert flow.status(env.app_id) == {"status": "failed", "failure_class": "permissions", "at": flow.status(env.app_id)["at"]}
+    if then == "sign_in":
+        await env.start()
+        assert flow.status(env.app_id)["status"] == "pending"
+        await flow.cancel(env.app_id, actor=("person", env.user_id))
+    else:
+        await signout.sign_out(env.app_id, actor=("person", env.user_id))
+    assert flow.status(env.app_id) == {"status": "idle"}
 
 
 async def test_a_malformed_token_response_stores_nothing_and_leaks_nothing(env, sinks):  # C-R9

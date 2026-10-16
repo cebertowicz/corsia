@@ -9,11 +9,7 @@ half-written pair. Only a person's completed sign-in creates or replaces the
 entry (:func:`replace`); a refresh can only rewrite one that exists
 (:func:`rotate`). Every writer holds :func:`grant_lock`. Entries have no label, so
 Settings > Keys never lists them; they end with the app (:func:`end`). Errors
-carry fixed text and never a value.
-
-Entries written while a sign-in was kept per (app, person) are found by their
-content: :func:`load` adopts the app's only one, and drops them all when there
-were several, so the app reads as signed out instead of as an arbitrary person.
+carry fixed text and never a value. Reading a grant never writes.
 """
 
 from __future__ import annotations
@@ -30,6 +26,7 @@ from dataclasses import asdict, dataclass, field, fields
 from infra import key_store
 from infra.database import get_db
 from infra.key_store_mcp import OAUTH_PREFIX, OAUTH_VALUE_MAX, is_oauth_entry_name
+from tools.mcp_oauth_protocol import origin_of
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
 
 _SLUG = 10
@@ -66,6 +63,11 @@ class Grant:
     def secrets(self) -> tuple[str | None, ...]:
         return (self.access_token, self.refresh_token, self.client_secret, self.registration_access_token)
 
+    def issued_for(self, url: str) -> bool:
+        """Whether this grant was issued for ``url``'s origin. It is never sent, refreshed or shown for another."""
+        origin = origin_of(url)
+        return origin_of(self.server_url) == origin and (not self.resource or origin_of(self.resource) == origin)
+
 
 def grant_lock(app_id: str) -> asyncio.Lock:
     """The one lock every writer of ``app_id``'s grant holds, so a rotated refresh token is never overwritten."""
@@ -92,8 +94,6 @@ def _encode(grant: Grant) -> str:
 def _decode(value: str) -> Grant | None:
     try:
         data = json.loads(base64.urlsafe_b64decode(value.encode()))
-        if "signed_in_by" not in data and "user_id" in data:
-            data["signed_in_by"] = data["user_id"]  # written while a sign-in was kept per (app, person)
         names = {item.name for item in fields(Grant)}
         return Grant(**{key: data[key] for key in data if key in names})
     except (ValueError, TypeError, KeyError):
@@ -117,45 +117,10 @@ def _read(name: str, conn: sqlite3.Connection) -> Grant | None:
     return _decode(value) if value else None
 
 
-def _per_person_entries(app_id: str, conn: sqlite3.Connection) -> dict[str, Grant]:
-    """``app_id``'s entries from when a sign-in was kept per (app, person); a slug can be shared, so by content."""
-    own = entry_name(app_id)
-    names = [
-        row["name"]
-        for row in conn.execute("SELECT name FROM key_store_entries WHERE name LIKE ?", (f"{OAUTH_PREFIX}{_slug(app_id)}-%",))
-        if row["name"] != own and is_oauth_entry_name(row["name"])
-    ]
-    found = {name: _decode(value) for name, value in key_store.resolve_names(names, db=conn).items()} if names else {}
-    return {name: grant for name, grant in found.items() if grant is not None and grant.app_id == app_id}
-
-
-def _settle_per_person(app_id: str, conn: sqlite3.Connection) -> Grant | None:
-    """Adopt the app's only per-person entry as its grant; with several, drop them all and read signed out."""
-    entries = _per_person_entries(app_id, conn)
-    if not entries:
-        return None
-    from connections.app_lifecycle_support import record_sign_in_event
-
-    adopted = next(iter(entries.values())) if len(entries) == 1 else None
-    if adopted is not None:
-        _write(adopted, conn, "the sign-in could not be kept")
-    for name in entries:
-        key_store.drop_managed_entry(name, db=conn)
-    if adopted is None:
-        for grant in entries.values():
-            mcp_oauth_secrets.register(*grant.secrets())
-        record_sign_in_event(
-            app_id, f"sign_in_dropped:per_person_grants={len(entries)}", actor=("system", "sign_in_store"), db=conn,
-        )
-    return adopted
-
-
 def load(app_id: str, *, db: sqlite3.Connection | None = None) -> Grant | None:
     """The app's sign-in, or None when it has none."""
     conn = db if db is not None else get_db()
     grant = _read(entry_name(app_id), conn)
-    if grant is None:
-        grant = _settle_per_person(app_id, conn)
     if grant is not None:
         _hold(grant)
     return grant
@@ -181,7 +146,7 @@ def rotate(grant: Grant, *, db: sqlite3.Connection | None = None) -> None:
 def end(app_id: str, *, db: sqlite3.Connection | None = None) -> Grant | None:
     """Delete the app's sign-in. Returns the grant it ended, for revoking at the provider afterwards."""
     conn = db if db is not None else get_db()
-    grant = load(app_id, db=conn)  # settles per-person entries first, so none outlives this
+    grant = load(app_id, db=conn)
     key_store.drop_managed_entry(entry_name(app_id), db=conn)
     mcp_oauth_secrets.release(app_id)
     return grant
@@ -197,11 +162,8 @@ def register_stored(*, db: sqlite3.Connection | None = None) -> int:
     count = 0
     for name, value in key_store.resolve_names(names, db=conn).items():
         grant = _decode(value)
-        if grant is None:
+        if grant is None or name != entry_name(grant.app_id):
             continue
-        if name == entry_name(grant.app_id):
-            _hold(grant)
-        else:
-            mcp_oauth_secrets.register(*grant.secrets())
+        _hold(grant)
         count += 1
     return count

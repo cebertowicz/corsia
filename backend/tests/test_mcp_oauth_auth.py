@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
-import json
 import time
-from dataclasses import asdict
 
 import httpx
 import pytest
 
 from auth_fixtures import OWNER_USER
-from infra import key_store
 from infra.database import get_db
 from oauth_fake_as import ACCESS, BASE, DCR_SECRET, MCP_URL, REFRESH
 from oauth_fixtures import browse, env, sinks  # noqa: F401
@@ -50,6 +45,29 @@ async def test_the_stored_token_is_attached_to_the_servers_own_requests(env):  #
     response = await call(env, OAuthGrantAuth(env.app_id, MCP_URL))
     assert response.status_code == 200 and env.fake.refresh_requests == []
     assert grant.access_token in env.fake.valid_access
+
+
+@pytest.mark.parametrize("change", ["replace_config", "approved_proposal"])
+async def test_a_grant_never_goes_to_an_address_it_was_not_issued_for(env, change):  # C-R4
+    from api.connected_app_signin_rows import sign_in_view
+    from connections.app_lifecycle import approve_proposal, get_app, propose_config, replace_config
+    from connections.app_reach import runtime_app_config
+
+    moved = "http://localhost:7999/mcp"  # the same fake server under another origin
+    await signed_in(env, expired=True)
+    revision = get_app(env.app_id, db=get_db())["revision"]
+    if change == "replace_config":
+        replace_config(env.app_id, {"url": moved}, expected_revision=revision, db=get_db())
+    else:
+        propose_config(env.app_id, {"url": moved}, actor_thread_id="thread-a", expected_revision=revision, db=get_db())
+        approve_proposal(env.app_id, audit_actor=PERSON, db=get_db())
+    _, config = runtime_app_config(env.app_id, db=get_db())
+    auth = OAuthGrantAuth(env.app_id, config["url"])
+    response = await call(env, auth, moved)
+    assert config["url"] == moved and response.status_code == 401 and auth.challenged is True  # reads needs_sign_in
+    assert env.fake.mcp_hosts_with_auth == [] and env.fake.refresh_requests == []
+    assert sign_in_view(config, env.app_id, person=True, db=get_db())["signed_in"] is False
+    assert store.load(env.app_id) is not None  # kept until the person signs in there, which replaces and revokes it
 
 
 async def test_a_server_that_challenges_without_a_sign_in_reads_needs_sign_in(env):  # C-R1
@@ -219,48 +237,11 @@ async def test_an_ended_sign_in_stops_being_held_but_stays_redacted(env):  # fin
     assert mcp_oauth_secrets.redact(grant.access_token) == mcp_oauth_secrets.MARK
 
 
-def legacy_entry(grant: store.Grant, person: str, **changes) -> str:
-    """Write ``grant`` the way it was kept per (app, person), before a sign-in belonged to the app."""
-    data = {**asdict(grant), **changes, "user_id": person}
-    del data["signed_in_by"]
-    digest = hashlib.sha256(f"oauth\0{grant.app_id}\0{person}".encode()).hexdigest()[:10]
-    name = f"mcp-oauth-{store._slug(grant.app_id)}-{digest}"
-    key_store.set_managed_value(name, base64.urlsafe_b64encode(json.dumps(data).encode()).decode())
-    return name
-
-
-def oauth_entries() -> list[str]:
-    return [row["name"] for row in get_db().execute("SELECT name FROM key_store_entries WHERE name LIKE 'mcp-oauth-%'")]
-
-
-async def test_a_single_per_person_sign_in_becomes_the_apps(env):  # legacy migration (finding 2)
-    grant = await signed_in(env)
-    store.end(env.app_id)
-    legacy_entry(grant, env.user_id)
-    adopted = store.load(env.app_id)
-    assert adopted.access_token == grant.access_token and adopted.signed_in_by == env.user_id
-    assert oauth_entries() == [store.entry_name(env.app_id)]
-    assert (await call(env, OAuthGrantAuth(env.app_id, MCP_URL))).status_code == 200
-
-
-async def test_several_per_person_sign_ins_are_dropped_and_the_app_reads_signed_out(env):  # legacy migration (finding 2)
-    grant = await signed_in(env)
-    store.end(env.app_id)
-    legacy_entry(grant, env.user_id)
-    legacy_entry(grant, "someone-else", access_token="another-persons-access-token")
-    assert store.load(env.app_id) is None and oauth_entries() == []
-    assert "sign_in_dropped:per_person_grants=2" in env.audit()
-    assert mcp_oauth_secrets.redact("another-persons-access-token") == mcp_oauth_secrets.MARK
-    response = await call(env, OAuthGrantAuth(env.app_id, MCP_URL))
-    assert response.status_code == 401  # the row offers Sign in, never a sign-in it cannot end
-
-
-async def test_sign_out_ends_a_per_person_sign_in_and_leaves_none(env):  # legacy migration, C-R6
-    grant = await signed_in(env)
-    store.end(env.app_id)
-    legacy_entry(grant, env.user_id)
-    result = await signout.sign_out(env.app_id, actor=PERSON)
-    assert result["had_sign_in"] is True and env.fake.revoked == [grant.refresh_token] and oauth_entries() == []
+async def test_reading_a_sign_in_writes_nothing(env):  # a GET reads only
+    await signed_in(env)
+    before = get_db().total_changes
+    assert store.load(env.app_id) is not None and store.load("an-app-never-signed-in") is None
+    assert get_db().total_changes == before
 
 
 async def test_a_refresh_waits_for_the_apps_one_lock(env):  # Governance 4 (C-R5)

@@ -156,9 +156,12 @@ def provider_origin(url: str) -> str:
 
 async def tell_provider(grant: store.Grant) -> str | None:
     """Revoke an ended grant at its provider (RFC 7009). None once told, else ``protocol.revoke``'s reason."""
-    token = grant.refresh_token or grant.access_token
+    token, hint = (grant.refresh_token, "refresh_token") if grant.refresh_token else (grant.access_token, "access_token")
     async with protocol.new_client(timeout=protocol.REVOKE_TIMEOUT) as http:
-        return await protocol.revoke(http, grant.revocation_endpoint, token=token, client_id=grant.client_id)
+        return await protocol.revoke(
+            http, grant.revocation_endpoint, token=token, token_type_hint=hint, client_id=grant.client_id,
+            client_secret=grant.client_secret,
+        )
 
 
 def revoke_outcome(event: str, grant: store.Grant, failure: str | None) -> str:
@@ -169,8 +172,9 @@ def revoke_outcome(event: str, grant: store.Grant, failure: str | None) -> str:
 async def start(
     app_id: str, app_name: str, config: dict, *, user_id: str, session_hash: str, metadata_url: str,
 ) -> dict[str, object]:
-    """Begin this session's sign-in, or reopen its own pending one (C-R8a). Returns the consent link and expiry."""
+    """Begin this session's sign-in, or reopen its own pending one (C-R8a); either clears the last failure."""
     async with _lock:
+        _results.pop(app_id, None)
         existing = _flows.get(app_id)
         if existing is not None and existing.expires_at > time.time() and _started_by(existing, user_id, session_hash):
             return {"authorization_url": existing.authorization_url, "expires_at": _iso(existing.expires_at), "reopened": True}
@@ -186,7 +190,6 @@ async def start(
             await audit(app_id, "sign_in_superseded", ("person", user_id))
         flow = await _open_flow(app_id, app_name, server_url, user_id, session_hash, pasted, host, port, path, metadata_url)
         _flows[app_id] = flow
-        _results.pop(app_id, None)
         flow.timer = asyncio.create_task(_expire(flow))
     await audit(app_id, "sign_in_started", ("person", user_id))
     return {"authorization_url": flow.authorization_url, "expires_at": _iso(flow.expires_at), "reopened": False}
@@ -260,7 +263,8 @@ async def _end(flow: Flow, failure: SignInError | None) -> None:
 
 
 async def cancel(app_id: str, *, actor: Actor) -> bool:
-    """End a pending sign-in: a person's Cancel, a sign-out or Remove, or shutdown. False when none was pending."""
+    """End a pending sign-in and forget the last failure: Cancel, sign-out, Remove or shutdown. False if none pending."""
+    _results.pop(app_id, None)
     flow = _flows.get(app_id)
     if flow is None or not await _close(flow):
         return False
@@ -359,9 +363,12 @@ def _keep(grant: store.Grant) -> store.Grant | None:
 async def _retire(old: store.Grant, new: store.Grant) -> None:
     """Revoke the grant a completed sign-in replaced; its tokens are already gone from the store."""
     actor = ("person", new.signed_in_by)
-    if old.client_id == new.client_id and old.account == new.account:
-        # Providers may revoke per client and account, which would end the new sign-in too.
-        await audit(new.app_id, "sign_in_replaced_not_revoked:same_client_and_account", actor)
+    unknown = old.account is None or new.account is None
+    if old.client_id == new.client_id and (unknown or old.account == new.account):
+        # Providers may revoke per client and account, which would end the new sign-in too. An unknown account is
+        # never taken as the same one: the old grant is still kept unrevoked, but audited apart.
+        same = "account_unknown" if unknown else "and_account"
+        await audit(new.app_id, f"sign_in_replaced_not_revoked:same_client_{same}", actor)
         return
     await audit(new.app_id, revoke_outcome("sign_in_replaced", old, await tell_provider(old)), actor)
 

@@ -10,6 +10,8 @@ def sign_in_view(config: object, app_id: str, *, person: bool, db) -> dict[str, 
     import tools.mcp_oauth_store as store
 
     grant = store.load(app_id, db=db)
+    if grant is not None and not grant.issued_for(config["url"]):
+        grant = None  # issued for an address the app no longer has: it reads as needing a sign-in
     view: dict[str, object] = {**flow.status(app_id), "signed_in": grant is not None}
     if person and grant is not None and grant.account:
         view["account"] = grant.account

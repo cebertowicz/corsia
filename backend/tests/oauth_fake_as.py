@@ -36,6 +36,7 @@ class FakeAS:
         self.token_requests: list[dict] = []
         self.refresh_requests: list[dict] = []
         self.revoked: list[str] = []
+        self.revoke_forms: list[dict[str, str]] = []  # every field of each revocation request
         self.refresh_mode = "ok"      # ok | rejected | malformed | down
         self.token_mode = "ok"        # ok | malformed
         self.revoke_mode = "ok"       # ok | fail | hang
@@ -44,6 +45,7 @@ class FakeAS:
         self.current_access = ""
         self.valid_access: set[str] = set()
         self.mcp_calls = 0
+        self.mcp_hosts_with_auth: list[str] = []  # the Host of every MCP request that carried an Authorization header
         self.app = Starlette(routes=[
             Route("/.well-known/oauth-protected-resource{rest:path}", self._resource),
             Route("/.well-known/oauth-authorization-server", self._metadata),
@@ -88,6 +90,8 @@ class FakeAS:
     async def _mcp(self, request: Request):
         self.mcp_calls += 1
         auth = request.headers.get("authorization", "")
+        if auth:
+            self.mcp_hosts_with_auth.append(request.headers.get("host", ""))
         if auth.removeprefix("Bearer ") in self.valid_access:
             return JSONResponse({"jsonrpc": "2.0", "id": 1, "result": {}})
         return PlainTextResponse("", 401, headers={"www-authenticate": f'Bearer resource_metadata="{BASE}/.well-known/oauth-protected-resource/mcp"'})
@@ -95,6 +99,7 @@ class FakeAS:
     async def _revoke(self, request: Request):
         form = parse_qs((await request.body()).decode())
         self.revoked.append(form.get("token", [""])[0])
+        self.revoke_forms.append({key: values[0] for key, values in form.items()})
         if self.revoke_mode == "fail":
             return PlainTextResponse("", 500)
         if self.revoke_mode == "hang":

@@ -346,18 +346,22 @@ async def refresh_tokens(
         raise RefreshUnavailable from None
 
 
-async def revoke(client: httpx.AsyncClient, endpoint: str | None, *, token: str, client_id: str) -> str | None:
+async def revoke(
+    client: httpx.AsyncClient, endpoint: str | None, *, token: str, token_type_hint: str, client_id: str,
+    client_secret: str | None = None,
+) -> str | None:
     """Tell the provider to forget a token (RFC 7009). None once it answered success, else a fixed reason.
 
-    The reason is ``not_supported`` (no revocation endpoint), ``unreachable`` or ``refused``; never its body.
+    ``token_type_hint`` names the token sent. A confidential client authenticates the way it does at the token
+    endpoint. The reason is ``not_supported`` (no revocation endpoint), ``unreachable`` or ``refused``; never its body.
     """
     if not endpoint:
         return "not_supported"
+    form = {"token": token, "client_id": client_id, "token_type_hint": token_type_hint}
+    if client_secret:
+        form.update(client_secret=client_secret)
     try:
-        response, _body = await _send(
-            client, "POST", check_url(endpoint),
-            data={"token": token, "client_id": client_id, "token_type_hint": "refresh_token"}, timeout=REVOKE_TIMEOUT,
-        )
+        response, _body = await _send(client, "POST", check_url(endpoint), data=form, timeout=REVOKE_TIMEOUT)
     except (httpx.HTTPError, SignInError):
         return "unreachable"
     return None if response.status_code == 200 else "refused"
