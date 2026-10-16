@@ -25,7 +25,6 @@ def direct_safehouse_argv(
         f"--workdir={canonical_cwd}",
         "--trust-workdir-config=false",
         "--allow-workdir-config-writes",
-        "--enable=docker,agent-browser",
         f"--append-profile={canonical_profile}",
         f"--env-pass={','.join(sorted(env_pass_names))}",
         "--",

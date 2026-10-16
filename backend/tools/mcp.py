@@ -82,9 +82,11 @@ class MCPToolWrapper(Tool):
         parts = [block.text if isinstance(block, types.TextContent) else str(block)
                  for block in result.content]
         output = self._redact("\n".join(parts) or "(no output)")
+        if not getattr(result, "isError", False):
+            return output
         if guidance := _mcp_denial_guidance(output):
             return f"Error: {guidance}"
-        return f"Error: {output}" if getattr(result, "isError", False) else output
+        return f"Error: {output}"
 
     async def _authorized_user(self):
         if self._allowed_user_ids is None:
@@ -157,28 +159,35 @@ def _write_no_proctitle_shim(cache_dir: Path) -> Path:
 
 
 def _mcp_denial_guidance(text: str) -> str | None:
-    """Turn a Safehouse denial into the existing path-aware refusal where possible."""
+    """Clarify only path-aware denials imposed by the MCP private-state profile."""
     from tools.host_path_policy import denial_guidance_for_output
 
-    if guidance := denial_guidance_for_output(text):
-        path, separator, message = guidance.partition(" — ")
-        if separator and "requires reviewed host access" in message:
-            return (
-                f"{path} — CORSIA private state is blocked for local MCP apps. Nothing was returned. "
-                "Use the app's own working directory or a supported non-private integration."
-            )
-        return guidance
-    if "Operation not permitted" in text:
+    guidance = denial_guidance_for_output(text)
+    if not guidance:
+        return None
+    path, separator, message = guidance.partition(" — ")
+    if not separator:
+        return None
+    if "requires reviewed host access" in message:
         return (
-            "CORSIA private state is blocked for local MCP apps. Nothing was returned. "
+            f"{path} — CORSIA private state is blocked for local MCP apps. Nothing was returned. "
             "Use the app's own working directory or a supported non-private integration."
         )
+    if (
+        "CORSIA and Safehouse private state is blocked" in message
+        or "Stored secrets are closed" in message
+    ):
+        return guidance
     return None
 
 
 def _mcp_setup_refusal(detail: str) -> str:
     return f"local MCP app confinement setup failed: {detail}. Nothing ran."
 
+
+def _mcp_oserror_detail(error: OSError) -> str:
+    """Preserve non-private launch errors while clarifying private-state denials."""
+    return _mcp_denial_guidance(str(error)) or str(error)
 
 
 def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: dict[str, str]):
@@ -254,7 +263,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         try:
             read, write = await stack.enter_async_context(stdio_client(params))
         except OSError as error:
-            raise MCPConfigError(_mcp_denial_guidance(str(error)) or _mcp_setup_refusal(type(error).__name__)) from None
+            raise MCPConfigError(_mcp_oserror_detail(error)) from None
     elif config.get("url"):
         from mcp.client.streamable_http import streamable_http_client
 
