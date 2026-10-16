@@ -5,7 +5,7 @@ the later entry describes the current behavior.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, and steadier plans
 
-Released 2026-10-15.
+Released 2026-10-16.
 
 ### Upgrading
 
@@ -28,6 +28,7 @@ Released 2026-10-15.
 - Returning to a document tab no longer lets an older restore disturb the tab you switched to, and open tabs return directly to their saved place without a loading flash.
 - Mobile document comments stay clear of save status and selection controls; save feedback stays quiet for fast saves and appears when needed; review headers remain compact on phones with an ask open.
 - Markdown links refresh when their source finishes parsing.
+- A document carries one open review request at a time, and a review request on a sub-step counts once in your chat list.
 
 ### Agents and Plans
 
@@ -49,16 +50,19 @@ Released 2026-10-15.
 ### First Run and Setup
 
 - First-run setup guides you through local setup and connecting your first account, and asks before importing detected MCP servers.
+- Setup is shorter when an AI is already installed and signed in: it skips Connect an AI. Otherwise Claude Code or Codex installs after a one-line confirm and signs in without leaving setup. The Welcome intro and the app mark are new.
+- Setup lets you choose your work folder before you create your account.
+- When a local model download is already running, first run shows its progress instead of offering it again, and an interrupted download resumes after a restart.
+- Setup shows clear background-download progress and a smoother step indicator.
 - The supported setup for 16 GB Macs is now documented.
 
-<!-- cut4: verify -->
-### Packaged Mac App and Setup
+### Packaged Mac App
 
-- The macOS desktop app ships as a self-contained local CORSIA service, including its frontend, backend, Python runtime, and local AI dependencies. On a fresh Mac, opening it creates the local workspace and starts CORSIA without prior configuration.
+- The macOS desktop app ships as a self-contained local CORSIA service, including its frontend, backend, Python runtime, and local AI dependencies. On a fresh Mac, opening it creates the local workspace and starts CORSIA without prior configuration; an existing install is left untouched, with the reason shown.
 - The app includes its own Git, asks before reusing an existing local AI runtime, and keeps optional background downloads from delaying Start using CORSIA while showing progress and recovery if they fail.
-- Closing the CORSIA window keeps its packaged background service running, with recovery if macOS disables it. CORSIA can securely download and verify a newer desktop update before it is ready to install.
-- Setup shows clear background-download progress and a smoother step indicator.
-<!-- /cut4: verify -->
+- Closing the CORSIA window keeps its background service running, with recovery if macOS disables it.
+- The app updates itself. It downloads and verifies a newer version, and Update installs it in place and relaunches onto it. If the new version does not start healthy, the app restores the previous version and says so. Your data lives outside the app, so an update never touches it.
+- Settings › Restart works in the packaged app.
 
 ## v0.3.0 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
 
