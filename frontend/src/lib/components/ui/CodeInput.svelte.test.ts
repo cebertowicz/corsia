@@ -2,9 +2,6 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CodeInput from './CodeInput.svelte';
 
-// Several waits here ride real timers (a one-second poll, a 200 ms hold); a loaded machine must not fail them.
-const waitFor = <T,>(fn: () => T | Promise<T>, options: { timeout?: number } = {}) => vi.waitFor(fn, { timeout: 4000, ...options });
-
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 const state = $state({ value: '', refocus: 0 });
@@ -15,8 +12,8 @@ function show(props: Record<string, unknown> = {}) {
 	component = mount(CodeInput, { target: host, props: { label: 'Code', onsubmit: props.onsubmit ?? vi.fn(), ...props } });
 	flushSync();
 }
-beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); });
-afterEach(() => { if (component) void unmount(component); component = null; host.remove(); });
+beforeEach(() => { vi.useFakeTimers(); host = document.createElement('div'); document.body.appendChild(host); });
+afterEach(() => { if (component) void unmount(component); component = null; host.remove(); vi.useRealTimers(); });
 
 describe('CodeInput', () => {
 	it('has four boxes, each named by its place', () => {
@@ -48,7 +45,9 @@ describe('CodeInput', () => {
 	});
 	it('takes focus in the first box when it shows', async () => {
 		show({ focusAt: 0 });
-		await waitFor(() => expect(document.activeElement).toBe(boxes()[0]));
+		// The box takes focus on a zero-delay timer, after the shell's own move to the heading.
+		await vi.advanceTimersByTimeAsync(0);
+		expect(document.activeElement).toBe(boxes()[0]);
 	});
 	it('a disabled input accepts nothing', () => {
 		show({ disabled: true });
