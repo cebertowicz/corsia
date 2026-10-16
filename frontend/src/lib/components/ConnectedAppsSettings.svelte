@@ -9,6 +9,7 @@
 	import { anyFirstSignIn, needsSignInAttention, SIGN_IN_LEDE, signInStateLine } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
+	import ConnectAppFlow from './ConnectAppFlow.svelte';
 
 	let apps = $state<ConnectedApp[]>([]);
 	let loading = $state(true);
@@ -16,6 +17,7 @@
 	let actionId = $state<string | null>(null);
 	let actionError = $state('');
 	let whereApp = $state<ConnectedApp | null>(null);
+	let connectAppOpen = $state(false);
 	let openId = $state<string | null>(null);
 	let signInHere = $state(false);
 	let signedOut = $state<Set<string>>(new Set());
@@ -84,13 +86,13 @@
 </script>
 
 <section class="connected-apps" data-settings-anchor="connected-apps" id="connected-apps">
-	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div></div>
+	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div><Button variant="primary" onclick={() => connectAppOpen = true}>Connect an app</Button></div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
 		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Try again</Button></div>
 	{:else if apps.length === 0}
-		<p class="state">No connected apps yet. Ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor or Codex, for example: “Bring over my apps from Claude.”</p>
+		<p class="state">No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor or Codex, for example: “Bring over my apps from Claude.”</p>
 	{:else}
 		<div class="rows">
 			{#each apps as app (app.id)}
@@ -123,9 +125,11 @@
 </section>
 
 {#if whereApp}<WhereItWorks app={whereApp} onClose={() => whereApp = null} onSaved={(app) => { replace(app); whereApp = null; }} />{/if}
+{#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { apps = [...apps, app]; }} />{/if}
 
 <style>
 	.connected-apps { max-width: 760px; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }
+	.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 	.heading h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
 	.heading p { margin: var(--space-2) 0 0; color: var(--text-secondary); line-height: 1.5; }
 	.rows { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
@@ -138,5 +142,5 @@
 	.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.state { margin: var(--space-5) 0; display: grid; gap: var(--space-3); }
-	@media (max-width: 768px) { .connected-apps { margin-top: var(--space-5); } }
+	@media (max-width: 768px) { .connected-apps { margin-top: var(--space-5); } .heading { align-items: stretch; flex-direction: column; } .heading :global(.btn) { align-self: flex-start; } }
 </style>
