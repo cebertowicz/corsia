@@ -12,15 +12,12 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
-	import FolderRow from './FolderRow.svelte';
-
+	import SetupAccountForm from './SetupAccountForm.svelte';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
 	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
-	type FolderChoice = { state: 'ready'; path: string; protected_folder: string | null } | { state: 'unwritable'; path: string; reason: string };
-	type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 	const classifier = createSetupClassifier();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: () => refreshSources() });
 	let page = $state<Page>('checking');
@@ -32,10 +29,9 @@
 	let password = $state('');
 	let confirmation = $state('');
 	let email = $state('');
-	let folder = $state('~/CORSIA');
+	let folder = $state('~/CORSIA'), folderChanged = $state(false);
 	let folderNotice = $state<FolderNotice>(null);
 	let folderChanging = $state(false);
-	let folderChanged = $state(false);
 	let accountBusy = $state(false);
 	let accountError = $state('');
 	let confirmationError = $state('');
@@ -190,32 +186,9 @@
 		}
 	}
 
-	function tauriInvoke(): TauriInvoke | undefined {
-		return (window as Window & { __TAURI_INTERNALS__?: { invoke?: TauriInvoke } }).__TAURI_INTERNALS__?.invoke;
-	}
-
-	async function changeFolder() {
-		const invoke = tauriInvoke();
-		if (!invoke || folderChanging) return;
-		folderChanging = true;
-		try {
-			const choice = await invoke('choose_work_folder') as FolderChoice | null;
-			if (!choice) return;
-			folder = choice.path;
-			folderChanged = true;
-			folderNotice = choice.state === 'ready'
-				? (choice.protected_folder ? { kind: 'protected', folder: choice.protected_folder } : null)
-				: { kind: 'unwritable', reason: choice.reason };
-		} catch {
-			folderNotice = { kind: 'unwritable', reason: 'the folder picker could not check this folder' };
-		} finally {
-			folderChanging = false;
-		}
-	}
-
 	async function applyFolderBeforeAccount() {
 		if (!folderChanged) return;
-		const invoke = tauriInvoke();
+		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
 		if (!invoke) return;
 		await invoke('configure_work_folder', { path: folder });
 		folderChanged = false;
@@ -387,21 +360,7 @@
 		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} modelSizeGb={status.model_size_gb} {modelSize} modelLabel={downloadModelLabel}
 			wanted={localWanted} onWantedChange={(next) => localWanted = next} onRecheck={readStatus} />
 	{:else if page === 'account'}
-		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
-			<div class="group">
-				<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
-				<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
-			</div>
-			<div class="group">
-				<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
-				<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
-			</div>
-			<div class="group">
-				<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
-			</div>
-			<FolderRow {folder} notice={folderNotice} changing={folderChanging} onChange={changeFolder} />
-			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
-		</form>
+		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />
 	{:else if page === 'models' && existingOmlxConsent}
 		<div class="sources consent">
 			<p>CORSIA will read:</p>
@@ -432,8 +391,7 @@
 </SetupShell>
 
 <style>
-	.form { display: flex; flex-direction: column; gap: var(--space-3); max-width: calc(var(--space-8) * 8); }
-	.group { display: flex; flex-direction: column; gap: var(--space-2); }
+	/* Account form styles live with SetupAccountForm. */
 	.sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
 	.consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }
