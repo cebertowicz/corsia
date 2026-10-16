@@ -216,6 +216,65 @@ def test_a_cleared_round_reads_its_outcome_not_needs_review(db, outcome, expecte
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == expected
 
 
+def test_a_replaced_round_cleared_before_endings_were_recorded_still_reads_replaced(db):
+    from plans import holds
+    from registry import models
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    hold_id = _ask(db, plan_id, node_id, ask)
+    # An older person's 'replaced' clear wrote no ending to the clearance event,
+    # only its outcome to the artifact's attention metadata.
+    holds.clear_write(
+        node_id, hold_id, expected_kind="blocked", actor_id=None,
+        provenance="user.ask_cleared", db=db,
+    )
+    row = db.execute("SELECT integration,type,external_id FROM artifact_identities WHERE id=?", (ask,)).fetchone()
+    models.update_metadata(
+        row["integration"], row["type"], row["external_id"],
+        {"attention_state": "cleared", "attention_outcome": "supersede"}, db=db,
+    )
+
+    assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == "replaced"
+
+
+@pytest.mark.parametrize("outcome", ["dismiss", "acknowledge", "answer"])
+def test_a_round_the_person_answered_keeps_reading_answered_after_a_later_round_is_replaced(db, outcome):
+    """The artifact's attention metadata describes only its latest clear, never an earlier round."""
+    from registry.attention import clear_attention
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    first = _ask(db, plan_id, node_id, ask)
+    clear_attention(ask, outcome=outcome, db=db)
+    later_plan, later_node = _node(db, title="Review it again")
+    later = _ask(db, later_plan, later_node, ask)
+    clear_attention(ask, outcome="supersede", db=db)
+
+    cards = ask_cards(db, {first: ask, later: ask})
+    assert (cards[first]["state"], cards[later]["state"]) == ("answered", "replaced")
+
+
+_CARD_STATE_BY_ENDING = {
+    "withdrawn": "withdrawn", "closed": "closed", "replaced": "replaced",
+    "retired": "unavailable", "rejected": "rejected",
+    "revision_requested": "revision_requested", "answered_internally": "answered_internally",
+}
+
+
+@pytest.mark.parametrize("ended,expected", sorted(_CARD_STATE_BY_ENDING.items()))
+def test_every_ask_ending_has_one_card_state(ended, expected):
+    from registry.chat_cards import ask_state
+
+    assert ask_state({"open": False, "answer": {"ended": ended}}) == (expected, None)
+
+
+def test_the_card_states_cover_every_recorded_ending():
+    from plans.public import ASK_ENDINGS
+
+    assert set(_CARD_STATE_BY_ENDING) == ASK_ENDINGS
+
+
 def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):
     plan_id, node_id = _node(db)
     ask = document_ask(db, "owner")

@@ -142,7 +142,9 @@ def start_first_run_task(conductor_id: str, user_id: str) -> None:
         log.warning("first-run task not started for %s", conductor_id, exc_info=True)
 
 
-def enqueue_first_run_wake(conductor_id: str, *, db: sqlite3.Connection) -> bool:
+def enqueue_first_run_wake(
+    conductor_id: str, *, first_run_path: str = "script", db: sqlite3.Connection,
+) -> bool:
     """Queue the first-run wake inside the caller's transaction.
 
     Only a conductor with no messages gets it, so a restored or reused
@@ -158,7 +160,8 @@ def enqueue_first_run_wake(conductor_id: str, *, db: sqlite3.Connection) -> bool
         return False
     enqueue_event_wake(
         conductor_id, FIRST_RUN_EVENT, FIRST_RUN_SUMMARY,
-        chip=FIRST_RUN_CHIP, message_id=first_run_message_id(conductor_id), db=db,
+        chip=FIRST_RUN_CHIP, message_id=first_run_message_id(conductor_id),
+        metadata={"first_run_path": first_run_path}, db=db,
     )
     return True
 
@@ -166,13 +169,22 @@ def enqueue_first_run_wake(conductor_id: str, *, db: sqlite3.Connection) -> bool
 _HELD_WAKE = "FROM messages WHERE id=? AND thread_id=? AND delivery_state='queued' AND delivery_error=?"
 
 
-def has_held_first_run_wake(thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Whether ``thread_id`` holds its first-run wake, unread, for a first model choice."""
+def held_first_run_path(thread_id: str, *, db: sqlite3.Connection) -> str | None:
+    """The held wake's path, defaulting legacy wakes without metadata to ``script``."""
     from infra.send_target import NO_MODEL_SELECTED
+    import json
 
-    return db.execute(
-        f"SELECT 1 {_HELD_WAKE}", (first_run_message_id(thread_id), thread_id, NO_MODEL_SELECTED),
-    ).fetchone() is not None
+    row = db.execute(
+        f"SELECT metadata {_HELD_WAKE}",
+        (first_run_message_id(thread_id), thread_id, NO_MODEL_SELECTED),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        path = json.loads(row["metadata"] or "{}").get("first_run_path")
+    except (TypeError, ValueError):
+        path = None
+    return path if path in {"app", "script"} else "script"
 
 
 def fill_held_first_run_wake(thread_id: str, content: str, *, db: sqlite3.Connection) -> bool:

@@ -130,10 +130,30 @@ describe('DecisionChip — Recommended badge', () => {
 		expect(el.querySelector('dt')?.textContent).not.toBe('Recommendation');
 	});
 
-	it('shows no badge and no fallback row when no option matches the recommendation', () => {
+	it('keeps Why in the definition list when no option matches the recommendation', () => {
 		const el = renderChip(makeDecision({ recommendation: 'not-a-real-option-id' }));
 		expect(el.textContent).not.toContain('Recommended');
-		expect(el.textContent).not.toContain('None stated');
+		expect(el.querySelector('dl')?.textContent).toContain('Why');
+		expect(el.querySelector('.option-rationale')).toBeNull();
+	});
+
+	it('attaches the reason to the recommended option with an accessible description', () => {
+		const el = renderChip(makeDecision({ recommendation: 'b' }));
+		const bBtn = Array.from(el.querySelectorAll('.option-button')).find((button) => button.textContent?.includes('Option B'))!;
+		const rationale = bBtn.querySelector('.option-rationale');
+		expect(rationale?.textContent).toContain('Why');
+		expect(rationale?.textContent).toContain('A is safer given the current evidence.');
+		expect(bBtn.getAttribute('aria-describedby')).toContain(rationale?.id);
+		expect(el.querySelector('dl')?.textContent).not.toContain('Why');
+	});
+
+	it('attaches the reason once to the first recommended pick-any option', () => {
+		const el = renderChip(makeDecision({
+			pick: 'any',
+			recommendation: ['a', 'b'],
+		}));
+		expect(el.querySelectorAll('.option-rationale')).toHaveLength(1);
+		expect(el.querySelector('.option-row .option-rationale')?.parentElement?.textContent).toContain('Option A');
 	});
 });
 

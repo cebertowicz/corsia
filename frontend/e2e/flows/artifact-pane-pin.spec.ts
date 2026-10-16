@@ -55,13 +55,14 @@ test.describe('@flow:artifact-pin @surface:chat artifact pane pinning', () => {
 		await expect(names).toHaveText([churn, keeper]);
 
 		const keeperRow = page.locator('.row-outer').filter({ hasText: keeper });
-		await keeperRow.hover();
-		await keeperRow.getByRole('button', { name: 'Pin to pane' }).click();
+		await keeperRow.click({ button: 'right' });
+		await page.getByRole('menuitem', { name: 'Pin to pane' }).click();
 
 		// Pinned rows lead the pane regardless of recency.
 		await expect(names).toHaveText([keeper, churn]);
 		const pinnedRow = page.locator('.row-outer').filter({ hasText: keeper });
-		await expect(pinnedRow.getByRole('button', { name: 'Unpin from pane' })).toBeVisible();
+		// One pin mark on the row; Unpin lives in its menu.
+		await expect(pinnedRow.locator('.pin-mark')).toHaveCount(1);
 		await expect(pinnedRow.locator('.pin-mark')).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'artifact-pane-pinned', { fullPage: false });
 
@@ -79,8 +80,8 @@ test.describe('@flow:artifact-pin @surface:chat artifact pane pinning', () => {
 		// Unpinning drops the priority tier, but the toggle itself updates the
 		// registration, so the row just acted on leads the recency tier.
 		const stillPinned = page.locator('.row-outer').filter({ hasText: keeper });
-		await stillPinned.hover();
-		await stillPinned.getByRole('button', { name: 'Unpin from pane' }).click();
+		await stillPinned.click({ button: 'right' });
+		await page.getByRole('menuitem', { name: 'Unpin from pane' }).click();
 		await expect(names).toHaveText([keeper, churn]);
 		await expect(page.locator('.row-outer .pin-mark')).toHaveCount(0);
 	});

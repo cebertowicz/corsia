@@ -28,6 +28,41 @@ async def test_all_script_wrappers_refused_before_any_invocation(synthetic_brows
     assert fake.owner.live_count() == 0
 
 
+def _chrome_folders(tmp_path, monkeypatch, *, system: bool, user: bool, executable: bool = True):
+    folders = (tmp_path / 'Applications', tmp_path / 'home' / 'Applications')
+    for folder, present in zip(folders, (system, user)):
+        if present:
+            binary = folder / 'Google Chrome.app/Contents/MacOS/Google Chrome'
+            binary.parent.mkdir(parents=True)
+            binary.write_text('stub')
+            binary.chmod(0o755 if executable else 0o644)
+    monkeypatch.setattr(cli, '_application_dirs', lambda: folders)
+    monkeypatch.delenv('AGENT_BROWSER_EXECUTABLE_PATH', raising=False)
+    return [str(folder / 'Google Chrome.app/Contents/MacOS/Google Chrome') for folder in folders]
+
+
+def test_chrome_executable_prefers_the_environment(tmp_path, monkeypatch):
+    _chrome_folders(tmp_path, monkeypatch, system=True, user=True)
+    monkeypatch.setenv('AGENT_BROWSER_EXECUTABLE_PATH', '/opt/chrome')
+    assert cli.chrome_executable() == ('/opt/chrome', 'env')
+
+
+def test_chrome_executable_uses_system_chrome_before_the_user_copy(tmp_path, monkeypatch):
+    system, _user = _chrome_folders(tmp_path, monkeypatch, system=True, user=True)
+    assert cli.chrome_executable() == (system, 'system')
+
+
+def test_chrome_executable_falls_back_to_the_user_applications_copy(tmp_path, monkeypatch):
+    _system, user = _chrome_folders(tmp_path, monkeypatch, system=False, user=True)
+    assert cli.chrome_executable() == (user, 'system')
+
+
+@pytest.mark.parametrize('installed', [False, True])
+def test_chrome_executable_keeps_the_agent_browser_default_without_a_runnable_chrome(tmp_path, monkeypatch, installed):
+    _chrome_folders(tmp_path, monkeypatch, system=installed, user=False, executable=False)
+    assert cli.chrome_executable() == (None, 'default')
+
+
 def test_canonical_native_and_symlink_resolve_same_identity(tmp_path):
     link = tmp_path / 'agent-browser'
     link.symlink_to(sys.executable)

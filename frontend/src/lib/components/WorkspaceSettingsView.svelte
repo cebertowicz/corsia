@@ -139,7 +139,7 @@
 </div>
 
 <style>
-	.ws-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: calc(var(--header-height, 60px) + env(safe-area-inset-top, 0px)); }
+	.ws-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: var(--header-bottom); }
 	.ws { width: 100%; max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 40px; text-align: left; }
 	h2 { font-size: var(--text-title2); margin: 0; color: var(--text-primary); }
 	.sec { border: 1px solid var(--border-subtle); border-radius: var(--lg-card-radius); background: var(--bg-secondary); padding: 16px 18px; display: flex; flex-direction: column; gap: 11px; }

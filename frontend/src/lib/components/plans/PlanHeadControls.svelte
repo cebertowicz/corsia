@@ -71,6 +71,9 @@
 
 <style>
 	.plan-head-controls { display: inline-flex; min-width: 0; align-items: center; gap: var(--space-1); }
+	/* Pause reads as the plan's other trailing actions (Open, Show 3): caption, tertiary, primary on hover. */
+	.plan-head-controls :global(.btn.ghost) { padding: 0 2px 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-regular, 400); }
+	@media (hover: hover) { .plan-head-controls :global(.btn.ghost:hover:not(:disabled)) { color: var(--text-primary); } }
 	.progress { color: var(--text-tertiary); font-size: var(--text-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.progress.oversize { text-decoration: underline dotted; cursor: help; }
 	.lifecycle-error {

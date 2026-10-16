@@ -69,7 +69,7 @@ export function foldedNode(item: FoldedItem, depth: number, parentId: string | n
 		description: null, waiting_on: [], acceptance_criteria: '', state: item.state,
 		unmet_dependencies: [], held_by: null, assignee: null,
 		revision: 0, requirements_revision: 0, commitment_id: '',
-		updated_at: item.folded_at, last_transition_at: item.folded_at, folded: true, requires_user_action: false,
+		updated_at: item.folded_at, last_transition_at: item.folded_at, folded: true, container: false, requires_user_action: false,
 		executor: { thread_id: '', label: '' },
 		execution: {
 			condition: 'terminal', primary_reason: null, causes: [], selection: null, conflict: null,

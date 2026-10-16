@@ -88,15 +88,20 @@ def p3_problem(text: str, entry_text: str, user_names: list[str]) -> str | None:
     """
     if shares_run(text, entry_text):
         return f"it repeats {_RUN_WORDS} or more words of the lesson in a row"
-    words = {_bare(word) for word in _WORD.findall(text)}
-    lowered = {word.lower() for word in words}
-    named = {
-        part for name in user_names for part in _tokens(name)
-        if len(part) >= 3 and part in lowered
-    } | (_named_people(entry_text) & words)
+    named = names_in(text, entry_text, user_names)
     if named:
         return f"it names {', '.join(sorted(named))}"
     return None
+
+
+def names_in(text: str, entry_text: str, user_names: list[str]) -> set[str]:
+    """The person-name words ``text`` carries, by the rule ``p3_problem`` applies."""
+    words = {_bare(word) for word in _WORD.findall(text)}
+    lowered = {word.lower() for word in words}
+    return {
+        part for name in user_names for part in _tokens(name)
+        if len(part) >= 3 and part in lowered
+    } | (_named_people(entry_text) & words)
 
 
 _WORD = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z]+)*")

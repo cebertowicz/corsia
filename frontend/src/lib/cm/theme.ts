@@ -27,7 +27,7 @@ export const docTheme = EditorView.theme({
 	'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
 		backgroundColor: 'var(--accent-subtle)'
 	},
-	'.cm-selectionMatch': { backgroundColor: 'var(--accent-bg)' },
+	'.cm-selectionMatch': { backgroundColor: 'var(--accent-wash)' },
 	'.cm-gutters': { display: 'none' },
 
 	'.cm-md-h1': { fontSize: '1.7em', fontWeight: '600', lineHeight: '1.25', letterSpacing: '-0.01em' },
@@ -40,7 +40,7 @@ export const docTheme = EditorView.theme({
 	'.cm-md-quote': {
 		color: 'var(--text-secondary)',
 		fontStyle: 'italic',
-		borderLeft: '3px solid var(--violet-line)',
+		borderLeft: '3px solid var(--accent-line)',
 		paddingLeft: '14px'
 	},
 	'.cm-md-code': {
@@ -58,14 +58,14 @@ export const docTheme = EditorView.theme({
 		borderRadius: 'var(--radius-xs)',
 		padding: '0.05em 0.35em'
 	},
-	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--violet-line)' },
+	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--accent-line)' },
 	'.cm-md-link-open': { transition: 'text-decoration-color 150ms' },
 	'@media (hover: hover) and (pointer: fine)': { '.cm-md-link-open': { cursor: 'pointer' }, '.cm-md-link-open:hover': { textDecorationColor: 'var(--accent)' } },
-	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-bg)' } },
+	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' } },
 	'.cm-md-bullet': { color: 'var(--text-tertiary)' },
 	'.cm-md-task-control': { display: 'inline-flex', width: '28px', height: '28px', margin: '-3px 4px -3px 0', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' },
 	'.cm-md-task-checkbox': { width: '18px', height: '18px', margin: '0', accentColor: 'var(--accent)', cursor: 'pointer' },
-	'.cm-md-task-control:hover .cm-md-task-checkbox': { outline: '2px solid var(--accent-bg)', outlineOffset: '2px' },
+	'.cm-md-task-control:hover .cm-md-task-checkbox': { outline: '2px solid var(--accent-wash)', outlineOffset: '2px' },
 	'.cm-md-task-checkbox:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
 	'.cm-md-task-checkbox:disabled': { cursor: 'default', opacity: '0.65' },
 	'.cm-md-task-done': { textDecoration: 'line-through', color: 'var(--text-tertiary)' },

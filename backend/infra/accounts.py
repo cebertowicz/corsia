@@ -146,15 +146,18 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
 
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
-    require_first: bool, claim_data_owner: bool = False, before_commit=None,
+    require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
+    before_commit=None,
 ):
     """Insert the account (and the first one's CORSIA agent) in one transaction.
 
     ``before_commit`` runs as its last step. Returns the effects owed after
     the commit, for the caller to run once it has seen the commit succeed.
     """
+    if first_run_path not in {"app", "script"}:
+        raise AccountError("first_run_path must be 'app' or 'script'")
     now = utc_now_iso()
-    woke = False
+    woke = start_setup_task = False
     with write_transaction(db, scope="create_user") as conn:
         had_users = has_users(conn)
         if require_first and had_users:
@@ -186,8 +189,13 @@ def _create_account(
                     enqueue_first_run_wake, seed_first_run_setup_plan,
                 )
 
-                seed_first_run_setup_plan(conductor_id, name, db=conn)
-                woke = enqueue_first_run_wake(conductor_id, db=conn)
+                from onboarding.first_run_wake import app_reference_served
+
+                start_setup_task = first_run_path != "app" or not app_reference_served()
+                if start_setup_task:
+                    first_run_path = "script"  # seeded tasks mean the wake follows the script path
+                    seed_first_run_setup_plan(conductor_id, name, db=conn)
+                woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
         if before_commit is not None:
             before_commit()
 
@@ -196,7 +204,7 @@ def _create_account(
             return
         from infra import onboarding_events
 
-        if woke:
+        if woke and start_setup_task:
             onboarding_events.start_first_run_task(conductor_id, name)
         onboarding_events.emit("account_created")
         if woke:
@@ -207,7 +215,7 @@ def _create_account(
 
 def create_user(
     username: str, password: str, *, db: sqlite3.Connection | None = None,
-    first_run_wake: bool = True, require_first: bool = False,
+    first_run_wake: bool = True,
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
@@ -220,15 +228,13 @@ def create_user(
     data-owner rule.
     """
     name, encoded = _credentials(username, password)
-    _create_account(
-        name, encoded, db=db, first_run_wake=first_run_wake, require_first=require_first,
-    )()
+    _create_account(name, encoded, db=db, first_run_wake=first_run_wake)()
     return name
 
 
 def create_first_account(
     username: str, password: str, *, call_name: str | None = None, email: str = "",
-    first_run_wake: bool = True,
+    first_run_wake: bool = True, first_run_path: str = "script",
 ) -> str:
     """Create the install's first account: the one owner behind ``corsia user add`` and setup.
 
@@ -239,7 +245,6 @@ def create_first_account(
     first; an unwritable profile folder raises ``OSError`` with no account made.
     """
     from infra import config
-
     if call_name is not None and not user_profile.one_line(call_name):
         raise AccountError("name is required")
     name, encoded = _credentials(username, password)
@@ -251,7 +256,8 @@ def create_first_account(
     try:
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
-            claim_data_owner=True, before_commit=staged.publish if staged else None,
+            first_run_path=first_run_path, claim_data_owner=True,
+            before_commit=staged.publish if staged else None,
         )
     except BaseException:
         if staged:

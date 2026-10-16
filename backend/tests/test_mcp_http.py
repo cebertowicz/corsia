@@ -525,6 +525,8 @@ async def test_seven_servers_and_39_tools_in_fresh_codex_registries(
     monkeypatch.setattr(mcp_runtime, "_app_servers", {})
     monkeypatch.setattr(mcp_runtime, "_app_states", {})
     monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    # A live process agent must not keep a stopped runtime's wrappers.
+    monkeypatch.setattr(mcp_runtime.state, "_agent", CORSIAAgent(tmp_path))
     http_mcp.names = ["read_one", "read_two"]
     first = server_config(tmp_path, http_mcp, allowed_tools=["read_one"], tool_prefix="first_")
     second = server_config(tmp_path, http_mcp, allowed_tools=["read_two"], tool_prefix="second_")

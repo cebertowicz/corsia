@@ -50,5 +50,5 @@
 		stroke-linecap: round; stroke-linejoin: round;
 	}
 	.mobile-scroll-fab:hover { color: var(--text-primary); }
-	.mobile-scroll-fab:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
+	.mobile-scroll-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 </style>

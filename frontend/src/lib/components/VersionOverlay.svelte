@@ -54,7 +54,7 @@
 <style>
 	.version-overlay {
 		position: fixed;
-		top: max(4px, calc(env(safe-area-inset-top, 0px) + 2px));
+		top: max(4px, calc(var(--safe-top) + 2px));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: 11;

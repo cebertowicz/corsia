@@ -126,7 +126,11 @@ def _plan_attention_items(presented: dict) -> list[dict]:
     items = []
     work = node_states.work_ids(presented["nodes"])
     for node in presented["nodes"]:
-        if node["id"] not in work or node["folded"] or not node["requires_user_action"]:
+        # A container's need is its leaves' rollup, already counted at each leaf.
+        if (
+            node["id"] not in work or node["container"] or node["folded"]
+            or not node["requires_user_action"]
+        ):
             continue
         review = node["review"]
         if review is None:

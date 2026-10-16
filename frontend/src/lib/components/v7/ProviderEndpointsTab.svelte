@@ -61,7 +61,7 @@
 	}
 	.ep-kind.local     { color: var(--teal); border: 1px solid var(--teal-line); background: var(--teal-bg); }
 	.ep-kind.lan       { color: var(--sky); border: 1px solid var(--sky-line); background: var(--sky-bg); }
-	.ep-kind.tailscale { color: var(--violet-text, var(--violet)); border: 1px solid var(--violet-line); background: var(--violet-bg); }
+	.ep-kind.tailscale { color: var(--purple-text, var(--purple)); border: 1px solid var(--purple-line); background: var(--purple-bg); }
 	.ep-kind.public    { color: var(--text-tertiary); border: 1px solid var(--border); background: var(--bg-tertiary); }
 	.lat { color: var(--text-tertiary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; }
 

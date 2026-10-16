@@ -346,7 +346,7 @@
 	}
 
 	.token-add {
-		color: var(--accent);
+		color: var(--accent-text);
 		font-size: var(--text-caption);
 		font-weight: var(--fw-semibold);
 		padding: 4px 6px;

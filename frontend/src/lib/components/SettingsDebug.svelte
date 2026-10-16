@@ -262,7 +262,7 @@
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.btn.sm { padding: 4px 10px; font-size: var(--text-footnote); }
 	.btn.ghost { background: none; }
-	.btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+	.btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-on-fill); }
 	.btn.primary:hover { filter: brightness(1.06); }
 
 	.feature-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }

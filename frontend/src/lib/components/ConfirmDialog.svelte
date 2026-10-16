@@ -47,7 +47,7 @@
 	.body { display: flex; flex-direction: column; gap: 14px; }
 	.icon {
 		width: 40px; height: 40px; border-radius: var(--radius-sm);
-		background: var(--violet-bg); color: var(--violet-text, var(--violet));
+		background: var(--accent-wash); color: var(--accent-text, var(--accent));
 		display: flex; align-items: center; justify-content: center;
 	}
 	.icon.destructive {

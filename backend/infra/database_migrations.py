@@ -174,9 +174,11 @@ from infra.migration_114_to_115_scheduled_updates import migrate_114_to_115
 from infra.migration_115_to_116_corrections_checker_cleanup import migrate_115_to_116
 from infra.migration_116_to_117_script_schedules import migrate_116_to_117
 from infra.migration_117_to_118_corsia_agent import migrate_117_to_118
-from infra.migration_118_to_119_action_drafts import migrate_118_to_119
-from infra.migration_119_to_120_email_screens import migrate_119_to_120
-from infra.migration_120_to_121_connected_apps import migrate_120_to_121
+from infra.migration_118_to_119_lesson_placement_checks import migrate_118_to_119
+from infra.migration_119_to_120_withdraw_retired_user_asks import migrate_119_to_120
+from infra.migration_120_to_121_action_drafts import migrate_120_to_121
+from infra.migration_121_to_122_email_screens import migrate_121_to_122
+from infra.migration_122_to_123_connected_apps import migrate_122_to_123
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -782,6 +784,8 @@ MIGRATIONS[117] = migrate_117_to_118
 MIGRATIONS[118] = migrate_118_to_119
 MIGRATIONS[119] = migrate_119_to_120
 MIGRATIONS[120] = migrate_120_to_121
+MIGRATIONS[121] = migrate_121_to_122
+MIGRATIONS[122] = migrate_122_to_123
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

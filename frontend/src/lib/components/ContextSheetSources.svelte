@@ -189,7 +189,7 @@
 		color: var(--text-primary);
 	}
 	.ctx-source-group summary:focus-visible {
-		outline: 2px solid var(--violet-line);
+		outline: 2px solid var(--accent-line);
 		outline-offset: 2px;
 	}
 	.ctx-source-group summary::-webkit-details-marker { display: none; }
@@ -258,7 +258,7 @@
 		cursor: pointer;
 	}
 	.ctx-source-row.actionable:focus-visible {
-		outline: 2px solid var(--violet-line);
+		outline: 2px solid var(--accent-line);
 		outline-offset: 2px;
 	}
 	.ctx-source-main {

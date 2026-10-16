@@ -171,6 +171,29 @@ def test_agent_create_uses_server_thread_scope_and_refuses_reach(connected_apps_
     }
 
 
+@pytest.mark.parametrize("body,remedy", [
+    ({"name": "GitHub", "config": {}}, "needs the command"),
+    ({"name": "GitHub", "config": {"name": "GitHub"}}, "needs the command"),
+    ({"name": "GitHub", "config": {"command": "npx", "args": "-y pkg"}}, "args must be a list"),
+    ({"name": "GitHub", "config": {"command": "npx", "key_refs": ["github"]}}, "beside config"),
+    ({"name": "GitHub", "config": {"command": "npx"}, "key_refs": ["github"]}, "env or header names"),
+])
+def test_unrunnable_proposal_is_refused_with_the_body_shape(connected_apps_client, body, remedy) -> None:
+    client, db, _actor = connected_apps_client
+
+    refused = client.post("/api/mcp/servers", json=body)
+
+    assert refused.status_code == 422
+    assert remedy in refused.json()["detail"]
+    assert '"key_refs": [{"kind": "env"' in refused.json()["detail"]
+    assert db.execute("SELECT COUNT(*) FROM connected_apps").fetchone()[0] == 0
+    created = client.post("/api/mcp/servers", json={
+        "name": "GitHub", "config": {"command": "npx", "args": ["-y", "pkg"]},
+        "key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}],
+    })
+    assert created.status_code == 201
+
+
 @pytest.mark.parametrize("person", [False, True])
 def test_config_refuses_asked_by_thread_id_on_create_and_update(connected_apps_client, person) -> None:
     client, db, actor = connected_apps_client

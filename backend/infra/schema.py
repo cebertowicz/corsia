@@ -17,6 +17,7 @@ from infra.delivery_foundation_schema import DELIVERY_FOUNDATION_SCHEMA_SQL
 from infra.host_access_schema import HOST_ACCESS_LEASE_SCHEMA_SQL
 from infra.key_store_schema import KEY_STORE_SCHEMA_SQL
 from infra.learning_schema import LEARNING_INDEX_SQL
+from infra.lesson_placement_check_schema import LESSON_PLACEMENT_CHECK_SCHEMA_SQL
 from infra.managed_process_schema import MANAGED_PROCESS_SCHEMA_SQL
 from infra.measurement_schema import MEASUREMENT_INDEX_SQL
 from infra.message_schema import MESSAGE_SCHEMA_SQL
@@ -31,7 +32,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 121
+SCHEMA_VERSION = 123
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -68,10 +69,7 @@ SCHEMA_SQL = f"""
         history_epoch INTEGER NOT NULL DEFAULT 0,
         runtime_context_epoch INTEGER NOT NULL DEFAULT 0 CHECK (typeof(runtime_context_epoch) = 'integer' AND runtime_context_epoch >= 0),
         last_context_change_seq INTEGER NOT NULL DEFAULT 0
-            CHECK (
-                typeof(last_context_change_seq) = 'integer'
-                AND last_context_change_seq >= 0
-            ),
+            CHECK (typeof(last_context_change_seq) = 'integer' AND last_context_change_seq >= 0),
         execution_epoch INTEGER NOT NULL DEFAULT 0
             CHECK (typeof(execution_epoch) = 'integer' AND execution_epoch >= 0),
         pending_model TEXT,
@@ -113,6 +111,7 @@ SCHEMA_SQL = f"""
     {PRESENCE_SCHEMA_SQL}
     {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}{EMAIL_SCREENS_SCHEMA_SQL}
     {OUTCOME_EVENTS_SCHEMA_SQL}
+    {LESSON_PLACEMENT_CHECK_SCHEMA_SQL}
     {PROVIDER_AVAILABILITY_TABLE_SQL};
     CREATE TABLE IF NOT EXISTS model_profiles (
         model_id TEXT PRIMARY KEY,

@@ -1,4 +1,4 @@
-"""Schema 119 -> 120: the local screen's per-message results.
+"""Schema 121 -> 122: the local screen's per-message results.
 
 Purely additive: one new table, no data to convert. The DDL is copied rather
 than imported so this step keeps producing the shape it was written for.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-_EMAIL_SCREENS_120_DDL = """
+_EMAIL_SCREENS_121_DDL = """
     CREATE TABLE IF NOT EXISTS email_screens (
         account        TEXT NOT NULL,
         message_id     TEXT NOT NULL,
@@ -26,6 +26,6 @@ _EMAIL_SCREENS_120_DDL = """
 """
 
 
-def migrate_119_to_120(conn: sqlite3.Connection) -> None:
+def migrate_121_to_122(conn: sqlite3.Connection) -> None:
     """Create the email screens table."""
-    conn.execute(_EMAIL_SCREENS_120_DDL)
+    conn.execute(_EMAIL_SCREENS_121_DDL)

@@ -84,6 +84,13 @@ afterEach(() => {
 });
 
 describe('SettingsSystem', () => {
+	it('does not expose the removed desktop server reset', () => {
+		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(host.textContent).not.toContain('Reset URL');
+		expect(host.textContent).not.toContain('server picker');
+	});
+
 	it("labels the supported requester-model reviewer default without a warning", () => {
 		coreSettings.set({
 			...settingsPayload,

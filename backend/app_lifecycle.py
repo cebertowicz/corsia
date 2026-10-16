@@ -155,6 +155,8 @@ async def lifespan(app: FastAPI):
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         await start_documents()
+        from llm.local_setup import resume_pending_setup
+        await resume_pending_setup()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(

@@ -1,0 +1,75 @@
+name: Build unsigned macOS app
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build
+        required: true
+        type: string
+
+jobs:
+  verify:
+    name: Verify tagged main commit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      commit_sha: ${{ steps.tag.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          [[ "$RELEASE_TAG" =~ ^v0\.[0-9]+\.[0-9]+$ ]] || {
+            echo "tag must be v0.X.Y" >&2
+            exit 1
+          }
+          git fetch --force --tags origin main
+          commit_sha="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          git merge-base --is-ancestor "$commit_sha" origin/main
+          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build unsigned app artifact
+    needs: verify
+    runs-on: macos-15
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.verify.outputs.commit_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Stamp and build unsigned app
+        run: |
+          set -euo pipefail
+          release_version="${RELEASE_TAG#v}"
+          desktop/scripts/test-stamp-release-version.sh
+          desktop/scripts/stamp-release-version.sh "$RELEASE_TAG"
+          # The marketing version is the release tag without v. Previews use
+          # 0.x.y-dev.N but macOS requires an integer-only build sequence.
+          macos_bundle_version="1.0.$(git rev-list --count HEAD)"
+          CORSIA_APP_VERSION="$release_version" CORSIA_MACOS_SHORT_VERSION="$release_version" CORSIA_MACOS_BUNDLE_VERSION="$macos_bundle_version" desktop/scripts/build-macos-bundle.sh --skip-dmg
+          app="desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CORSIA.app"
+          test -d "$app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | grep -Fx "$release_version"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist" | grep -Fx "$macos_bundle_version"
+          ditto -c -k --keepParent "$app" CORSIA.app.zip
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: corsia-unsigned-macos-app-${{ env.RELEASE_TAG }}
+          path: CORSIA.app.zip
+          if-no-files-found: error
+          retention-days: 7

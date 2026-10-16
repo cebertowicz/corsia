@@ -57,8 +57,6 @@
 	%sveltekit.head%
 </head>
 <body>
-	<!-- iOS 27 colors an installed app's status bar from a real fixed element at the top edge; without one it lays its own blur over the header. -->
-	<div id="status-bar-color" aria-hidden="true"></div>
 	%sveltekit.body%
 	<script>
 		if ('serviceWorker' in navigator) {

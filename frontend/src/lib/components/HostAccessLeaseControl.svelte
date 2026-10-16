@@ -437,7 +437,7 @@
 	.thread-host-access {
 		--host-access-available-height: calc(
 			100dvh
-			- var(--header-height, 64px)
+			- var(--header-bottom)
 			- var(--input-bar-height, 100px)
 			- 24px
 		);
@@ -509,7 +509,7 @@
 		pointer-events: auto;
 	}
 	.pending-request-trigger:focus-visible {
-		outline: 2px solid var(--violet-line);
+		outline: 2px solid var(--accent-line);
 		outline-offset: 2px;
 	}
 	.pending-owner {
@@ -540,8 +540,7 @@
 		.thread-host-access {
 			--host-access-available-height: calc(
 				100dvh
-				- var(--header-height, 64px)
-				- env(safe-area-inset-top, 0px)
+				- var(--header-bottom)
 				- var(--input-bar-height, 100px)
 				- var(--kb-toolbar-inset, 0px)
 				- 16px
