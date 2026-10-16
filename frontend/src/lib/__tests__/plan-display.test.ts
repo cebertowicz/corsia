@@ -60,7 +60,7 @@ function node(over: Partial<OperatorNode> = {}): OperatorNode {
 		id: 'n1', parent_id: null, depth: 0, kind: 'task', title: 'Task',
 		description: null, acceptance_criteria: 'DOD', state: 'pending',
 		unmet_dependencies: [], held_by: null, revision: 1, requirements_revision: 1,
-		commitment_id: 'n1', updated_at: 'now', last_transition_at: 'now', folded: false,
+		commitment_id: 'n1', updated_at: 'now', last_transition_at: 'now', folded: false, container: false,
 		requires_user_action: false,
 		executor: { thread_id: 't1', label: 'Agent' },
 		execution: {

@@ -76,11 +76,10 @@
   --text-secondary: #adadb2;
   --text-muted: #adadb2;
   --text-tertiary: #919196;
-  --accent: #8b5cf6;
-  --accent-hover: #b29bff;
-  --accent-subtle: rgba(139, 92, 246, 0.12);
-  --accent-bg: rgba(139, 92, 246, 0.08);
-  --accent-bg-hover: rgba(139, 92, 246, 0.14);
+  --accent: #60a5fa;
+  --accent-hover: #93c5fd;
+  --accent-subtle: rgba(96, 165, 250, 0.12);
+  --accent-bg-hover: rgba(96, 165, 250, 0.14);
   --green: #34d399;
   --green-bg: rgba(52, 211, 153, 0.08);
   --green-border: rgba(52, 211, 153, 0.25);
@@ -106,6 +105,7 @@
   --header-height: 60px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
+  --header-bottom: calc(var(--header-height) + var(--safe-top));
   --status-ready: #22c55e;
   --status-in-progress: #3b82f6;
   --status-planned: #f59e0b;
@@ -121,21 +121,21 @@
   --hl-string: #98c379;
   --hl-comment: #5c6370;
   --hl-number: #d19a66;
+  /* The categorical violet: identity and kind colours that must stay apart from blue (never the accent). */
   --purple: #8b5cf6;
+  --purple-2: #b29bff;
+  --purple-text: #bba8ff;
+  --purple-bg: rgba(139, 92, 246, 0.10);
+  --purple-line: rgba(139, 92, 246, 0.28);
 
-  --violet: var(--purple);
-  --violet-2: #b29bff;
-  --violet-text: #bba8ff;
-  --violet-bg: rgba(139, 92, 246, 0.10);
-  --violet-line: rgba(139, 92, 246, 0.28);
-  --violet-brand: #8b5cf6;
-  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
-     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
-  --accent-fill: var(--violet-text);
+  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA-blue defaults;
+     under a project scope +layout replaces --accent and every role from accentRoles(). */
+  --accent-text: var(--accent);
+  --accent-wash: rgba(96, 165, 250, 0.08);
+  --accent-line: rgba(96, 165, 250, 0.28);
+  --accent-fill: var(--accent);
   --accent-on-fill: #0a0a0b;
-  --accent-text: var(--violet-text, var(--violet));
-  --accent-line: var(--accent);
-  --accent-wash: var(--violet-bg);
+  --violet-brand: #8b5cf6;
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
   --teal-line: rgba(45, 212, 191, 0.28);
@@ -151,7 +151,7 @@
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
-  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 92%, transparent);
   --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glass-scrim: rgba(0, 0, 0, 0.28);
   --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.40);
@@ -179,17 +179,16 @@
   --text-secondary: #46464b;
   --text-muted: #46464b;
   --text-tertiary: #636368;
-  --accent: #7c5cf6;
-  --accent-hover: #6d4ce6;
-  --accent-subtle: rgba(124, 92, 246, 0.08);
-  --accent-bg: rgba(124, 92, 246, 0.10);
-  --accent-bg-hover: rgba(124, 92, 246, 0.16);
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-subtle: rgba(37, 99, 235, 0.08);
+  --accent-bg-hover: rgba(37, 99, 235, 0.16);
   --green: #34d399;
   --green-bg: #f0fdf4;
   --green-border: rgba(34, 197, 94, 0.3);
   --green-text: #166534;
   --red-text: #b91c1c;
-  --amber-text: #92400e;
+  --amber-text: #a3480a;
   --yellow: #fbbf24;
   --red: #f87171;
   --red-bg: #fef2f2;
@@ -212,22 +211,19 @@
   --hl-string: #059669;
   --hl-comment: #9ca3af;
   --hl-number: #d97706;
-  --purple: #8b5cf6;
+  --purple: #7c5cf6;
+  --purple-2: #6d4ce6;
+  --purple-text: #5b3fd0;
+  --purple-bg: rgba(124, 92, 246, 0.08);
+  --purple-line: rgba(124, 92, 246, 0.32);
 }
 
 [data-theme="light"] {
-  --violet: #7c5cf6;
-  --violet-2: #6d4ce6;
-  --violet-text: #5b3fd0;
-  --violet-bg: rgba(124, 92, 246, 0.08);
-  --violet-line: rgba(124, 92, 246, 0.32);
-  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
-     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
-  --accent-fill: var(--violet-text);
+  --accent-text: #1d4ed8;
+  --accent-wash: rgba(37, 99, 235, 0.10);
+  --accent-line: rgba(37, 99, 235, 0.32);
+  --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
-  --accent-text: var(--violet-text, var(--violet));
-  --accent-line: var(--accent);
-  --accent-wash: var(--violet-bg);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);
@@ -253,23 +249,31 @@
 
 @supports (color: color(display-p3 1 1 1)) {
   :root {
-    --violet: color(display-p3 0.545 0.361 0.965);
-    --violet-2: color(display-p3 0.698 0.608 1);
-    --violet-text: color(display-p3 0.733 0.659 1);
     --teal: color(display-p3 0.176 0.831 0.749);
     --sky: color(display-p3 0.376 0.647 0.98);
     --amber: color(display-p3 0.961 0.62 0.043);
-    --accent: color(display-p3 0.545 0.361 0.965);
-    --accent-hover: color(display-p3 0.698 0.608 1);
+    --accent: color(display-p3 0.376 0.647 0.98);
+    --accent-hover: color(display-p3 0.576 0.773 0.992);
+    --purple: color(display-p3 0.545 0.361 0.965);
+    --purple-2: color(display-p3 0.698 0.608 1);
+    --purple-text: color(display-p3 0.733 0.659 1);
   }
   [data-theme="light"] {
-    --violet: color(display-p3 0.486 0.361 0.965);
-    --violet-2: color(display-p3 0.427 0.298 0.902);
-    --violet-text: color(display-p3 0.357 0.247 0.816);
     --teal: color(display-p3 0.051 0.58 0.533);
     --sky: color(display-p3 0.145 0.388 0.922);
     --amber: color(display-p3 0.851 0.467 0.024);
-    --accent: color(display-p3 0.486 0.361 0.965);
-    --accent-hover: color(display-p3 0.427 0.298 0.902);
+    --accent: color(display-p3 0.145 0.388 0.922);
+    --accent-hover: color(display-p3 0.114 0.306 0.816);
+    --accent-text: color(display-p3 0.114 0.306 0.816);
+    --purple: color(display-p3 0.486 0.361 0.965);
+    --purple-2: color(display-p3 0.427 0.298 0.902);
+    --purple-text: color(display-p3 0.357 0.247 0.816);
   }
+}
+
+/* Hover and subtle tones keep their own CORSIA-blue shades by default; under a project scope (+layout sets the
+   attribute) they follow its accent through the roles rather than a second derivation. */
+:root[data-project-accent] {
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
 }

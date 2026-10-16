@@ -1,4 +1,4 @@
-"""The setup flight that installs and owns a new oMLX, then downloads the profile's model.
+"""The setup flight on CORSIA's own oMLX: install and start it, take the pick, download it.
 
 The flight state and the oMLX calls live in ``local_setup``; they are read
 through the module at call time so one set of names is patched and observed.
@@ -11,17 +11,21 @@ import secrets
 from typing import Callable
 
 from llm import local_setup as ls
-from llm.local_profiles import LocalProfile
-from llm.local_setup_gates import Eligibility
+from llm import local_setup_prepare as prepare
+from llm.local_model import LocalModel, omlx_has_recommender, record_set_up
 
 
-async def _setup_new_omlx(report: Callable[[str], None], eligibility: Eligibility, events: list[str],
-                         profile: LocalProfile) -> dict:
-    """Install and configure oMLX, download the chosen model and refresh the catalog."""
+async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
+    """Install, start and secure CORSIA's own oMLX; return its server id and port.
+
+    Prepare and the flight share it. An oMLX older than the recommender is
+    updated with the same repair as one older than loopback auth.
+    """
     report("Installing")
-    needs_repair = not await asyncio.to_thread(ls._omlx_supports_loopback_auth)
+    version = await asyncio.to_thread(ls.omlx_version)
+    needs_repair = (not await asyncio.to_thread(ls._omlx_supports_loopback_auth)
+                    or not omlx_has_recommender(version))
     if needs_repair:
-        version = await asyncio.to_thread(ls.omlx_version)
         await asyncio.to_thread(ls._ensure_omlx, report, needs_repair=True, broken=version is None)
     else:
         await asyncio.to_thread(ls._ensure_omlx, report)
@@ -44,17 +48,38 @@ async def _setup_new_omlx(report: Callable[[str], None], eligibility: Eligibilit
     report("Configuring")
     await ls.secure_local_omlx(server_id, key)
     await ls._configure_global(server_id)
-    await ls._download(server_id, report, profile)
-    await ls._configure_model_settings(server_id, eligibility.context_window, profile)
+    return server_id, port
+
+
+async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
+                         model: LocalModel | None = None) -> dict:
+    """Set up CORSIA's own oMLX, download the picked model and refresh the catalog.
+
+    ``model`` is a resumed flight's; otherwise the flight waits for a running
+    prepare, takes its pick, or asks the recommender itself.
+    """
+    await prepare.join()
+    server_id, port = await start_managed_omlx(report)
+    if model is None:
+        model = prepare.picked_model()
+    if model is None:
+        report("Finding the model that fits this computer")
+        model = await prepare.ask(server_id, port)
+    if model is None:
+        ls._emit("skipped", reason="none_fits")
+        return {"ok": True, "skipped": "none_fits", "message": prepare.NO_LOCAL_MODEL, "progress": events}
+    ls._record_model(model)
+    await ls._download(server_id, report, model)
+    await ls._configure_model_settings(server_id, model)
     report("Refreshing model catalog")
     from llm.catalog_network_models import discover_network_models
 
     result = await discover_network_models(server_id)
     if not result.get("ok"):
         raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
-    ls._emit("completed", profile=profile.id)
+    await asyncio.to_thread(record_set_up, model)
+    ls._emit("completed", model=model.repository)
     return {
-        "ok": True, "server_id": server_id, "model": profile.model,
-        "download_size": ls.format_size(profile.download_size_bytes),
-        "eligibility": eligibility.__dict__, "progress": events,
+        "ok": True, "server_id": server_id, "model": model.model,
+        "download_size": ls.format_size(model.download_size_bytes), "progress": events,
     }

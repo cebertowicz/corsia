@@ -81,7 +81,7 @@ describe('first-run line', () => {
 	it('with a ready model: points at the picker and shows no button or link', async () => {
 		listed = [claude('ready', [account('ready')])];
 		await render();
-		expect(text()).toBe('Pick a model from the picker below to start your conductor.');
+		expect(text()).toBe('Pick a model from the picker below to start CORSIA.');
 		expect(host.querySelectorAll('button')).toHaveLength(0);
 		expect(saveThreadModel).not.toHaveBeenCalled();
 	});

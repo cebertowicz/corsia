@@ -5,8 +5,7 @@ import json
 import pytest
 from fastapi import WebSocketDisconnect
 
-from host_access import browser_control
-from tests.test_browser_pane import FakePane, FakeStream
+from tests.test_browser_pane import FakePane, screencast  # noqa: F401 - autouse fixture: no real page screencast
 from ws import browser_stream
 
 
@@ -35,25 +34,24 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
             if json.loads(payload).get('type') == 'navigate_result':
                 navigation_delivered.set()
 
-    class Stream(FakeStream):
-        async def send(self, payload):
-            await super().send(payload)
-            if json.loads(payload).get('type') == 'input_keyboard':
-                input_received.set()
+    async def key_event(_thread_id, payload, _connection_token):
+        assert payload == {'type': 'input_keyboard', 'key': 'a'}
+        input_received.set()
+
+    monkeypatch.setattr(browser_stream.browser_pane, 'key_event', key_event)
 
     pane = Pane([json.dumps(message) for message in [
         {'type': 'take_over'}, {'type': 'navigate', 'url': 'https://example.test'},
         {'type': 'input_keyboard', 'key': 'a'},
     ]])
-    browser_control._control_holders.clear()
     try:
         with pytest.raises(WebSocketDisconnect):
-            await asyncio.wait_for(browser_stream._relay(pane, Stream(), 'thread', 'user'), 1)
+            await asyncio.wait_for(browser_stream._relay(pane, 'thread', 'user'), 1)
         assert input_received.is_set()
-        assert {'type': 'navigate_result', 'error': None} in [json.loads(message) for message in pane.text]
-        assert not browser_control.holds_control('thread', 'pane')
+        assert any(result.get('type') == 'navigate_result' and result.get('error') is None for result in (json.loads(message) for message in pane.text))
+        assert browser_stream._runners == {}
     finally:
-        browser_control._control_holders.clear()
+        browser_stream._runners.clear()
 
 
 @pytest.mark.asyncio
@@ -72,15 +70,11 @@ async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance
         await release_third.wait()
         return "Error:third"
 
-    async def match_pane(_thread_id, appearance, _connection_token):
+    async def match_pane(_thread_id, appearance):
         commands.append(appearance.width)
-
-    async def repaint(*_args):
-        pass
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
     monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
-    monkeypatch.setattr(browser_stream.browser_pane, "repaint", repaint)
 
     class Pane(FakePane):
         async def receive_text(self):
@@ -106,7 +100,7 @@ async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance
         {"type": "navigate", "url": "https://example.test/second"},
         {"type": "navigate", "url": "https://example.test/third"},
     ]])
-    relay = asyncio.create_task(browser_stream._relay(pane, FakeStream(), "thread", "user"))
+    relay = asyncio.create_task(browser_stream._relay(pane, "thread", "user"))
     try:
         await asyncio.wait_for(first_started.wait(), 1)
         release_first.set()
@@ -125,7 +119,7 @@ async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance
     finally:
         if not relay.done():
             relay.cancel()
-        browser_control._control_holders.clear()
+        browser_stream._runners.clear()
 
 
 @pytest.mark.asyncio
@@ -157,7 +151,7 @@ async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
     ]])
     try:
         with pytest.raises(WebSocketDisconnect):
-            await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), "thread", "user"), 1)
+            await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
         navigation = browser_stream._runners["thread"]
         assert not cancelled.is_set()
         release.set()
@@ -165,7 +159,7 @@ async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
         await asyncio.wait_for(navigation, 1)
         assert not cancelled.is_set()
     finally:
-        browser_control._control_holders.clear()
+        browser_stream._runners.clear()
 
 
 @pytest.mark.asyncio
@@ -175,7 +169,14 @@ async def test_navigation_result_overflow_closes_stalled_pane(monkeypatch, caplo
     async def open_url(*_args):
         return "ok"
 
+    async def watch_page_metadata(*args):
+        report = args[-1]
+        await report({"type": "browser_metadata", "url": "https://example.test", "title": "Example"})
+        await report({"type": "browser_metadata", "url": "https://example.test/next", "title": "Next"})
+        await asyncio.Future()
+
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
 
     class Pane(FakePane):
         async def receive_text(self):
@@ -192,8 +193,36 @@ async def test_navigation_result_overflow_closes_stalled_pane(monkeypatch, caplo
         {"type": "navigate", "url": "https://example.test"},
     ]])
     try:
-        await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), "thread", "user"), 1)
+        await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
         assert pane.closed == [1013]
         assert "browser pane navigation failed" not in caplog.text
     finally:
-        browser_control._control_holders.clear()
+        browser_stream._runners.clear()
+
+
+@pytest.mark.asyncio
+async def test_a_lost_address_watch_is_re_established_then_ends_the_stream_visibly(monkeypatch, caplog):
+    monkeypatch.setattr(browser_stream, "METADATA_RETRY_DELAYS", (0, 0, 0))
+    attempts = []
+
+    async def watch_page_metadata(_thread_id, _connection_token, report):
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            # The first watch reports the page, then its CDP connection drops.
+            await report({"type": "browser_metadata", "url": "https://example.test", "domain": "example.test", "title": "Example"})
+            raise OSError("connection reset")
+        raise browser_stream.BrowserSessionError("This page couldn't be checked")
+
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    pane = Pane()
+    with pytest.raises(browser_stream.BrowserSessionError, match="stopped following the page's address"):
+        await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
+    assert attempts == [0, 1, 2]
+    assert caplog.text.count("lost its page address watch") == 3
+    assert {"type": "browser_metadata", "url": "https://example.test", "domain": "example.test",
+            "title": "Example"} in [json.loads(message) for message in pane.text]

@@ -80,7 +80,6 @@ class BrowserCloseTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         thread_id, _project_id = _execution_context(kwargs)
         try:
-            browser_control.require_page_control(thread_id)
             return await PROCESS_OWNER.close_browser(thread_id)
         except BrowserSessionCleanupError as exc:
             return exc.tool_message

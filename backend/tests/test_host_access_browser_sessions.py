@@ -7,7 +7,7 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from host_access import browser_cli, browser_sessions as sessions
+from host_access import browser_cdp, browser_cli, browser_sessions as sessions
 from tests.browser_process_fixture import synthetic_browser  # noqa: F401
 
 
@@ -33,6 +33,39 @@ async def test_visible_browser_mode_is_pinned_when_the_session_starts(synthetic_
     visible, headless = fake.calls
     assert "--headed" in visible
     assert "--headed" not in headless
+    await fake.owner.shutdown()
+
+
+async def test_first_open_does_not_probe_a_page_before_one_exists(synthetic_browser, monkeypatch):
+    fake = synthetic_browser
+
+    async def no_page_yet(_run):
+        raise sessions.BrowserSessionError("no page exists before open")
+
+    monkeypatch.setattr(browser_cdp, "page_endpoint", no_page_yet)
+    assert await fake.owner.run("thread", ["open", "about:blank"]) == "ok"
+    with pytest.raises(sessions.BrowserSessionError, match="no page exists"):
+        await fake.owner.run("thread", ["open", "about:blank"])
+    await fake.owner.shutdown()
+
+
+@pytest.mark.parametrize("chrome", ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", None])
+async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser, monkeypatch, chrome):
+    fake = synthetic_browser
+    resolved = []
+    monkeypatch.setattr(browser_cli, "chrome_executable",
+                        lambda: resolved.append(chrome) or (chrome, "system" if chrome else "default"))
+    await fake.owner.run("visible", ["open", "about:blank"], show_window=True)
+    await fake.owner.run("visible", ["snapshot"])
+    await fake.owner.run("headless", ["snapshot"])
+    assert resolved == [chrome]
+    for call in fake.calls:
+        launch = call[:call.index("--json")]
+        assert launch[1] == "--session"
+        assert (launch[3:5] == ("--executable-path", chrome)) if chrome else ("--executable-path" not in call)
+        # Only the binary changes: agent-browser keeps its temporary profile, never the person's.
+        assert not {"--profile", "--user-data-dir", "--args"} & set(call)
+    assert "--headed" in fake.calls[0]
     await fake.owner.shutdown()
 
 

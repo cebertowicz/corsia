@@ -7,8 +7,9 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.setup import _trusted_request
 from api.system_admin import router as system_admin_router
 from api.system_reviewer import (
     host_access_reviewer_status as _host_access_reviewer_status,
@@ -44,6 +45,16 @@ async def health():
     if state._thread_driver_failure is not None:
         raise HTTPException(503, f"thread driver failed: {state._thread_driver_failure}")
     return {"status": "ok"}
+
+
+@router.get("/system/operation-active")
+async def system_operation_active(request: Request):
+    """Expose only whether the durable update/restart lock currently holds."""
+    if not _trusted_request(request):
+        raise HTTPException(403)
+    from automation import self_restart
+
+    return {"active": await run_in_db(self_restart.in_flight_request) is not None}
 
 
 def _security_alert_path() -> Path:
@@ -272,11 +283,22 @@ _system_cache: dict = {"data": None, "ts": 0.0}
 _SYSTEM_CACHE_TTL = 5  # seconds
 
 
-@router.get("/system")
-async def system_status(user: dict = Depends(require_user)):
-    """Return cached system performance metrics and live GitHub poller state."""
+def _live_platform_status() -> dict:
+    """The non-cached poller state included in each system status response."""
     from events.connectors.github_notifications import poller_status
     from events.connectors.github_pr_quiet_watch import quiet_watch_status
+    from events.connectors.gmail_poller import poller_status as gmail_poller_status
+
+    return {
+        "github_notifications": poller_status(),
+        "gmail_poller": gmail_poller_status(),
+        "pr_quiet_watch": quiet_watch_status(),
+    }
+
+
+@router.get("/system")
+async def system_status(user: dict = Depends(require_user)):
+    """Return cached system performance metrics and live platform poller state."""
 
     now = time.monotonic()
     if (
@@ -285,8 +307,7 @@ async def system_status(user: dict = Depends(require_user)):
     ):
         return {
             **_system_cache["data"],
-            "github_notifications": poller_status(),
-            "pr_quiet_watch": quiet_watch_status(),
+            **_live_platform_status(),
             "network_setup": _network_setup(),
         }
 
@@ -347,7 +368,6 @@ async def system_status(user: dict = Depends(require_user)):
     _system_cache["ts"] = time.monotonic()
     return {
         **result,
-        "github_notifications": poller_status(),
-        "pr_quiet_watch": quiet_watch_status(),
+        **_live_platform_status(),
         "network_setup": _network_setup(),
     }

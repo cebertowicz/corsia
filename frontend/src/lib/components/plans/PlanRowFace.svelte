@@ -103,14 +103,15 @@
 		flex: none; color: var(--text-tertiary); font-size: var(--text-caption);
 		font-variant-numeric: tabular-nums;
 	}
+	/* One line of running text that truncates once, at its end: the live step, the lead and the moment
+	   are inline runs, so two parts never each show their own ellipsis. */
 	.row-subline {
-		display: flex; min-width: 0; overflow: hidden; color: var(--text-tertiary);
+		display: block; min-width: 0; overflow: hidden; color: var(--text-tertiary);
 		font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap;
 	}
-	/* A flex row shows no ellipsis on bare text, so the text gets its own block. */
-	.subline-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-	.subline-moment { flex: none; white-space: pre; }
-	.row-subline.needs-you { color: var(--amber); }
+	.row-subline :global(.live-step) { display: inline; }
+	.subline-text, .subline-moment { white-space: pre; }
+	.row-subline.needs-you { color: var(--amber-text); }
 	.row-subline.waiting { color: var(--text-secondary); }
 	.row-subline.finished.failed { color: var(--red); }
 	.sr-only {

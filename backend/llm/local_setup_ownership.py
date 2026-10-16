@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 MARKER_NAME = "local_setup_installed_omlx"
+CONSENT_MARKER_NAME = "local_setup_existing_omlx_consented"
 OMLX_FORMULA = "jundot/omlx/omlx"
 DEFAULT_PORT = 8000
 
@@ -30,11 +31,39 @@ def marker_path() -> Path:
     return Path(STATE_ROOT) / MARKER_NAME
 
 
+def consent_marker_path() -> Path:
+    from infra.config import STATE_ROOT
+
+    return Path(STATE_ROOT) / CONSENT_MARKER_NAME
+
+
 def mark_installed_by_setup() -> None:
     """Record, durably, that local setup itself installed oMLX."""
     path = marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("installed by corsia local setup\n", encoding="utf-8")
+
+
+def record_existing_omlx_consent(*, manage: bool | None = None) -> None:
+    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root.
+
+    ``manage`` is the person's choice between the two (``own_omlx_management``):
+    True is "Let CORSIA manage it", also consent to read that oMLX's admin key and
+    change the settings shown first; False is "Use mine", where the key is never
+    read and nothing is offered or written. None is a consent given where those
+    choices weren't shown, which records neither.
+    """
+    path = consent_marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("consented to existing oMLX\n", encoding="utf-8")
+    if manage is None:
+        return
+    from llm import own_omlx_management
+
+    if manage:
+        own_omlx_management.consent()
+    else:
+        own_omlx_management.choose_use_mine()
 
 
 _BROKEN_RETURN_CODES = (126, 127)
@@ -67,6 +96,21 @@ def _is_broken_leftover(path: str) -> bool:
     _broken_cache.clear()
     _broken_cache[key] = broken
     return broken
+
+
+def existing_omlx_requires_consent() -> bool:
+    """Whether setup must ask before inspecting a pre-existing oMLX.
+
+    This deliberately checks only PATH and CORSIA's ownership/consent markers.
+    In particular, it must not execute oMLX before the person has consented;
+    a broken leftover follows the same consent journey and is repaired after
+    that consent by local setup.
+    """
+    return bool(
+        shutil.which("omlx")
+        and not marker_path().exists()
+        and not consent_marker_path().exists()
+    )
 
 
 def installed_omlx() -> str | None:

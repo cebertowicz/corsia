@@ -354,7 +354,7 @@
 		flex: 1; height: 1px;
 		background: linear-gradient(90deg, var(--border-subtle) 30%, transparent);
 	}
-	.section.loaded .section-label  { color: var(--violet-text); }
+	.section.loaded .section-label  { color: var(--accent-text); }
 	.section.loading .section-label { color: var(--amber); }
 
 	.show-more {

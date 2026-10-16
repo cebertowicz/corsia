@@ -4,142 +4,154 @@
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>CORSIA</title>
+	<!-- Generated from the app design tokens by desktop/scripts/gen-shell-tokens.mjs. -->
+	<link rel="stylesheet" href="tokens.css" />
 	<style>
-		:root {
-			color-scheme: dark light;
-			font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
-		}
-		* { margin: 0; padding: 0; box-sizing: border-box; }
-		html, body {
-			height: 100%;
-			-webkit-font-smoothing: antialiased;
-		}
-		/* Theme-aware base. Both modes are translucent enough to let macOS
-		   NSVisualEffectView vibrancy (set via tauri.conf windowEffects)
-		   show through to the desktop wallpaper, but opaque enough that
-		   the picker text remains readable. */
-		html[data-theme="dark"] body {
-			background: rgba(20, 20, 22, 0.55);
-			color: #e8e8ed;
-		}
-		html[data-theme="light"] body {
-			background: rgba(255, 255, 255, 0.55);
-			color: #1a1a1e;
-		}
+		:root { color-scheme: dark light; font-family: var(--font-sans); }
+		* { box-sizing: border-box; }
+		html, body { height: 100%; margin: 0; -webkit-font-smoothing: antialiased; }
+		body { background: color-mix(in srgb, var(--bg-primary) 55%, transparent); color: var(--text-primary); }
 		.app {
 			min-height: 100vh;
-			display: flex; flex-direction: column;
-			align-items: center; justify-content: center;
-			padding: 80px 32px 48px;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			padding: var(--space-8) var(--space-7);
+			text-align: center;
 		}
 		.mark {
-			width: 96px; height: 96px;
-			margin-bottom: 28px;
+			width: calc(var(--space-8) * 2);
+			height: calc(var(--space-8) * 2);
+			margin-bottom: var(--space-6);
 			pointer-events: none;
 			user-select: none;
 			-webkit-user-drag: none;
 		}
 		h1 {
-			font-size: 22px; font-weight: 600;
-			letter-spacing: -0.015em;
-			margin-bottom: 8px;
+			max-width: calc(var(--space-8) * 12);
+			margin: 0;
+			font-size: var(--text-title2);
+			font-weight: var(--fw-semibold);
+			letter-spacing: var(--ls-title);
+			line-height: var(--lh-tight);
+			text-wrap: balance;
 		}
-		.lede {
-			font-size: 14px;
-			margin-bottom: 32px;
-			text-align: center; max-width: 380px;
-			line-height: 1.5;
+		.line {
+			max-width: calc(var(--space-8) * 8);
+			margin: var(--space-2) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-callout);
+			line-height: var(--lh-normal);
+			text-wrap: pretty;
 		}
-		html[data-theme="dark"] .lede { color: #8e8e93; }
-		html[data-theme="light"] .lede { color: #6e6e73; }
-
-		.card {
-			width: 100%; max-width: 420px;
-			border-radius: 12px;
-			padding: 20px;
-			-webkit-backdrop-filter: blur(40px) saturate(180%);
-			backdrop-filter: blur(40px) saturate(180%);
+		.log {
+			max-width: calc(var(--space-8) * 12);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
 		}
-		html[data-theme="dark"] .card {
-			background: rgba(28, 28, 31, 0.65);
-			border: 1px solid rgba(255, 255, 255, 0.08);
-		}
-		html[data-theme="light"] .card {
-			background: rgba(255, 255, 255, 0.7);
-			border: 1px solid rgba(0, 0, 0, 0.08);
-		}
-
-		label {
+		.log code {
 			display: block;
-			font-size: 12px; font-weight: 500;
-			text-transform: uppercase; letter-spacing: 0.06em;
-			margin-bottom: 8px;
+			margin-top: var(--space-1);
+			overflow-wrap: anywhere;
+			font-family: var(--font-mono);
 		}
-		html[data-theme="dark"] label { color: #8e8e93; }
-		html[data-theme="light"] label { color: #6e6e73; }
+		.spinner {
+			width: var(--space-5);
+			height: var(--space-5);
+			margin-top: var(--space-5);
+			border: var(--space-1) solid var(--border);
+			border-top-color: var(--accent-line);
+			border-radius: var(--radius-circle);
+			animation: spin var(--dur-hero-plus) linear infinite;
+		}
+		@keyframes spin { to { transform: rotate(360deg); } }
 
-		input {
-			width: 100%; height: 36px; padding: 0 12px;
-			border-radius: 8px;
-			font-size: 14px;
-			font-family: inherit;
-			outline: none;
-			transition: border-color 0.15s, box-shadow 0.15s;
+		.actions, .background-approval {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: var(--space-1);
+			margin-top: var(--space-6);
 		}
-		html[data-theme="dark"] input {
-			background: rgba(0, 0, 0, 0.25);
-			border: 1px solid rgba(255, 255, 255, 0.12);
-			color: #e8e8ed;
+		.approval-row {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: var(--space-2);
+			color: var(--text-secondary);
+			font-size: var(--text-callout);
+			line-height: var(--lh-normal);
 		}
-		html[data-theme="light"] input {
-			background: rgba(255, 255, 255, 0.6);
-			border: 1px solid rgba(0, 0, 0, 0.15);
-			color: #1a1a1e;
+		.approval-check {
+			display: inline-flex;
+			flex: none;
+			width: var(--space-5);
+			height: var(--space-5);
+			align-items: center;
+			justify-content: center;
+			border: var(--space-1) solid var(--accent-line);
+			border-radius: var(--radius-circle);
+			color: transparent;
+			font-size: var(--text-footnote);
+			line-height: 1;
 		}
-		input:focus {
-			border-color: #8b5cf6;
-			box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
+		.approval-check[data-state="on"] {
+			border-color: var(--accent-fill);
+			background: var(--accent-fill);
+			color: var(--accent-on-fill);
 		}
-
-		.hint { font-size: 11.5px; margin-top: 8px; line-height: 1.5; }
-		html[data-theme="dark"] .hint { color: #636366; }
-		html[data-theme="light"] .hint { color: #9e9ea3; }
-
-		.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 		button {
-			height: 32px; padding: 0 14px;
-			border-radius: 8px;
-			font-size: 13px; font-weight: 500;
-			font-family: inherit; cursor: pointer;
-			background: rgba(139, 92, 246, 0.15);
-			border: 1px solid rgba(139, 92, 246, 0.4);
-			color: #b29bff;
-			transition: background 0.15s, border-color 0.15s;
+			border: 0;
+			font: inherit;
+			cursor: pointer;
+			transition: background var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap);
 		}
-		html[data-theme="light"] button { color: #6d4ce6; }
-		button:hover:not(:disabled) {
-			background: rgba(139, 92, 246, 0.25);
-			border-color: #8b5cf6;
+		.primary {
+			height: calc(var(--space-7) + var(--space-2));
+			padding: 0 var(--space-5);
+			border-radius: var(--radius-pill);
+			background: var(--accent-fill);
+			color: var(--accent-on-fill);
+			font-size: var(--text-callout);
+			font-weight: var(--fw-semibold);
 		}
-		button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-		.err {
-			margin-top: 12px;
-			font-size: 12.5px; color: #f87171;
-			padding: 8px 10px;
-			background: rgba(248, 113, 113, 0.1);
-			border: 1px solid rgba(248, 113, 113, 0.3);
-			border-radius: 6px;
+		.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary)); }
+		.secondary {
+			height: var(--space-7);
+			padding: 0 var(--space-2);
+			border-radius: var(--radius-sm);
+			background: transparent;
+			color: var(--accent-text);
+			font-size: var(--text-callout);
+			font-weight: var(--fw-semibold);
+		}
+		.secondary:hover:not(:disabled) { background: var(--accent-wash); }
+		button:disabled { cursor: wait; opacity: 0.3; }
+		button:focus-visible { outline: var(--space-1) solid var(--accent-wash); outline-offset: var(--space-1); }
+		[hidden] { display: none !important; }
+		@media (prefers-reduced-motion: reduce) {
+			button { transition: none; }
+			.spinner { animation: none; }
 		}
 	</style>
 	<script>
-		// Apply system theme before paint to avoid flash. Honor user's
-		// macOS Light/Dark setting; reapply if they switch while picker is open.
 		(function () {
 			function apply() {
-				const light = window.matchMedia('(prefers-color-scheme: light)').matches;
-				document.documentElement.dataset.theme = light ? 'light' : 'dark';
+				document.documentElement.dataset.theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 			}
 			apply();
 			window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', apply);
@@ -147,96 +159,157 @@
 	</script>
 </head>
 <body>
-	<!--
-		Whole picker is a Tauri drag region (data-tauri-drag-region is the
-		Tauri 2 way; -webkit-app-region is Electron-only). Inputs/buttons
-		stop the drag automatically since they're interactive form controls.
-	-->
 	<div class="app" data-tauri-drag-region>
-		<!-- Real CORSIA mark — full-color particle SVG, transparent bg. -->
-		<img class="mark" src="corsia-mark.svg" alt="CORSIA" data-tauri-drag-region />
-		<h1 data-tauri-drag-region>Welcome to CORSIA</h1>
-		<p class="lede" data-tauri-drag-region>
-			Connect to your CORSIA server to get started. You can change this later.
-		</p>
-		<div class="card">
-			<label for="url">Server URL</label>
-			<input
-				id="url" type="text"
-				placeholder="https://corsia.example.com/"
-				autocomplete="url"
-				autofocus
-			/>
-			<div class="hint">
-				Use the address of your CORSIA instance — local, on your network, or via Tailscale.
+		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
+		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
+		<p id="line" class="line" hidden></p>
+		<p id="log" class="log" hidden>Service log<code id="log-path"></code></p>
+		<div id="spinner" class="spinner"></div>
+		<section id="background-approval" class="background-approval" hidden aria-labelledby="status">
+			<div class="approval-row">
+				<span id="approval-check" class="approval-check" data-state="off"><span aria-hidden="true">✓</span><span id="approval-state" class="visually-hidden">Off</span></span>
+				<span>Keep CORSIA running when the window is closed</span>
 			</div>
-			<div class="actions">
-				<button id="connect" disabled>Connect</button>
-			</div>
-			<div id="err" class="err" hidden></div>
+			<button id="open-login-items" class="primary" type="button">Open Login Items</button>
+		</section>
+		<div id="actions" class="actions" hidden>
+			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
+			<button id="retry" class="primary" type="button">Try again</button>
 		</div>
 	</div>
 
 	<script>
 		(async () => {
-			const tauri = window.__TAURI__;
-			const invoke = tauri?.core?.invoke;
-			const input = document.getElementById('url');
-			const button = document.getElementById('connect');
-			const errBox = document.getElementById('err');
+			const invoke = window.__TAURI__?.core?.invoke;
+			const status = document.getElementById('status');
+			const line = document.getElementById('line');
+			const log = document.getElementById('log');
+			const logPath = document.getElementById('log-path');
+			const spinner = document.getElementById('spinner');
+			const actions = document.getElementById('actions');
+			const backgroundApproval = document.getElementById('background-approval');
+			const approvalCheck = document.getElementById('approval-check');
+			const approvalState = document.getElementById('approval-state');
+			const openLoginItems = document.getElementById('open-login-items');
+			const retry = document.getElementById('retry');
+			const failureLoginItems = document.getElementById('failure-login-items');
+			let quitFailure = false;
+			let approvalPoll;
+			let approvalPollInFlight = false;
+			let continuationStarted = false;
 
-			function showErr(msg) {
-				errBox.textContent = msg;
-				errBox.hidden = false;
+			function showStarting() {
+				quitFailure = false;
+				status.textContent = 'Starting CORSIA…';
+				line.hidden = true;
+				log.hidden = true;
+				spinner.hidden = false;
+				actions.hidden = true;
+				backgroundApproval.hidden = true;
 			}
 
-			if (!invoke) {
-				showErr('Tauri runtime not detected — picker is opening outside the desktop shell.');
-				return;
+			async function showFailure(why, quitting = false) {
+				clearInterval(approvalPoll);
+				quitFailure = quitting;
+				backgroundApproval.hidden = true;
+				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
+				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : typeof why === 'string' ? why : '';
+				line.hidden = !line.textContent;
+				log.hidden = false;
+				spinner.hidden = true;
+				failureLoginItems.hidden = !quitting;
+				failureLoginItems.className = quitting ? 'primary' : 'secondary';
+				retry.className = quitting ? 'secondary' : 'primary';
+				actions.hidden = false;
+				try {
+					logPath.textContent = await invoke('get_service_log_path');
+				} catch {
+					logPath.textContent = 'Service log location unavailable';
+				}
+				retry.disabled = false;
+				retry.focus();
 			}
 
-			// If a URL is already saved, jump straight to it. Otherwise show
-			// the picker with prefill (user came here via Reset).
-			try {
-				const saved = await invoke('get_server_url');
-				if (saved) {
-					window.location.href = saved;
+			function continueToService(startup, showApproval) {
+				if (continuationStarted) return;
+				continuationStarted = true;
+				clearInterval(approvalPoll);
+				status.textContent = 'Starting CORSIA…';
+				if (showApproval) {
+					approvalCheck.dataset.state = 'on';
+					approvalState.textContent = 'On';
+					window.setTimeout(() => window.location.replace(startup.url), 600);
 					return;
 				}
-			} catch { /* fresh install */ }
-
-			function normalize(raw) {
-				const trimmed = raw.trim();
-				if (!trimmed) return '';
-				if (!/^https?:\/\//i.test(trimmed)) return 'http://' + trimmed;
-				return trimmed;
+				window.location.replace(startup.url);
 			}
-			function validate() {
-				try {
-					const u = new URL(normalize(input.value));
-					button.disabled = !(u.protocol === 'http:' || u.protocol === 'https:');
-				} catch { button.disabled = true; }
-			}
-			validate();
-			input.addEventListener('input', validate);
-			input.addEventListener('keydown', (e) => {
-				if (e.key === 'Enter' && !button.disabled) connect();
-			});
-			button.addEventListener('click', connect);
 
-			async function connect() {
-				errBox.hidden = true;
-				button.disabled = true;
-				const url = normalize(input.value);
-				try {
-					await invoke('set_server_url', { url });
-				} catch (e) {
-					showErr('Failed to save URL: ' + e);
-					button.disabled = false;
+			async function showBackgroundApproval() {
+				quitFailure = false;
+				line.textContent = 'Turn this on so your agents keep working when you close this window.';
+				line.hidden = false;
+				log.hidden = true;
+				spinner.hidden = true;
+				actions.hidden = true;
+				status.textContent = 'Keep CORSIA running';
+				backgroundApproval.hidden = false;
+				approvalCheck.dataset.state = 'off';
+				approvalState.textContent = 'Off';
+				clearInterval(approvalPoll);
+				approvalPoll = setInterval(async () => {
+					if (approvalPollInFlight || continuationStarted) return;
+					approvalPollInFlight = true;
+					try {
+						const startup = await invoke('start_local_service');
+						if (startup.state === 'ready') {
+							continueToService(startup, true);
+						}
+					} catch (_) {
+					} finally {
+						approvalPollInFlight = false;
+					}
+				}, 1000);
+			}
+
+			async function start() {
+				if (continuationStarted) return;
+				showStarting();
+				retry.disabled = true;
+				if (!invoke) {
+					await showFailure();
 					return;
 				}
-				window.location.href = url;
+				try {
+					const startup = await invoke('start_local_service');
+					if (startup.state === 'ready') {
+						continueToService(startup);
+					} else {
+						await showBackgroundApproval();
+					}
+				} catch (error) {
+					await showFailure(error);
+				}
 			}
+
+			async function retryFailure() {
+				if (!quitFailure) return start();
+				retry.disabled = true;
+				status.textContent = 'Stopping CORSIA…';
+				try {
+					await invoke('retry_quit');
+				} catch (_) {
+					await showFailure(undefined, true);
+				}
+			}
+
+			window.__corsiaShowServiceFailure = showFailure;
+			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
+			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
+			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
+			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
+			retry.addEventListener('click', retryFailure);
+			if (window.location.hash === '#background-approval') showBackgroundApproval();
+			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();
 	</script>
 </body>

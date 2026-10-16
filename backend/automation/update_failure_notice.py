@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 
 from loguru import logger
@@ -58,13 +59,15 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         logger.warning("update failure conductor notice could not be delivered")
 
 
-async def tell_conductor_about_scheduled_lapse(
+async def _tell_conductor_about_owner_notice(
     owner_id: str | None,
     summary: str,
     *,
+    event_type: str,
     delivery_id: str,
+    notice_name: str,
 ) -> None:
-    """Tell the CORSIA agent that an owner-bound schedule did not run."""
+    """Deliver one typed CORSIA agent notice for a fact owned by one user."""
     from core.agent_roster_queries import corsia_agent_contact
     from infra.db_async import run_in_db
 
@@ -77,18 +80,96 @@ async def tell_conductor_about_scheduled_lapse(
     contact, gap = await run_in_db(contact_for_owner)
     if contact is None:
         if gap:
-            logger.warning("scheduled update conductor notice skipped: {}", gap)
+            logger.warning("{} conductor notice skipped: {}", notice_name, gap)
         return
     from events.delivery import deliver_to_thread
 
     sent = await deliver_to_thread(
         str(contact["id"]),
-        "system.update_schedule_lapsed",
+        event_type,
         summary,
         delivery_id=delivery_id,
     )
     if not sent:
-        logger.warning("scheduled update conductor notice could not be delivered")
+        logger.warning("{} conductor notice could not be delivered", notice_name)
+
+
+async def tell_conductor_about_scheduled_lapse(
+    owner_id: str | None,
+    summary: str,
+    *,
+    delivery_id: str,
+) -> None:
+    """Tell the CORSIA agent that an owner-bound schedule did not run."""
+    await _tell_conductor_about_owner_notice(
+        owner_id, summary, event_type="system.update_schedule_lapsed", delivery_id=delivery_id,
+        notice_name="scheduled update",
+    )
+
+
+async def tell_conductor_about_corrections_classifier_failure(
+    version: str,
+    reason: str,
+    reader: str,
+) -> None:
+    """Tell the CORSIA agent once when a pinned classifier cannot serve."""
+    from infra.db_async import run_in_db
+    from jobs.corrections_recording import owner_user_ids
+
+    owner_ids = await run_in_db(owner_user_ids)
+    if len(owner_ids) != 1:
+        logger.warning("corrections classifier failure notice skipped: expected one owner, found {}", len(owner_ids))
+        return
+    digest = hashlib.sha256(reason.encode("utf-8")).hexdigest()[:16]
+    await _tell_conductor_about_owner_notice(
+        owner_ids[0], f"Corrections classifier {version} cannot run: {reader}",
+        event_type="system.corrections_classifier_failed",
+        delivery_id=f"corrections-classifier-failed:{version}:{digest}",
+        notice_name="corrections classifier failure",
+    )
+
+
+async def tell_conductor_about_corrections_classifier_load_crash(version: str) -> None:
+    """Tell the CORSIA agent when the sole classifier version repeatedly exits on load."""
+    from infra.db_async import run_in_db
+    from jobs.corrections_recording import owner_user_ids
+
+    owner_ids = await run_in_db(owner_user_ids)
+    if len(owner_ids) != 1:
+        logger.warning("corrections classifier load-crash notice skipped: expected one owner, found {}", len(owner_ids))
+        return
+    await _tell_conductor_about_owner_notice(
+        owner_ids[0], f"Corrections classifier {version} keeps crashing on load and will keep retrying.",
+        event_type="system.corrections_classifier_load_crash",
+        delivery_id=f"corrections-classifier-load-crash:{version}",
+        notice_name="corrections classifier load crash",
+    )
+
+
+def tell_corrections_classifier_failure_detached(
+    version: str,
+    reason: str,
+    reader: str,
+    *,
+    tasks: set[asyncio.Task],
+) -> None:
+    """Deliver a classifier failure notice without delaying correction recording."""
+    task = asyncio.create_task(tell_conductor_about_corrections_classifier_failure(version, reason, reader))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    task.add_done_callback(_log_notice_failure)
+
+
+def tell_corrections_classifier_load_crash_detached(
+    version: str,
+    *,
+    tasks: set[asyncio.Task],
+) -> None:
+    """Deliver a retryable load-crash notice without delaying correction recording."""
+    task = asyncio.create_task(tell_conductor_about_corrections_classifier_load_crash(version))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    task.add_done_callback(_log_notice_failure)
 
 
 def tell_conductor_detached(operation_id: str, tasks: set[asyncio.Task]) -> None:

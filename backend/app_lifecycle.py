@@ -143,11 +143,10 @@ async def lifespan(app: FastAPI):
         from api.usage_rollup import schedule_refresh as schedule_usage_rollup_refresh
         from automation import restart_startup
         from doceditor.live_runtime import start_documents
-        from infra.settings import get_mcp_servers
         from llm.lifecycle import autostart_local_providers
-        from tools.mcp_runtime import start_mcp_runtime
+        from tools.mcp_runtime import start_connected_app_runtime
 
-        await start_mcp_runtime(await run_in_db(get_mcp_servers))
+        await start_connected_app_runtime()
 
         startup_tasks[0] = asyncio.create_task(autostart_local_providers())
         startup_tasks[1] = asyncio.create_task(_startup_cloud_discovery())
@@ -156,6 +155,8 @@ async def lifespan(app: FastAPI):
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         await start_documents()
+        from llm.local_setup import resume_pending_setup
+        await resume_pending_setup()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(

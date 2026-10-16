@@ -27,7 +27,7 @@ export function parseWsTimestamp(raw: unknown): number {
 
 export function formatTime(iso: string): string {
 	try {
-		return parseUTC(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		return parseUTC(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 	} catch { return ''; }
 }
 

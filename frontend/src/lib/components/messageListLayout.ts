@@ -17,6 +17,10 @@ export function observeLayoutGrowth(
 	].filter((element): element is HTMLElement => element !== null);
 	if (layoutOwners.length === 0) return;
 	const heights = new Map(layoutOwners.map((element) => [element, element.getBoundingClientRect().height]));
+	// The attention slot publishes its reservation from its own ResizeObserver,
+	// which may run after this one; following now would pin to the old bottom
+	// and leave the last row under the band. Follow once that frame has laid out.
+	let pendingFollow: number | null = null;
 	const observer = new ResizeObserver((entries) => {
 		let grew = false;
 		for (const { target } of entries) {
@@ -26,10 +30,17 @@ export function observeLayoutGrowth(
 			heights.set(element, height);
 			grew ||= height > previous;
 		}
-		if (grew && wasPinned()) followBottom();
+		if (!grew || !wasPinned() || pendingFollow !== null) return;
+		pendingFollow = requestAnimationFrame(() => {
+			pendingFollow = null;
+			followBottom();
+		});
 	});
 	for (const owner of layoutOwners) observer.observe(owner);
-	return () => observer.disconnect();
+	return () => {
+		observer.disconnect();
+		if (pendingFollow !== null) cancelAnimationFrame(pendingFollow);
+	};
 }
 
 /** F7: what an open lands on, just under the header: the visit divider, else the block carrying `new`. */

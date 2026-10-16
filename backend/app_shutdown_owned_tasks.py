@@ -17,6 +17,7 @@ async def shutdown_owned_tasks(
     from connections.account_controls import stop_all_signins
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
+    from llm.local_setup_prepare import prepare_task
 
     owned_tasks = [
         *((label, getattr(state, attr, None)) for label, attr in RUNTIME_LOOP_TASKS),
@@ -25,6 +26,7 @@ async def shutdown_owned_tasks(
             getattr(state, "_github_ownership_login_task", None),
         ),
         ("local model setup", flight_task()),
+        ("local model pick", prepare_task()),
         *zip(
             ("provider auto-start", "cloud discovery", "network discovery",
              "harness discovery", "continuity drive"),

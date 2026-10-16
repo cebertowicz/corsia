@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from events.disposition import delivery_disposition
-from infra.database import get_db, write_transaction
+from infra.database import write_transaction
 from infra.product_events import emit_product_event
 from registry import artifact_record as AR
 from registry import models
@@ -75,22 +75,42 @@ def _resolve(artifact_id: str, db) -> dict:
 
 
 def _record_state(identity: dict, patch: dict, db) -> None:
-    models.update_metadata(identity["integration"], identity["type"],
-                           identity["external_id"], patch, db=db)
+    from registry import attention
+
+    attention.record_attention(db, identity, patch)
+
+
+def _clear_ask(identity: dict, child_owner: str | None, outcome: str,
+               release, db) -> bool:
+    """End the artifact's open ask; return whether that already woke the child owner."""
+    from plans import public as plans_public
+
+    ask_release_executors: set[str] = set()
+    plans_public.ask_cleared(
+        str(identity["id"]), outcome, release=release, db=db,
+        released_executors=ask_release_executors,
+    )
+    return child_owner is not None and child_owner in ask_release_executors
 
 
 def _route_back(identity: dict, child_owner: str | None, outcome: str,
-                reason: str | None, db) -> str | None:
-    """Record an owner-visible (NOT user-visible) route-back to the child owner."""
+                reason: str | None, owner_woken: bool, db) -> str | None:
+    """Record an owner-visible (NOT user-visible) route-back to the child owner.
+
+    A child owner the ask's release already woke with the outcome gets no
+    second route-back.
+    """
     if child_owner is None:
         return None
-    label = delivery_disposition("owner", "actionable")  # owner_wake
-    models.record_artifact_change(
-        artifact_id=identity["id"],
-        internal_event="artifact.disposition", external_id=identity["external_id"],
-        summary=f"parent disposition: {outcome}" + (f" — {reason}" if reason else ""),
-        provenance={"outcome": outcome, "reason": reason,
-                    "route_disposition": label, "user_visible": False}, db=db)
+    label = None
+    if not owner_woken:
+        label = delivery_disposition("owner", "actionable")  # owner_wake
+        models.record_artifact_change(
+            artifact_id=identity["id"],
+            internal_event="artifact.disposition", external_id=identity["external_id"],
+            summary=f"parent disposition: {outcome}" + (f" — {reason}" if reason else ""),
+            provenance={"outcome": outcome, "reason": reason,
+                        "route_disposition": label, "user_visible": False}, db=db)
     emit_product_event("parent_disposition", outcome,
                        properties={"external_id": identity["external_id"],
                                    "child_owner": child_owner})
@@ -146,7 +166,9 @@ def dispose(
     answer: str | None = None, authority: str | None = None,
     override_blocking: bool = False, new_owner: str | None = None,
     condition: dict | None = None, replacement_id: str | None = None,
-    review_result=None, actor_thread: str | None = None, db=None,
+    hold_ids: list[str] | None = None, require_hold_ids: bool = False, review_result=None,
+    actor_thread: str | None = None, db=None,
+    drives: list[str] | None = None,
 ) -> DispositionResult:
     """Record a parent disposition and route its outcome durably (never silent).
 
@@ -156,15 +178,26 @@ def dispose(
     if outcome not in OUTCOMES:
         raise DispositionError(f"unknown disposition outcome {outcome!r}")
     if outcome == REROUTE_OWNER:
-        return _do_reroute(artifact_id, new_owner, authority, reason, actor_thread, db)
-    _db = db or get_db()
-    try:
+        return _do_reroute(
+            artifact_id, new_owner, authority, reason, actor_thread, hold_ids,
+            require_hold_ids, db,
+        )
+    from plans import public as plans_public
+
+    # One write: the wakes collected are this disposition's alone, and a failed
+    # ask release leaves no outcome recorded.
+    with write_transaction(db, scope="parent_dispose") as _db, \
+            plans_public.collect_wake_recipients(_db, drives):
         identity = _resolve(artifact_id, _db)
         record = AR.register_or_resolve(
             {"integration": identity["integration"], "type": identity["type"],
              "external_id": identity["external_id"]}, db=_db)
         child_owner = record.owner_thread
+        from doceditor import review_bar
 
+        review_bar.assert_current_ask(
+            _db, str(identity["id"]), hold_ids, require_hold_ids=require_hold_ids,
+        )
         if outcome == APPROVE_TO_USER:
             return _do_approve(identity, artifact_id, review_result,
                                override_blocking, authority, reason, actor_thread, _db)
@@ -176,18 +209,15 @@ def dispose(
         # reject_with_reason / answer_internally / request_revision
         return _do_route_back(identity, artifact_id, child_owner, outcome,
                               reason or answer, _db)
-    finally:
-        if not db:
-            _db.close()
 
 
 def _do_approve(identity, artifact_id, review_result, override_blocking,
                 authority, reason, actor_thread, db) -> DispositionResult:
     audit = _enforce_blocking(artifact_id, identity, review_result,
                               override_blocking, authority, reason, actor_thread, db)
-    _record_state(identity, {"attention_state": "raised",
-                             "disposition_outcome": APPROVE_TO_USER,
-                             "disposition_audit": audit}, db)
+    patch = {"attention_state": "raised", "disposition_outcome": APPROVE_TO_USER,
+             "disposition_audit": audit}
+    _record_state(identity, patch, db)
     emit_product_event("parent_disposition", APPROVE_TO_USER,
                        properties={"external_id": identity["external_id"]})
     return DispositionResult(artifact_id, APPROVE_TO_USER, user_visible=True,
@@ -198,20 +228,31 @@ def _do_route_back(identity, artifact_id, child_owner, outcome, reason,
                    db) -> DispositionResult:
     state = {REJECT_WITH_REASON: "resolved", ANSWER_INTERNALLY: "resolved",
              REQUEST_REVISION: "revision_requested"}[outcome]
+    from plans import public as plans_public
+
     _record_state(identity, {"attention_state": state,
                              "disposition_outcome": outcome,
                              "disposition_reason": reason}, db)
-    label = _route_back(identity, child_owner, outcome, reason, db)
+    owner_woken = _clear_ask(
+        identity, child_owner, outcome,
+        plans_public.AskRelease({"note": reason}) if reason else None, db,
+    )
+    label = _route_back(identity, child_owner, outcome, reason, owner_woken, db)
     return DispositionResult(artifact_id, outcome, user_visible=False,
                              attention_state=state, routed_to=child_owner,
                              route_disposition=label, reason=reason)
 
 
 def _do_reroute(artifact_id, new_owner, authority, reason,
-                actor_thread, db) -> DispositionResult:
+                actor_thread, hold_ids, require_hold_ids, db) -> DispositionResult:
     with write_transaction(db, scope="parent_reroute_owner") as connection:
         identity = _resolve(artifact_id, connection)
         child_owner = AR.register_or_resolve(identity, db=connection).owner_thread
+        from doceditor import review_bar
+
+        review_bar.assert_current_ask(
+            connection, str(identity["id"]), hold_ids, require_hold_ids=require_hold_ids,
+        )
         if not new_owner:
             raise DispositionError("reroute_owner requires new_owner")
         if not (reason and actor_thread):
@@ -250,10 +291,11 @@ def _do_defer(identity, artifact_id, child_owner, condition, reason,
         condition = validate_defer_condition(condition)  # normalized (canonical UTC)
     except AttentionError as exc:
         raise DispositionError(str(exc)) from exc
-    _record_state(identity, {"attention_state": "deferred",
-                             "disposition_outcome": DEFER_UNTIL,
-                             "defer_condition": condition,
-                             "disposition_reason": reason}, db)
+    patch = {"attention_state": "deferred",
+             "disposition_outcome": DEFER_UNTIL,
+             "defer_condition": condition,
+             "disposition_reason": reason}
+    _record_state(identity, patch, db)
     return DispositionResult(artifact_id, DEFER_UNTIL, user_visible=False,
                              attention_state="deferred", routed_to=child_owner,
                              reason=reason, audit={"condition": condition})
@@ -263,11 +305,17 @@ def _do_supersede(identity, artifact_id, child_owner, replacement_id, reason,
                   db) -> DispositionResult:
     if not replacement_id:
         raise DispositionError("supersede requires replacement_id")
+    from plans import public as plans_public
+
     _record_state(identity, {"attention_state": "superseded",
                              "disposition_outcome": SUPERSEDE,
                              "superseded_by": replacement_id,
                              "disposition_reason": reason}, db)
-    label = _route_back(identity, child_owner, SUPERSEDE, reason, db)
+    owner_woken = _clear_ask(
+        identity, child_owner, SUPERSEDE,
+        plans_public.AskRelease({"note": reason}) if reason else None, db,
+    )
+    label = _route_back(identity, child_owner, SUPERSEDE, reason, owner_woken, db)
     return DispositionResult(artifact_id, SUPERSEDE, user_visible=False,
                              attention_state="superseded", routed_to=child_owner,
                              route_disposition=label, reason=reason,

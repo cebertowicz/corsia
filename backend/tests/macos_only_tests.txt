@@ -2,10 +2,13 @@
 # semantics). The Linux L1 job skips exactly these files and the macOS L1 job
 # runs exactly these, so every test file runs once. Paths are relative to the
 # repository root, one per line.
+backend/tests/test_corsia_app_mode.py
+backend/tests/test_desktop_service_launcher.py
 backend/tests/test_foreground_invocation_handoff.py
 backend/tests/test_install_script.py
 backend/tests/test_launchd_services.py
 backend/tests/test_matrix_environment.py
+backend/tests/test_mcp_safehouse.py
 backend/tests/test_process_stop_exited_leader.py
 backend/tests/test_repo_branch_pinning.py
 backend/tests/test_reviewer_exact_source.py

@@ -57,6 +57,14 @@ describe('source routes', () => {
 		]);
 	});
 
+	it('returns a structured consent requirement so callers can recover', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({
+			ok: false, status: 409, json: async () => ({ detail: { code: 'consent_required' } }),
+		})));
+
+		expect(await setupLocalSource('tok')).toEqual({ ok: false, code: 'consent_required' });
+	});
+
 	it('throws on a failed read so the panel can say it could not read', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
 		await expect(fetchSources('tok')).rejects.toThrow('sources 500');

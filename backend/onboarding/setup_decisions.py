@@ -35,8 +35,11 @@ class Facts:
     """What the decisions are built from.
 
     ``omlx_differences`` is None when the person has no oMLX of their own or its
-    settings are unknown, and empty when they already match. ``email`` is the
-    address the person confirmed at install, or empty.
+    settings are unknown, and empty when they already match. ``omlx_managed`` is
+    whether they let CORSIA manage it, so every difference is offered;
+    ``omlx_use_mine`` whether they chose Use mine, so none is. With neither (an
+    install that never showed the choice) only concurrent requests is offered.
+    ``email`` is the address the person confirmed at install, or empty.
     """
 
     omlx_differences: tuple[dict[str, Any], ...] | None = None
@@ -44,6 +47,8 @@ class Facts:
     self_check_passed: bool = True
     session_apps: tuple[str, ...] = ()
     email: str = ""
+    omlx_managed: bool = False
+    omlx_use_mine: bool = False
 
 
 def _safe(value: object) -> str:
@@ -126,9 +131,29 @@ def _github(email: str) -> dict[str, Any]:
                      sign_up_with=agents_email(email) or text.ASK_FOR_ADDRESS)
 
 
-def _omlx(facts: Facts) -> dict[str, Any] | None:
-    if not facts.self_check_passed:
+def _omlx_row(row: dict[str, Any]) -> str:
+    return text.OMLX_ROW.format(label=text.OMLX_LABELS.get(row["setting"], _safe(row["setting"])),
+                                current=_safe(text.omlx_value(row["current"])),
+                                recommended=_safe(text.omlx_value(row["recommended"])))
+
+
+def _managed_omlx(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    """Every setting CORSIA would change on the oMLX it manages, each as current → new."""
+    server_wide = [_omlx_row(row) for row in rows if "model" not in row]
+    model_rows = [row for row in rows if "model" in row]
+    groups = [text.OMLX_GROUP_GLOBAL.format(rows=", ".join(server_wide))] if server_wide else []
+    if model_rows:
+        groups.append(text.OMLX_GROUP_MODEL.format(
+            model=_safe(model_rows[0]["model"]), rows=", ".join(_omlx_row(row) for row in model_rows)))
+    return _pick_one(tasks.TASK_CONFIG, text.OMLX_MANAGED, "A", changes="; ".join(groups))
+
+
+def omlx_decision(facts: Facts) -> dict[str, Any] | None:
+    """The oMLX settings decision, or None when nothing differs, the self-check failed, or under Use mine."""
+    if not facts.self_check_passed or facts.omlx_use_mine:
         return None
+    if facts.omlx_managed:
+        return _managed_omlx(facts.omlx_differences) if facts.omlx_differences else None
     entry = next((row for row in facts.omlx_differences or () if row["setting"] == OMLX_SETTING), None)
     if entry is None:
         return None
@@ -138,7 +163,7 @@ def _omlx(facts: Facts) -> dict[str, Any] | None:
 
 def build_decisions(facts: Facts) -> list[dict[str, Any]]:
     """The complete decisions to raise, in setup-task order, each as-is."""
-    omlx = _omlx(facts)
+    omlx = omlx_decision(facts)
     projects = find_projects(facts.session_apps)
     return [
         *([omlx] if omlx else []),
@@ -192,10 +217,12 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
     so its decision stays for the conductor to settle after testing it itself.
     """
     from infra.db_async import run_in_db, run_off_db
+    from llm import own_omlx_management
 
     from onboarding.project_discovery import Roots, session_apps
 
     omlx: tuple[dict[str, Any], ...] | None = None
+    managed = use_mine = False
     sessions = tuple(await run_off_db(session_apps, Roots.for_user()))
     if self_check_passed:
         from api.provider_sources import list_sources
@@ -203,8 +230,10 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
         for row in await run_in_db(list_sources):
             if row.get("source") == "omlx" and row.get("omlx_settings") is not None:
                 omlx = tuple((row["omlx_settings"] or {}).get("differences") or ())
+                managed = (row.get("omlx_management") or {}).get("state") == "managed"
+                use_mine = await run_off_db(own_omlx_management.uses_mine)
     works = await web_search_works() if probe_web_search else False
-    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email))
+    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email), managed, use_mine)
 
 
 async def setup_plan(*, self_check_passed: bool = True, probe_web_search: bool = True) -> dict[str, Any]:

@@ -136,7 +136,7 @@
 <style>
 	.billing { padding: 8px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); outline: none; }
 	.billing.ruled { margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--border-subtle); }
-	.billing:focus-visible { box-shadow: 0 0 0 3px var(--violet-bg); border-radius: var(--radius-xs); }
+	.billing:focus-visible { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
 	.summary { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 	.name { color: var(--text-secondary); }
 	.value { color: var(--text-primary); min-width: 0; overflow-wrap: anywhere; }

@@ -206,7 +206,7 @@
 		font-size: var(--text-caption); font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: var(--ls-cap);
-		color: color-mix(in srgb, var(--violet) 55%, var(--text-secondary));
+		color: color-mix(in srgb, var(--accent) 55%, var(--text-secondary));
 		margin-bottom: var(--space-2);
 	}
 	.ctx-thread-label {

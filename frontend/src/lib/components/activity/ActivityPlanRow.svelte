@@ -236,11 +236,11 @@
 	/* Hover colour is for a pointer. A touch tap leaves :hover stuck on the last
 	   row tapped, which read as a different state. */
 	@media (hover: hover) {
-		.row-summary:hover .owner-copy strong { color: var(--violet-text); }
+		.row-summary:hover .owner-copy strong { color: var(--accent-text); }
 	}
 	.row-meta, .row-open { display: contents; }
 	.row-summary:focus-visible {
-		outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-xs);
+		outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs);
 	}
 	.owner-mark {
 		display: inline-flex; width: 28px; height: 28px; flex: none; align-items: center; justify-content: center;

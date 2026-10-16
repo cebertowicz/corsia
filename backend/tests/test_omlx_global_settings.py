@@ -6,15 +6,17 @@ import asyncio
 
 import pytest
 
-from llm import local_setup, local_sources, omlx_global_settings
+from llm import local_setup, local_sources, omlx_global_settings, own_omlx_management
 from llm.local_profiles import OMLX_GLOBAL_SETTINGS
 
 SERVER = {"id": "local-server"}
 
 
 @pytest.fixture(autouse=True)
-def clean(monkeypatch):
+def clean(monkeypatch, tmp_path):
     monkeypatch.setattr(omlx_global_settings, "_observed", {})
+    monkeypatch.setattr(omlx_global_settings, "_observed_model", {})
+    monkeypatch.setattr(own_omlx_management, "record_path", lambda: tmp_path / "own-omlx-management.json")
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kw: [
         {"id": "local-server", "status": "online", "kind": "local"}])

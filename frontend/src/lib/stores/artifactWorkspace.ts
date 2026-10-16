@@ -172,6 +172,19 @@ export function openBrowserPane(threadId: string, agentOpened = false): void {
 	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, newInstanceId, foreground));
 }
 
+/** Update this thread's sole browser tab without changing its selection or lifecycle. */
+export function setBrowserPaneLabel(threadId: string, title: string): void {
+	mutate(threadId, (ws) => {
+		let changed = false;
+		const tabs = ws.tabs.map((tab) => {
+			if (tab.kind !== 'browser' || tab.title === title) return tab;
+			changed = true;
+			return { ...tab, title };
+		});
+		return changed ? { ...ws, tabs } : null;
+	});
+}
+
 /** Opens a canonical child conversation beside its still-mounted parent. */
 export function openSubagentConversationTab(threadId: string, input: OpenSubagentInput): void {
 	mutate(threadId, (ws) => openSubagentTab(ws, input));

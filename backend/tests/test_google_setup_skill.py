@@ -10,6 +10,7 @@ SKILL = SKILLS / "google-setup/SKILL.md"
 FIRST_RUN = SKILLS / "conductor-bootstrap/references/first-run.md"
 FIRST_RUN_APP = FIRST_RUN.parent / "first-run-app.md"
 FIRST_AGENT = FIRST_RUN.parent / "first-agent.md"
+IMPORT_RESULT_LINES = FIRST_RUN.parent / "import-result-lines.md"
 
 
 def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
@@ -17,9 +18,15 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
 
     assert "`mcp_sources`" in first_run
     assert "/api/mcp/import" in first_run
-    assert "Import all, some (name them), or none?" in first_run
+    assert "Bring over all [n] apps listed above, some (tell me which), or none?" in first_run
     assert "with only the pairs they approved" in first_run
-    assert "`You chose not to import them. Ask me any time to bring them over.`" in first_run
+    assert "`references/import-result-lines.md`" in first_run
+    assert "`Okay, nothing brought over.`" in first_run
+    result_lines = IMPORT_RESULT_LINES.read_text(encoding="utf-8")
+    for status in ("awaiting_approval", "already_exists", "outside_project", "cannot_connect", "failed"):
+        assert f"`{status}`" in result_lines or f'"{status}"' in result_lines
+    assert "`Approve them in [Settings › System › Connected apps](/settings/system#connected-apps).`" in result_lines
+    assert "Every CORSIA agent can use what you bring over" not in first_run
     for retired in ("**The Assistant:**", "Create your Assistant", "<assistant_setup_node_id>",
                     "assistant-onboarding"):
         assert retired not in first_run

@@ -10,7 +10,11 @@ const css = readFileSync(resolve(__dirname, 'InputBar.css'), 'utf8').replace(/\/
 function declarations(selector: string): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-		if (rule[1].trim() !== selector) continue;
+		// A nested container rule describes a narrower layout state; it must not
+		// replace the default action-row contract this helper reads.
+		const prefix = css.slice(0, rule.index);
+		const depth = (prefix.match(/\{/g)?.length ?? 0) - (prefix.match(/\}/g)?.length ?? 0);
+		if (depth !== 0 || rule[1].trim() !== selector) continue;
 		for (const part of rule[2].split(';')) {
 			const [name, ...value] = part.split(':');
 			if (name.trim() && value.length) out[name.trim()] = value.join(':').trim();
@@ -56,7 +60,14 @@ describe('composer action row: who gives way first', () => {
 		expect(declarations('.model-chip-name')['text-overflow']).toBe('ellipsis');
 	});
 
-	it('no width query hides the context label ahead of the shrink order', () => {
-		expect(css).not.toMatch(/@container[^{]*\{\s*\.context-chip span/);
+	it('uses the action-row container, not the viewport, before reducing context to its ring', () => {
+		expect(css).toMatch(
+			/@container action-row \(max-width: 360px\)\s*\{\s*\.context-chip \{[^}]*\}\s*\.context-chip \.ctx-pct \{\s*display: none;/
+		);
+	});
+
+	it('uses the scoped readable accent token for model and effort labels', () => {
+		expect(model.color).toBe('var(--accent-text)');
+		expect(declarations('.effort-chip').color).toBe('var(--accent-text)');
 	});
 });
