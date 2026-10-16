@@ -8,7 +8,21 @@ export type LocalPick = {
 };
 
 const PICK = '/api/setup/local-model';
+const WANTED_KEY = 'corsia.setup.local-ai-wanted';
 const FAILED: LocalPick = { state: 'failed', model: null, message: null };
+
+function storedWanted(): boolean | undefined {
+	if (typeof window === 'undefined') return undefined;
+	try {
+		const value = window.sessionStorage.getItem(WANTED_KEY);
+		return value === null ? undefined : value === 'true';
+	} catch { return undefined; }
+}
+
+function rememberWanted(wanted: boolean) {
+	if (typeof window === 'undefined') return;
+	try { window.sessionStorage.setItem(WANTED_KEY, String(wanted)); } catch { /* setup still works without session storage */ }
+}
 
 /** Whether the picked model needs more room than this computer has free. */
 export function needsSpace(pick: LocalPick | null, freeDiskGb: number | undefined): boolean {
@@ -43,16 +57,17 @@ export function createSetupLocalPick() {
 	return {
 		get pick() { return pick; },
 		get wanted() { return wanted; },
-		set wanted(next: boolean) { wanted = next; },
+		set wanted(next: boolean) { wanted = next; rememberWanted(next); },
 		start,
 		/** Welcome opened: the switch starts on where a local model can run. An oMLX CORSIA doesn't manage is never started a second time, so it gets no pick. */
 		open(eligible: boolean, ownOmlx: boolean) {
-			wanted = eligible;
-			if (eligible && !ownOmlx) void start();
+			wanted = eligible && (storedWanted() ?? true);
+			if (wanted && !ownOmlx) void start();
 		},
 		/** The switch moved; a person's own oMLX has no pick to start or stop. */
 		change(next: boolean, ownOmlx: boolean) {
 			wanted = next;
+			rememberWanted(next);
 			if (!ownOmlx) void (next ? start() : send(`${PICK}/stop`, false));
 		},
 		/**

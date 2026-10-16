@@ -1,10 +1,10 @@
 import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
-import { accountToSignIn, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startCliUpdate, startSignin } from '$lib/conductorSourcesApi';
+import { accountToSignIn, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startSignin } from '$lib/conductorSourcesApi';
 import { openExternalUrl } from '$lib/linkTargetResolver';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 
 // One vendor's place in install and sign-in; absent means the row shows its source's own state.
-type ConnectPhase = { phase: 'confirm' | 'installing' | 'signing-in' | 'path-shadow' | 'failed'; operation?: 'install' | 'update'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin'; reason?: string | null; shadowedBinary?: string };
+type ConnectPhase = { phase: 'confirm' | 'installing' | 'signing-in' | 'path-shadow' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin'; reason?: string | null; shadowedBinary?: string };
 
 export type RowView = {
 	meta: string; ready?: boolean; busy?: boolean; error?: boolean; detail?: string;
@@ -77,18 +77,18 @@ export function createSetupConnect(deps: ConnectDeps) {
 		await beginSignIn(source, true);
 	}
 
-	async function startInstall(source: ModelSource, operation: 'install' | 'update' = 'install') {
+	async function startInstall(source: ModelSource) {
 		const current = deps.token();
 		if (!current) return;
 		const vendor = source.source;
-		setConnect(vendor, { phase: 'installing', operation });
+		setConnect(vendor, { phase: 'installing' });
 		try {
-			const refusal = operation === 'update' ? await startCliUpdate(current, vendor) : await startCliInstall(current, vendor);
+			const refusal = await startCliInstall(current, vendor);
 			if (refusal === 'invisible_binary') await linkCli(current, vendor);
 			if (refusal) { await afterInstalled(vendor); return; }
 			await tickConnect();
 		} catch {
-			setConnect(vendor, { phase: 'failed', failed: 'install', operation, reason: null });
+			setConnect(vendor, { phase: 'failed', failed: 'install', reason: null });
 		}
 	}
 
@@ -103,7 +103,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 				if (entry?.phase === 'installing') {
 					const install = await getCliInstall(current, vendor).catch(() => null);
 					if (install?.state === 'done' || install?.state === 'idle') await afterInstalled(vendor, install.path_shadowed_by);
-					else if (install?.state === 'failed') setConnect(vendor, { phase: 'failed', failed: 'install', operation: entry.operation, reason: install.reason });
+					else if (install?.state === 'failed') setConnect(vendor, { phase: 'failed', failed: 'install', reason: install.reason });
 				} else if (entry?.phase === 'path-shadow') {
 					const source = deps.sources().find((candidate) => candidate.source === vendor);
 					if (!source || sourceIsReady(source)) setConnect(vendor, undefined);
@@ -130,11 +130,11 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'confirm') {
 			return {
 				meta: lines(`CORSIA installs ${copy.cli} for you.`),
-				detail: `${entry.operation === 'update' ? 'Update' : 'Set up'} ${copy.cli}? This runs ${copy.maker}’s official installer, downloaded from ${copy.origin}, and then you sign in to your ${copy.account} account.`,
-				confirm: [{ label: entry.operation === 'update' ? 'Update' : 'Set up', run: () => void startInstall(source, entry.operation) }, { label: 'Cancel', run: () => setConnect(source.source, undefined) }],
+				detail: `Set up ${copy.cli}? This runs ${copy.maker}’s official installer, downloaded from ${copy.origin}, and then you sign in to your ${copy.account} account.`,
+				confirm: [{ label: 'Set up', run: () => void startInstall(source) }, { label: 'Cancel', run: () => setConnect(source.source, undefined) }],
 			};
 		}
-		if (entry?.phase === 'installing') return { meta: `${entry.operation === 'update' ? 'Updating' : 'Installing'} with ${copy.maker}’s official installer. This can take up to 3 minutes.`, busy: true };
+		if (entry?.phase === 'installing') return { meta: `Installing with ${copy.maker}’s official installer. This can take up to 3 minutes.`, busy: true };
 		if (entry?.phase === 'signing-in') {
 			return {
 				meta: `${entry.installed ? 'Installed. ' : ''}Finish signing in to your ${copy.account} account in the browser window that just opened.`,
@@ -148,7 +148,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			const why = entry.reason ? `: ${entry.reason}` : '';
 			const next = entry.reason?.includes('internet') ? 'Check your connection, then choose Try again.' : 'Choose Try again.';
 			return {
-				meta: lines(''), error: true, detail: `Couldn’t ${entry.operation === 'update' ? 'update' : 'install'} ${copy.cli}${why}. ${next}`,
+				meta: lines(''), error: true, detail: `Couldn’t install ${copy.cli}${why}. ${next}`,
 				action: { label: 'Try again', run: () => void startInstall(source) },
 				more: copy.page ? [{ label: 'Open the install page', run: () => void openExternalUrl(copy.page) }] : undefined,
 			};

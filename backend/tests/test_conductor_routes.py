@@ -115,6 +115,37 @@ class TestConductorRoutes:
         return _inline
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("pending", "model", "expected"),
+        [(True, None, True), (True, "ready-model", False), (False, None, False)],
+    )
+    async def test_read_designation_marks_only_pending_model_less_setup_incomplete(
+        self, inline_db, monkeypatch, pending, model, expected,
+    ):
+        import api.conductor as conductor_routes
+
+        class Db:
+            def close(self):
+                pass
+
+        async def runtime_truth(*_args, **_kwargs):
+            return {"model": model}
+
+        monkeypatch.setattr(conductor_routes, "get_scope_coordinator", lambda _scope: "agent")
+        monkeypatch.setattr(conductor_routes, "get_thread_for_user", lambda *_args: {"id": "agent", "title": "CORSIA agent"})
+        monkeypatch.setattr(conductor_routes, "thread_is_available", lambda _row: True)
+        monkeypatch.setattr(conductor_routes, "get_coordination_scopes", lambda _sid: [])
+        monkeypatch.setattr(conductor_routes, "first_run_pending", lambda _sid, db: pending)
+        monkeypatch.setattr(conductor_routes, "get_db", Db)
+        monkeypatch.setattr(conductor_routes, "read_runtime_truth", runtime_truth)
+
+        got = await conductor_routes.read_designation(
+            {"id": "steve"}, conductor_routes.WORKSPACE_SCOPE,
+        )
+
+        assert got["target"]["setup_incomplete"] is expected
+
+    @pytest.mark.asyncio
     async def test_conductor_routes(self, inline_db, conductor_db, monkeypatch):
         from fastapi import HTTPException
         import api.conductor as conductor_routes

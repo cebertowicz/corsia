@@ -84,6 +84,8 @@ beforeEach(() => {
 		if (url.pathname === '/api/threads') return deferredThreadList?.promise ?? json({ threads: listedThreads });
 		if (url.pathname === '/api/projects') return deferredProjectList?.promise ?? json({ projects: [] });
 		if (url.pathname === '/api/models') return json({ models: [] });
+		if (url.pathname === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+		if (url.pathname === '/api/providers/sources/recheck' || url.pathname === '/api/providers/sources') return json({ sources: [] });
 		if (url.pathname === '/api/settings' || url.pathname === '/api/system/drain') return json({});
 		if (url.pathname.startsWith('/api/delegation/threads/')) return json({ thread_kind: 'conductor' });
 		if (url.pathname.endsWith('/messages')) return json({ messages: [], has_more: false, next_cursor: null });

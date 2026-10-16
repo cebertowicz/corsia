@@ -18,6 +18,7 @@ let component: ReturnType<typeof mount> | null = null;
 let calls: string[];
 
 beforeEach(() => {
+	sessionStorage.clear();
 	token.set(null); user.set(null); calls = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input); calls.push(url);
@@ -33,7 +34,7 @@ beforeEach(() => {
 
 afterEach(async () => {
 	if (component) await unmount(component);
-	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+	host.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
@@ -82,6 +83,29 @@ describe('SetupScreen', () => {
 
 		expect(onExistingAccount).toHaveBeenCalledOnce();
 		expect(calls).toEqual(['/api/setup/status']);
+	});
+
+	it('keeps a local-AI opt-out after setup resumes on a page reload', async () => {
+		await settle();
+		const localSwitch = host.querySelector<HTMLButtonElement>('button[aria-label="Also run AI on this computer"]');
+		localSwitch?.click();
+		await settle();
+		if (component) await unmount(component);
+		token.set('resume-token'); calls = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: [{ source: 'omlx', name: 'This computer', state: 'needs_setup' }] });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync();
+
+		await settle();
+
+		expect(calls).toContain('/api/setup/status');
+		expect(host.textContent).toContain('Connect an AI');
+		expect(host.textContent).not.toContain('This computer');
 	});
 
 	it('shows Save a report only with a working desktop invoke bridge', async () => {
@@ -590,7 +614,7 @@ describe('SetupScreen', () => {
 		let localSetupStarts = 0;
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true });
 			if (url.startsWith('/api/setup/local-model')) return picked();
 			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_error: 'Download failed' }] });
