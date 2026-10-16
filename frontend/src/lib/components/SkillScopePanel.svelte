@@ -170,7 +170,9 @@
 	.skills-summary, .skills-hint, .skills-empty, .skills-error { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.skills-summary .bad, .skills-error { color: var(--red-text); }
 	.skills-list { display: flex; flex-direction: column; }
-	.skills-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+	/* Settings action labels share the group label's row-text edge without changing Button globally. */
+	.skills-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); padding-left: var(--space-2); }
+	.skills-actions :global(.btn.ghost) { border-left-width: 0; padding-left: 0; }
 	.skill-create { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto; gap: var(--space-2); }
 	.skill-create input {
 		min-width: 0;

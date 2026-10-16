@@ -99,4 +99,6 @@
 	.trailing { flex-shrink: 0; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 	.chev { flex-shrink: 0; color: var(--text-tertiary); }
 	.actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-1); }
+	/* A Settings row's text action ends on the same edge as its other trailing controls. */
+	.actions :global(.btn.ghost) { border-right-width: 0; padding-right: var(--space-1); }
 </style>

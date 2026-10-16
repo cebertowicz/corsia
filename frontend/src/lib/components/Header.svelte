@@ -205,7 +205,10 @@
 		background: none; border: none; cursor: pointer; color: var(--text-secondary);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.h-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+	@media (hover: hover) {
+		.h-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+		.h-back:hover { background: var(--bg-hover); color: var(--text-primary); }
+	}
 	.h-icon.active { background: var(--accent-wash); color: var(--accent-text); }
 	.h-icon:active { scale: 0.94; }
 
@@ -217,7 +220,6 @@
 		font-size: var(--text-subhead); font-weight: var(--fw-medium);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.h-back:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-back svg { flex-shrink: 0; }
 	.h-back-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

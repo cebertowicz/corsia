@@ -243,6 +243,8 @@
 			overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 		}
 		.inset :global(.page-head) { justify-content: flex-end; }
+		/* The visually hidden title remains the first DOM child; do not let it create an extra group gap. */
+		.section-host > :global(.settings-group:first-of-type) { margin-top: 0; }
 		.mobile-root { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: var(--space-3); }
 		.mobile-root.hidden { display: none; }
 		.mobile-group { display: flex; flex-direction: column; }

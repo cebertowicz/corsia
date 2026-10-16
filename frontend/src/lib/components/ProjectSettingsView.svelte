@@ -309,6 +309,8 @@
 
 <style>
 	.project-page { display: flex; flex-direction: column; }
+	/* This page title owns the first gap; its first group should match the other titled Settings pages. */
+	.project-page :global(.settings-group:first-of-type) { margin-top: 0; }
 	.group-gap { margin-top: var(--space-6); }
 	/* The policy block draws edge to edge; inset it to the page's row edge. */
 	.policy { padding: 0 var(--space-2); }
