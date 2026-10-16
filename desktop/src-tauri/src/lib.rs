@@ -23,6 +23,8 @@ use serde::Serialize;
 use tauri::Manager;
 
 mod app_paths;
+mod classify;
+mod discovery;
 mod first_run;
 mod lifecycle;
 mod pairing;
