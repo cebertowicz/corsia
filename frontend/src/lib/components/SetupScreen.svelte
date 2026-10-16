@@ -86,7 +86,7 @@
 				if (status.macos_supported === false) return { title: 'Update macOS to continue', lede: 'Update to macOS 15 or later, then open CORSIA again.' };
 				return { title: 'Move CORSIA to Applications', lede: 'Move CORSIA to Applications, then open it again so updates work.' };
 			case 'welcome':
-				return { title: 'Welcome to CORSIA', lede: 'CORSIA runs AI agents that work on your projects with you.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
+				return { title: 'Welcome to CORSIA', lede: 'Your own AI team, on this computer. It remembers your projects, works with the tools and models you already use, and shows you results, not transcripts.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
 			case 'account':
 				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
