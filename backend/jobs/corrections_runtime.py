@@ -26,6 +26,8 @@ class ClassificationOutcome:
     kind: OutcomeKind
     reason: str | None = None
     failure_version: str | None = None
+    only_version_load_crash: bool = False
+    load_succeeded: bool = False
 
 
 async def drop_child(worker: CorrectionsWorker) -> None:
@@ -73,6 +75,7 @@ async def classify(
     outages: list[str] = []
     failures: list[str] = []
     consecutive_load_exits = 0
+    load_succeeded = False
     worker.call_seconds = 0.0
     while len(outages) < attempts_per_kind and len(failures) < attempts_per_kind:
         child = await _child_for(worker, manifest, child_factory)
@@ -88,13 +91,20 @@ async def classify(
                 consecutive_load_exits += 1
                 if consecutive_load_exits == 2 and has_fallback:
                     error = ClassifierUnavailable(reason, kind="deterministic", cause=error.cause)
+                elif consecutive_load_exits == 2:
+                    return ClassificationOutcome(
+                        "outage", reason, only_version_load_crash=True,
+                    )
             if error.kind == "deterministic":
                 worker.failed_versions[manifest.version] = reason
                 record_version_state(worker, manifest.version, "failed", reason)
-                return ClassificationOutcome("version_failed", reason, manifest.version)
+                return ClassificationOutcome(
+                    "version_failed", reason, manifest.version, load_succeeded=load_succeeded,
+                )
             outages.append(reason)
             continue
         consecutive_load_exits = 0
+        load_succeeded = True
         call_started = clock()
         try:
             result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
@@ -112,12 +122,12 @@ async def classify(
         await record_classification(candidate, result)
         worker.version = manifest.classifier_version()
         worker._set("ready", None)
-        return ClassificationOutcome("recorded")
+        return ClassificationOutcome("recorded", load_succeeded=load_succeeded)
     if len(failures) == attempts_per_kind:
         await record_unreadable(candidate, manifest.classifier_version(), failures[-1])
         worker.version = manifest.classifier_version()
         worker._set("ready", None)
-        return ClassificationOutcome("unreadable")
+        return ClassificationOutcome("unreadable", load_succeeded=load_succeeded)
     reason = outages[-1]
     worker._set("unavailable", reason)
-    return ClassificationOutcome("outage", reason)
+    return ClassificationOutcome("outage", reason, load_succeeded=load_succeeded)

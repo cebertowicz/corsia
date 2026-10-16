@@ -129,6 +129,23 @@ async def tell_conductor_about_corrections_classifier_failure(
     )
 
 
+async def tell_conductor_about_corrections_classifier_load_crash(version: str) -> None:
+    """Tell the CORSIA agent when the sole classifier version repeatedly exits on load."""
+    from infra.db_async import run_in_db
+    from jobs.corrections_recording import owner_user_ids
+
+    owner_ids = await run_in_db(owner_user_ids)
+    if len(owner_ids) != 1:
+        logger.warning("corrections classifier load-crash notice skipped: expected one owner, found {}", len(owner_ids))
+        return
+    await _tell_conductor_about_owner_notice(
+        owner_ids[0], f"Corrections classifier {version} keeps crashing on load and will keep retrying.",
+        event_type="system.corrections_classifier_load_crash",
+        delivery_id=f"corrections-classifier-load-crash:{version}",
+        notice_name="corrections classifier load crash",
+    )
+
+
 def tell_corrections_classifier_failure_detached(
     version: str,
     reason: str,
@@ -138,6 +155,18 @@ def tell_corrections_classifier_failure_detached(
 ) -> None:
     """Deliver a classifier failure notice without delaying correction recording."""
     task = asyncio.create_task(tell_conductor_about_corrections_classifier_failure(version, reason, reader))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    task.add_done_callback(_log_notice_failure)
+
+
+def tell_corrections_classifier_load_crash_detached(
+    version: str,
+    *,
+    tasks: set[asyncio.Task],
+) -> None:
+    """Deliver a retryable load-crash notice without delaying correction recording."""
+    task = asyncio.create_task(tell_conductor_about_corrections_classifier_load_crash(version))
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     task.add_done_callback(_log_notice_failure)

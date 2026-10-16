@@ -365,23 +365,65 @@ async def test_two_native_exits_during_load_exclude_the_newer_version(worker, mo
 
 
 @pytest.mark.asyncio
-async def test_only_version_with_two_native_load_exits_stays_retryable_then_records(worker, monkeypatch):
+async def test_only_version_with_two_native_load_exits_notifies_once_and_stays_retryable(worker, monkeypatch):
+    from automation import update_failure_notice
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
+    notices = []
     ScriptedChild.loads = [
         ClassifierUnavailable("load native exit", cause="child_exited"),
         ClassifierUnavailable("load native exit", cause="child_exited"),
-        "ok",
     ]
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        update_failure_notice, "tell_corrections_classifier_load_crash_detached",
+        lambda version, *, tasks: notices.append((version, tasks)),
+    )
 
     assert (await worker._classify(_candidate())).kind == "outage"
     assert (worker.state, worker.reason) == ("unavailable", "load native exit")
     assert worker.failed_versions == {}
+    assert worker.snapshot()["retryable"] is True
+    assert [version for version, _ in notices] == ["v1"]
 
-    assert (await worker._classify(_candidate("later"))).kind == "recorded"
-    assert worker.snapshot()["state"] == "ready"
+    assert (await worker._classify(_candidate("later"))).kind == "outage"
+    assert len(ScriptedChild.created) == 2
+    assert [version for version, _ in notices] == ["v1"]
+
+
+@pytest.mark.asyncio
+async def test_only_version_load_crash_backoff_clears_after_success_and_new_version_notifies(worker, monkeypatch):
+    from automation import update_failure_notice
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime
+
+    now = [0.0]
+    notices = []
+    ScriptedChild.loads = [
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+        "ok",
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+    ]
+    monkeypatch.setattr(corrections_realtime, "_clock", lambda: now[0])
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        update_failure_notice, "tell_corrections_classifier_load_crash_detached",
+        lambda version, *, tasks: notices.append(version),
+    )
+
+    assert (await worker._classify(_candidate())).kind == "outage"
+    assert len(ScriptedChild.created) == 2
+
+    now[0] = corrections_realtime.LOAD_CRASH_BACKOFF_SECONDS
+    assert (await worker._classify(_candidate("recovered"))).kind == "recorded"
+    assert worker.load_crash_retry_at == {"v1": 0.0}
+
+    worker.versions = []
+    assert (await worker._classify_with(_candidate("new-version"), _manifest("v2"))).kind == "outage"
+    assert notices == ["v1", "v2"]
 
 
 @pytest.mark.asyncio

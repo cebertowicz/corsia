@@ -7,7 +7,8 @@ answers one request at a time. The parent separates two kinds of failure:
   a native exit before any reply) or the parent was shut down. Nothing is recorded; the message
   stays pending. Deterministic startup failures (a self-test mismatch or a load-time memory-ceiling
   breach) are marked for version exclusion instead. A caller may exclude repeated native exits
-  only when another verified version can serve.
+  only when another verified version can serve; otherwise it keeps the version retryable and
+  rate-limits later load attempts.
 - ``MessageFailed``: a child that loaded and passed its self-test failed on this input
   (``timeout``, ``rss`` or ``child_error``). The child is stopped; the next call starts a
   fresh one.
