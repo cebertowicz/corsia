@@ -14,7 +14,7 @@ def ask_holds(db, hold_ids) -> dict[str, dict]:
     whether the ask is still open, where the agent raised it (``turn_id``,
     ``tool_invocation_id``, ``provider_call_id``; empty for a hold placed before
     they were recorded), and what its ending recorded (``verdict``,
-    ``feedback_counts``, ``ended``; empty when it recorded none). A hold that is
+    ``feedback_counts``, ``ended``, ``answered_by``; empty when it recorded none). A hold that is
     not a user ask, or does not exist, is absent.
     """
     ids = list(dict.fromkeys(hold_ids))
@@ -30,7 +30,7 @@ def ask_holds(db, hold_ids) -> dict[str, dict]:
             "raised_in": placed.get(hold_id, {}),
             "answer": {
                 key: value for key, value in endings.get(row["clearance_event_id"], {}).items()
-                if key in ("ended", "verdict", "feedback_counts")
+                if key in ("ended", "verdict", "feedback_counts", "answered_by")
             },
         }
         for hold_id, row in rows.items()

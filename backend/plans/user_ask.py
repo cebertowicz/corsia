@@ -286,9 +286,7 @@ def _release(
         (artifact_id,),
     ).fetchall()
     detail = dict(release.detail) if release is not None else {}
-    ending = ask_endings.detail(why=why)
-    if ending is not None:
-        detail.update(ending)
+    detail.update(ask_endings.detail(why=why))
     causes = [
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",

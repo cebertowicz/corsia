@@ -105,10 +105,11 @@ def ask_state(
 
     ``hold`` is one ``plans.public.ask_holds`` entry. Open reads as needing
     review. A cleared ask reads its terminal path from the hold's clearance
-    event, else its verdict when the review bar recorded one. A clearance that
-    recorded neither predates recorded endings: a person's 'replaced' clear then
-    wrote its outcome only to the artifact's attention metadata, so that is read
-    as replaced and anything else as answered.
+    event, else its verdict when the review bar recorded one, else answered when
+    the person answered. A clearance that recorded none of these predates
+    recorded endings: a person's 'replaced' clear then wrote its outcome only to
+    the artifact's attention metadata, so that is read as replaced and anything
+    else as answered.
     """
     from plans.public import ASK_ENDINGS
 
@@ -123,6 +124,8 @@ def ask_state(
     verdict = answer.get("verdict")
     if verdict in VERDICTS:
         return verdict, _counts(answer.get("feedback_counts"))
+    if answer.get("answered_by"):
+        return ANSWERED, None
     attention = _payload(artifact.get("metadata")) if artifact else {}
     if attention.get("attention_state") == "cleared" and attention.get("attention_outcome") == "supersede":
         return REPLACED, None

@@ -238,6 +238,23 @@ def test_a_replaced_round_cleared_before_endings_were_recorded_still_reads_repla
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == "replaced"
 
 
+@pytest.mark.parametrize("outcome", ["dismiss", "acknowledge", "answer"])
+def test_a_round_the_person_answered_keeps_reading_answered_after_a_later_round_is_replaced(db, outcome):
+    """The artifact's attention metadata describes only its latest clear, never an earlier round."""
+    from registry.attention import clear_attention
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    first = _ask(db, plan_id, node_id, ask)
+    clear_attention(ask, outcome=outcome, db=db)
+    later_plan, later_node = _node(db, title="Review it again")
+    later = _ask(db, later_plan, later_node, ask)
+    clear_attention(ask, outcome="supersede", db=db)
+
+    cards = ask_cards(db, {first: ask, later: ask})
+    assert (cards[first]["state"], cards[later]["state"]) == ("answered", "replaced")
+
+
 _CARD_STATE_BY_ENDING = {
     "withdrawn": "withdrawn", "closed": "closed", "replaced": "replaced",
     "retired": "unavailable", "rejected": "rejected",
