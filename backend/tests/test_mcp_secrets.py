@@ -113,6 +113,12 @@ def test_resolve_returns_stored_values_and_names_missing_variables_without_value
     assert "value-two" not in str(error.value)
 
 
+def test_url_origin_normalizes_scheme_before_default_port_selection():
+    from tools.mcp import _url_origin
+
+    assert _url_origin("HTTPS://example.test/mcp") == ("https", "example.test", 443)
+
+
 def test_managed_header_key_reaches_auth_only_after_key_store_resolution(store):
     clean, lifted = mcp_secrets.split_secrets(
         "svc", {"url": "http://127.0.0.1:1/mcp", "headers": {"X-API-Key": "value-one"}}, headers=True,

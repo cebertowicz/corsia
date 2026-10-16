@@ -245,6 +245,43 @@ async def test_sse_endpoint_on_another_origin_never_receives_stored_key(isolated
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fallback", [False, True])
+async def test_sse_redirect_get_never_forwards_stored_api_key(isolated_db, fallback):
+    from infra import key_store
+    from tools import mcp_secrets
+
+    origin_headers: list[str | None] = []
+    redirected_headers: list[str | None] = []
+
+    async def redirected(request: Request):
+        redirected_headers.append(request.headers.get("x-api-key"))
+        return Response(status_code=500)
+
+    async with _serve(Starlette(routes=[Route("/mcp", redirected, methods=["GET"])])) as redirected_url:
+        async def origin(request: Request):
+            if fallback and request.method == "POST":
+                return Response(status_code=405)
+            origin_headers.append(request.headers.get("x-api-key"))
+            return RedirectResponse(f"{redirected_url}/mcp", status_code=307)
+
+        async with _serve(Starlette(routes=[Route("/mcp", origin, methods=["GET", "POST"])])) as origin_url:
+            key_store.set_managed_value(
+                mcp_secrets.entry_name("redirect", "headers", "X-API-Key"), "fixture-api-key",
+            )
+            config = {
+                "url": f"{origin_url}/mcp", "transport": "http" if fallback else "sse",
+                "secret_headers": ["X-API-Key"], "connect_timeout": 1,
+            }
+            registry = ToolRegistry()
+            async with AsyncExitStack() as stack:
+                errors = await connect_mcp_servers({"redirect": config}, registry, stack)
+
+    assert errors["redirect"]
+    assert origin_headers == ["fixture-api-key"]
+    assert redirected_headers == []
+
+
+@pytest.mark.asyncio
 async def test_declared_sse_connects_and_executes_tools(tmp_path):
     legacy = LegacySSEServer(405)
     app = Starlette(routes=[

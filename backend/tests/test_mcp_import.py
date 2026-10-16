@@ -116,6 +116,62 @@ def test_import_route_returns_awaiting_approval_for_a_valid_selection(tmp_path, 
     }]
 
 
+def test_proxy_authorization_import_is_classified_as_cannot_connect(tmp_path):
+    import sqlite3
+
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    _json(tmp_path / ".claude.json", {"mcpServers": {"Proxy": {
+        "type": "http", "url": "https://example.test/mcp", "headers": {"Proxy-Authorization": "fake"},
+    }}})
+
+    result = mcp_import.import_selected(
+        [{"source": "claude_code", "name": "Proxy"}], db=db, home=tmp_path, actor="agent",
+    )
+
+    assert result == {"rows": [{"name": "Proxy", "status": "cannot_connect"}]}
+    assert mcp_import.IMPORT_UNSUPPORTED == "CORSIA can't connect to that kind of app yet."
+
+
+def test_import_rolls_back_pending_app_when_key_store_write_fails(tmp_path, monkeypatch):
+    import sqlite3
+
+    from infra import key_store
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    _json(tmp_path / ".claude.json", {"mcpServers": {
+        "fails": {"type": "http", "url": "https://first.test/mcp", "headers": {"Authorization": "one"}},
+        "works": {"type": "http", "url": "https://second.test/mcp", "headers": {"Authorization": "two"}},
+    }})
+    original = key_store.set_managed_value
+    calls = 0
+
+    def fail_once(name, value, *, db=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise key_store.KeyStoreError("injected failure")
+        original(name, value, db=db)
+
+    monkeypatch.setattr(key_store, "set_managed_value", fail_once)
+    result = mcp_import.import_selected(
+        [{"source": "claude_code", "name": "fails"}, {"source": "claude_code", "name": "works"}],
+        db=db, home=tmp_path, actor="agent",
+    )
+
+    assert result["rows"] == [
+        {"name": "fails", "status": "failed"},
+        {"id": result["rows"][1]["id"], "name": "works", "state": "awaiting_approval"},
+    ]
+    assert db.execute("SELECT name FROM connected_apps").fetchall()[0]["name"] == "works"
+
+
 def test_import_selected_creates_pending_app_and_keeps_key_out_of_row(tmp_path):
     import sqlite3
 
@@ -177,6 +233,7 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
 
     assert imported["rows"][0]["state"] == "awaiting_approval"
     assert app["config"]["needs_token"] is True
+    assert app["config"]["key_refs"] == [{"kind": "header", "name": "Authorization"}]
     assert secret not in json.dumps({"row": app, "response": imported})
     assert secret not in str(db.execute("SELECT name,value_ref FROM key_store_entries").fetchall())
 
@@ -190,10 +247,15 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
     monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
     monkeypatch.setattr(state, "_agent", None)
     published = []
+    key_is_set = False
 
     async def load(fn, *args):
         if fn.__name__ == "load_runtime_app_config":
-            return "codex", {**app["config"], "connected_app_id": args[0]}
+            return "codex", {
+                **app["config"], "secret_headers": ["Authorization"], "connected_app_id": args[0],
+            }
+        if fn.__name__ == "missing_app_key_refs":
+            return [] if key_is_set else ["Authorization"]
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])
             return None
@@ -208,6 +270,17 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
 
     assert result["state"] == "needs_token"
     assert [item["state"] for item in published] == ["connecting", "needs_token"]
+
+    key_is_set = True
+
+    async def connects(config, _registry, _stack):
+        assert config["codex"]["secret_headers"] == ["Authorization"]
+        return {}
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connects)
+    result = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", str(app["id"])))
+
+    assert result["state"] == "working"
     assert secret not in json.dumps(result)
     assert secret not in caplog.text
 

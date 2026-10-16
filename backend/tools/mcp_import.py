@@ -99,6 +99,14 @@ def _kind(source: str, config: dict[str, Any]) -> str | None:
     return None
 
 
+def _has_refused_proxy_authorization(config: dict[str, Any]) -> bool:
+    """Treat proxy credentials as an unsupported import, never a token prompt."""
+    headers = config.get("headers", config.get("http_headers"))
+    return isinstance(headers, dict) and any(
+        isinstance(name, str) and name.lower() == "proxy-authorization" for name in headers
+    )
+
+
 def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
     """Whether a remote app cannot be imported before C supplies sign-in."""
     if _kind(source, config) != "remote":
@@ -210,6 +218,12 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
             copied["headers"] = headers
     if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
         copied["needs_token"] = True
+        header_env = config.get("env_http_headers")
+        if isinstance(header_env, dict):
+            copied["secret_headers"] = [
+                name for name, value in header_env.items()
+                if isinstance(name, str) and name and isinstance(value, str) and value
+            ]
     for source_key, target_key in (("connect_timeout", "connect_timeout"),
                                    ("startup_timeout_sec", "connect_timeout"),
                                    ("tool_timeout", "tool_timeout"),
@@ -315,6 +329,7 @@ def import_selected(
     from connections.app_lifecycle import create_pending_app
     from connections.app_reach import AppNameOverlapError
     from infra import key_store
+    from infra.database import write_transaction
     import uuid
 
     if not isinstance(selected, list) or any(not isinstance(item, dict) for item in selected):
@@ -333,7 +348,7 @@ def import_selected(
             rows.append({"name": name, "status": "failed"})
             continue
         source_config, folder = entry
-        if _kind(source, source_config) == "unsupported":
+        if _kind(source, source_config) == "unsupported" or _has_refused_proxy_authorization(source_config):
             rows.append({"name": name, "status": "cannot_connect"})
             continue
         if _needs_sign_in(source, source_config):
@@ -352,17 +367,18 @@ def import_selected(
             config, lifted = _key_refs(app_id, copied)
             _validate(app_id, {**config, "secret_env": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "env"],
                                "secret_headers": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "header"]})
-            result = create_pending_app(
-                name, config, reach, actor_thread_id=actor, app_id=app_id,
-                audit_actor=("agent", actor), db=db,
-            )
-            for entry_name, value in lifted.items():
-                key_store.set_managed_value(entry_name, value, db=db)
-                audit_import_key_write(actor, _SOURCE_LABELS[source], name)
+            with write_transaction(db, scope="mcp_import"):
+                result = create_pending_app(
+                    name, config, reach, actor_thread_id=actor, app_id=app_id,
+                    audit_actor=("agent", actor), db=db,
+                )
+                for entry_name, value in lifted.items():
+                    key_store.set_managed_value(entry_name, value, db=db)
+                    audit_import_key_write(actor, _SOURCE_LABELS[source], name)
             rows.append({"id": str(result["id"]), "name": name, "state": "awaiting_approval"})
         except AppNameOverlapError:
             rows.append({"name": name, "status": "already_exists"})
-        except MCPConfigError:
+        except (MCPConfigError, key_store.KeyStoreError):
             rows.append({"name": name, "status": "failed"})
     return {"rows": rows}
 

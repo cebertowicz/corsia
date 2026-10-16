@@ -90,7 +90,11 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
         name, config = await run_in_db(load_runtime_app_config, app_id)
         connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
         await _publish_app_state(app_id, connecting)
-        if config.get("needs_token") is True or await run_in_db(missing_app_key_refs, app_id):
+        missing_keys = await run_in_db(missing_app_key_refs, app_id)
+        token_without_key_ref = config.get("needs_token") is True and not (
+            config.get("secret_env") or config.get("secret_headers")
+        )
+        if token_without_key_ref or missing_keys:
             result = {
                 "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
                 "failure_class": None,

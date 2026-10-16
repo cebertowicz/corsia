@@ -118,7 +118,7 @@ def _key_refs(value: object) -> list[dict[str, str]]:
 
 def _config(body: dict[str, Any]) -> dict[str, Any]:
     config = body.get("config")
-    if not isinstance(config, dict) or "key_refs" in config:
+    if not isinstance(config, dict) or {"key_refs", "asked_by_thread_id"}.intersection(config):
         raise _refusal("config must be an object; declare key names with key_refs")
     from tools.conductor_api_policy import contains_forbidden_fields
 

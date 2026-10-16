@@ -169,6 +169,29 @@ def test_agent_create_uses_server_thread_scope_and_refuses_reach(connected_apps_
     }
 
 
+@pytest.mark.parametrize("person", [False, True])
+def test_config_refuses_asked_by_thread_id_on_create_and_update(connected_apps_client, person) -> None:
+    client, db, actor = connected_apps_client
+    if person:
+        actor.clear()
+        actor.update({"id": "user", "token_kind": "session"})
+    payload = {"command": "app", "asked_by_thread_id": "thread-b"}
+
+    created = client.post("/api/mcp/servers", json={"name": "A", "config": payload, "key_refs": []})
+
+    assert created.status_code == 422
+    app = create_app(
+        "Existing", {"command": "app", "key_refs": []},
+        {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}, db=db,
+    )
+    updated = client.patch(
+        f"/api/mcp/servers/{app['id']}",
+        json={"config": payload, "key_refs": [], "expected_revision": 1},
+    )
+
+    assert updated.status_code == 422
+
+
 def test_workspace_corsia_proposes_an_app_for_all_projects(connected_apps_client) -> None:
     client, db, actor = connected_apps_client
     actor["thread_id"] = "workspace"

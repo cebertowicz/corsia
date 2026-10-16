@@ -57,7 +57,8 @@ def _url_origin(url: str) -> tuple[str, str, int] | None:
     parsed = urlsplit(url)
     if not parsed.scheme or not parsed.hostname:
         return None
-    return (parsed.scheme.lower(), parsed.hostname.lower(), parsed.port or (443 if parsed.scheme == "https" else 80))
+    scheme = parsed.scheme.lower()
+    return (scheme, parsed.hostname.lower(), parsed.port or (443 if scheme == "https" else 80))
 
 
 class MCPConnectionError(MCPConfigError):
@@ -228,6 +229,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
             raise MCPConfigError(_mcp_oserror_detail(error)) from None
     elif config.get("url"):
         from mcp.client.sse import sse_client
+        from tools.mcp_http_transport import sse_http_client_factory
 
         options, auth = http_options(config)
         if secret_headers:
@@ -239,7 +241,10 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         transport = config.get("transport", "http")
         if transport == "sse":
             read, write = await stack.enter_async_context(
-                sse_client(config["url"], headers=options["headers"], auth=auth),
+                sse_client(
+                    config["url"], headers=options["headers"], auth=auth,
+                    httpx_client_factory=sse_http_client_factory,
+                ),
             )
             session = await stack.enter_async_context(ClientSession(read, write))
             initialized = await session.initialize()

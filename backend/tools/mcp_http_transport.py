@@ -7,6 +7,15 @@ from typing import Any
 import httpx
 
 
+def sse_http_client_factory(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """Create the redirect-contained client required by every SSE connection."""
+    return httpx.AsyncClient(headers=headers, timeout=timeout, auth=auth, follow_redirects=False)
+
+
 async def _own_streamable_session(url: str, client: httpx.AsyncClient, ready, closed: asyncio.Event) -> None:
     """Own the SDK task group in one task so it closes in the task that entered it."""
     from mcp import ClientSession
@@ -33,7 +42,9 @@ async def _open_legacy_sse(url: str, headers: dict, auth: httpx.Auth | None, sta
     from mcp import ClientSession
     from mcp.client.sse import sse_client
 
-    read, write = await stack.enter_async_context(sse_client(url, headers=headers, auth=auth))
+    read, write = await stack.enter_async_context(
+        sse_client(url, headers=headers, auth=auth, httpx_client_factory=sse_http_client_factory),
+    )
     session = await stack.enter_async_context(ClientSession(read, write))
     return session, await session.initialize()
 
