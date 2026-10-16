@@ -5,6 +5,7 @@
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
+	import SetupExistingOmlxConsent from './SetupExistingOmlxConsent.svelte';
 	import { token, user } from '$lib/stores/auth';
 	import { cancelLocalDownload, fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
@@ -45,6 +46,8 @@
 	let localDownloadPending = $state(false);
 	let localSetupBusy = $state(false);
 	let existingOmlxConsent = $state(false);
+	/** Welcome's Let CORSIA manage it (or Use mine) for the person's own oMLX. */
+	let manageOwnOmlx = $state(true);
 	let keyOpen = $state(false);
 	let providerName = $state('anthropic');
 	let apiKey = $state('');
@@ -55,6 +58,9 @@
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
+	/** Welcome's choice where it showed both (Let CORSIA manage it, Use mine); undefined where it didn't. */
+	const ownOmlxChoice = $derived(status.existing_omlx && localPick.wanted ? manageOwnOmlx : undefined);
+	const manageExisting = $derived(ownOmlxChoice === true);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived(buildLocalJob(local, localDownloading, localPick.pick?.model?.name, page, Boolean(get(token)), localStartError, () => void cancelDownload()));
@@ -118,7 +124,7 @@
 
 	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
 		if (!localPick.downloads(status.free_disk_gb) && !consentExisting) return 'started';
-		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting }) });
+		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, manage_existing: consentExisting ? ownOmlxChoice : undefined }) });
 		const result = await response.json().catch(() => null);
 		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
 		return response.ok && result?.ok !== false ? 'started' : 'failed';
@@ -160,7 +166,7 @@
 			const current = get(token);
 			returnToModels = Boolean(current);
 			const start = current
-				? await setupLocalSource(current, true)
+				? await setupLocalSource(current, true, ownOmlxChoice)
 				: await startLocalDownload(true);
 			const started = typeof start === 'string' ? start === 'started' : start.ok;
 			if (started) localDownloadPending = true;
@@ -358,23 +364,12 @@
 
 	{#if page === 'welcome'}
 		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
-			onWantedChange={(next) => localPick.change(next, Boolean(status.existing_omlx))} onRecheck={readStatus} onRetry={() => void localPick.start()} />
+			onWantedChange={(next) => localPick.change(next, Boolean(status.existing_omlx))} onRecheck={readStatus} onRetry={() => void localPick.start()}
+			ownOmlx={Boolean(status.existing_omlx)} manage={manageOwnOmlx} onManageChange={(next) => (manageOwnOmlx = next)} />
 	{:else if page === 'account'}
 		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />
 	{:else if page === 'models' && existingOmlxConsent}
-		<div class="sources consent">
-			<p>CORSIA will read:</p>
-			<ul>
-				<li>your oMLX port setting</li>
-				<li>the installed oMLX version</li>
-				<li>your oMLX server to find its available models</li>
-			</ul>
-			<p>It won’t change your oMLX.</p>
-			<div class="consent-actions">
-				<Button variant="chip" onclick={() => decideExistingOmlx(false)} disabled={localSetupBusy}>Not now</Button>
-				<Button variant="chip" onclick={() => decideExistingOmlx(true)} loading={localSetupBusy} disabled={localSetupBusy}>Use it</Button>
-			</div>
-		</div>
+		<SetupExistingOmlxConsent manage={manageExisting} busy={localSetupBusy} onDecide={decideExistingOmlx} />
 	{:else if page === 'models'}
 		<div class="sources">
 			<SetupAiRows rows={aiRows} />
@@ -393,8 +388,5 @@
 <style>
 	/* Account form styles live with SetupAccountForm. */
 	.sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
-	.consent p { margin: 0; }
-	.consent ul { margin: 0; padding-left: var(--space-5); }
-	.consent-actions { display: flex; gap: var(--space-2); }
 	.api-key-action { align-self: flex-start; }
 </style>

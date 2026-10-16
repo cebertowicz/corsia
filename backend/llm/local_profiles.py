@@ -27,6 +27,18 @@ def load_settings(path: Path = _PATH) -> tuple[dict, dict]:
 OMLX_GLOBAL_SETTINGS, MODEL_SETTINGS = load_settings()
 
 
+def thinking_recommendation(thinking_default: object) -> dict[str, bool]:
+    """What a model needs written so an agent turn on it thinks.
+
+    oMLX reads each model's thinking default from its chat template
+    (``thinking_default`` on ``GET /admin/api/models``): Qwen 3.x thinks unless
+    told not to, Gemma 4 only when asked, and None means there is no toggle. A
+    family that defaults to off gets ``enable_thinking`` alone; no effort is
+    written, so the template's own default applies.
+    """
+    return {"enable_thinking": True} if thinking_default is False else {}
+
+
 def format_size(size_bytes: int) -> str:
     """The one display format for byte sizes."""
     return f"{size_bytes / 1024**3:.2f} GiB"
