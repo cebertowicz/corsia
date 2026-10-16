@@ -16,6 +16,10 @@ LOCAL_APP_NOTICE = (
     "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
     "Connect only apps you trust."
 )
+BODY_SHAPE = (
+    'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '
+    '"key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]}; use "url" instead of "command" for a hosted app.'
+)
 
 
 def _refusal(detail: str, status: int = 422) -> HTTPException:
@@ -104,13 +108,13 @@ def _key_refs(value: object) -> list[dict[str, str]]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise _refusal("key_refs must be a list of env or header names")
+        raise _refusal(f"key_refs must be a list of env or header names. {BODY_SHAPE}")
     refs: list[dict[str, str]] = []
     for ref in value:
         if (not isinstance(ref, dict) or set(ref) != {"kind", "name"}
                 or ref.get("kind") not in {"env", "header"}
                 or not isinstance(ref.get("name"), str) or not ref["name"]):
-            raise _refusal("key_refs must contain only env or header names")
+            raise _refusal(f"key_refs must contain only env or header names. {BODY_SHAPE}")
         refs.append({"kind": ref["kind"], "name": ref["name"]})
     if len({(ref["kind"], ref["name"]) for ref in refs}) != len(refs):
         raise _refusal("key_refs cannot repeat a name")
@@ -119,8 +123,15 @@ def _key_refs(value: object) -> list[dict[str, str]]:
 
 def _config(body: dict[str, Any]) -> dict[str, Any]:
     config = body.get("config")
-    if not isinstance(config, dict) or {"key_refs", "asked_by_thread_id"}.intersection(config):
-        raise _refusal("config must be an object; declare key names with key_refs")
+    if isinstance(config, dict) and {"key_refs", "asked_by_thread_id"}.intersection(config):
+        raise _refusal(f"key_refs and asked_by_thread_id go beside config, not inside it. {BODY_SHAPE}")
+    if not isinstance(config, dict):
+        raise _refusal(f"config must be an object. {BODY_SHAPE}")
+    command, url, args = config.get("command"), config.get("url"), config.get("args", [])
+    if not (isinstance(command, str) and command.strip()) and not (isinstance(url, str) and url.strip()):
+        raise _refusal(f"config needs the command that starts the app, or its url. {BODY_SHAPE}")
+    if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+        raise _refusal(f"config args must be a list of strings. {BODY_SHAPE}")
     from tools.conductor_api_policy import contains_forbidden_fields
 
     refs = _key_refs(body.get("key_refs"))
