@@ -10,6 +10,7 @@ Released 2026-10-16.
 ### Upgrading
 
 - This update adds `flatbuffers`, `onnxruntime`, `protobuf`, and `publicsuffixlist`; the update installs them as part of its normal dependency setup.
+- The workspace conductor is now the CORSIA agent. Its thread and settings say CORSIA, `corsia agent warm` replaces the conductor warm command, and the workspace agent’s API moved from `/api/conductor?scope=workspace` to `/api/corsia-agent`. Project conductors are unchanged.
 
 ### Updates
 
@@ -33,6 +34,7 @@ Released 2026-10-16.
 
 - The chat view is tidied: the sidebar, chat, plan and document panes share one style for each repeated element, with dated boxes and heavy borders removed and no information or action lost.
 - Project colours keep text readable on every coloured control, in light and dark themes.
+- New threads on local models, and other models CORSIA runs directly, get a short generated title instead of the start of your first message. If a title can’t be generated, the thread keeps its placeholder and tries again after its next turn.
 - On phones, the header clears the screen's safe areas and keeps its faded frosted blur while content scrolls underneath. In installed iOS 27 apps, the header and first sidebar row sit below the system's top-edge blur, and chat text no longer shows through the header title.
 - The decision drawer's footer no longer covers its options on phones. A decision shows its reasoning on the option it recommends, and its labels match the rest of the chat view.
 - Plan decisions stay listed while the decision queue is still loading, and a decision row opens the decision it names.
@@ -43,6 +45,9 @@ Released 2026-10-16.
 - Plans use clearer Done and Won’t do language, complete summaries on smaller screens, and smoother open and close motion. The chat thread list no longer shows a misleading Stuck status.
 - Steps needing your action show clear in-place instructions and what they unblock. Nested plan review requests now appear in chat, and a stopped review or failing item no longer prevents other scheduled follow-through from running.
 - Agents see and are prompted to resume work they intentionally set aside, browser sign-in requests open a clear task and settle only when completion is observed, and a new input stays queued behind a live Codex writer instead of failing.
+- A hands-on step only you can take arrives as a task assigned to you, with how to do it; a question only you can answer is still asked in chat.
+- The CORSIA agent watches for agents that have got worse for you, confirms it a week later and sends it to whoever can fix it. It also spots recurring work that takes your time and offers to take it over.
+- An agent can schedule a script it wrote to check readings on a cadence, sandboxed and bounded, without spending a model turn on each run.
 
 ### Providers
 
@@ -54,6 +59,11 @@ Released 2026-10-16.
 - MCP servers imported from your other AI tools arrive as connected apps waiting for your approval. Settings › Connected apps lets you approve, decline, reconnect or remove each one and choose which projects it works in.
 - Connected apps that CORSIA runs on your Mac are sandboxed away from CORSIA's private state and stored keys.
 - Google sign-in is held by CORSIA itself and gives agents email and calendar tools. An agent sends an email or invite only from the exact draft open in its document, and only after your latest message.
+- CORSIA sets up your own private Google project in a browser you can watch; you only sign in and click Allow. Sign-in also asks for Drive, Docs and Sheets now, so you won’t need to sign in again when CORSIA’s tools for them arrive.
+- With Google connected, CORSIA screens new Inbox mail every few minutes and passes it to your agents. It starts from the moment you connect and never replays older mail.
+- A hosted connected app that needs you to sign in has Sign in on its row in Settings › Connected apps. You sign in in your own browser on the Mac CORSIA runs on, and you can sign out again. Agents can’t sign in or out for you, and the sign-in stays in CORSIA’s key store. If an app stops accepting it, its row asks you to sign in again.
+- If an app doesn’t recognise CORSIA, its row says how to get the client ID it needs, and you give it to CORSIA in chat.
+- Agents now point you to Settings › Connected apps for every app, and each app works in the projects you choose for it.
 - The context sheet shows what each connected app costs in context.
 
 ### Measurement
@@ -70,6 +80,12 @@ Released 2026-10-16.
 - When a local model download is already running, first run shows its progress instead of offering it again, and an interrupted download resumes after a restart.
 - Setup shows clear background-download progress and a smoother step indicator.
 - The supported setup for 16 GB Macs is now documented.
+- The local model step uses oMLX’s own recommendation for your Mac.
+- If you already run oMLX, CORSIA can manage it with your consent. It records your settings first and restores them when it stops managing.
+- Setup offers to update an outdated Claude Code or Codex.
+- Your first chat, named CORSIA, knows what setup actually did. The AI that’s ready is preselected, and it doesn’t hold up finishing.
+- Downloads can be cancelled. They no longer show a time estimate CORSIA hasn’t measured, and a failure lets you save a report.
+- The launch screen matches setup, and setup’s motion becomes a crossfade when Reduce Motion is on.
 
 ### Packaged Mac App
 
@@ -78,6 +94,14 @@ Released 2026-10-16.
 - Closing the CORSIA window keeps its background service running, with recovery if macOS disables it.
 - The app updates itself. It downloads and verifies a newer version, and Update installs it in place and relaunches onto it. If the new version does not start healthy, the app restores the previous version and says so. Your data lives outside the app, so an update never touches it.
 - Settings › Restart works in the packaged app.
+
+### Known issues
+
+- Editing a connected app that is running takes effect only after you Reconnect it.
+- Saving two keys within about 10 seconds can show an error. The value is saved, and Reconnect clears the "needs a key" state.
+- Declining an imported app leaves the keys it brought in stored in CORSIA.
+- Some connected-app guidance mentions Set key or Replace key buttons that this release doesn’t have. Use Settings › Connected apps.
+- If CORSIA manages your own oMLX and oMLX can’t recommend a model, setup finishes without saying that no model was set up.
 
 ## v0.3.0 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
 
