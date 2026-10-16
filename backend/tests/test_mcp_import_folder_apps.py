@@ -95,7 +95,8 @@ def test_outside_folder_app_comes_over_waiting_with_a_reach_that_reaches_nothing
 
     assert row["state"] == "awaiting_approval"
     assert row["folder"] == "notes"
-    assert row["message"] == mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE
+    assert row["message"] == mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE.format(App=row["name"])
+    assert row["message"].startswith(f"**{row['name']}**: ")
     assert "status" not in row
     app = get_app(row["id"], db=db)
     assert app["reach"] == EMPTY

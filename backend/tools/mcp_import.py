@@ -29,7 +29,7 @@ log = logging.getLogger("corsia.key_audit")
 # The import conversation is assembled from these canonical person-facing lines.
 IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
-IMPORT_FOLDER_WAITING_FOR_PLACE = "Not working yet. Choose where it works, then approve it."
+IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
 IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
 IMPORT_NEEDS_SIGN_IN = "I can't bring over **{App}** ({client}) yet: it needs you to sign in, and CORSIA can't do that yet."
 
@@ -361,7 +361,7 @@ def import_selected(
             row = {"id": str(result["id"]), "name": name, "state": "awaiting_approval"}
             if outside_folder is not None:
                 row["folder"] = outside_folder
-                row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE
+                row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE.format(App=name)
             rows.append(row)
         except AppNameOverlapError:
             rows.append({"name": name, "status": "already_exists"})
