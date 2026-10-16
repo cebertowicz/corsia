@@ -28,7 +28,7 @@ class DecisionInputError(service.PlanError):
 MAX_TITLE = 120
 MAX_CONTEXT = 1200
 MAX_TRADEOFF = 800
-MAX_RATIONALE = 800
+MAX_RATIONALE = 240
 MAX_OPTION_LABEL = 80
 MAX_OPTION_DETAIL = 240
 MAX_OTHER_TEXT = 2000
@@ -296,6 +296,13 @@ def answer_note(answer: dict | None) -> str | None:
 
 def patched(existing: dict, patch: dict) -> dict:
     """Merge a partial update onto the stored body, rejecting unknown fields."""
+    if (
+        "rationale" not in patch
+        and len(str(existing.get("rationale") or "").strip()) > MAX_RATIONALE
+    ):
+        raise DecisionInputError(
+            f"stored rationale must be shortened to {MAX_RATIONALE} characters before updating"
+        )
     unknown = sorted(set(patch) - set(CONTENT_FIELDS))
     if unknown:
         raise DecisionInputError(f"unknown decision fields: {', '.join(unknown)}")

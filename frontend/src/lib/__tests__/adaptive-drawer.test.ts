@@ -49,6 +49,21 @@ afterEach(() => {
 });
 
 describe("AdaptiveDrawer", () => {
+  it("keeps content-owned context beside Done at desktop width", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: vi.fn(), mobileMeta: "Decision · Reviewer subagent · CORSIA" },
+    });
+    await settle();
+
+    const header = host.querySelector(".drawer-head") as HTMLElement;
+    expect(header.querySelector("h2")).toBeNull();
+    expect(header.querySelector(".drawer-eyebrow")?.textContent).toBe("Decision · Reviewer subagent · CORSIA");
+    expect(header.querySelectorAll(".drawer-eyebrow")).toHaveLength(1);
+    expect(header.querySelector(".drawer-done")?.textContent?.trim()).toBe("Done");
+    expect(header.querySelector(".drawer-mobile-meta + .drawer-done")).toBeTruthy();
+  });
+
   it("gives its content a bounded flex column only when asked to fill", async () => {
     component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
     await settle();

@@ -138,14 +138,16 @@ describe("pick any — what the person sees", () => {
     expect(host.querySelector(".option-button")).toBeNull();
   });
 
-  it("names each checkbox by its label, plus 'recommended', and describes it by its detail", async () => {
+  it("names each checkbox by its label, plus 'recommended', and describes the first recommendation by its detail and rationale", async () => {
     await openChip();
 
     const first = box("Bring over your MCP servers (3)");
     expect(first.getAttribute("aria-label")).toBe("Bring over your MCP servers (3), recommended");
     expect(box("Daily summary").getAttribute("aria-label")).toBe("Daily summary");
-    const described = document.getElementById(first.getAttribute("aria-describedby")!);
-    expect(described?.textContent).toBe("Copies your config.");
+    const describedBy = first.getAttribute("aria-describedby")!.split(" ");
+    expect(describedBy).toHaveLength(2);
+    expect(document.getElementById(describedBy[0])?.textContent).toBe("Copies your config.");
+    expect(document.getElementById(describedBy[1])?.textContent).toContain("None of them changes anything else on this Mac.");
     expect(first.closest("label")).toBeTruthy();
     expect(first.tabIndex).toBe(0);
   });
