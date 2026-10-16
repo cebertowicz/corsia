@@ -45,6 +45,7 @@ class Management:
 
 
 def record_path() -> Path:
+    """The record's file in this CORSIA state root."""
     from infra.config import STATE_ROOT
 
     return Path(STATE_ROOT) / _RECORD_NAME
@@ -92,6 +93,7 @@ def _write(record: Management) -> None:
 
 
 def active() -> bool:
+    """Whether CORSIA manages the person's oMLX now: stopping, or never managing, reads False."""
     record = read()
     return record is not None and record.active
 
@@ -136,6 +138,7 @@ def begin_stop() -> Management | None:
 
 
 def restore_failed() -> None:
+    """A restore didn't finish: keep the record, marked, so Settings offers Try again."""
     record = read()
     if record is not None:
         _write(replace(record, restore_failed=True))
