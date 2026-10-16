@@ -228,7 +228,6 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
             raise MCPConfigError(_mcp_oserror_detail(error)) from None
     elif config.get("url"):
         from mcp.client.sse import sse_client
-        from mcp.client.streamable_http import streamable_http_client
 
         options, auth = http_options(config)
         if secret_headers:
@@ -245,66 +244,11 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
             session = await stack.enter_async_context(ClientSession(read, write))
             initialized = await session.initialize()
         elif transport == "http":
-            initialize_statuses: set[int] = set()
+            from tools.mcp_http_transport import open_streamable_http_session
 
-            async def record_initialize_status(response: httpx.Response) -> None:
-                if response.request.method == "POST":
-                    initialize_statuses.add(response.status_code)
-
-            client = await stack.enter_async_context(httpx.AsyncClient(
-                **options, event_hooks={"response": [record_initialize_status]},
-            ))
-            stream_ready = asyncio.get_running_loop().create_future()
-            stream_closed = asyncio.Event()
-
-            async def own_streamable_session() -> None:
-                try:
-                    async with AsyncExitStack() as stream_stack:
-                        read, write, _ = await stream_stack.enter_async_context(
-                            streamable_http_client(config["url"], http_client=client),
-                        )
-                        stream_session = await stream_stack.enter_async_context(ClientSession(read, write))
-                        stream_initialized = await stream_session.initialize()
-                        stream_ready.set_result((stream_session, stream_initialized))
-                        await stream_closed.wait()
-                except BaseException as error:
-                    if not stream_ready.done():
-                        stream_ready.set_exception(error)
-                    else:
-                        raise
-
-            stream_task = asyncio.create_task(own_streamable_session())
-
-            async def close_streamable_session() -> None:
-                stream_closed.set()
-                await asyncio.gather(stream_task, return_exceptions=True)
-
-            try:
-                session, initialized = await asyncio.shield(stream_ready)
-            except asyncio.CancelledError:
-                await close_streamable_session()
-                if not (stream_task.done() and initialize_statuses.intersection({404, 405})):
-                    raise
-                read, write = await stack.enter_async_context(
-                    sse_client(config["url"], headers=options["headers"], auth=auth),
-                )
-                session = await stack.enter_async_context(ClientSession(read, write))
-                initialized = await session.initialize()
-            except (Exception, BaseExceptionGroup):
-                await close_streamable_session()
-                # The MCP SDK turns a 404 into JSON-RPC termination and can
-                # contain a 405 in its task group, so its public exception type
-                # is not a reliable status signal. The client response hook is.
-                if not initialize_statuses.intersection({404, 405}):
-                    raise
-                read, write = await stack.enter_async_context(
-                    sse_client(config["url"], headers=options["headers"], auth=auth),
-                )
-                session = await stack.enter_async_context(ClientSession(read, write))
-                initialized = await session.initialize()
-            else:
-                transport_task = stream_task
-                stack.push_async_callback(close_streamable_session)
+            session, initialized, transport_task = await open_streamable_http_session(
+                config["url"], options, auth, stack,
+            )
         else:
             raise MCPConfigError("MCP transport is not supported")
     else:
