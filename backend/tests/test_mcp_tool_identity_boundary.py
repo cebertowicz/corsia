@@ -24,6 +24,17 @@ def _wrapper_for_output(output: str, *, is_error: bool):
     )
 
 
+def test_mcp_denied_paths_include_shell_and_native_formats():
+    from tools.mcp import _mcp_denied_paths_in
+
+    paths = _mcp_denied_paths_in(
+        "cat: /state/shell.db: Operation not permitted\n"
+        "EPERM: operation not permitted, open '/state/native.db'"
+    )
+
+    assert paths == (Path("/state/shell.db"), Path("/state/native.db"))
+
+
 @pytest.mark.asyncio
 async def test_mcp_wrapper_never_forwards_backend_execution_context():
     from tools.mcp import MCPToolWrapper

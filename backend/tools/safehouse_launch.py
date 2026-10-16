@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections.abc import Callable
 import os
 from pathlib import Path
+import re
+import tempfile
 
 
 def direct_safehouse_argv(
@@ -33,13 +35,50 @@ def direct_safehouse_argv(
     ]
 
 
+def mcp_envelope_dir(state_root: Path) -> Path:
+    """Return the state-owned, agent-denied directory for MCP profiles."""
+    profile_dir = state_root / "runtime" / "mcp-envelopes"
+    profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    profile_dir.chmod(0o700)
+    return profile_dir
+
+
+_NO_PROCTITLE_SHIM = """const descriptor = Object.getOwnPropertyDescriptor(process, 'title');
+if (!descriptor?.configurable) {
+  throw new Error('CORSIA MCP preload cannot safely disable process.title');
+}
+const get = typeof descriptor.get === 'function' ? descriptor.get : () => descriptor.value;
+Object.defineProperty(process, 'title', {get, set(){}, configurable:true});
+"""
+
+
+def write_no_proctitle_shim(cache_dir: Path) -> Path:
+    """Write the app-local Node preload before a Safehouse launch."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    shim_path = cache_dir / "no-proctitle.cjs"
+    shim_path.write_text(_NO_PROCTITLE_SHIM, encoding="utf-8")
+    return shim_path
+
+
+def _generated_profile_temp_rules() -> tuple[str, ...]:
+    roots = {Path(tempfile.gettempdir()), Path("/tmp"), Path("/private/tmp")}
+    for root in tuple(roots):
+        raw = str(root)
+        if raw.startswith("/private/"):
+            roots.add(Path(raw.removeprefix("/private")))
+        elif raw.startswith("/"):
+            roots.add(Path("/private" + raw))
+    prefix = r"corsia-(?:shell-envelope|controlled-git|mcp-envelope)-[^/]*\.sb"
+    return tuple(f'(deny file-write* (regex #"^{re.escape(str(root))}/{prefix}$"))' for root in roots)
+
+
 def mcp_private_state_profile(
     profile_path: Path,
     safehouse_path: Path,
     state_root: Path,
 ) -> str:
-    # Temporary floor block until a reviewed host-access path for MCP exists (#154).
     """Render the allow-default profile from the shared protected-path inventory."""
+    # Temporary floor block until a reviewed host-access path for MCP exists (#154).
     from tools.host_path_policy import current_protected_host_path_policy
 
     policy = current_protected_host_path_policy(
@@ -70,6 +109,7 @@ def mcp_private_state_profile(
             "(allow default)",
             ";; Temporary MCP private-state floor block; remove after #154.",
             *path_rules,
+            *_generated_profile_temp_rules(),
             "(deny process-info*)",
             "(deny signal)",
             "(deny mach-priv-task-port)",

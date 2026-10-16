@@ -17,7 +17,7 @@ from tools.registry import ToolRegistry
 
 
 _PYTHON_SERVER = r'''
-import json, os, signal, subprocess, sys
+import json, os, signal, subprocess, sys, tempfile
 
 def respond(request_id, result):
     print(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}), flush=True)
@@ -33,7 +33,9 @@ for line in sys.stdin:
     elif method == "tools/list":
         respond(request["id"], {"tools": [
             {"name": "read_private", "description": "probe private files", "inputSchema": {"type": "object", "properties": {}}},
+            {"name": "read_private_link", "description": "probe linked private files", "inputSchema": {"type": "object", "properties": {}}},
             {"name": "manage_child", "description": "spawn signal and wait", "inputSchema": {"type": "object", "properties": {}}},
+            {"name": "write_shell_envelope", "description": "attempt generated profile rewrite", "inputSchema": {"type": "object", "properties": {}}},
         ]})
     elif method == "tools/call":
         name = request["params"]["name"]
@@ -41,10 +43,21 @@ for line in sys.stdin:
             child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
             child.send_signal(signal.SIGTERM)
             respond(request["id"], text(json.dumps({"returncode": child.wait(timeout=5)})))
+        elif name == "write_shell_envelope":
+            target = os.path.join(tempfile.gettempdir(), "corsia-shell-envelope-mcp-test.sb")
+            try:
+                open(target, "w", encoding="utf-8").write("(allow default)")
+            except OSError as error:
+                respond(request["id"], text(str(error), is_error=True))
+            else:
+                respond(request["id"], text("unexpected generated profile write"))
         else:
             reports = []
             denied = False
-            for path in (os.environ["MCP_KEY_PATH"], os.environ["MCP_DB_PATH"]):
+            paths = (os.environ["MCP_KEY_PATH"], os.environ["MCP_DB_PATH"])
+            if name == "read_private_link":
+                paths = (os.environ["MCP_KEY_LINK_PATH"], os.environ["MCP_DB_LINK_PATH"])
+            for path in paths:
                 try:
                     reports.append({"path": path, "content": open(path, encoding="utf-8").read()})
                 except OSError as error:
@@ -105,8 +118,25 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     assert f'(subpath "{lexical}")' in profile
     assert f'(subpath "{state}")' in profile
     assert f'(subpath "{state / "keys"}")' in profile
+    assert "corsia-(?:shell-envelope|controlled-git|mcp-envelope)-[^/]*\\.sb" in profile
+    assert '^/tmp/' in profile
+    assert '^/private/tmp/' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
+
+
+def test_mcp_envelope_dir_is_agent_shell_denied(monkeypatch, tmp_path):
+    from tools.host_path_policy import ProtectedHostPathPolicy
+    from tools.safehouse_launch import mcp_envelope_dir
+
+    _workspace, state = _configure_roots(monkeypatch, tmp_path)
+    envelope_dir = mcp_envelope_dir(state)
+    policy = ProtectedHostPathPolicy(home=tmp_path / "home", state_root=state)
+
+    assert envelope_dir.is_relative_to(state)
+    assert envelope_dir.stat().st_mode & 0o777 == 0o700
+    assert policy.ordinary_denial(envelope_dir / "profile.sb", for_write=True)
+    assert f'(subpath "{state}")' in policy.sandbox_rules()
 
 
 def test_mcp_direct_safehouse_argv_excludes_shell_feature_enables(tmp_path):
@@ -208,17 +238,26 @@ async def test_local_mcp_safehouse_blocks_private_state_and_allows_child_managem
     db_path.write_text("database-private", encoding="utf-8")
     app = tmp_path / "server.py"
     app.write_text(_PYTHON_SERVER, encoding="utf-8")
-    config = {"command": sys.executable, "args": [str(app)], "env": {"MCP_KEY_PATH": str(key_path), "MCP_DB_PATH": str(db_path)}}
+    config = {"command": sys.executable, "args": [str(app)], "env": {
+        "MCP_KEY_PATH": str(key_path), "MCP_DB_PATH": str(db_path),
+        "MCP_KEY_LINK_PATH": str(tmp_path / "state-link" / "keys" / "value"),
+        "MCP_DB_LINK_PATH": str(tmp_path / "state-link" / "corsia.db"),
+    }}
 
     registry = ToolRegistry()
     async with AsyncExitStack() as stack:
         errors = await connect_mcp_servers({"private": config}, registry, stack)
         assert errors == {}
         read_result = await registry.get("mcp_private_read_private").execute()
+        link_read_result = await registry.get("mcp_private_read_private_link").execute()
         child_result = await registry.get("mcp_private_manage_child").execute()
+        rewrite_result = await registry.get("mcp_private_write_shell_envelope").execute()
     assert secret not in read_result
+    assert secret not in link_read_result
     assert "CORSIA private state is blocked for local MCP apps" in read_result or "Stored secrets are closed" in read_result
+    assert "CORSIA private state is blocked for local MCP apps" in link_read_result or "Stored secrets are closed" in link_read_result
     assert json.loads(child_result)["returncode"] == -15
+    assert "Operation not permitted" in rewrite_result
 
 
 @pytest.mark.integration

@@ -19,6 +19,7 @@ from tools.mcp_config import (
     MCPConfigError, allowed_names, http_options, protect_transport_logs, public_name, safe_error,
     timeout_seconds,
 )
+from tools.host_path_resolution import denied_paths_in
 from tools.registry import ToolRegistry, _is_reserved_execution_param
 
 
@@ -32,7 +33,12 @@ _MCP_DENIED_PATH = re.compile(
 
 
 def _mcp_denied_paths_in(text: str) -> tuple[Path, ...]:
-    return tuple(dict.fromkeys(Path(match.group("path")) for match in _MCP_DENIED_PATH.finditer(text)))
+    paths = (
+        *denied_paths_in(text),
+        *(Path(match.group("path")) for match in _MCP_DENIED_PATH.finditer(text)),
+    )
+    return tuple(dict.fromkeys(paths))
+
 
 class MCPToolWrapper(Tool):
     """Wrap one upstream tool without leaking backend identity or credentials."""
@@ -134,13 +140,6 @@ class MCPToolWrapper(Tool):
 
 
 _SAFEHOUSE_INHERITED_ENV = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
-_NO_PROCTITLE_SHIM = """const descriptor = Object.getOwnPropertyDescriptor(process, 'title');
-if (!descriptor?.configurable) {
-  throw new Error('CORSIA MCP preload cannot safely disable process.title');
-}
-const get = typeof descriptor.get === 'function' ? descriptor.get : () => descriptor.value;
-Object.defineProperty(process, 'title', {get, set(){}, configurable:true});
-"""
 
 
 def _mcp_app_id(name: str) -> str:
@@ -163,12 +162,6 @@ def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
     return cache_dir
 
 
-def _write_no_proctitle_shim(cache_dir: Path) -> Path:
-    """Rewrite the app-local Node preload before every Safehouse launch."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    shim_path = cache_dir / "no-proctitle.cjs"
-    shim_path.write_text(_NO_PROCTITLE_SHIM, encoding="utf-8")
-    return shim_path
 
 def _mcp_denial_guidance(text: str) -> str | None:
     """Clarify only path-aware denials imposed by the MCP private-state profile."""
@@ -209,7 +202,7 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
     from mcp import StdioServerParameters
 
     from infra.config import STATE_ROOT, WORKSPACE
-    from tools.safehouse_launch import direct_safehouse_argv, mcp_private_state_profile
+    from tools.safehouse_launch import direct_safehouse_argv, mcp_envelope_dir, mcp_private_state_profile, write_no_proctitle_shim
     from tools.shell_guard import _safehouse_executable, safehouse_version_error
 
     if version_error := safehouse_version_error():
@@ -222,7 +215,7 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
     cache_dir = _mcp_cache_dir(name, workspace, Path(STATE_ROOT))
     cwd = cache_dir / "cwd"
     cwd.mkdir(parents=True, exist_ok=True)
-    shim_path = _write_no_proctitle_shim(cache_dir)
+    shim_path = write_no_proctitle_shim(cache_dir)
     node_options = f"--require {shlex.quote(str(shim_path))}"
     if existing := env.get("NODE_OPTIONS"):
         node_options = f"{node_options} {existing}"
@@ -234,7 +227,9 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
         "XDG_CACHE_HOME": str(cache_dir / "xdg"),
         "NODE_OPTIONS": node_options,
     }
-    descriptor, raw_profile = tempfile.mkstemp(prefix="corsia-mcp-envelope-", suffix=".sb")
+    descriptor, raw_profile = tempfile.mkstemp(
+        dir=mcp_envelope_dir(Path(STATE_ROOT)), prefix="corsia-mcp-envelope-", suffix=".sb",
+    )
     profile_path = Path(raw_profile).resolve(strict=False)
     try:
         safehouse_path = _safehouse_executable()

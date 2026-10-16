@@ -170,7 +170,7 @@ class ProtectedHostPathPolicy:
             candidate.parent in temporary_roots
             and candidate.suffix == ".sb"
             and candidate.name.startswith(
-                ("corsia-shell-envelope-", "corsia-controlled-git-")
+                ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
             )
         ):
             return (
@@ -249,6 +249,7 @@ class ProtectedHostPathPolicy:
         rather than restating them.
         """
         return self.denial_guidance_for_paths(denied_paths_in(text))
+
     def denial_guidance_for_paths(self, paths: Iterable[Path]) -> str | None:
         """Name the first denied protected path from an already-parsed path list."""
         for path in paths:
@@ -380,7 +381,6 @@ def path_review_classification(
 def denial_guidance_for_output(text: str) -> str | None:
     """Explain a sandbox refusal found in ``text`` against the live policy."""
     return current_protected_host_path_policy().denial_guidance_for_output(text)
-
 
 
 def denial_guidance_prefix(text: str) -> str:
