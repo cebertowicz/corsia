@@ -4,7 +4,7 @@ import { get } from 'svelte/store';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { uiScope } from '$lib/stores/uiScope';
-import { settingsActiveSection, settingsOpenRequest, settingsProject } from '$lib/stores/settingsNavigation';
+import { resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { measurementScope } from '$lib/stores/measurement';
 import { projects } from '$lib/stores/projects';
@@ -20,7 +20,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	canvasHeader.set(null);
 	uiScope.set(null);
-	settingsProject.set(null);
+	resetSettingsNavigation();
 	threadSettingsOpen.set(false);
 	measurementScope.set({ project: 'all', agent: null });
 	measurementOrigin.set(null);
@@ -86,22 +86,22 @@ describe('Header', () => {
 		canvasHeader.set({ title: 'CORSIA' });
 		render('activity');
 		expect(host.querySelector('[aria-label="Thread settings"]')).toBeNull();
-		const before = get(settingsOpenRequest);
+		const before = get(settingsNavigation).openRequest;
 		(host.querySelector('[aria-label="Project settings"]') as HTMLButtonElement).click();
-		expect(get(settingsOpenRequest)).toBe(before + 1);
-		expect(get(settingsActiveSection)).toBe('projects');
-		expect(get(settingsProject)).toBe('project-1');
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('projects');
+		expect(get(settingsNavigation).project).toBe('project-1');
 	});
 
 	it('opens Settings at its first section from the workspace activity header', () => {
 		activeThreadId.set(null);
-		settingsActiveSection.set('debug');
+		selectSettingsSection('debug');
 		render('activity');
-		const before = get(settingsOpenRequest);
+		const before = get(settingsNavigation).openRequest;
 		(host.querySelector('[aria-label="Workspace settings"]') as HTMLButtonElement).click();
-		expect(get(settingsOpenRequest)).toBe(before + 1);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsProject)).toBeNull();
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).project).toBeNull();
 	});
 
 	it('shows conductor settings for the designated hidden thread, not a project gear', () => {

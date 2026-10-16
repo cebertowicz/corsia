@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	// One group on a Settings page: a §0.1 section label (with a project mark when
 	// the group is a project's level), then its rows. Space alone separates groups.
@@ -13,7 +14,7 @@
 	} = $props();
 </script>
 
-<section class="settings-group" aria-label={label} data-settings-anchor={anchor ?? undefined}>
+<section class="settings-group" aria-label={label} data-settings-anchor={anchor ?? undefined} use:settingsAnchor={anchor}>
 	<h3 class="label">
 		{#if mark}<span class="mark" style:background={mark} aria-hidden="true"></span>{/if}
 		{label}

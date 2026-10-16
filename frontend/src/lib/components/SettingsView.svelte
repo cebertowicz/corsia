@@ -1,11 +1,4 @@
-<script module lang="ts">
-	// The last open request a SettingsView has acted on. It outlives a mount because a gear's
-	// request usually arrives before Settings mounts.
-	let consumedRequest = 0;
-</script>
-
 <script lang="ts">
-	import { tick } from 'svelte';
 	import { loadProviders } from '$lib/stores/providers';
 	import ProviderManager from './ProviderManager.svelte';
 	import ProvidersPolicyBlock from './ProvidersPolicyBlock.svelte';
@@ -24,13 +17,12 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { projects } from '$lib/stores/projects';
 	import {
+		closeSettingsProject,
+		consumeSettingsOpenRequest,
 		returnToProjectPage,
-		settingsActiveSection,
-		settingsAnchorRequest,
-		settingsDrill,
-		settingsFromProject,
-		settingsOpenRequest,
-		settingsProject,
+		selectSettingsSection,
+		setSettingsDrill,
+		settingsNavigation,
 		type SettingsDrill,
 		type SettingsSection,
 	} from '$lib/stores/settingsNavigation';
@@ -42,20 +34,15 @@
 		systemStatus?: { memory?: any; cpu?: any };
 	} = $props();
 
-	$effect(() => {
-		if ($settingsActiveSection === 'providers') loadProviders();
-		if ($settingsActiveSection === 'debug') loadServerVersion();
-	});
+	// Effects read these, not the whole store: the drill this view writes must not re-run them.
+	const section = $derived($settingsNavigation.section);
+	const project = $derived($settingsNavigation.project);
+	const fromProject = $derived($settingsNavigation.fromProject);
+	const openRequest = $derived($settingsNavigation.openRequest);
 
-	// A chat link such as /settings/system#restart lands on its section, then on the named element.
 	$effect(() => {
-		const anchor = $settingsAnchorRequest;
-		if (!anchor) return;
-		void $settingsActiveSection;
-		void tick().then(() => {
-			document.querySelector(`[data-settings-anchor="${anchor}"]`)?.scrollIntoView({ block: 'start' });
-			settingsAnchorRequest.set(null);
-		});
+		if (section === 'providers') loadProviders();
+		if (section === 'debug') loadServerVersion();
 	});
 
 	// Three groups by kind (S-R2); space alone separates them.
@@ -76,42 +63,37 @@
 	const labelOf = (id: SettingsSection) => groups.flat().find((s) => s.id === id)?.label ?? 'Settings';
 
 	// Phone: the section list is the whole screen; a tapped row opens its section full-screen.
+	// Pure view state of this mounted view, so it stays local.
 	let mobileOpen = $state(false);
 	// A deep link (a gear, a chat link) opens its section, not the list, whether it opened
 	// Settings or arrived while Settings was already showing.
 	$effect(() => {
-		const request = $settingsOpenRequest;
-		if (request !== consumedRequest) {
-			consumedRequest = request;
-			mobileOpen = true;
-		}
+		void openRequest;
+		if (consumeSettingsOpenRequest()) mobileOpen = true;
 	});
 
 	function select(id: SettingsSection) {
-		settingsFromProject.set(null);
-		settingsProject.set(null);
-		settingsActiveSection.set(id);
+		selectSettingsSection(id);
 		mobileOpen = true;
 	}
 
-	const projectName = $derived($projects.find((p) => p.id === $settingsProject)?.name ?? 'Project');
+	const projectName = $derived($projects.find((p) => p.id === project)?.name ?? 'Project');
 
 	// One back, in the app header: it names the page on a phone and goes up one level.
 	$effect(() => {
 		const phone = $isMobile;
-		const section = $settingsActiveSection;
-		const from = $settingsFromProject;
+		const from = fromProject;
 		let drill: SettingsDrill | null = null;
 		if (from) {
 			drill = { title: phone ? labelOf(section) : 'Settings', backLabel: from.name, onBack: returnToProjectPage };
-		} else if (section === 'projects' && $settingsProject) {
-			drill = { title: phone ? projectName : 'Settings', backLabel: 'Projects', onBack: () => settingsProject.set(null) };
+		} else if (section === 'projects' && project) {
+			drill = { title: phone ? projectName : 'Settings', backLabel: 'Projects', onBack: closeSettingsProject };
 		} else if (phone && mobileOpen) {
 			drill = { title: labelOf(section), backLabel: 'Settings', onBack: () => { mobileOpen = false; } };
 		}
-		settingsDrill.set(drill);
+		setSettingsDrill(drill);
 	});
-	$effect(() => () => settingsDrill.set(null));
+	$effect(() => () => setSettingsDrill(null));
 </script>
 
 <div class="settings-view">
@@ -130,8 +112,8 @@
 					<button
 						class="nav-item"
 						data-settings-section={s.id}
-						class:active={$settingsActiveSection === s.id}
-						aria-current={$settingsActiveSection === s.id ? 'page' : undefined}
+						class:active={section === s.id}
+						aria-current={section === s.id ? 'page' : undefined}
 						onclick={() => select(s.id)}
 					>{s.label}</button>
 				{/each}
@@ -141,27 +123,27 @@
 
 	<div class="settings-content" class:mobile-section={mobileOpen} use:toastAnchorSurface>
 		<div class="section-host">
-			{#if $settingsActiveSection === 'providers'}
+			{#if section === 'providers'}
 				<div class="inset"><ProviderManager /></div>
 				<div class="policy"><ProvidersPolicyBlock /></div>
-			{:else if $settingsActiveSection === 'connected-apps'}
+			{:else if section === 'connected-apps'}
 				<div class="inset"><ConnectedAppsSettings /></div>
-			{:else if $settingsActiveSection === 'skills'}
+			{:else if section === 'skills'}
 				<h2 class="page-title">Skills</h2>
 				<SettingsSkills {onBrowseSkills} />
-			{:else if $settingsActiveSection === 'context'}
+			{:else if section === 'context'}
 				<h2 class="page-title">Context</h2>
 				<SettingsContext {onBrowseContextFiles} />
-			{:else if $settingsActiveSection === 'projects'}
+			{:else if section === 'projects'}
 				<SettingsProjects />
-			{:else if $settingsActiveSection === 'system'}
+			{:else if section === 'system'}
 				<div class="inset">
-					<SettingsSystem {systemStatus} onSwitchSection={(s) => settingsActiveSection.set(s as SettingsSection)} />
+					<SettingsSystem {systemStatus} onSwitchSection={(s) => selectSettingsSection(s as SettingsSection)} />
 					<SystemBulletinsSetting />
 				</div>
-			{:else if $settingsActiveSection === 'keys'}
+			{:else if section === 'keys'}
 				<div class="inset"><SettingsKeys /></div>
-			{:else if $settingsActiveSection === 'debug'}
+			{:else if section === 'debug'}
 				<div class="inset"><SettingsDebug /></div>
 			{/if}
 		</div>

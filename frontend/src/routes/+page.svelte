@@ -18,7 +18,7 @@
 	import { openThread } from '$lib/stores/openThread';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { closeSettingsBack, requestSettingsSection, settingsDrill, settingsHomeThread, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
@@ -62,7 +62,7 @@
 
 	let lastSettingsOpenRequest = 0;
 	$effect(() => {
-		const request = $settingsOpenRequest;
+		const request = $settingsNavigation.openRequest;
 		if (request === lastSettingsOpenRequest) return;
 		lastSettingsOpenRequest = request;
 		openSettings();
@@ -103,7 +103,7 @@
 		}
 		threadSettingsOpen.set(false);
 		// Settings keeps the thread it opened over, so a file opened there has a tab to land in.
-		settingsHomeThread.set(view === 'settings' ? (get(activeThreadId) ?? get(settingsHomeThread)) : null);
+		recordSettingsHomeThread(view, get(activeThreadId));
 		if (!options.preserveActiveThread) activeThreadId.set(null);
 		activeView = view;
 		if (!options.preserveActiveThread) messages.set([]);
@@ -261,7 +261,7 @@
 		const tab = $canvasCompact ? getActiveTab(activeWorkspace) : null;
 		syncCanvasHeader({
 			threadSettingsOpen: $threadSettingsOpen,
-			settingsDrill: $settingsDrill,
+			settingsDrill: $settingsNavigation.drill,
 			compactArtifact: tab && $activeThreadId
 				? {
 					title: tab.title,

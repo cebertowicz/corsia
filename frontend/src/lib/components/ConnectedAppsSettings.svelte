@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, declineConnectedApp, loadConnectedApps, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
@@ -70,7 +71,7 @@
 	onMount(() => { void loadProjects(); void load(); });
 </script>
 
-<section class="connected-apps" data-settings-anchor="connected-apps" id="connected-apps">
+<section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
 	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Apps here work in every project. A project can turn one off, or connect apps of its own, in its settings.</p></div></div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>

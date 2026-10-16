@@ -2,7 +2,7 @@
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { uiScope, exitScope } from '$lib/stores/uiScope';
-	import { openSectionFromProject, requestSettingsSection, settingsProject } from '$lib/stores/settingsNavigation';
+	import { closeSettingsProject, openSectionFromProject, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { updateProject, archiveProject, restoreProject } from '$lib/stores/projects';
 	import { projectColor } from '$lib/utils/projectColors';
 	import { toasts } from '$lib/stores/toast';
@@ -194,7 +194,7 @@
 			await archiveProject(project.id);
 			toasts.show(`Archived ${project.name}`, 'success');
 			if (isCurrentScope) exitScope();
-			settingsProject.set(null);
+			closeSettingsProject();
 		} catch (e) {
 			toasts.show(e instanceof Error ? e.message : "Couldn't archive project", 'error');
 		} finally {

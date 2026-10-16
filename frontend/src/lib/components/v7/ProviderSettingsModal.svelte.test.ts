@@ -13,7 +13,7 @@ vi.mock('$lib/stores/providersV7', () => ({
 }));
 
 import ProviderSettingsModal from './ProviderSettingsModal.svelte';
-import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const server = {
 	id: 'ns-plan', provider: 'external', instance_id: 'token-plan.example/v1',
@@ -42,7 +42,7 @@ describe('ProviderSettingsModal remove', () => {
 		component = null;
 		document.body.innerHTML = '';
 		removeNetworkServer.mockClear();
-		settingsAnchorRequest.set(null);
+		resetSettingsNavigation();
 		vi.unstubAllGlobals();
 	});
 
@@ -103,12 +103,12 @@ describe('ProviderSettingsModal remove', () => {
 				} as never, onClose },
 			});
 			await vi.waitFor(() => expect(document.body.textContent).toContain('Plus account 1'));
-			const before = get(settingsOpenRequest);
+			const before = get(settingsNavigation).openRequest;
 			button('Accounts and rollover').click();
 			flushSync();
-			expect(get(settingsOpenRequest)).toBe(before + 1);
-			expect(get(settingsActiveSection)).toBe('providers');
-			expect(get(settingsAnchorRequest)).toBe('workspace-provider-policy');
+			expect(get(settingsNavigation).openRequest).toBe(before + 1);
+			expect(get(settingsNavigation).section).toBe('providers');
+			expect(get(settingsNavigation).anchor).toBe('workspace-provider-policy');
 			expect(onClose).toHaveBeenCalledOnce();
 		});
 

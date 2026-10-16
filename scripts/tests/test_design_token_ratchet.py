@@ -62,13 +62,17 @@ def test_category_rise_fails_with_source_and_hint(token_ratchet, capsys):
     assert "semantic colour token" in err
 
 
-def test_drop_passes_without_requiring_baseline_update(token_ratchet):
+def test_drop_passes_and_reports_a_baseline_update(token_ratchet, capsys):
     module, write, baseline = token_ratchet
     path = "frontend/src/Card.svelte"
     write(path, "<style>.card { color: var(--text-primary); }</style>")
     baseline({path: counts(raw_colors=1)})
 
     assert module.main([]) == 0
+    assert (
+        f"design-token debt is below baseline in: {path}; "
+        "run --update-baseline to record the reductions"
+    ) in capsys.readouterr().out
 
 
 def test_update_baseline_only_lowers_counts(token_ratchet):

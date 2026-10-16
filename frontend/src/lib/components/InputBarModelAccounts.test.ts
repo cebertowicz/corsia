@@ -17,7 +17,7 @@ import { activeModelId, models, type Model } from '$lib/stores/models';
 import type { RunsOn } from '$lib/stores/modelTurn';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
-import { providerCardRequest, settingsActiveSection, settingsAnchorRequest, settingsOpenRequest, settingsProject } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { vendorAccounts, type VendorAccount, type VendorAccountUsage } from '$lib/stores/vendorAccounts';
 
 const CAPS = {
@@ -83,10 +83,7 @@ beforeEach(() => {
 	pickerPolicy.set({});
 	pickerPolicyProject.set(undefined);
 	providerCardRequest.set(null);
-	settingsActiveSection.set('providers');
-	settingsOpenRequest.set(0);
-	settingsProject.set(null);
-	settingsAnchorRequest.set(null);
+	resetSettingsNavigation();
 	threadSettingsOpen.set(false);
 	vendorAccounts.set([account('work', 'Work', {}, {}, 'work@example.test'), account('personal', 'Personal')]);
 	pinReply = () => json(200, { account_id: 'personal', runtime_context_epoch: 8, changed: true });
@@ -108,10 +105,7 @@ afterEach(() => {
 	pickerPolicy.set({});
 	pickerPolicyProject.set(undefined);
 	providerCardRequest.set(null);
-	settingsActiveSection.set('providers');
-	settingsOpenRequest.set(0);
-	settingsProject.set(null);
-	settingsAnchorRequest.set(null);
+	resetSettingsNavigation();
 	threadSettingsOpen.set(false);
 	models.set([]);
 	threads.set([]);
@@ -188,10 +182,10 @@ describe('model picker account rows', () => {
 		flushSync();
 		host.querySelector<HTMLButtonElement>('.rollover-settings button')!.click();
 		expect(get(threadSettingsOpen)).toBe(false);
-		expect(get(settingsOpenRequest)).toBe(1);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsProject)).toBeNull();
-		expect(get(settingsAnchorRequest)).toBe('workspace-provider-policy');
+		expect(get(settingsNavigation).openRequest).toBe(1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).project).toBeNull();
+		expect(get(settingsNavigation).anchor).toBe('workspace-provider-policy');
 		expect(onclose).toHaveBeenCalledOnce();
 	});
 
@@ -204,9 +198,9 @@ describe('model picker account rows', () => {
 		flushSync();
 		host.querySelector<HTMLButtonElement>('.rollover-settings button')!.click();
 		expect(get(threadSettingsOpen)).toBe(false);
-		expect(get(settingsActiveSection)).toBe('projects');
-		expect(get(settingsProject)).toBe('project-1');
-		expect(get(settingsAnchorRequest)).toBe('project-provider-policy');
+		expect(get(settingsNavigation).section).toBe('projects');
+		expect(get(settingsNavigation).project).toBe('project-1');
+		expect(get(settingsNavigation).anchor).toBe('project-provider-policy');
 	});
 
 	it('shows no order from another project\'s policy, and the thread\'s own once its read lands', async () => {

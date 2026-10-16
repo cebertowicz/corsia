@@ -81,11 +81,9 @@ function settingsLink(href: string, origin: string): { section: SettingsSection;
 	}
 	if (url.origin !== origin) return null;
 	const match = /^\/settings\/([a-z-]+)\/?$/.exec(url.pathname);
-	const named = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
-	if (!named) return null;
+	const section = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
+	if (!section) return null;
 	const anchor = /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null;
-	// An anchor that has become its own section (/settings/system#connected-apps) opens that section.
-	const section = SETTINGS_SECTIONS.find((id) => id === anchor) ?? named;
 	return { section, anchor };
 }
 

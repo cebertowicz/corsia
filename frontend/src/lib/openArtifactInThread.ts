@@ -1,7 +1,7 @@
 import { get, writable } from 'svelte/store';
 import { activeThreadId } from '$lib/stores/threads';
 import { docPickerTarget } from '$lib/stores/docPickerTarget';
-import { settingsHomeThread } from '$lib/stores/settingsNavigation';
+import { settingsNavigation } from '$lib/stores/settingsNavigation';
 import { openArtifactTab, type OpenArtifactInput } from '$lib/stores/artifactWorkspace';
 
 /**
@@ -13,7 +13,7 @@ import { openArtifactTab, type OpenArtifactInput } from '$lib/stores/artifactWor
 export const showArtifactThreadRequest = writable<{ threadId: string } | null>(null);
 
 function homeThread(threadId?: string | null): string | null {
-	return threadId ?? get(docPickerTarget)?.threadId ?? get(activeThreadId) ?? get(settingsHomeThread);
+	return threadId ?? get(docPickerTarget)?.threadId ?? get(activeThreadId) ?? get(settingsNavigation).homeThread;
 }
 
 /**

@@ -81,8 +81,6 @@ describe('resolveLinkTarget', () => {
 		['/settings/providers', 'providers', null],
 		['/settings/system#restart', 'system', 'restart'],
 		['/settings/connected-apps', 'connected-apps', null],
-		// Connected apps moved out of System into its own section; links written before still land there.
-		['/settings/system#connected-apps', 'connected-apps', 'connected-apps'],
 		['http://corsia.test/settings/providers', 'providers', null],
 	])('opens Settings in place for the same-origin link %s', async (href, section, anchor) => {
 		const d = deps();

@@ -8,7 +8,7 @@ import { projects } from '$lib/stores/projects';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { activeThreadId } from '$lib/stores/threads';
 import { contextAttachTarget } from '$lib/stores/contextAttach';
-import { settingsHomeThread } from '$lib/stores/settingsNavigation';
+import { recordSettingsHomeThread, resetSettingsNavigation } from '$lib/stores/settingsNavigation';
 import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 
 let host: HTMLElement;
@@ -19,7 +19,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	token.set('test-token');
 	activeThreadId.set(null);
-	settingsHomeThread.set(null);
+	resetSettingsNavigation();
 	threadWorkspaces.set({});
 	projects.set([]);
 	coreSettings.set({
@@ -44,7 +44,7 @@ afterEach(() => {
 	host.remove();
 	token.set(null);
 	activeThreadId.set(null);
-	settingsHomeThread.set(null);
+	resetSettingsNavigation();
 	threadWorkspaces.set({});
 	coreSettings.set(null);
 	contextAttachTarget.set(null);
@@ -57,7 +57,7 @@ const row = (name: string) => host.querySelector<HTMLElement>(`[data-settings-ro
 
 describe('SettingsContext', () => {
 	it('opens a context file as a tab in the thread Settings was opened over', () => {
-		settingsHomeThread.set('home-thread');
+		recordSettingsHomeThread('settings', 'home-thread');
 		component = mount(SettingsContext, { target: host, props: {} });
 		flushSync();
 

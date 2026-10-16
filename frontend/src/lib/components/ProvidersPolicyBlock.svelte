@@ -5,7 +5,7 @@
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
 	import { loadProviderPolicy, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
 	let policy = $state<ProviderPolicy | null>(null);
@@ -73,7 +73,7 @@
 	}
 </script>
 
-<section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
+<section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
 	<h2>Accounts and rollover</h2>
 	{#if loading}<p role="status">Loading providers…</p>
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>

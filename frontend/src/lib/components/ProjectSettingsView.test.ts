@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import ProjectSettingsView from './ProjectSettingsView.svelte';
 import { token } from '$lib/stores/auth';
 import { uiScope } from '$lib/stores/uiScope';
-import { settingsActiveSection, settingsAnchorRequest, settingsFromProject, settingsProject } from '$lib/stores/settingsNavigation';
+import { openProjectSettings, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -37,10 +37,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 	uiScope.set(null);
 	token.set(null);
-	settingsProject.set(null);
-	settingsFromProject.set(null);
-	settingsAnchorRequest.set(null);
-	settingsActiveSection.set('providers');
+	resetSettingsNavigation();
 });
 
 type Detail = Record<string, unknown>;
@@ -136,10 +133,32 @@ describe('ProjectSettingsView', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('What this project can use'));
 
 		button('Context')!.click();
-		expect(get(settingsActiveSection)).toBe('context');
-		expect(get(settingsAnchorRequest)).toBe('context-corsia');
-		expect(get(settingsFromProject)).toEqual({ id: 'corsia', name: 'CORSIA' });
-		expect(get(settingsProject)).toBeNull();
+		expect(get(settingsNavigation).section).toBe('context');
+		expect(get(settingsNavigation).anchor).toBe('context-corsia');
+		expect(get(settingsNavigation).fromProject).toEqual({ id: 'corsia', name: 'CORSIA' });
+		expect(get(settingsNavigation).project).toBeNull();
+	});
+
+	it('scrolls to the rollover block that renders only after the project loads', async () => {
+		const scroll = vi.fn();
+		Element.prototype.scrollIntoView = scroll;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		stubFetch(project(), [], (url) => {
+			if (!url.startsWith('/api/projects/corsia?')) return undefined;
+			return gate.then(() => ({ ok: true, json: async () => project() }));
+		});
+		openProjectSettings('corsia', 'project-provider-policy');
+		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
+		flushSync();
+		expect(host.querySelector('[data-settings-anchor="project-provider-policy"]')).toBeNull();
+		expect(get(settingsNavigation).anchor).toBe('project-provider-policy');
+
+		release();
+		await vi.waitFor(() => expect(host.querySelector('[data-settings-anchor="project-provider-policy"]')).not.toBeNull());
+		expect(scroll).toHaveBeenCalledTimes(1);
+		expect(scroll.mock.contexts[0]).toBe(host.querySelector('[data-settings-anchor="project-provider-policy"]'));
+		expect(get(settingsNavigation).anchor).toBeNull();
 	});
 
 	it('repaints the shell accent only for the project the person is in', async () => {
