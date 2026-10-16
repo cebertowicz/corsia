@@ -1,4 +1,4 @@
-import { inkOn, parseColor, parseCssColour, stepToContrast, toHex } from './contrast';
+import { apcaLc, INK_WHITE, inkOn, parseColor, parseCssColour, stepToContrast, stepUntil, toHex } from './contrast';
 
 const PALETTE_HUES = [
 	210,
@@ -42,6 +42,13 @@ export const ACCENT_TEXT_SURFACES: Record<'light' | 'dark', string[]> = {
 	light: ['#ffffff', '#f0f0f2', '#e8e8ec', '#e0e0e5'],
 	dark: ['#0a0a0b', '#1c1c1f', '#242428', '#2a2a2f'],
 };
+/**
+ * The least APCA contrast (`|Lc|`) the ink must reach on an accent fill: APCA's minimum for content text. The fill
+ * steps away from its ink only below it, so a colour that already reads (the default `#0083af` is Lc 74.7 with white)
+ * fills with itself.
+ */
+export const FILL_INK_MIN_LC = 60;
+
 export interface AccentRoles {
 	base: string;
 	text: string;
@@ -67,8 +74,8 @@ const warnedUnparsed = new Set<string>();
  * What a project's colour becomes when it is the accent, every role from this one place.
  * The colour is treated as opaque: an alpha component is dropped, and every role is opaque (the base is the colour
  * itself, or its opaque hex when it carried an alpha). Text is the same hue stepped until it reads (4.5:1) on every
- * pane. The fill is always the colour itself — the project's colour is what a person chose, so it is never stepped or
- * darkened — and the ink on it is the shared APCA `inkOn` choice for that exact fill.
+ * pane. The ink on the fill is the shared APCA `inkOn` choice. The fill is the colour itself — what a person chose —
+ * unless that ink reads below `FILL_INK_MIN_LC` on it; then the fill steps away from its ink until it does.
  * Null when the colour does not parse (the API validates it, so this should not happen): the default accent applies,
  * with one console warning per value.
  */
@@ -88,7 +95,10 @@ export function accentRoles(colour: string, theme: 'light' | 'dark'): AccentRole
 	const surfaces = ACCENT_TEXT_SURFACES[theme].map((hex) => parseColor(hex)!);
 	const text = toHex(stepToContrast(own, surfaces, theme, 4.5));
 	const onFill = inkOn(base);
-	return { base, text, wash, line, fill: base, onFill };
+	const ink = parseColor(onFill)!;
+	// White ink needs a darker fill and near-black ink a lighter one: the text stepping directions of light and dark.
+	const stepped = stepUntil(own, onFill === INK_WHITE ? 'light' : 'dark', (tone) => Math.abs(apcaLc(ink, tone)) >= FILL_INK_MIN_LC);
+	return { base, text, wash, line, fill: stepped === own ? base : toHex(stepped), onFill };
 }
 
 export const ACCENT_SWATCHES = [

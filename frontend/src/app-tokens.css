@@ -131,8 +131,8 @@
   /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA default, and the
      default *is* a project colour: the corsia project's own accent, #0083af. Every value below is exactly what
      `accentRoles('#0083af', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
-     a project painted #0083af are indistinguishable. Under a project scope +layout replaces --accent and every role
-     from accentRoles(), and the `:root[data-project-accent]` block at the bottom keeps hover and subtle in step. */
+     a project painted #0083af look the same. Under a project scope +layout replaces --accent and every role from
+     accentRoles(); --accent-hover and --accent-subtle (theme blocks) follow through var(). */
   --accent-text: #009cd0;
   --accent-wash: color-mix(in srgb, #0083af 12%, transparent);
   --accent-line: color-mix(in srgb, #0083af 30%, transparent);
@@ -271,9 +271,3 @@
   }
 }
 
-/* Hover and subtle are derived from the accent by default, exactly as they are under a project scope; the
-   attribute (+layout sets it) is what makes them follow *that project's* colour rather than the default one. */
-:root[data-project-accent] {
-  --accent-hover: var(--accent);
-  --accent-subtle: var(--accent-wash);
-}

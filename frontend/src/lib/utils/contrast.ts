@@ -164,7 +164,11 @@ export function apcaLc(text: Rgb, background: Rgb): number {
  * against every surface; the colour itself when it already does.
  */
 export function stepToContrast(own: Rgb, on: Rgb[], theme: 'light' | 'dark', min: number): Rgb {
-	const meets = (tone: Rgb) => on.every((surface) => contrastRatio(tone, surface) >= min);
+	return stepUntil(own, theme, (tone) => on.every((surface) => contrastRatio(tone, surface) >= min));
+}
+
+/** The same hue stepped darker (light) or lighter (dark) until `meets` holds; `own` itself (same object) when it does. */
+export function stepUntil(own: Rgb, theme: 'light' | 'dark', meets: (tone: Rgb) => boolean): Rgb {
 	if (meets(own)) return own;
 	const [h, s, l] = toHsl(own);
 	const step = theme === 'light' ? -0.005 : 0.005;
@@ -176,7 +180,7 @@ export function stepToContrast(own: Rgb, on: Rgb[], theme: 'light' | 'dark', min
 }
 
 /** The two inks an accent fill may carry. */
-const INK_WHITE = '#ffffff';
+export const INK_WHITE = '#ffffff';
 const INK_BLACK = '#0a0a0b';
 
 /**

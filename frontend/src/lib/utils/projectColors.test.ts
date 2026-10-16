@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apcaLc, contrastRatio, inkOn, parseColor, parseCssColour } from './contrast';
-import { ACCENT_ROLE_TOKENS, ACCENT_SWATCHES, ACCENT_TEXT_SURFACES, accentRoles } from './projectColors';
+import { ACCENT_ROLE_TOKENS, ACCENT_SWATCHES, ACCENT_TEXT_SURFACES, accentRoles, FILL_INK_MIN_LC } from './projectColors';
 
 /** Every hue at the lightnesses a project colour realistically takes, plus the offered swatches. */
 const SPREAD = [
@@ -14,10 +14,6 @@ const SPREAD = [
 
 const THEMES = ['light', 'dark'] as const;
 
-// The fill is never stepped, so the ink choice is the only readability control it has. Measured worst case over
-// the hue spread is Lc 54.8 (the ink crossover); 50 leaves room without letting the fill drift.
-const APCA_FILL_FLOOR = 50;
-
 /** Text reads on every pane, and the ink reads on the fill, in both themes. */
 function expectReadable(colour: string) {
 	for (const theme of THEMES) {
@@ -27,7 +23,7 @@ function expectReadable(colour: string) {
 		for (const surface of ACCENT_TEXT_SURFACES[theme]) {
 			expect(contrastRatio(parseColor(text)!, parseColor(surface)!), `${colour} ${theme} text on ${surface}`).toBeGreaterThanOrEqual(4.5);
 		}
-		expect(Math.abs(apcaLc(parseColor(onFill)!, parseColor(fill)!)), `${colour} ${theme} ink on fill`).toBeGreaterThanOrEqual(APCA_FILL_FLOOR);
+		expect(Math.abs(apcaLc(parseColor(onFill)!, parseColor(fill)!)), `${colour} ${theme} ink on fill`).toBeGreaterThanOrEqual(FILL_INK_MIN_LC);
 	}
 }
 
@@ -42,26 +38,26 @@ describe('accentRoles', () => {
 		expect(accentRoles('#0083af', 'dark')!.fill).toBe('#0083af');
 	});
 
-	it('inks the fill it paints at Lc 50 or above in both themes across the hue spread', () => {
+	it('inks the fill it paints at the APCA floor or above in both themes across the hue spread', () => {
 		for (const colour of SPREAD) {
 			for (const theme of THEMES) {
 				const { fill, onFill } = accentRoles(colour, theme)!;
 				const lc = Math.abs(apcaLc(parseColor(onFill)!, parseColor(fill)!));
-				expect(lc, `${colour} ${theme} ${onFill} on ${fill}`).toBeGreaterThanOrEqual(APCA_FILL_FLOOR);
+				expect(lc, `${colour} ${theme} ${onFill} on ${fill}`).toBeGreaterThanOrEqual(FILL_INK_MIN_LC);
 			}
 		}
 	});
 
-	it('never steps the fill, even where neither ink reads well on it', () => {
-		// The crossover: WCAG 2 gives neither ink 4.5:1 here. The fill stays the chosen colour anyway — a
-		// project's colour is what a person picked — and only the ink is chosen, with APCA, for that exact fill.
-		const crossover = 'hsl(220, 50%, 54%)';
+	it('steps the fill away from its ink only where neither ink reaches the APCA floor on it', () => {
+		// APCA's crossover sits lighter than WCAG 2's: here white and near-black both read below the floor.
+		const crossover = 'hsl(220, 50%, 68%)';
 		const raw = parseColor(crossover)!;
-		expect(Math.max(contrastRatio(raw, [255, 255, 255]), contrastRatio(raw, [10, 10, 11]))).toBeLessThan(4.5);
+		expect(Math.max(Math.abs(apcaLc([255, 255, 255], raw)), Math.abs(apcaLc([10, 10, 11], raw)))).toBeLessThan(FILL_INK_MIN_LC);
 		for (const theme of THEMES) {
 			const { fill, onFill } = accentRoles(crossover, theme)!;
-			expect(fill).toBe(crossover);
 			expect(onFill).toBe(inkOn(crossover));
+			expect(fill).not.toBe(crossover);
+			expect(Math.abs(apcaLc(parseColor(onFill)!, parseColor(fill)!))).toBeGreaterThanOrEqual(FILL_INK_MIN_LC);
 		}
 	});
 
@@ -128,7 +124,7 @@ describe('every colour form the project API accepts', () => {
 		}
 	});
 
-	it('steps a pale #ff0 to readable accent text but never steps its fill', () => {
+	it('steps a pale #ff0 to readable accent text and keeps its own fill', () => {
 		expectReadable('#ff0');
 		expect(accentRoles('#ff0', 'light')!.text).not.toBe('#ffff00');
 		expect(accentRoles('#ff0', 'light')!.fill).toBe('#ff0');
