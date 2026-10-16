@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from llm import local_setup, local_setup_ownership, omlx_global_settings
+from llm import local_setup, local_setup_ownership, omlx_global_settings, own_omlx_management
 from llm.local_profiles import OMLX_GLOBAL_SETTINGS
 from llm.providers import omlx_settings
 from tests.test_provider_sources import client  # noqa: F401
@@ -61,9 +61,10 @@ class _Response:
 
 
 @pytest.fixture
-def omlx(monkeypatch):
+def omlx(monkeypatch, tmp_path):
     fake = FakeOmlx()
     monkeypatch.setattr(omlx_settings, "admin_request", fake.admin_request)
+    monkeypatch.setattr(own_omlx_management, "record_path", lambda: tmp_path / "own-omlx-management.json")
     monkeypatch.setattr(omlx_global_settings, "_observed", {"srv": {"scheduler": {"max_concurrent_requests": 8}}})
     monkeypatch.setattr("api.provider_sources.network_discovery.get_servers", lambda **_kw: [dict(SERVER)])
     monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: True)

@@ -128,10 +128,28 @@ async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", refresh)
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: notified.append(True))
-    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None}
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: "/usr/local/bin/codex")
+    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
-    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None}
+    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "path_shadowed_by": "/usr/local/bin/codex"}
     assert refreshed == [True] and notified == [True]
+
+
+@pytest.mark.asyncio
+async def test_location_check_failure_does_not_break_a_successful_install(monkeypatch, caplog):
+    from api import cli_install
+
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: (_ for _ in ()).throw(OSError("unreadable")))
+    _nothing_installed(monkeypatch)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+
+    with caplog.at_level("WARNING", logger=cli_install.log.name):
+        await cli_install.start_install("codex", {})
+        await cli_install._jobs["codex"].task
+    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "path_shadowed_by": None}
+    assert "location check after installation did not complete" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -149,9 +167,32 @@ async def test_second_post_returns_the_existing_running_job(monkeypatch):
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
     await cli_install.start_install("claude-code", {})
-    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None}
+    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
     release.set()
     await cli_install._jobs["claude-code"].task
+
+
+@pytest.mark.asyncio
+async def test_update_reuses_the_installer_unless_a_package_manager_owns_the_cli(monkeypatch):
+    from api import cli_install
+
+    refreshed = []
+    monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: "/usr/local/bin/codex")
+    monkeypatch.setattr(cli_install, "package_manager_for", lambda *_args: None)
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: refreshed.append(True) or asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+
+    assert await cli_install.start_update("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    await cli_install._jobs["codex"].task
+    assert refreshed == [True]
+
+    cli_install._jobs.clear()
+    monkeypatch.setattr(cli_install, "package_manager_for", lambda *_args: "npm")
+    response = await cli_install.start_update("codex", {})
+    assert response.status_code == 409 and response.body == b'{"reason":"package_managed"}'
+    assert "codex" not in cli_install._jobs
 
 
 def _nothing_installed(monkeypatch):
@@ -206,7 +247,7 @@ async def test_guard_treats_a_hung_login_shell_as_not_found(monkeypatch):
     monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
-    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None}
+    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
 
 
@@ -225,7 +266,7 @@ async def test_a_tempfile_error_settles_the_job_failed(monkeypatch):
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
     await cli_install.start_install("codex", {})
     await cli_install._jobs["codex"].task
-    assert await cli_install.get_install("codex", {}) == {"state": "failed", "reason": cli_install.INSTALLER_STOPPED}
+    assert await cli_install.get_install("codex", {}) == {"state": "failed", "reason": cli_install.INSTALLER_STOPPED, "path_shadowed_by": None}
 
 
 @pytest.mark.asyncio
@@ -242,7 +283,7 @@ async def test_any_unexpected_error_settles_the_job_failed_and_is_logged(monkeyp
     with caplog.at_level("ERROR", logger=cli_install.log.name):
         await cli_install.start_install("claude-code", {})
         await cli_install._jobs["claude-code"].task
-    assert await cli_install.get_install("claude-code", {}) == {"state": "failed", "reason": cli_install.INSTALLER_STOPPED}
+    assert await cli_install.get_install("claude-code", {}) == {"state": "failed", "reason": cli_install.INSTALLER_STOPPED, "path_shadowed_by": None}
     assert "stopped unexpectedly" in caplog.text
 
 
@@ -273,6 +314,6 @@ def test_get_is_exact_and_unknown_vendor_is_not_found():
 
     with _client() as client:
         response = client.get("/api/providers/cli/codex/install")
-        assert response.json() == {"state": "idle", "reason": None}
+        assert response.json() == {"state": "idle", "reason": None, "path_shadowed_by": None}
     with pytest.raises(HTTPException, match="CLI vendor not found"):
         asyncio.run(cli_install.get_install("unknown", {}))
