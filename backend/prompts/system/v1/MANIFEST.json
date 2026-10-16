@@ -214,10 +214,10 @@
       "sha256": "cd4ebb24a0a98445ad5a85de24f9be6413cb1a413cc7663afb5f474820e949bc"
     },
     {
-      "bytes": 6783,
+      "bytes": 9129,
       "kind": "skill",
       "path": "skills/coordination-api/SKILL.md",
-      "sha256": "764b55e5663be4f84f0bdfaab35684fbde2abc5768b692d7c753377b9365fbb2"
+      "sha256": "122c39cd87851e430f12991331e7252deacf6284b08ef57bb88177d75edfd95b"
     },
     {
       "bytes": 4113,
