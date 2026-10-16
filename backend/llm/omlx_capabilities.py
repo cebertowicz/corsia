@@ -18,6 +18,7 @@ from typing import Any
 REPORTED_FIELDS = (
     "thinking_default",
     "preserve_thinking_default",
+    "reasoning_efforts",
     "reasoning_effort_options",
     "reasoning_effort_default",
 )
