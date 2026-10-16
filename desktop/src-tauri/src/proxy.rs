@@ -29,6 +29,7 @@ type Resolver = Arc<dyn Fn(Locator) -> ResolveFuture + Send + Sync>;
 pub enum ProxyError {
     Bind(String),
     Resolve(String),
+    Unreachable(crate::classify::Unreachable),
     Transport(String),
 }
 
@@ -148,6 +149,8 @@ async fn forward_trusted(
 ) -> Result<Response<ProxyBody>, String> {
     let (host, port) = (state.resolver)(state.locator.clone()).await.map_err(|error| match error {
         ProxyError::Resolve(message) => message,
+        ProxyError::Unreachable(crate::classify::Unreachable::Network) => "remote host is unreachable on the network".into(),
+        ProxyError::Unreachable(crate::classify::Unreachable::Server) => "remote CORSIA server is unavailable".into(),
         other => format!("{other:?}"),
     })?;
     let stream = TcpStream::connect((host.as_str(), port)).await.map_err(|error| error.to_string())?;
@@ -174,7 +177,10 @@ async fn default_resolve(locator: Locator) -> Result<(String, u16), ProxyError> 
         Locator::Address { host, port } => Ok((host, port)),
         Locator::DnsSd { instance } => crate::discovery::resolve(&instance, Duration::from_secs(5))
             .await
-            .map_err(|error| ProxyError::Resolve(format!("DNS-SD resolution failed: {error:?}"))),
+            .map_err(|error| match error {
+                crate::discovery::DiscoveryError::Timeout => ProxyError::Unreachable(crate::classify::Unreachable::Network),
+                other => ProxyError::Resolve(format!("DNS-SD resolution failed: {other}")),
+            }),
     }
 }
 
