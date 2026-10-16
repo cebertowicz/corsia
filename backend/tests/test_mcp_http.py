@@ -103,6 +103,7 @@ class LegacySSEServer:
         self.headers.append(request.headers.get("authorization"))
         message = await request.json()
         if "id" in message:
+            result: dict[str, object]
             if message["method"] == "initialize":
                 result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}},
                           "serverInfo": {"name": "legacy", "version": "1"}}
