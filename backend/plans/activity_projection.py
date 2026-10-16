@@ -332,6 +332,7 @@ def _scope(kind: str, owner_id: str, label: str, actor: PlanActor, *, db) -> dic
         str(item["artifact_id"])
         for item in decision_facts
         if item["answerable"] and str(item["plan_id"]) in eligible_tree
+        and plan_index[str(item["plan_id"])]["state"] != "paused"
     })
     target = {"kind": kind, "id": owner_id, "label": label}
     revision_source = {

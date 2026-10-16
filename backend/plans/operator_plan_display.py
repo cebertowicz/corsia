@@ -30,7 +30,7 @@ def display_from_facts(
     display: dict[str, object]
     if working and plan["state"] != "paused":
         display = {"label_key": "working", "tone_key": "active"}
-    elif needs_user and plan["state"] != "paused":
+    elif needs_user:
         display = {"label_key": "needs_you", "tone_key": "human-review"}
     else:
         lead = leading(counts)

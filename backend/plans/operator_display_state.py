@@ -42,6 +42,20 @@ def review_kind_from_facts(
     return "human_review" if assignee == "user" or owner_kind != "thread" else "parent_agent"
 
 
+def plan_paused(execution: dict) -> bool:
+    """Whether the whole plan is paused: every one of its rows carries that cause."""
+    return any(cause.get("reason_key") == "plan_paused" for cause in execution["causes"])
+
+
+def ask_deferred(condition: str, review_kind: str | None, *, plan_paused: bool) -> bool:
+    """Whether a whole-plan pause defers this row's human ask until resume.
+
+    The one owner of that rule. Admission still reads the row as in review, and the
+    person can still answer it; only what it asks of them now is deferred.
+    """
+    return plan_paused and condition == "review" and review_kind in _HUMAN_REVIEWS
+
+
 def needs_user_from_facts(
     state: str,
     condition: str,
@@ -49,9 +63,10 @@ def needs_user_from_facts(
     review_kind: str | None,
     *,
     has_attention: bool,
+    plan_paused: bool = False,
 ) -> bool:
     """Return whether compact node facts expose a concrete user action."""
-    if state in TERMINAL_DISPLAY:
+    if state in TERMINAL_DISPLAY or plan_paused:
         return False
     return bool(
         (assignee == "user" and condition == "ready")
@@ -69,6 +84,7 @@ def display_from_facts(
     child_working: bool = False,
     executor_stopped: bool = False,
     worker_needs_input: bool = False,
+    plan_paused: bool = False,
 ) -> dict[str, str]:
     """Reduce compact lifecycle facts into the canonical four-state display."""
     if state in TERMINAL_DISPLAY:
@@ -77,6 +93,8 @@ def display_from_facts(
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}
+    if ask_deferred(condition, review_kind, plan_paused=plan_paused):
+        return {"label_key": "waiting", "tone_key": "waiting"}
     if condition == "review":
         kind = review_kind or "parent_agent"
         return {

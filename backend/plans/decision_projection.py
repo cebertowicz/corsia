@@ -292,9 +292,13 @@ def awaiting_count(plan_ids, *, db) -> int:
     A decision is held by a node in work, and a node in work is never folded, so
     the read asks for the open rows alone (``idx_plan_nodes_open``) and costs the
     open work, not the plan's history.
+
+    A paused plan defers its asks until resume, so it contributes none; the
+    decision stays raised and answerable meanwhile.
     """
     rows = hierarchy.descendants(db, plan_ids)
-    return len(raised_decisions([row["id"] for row in rows], db=db, open_nodes=True))
+    live = [row["id"] for row in rows if row["state"] != "paused"]
+    return len(raised_decisions(live, db=db, open_nodes=True))
 
 
 def next_order_key(plan_id: str, *, db) -> int:
