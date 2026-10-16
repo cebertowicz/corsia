@@ -175,6 +175,7 @@
 		<div id="actions" class="actions" hidden>
 			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
 			<button id="retry" class="primary" type="button">Try again</button>
+			<button id="set-up-local" class="secondary" type="button" hidden>Set up this computer instead</button>
 		</div>
 	</div>
 
@@ -192,6 +193,7 @@
 			const approvalState = document.getElementById('approval-state');
 			const openLoginItems = document.getElementById('open-login-items');
 			const retry = document.getElementById('retry');
+			const setUpLocal = document.getElementById('set-up-local');
 			const failureLoginItems = document.getElementById('failure-login-items');
 			let quitFailure = false;
 			let approvalPoll;
@@ -200,6 +202,7 @@
 
 			function showStarting() {
 				quitFailure = false;
+				setUpLocal.hidden = true;
 				status.textContent = 'Starting CORSIA…';
 				line.hidden = true;
 				log.hidden = true;
@@ -302,6 +305,36 @@
 				}
 			}
 
+			function showRemoteState(state) {
+				clearInterval(approvalPoll);
+				backgroundApproval.hidden = true;
+				log.hidden = true;
+				failureLoginItems.hidden = true;
+				spinner.hidden = state.kind !== 'connecting';
+				setUpLocal.hidden = !['unreachable', 'incompatible', 'too_old', 'key_changed'].includes(state.kind);
+				if (state.kind === 'connecting') {
+					status.textContent = `Connecting to ${state.name}…`;
+					line.hidden = true;
+					actions.hidden = true;
+					return;
+				}
+				status.textContent = state.kind === 'key_changed' ? `${state.name} has changed` : `Can’t open ${state.name}`;
+				if (state.kind === 'unreachable') {
+					line.textContent = state.cause === 'server' ? 'CORSIA is not listening there. Open CORSIA › Settings › System on that computer.' : 'This computer can’t reach it right now. Check your network, then try again.';
+				} else if (state.kind === 'incompatible') {
+					line.textContent = state.host ? `This computer has CORSIA ${state.app} and ${state.name} has ${state.host}. Update the older one, then try again.` : `${state.name} has an older CORSIA. Update it, then try again.`;
+				} else if (state.kind === 'key_changed') {
+					line.textContent = `It isn’t the computer this app paired with. That happens when CORSIA is reset or reinstalled there. If nobody did that, check ${state.name} before you pair again.`;
+				} else {
+					line.textContent = `${state.name} has an older CORSIA. Update it, then try again.`;
+				}
+				line.hidden = false;
+				retry.textContent = state.kind === 'key_changed' ? 'Pair again' : 'Try again';
+				retry.disabled = false;
+				actions.hidden = false;
+			}
+
+			window.__corsiaShowRemoteState = showRemoteState;
 			window.__corsiaShowServiceFailure = showFailure;
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
 			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
