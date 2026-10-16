@@ -18,6 +18,8 @@ use std::{
     process::Command,
 };
 
+use serde::Serialize;
+
 pub const SERVICE_FILE: &str = "service.json";
 const WORKSPACE_FOLDER: &str = "corsia";
 const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
@@ -33,6 +35,79 @@ pub enum FirstRun {
     Fresh { workspace: PathBuf },
     /// An earlier install is present: write nothing and show this reason.
     ExistingInstall { reason: String },
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FolderClassification {
+    Ready { path: String, protected_folder: Option<&'static str> },
+    Unwritable { path: String, reason: String },
+}
+
+fn protected_folder(path: &Path, home: &Path) -> Option<&'static str> {
+    [
+        (home.join("Documents"), "Documents"),
+        (home.join("Desktop"), "Desktop"),
+        (home.join("Downloads"), "Downloads"),
+        (
+            home.join("Library")
+                .join("Mobile Documents")
+                .join("com~apple~CloudDocs"),
+            "iCloud Drive",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(protected, name)| path.starts_with(&protected).then_some(name))
+}
+
+pub fn classify_folder(
+    path: &Path,
+    home: &Path,
+    check_writable: impl FnOnce(&Path) -> Result<(), String>,
+) -> FolderClassification {
+    let shown = path.display().to_string();
+    match check_writable(path) {
+        Ok(()) => FolderClassification::Ready {
+            path: shown,
+            protected_folder: protected_folder(path, home),
+        },
+        Err(reason) => FolderClassification::Unwritable { path: shown, reason },
+    }
+}
+
+pub fn ensure_folder_writable(path: &Path) -> Result<(), String> {
+    fs::create_dir_all(path)
+        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
+    let probe = path.join(format!(".corsia-write-check-{}", std::process::id()));
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    fs::remove_file(&probe)
+        .map_err(|error| format!("could not finish checking {}: {error}", path.display()))
+}
+
+pub fn remove_default_folder_if_fresh(default_folder: &Path, chosen_folder: &Path) -> Result<bool, String> {
+    if default_folder == chosen_folder || !default_folder.is_dir() {
+        return Ok(false);
+    }
+    let mut entries = fs::read_dir(default_folder)
+        .map_err(|error| format!("could not read {}: {error}", default_folder.display()))?;
+    let Some(entry) = entries
+        .next()
+        .transpose()
+        .map_err(|error| format!("could not read {}: {error}", default_folder.display()))?
+    else {
+        return Ok(false);
+    };
+    if entry.file_name() != ".git" || !entry.path().is_dir() || entries.next().is_some() {
+        return Ok(false);
+    }
+    fs::remove_dir_all(default_folder)
+        .map_err(|error| format!("could not remove {}: {error}", default_folder.display()))?;
+    Ok(true)
 }
 
 /// The shell's own environment names the workspace or state folder (tests and
@@ -52,6 +127,10 @@ fn present(path: &Path) -> Result<bool, String> {
             path.display()
         )),
     }
+}
+
+pub fn default_workspace(home: &Path) -> PathBuf {
+    home.join(WORKSPACE_FOLDER)
 }
 
 fn existing_install(reason: String) -> Result<FirstRun, String> {
@@ -240,6 +319,26 @@ pub fn apply(
     fs::create_dir_all(state_dir)
         .map_err(|error| format!("could not create {}: {error}", state_dir.display()))?;
     write_service_file(state_dir, workspace, port)
+}
+
+pub fn apply_chosen_folder(
+    workspace: &Path,
+    default_workspace: &Path,
+    state_dir: &Path,
+    port: u16,
+    account_exists: impl FnOnce() -> Result<bool, String>,
+    init_git: impl FnOnce(&Path) -> Result<(), String>,
+    restart: impl FnOnce() -> Result<(), String>,
+    wait_for_health: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if account_exists()? {
+        return Err("Your account is already set up, so CORSIA left its work folder unchanged.".into());
+    }
+    apply(workspace, state_dir, port, init_git)?;
+    restart()?;
+    wait_for_health()?;
+    remove_default_folder_if_fresh(default_workspace, workspace)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -494,6 +593,102 @@ mod tests {
         );
         assert_eq!(recorded_port(&home.state()), Some(5123));
         assert_eq!(home.listing(), before);
+    }
+
+    #[test]
+    fn chosen_folder_is_created_git_initialised_recorded_and_restarts_before_account() {
+        let home = Home::new("chosen-folder");
+        let default_folder = home.0.join("corsia");
+        fs::create_dir_all(default_folder.join(".git")).unwrap();
+        let chosen = home.0.join("Documents").join("corsia");
+        let calls = std::cell::RefCell::new(Vec::new());
+
+        apply_chosen_folder(
+            &chosen,
+            &default_folder,
+            &home.state(),
+            47_895,
+            || Ok(false),
+            |workspace| {
+                calls.borrow_mut().push(format!("git:{}", workspace.display()));
+                fs::create_dir_all(workspace.join(".git")).map_err(|error| error.to_string())
+            },
+            || { calls.borrow_mut().push("restart".into()); Ok(()) },
+            || { calls.borrow_mut().push("health".into()); Ok(()) },
+        )
+        .unwrap();
+
+        assert!(chosen.join(".git").is_dir());
+        assert_eq!(
+            *calls.borrow(),
+            [
+                format!("git:{}", chosen.display()),
+                "restart".to_string(),
+                "health".to_string(),
+            ]
+        );
+        let recorded: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.state().join(SERVICE_FILE)).unwrap()).unwrap();
+        assert_eq!(recorded["workspace"], chosen.to_str().unwrap());
+        assert!(!default_folder.exists(), "only the fresh default Git folder is removed");
+    }
+
+    #[test]
+    fn chosen_folder_is_refused_after_an_account_exists() {
+        let home = Home::new("chosen-folder-account");
+        let chosen = home.0.join("Documents").join("corsia");
+        let result = apply_chosen_folder(
+            &chosen,
+            &home.0.join("corsia"),
+            &home.state(),
+            47_895,
+            || Ok(true),
+            |_| panic!("must not initialise after account creation"),
+            || panic!("must not restart after account creation"),
+            || panic!("must not wait after account creation"),
+        );
+
+        assert!(result.unwrap_err().contains("already set up"));
+        assert!(!chosen.exists());
+        assert!(!home.state().join(SERVICE_FILE).exists());
+    }
+
+    #[test]
+    fn protected_and_unwritable_folder_choices_are_classified() {
+        let home = Home::new("folder-classification");
+        let documents = home.0.join("Documents").join("corsia");
+        assert_eq!(
+            classify_folder(&documents, &home.0, |_| Ok(())),
+            FolderClassification::Ready {
+                path: documents.display().to_string(),
+                protected_folder: Some("Documents"),
+            }
+        );
+
+        let unwritable = home.0.join("read-only");
+        assert_eq!(
+            classify_folder(&unwritable, &home.0, |_| Err("the disk is read-only".into())),
+            FolderClassification::Unwritable {
+                path: unwritable.display().to_string(),
+                reason: "the disk is read-only".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn only_a_git_only_default_folder_is_removed_after_a_new_choice() {
+        let home = Home::new("remove-default");
+        let default_folder = home.0.join("corsia");
+        let chosen = home.0.join("Documents").join("corsia");
+        fs::create_dir_all(default_folder.join(".git")).unwrap();
+
+        assert!(remove_default_folder_if_fresh(&default_folder, &chosen).unwrap());
+        assert!(!default_folder.exists());
+
+        fs::create_dir_all(default_folder.join(".git")).unwrap();
+        fs::write(default_folder.join("notes.md"), "keep me").unwrap();
+        assert!(!remove_default_folder_if_fresh(&default_folder, &chosen).unwrap());
+        assert!(default_folder.exists());
     }
 
     #[test]

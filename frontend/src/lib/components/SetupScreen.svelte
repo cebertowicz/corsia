@@ -10,11 +10,15 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
+	import FolderRow from './FolderRow.svelte';
 
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
 	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; error?: string };
+	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
+	type FolderChoice = { state: 'ready'; path: string; protected_folder: string | null } | { state: 'unwritable'; path: string; reason: string };
+	type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 	const classifier = createSetupClassifier();
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
@@ -26,6 +30,9 @@
 	let confirmation = $state('');
 	let email = $state('');
 	let folder = $state('~/CORSIA');
+	let folderNotice = $state<FolderNotice>(null);
+	let folderChanging = $state(false);
+	let folderChanged = $state(false);
 	let accountBusy = $state(false);
 	let accountError = $state('');
 	let confirmationError = $state('');
@@ -87,7 +94,7 @@
 			case 'welcome':
 				return { title: 'Welcome to CORSIA', lede: 'CORSIA runs AI agents that work on your projects with you.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
 			case 'account':
-				return { title: 'Create your account', primary: { label: 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
+				return { title: 'Create your account', primary: { label: 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
@@ -180,6 +187,37 @@
 		}
 	}
 
+	function tauriInvoke(): TauriInvoke | undefined {
+		return (window as Window & { __TAURI_INTERNALS__?: { invoke?: TauriInvoke } }).__TAURI_INTERNALS__?.invoke;
+	}
+
+	async function changeFolder() {
+		const invoke = tauriInvoke();
+		if (!invoke || folderChanging) return;
+		folderChanging = true;
+		try {
+			const choice = await invoke('choose_work_folder') as FolderChoice | null;
+			if (!choice) return;
+			folder = choice.path;
+			folderChanged = true;
+			folderNotice = choice.state === 'ready'
+				? (choice.protected_folder ? { kind: 'protected', folder: choice.protected_folder } : null)
+				: { kind: 'unwritable', reason: choice.reason };
+		} catch {
+			folderNotice = { kind: 'unwritable', reason: 'the folder picker could not check this folder' };
+		} finally {
+			folderChanging = false;
+		}
+	}
+
+	async function applyFolderBeforeAccount() {
+		if (!folderChanged) return;
+		const invoke = tauriInvoke();
+		if (!invoke) return;
+		await invoke('configure_work_folder', { path: folder });
+		folderChanged = false;
+	}
+
 	function validateConfirmation() {
 		confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : '';
 	}
@@ -188,6 +226,13 @@
 		validateConfirmation();
 		if (!name.trim() || !username.trim() || usernameError || password.length < 8 || confirmationError || accountBusy) return;
 		accountBusy = true; accountError = '';
+		try {
+			await applyFolderBeforeAccount();
+		} catch {
+			accountError = 'CORSIA couldn’t prepare this work folder. Choose another folder or try again.';
+			accountBusy = false;
+			return;
+		}
 		try {
 			const response = await fetch('/api/setup/first-account', {
 				method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -331,7 +376,7 @@
 			<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
 			<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
 			<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
-			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
+			<FolderRow {folder} notice={folderNotice} changing={folderChanging} onChange={changeFolder} />
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
 	{:else if page === 'models' && existingOmlxConsent}
@@ -375,9 +420,7 @@
 
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 8); }
-	.folder { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); color: var(--text-secondary); font-size: var(--text-subhead); }
-	.folder span { flex: none; white-space: nowrap; }
-	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
+	/* FolderRow owns the account form's work-folder layout. */
 	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
 	.welcome-copy p, .consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }

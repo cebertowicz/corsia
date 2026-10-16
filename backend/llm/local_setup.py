@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Callable, IO
 
 import httpx
 
@@ -38,7 +38,8 @@ from llm.local_setup_ownership import ensure_omlx as _ensure_omlx
 from llm.local_setup_ownership import existing_install_is_foreign
 from llm.local_setup_ownership import omlx_log_detail, own_omlx_admin_key, own_omlx_port, require_free_disk
 from llm.local_setup_ownership import run_command as _run
-from llm.local_profiles import DEFAULT_PROFILE, OMLX_GLOBAL_SETTINGS, LocalProfile, format_size
+from llm.local_profiles import DEFAULT_PROFILE, OMLX_GLOBAL_SETTINGS, LocalProfile, format_size, profile_by_id
+from llm import local_setup_operation
 
 LOCAL_HOST = "127.0.0.1"
 # A first start on a new Mac imports MLX and preloads pinned models before it answers.
@@ -120,18 +121,22 @@ async def _wait_for_download(server_id: str, progress: Callable[[str], None],
     from llm.providers.omlx_endpoints import admin_request
 
     cfg = {"server_id": server_id}
-    response = await admin_request(
-        cfg, "POST", "/hf/download", json={"repo_id": profile.repository, "hf_token": ""}, timeout=15.0,
-    )
-    if response.status_code not in (200, 201, 202):
-        raise RuntimeError(f"oMLX could not start the model download (HTTP {response.status_code}).")
-    payload = response.json()
-    if not isinstance(payload, dict) or not payload.get("success"):
-        raise RuntimeError("oMLX did not accept the model download request.")
-    task = payload.get("task")
-    task_id = task.get("task_id") if isinstance(task, dict) else None
-    if not isinstance(task_id, str) or not task_id:
-        raise RuntimeError("oMLX did not return a download task id.")
+    operation = local_setup_operation.read()
+    task_id = operation.task_id if operation and operation.profile_id == profile.id else None
+    if task_id is None:
+        response = await admin_request(
+            cfg, "POST", "/hf/download", json={"repo_id": profile.repository, "hf_token": ""}, timeout=15.0,
+        )
+        if response.status_code not in (200, 201, 202):
+            raise RuntimeError(f"oMLX could not start the model download (HTTP {response.status_code}).")
+        payload = response.json()
+        if not isinstance(payload, dict) or not payload.get("success"):
+            raise RuntimeError("oMLX did not accept the model download request.")
+        task = payload.get("task")
+        task_id = task.get("task_id") if isinstance(task, dict) else None
+        if not isinstance(task_id, str) or not task_id:
+            raise RuntimeError("oMLX did not return a download task id.")
+        _record_download_task(profile, task_id)
 
     started = time.monotonic()
     tracker = DownloadProgress(started)
@@ -196,6 +201,7 @@ class _Flight:
     eligibility: Eligibility | None = None
     following: bool = False
     kind: str | None = None
+    operation_lock: IO[str] | None = None
 
 
 _flight = _Flight()
@@ -203,6 +209,37 @@ _flight = _Flight()
 
 def _running() -> bool:
     return _flight.task is not None and not _flight.task.done()
+
+
+def _release_operation_lock() -> None:
+    local_setup_operation.unlock(_flight.operation_lock)
+    _flight.operation_lock = None
+
+
+def _claim_operation(profile: LocalProfile, kind: str) -> bool:
+    """Persist and exclusively own one flight before it can request a download."""
+    lock = local_setup_operation.try_lock()
+    if lock is None:
+        return False
+    try:
+        if local_setup_operation.read() is not None:
+            local_setup_operation.unlock(lock)
+            return False
+        local_setup_operation.write(local_setup_operation.Operation(profile.id, kind))
+    except Exception:
+        local_setup_operation.unlock(lock)
+        raise
+    _flight.operation_lock = lock
+    return True
+
+
+def _record_download_task(profile: LocalProfile, task_id: str) -> None:
+    operation = local_setup_operation.read()
+    if operation is None or operation.profile_id != profile.id:
+        return
+    local_setup_operation.write(
+        local_setup_operation.Operation(profile.id, operation.kind, task_id),
+    )
 
 
 def setup_stage() -> str | None:
@@ -316,6 +353,9 @@ async def _run_flight(eligibility: Eligibility, *, profile: LocalProfile, into_o
             result = await adopt_existing_omlx(report, eligibility, events)
         else:
             result = await _setup_new_omlx(report, eligibility, events, profile)
+    except asyncio.CancelledError:
+        _release_operation_lock()
+        raise
     except StillDownloading:
         _emit("downloading_stopped", profile=profile.id)
         result = {
@@ -334,12 +374,61 @@ async def _run_flight(eligibility: Eligibility, *, profile: LocalProfile, into_o
     _flight.result = result
     _flight.stage = None
     _flight.following = False
+    if result.get("ok") and not result.get("downloading"):
+        local_setup_operation.clear()
+    elif not result.get("downloading"):
+        # A terminal oMLX error cannot be followed. Removing its stale task id
+        # lets an explicit retry create one new task instead of replaying it.
+        local_setup_operation.clear()
+    _release_operation_lock()
     return result
 
 
 def flight_task() -> asyncio.Task | None:
     """The flight's task for lifespan shutdown to cancel and join, else None."""
     return _flight.task
+
+
+async def resume_pending_setup() -> bool:
+    """Re-follow a persisted oMLX task after a backend restart, without posting a duplicate."""
+    if _running():
+        return True
+    operation = local_setup_operation.read()
+    if operation is None:
+        return False
+    profile = profile_by_id(operation.profile_id)
+    if profile is None or operation.kind not in {"setup", "starter"}:
+        log.warning("discarding unreadable local setup recovery record")
+        local_setup_operation.clear()
+        return False
+    eligibility = profile_eligibility(profile, await asyncio.to_thread(host_ram_bytes))
+    if not eligibility.eligible:
+        log.warning("cannot resume local setup for ineligible profile %s", profile.id)
+        return False
+
+    _flight.result = None
+    _flight.eligibility = eligibility
+    _flight.kind = operation.kind
+    _flight.stage = "Waiting to resume local model setup"
+
+    async def resume() -> dict:
+        while _flight.operation_lock is None:
+            lock = local_setup_operation.try_lock()
+            if lock is not None:
+                _flight.operation_lock = lock
+                break
+            await asyncio.sleep(0.25)
+        return await _run_flight(
+            eligibility,
+            profile=profile,
+            into_own_omlx=operation.kind == "starter",
+        )
+
+    _flight.task = asyncio.create_task(resume())
+    _flight.task.add_done_callback(_observe_setup_task)
+    _flight.task.add_done_callback(lambda _task: _notify_models_changed())
+    _emit("resumed", profile=profile.id, kind=operation.kind)
+    return True
 
 
 async def begin_local_setup(
@@ -356,6 +445,10 @@ async def begin_local_setup(
     """
     if _running():
         return _in_progress_result(_flight.eligibility)
+    if local_setup_operation.read() is not None:
+        if await resume_pending_setup():
+            return _in_progress_result(_flight.eligibility)
+        return local_setup_error("CORSIA could not resume the local model setup safely.", profile_id or DEFAULT_PROFILE.id)
     ram_bytes = await asyncio.to_thread(host_ram_bytes)
     foreign = profile_id is not None and await asyncio.to_thread(existing_install_is_foreign)
     # Refused before anything is cleared or started: the caller reads the reason.
@@ -383,6 +476,10 @@ async def begin_local_setup(
         return {**local_setup_error(message, profile.id), "eligibility": eligibility.__dict__, "progress": []}
     if _running():
         return _in_progress_result(_flight.eligibility)
+    if not _claim_operation(profile, "setup"):
+        if await resume_pending_setup():
+            return _in_progress_result(_flight.eligibility)
+        return _in_progress_result(eligibility)
     _flight.stage = "Installing"
     _flight.kind = "setup"
     _flight.eligibility = eligibility
