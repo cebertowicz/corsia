@@ -542,6 +542,8 @@ async def test_seven_servers_and_39_tools_in_fresh_codex_registries(
             return apps[args[0]]
         if fn.__name__ == "load_missing_app_key_refs":
             return []
+        if fn.__name__ == "register_stored":
+            return 0
         if fn.__name__ == "record_runtime_app_state":
             return None
         raise AssertionError(fn.__name__)
