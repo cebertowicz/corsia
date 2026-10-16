@@ -92,7 +92,7 @@
 	{:else if error}
 		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Try again</Button></div>
 	{:else if apps.length === 0}
-		<p class="state">No apps shared with every project yet. Ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor or Codex, for example: “Bring over my apps from Claude.”</p>
+		<p class="state">No apps shared with every project yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor or Codex, for example: “Bring over my apps from Claude.”</p>
 	{:else}
 		<div class="rows">
 			{#each apps as app (app.id)}

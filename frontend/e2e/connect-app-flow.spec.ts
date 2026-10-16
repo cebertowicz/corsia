@@ -16,6 +16,8 @@ for (const viewport of [
 		await page.getByRole('button', { name: 'Connect an app', exact: true }).click();
 		const dialog = page.getByRole('dialog');
 		await expect(dialog.getByRole('heading', { name: 'What' })).toBeVisible();
+		// Modal.svelte's open fly transition runs for 380ms; capture the settled surface.
+		await page.waitForTimeout(400);
 		await saveEvidenceScreenshot(page, testInfo, `connect-app-${viewport.name}-step-1`);
 		await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
 		await expect(dialog.getByRole('heading', { name: 'Set it up' })).toBeVisible();
