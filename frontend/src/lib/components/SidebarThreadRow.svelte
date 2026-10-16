@@ -208,7 +208,7 @@
 	.action-zone .zone-label { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.01em; }
 	.left-zone {
 		left: 0; width: 80px;
-		background: var(--violet);
+		background: var(--accent-fill); color: var(--accent-on-fill);
 		border-top-left-radius: var(--radius-sm);
 		border-bottom-left-radius: var(--radius-sm);
 	}
@@ -274,7 +274,7 @@
 	.thread-action-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
 	.thread-item:hover { background: var(--bg-hover); }
 	.thread-item.active {
-		background: var(--violet-bg);
+		background: var(--accent-wash);
 	}
 	.thread-title-row {
 		display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;

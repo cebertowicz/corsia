@@ -110,6 +110,7 @@ const TEXT: Record<string, string[]> = {
 	'--text-muted': ALL_TINTS,
 	'--text-tertiary': ALL_TINTS,
 	'--violet-text': ['--violet-bg', '--accent-bg', '--accent-bg-hover'],
+	'--purple-text': ['--purple-bg'],
 	'--green-text': ['--green-bg'],
 	'--red-text': ['--red-bg'],
 	'--amber-text': ['--amber-bg'],

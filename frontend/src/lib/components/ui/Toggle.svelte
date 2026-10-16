@@ -55,8 +55,8 @@
 		transition: all var(--dur-tight) var(--ease-snap);
 	}
 	.tg.on {
-		background: linear-gradient(180deg, var(--violet-2, var(--violet)), var(--violet));
-		border-color: var(--violet);
+		background: linear-gradient(180deg, var(--accent-hover, var(--accent)), var(--accent));
+		border-color: var(--accent);
 	}
 	.tg.on::after {
 		left: calc(var(--w) - var(--knob) - 2.5px);
@@ -67,7 +67,7 @@
 		cursor: not-allowed;
 	}
 	.tg:focus-visible {
-		outline: 2px solid var(--violet);
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>

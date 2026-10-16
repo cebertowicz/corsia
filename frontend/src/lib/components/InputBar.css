@@ -224,8 +224,8 @@
 .effort-thumb {
 	position: absolute;
 	top: 3px; bottom: 3px;
-	background: color-mix(in srgb, var(--violet) 22%, transparent);
-	border: 1px solid color-mix(in srgb, var(--violet) 35%, transparent);
+	background: color-mix(in srgb, var(--accent) 22%, transparent);
+	border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
 	border-radius: var(--radius-xs);
 	z-index: 0;
 	pointer-events: none;
@@ -239,7 +239,7 @@
 	font-size: var(--text-caption); font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	color: color-mix(in srgb, var(--violet) 55%, var(--text-tertiary));
+	color: color-mix(in srgb, var(--accent) 55%, var(--text-tertiary));
 	margin-bottom: 8px;
 }
 
@@ -265,7 +265,7 @@
 .model-list-item:disabled:hover { background: none; }
 .model-list-item.active {
 	color: var(--accent-text);
-	background: color-mix(in srgb, var(--violet) 10%, transparent);
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .model-status-dot {
 	width: 7px; height: 7px; border-radius: var(--radius-circle); flex-shrink: 0;
@@ -313,7 +313,7 @@
 	user-select: none; -webkit-user-select: none;
 	position: relative; overflow: hidden; isolation: isolate;
 }
-.send-btn:hover { background: color-mix(in srgb, var(--violet) 88%, white); }
+.send-btn:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
 /* The hold fills the button while it is being made, so the user can see the
    gesture landing instead of finding out after they let go. */
 .send-btn.queue-holding::before {

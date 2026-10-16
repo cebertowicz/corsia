@@ -86,9 +86,9 @@
 		color: var(--text-secondary);
 	}
 	.btn.secondary:hover:not(:disabled) {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text, var(--violet));
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
+		color: var(--accent-text, var(--accent));
 	}
 
 	/* The one solid accent fill per view, inked like every other accent fill (send, compose, your messages). */

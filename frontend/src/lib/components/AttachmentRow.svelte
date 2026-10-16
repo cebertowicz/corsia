@@ -188,7 +188,7 @@
 	}
 	/* Inset: the message clips at the prose edge and the phone's chip strip scrolls, so an outward ring would be cut off.
 	   The row's 2 px left padding (always there, so focus moves nothing) is the room the ring takes beside the tile. */
-	button.tile:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+	button.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	@media (pointer: coarse) {
 		.tile.row { min-height: 44px; }
 		.tile.chip { min-height: 36px; }

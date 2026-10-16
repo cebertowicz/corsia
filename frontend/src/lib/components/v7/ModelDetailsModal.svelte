@@ -311,7 +311,7 @@
 		border-radius: var(--radius-xs);
 	}
 	.cap-chip[data-cap="vision"]    { background: var(--sky-bg);    color: var(--sky); }
-	.cap-chip[data-cap="reasoning"] { background: var(--violet-bg); color: var(--violet-text, var(--violet)); }
+	.cap-chip[data-cap="reasoning"] { background: var(--purple-bg); color: var(--purple-text, var(--purple)); }
 	.cap-chip[data-cap="tools"]     { background: var(--teal-bg);   color: var(--teal); }
 	.cap-text { font-size: var(--text-subhead); color: var(--text-primary); }
 
@@ -360,9 +360,9 @@
 		box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 	}
 	.tg.on {
-		background: linear-gradient(180deg, var(--violet-2), var(--violet));
-		border-color: var(--violet);
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 8px color-mix(in srgb, var(--violet) 30%, transparent);
+		background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+		border-color: var(--accent);
+		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
 	}
 	.tg.on::after {
 		left: calc(var(--w) - 14.5px);

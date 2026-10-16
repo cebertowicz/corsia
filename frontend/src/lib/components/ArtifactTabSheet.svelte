@@ -67,7 +67,7 @@
 		display: flex; align-items: center; gap: 2px;
 		border-radius: var(--radius-sm);
 	}
-	.sheet-row.active { background: var(--accent-bg); }
+	.sheet-row.active { background: var(--accent-wash); }
 	.sheet-pick {
 		flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
 		padding: 12px 8px; background: none; border: none; cursor: pointer;

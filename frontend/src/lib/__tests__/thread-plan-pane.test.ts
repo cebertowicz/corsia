@@ -541,7 +541,7 @@ describe("ThreadPlanPane", () => {
     __reset();
   });
 
-  it("renders attention rows only for its own active thread", async () => {
+  it("renders its own thread's rows and the plan's total when that spans more", async () => {
     const { __reset, queue } = await import("$lib/stores/attentionDock.svelte");
     __reset();
     activeThreadId.set("t1");
@@ -565,9 +565,10 @@ describe("ThreadPlanPane", () => {
     expect(rows[0].textContent).toContain("Decision for this thread");
     // Every row is this thread's own, so none repeats the thread's name.
     expect(rows[0].textContent).not.toContain("This thread");
-    // The rows are the queue's whole account of this thread: no count mixed in from the plan
-    // that could only open a listed row or another thread's decision.
-    expect(host.querySelector(".decision-indicator")).toBeNull();
+    // The plan's count also spans its child plans, so it exceeds the rows: its total sits below
+    // them, never the difference, and another thread's decision is never listed as a row.
+    const indicator = host.querySelector(".decision-indicator");
+    expect(indicator?.textContent?.replace(/\s+/g, " ").trim()).toBe("2 decisions in all Open");
     expect(host.textContent).not.toContain("Decision for another thread");
     __reset();
   });

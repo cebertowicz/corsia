@@ -213,7 +213,7 @@
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
 	.h-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-icon.active { background: var(--violet-bg); color: var(--violet-text); }
+	.h-icon.active { background: var(--accent-wash); color: var(--accent-text); }
 	.h-icon:active { scale: 0.94; }
 
 	.h-back {

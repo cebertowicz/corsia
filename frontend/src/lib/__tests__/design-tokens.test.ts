@@ -68,12 +68,12 @@ const KNOWN_UNRESOLVED = new Set([
 	'lib/components/v7/OmlxServerInfoPanel.svelte:190 → var(--surface-2)',
 ]);
 
-function walk(dir: string, out: string[] = []): string[] {
+function walk(dir: string, out: string[] = [], include = /\.(svelte|css)$/): string[] {
 	for (const entry of readdirSync(dir)) {
 		if (entry === 'node_modules' || entry.startsWith('.')) continue;
 		const path = join(dir, entry);
-		if (statSync(path).isDirectory()) walk(path, out);
-		else if (/\.(svelte|css)$/.test(entry)) out.push(path);
+		if (statSync(path).isDirectory()) walk(path, out, include);
+		else if (include.test(entry)) out.push(path);
 	}
 	return out;
 }
@@ -146,5 +146,18 @@ describe('design tokens', () => {
 		for (const token of ['--image-region-ink', '--image-region-halo', '--image-region-edge']) {
 			expect(defined.has(token), `${token} must be defined`).toBe(true);
 		}
+	});
+
+	it('never uses the deprecated accent aliases', () => {
+		// `--violet*` once meant both the accent and the violet hue. Accent consumers read the roles (`--accent`,
+		// `--accent-hover`, `-text`, `-wash`, `-line`); categorical violet reads `--purple*`. `--violet-brand` stays.
+		const deprecated = /var\(\s*--(?:violet(?!-brand)[a-z0-9-]*|accent-bg)\s*[,)]/;
+		const uses = walk(SRC, [], /\.(svelte|css|ts)$/)
+			.filter((file) => !/app-tokens\.css$|\.(test|spec)\.ts$/.test(file))
+			.flatMap((file) => readFileSync(file, 'utf8').split('\n')
+				.map((text, index) => ({ text, at: `${file.slice(SRC.length + 1)}:${index + 1}` }))
+				.filter(({ text }) => deprecated.test(text))
+				.map(({ at }) => at));
+		expect(uses).toEqual([]);
 	});
 });

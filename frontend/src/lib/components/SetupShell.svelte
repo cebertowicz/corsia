@@ -209,8 +209,8 @@
 <style>
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
 	/*
-	 * The approved blue, for setup only: the app-wide accent waits. The five role tokens carry it, and the legacy
-	 * names the shared controls still read follow them. Each role has its own shade because one hex cannot be a
+	 * The approved blue, for setup only: the app-wide accent waits. The role tokens carry it; the deprecated legacy
+	 * names mirror them only for branches in flight (#856). Each role has its own shade because one hex cannot be a
 	 * fill, ink on that fill, text and a hairline at AA in both themes.
 	 */
 	.setup-shell {
@@ -227,6 +227,9 @@
 		--violet: #00769e; --violet-2: #00769e; --violet-text: #006d92;
 		--violet-bg: color-mix(in srgb, #00769e 10%, transparent); --violet-line: color-mix(in srgb, #00769e 30%, transparent);
 	}
+	/* The toggle keeps the shades it had under the legacy names, which differ from the roles above. */
+	.setup-shell :global(.tg) { --accent: #3aa9d0; }
+	:global([data-theme='light']) .setup-shell :global(.tg) { --accent: #00769e; --accent-hover: #00769e; }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
