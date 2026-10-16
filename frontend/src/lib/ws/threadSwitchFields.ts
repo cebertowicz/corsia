@@ -14,3 +14,6 @@ export function threadAgentFields(data: any) {
 	return Object.fromEntries(SESSION_AGENT_FIELDS
 		.filter(field => data[field] !== undefined).map(field => [field, data[field]]));
 }
+
+/** Every optional row field a `session_updated` frame may carry besides title and model truth. */
+export const threadFrameFields = (data: any) => ({ ...threadSwitchFields(data), ...threadAgentFields(data) });
