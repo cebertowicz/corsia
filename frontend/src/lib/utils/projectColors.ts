@@ -44,7 +44,7 @@ export const ACCENT_TEXT_SURFACES: Record<'light' | 'dark', string[]> = {
 };
 /**
  * The least APCA contrast (`|Lc|`) the ink must reach on an accent fill: APCA's minimum for content text. The fill
- * steps away from its ink only below it, so a colour that already reads (the default `#0083af` is Lc 74.7 with white)
+ * steps away from its ink only below it, so a colour that already reads (the default `#007faa` is Lc 76.4 with white)
  * fills with itself.
  */
 export const FILL_INK_MIN_LC = 60;

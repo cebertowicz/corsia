@@ -4,13 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { ACCENT_ROLE_TOKENS, type AccentRoles, accentRoles } from './lib/utils/projectColors';
 
 /**
- * The default (no-project) accent IS a project colour: the corsia project's own `#0083af`. So the defaults in
+ * The default (no-project) accent IS a project colour: the corsia project's own `#007faa`. So the defaults in
  * `app-tokens.css` must be exactly what `accentRoles(ACCENT_DEFAULT, theme)` returns — anything else and the
  * workspace scope and the corsia project render two different blues from one brand. The literals drift, so they
  * are pinned to the function rather than to each other.
  */
 
-const ACCENT_DEFAULT = '#0083af';
+const ACCENT_DEFAULT = '#007faa';
 const css = readFileSync(resolve(__dirname, 'app-tokens.css'), 'utf8');
 
 /** Drop at-rules (`@supports`), keeping only the top-level rule bodies that set the defaults. */
@@ -85,7 +85,7 @@ describe('the default accent is the project blue', () => {
 	});
 
 	it('keeps the wider-gamut block off the accent', () => {
-		// #0083af is authored as sRGB; a display-p3 variant would be an invented colour accentRoles() cannot
+		// #007faa is authored as sRGB; a display-p3 variant would be an invented colour accentRoles() cannot
 		// derive, and it would make the default disagree with a project painted the same hex.
 		const at = css.indexOf('@supports (color: color(display-p3');
 		expect(at).toBeGreaterThan(-1);
