@@ -35,7 +35,6 @@ UNAVAILABLE_READS = {
     "harness_ready": "tool model_sources, once, without recheck",
     "sources_missing": "tool model_sources, once, without recheck",
     "local_download": "corsia_api GET /api/providers/local/setup",
-    "gmail_eligible": "none; treat as no for gmail_eligible",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
     "own_omlx_source": "local oMLX ownership and source read, once",
@@ -142,14 +141,6 @@ def _own_omlx_source() -> bool:
     )
 
 
-def _gmail_eligible() -> bool:
-    from infra import config
-    from infra.user_profile import profile_email
-    from onboarding.setup_decisions import GMAIL_DOMAINS
-
-    return profile_email(config.WORKSPACE).rsplit("@", 1)[-1].lower() in GMAIL_DOMAINS
-
-
 def _app_user_profile() -> dict[str, str | None]:
     from infra import config
     from infra.user_profile import profile_name
@@ -216,7 +207,6 @@ async def _app_setup_facts() -> dict[str, Any]:
     reads = await _read_facts({
         "model_sources": lambda: run_in_db(_model_sources),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
-        "gmail_eligible": lambda: run_off_db(_gmail_eligible),
         "web_search_ready": setup_decisions.web_search_works,
         "own_omlx_source": lambda: run_off_db(_own_omlx_source),
         "setup": _app_setup,
@@ -238,7 +228,8 @@ async def _app_setup_facts() -> dict[str, Any]:
         "harness_ready": harness_ready,
         "sources_missing": sources_missing,
         "local_download": reads["local_download"],
-        "gmail_eligible": reads["gmail_eligible"],
+        # Every install is offered Google setup; the key stays for the first-run reference's gate.
+        "gmail_eligible": True,
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,
         "own_omlx_source": reads["own_omlx_source"],

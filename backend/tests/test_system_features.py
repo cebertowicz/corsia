@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -24,6 +25,42 @@ def test_feature_snapshot_keeps_a_saved_focus_override():
         "focus_mode": False,
         "cpu_profiler": False,
     }
+
+
+# The build stamp names checkout commits, so it defaults off in a packaged app
+# (no checkout to debug against) and on in a source checkout. A saved
+# Settings > Debug value wins over the mode default in both.
+
+
+def _set_platform_module_path(monkeypatch, tmp_path: Path, *, bundled: bool) -> None:
+    """Make the real app_bundle_root() inspect a bundled or checkout path."""
+    from infra import platform_paths
+
+    module_path = (
+        tmp_path / "CORSIA.app" / "Contents" / "Resources" / "backend" / "infra" / "x.py"
+        if bundled
+        else tmp_path / "checkout" / "backend" / "infra" / "x.py"
+    )
+    monkeypatch.setattr(platform_paths, "__file__", str(module_path))
+
+
+@pytest.mark.parametrize("bundled", (True, False), ids=("packaged-app", "source-checkout"))
+def test_debug_overlay_default_follows_the_real_app_bundle_path_check(
+    monkeypatch, tmp_path, bundled,
+):
+    _set_platform_module_path(monkeypatch, tmp_path, bundled=bundled)
+    assert system._features_snapshot({})["debug_version_overlay"] is not bundled
+
+
+@pytest.mark.parametrize("bundled", (True, False), ids=("packaged-app", "source-checkout"))
+@pytest.mark.parametrize("saved", (True, False), ids=("saved-on", "saved-off"))
+def test_saved_debug_overlay_wins_over_the_mode_default(
+    monkeypatch, tmp_path, bundled, saved,
+):
+    _set_platform_module_path(monkeypatch, tmp_path, bundled=bundled)
+    assert system._features_snapshot({"debug_version_overlay": saved})[
+        "debug_version_overlay"
+    ] is saved
 
 
 def _stub_features(monkeypatch, flags: dict | None = None, *, can_start: bool = True):

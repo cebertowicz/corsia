@@ -168,6 +168,47 @@ def record_set_up(model: LocalModel) -> None:
         staged.unlink(missing_ok=True)
 
 
+def _starter_installed(starter: LocalModel) -> bool:
+    """Whether CORSIA's own oMLX has the whole pre-record starter in its configured model directory."""
+    from llm.local_setup_ownership import download_complete, own_omlx_settings_file
+
+    try:
+        raw = json.loads(own_omlx_settings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    model = raw.get("model") if isinstance(raw, dict) else None
+    model_dir = model.get("model_dir") if isinstance(model, dict) else None
+    if not isinstance(model_dir, str) or not model_dir:
+        return False
+    return download_complete(Path(model_dir) / starter.repository, starter.download_size_bytes)
+
+
+def backfill_legacy_record() -> LocalModel | None:
+    """Once at startup, record the starter a finished pre-record setup installed.
+
+    Writes only when there is no record and no recovery record of any version (a
+    setup may be mid-download), setup's own marker is present, the current oMLX
+    runs and is setup's own, and that oMLX's model directory holds the whole starter
+    (the marker is written before the download starts, so it proves no download).
+    Blocking: run it off the event loop.
+    """
+    from llm import local_setup_operation
+    from llm.local_profiles import OWN_OMLX_STARTER
+    from llm.local_setup_ownership import existing_install_is_foreign, installed_omlx, marker_path
+
+    if _record_path().exists() or local_setup_operation.record_path().exists() or not marker_path().exists():
+        return None
+    if installed_omlx() is None or existing_install_is_foreign() or not _starter_installed(OWN_OMLX_STARTER):
+        return None
+    try:
+        record_set_up(OWN_OMLX_STARTER)
+    except OSError as error:
+        log.warning("could not record the earlier setup's starter model: %s", error)
+        return None
+    log.info("recorded the starter model a finished earlier setup installed")
+    return OWN_OMLX_STARTER
+
+
 def set_up_model() -> LocalModel | None:
     """The model the last finished setup installed, else None."""
     try:

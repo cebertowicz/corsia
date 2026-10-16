@@ -157,6 +157,16 @@ def test_exit_torn_read_type_is_emitted_only_for_specific_missing_reads(tmp_path
             DeniedProcess(), session='session', socket_dir=tmp_path,
         )
 
+    # Linux serves an empty environment once an exiting process has released its memory.
+    class EmptyEnvProcess:
+        def environ(self):
+            return {}
+
+    with pytest.raises(identity.BrowserExitTornRead):
+        identity.daemon_environment_matches(
+            EmptyEnvProcess(), session='session', socket_dir=tmp_path,
+        )
+
     # macOS returns an empty or denied executable path while a process exits, before it is a zombie.
     class ExitingProcess:
         def __init__(self, exe):
@@ -334,5 +344,28 @@ async def test_empty_executable_read_after_close_ack_retries_to_closed(synthetic
 
     monkeypatch.setattr(owner, '_request_close', close)
     monkeypatch.setattr(psutil.Process, 'exe', exe)
+    await owner.close_thread('thread')
+    assert torn and owner.live_count() == 0
+
+
+async def test_empty_environment_read_after_close_ack_retries_to_closed(synthetic_browser, monkeypatch):
+    fake = synthetic_browser
+    owner = fake.owner
+    await owner.run('thread', ['snapshot'])
+    real_environ, real_close = psutil.Process.environ, owner._request_close
+    acked, torn = [], []
+
+    async def close(runtime):
+        await real_close(runtime)
+        acked.append(True)
+
+    def environ(self):
+        if acked and not torn and self.pid != psutil.Process().pid:
+            torn.append(self.pid)
+            return {}
+        return real_environ(self)
+
+    monkeypatch.setattr(owner, '_request_close', close)
+    monkeypatch.setattr(psutil.Process, 'environ', environ)
     await owner.close_thread('thread')
     assert torn and owner.live_count() == 0

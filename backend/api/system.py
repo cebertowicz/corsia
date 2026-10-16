@@ -20,6 +20,7 @@ from infra import state
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
+from infra.platform_paths import app_bundle_root
 from infra.settings import (
     delete_agent_default,
     get_feature_flags,
@@ -38,6 +39,15 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
+
+def _debug_version_overlay_default() -> bool:
+    """Hide the checkout build stamp in an immutable packaged app by default.
+
+    A source checkout has commits a developer can act on, while an app bundle
+    has no checkout (api/version.py likewise reports no disk head there). A
+    saved Settings > Debug value still wins; this supplies only the default.
+    """
+    return app_bundle_root() is None
 
 
 @router.get("/health")
@@ -102,7 +112,9 @@ def _features_snapshot(flags: dict | None = None) -> dict:
     """
     resolved = flags if flags is not None else get_feature_flags()
     return {
-        "debug_version_overlay": resolved.get("debug_version_overlay", True),
+        "debug_version_overlay": resolved.get(
+            "debug_version_overlay", _debug_version_overlay_default()
+        ),
         "focus_mode": resolved.get("focus_mode", True),
         # The sampler's real state, not the saved flag: a start that failed reads off.
         "cpu_profiler": cpu_sampler_running(),

@@ -1,19 +1,18 @@
 """User-attention HTTP surface (coordination MVP S6b).
 
 Thin endpoints over the tested attention lifecycle (S6a), parent disposition
-(S5b), and review-profile execution (S5a). No new backend concept — these wire
-the existing model functions for the launch UI:
+(S5b), and review-profile execution (S5a):
 
-- ``GET  /api/attention/raised``            — the Requires-user list (optionally scoped to a thread)
+- ``GET  /api/attention/raised``            — raised rows, optionally scoped to a thread
 - ``GET  /api/attention/rollup``            — pull-only parent roll-up (no badge/wake)
 - ``GET  /api/attention/{id}/review``       — the review-profile result for a card
 - ``POST /api/attention/{id}/clear``        — clearing actions (S6a)
 - ``GET  /api/attention/queue``             — the one queue the user works through
 - ``POST /api/attention/{id}/dispose``      — parent disposition (S5b)
 
-There is one pile and one "needs you" concept (PLANS-AC29). `/queue` returns the
-rows a typed renderer can actually draw, head-first; `/raised` and `/rollup`
-return exactly the rows it cannot, so nothing is hidden by an unproven claim.
+``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
+semantics remain covered by backend tests while #921 decides whether raised rows
+receive a typed surface or stop being raised.
 """
 
 from __future__ import annotations

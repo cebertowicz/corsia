@@ -6,8 +6,10 @@ concern from the catalog plumbing that stores them, so it lives here.
 
 A field the server omits means "this server cannot say", which is never the
 same as it saying the model has no such capability. Absent stays absent.
-``reasoning_effort_options`` is None when the template has no strict vocabulary,
-which reads the same way: no discrete picker, fall back to the on/off toggle.
+``reasoning_efforts`` (oMLX 0.7.1rc1+) is the template's own vocabulary; None
+means it names none, so the picker falls back to the on/off toggle.
+``reasoning_effort_options`` is oMLX's generic custom-control list, trusted only
+where ``reasoning_efforts`` is present and empty (see ``reasoning_config``).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Any
 REPORTED_FIELDS = (
     "thinking_default",
     "preserve_thinking_default",
+    "reasoning_efforts",
     "reasoning_effort_options",
     "reasoning_effort_default",
 )
