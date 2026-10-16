@@ -204,6 +204,53 @@ def test_repairs_each_candidate_through_the_runtime_reconciler(monkeypatch):
         db.close()
 
 
+def test_withdraws_a_user_deferred_ask_whose_task_retired():
+    db = _db()
+    try:
+        deferred = _artifact(db, "deferred-retired.md")
+        node, hold = _raise_ask(db, deferred)
+        attention.clear_attention(
+            deferred, outcome="defer",
+            condition={"type": "deadline", "value": "2026-10-01T16:00:00+00:00"}, db=db,
+        )
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
+        db.commit()
+
+        migrate_119_to_120(db)
+
+        assert db.execute(
+            "SELECT cleared_at FROM plan_node_holds WHERE id=?", (hold,),
+        ).fetchone()["cleared_at"] is not None
+        assert attention.get_attention_state(deferred, db=db) == "cleared"
+        assert json.loads(db.execute(
+            "SELECT metadata FROM artifact_identities WHERE id=?", (deferred,),
+        ).fetchone()["metadata"])["attention_outcome"] == "withdraw"
+    finally:
+        db.close()
+
+
+def test_keeps_a_parent_reviews_deferral_after_the_ask_ended():
+    db = _db()
+    try:
+        parent_deferred = _artifact(db, "parent-deferred.md")
+        node, hold = _raise_ask(db, parent_deferred)
+        holds.clear(
+            node.id, hold, expected_kind="blocked",
+            expected_revision=service._node_row(db, node.id)["revision"],
+            actor_id="owner", provenance="test.clear", db=db,
+        )
+        models.update_metadata(
+            "workspace", "document", "parent-deferred.md",
+            {"attention_state": "deferred", "disposition_outcome": "defer_until"}, db=db,
+        )
+
+        assert withdraw_stale_review_attention(db) == 0
+        assert attention.get_attention_state(parent_deferred, db=db) == "deferred"
+    finally:
+        db.close()
+
+
 def test_keeps_attention_no_ended_ask_left_behind():
     db = _db()
     try:

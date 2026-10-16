@@ -12,20 +12,22 @@ _TABLES = (
 
 
 def _stale_review_attention_sql() -> str:
-    """Raised attention an ended user ask may have left behind: the candidates.
+    """Raised or deferred attention an ended user ask may have left behind: the candidates.
 
     It takes positive evidence: a user ask on the item ended. Whether anything
     still raises it (another open ask, a parent review's approval or deferral, a
     raised plan decision) is not restated here: each candidate goes to
     ``sync_ask_attention``, the reconciler every runtime ask edge calls, so the
     repair and the runtime agree on which attention an ask owns. Attention no
-    ask ever touched is never a candidate.
+    ask ever touched is never a candidate. Deferred attention is a candidate
+    too: a deferral the user chose on an ask whose task has since ended would
+    otherwise come back when its condition fires, for a request already gone.
     """
     return """
     SELECT i.id
       FROM artifact_identities i
      WHERE i.state='active'
-       AND json_extract(i.metadata, '$.attention_state')='raised'
+       AND json_extract(i.metadata, '$.attention_state') IN ('raised','deferred')
        AND EXISTS (
            SELECT 1
              FROM plan_node_artifact_links l

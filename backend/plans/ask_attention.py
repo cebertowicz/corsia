@@ -124,7 +124,11 @@ def _parent_review_raises(metadata: dict) -> bool:
     """Whether a parent review sent the artifact to the user, or deferred it until a condition.
 
     Read only while the pile holds the artifact: the disposition stays in
-    metadata after the user clears it, so on its own it proves nothing.
+    metadata after the user clears it, so on its own it proves nothing. A raise
+    that starts a new episode drops it (``registry.attention.raise_attention``),
+    and a user's defer keeps it, so while the pile holds the artifact its
+    disposition was written in the episode now holding it. Attention raised
+    before raises dropped it can still carry one from an earlier episode.
     """
     from parent_review.disposition import APPROVE_TO_USER, DEFER_UNTIL
 

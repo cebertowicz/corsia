@@ -80,21 +80,87 @@ def _dispose(db, ask: str, outcome: str, **kwargs) -> None:
     db.commit()
 
 
-@pytest.mark.parametrize("operation", ("resolve_blocker", "close_node"))
-def test_ending_a_tasks_ask_keeps_a_parent_reviews_raise(db, operation):
+def _approve_to_user(db, ask: str) -> None:
     from parent_review.disposition import APPROVE_TO_USER
 
-    plan_id, node_id = _task(db)
-    ask = document_ask(db, "root")
-    _block(db, plan_id, node_id, ask)
     _dispose(
         db, ask, APPROVE_TO_USER, review_result=types.SimpleNamespace(blocking_failure=False),
     )
+
+
+def _metadata(db, artifact_id: str) -> dict:
+    raw = db.execute(
+        "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
+    ).fetchone()["metadata"]
+    return json.loads(raw) if raw else {}
+
+
+@pytest.mark.parametrize("approve_first", (False, True))
+@pytest.mark.parametrize("operation", ("resolve_blocker", "close_node"))
+def test_ending_a_tasks_ask_keeps_a_parent_reviews_raise(db, operation, approve_first):
+    plan_id, node_id = _task(db)
+    ask = document_ask(db, "root")
+    if approve_first:
+        _approve_to_user(db, ask)
+    _block(db, plan_id, node_id, ask)
+    if not approve_first:
+        _approve_to_user(db, ask)
 
     _end_ask(db, plan_id, node_id, operation)
 
     assert _open_holds(db, node_id) == []
     assert attention.get_attention_state(ask, db=db) == "raised"
+
+
+def test_a_parent_approval_the_user_cleared_does_not_hold_a_later_withdrawn_ask(db):
+    plan_id, node_id = _task(db)
+    ask = document_ask(db, "root")
+    _approve_to_user(db, ask)
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+    _block(db, plan_id, node_id, ask)
+    # The ask started a new episode: the earlier episode's disposition is gone.
+    assert attention.get_attention_state(ask, db=db) == "raised"
+    assert "disposition_outcome" not in _metadata(db, ask)
+
+    _end_ask(db, plan_id, node_id, "resolve_blocker")
+
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+    assert _metadata(db, ask)["attention_outcome"] == "withdraw"
+
+
+def test_a_user_defer_of_a_parent_approval_keeps_it_past_a_withdrawn_ask(db):
+    plan_id, node_id = _task(db)
+    ask = document_ask(db, "root")
+    _approve_to_user(db, ask)
+    attention.clear_attention(ask, outcome="defer", condition=_DEADLINE, db=db)
+    _block(db, plan_id, node_id, ask)
+
+    _end_ask(db, plan_id, node_id, "resolve_blocker")
+
+    assert attention.get_attention_state(ask, db=db) == "deferred"
+    assert _metadata(db, ask)["disposition_outcome"] == "approve_to_user"
+
+
+@pytest.mark.parametrize("prior,kept", (
+    (None, False), ("cleared", False), ("raised", True), ("deferred", True),
+))
+def test_only_a_raise_that_starts_an_episode_drops_the_disposition(db, prior, kept):
+    from registry import models
+
+    ask = document_ask(db, "root")
+    external_id = db.execute(
+        "SELECT external_id FROM artifact_identities WHERE id=?", (ask,),
+    ).fetchone()["external_id"]
+    models.update_metadata(
+        "workspace", "document", external_id,
+        {"attention_state": prior, "disposition_outcome": "approve_to_user"}, db=db,
+    )
+
+    attention.raise_attention(ask, db=db)
+
+    metadata = _metadata(db, ask)
+    assert metadata["attention_state"] == "raised"
+    assert ("disposition_outcome" in metadata) is kept
 
 
 def test_a_tasks_ask_ending_on_a_parent_deferral_stays_deferred_until_its_watch(db):

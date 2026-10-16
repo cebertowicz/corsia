@@ -69,12 +69,23 @@ def _attention_state(row: dict) -> str | None:
 
 
 def raise_attention(artifact_id: str, *, db=None) -> str:
-    """Mark an artifact's attention as raised, optionally inside a caller transaction."""
+    """Mark an artifact's attention as raised, optionally inside a caller transaction.
+
+    A raise from any state but raised or deferred starts a new attention
+    episode. A parent review's ``disposition_outcome`` belongs to the episode it
+    was written in, so this raise drops it: a disposition from an episode the
+    user already ended never counts as raising the new one. A raise while the
+    item is still raised or deferred keeps it.
+    """
     with write_transaction(db, scope="raise_attention") as _db:
-        identity = _identity(_identity_row(artifact_id, _db))
+        row = _identity_row(artifact_id, _db)
+        identity = _identity(row)
+        patch: dict[str, Any] = {"attention_state": ATTENTION_RAISED}
+        if _attention_state(row) not in (ATTENTION_RAISED, ATTENTION_DEFERRED):
+            patch["disposition_outcome"] = None  # update_metadata drops a None key
         models.update_metadata(
             identity["integration"], identity["type"], identity["external_id"],
-            {"attention_state": ATTENTION_RAISED}, db=_db,
+            patch, db=_db,
         )
         return ATTENTION_RAISED
 
