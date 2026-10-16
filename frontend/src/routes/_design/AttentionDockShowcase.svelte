@@ -20,7 +20,7 @@
 	} from '$lib/api/attentionQueue';
 
 	type Scenario =
-		| 'empty' | 'one' | 'pick-any' | 'many' | 'root-direct'
+		| 'empty' | 'one' | 'pick-any' | 'no-recommendation' | 'long-rationale' | 'many' | 'root-direct'
 		| 'external' | 'external-many' | 'suppressed' | 'stale';
 
 	const SCENARIOS: Array<{ id: Scenario; label: string }> = [
@@ -90,9 +90,9 @@
 				'Completed branches should collapse, but hiding them before the user sees the update makes the rollup feel untrustworthy.',
 			tradeoff:
 				'More visibility preserves continuity; less visibility keeps the landing surface calm.',
-			recommendation: 'A',
+			recommendation: 'B',
 			rationale:
-				'It witnesses completion without adding an acknowledgement chore or turning the canvas into history.',
+				'The passive witness gives the person a clear, reversible receipt at the moment it matters, while avoiding a second acknowledgement step or a persistent history surface that asks them to keep managing already-finished work.',
 			options: [
 				{ id: 'A', label: 'Seen on canvas open', detail: 'One passive witness, then collapse.' },
 				{ id: 'B', label: 'Seen when scrolled into view', detail: 'More precise, more machinery.' },
@@ -143,6 +143,19 @@
 				}),
 			);
 			return { current: picked, count: 1, items: [picked] };
+		}
+		if (scenario === 'no-recommendation') {
+			const unmatched = item(decision({ recommendation: 'Z' }));
+			return { current: unmatched, count: 1, items: [unmatched] };
+		}
+		if (scenario === 'long-rationale') {
+			const capped = item(
+				decision({
+					rationale:
+						'The recommended choice keeps the change reversible while making the next action obvious, so the person can decide now without creating another follow-up task or losing the context that explains why this option is a useful way forward today.',
+				}),
+			);
+			return { current: capped, count: 1, items: [capped] };
 		}
 		if (scenario === 'many') {
 			const items = [
