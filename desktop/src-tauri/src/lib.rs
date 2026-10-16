@@ -25,8 +25,10 @@ use tauri::Manager;
 mod app_paths;
 mod first_run;
 mod lifecycle;
+mod pairing;
 mod service_management;
 mod startup_failure;
+mod trust;
 mod update_stage;
 mod update_swap;
 
