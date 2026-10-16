@@ -71,8 +71,11 @@ def test_reply_waiting_marker_is_passive_and_clears_one_seen_thread(isolated_db)
             ) is True
         assert feedback_batches.reply_waiting_ids(db, "owner-token") == {artifact_id}
         threads = comments.list_for_artifact(artifact_id, db=db)
-        feedback_state.annotate_reply_waiting_threads(db, "owner-token", artifact_id, threads)
+        feedback_state.annotate_thread_attention(db, "owner-token", artifact_id, threads)
         assert {thread["id"] for thread in threads if thread["reply_waiting"]} == {second["id"]}
+        by_root = {thread["id"]: thread for thread in threads}
+        assert by_root[first["id"]]["new_reply_ids"] == []
+        assert len(by_root[second["id"]]["new_reply_ids"]) == 1
         assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
     finally:
         db.close()

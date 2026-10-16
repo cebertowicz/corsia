@@ -158,3 +158,80 @@ def test_viewed_route_is_monotonic_and_leaves_a_racing_reply_waiting(client, iso
     )
     assert raced.json() == {"root_id": root["id"], "reply_waiting": True}
     assert third["id"]
+
+
+def _listed(client, artifact_id: str) -> dict[str, dict]:
+    listed = client.get(f"/api/artifacts/{artifact_id}/comments", params={"token": OWNER_TOKEN})
+    assert listed.status_code == 200
+    return {thread["id"]: thread for thread in listed.json()["comments"]}
+
+
+def test_list_names_the_new_replies_and_clears_them_once_stamped(client, isolated_db):
+    db = get_db()
+    try:
+        artifact_id, root, first, second = _thread_with_replies(db)
+    finally:
+        db.close()
+
+    before = _listed(client, artifact_id)[root["id"]]
+    assert (before["new_reply_ids"], before["reply_waiting"]) == ([first["id"], second["id"]], True)
+
+    stamped = client.post(
+        f"/api/artifacts/{artifact_id}/comments/{root['id']}/viewed",
+        headers={"Authorization": f"Bearer {OWNER_TOKEN}"}, json={"seen_reply_id": first["id"]},
+    )
+    assert stamped.status_code == 200
+    partly = _listed(client, artifact_id)[root["id"]]
+    assert (partly["new_reply_ids"], partly["reply_waiting"]) == ([second["id"]], True)
+
+    client.post(
+        f"/api/artifacts/{artifact_id}/comments/{root['id']}/viewed",
+        headers={"Authorization": f"Bearer {OWNER_TOKEN}"}, json={"seen_reply_id": second["id"]},
+    )
+    after = _listed(client, artifact_id)[root["id"]]
+    assert (after["new_reply_ids"], after["reply_waiting"]) == ([], False)
+
+
+def test_a_users_own_reply_is_never_new_and_a_thread_they_did_not_touch_has_none(client, isolated_db):
+    db = get_db()
+    try:
+        artifact_id, root, first, second = _thread_with_replies(db)
+        db.commit()
+        own, _ = add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", parent_id=root["id"],
+        )
+        agent_root, _ = add_comment(db, artifact_id, author_id="owner", author="Owner")
+        agent_reply, _ = add_comment(
+            db, artifact_id, author_id="owner", author="Owner", parent_id=agent_root["id"],
+        )
+    finally:
+        db.close()
+
+    threads = _listed(client, artifact_id)
+    assert threads[root["id"]]["new_reply_ids"] == [first["id"], second["id"]]
+    assert own["id"] not in threads[root["id"]]["new_reply_ids"]
+    assert agent_reply["id"] not in threads[agent_root["id"]]["new_reply_ids"]
+    assert (threads[agent_root["id"]]["new_reply_ids"], threads[agent_root["id"]]["reply_waiting"]) == ([], False)
+
+    client.post(
+        f"/api/artifacts/{artifact_id}/comments/{root['id']}/viewed",
+        headers={"Authorization": f"Bearer {OWNER_TOKEN}"}, json={"seen_reply_id": second["id"]},
+    )
+    stamped = _listed(client, artifact_id)[root["id"]]
+    assert (stamped["new_reply_ids"], stamped["reply_waiting"]) == ([], False)
+
+
+def test_new_replies_use_one_query_per_list(client, isolated_db):
+    from doceditor import feedback_state
+
+    db = get_db()
+    try:
+        artifact_id, root, _first, _second = _thread_with_replies(db)
+        threads = [{"id": root["id"]}]
+        statements: list[str] = []
+        db.set_trace_callback(statements.append)
+        feedback_state.annotate_thread_attention(db, OWNER_USER, artifact_id, threads)
+        db.set_trace_callback(None)
+    finally:
+        db.close()
+    assert len([sql for sql in statements if "doc_comment_thread_views" in sql]) == 1
