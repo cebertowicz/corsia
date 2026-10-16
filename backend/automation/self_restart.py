@@ -145,7 +145,7 @@ def usual_update_seconds(*, db=None) -> int | None:
 
 
 def mark_conductor_told(operation_id: str, *, db=None) -> bool:
-    """Record exactly one successful workspace-conductor notification."""
+    """Record exactly one successful corsia-agent notification."""
     with write_transaction(db, scope="restart_operation") as connection:
         cur = connection.execute(
             "UPDATE self_restart_requests SET conductor_told_at=?,updated_at=? "

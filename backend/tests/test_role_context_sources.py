@@ -68,7 +68,7 @@ def test_ordinary_thread_receives_no_role_context_and_directory_does_not_instant
     after = dict(conn.execute("SELECT * FROM threads WHERE id='ordinary'").fetchone())
     assert resolution.roles == ()
     assert resolution.sources == ()
-    assert resolution.conductor_scopes == ()
+    assert resolution.coordination_scopes == ()
     assert after == before
 
 
@@ -143,6 +143,7 @@ def test_conductor_composes_agent_then_conductor_across_existing_scopes(
     _role_file(project, "agent", "A.md", "project agent")
     _role_file(workspace, "conductor", "C.md", "workspace conductor")
     _role_file(project, "conductor", "C.md", "project conductor")
+    _role_file(workspace, "corsia_agent", "C.md", "corsia agent")
 
     conn = _db()
     conn.execute(
@@ -161,7 +162,7 @@ def test_conductor_composes_agent_then_conductor_across_existing_scopes(
     conn.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps({"session_id": "conductor"}),
             "t",
         ),
@@ -174,20 +175,22 @@ def test_conductor_composes_agent_then_conductor_across_existing_scopes(
         db=conn,
     )
 
-    assert resolution.roles == ("agent", "conductor")
+    assert resolution.roles == ("agent", "conductor", "corsia_agent")
     assert [source.metadata["role"] for source in resolution.sources] == [
         "agent",
         "agent",
         "conductor",
         "conductor",
+        "corsia_agent",
     ]
     assert [source.metadata["scope"] for source in resolution.sources] == [
         "workspace",
         "project",
         "workspace",
         "project",
+        "workspace",
     ]
-    assert [scope["scope_type"] for scope in resolution.conductor_scopes] == [
+    assert [scope["scope_type"] for scope in resolution.coordination_scopes] == [
         "workspace",
         "project",
     ]

@@ -1,6 +1,6 @@
 """Settings › Keys: keys agents use but can never read.
 
-Two routes accept any signed-in caller, so any agent (the workspace conductor
+Two routes accept any signed-in caller, so any agent (the CORSIA agent
 through ``corsia_api`` among them): list entries' metadata, and add an inert
 entry by name, label and description. Neither ever carries a value. Every other route is the person's alone: it needs a
 signed-in human session from the ``Authorization`` header, and the writes

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Field, ListRow, Message, StatePill, Toggle } from '$lib/components/ui';
+	import { Button, Field, Message } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
+	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
 	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
-	import { accountToSignIn, startSignin } from '$lib/conductorSourcesApi';
+	import { fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
+	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
@@ -15,11 +17,12 @@
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
-	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; error?: string };
+	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
 	type FolderChoice = { state: 'ready'; path: string; protected_folder: string | null } | { state: 'unwritable'; path: string; reason: string };
 	type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 	const classifier = createSetupClassifier();
+	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: () => refreshSources() });
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
 	let localWanted = $state(true);
@@ -50,7 +53,7 @@
 	const steps = $derived<SetupStep[]>([
 		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
-		{ label: 'AI model', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
+		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
@@ -76,7 +79,7 @@
 			? 'The local model couldn’t start. Try again, or choose another source.'
 			: localDownloading
 				? 'Ready when the download finishes. You can close this window; CORSIA keeps going.'
-				: 'Sign in, add an API key, or download the local model to continue.',
+				: 'Connect Claude Code or Codex, or add an API key, to continue.',
 	);
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
 	const downloadModelLabel = $derived(status.model_name || 'local model');
@@ -92,14 +95,14 @@
 				if (status.macos_supported === false) return { title: 'Update macOS to continue', lede: 'Update to macOS 15 or later, then open CORSIA again.' };
 				return { title: 'Move CORSIA to Applications', lede: 'Move CORSIA to Applications, then open it again so updates work.' };
 			case 'welcome':
-				return { title: 'Welcome to CORSIA', lede: 'CORSIA runs AI agents that work on your projects with you.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
+				return { title: 'Welcome to CORSIA', lede: 'Your own AI team, on this computer. It remembers your projects, works with the tools and models you already use, and shows you results, not transcripts.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
 			case 'account':
-				return { title: 'Create your account', primary: { label: 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
+				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
-				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
+				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
 		}
 	});
 
@@ -252,6 +255,8 @@
 			connect();
 			await Promise.all([refreshSources(), classifier.read()]);
 			password = ''; confirmation = '';
+			// A source already Ready (named by setup status, confirmed by the recheck above) means the AI step never appears.
+			if (status.ready_ai && canFinish) { onFinished(); return; }
 			page = 'models';
 		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
@@ -273,18 +278,39 @@
 		}
 	}
 
-	async function signIn(source: ModelSource) {
-		const current = get(token);
-		if (!current) return;
+	let rechecking = false;
+	/** Coming back to the window is how a copy fixed in Terminal, or a sign-in finished in the browser, is noticed. */
+	async function recheckOnFocus() {
+		if (page !== 'models' || rechecking) return;
+		rechecking = true;
 		try {
-			const conductor = await fetch('/api/conductor', { headers: { Authorization: `Bearer ${current}` } });
-			const target = (await conductor.json())?.target?.thread_id;
-			if (!target) throw new Error('conductor unavailable');
-			const accountId = await accountToSignIn(current, source.source, source.name);
-			await startSignin(current, accountId, target);
 			await refreshSources();
-		} catch { sourceError = `CORSIA couldn’t start ${source.name} sign-in. Try again.`; }
+			await connectFlow.tick();
+		} finally { rechecking = false; }
 	}
+
+	$effect(() => {
+		if (!connectFlow.active) return;
+		const timer = setInterval(() => void connectFlow.tick(), POLL_MS);
+		return () => clearInterval(timer);
+	});
+
+	const harnessSources = $derived(sources.filter(isHarness));
+	const showLocalRow = $derived(Boolean(local) && (localDownloading || Boolean(local?.setup_error || localStartError) || (local && sourceIsReady(local))));
+	const aiRows = $derived.by((): AiRow[] => {
+		const rows: AiRow[] = harnessSources.map((source) => {
+			const row = connectFlow.row(source);
+			return { key: source.source, name: VENDOR_COPY[source.source]?.cli ?? source.name, meta: row.meta, busy: row.busy, error: row.error, detail: row.detail, action: row.action, confirm: row.confirm, more: row.more,
+				pill: row.ready ? { state: 'success', label: 'Ready' } : undefined };
+		});
+		if (!showLocalRow || !local) return rows;
+		const ready = sourceIsReady(local);
+		rows.push({ key: 'omlx', name: 'This computer', meta: sourceMeta(local),
+			pill: ready ? { state: 'success', label: 'Ready' } : localDownloading ? { state: 'loading', label: 'Downloading' } : undefined,
+			action: ready || localDownloading ? undefined : { label: 'Try again', run: retryLocalDownload, loading: localSetupBusy },
+			error: !localDownloading && !ready, detail: !localDownloading && !ready ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : undefined });
+		return rows;
+	});
 
 	async function retryLocalDownload() {
 		const current = get(token);
@@ -340,9 +366,11 @@
 		void readStatus();
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
-		const onFocus = () => { void classifier.recheckSpace(); };
+		const onVisible = () => { if (document.visibilityState === 'visible') void recheckOnFocus(); };
+		const onFocus = () => { void classifier.recheckSpace(); void recheckOnFocus(); };
 		window.addEventListener('focus', onFocus);
-		return () => { window.removeEventListener('focus', onFocus); offClassifier(); offModels(); };
+		document.addEventListener('visibilitychange', onVisible);
+		return () => { offModels(); offClassifier(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); };
 	});
 </script>
 
@@ -356,26 +384,21 @@
 	{/snippet}
 
 	{#if page === 'welcome'}
-		<div class="welcome-copy">
-			{#if status.local_eligible === false}
-				<p>This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.</p>
-			{:else if (status.free_disk_gb ?? Infinity) < (status.model_size_gb ?? 0)}
-				<p>Needs {modelSize} free; {status.free_disk_gb} GB is free.</p>
-				<Button variant="chip" onclick={readStatus}>Free up space, then check again</Button>
-			{:else}
-				<div class="download-choice">
-					<div class="switch"><Toggle checked={localWanted} onchange={(next) => localWanted = next} ariaLabel={`Download ${downloadModelLabel} now`} /><span>Download {downloadModelLabel} now</span></div>
-					<span class="local-meta">{modelSize} · runs on this computer</span>
-				</div>
-			{/if}
-		</div>
+		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} modelSizeGb={status.model_size_gb} {modelSize} modelLabel={downloadModelLabel}
+			wanted={localWanted} onWantedChange={(next) => localWanted = next} onRecheck={readStatus} />
 	{:else if page === 'account'}
 		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
-			<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
-			<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined} hint={status.required_username ? 'This matches the existing data on this computer.' : undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
-			<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
-			<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
-			<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
+			<div class="group">
+				<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
+				<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined} hint={status.required_username ? 'This matches the existing data on this computer.' : undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
+			</div>
+			<div class="group">
+				<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
+				<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
+			</div>
+			<div class="group">
+				<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
+			</div>
 			<FolderRow {folder} notice={folderNotice} changing={folderChanging} onChange={changeFolder} />
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
@@ -395,17 +418,7 @@
 		</div>
 	{:else if page === 'models'}
 		<div class="sources">
-			{#each sources as source (source.source)}
-				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[sourceMeta(source)]} centered>
-					{#snippet actions()}
-						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
-						{:else if source.source === 'omlx' && localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
-						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
-						{:else if source.state === 'not_installed'}<StatePill look="dot" state="idle" label="Not installed" /><Button variant="chip" size="sm" onclick={refreshSources}>Check again</Button>
-						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>Sign in</Button>{/if}
-					{/snippet}
-				</ListRow>
-			{/each}
+			<SetupAiRows rows={aiRows} />
 			{#if keyOpen}
 				<Field variant="chip" layout="stacked" label="API key">
 					<select aria-label="Provider" bind:value={providerName}>{#each $providers.filter((provider) => provider.type === 'cloud') as provider}<option value={provider.name}>{provider.label}</option>{/each}</select>
@@ -419,14 +432,11 @@
 </SetupShell>
 
 <style>
-	.form { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 8); }
-	/* FolderRow owns the account form's work-folder layout. */
-	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
-	.welcome-copy p, .consent p { margin: 0; }
+	.form { display: flex; flex-direction: column; gap: var(--space-3); max-width: calc(var(--space-8) * 8); }
+	.group { display: flex; flex-direction: column; gap: var(--space-2); }
+	.sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
+	.consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }
 	.consent-actions { display: flex; gap: var(--space-2); }
-	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
-	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
-	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.api-key-action { align-self: flex-start; }
 </style>

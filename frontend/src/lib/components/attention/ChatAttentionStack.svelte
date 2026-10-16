@@ -79,7 +79,7 @@
 		--chat-attention-keyboard-inset: 0px;
 		--chat-attention-available-height: calc(
 			100dvh
-			- var(--header-height, 64px)
+			- var(--header-bottom)
 			- var(--input-bar-height, 100px)
 			- var(--chat-attention-keyboard-inset)
 			- 24px

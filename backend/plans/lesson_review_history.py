@@ -12,6 +12,10 @@ def _project(row, reason: str | None, *, settled_at: str | None,
     """Project already-prefetched batch facts without further database reads."""
     kind, _, identity = str(row["key"]).partition(":")
     subject, separator, sha = identity.rpartition(":")
+    if kind == lesson_reviews.LESSON_PREFIX and separator:
+        candidate, state_separator, state = subject.rpartition(":")
+        if state_separator and state == "watch":
+            subject = candidate
     superseded = {
         lesson_reviews.SUPERSEDED_BY_VERSION: "version",
         lesson_reviews.SUPERSEDED_BY_TRIAL: "trial",

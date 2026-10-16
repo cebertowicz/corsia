@@ -216,7 +216,7 @@
 		height: var(--doc-visual-viewport-height, 100dvh);
 	}
 	.follow-keyboard .drawer-panel {
-		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top, 0px))));
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))));
 	}
 	.drawer-motion {
 		width: 100%;
@@ -227,7 +227,7 @@
 	.drawer-panel {
 		--drawer-drag-y: 0px;
 		width: 100%;
-		max-height: min(82dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px))));
+		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))));
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -248,7 +248,7 @@
 		transition: none;
 	}
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
-	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px)))); }
+	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
 	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
 	.drawer-panel:focus {
 		outline: none;

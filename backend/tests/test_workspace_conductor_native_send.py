@@ -9,6 +9,12 @@ admission and dispatch to an idle target. Only the harness process launch
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -144,12 +150,12 @@ def db(isolated_db, tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_project_agent_native_send_reaches_designated_conductor(db, launched):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _AGENT_A, project_id="proj-a")
     _insert_agent(db, _CONDUCTOR)
     _insert_agent(db, "agent-b", project_id="proj-b")
-    assert set_conductor("workspace", _CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
     agent = _start_live(db, _AGENT_A)
 
     # A forged sender in provider arguments is stripped; the Turn binds identity.
@@ -172,11 +178,11 @@ async def test_project_agent_native_send_reaches_designated_conductor(db, launch
 
 @pytest.mark.asyncio
 async def test_designated_conductor_native_reply_reaches_project_agent(db, launched):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _AGENT_A, project_id="proj-a")
     _insert_agent(db, _CONDUCTOR)
-    assert set_conductor("workspace", _CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
     conductor = _start_live(db, _CONDUCTOR)
 
     reply = await _native_send(db, conductor, _CONDUCTOR, "call-down", {
@@ -186,7 +192,7 @@ async def test_designated_conductor_native_reply_reaches_project_agent(db, launc
     assert _inbound(db, _AGENT_A) == [(_CONDUCTOR, "Policy updated")]
 
     # Designation is read on every send; a former conductor loses the privilege.
-    assert set_conductor("workspace", None) is True
+    assert set_corsia_agent(None) is True
     stale = await _native_send(db, conductor, _CONDUCTOR, "call-stale", {
         "thread_id": _AGENT_A, "message": "former conductor",
     })
@@ -206,11 +212,11 @@ async def test_designated_conductor_needs_no_agent_registration(
     db, launched, sender, target,
 ):
     """Production shape (#2634): the conductor is designated, never promoted."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _AGENT_A, project_id="proj-a")
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
     live = _start_live(db, sender)
 
     sent = await _native_send(db, live, sender, "call", {
@@ -223,12 +229,12 @@ async def test_designated_conductor_needs_no_agent_registration(
 
 @pytest.mark.asyncio
 async def test_unregistered_non_conductor_endpoint_is_refused_with_reason(db, launched):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _AGENT_A, project_id="proj-a")
     _insert_agent(db, _CONDUCTOR)
     _insert_agent(db, "plain-chat", project_id="proj-b", agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
     conductor = _start_live(db, _CONDUCTOR)
 
     refused = await _native_send(db, conductor, _CONDUCTOR, "call-chat", {
@@ -244,11 +250,11 @@ async def test_unregistered_non_conductor_endpoint_is_refused_with_reason(db, la
 
 @pytest.mark.asyncio
 async def test_native_send_denies_foreign_user_conductor_pair(db, launched):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _AGENT_A, project_id="proj-a")
     _insert_agent(db, _CONDUCTOR, user_id="u-other")
-    assert set_conductor("workspace", _CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
     agent = _start_live(db, _AGENT_A)
     conductor = _start_live(db, _CONDUCTOR)
 
@@ -280,12 +286,12 @@ async def test_workspace_and_project_conductors_reach_each_other(db, launched, s
     Both conductors are designated, never promoted: neither is
     ``agent_enabled``, which is what made both directions refuse.
     """
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
     _insert_agent(db, _PROJ_CONDUCTOR, project_id="proj-a", agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
-    assert set_conductor("proj-a", _PROJ_CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
+    assert set_project_conductor("proj-a", _PROJ_CONDUCTOR) is True
     live = _start_live(db, sender)
 
     sent = await _native_send(db, live, sender, "call-handoff", {
@@ -304,12 +310,12 @@ async def test_conductor_designated_for_another_project_stays_unregistered(db, l
     scope, so proj-a can be made to designate a thread that lives in proj-b.
     That thread must stay unreachable in proj-b, where it is an ordinary chat.
     """
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
     _insert_agent(db, _FOREIGN_CONDUCTOR, project_id="proj-b", agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
-    assert set_conductor("proj-a", _FOREIGN_CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
+    assert set_project_conductor("proj-a", _FOREIGN_CONDUCTOR) is True
     conductor = _start_live(db, _CONDUCTOR)
 
     refused = await _native_send(db, conductor, _CONDUCTOR, "call-mismatch", {
@@ -326,13 +332,13 @@ async def test_conductor_designated_for_another_project_stays_unregistered(db, l
 @pytest.mark.asyncio
 async def test_former_project_conductor_refused_after_redesignation(db, launched):
     """The designation is read live: the replaced conductor loses the privilege."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
     _insert_agent(db, _PROJ_CONDUCTOR, project_id="proj-a", agent_enabled=0)
     _insert_agent(db, "proj-a-conductor-2", project_id="proj-a", agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
-    assert set_conductor("proj-a", _PROJ_CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
+    assert set_project_conductor("proj-a", _PROJ_CONDUCTOR) is True
     conductor = _start_live(db, _CONDUCTOR)
 
     first = await _native_send(db, conductor, _CONDUCTOR, "call-first", {
@@ -340,7 +346,7 @@ async def test_former_project_conductor_refused_after_redesignation(db, launched
     })
     assert _ok(first), first
 
-    assert set_conductor("proj-a", "proj-a-conductor-2") is True
+    assert set_project_conductor("proj-a", "proj-a-conductor-2") is True
     stale = await _native_send(db, conductor, _CONDUCTOR, "call-stale", {
         "thread_id": _PROJ_CONDUCTOR, "message": "after re-designation",
     })
@@ -358,14 +364,14 @@ async def test_former_project_conductor_refused_after_redesignation(db, launched
 @pytest.mark.parametrize("target", ["plain-chat", "agent-a"])
 async def test_project_to_project_send_still_refused_at_scope(db, launched, target):
     """Only a pair including the workspace conductor crosses scope (S3)."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _AGENT_A, project_id="proj-b")
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
     _insert_agent(db, _PROJ_CONDUCTOR, project_id="proj-a", agent_enabled=0)
     _insert_agent(db, "plain-chat", project_id="proj-b", agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
-    assert set_conductor("proj-a", _PROJ_CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
+    assert set_project_conductor("proj-a", _PROJ_CONDUCTOR) is True
     conductor = _start_live(db, _CONDUCTOR)
     del conductor  # the sender is the project conductor, not the workspace one
 
@@ -378,19 +384,19 @@ async def test_project_to_project_send_still_refused_at_scope(db, launched, targ
     assert launched == []
 
 
-def test_workspace_conductor_contact_output_ignores_project_conductors(db):
+def test_corsia_agent_contact_output_ignores_project_conductors(db):
     """S2: listing the workspace contact is unchanged when a project designates one."""
-    from core.agent_roster_queries import workspace_conductor_contact
-    from infra.conductor import set_conductor
+    from core.agent_roster_queries import corsia_agent_contact
+    from infra.conductor import set_scope_coordinator
 
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
     _insert_agent(db, _PROJ_CONDUCTOR, project_id="proj-a", agent_enabled=0)
-    assert set_conductor("workspace", _CONDUCTOR) is True
+    assert set_corsia_agent(_CONDUCTOR) is True
 
-    before = workspace_conductor_contact("u-test", db)
-    assert set_conductor("proj-a", _PROJ_CONDUCTOR) is True
+    before = corsia_agent_contact("u-test", db)
+    assert set_project_conductor("proj-a", _PROJ_CONDUCTOR) is True
 
-    assert workspace_conductor_contact("u-test", db) == before
+    assert corsia_agent_contact("u-test", db) == before
     contact, gap = before
     assert gap is None
     assert contact is not None and contact["id"] == _CONDUCTOR

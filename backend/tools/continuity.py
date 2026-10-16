@@ -167,7 +167,7 @@ def _queue(db, thread_id: str, epoch: int, entry_id: int, placement: Any, verdic
     live = current_entry(db, thread_id, epoch, entry_id)
     if live is None or live["state"] != "active":
         raise ContinuityError(f"continuity entry {entry_id} is not active")
-    entry = {"entry_id": entry_id, "history_epoch": epoch, "body": json.loads(live["body"])}
+    entry = {"entry_id": entry_id, "history_epoch": epoch, "revision": int(live["revision"]), "body": json.loads(live["body"])}
     stored = stage(db, thread_id, entry, placement, None, require=_QUEUED_VERDICTS[verdict])
     if outstanding_count(db) >= OUTSTANDING_CAP:
         raise ContinuityError(

@@ -96,6 +96,31 @@ def _place(env: Env, entry: int, answer: dict | None = None) -> str:
     )
 
 
+def test_flagged_new_checkpoint_entry_records_an_overridden_trial_check(env: Env) -> None:
+    """A checkpoint-local entry has no revision yet, but the check remains non-blocking."""
+    from types import SimpleNamespace
+
+    from core import lesson_admission, placement_answer, placement_outcomes
+    from core.placement_decide import validate_decision
+
+    env.monkeypatch.setattr(lesson_admission, "admit", lambda *_args: SimpleNamespace(hold=None))
+    env.monkeypatch.setattr(placement_outcomes, "entry_text", lambda _entry: "source")
+    decision = validate_decision(_answer(
+        text="On 2026-10-15, run the check.",
+        trial={"incident_detail_reason": "needed for the test"},
+    ))
+    result = placement_answer._stage_trial(
+        env.db, THREAD, {"history_epoch": 0, "entry_id": 999, "revision": None},
+        SimpleNamespace(), decision, SimpleNamespace(), None,
+    )
+
+    assert result["placement_check"]["flags"] == ["date", "id"]
+    row = env.db.execute(
+        "SELECT revision, override_reason FROM lesson_placement_checks WHERE entry_id=999"
+    ).fetchone()
+    assert tuple(row) == (0, "needed for the test")
+
+
 def _state(env: Env, entry: int) -> tuple[str, str | None]:
     mark = _mark(env.db, entry, THREAD)
     return mark["state"], mark["placement_state"]
@@ -811,3 +836,46 @@ async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
     assert "retire or promote a trial lesson you no longer need" in reply
     assert not _skill(env).exists() and _offered(env) == []
     assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
+
+
+async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_record(env: Env) -> None:
+    def start(turn_id: str, *message_ids: str) -> None:
+        env.db.execute(
+            """INSERT INTO active_turns(
+                id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json
+            ) VALUES (?,? ,0,'test/model','running','now','boot','{}')""", (turn_id, THREAD),
+        )
+        first_order = int(env.db.execute(
+            "SELECT COALESCE(max(input_order), 0) + 1 FROM messages WHERE thread_id=?", (THREAD,),
+        ).fetchone()[0])
+        for order, message_id in enumerate(message_ids, first_order):
+            env.db.execute(
+                """INSERT INTO messages(
+                    id,thread_id,role,content,created_at,input_order,active_turn_id
+                ) VALUES (?,?,'user','Please correct this.','now',?,?)""",
+                (message_id, THREAD, order, turn_id),
+            )
+        env.db.commit()
+
+    start("turn-one", "first", "second")
+    first = _entry(env)
+    _place(env, first, _answer(trial={"state": "watch"}))
+    await _drain(env.worker)
+    watch = lesson_files.read_trial(_skill(env).read_text())
+    assert watch.lesson.state == "watch"
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-one'")
+    start("turn-two", "third")
+    second = _entry(env, text="the same correction recurred")
+    _place(env, second, _answer(duplicate_of="- same lesson"))
+    await _drain(env.worker)
+
+    promoted = lesson_files.read_trial(_skill(env).read_text())
+    assert promoted.lesson.id == watch.lesson.id
+    assert promoted.lesson.state == "trial"
+    assert promoted.lesson.review_node_id != watch.lesson.review_node_id
+    assert promoted.lesson.originating_subjects == ("message:first", "message:second", "message:third")
+    reviews = {review["id"]: review for review in _reviews(env)}
+    assert reviews[watch.lesson.review_node_id]["state"] == "closed"
+    assert reviews[watch.lesson.review_node_id]["key"] == f"lesson:{watch.lesson.id}:watch:{watch.behavioral_sha256}"
+    assert reviews[promoted.lesson.review_node_id]["title"] == "Review trial lesson: cite-the-head"

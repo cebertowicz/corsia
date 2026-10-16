@@ -373,5 +373,6 @@ def delete_thread_continuity(conn: sqlite3.Connection, thread_id: str) -> None:
 
     Purge keeps the session row, so the cascade never fires there.
     """
+    conn.execute("DELETE FROM lesson_placement_checks WHERE thread_id=?", (thread_id,))
     conn.execute("DELETE FROM continuity_entries WHERE thread_id=?", (thread_id,))
     conn.execute("DELETE FROM continuity_store WHERE thread_id=?", (thread_id,))

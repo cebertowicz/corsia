@@ -1,6 +1,14 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 from unittest.mock import patch
 
 import pytest
@@ -23,7 +31,7 @@ class TestCancelledDrop:
     async def test_check_suite_cancelled_dropped_with_no_owner(self, isolated_db):
         conductor_thread = _mk_session("cond-cancel-1")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         with patch("events.router.delivery.deliver_to_thread") as mock_deliver:
             res = await _route(
@@ -66,7 +74,7 @@ class TestWorkerPrCIIsolation:
         _register_pr("o/r", 80, worker)
         conductor_thread = _mk_session("cond-fail-b")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 80, conclusion="failure")
 
@@ -86,7 +94,7 @@ class TestWorkerPrCIIsolation:
         conductor_thread = _mk_session("cond-own")
         _register_pr("o/r", 81, conductor_thread)
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 81, conclusion="failure")
 
@@ -107,7 +115,7 @@ class TestNoOwnerFailure:
     async def test_unregistered_main_pr_failure_dead_letters(self, isolated_db):
         conductor_thread = _mk_session("cond-pf-1")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 110, conclusion="failure", base_ref="main")
 
@@ -125,7 +133,7 @@ class TestNoOwnerFailure:
     async def test_unregistered_non_main_pr_failure_still_filtered(self, isolated_db):
         conductor_thread = _mk_session("cond-pf-2")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 111, conclusion="failure", base_ref="dev")
 
@@ -141,7 +149,7 @@ class TestNoOwnerFailure:
     async def test_unregistered_main_pr_success_still_filtered(self, isolated_db):
         conductor_thread = _mk_session("cond-pf-3")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 112, conclusion="success", base_ref="main")
 
@@ -159,7 +167,7 @@ class TestNoOwnerFailure:
     ):
         conductor_thread = _mk_session(f"cond-pf-{conclusion}")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 113, conclusion=conclusion, base_ref="main")
 
@@ -175,7 +183,7 @@ class TestNoOwnerFailure:
     async def test_unregistered_no_base_ref_failure_still_filtered(self, isolated_db):
         conductor_thread = _mk_session("cond-pf-4")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 114, conclusion="failure")
 
@@ -191,7 +199,7 @@ class TestNoOwnerFailure:
         conductor_thread = _mk_session("cond-pf-5")
         _register_pr("o/r", 115, conductor_thread)
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 115, conclusion="failure", base_ref="main")
 
@@ -208,7 +216,7 @@ class TestNoOwnerFailure:
     async def test_cancelled_main_pr_still_dropped_before_failure(self, isolated_db):
         conductor_thread = _mk_session("cond-pf-7")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _cs_payload("o/r", 117, conclusion="cancelled", base_ref="main")
 

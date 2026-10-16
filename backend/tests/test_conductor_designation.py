@@ -23,28 +23,29 @@ def _insert_project(db, project_id: str, name: str, path: str) -> None:
 
 def test_ensure_scope_conductor_creates_workspace_thread_once(isolated_db):
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE
+    from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent
     from infra.database import get_db
 
     accounts.create_user("newcomer", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.execute("DELETE FROM threads")
         db.commit()
 
-        first = ensure_scope_conductor(WORKSPACE_SCOPE, "newcomer", model=None, db=db)
-        second = ensure_scope_conductor(WORKSPACE_SCOPE, "newcomer", model=None, db=db)
+        first = ensure_corsia_agent("newcomer", model=None, db=db)
+        second = ensure_corsia_agent("newcomer", model=None, db=db)
 
         rows = db.execute(
-            "SELECT id,user_id,title,model,project_id FROM threads WHERE title='Conductor'"
+            "SELECT id,user_id,title,model,project_id FROM threads WHERE title='CORSIA'"
         ).fetchall()
-        assert first == second == get_conductor(WORKSPACE_SCOPE, db=db)
+        assert first == second == get_corsia_agent(db=db)
         assert [dict(row) for row in rows] == [
             {
                 "id": first,
                 "user_id": "newcomer",
-                "title": "Conductor",
+                "title": "CORSIA",
                 "model": None,
                 "project_id": None,
             }
@@ -55,7 +56,7 @@ def test_ensure_scope_conductor_creates_workspace_thread_once(isolated_db):
 
 def test_ensure_scope_conductor_designates_project_thread(isolated_db):
     from infra import accounts
-    from infra.conductor import ensure_scope_conductor, get_conductor
+    from infra.conductor import ensure_project_conductor, get_project_conductor
     from infra.database import get_db
 
     accounts.create_user("newcomer", "long-enough-password")
@@ -64,13 +65,13 @@ def test_ensure_scope_conductor_designates_project_thread(isolated_db):
         _insert_project(db, "project-a", "Project A", "/workspace/projects/a")
         db.commit()
 
-        thread_id = ensure_scope_conductor("project-a", "newcomer", model=None, db=db)
+        thread_id = ensure_project_conductor("project-a", "newcomer", model=None, db=db)
 
         row = db.execute(
             "SELECT user_id,title,model,project_id FROM threads WHERE id=?",
             (thread_id,),
         ).fetchone()
-        assert get_conductor("project-a", db=db) == thread_id
+        assert get_project_conductor("project-a", db=db) == thread_id
         assert dict(row) == {
             "user_id": "newcomer",
             "title": "Conductor",
@@ -81,27 +82,45 @@ def test_ensure_scope_conductor_designates_project_thread(isolated_db):
         db.close()
 
 
-def test_backfill_scope_conductors_heals_missing_workspace_and_project(isolated_db):
+def test_backfill_coordination_scopes_heals_missing_workspace_and_project(isolated_db):
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, backfill_scope_conductors, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, backfill_coordination_scopes, get_project_conductor
+    from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
 
     accounts.create_user("newcomer", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.execute("DELETE FROM threads")
         _insert_project(db, "project-a", "Project A", "/workspace/projects/a")
         db.commit()
 
-        healed = backfill_scope_conductors(db=db)
+        healed = backfill_coordination_scopes(db=db)
 
         assert [scope for scope, _thread_id in healed] == [WORKSPACE_SCOPE, "project-a"]
-        assert get_conductor(WORKSPACE_SCOPE, db=db) is not None
-        assert get_conductor("project-a", db=db) is not None
-        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='Conductor'").fetchone()[0] == 2
+        assert get_corsia_agent(db=db) is not None
+        assert get_project_conductor("project-a", db=db) is not None
+        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='CORSIA'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='Conductor'").fetchone()[0] == 1
     finally:
         db.close()
+
+
+def test_project_conductor_apis_reject_workspace_scope(isolated_db):
+    from infra.conductor import (
+        WORKSPACE_SCOPE,
+        ensure_project_conductor,
+        get_project_conductor,
+        set_project_conductor,
+    )
+
+    with pytest.raises(ValueError, match="CORSIA agent"):
+        get_project_conductor(WORKSPACE_SCOPE)
+    with pytest.raises(ValueError, match="CORSIA agent"):
+        set_project_conductor(WORKSPACE_SCOPE, None)
+    with pytest.raises(ValueError, match="CORSIA agent"):
+        ensure_project_conductor(WORKSPACE_SCOPE, "user", model=None)
 
 
 @pytest.mark.parametrize("reader", ["designation", "scopes"])
@@ -119,26 +138,23 @@ def test_workspace_readers_reject_corrupt_designation(
     reader,
     stored_value,
 ):
-    from infra.conductor import (
-        ConductorSettingError,
-        get_conductor,
-        get_conductor_scopes,
-    )
+    from infra.conductor import get_coordination_scopes
+    from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
     from infra.database import get_db
 
     db = get_db()
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", stored_value, "t"),
+            ("corsia_agent_thread_id", stored_value, "t"),
         )
         db.commit()
 
-        with pytest.raises(ConductorSettingError, match="workspace conductor"):
+        with pytest.raises(CorsiaAgentSettingError, match="CORSIA agent"):
             if reader == "designation":
-                get_conductor("workspace", db=db)
+                get_corsia_agent(db=db)
             else:
-                get_conductor_scopes("candidate", db=db)
+                get_coordination_scopes("candidate", db=db)
     finally:
         db.close()
 
@@ -148,7 +164,7 @@ def test_set_conductor_change_invalidates_old_and_new_epochs_only(
     isolated_db,
     scope,
 ):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.database import get_db
 
     db = get_db()
@@ -160,7 +176,7 @@ def test_set_conductor_change_invalidates_old_and_new_epochs_only(
             db.execute(
                 "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
                 (
-                    "workspace_conductor_session_id",
+                    "corsia_agent_thread_id",
                     json.dumps({"session_id": "old"}),
                     "t",
                 ),
@@ -171,7 +187,7 @@ def test_set_conductor_change_invalidates_old_and_new_epochs_only(
             )
         db.commit()
 
-        assert set_conductor(scope, "new", db=db) is True
+        assert set_scope_coordinator(scope, "new", db=db) is True
         epochs = dict(
             db.execute(
                 "SELECT id,runtime_context_epoch FROM threads ORDER BY id"
@@ -179,7 +195,7 @@ def test_set_conductor_change_invalidates_old_and_new_epochs_only(
         )
         assert epochs == {"new": 1, "old": 1, "other": 0}
 
-        assert set_conductor(scope, "new", db=db) is True
+        assert set_scope_coordinator(scope, "new", db=db) is True
         unchanged = dict(
             db.execute(
                 "SELECT id,runtime_context_epoch FROM threads ORDER BY id"
@@ -187,7 +203,7 @@ def test_set_conductor_change_invalidates_old_and_new_epochs_only(
         )
         assert unchanged == epochs
 
-        assert set_conductor(scope, None, db=db) is True
+        assert set_scope_coordinator(scope, None, db=db) is True
         cleared = dict(
             db.execute(
                 "SELECT id,runtime_context_epoch FROM threads ORDER BY id"
@@ -203,7 +219,7 @@ def test_set_conductor_rolls_back_designation_when_epoch_invalidation_fails(
     isolated_db,
     scope,
 ):
-    from infra.conductor import get_conductor, set_conductor
+    from infra.conductor import get_scope_coordinator, set_scope_coordinator
     from infra.database import get_db
 
     db = get_db()
@@ -215,7 +231,7 @@ def test_set_conductor_rolls_back_designation_when_epoch_invalidation_fails(
             db.execute(
                 "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
                 (
-                    "workspace_conductor_session_id",
+                    "corsia_agent_thread_id",
                     json.dumps({"session_id": "old"}),
                     "t",
                 ),
@@ -232,9 +248,9 @@ def test_set_conductor_rolls_back_designation_when_epoch_invalidation_fails(
         db.commit()
 
         with pytest.raises(sqlite3.IntegrityError, match="epoch invalidation failed"):
-            set_conductor(scope, "new", db=db)
+            set_scope_coordinator(scope, "new", db=db)
 
-        assert get_conductor(scope, db=db) == "old"
+        assert get_scope_coordinator(scope, db=db) == "old"
         assert dict(
             db.execute(
                 "SELECT id,runtime_context_epoch FROM threads ORDER BY id"

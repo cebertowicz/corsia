@@ -107,7 +107,7 @@ def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
     node_id = lesson.review_node_id
     try:
         refusal = plans.lesson_review_refusal(
-            db, node_id, owner_thread_id=lesson.owner, lesson_id=lesson.id,
+            db, node_id, owner_thread_id=lesson.owner, lesson_id=lesson.id, state=lesson.state,
             behavioral_sha256=behavioral_sha256,
         )
         return refusal, plans.lesson_review_opened_at(db, node_id) or ""

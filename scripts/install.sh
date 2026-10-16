@@ -288,10 +288,10 @@ summarize_sources() {
     "$CORSIA_HOME/scripts/corsia" sources --install-summary || :
 }
 
-warm_conductor() {
-    # A head start for the conductor's first reply; prints nothing unless the
+warm_corsia_agent() {
+    # A head start for the CORSIA agent's first reply; prints nothing unless the
     # local starter model is ready, and never fails the install.
-    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" conductor warm || :
+    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" agent warm || :
 }
 
 open_browser() {
@@ -356,7 +356,7 @@ main() {
     ensure_model_source
     start_corsia
     summarize_sources
-    warm_conductor
+    warm_corsia_agent
     open_browser
 }
 
