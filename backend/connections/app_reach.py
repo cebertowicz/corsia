@@ -143,6 +143,14 @@ def key_entry_names(app_id: str, config: object) -> set[str]:
     return entries
 
 
+def _ensure_app_key_entries(app_id: str, name: str, config: object, *, db: sqlite3.Connection) -> None:
+    """Expose approved app keys for a person to set without creating a value."""
+    from infra.key_store import ensure_managed_entry
+
+    for entry in key_entry_names(app_id, config):
+        ensure_managed_entry(entry, f"{name} key", "Used by this connected app.", db=db)
+
+
 def _write_audit(
     db: sqlite3.Connection,
     *,
@@ -192,10 +200,15 @@ def _proposal_expired(state: str, state_since: str) -> bool:
 def _expire_pending_proposal(conn: sqlite3.Connection, app_id: str, app: sqlite3.Row) -> dict[str, object]:
     """Apply the same durable outcome as a decline once a proposal has expired."""
     current_reach = _reach(app_id, db=conn)
+    name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
     if app["pending_config_json"] is None:
         _write_audit(
             conn, actor=("system", "proposal_expiry"), app_id=app_id, action="expire",
             reach_from=current_reach, reach_to=None,
+        )
+        append_app_notice(
+            app_id, f"{name}: removed", db=conn, state="disconnected", reach_before=current_reach,
+            removed=True,
         )
         conn.execute("DELETE FROM connected_apps WHERE id=?", (app_id,))
         return {"id": app_id, "removed": True}
@@ -210,6 +223,9 @@ def _expire_pending_proposal(conn: sqlite3.Connection, app_id: str, app: sqlite3
     _write_audit(
         conn, actor=("system", "proposal_expiry"), app_id=app_id, action="expire",
         reach_from=current_reach, reach_to=current_reach,
+    )
+    append_app_notice(
+        app_id, f"{name}: {previous}", db=conn, state=previous, reach_after=current_reach,
     )
     return {"id": app_id, "removed": False}
 
@@ -257,17 +273,80 @@ def list_apps(*, db: sqlite3.Connection) -> list[dict[str, object]]:
     return [get_app(app_id, db=db) for app_id in ids]
 
 
-def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Whether an app reaches a durable thread scope, resolving no caller input.
+def runtime_app_config(app_id: str, *, db: sqlite3.Connection) -> tuple[str, dict[str, object]]:
+    """Build one launch config keyed by its stable app id without reading any key value."""
+    app = get_app(app_id, db=db)
+    if app["state"] in {PENDING_STATE, "expired"}:
+        raise AppPendingApprovalError("no approved connected app is available to start")
+    config = app["config"]
+    if not isinstance(config, dict):
+        raise AppReachError("invalid app config")
+    runtime_config = dict(config)
+    refs = runtime_config.pop("key_refs", [])
+    if not isinstance(refs, list):
+        raise AppReachError("invalid app key references")
+    runtime_config["secret_env"] = [
+        ref["name"] for ref in refs if isinstance(ref, dict) and ref.get("kind") == "env"
+    ]
+    runtime_config["secret_headers"] = [
+        ref["name"] for ref in refs if isinstance(ref, dict) and ref.get("kind") == "header"
+    ]
+    if len(runtime_config["secret_env"]) + len(runtime_config["secret_headers"]) != len(refs):
+        raise AppReachError("invalid app key references")
+    runtime_config["connected_app_id"] = app_id
+    name = app["name"]
+    if not isinstance(name, str):
+        raise AppReachError("invalid app name")
+    return name, runtime_config
 
-    Missing app/thread/project records fail closed. A workspace thread is Outside
-    projects, not an implicit project fallback. Every parent must also reach the
-    app, so a child can never gain reach its parent lacks.
-    """
+
+def runtime_app_ids(*, db: sqlite3.Connection) -> list[str]:
+    """Return approved app ids eligible for runtime startup."""
+    return [row["id"] for row in db.execute(
+        "SELECT id FROM connected_apps WHERE state<>? ORDER BY id", (PENDING_STATE,)
+    )]
+
+
+def load_runtime_app_config(app_id: str) -> tuple[str, dict[str, object]]:
+    """Load one launch config in a DB job, retaining no caller-owned connection."""
+    from infra.database import get_db
+
+    db = get_db()
     try:
-        reach = _reach(app_id, db=db)
-    except AppReachError:
-        return False
+        return runtime_app_config(app_id, db=db)
+    finally:
+        db.close()
+
+
+def load_runtime_app_ids() -> list[str]:
+    """Load all startup app ids in one DB job."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return runtime_app_ids(db=db)
+    finally:
+        db.close()
+
+
+def runtime_app_id_for_key_entry(entry: str) -> str | None:
+    """Find the approved app using one managed key entry, without reading its value."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        for row in db.execute("SELECT id,config_json,state,state_since FROM connected_apps"):
+            if row["state"] == PENDING_STATE or _proposal_expired(row["state"], row["state_since"]):
+                continue
+            if entry in key_entry_names(row["id"], json.loads(row["config_json"])):
+                return row["id"]
+        return None
+    finally:
+        db.close()
+
+
+def _reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
+    """Apply one reach snapshot to a thread and every parent, failing closed."""
     seen: set[str] = set()
     current_thread_id: str | None = thread_id
     while current_thread_id is not None and current_thread_id not in seen:
@@ -283,6 +362,78 @@ def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -
         ).fetchone()
         current_thread_id = parent["parent_thread_id"] if parent is not None else None
     return current_thread_id is None
+
+
+def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
+    """Whether an app reaches a durable thread scope, resolving no caller input.
+
+    Missing app/thread/project records fail closed. A workspace thread is Outside
+    projects, not an implicit project fallback. Every parent must also reach the
+    app, so a child can never gain reach its parent lacks.
+    """
+    try:
+        reach = _reach(app_id, db=db)
+    except AppReachError:
+        return False
+    return _reach_reaches_thread(reach, thread_id, db=db)
+
+
+def append_app_notice(
+    app_id: str,
+    summary: str,
+    *,
+    db: sqlite3.Connection,
+    state: str | None = None,
+    reach_before: AppReach | None = None,
+    reach_after: AppReach | None = None,
+    removed: bool = False,
+) -> None:
+    """Passively notify affected threads through the one canonical reach owner.
+
+    Runtime changes notify every currently reachable thread. A reach transition
+    notifies only a thread whose availability changed; that lets a project that
+    remains on avoid an irrelevant notice while both sides of a removal hear it.
+    The stable path retains only each app's latest state for one delivery.
+    """
+    before = reach_before
+    after = None if removed else reach_after or _reach(app_id, db=db)
+    from infra.passive_changes import append_thread_context_note
+
+    details = {"path": f"connected_apps/{app_id}", "app_id": app_id}
+    if state is not None:
+        details["state"] = state
+    for row in db.execute("SELECT id FROM threads"):
+        thread_id = row["id"]
+        reached_before = before is not None and _reach_reaches_thread(before, thread_id, db=db)
+        reached_after = after is not None and _reach_reaches_thread(after, thread_id, db=db)
+        if (before is None and reached_after) or (before is not None and reached_before != reached_after):
+            append_thread_context_note(db, thread_id=thread_id, summary=summary, details=details)
+
+
+def record_runtime_app_state(app_id: str, state: dict[str, object]) -> None:
+    """Atomically journal one live runtime state to every reachable thread."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        with write_transaction(db, scope="connected_app_runtime_notice") as conn:
+            row = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()
+            if row is None:
+                return
+            name = row["name"]
+            app_state = state.get("state")
+            tool_count = state.get("tool_count")
+            if not isinstance(name, str) or not isinstance(app_state, str):
+                return
+            suffix = f" ({tool_count} actions)" if app_state == "working" and isinstance(tool_count, int) else ""
+            append_app_notice(
+                app_id,
+                f"{name}: {app_state}{suffix}",
+                db=conn,
+                state=app_state,
+            )
+    finally:
+        db.close()
 
 
 def _reach_scope(reach: AppReach, scope: dict, *, db: sqlite3.Connection) -> bool:
@@ -334,9 +485,14 @@ def create_app(
              int(normalized.outside_projects), created_by_thread_id, pending_actor_thread_id, now, now),
         )
         _write_projects(identity, normalized, db=conn)
+        if state != PENDING_STATE:
+            _ensure_app_key_entries(identity, name, config, db=conn)
         _write_audit(
             conn, actor=audit_actor, app_id=identity, action="add",
             reach_from=None, reach_to=normalized,
+        )
+        append_app_notice(
+            identity, f"{name}: {state}", db=conn, state=state, reach_after=normalized,
         )
     return {"id": identity, "revision": 1, "reach": normalized.as_dict()}
 
@@ -378,6 +534,10 @@ def replace_reach(
         _write_audit(
             conn, actor=audit_actor, app_id=app_id, action="reach_change",
             reach_from=previous_reach, reach_to=normalized,
+        )
+        append_app_notice(
+            app_id, f"{app['name']}: availability changed", db=conn, state=app["state"],
+            reach_before=previous_reach, reach_after=normalized,
         )
     return {"id": app_id, "revision": next_revision, "reach": normalized.as_dict()}
 
@@ -444,6 +604,10 @@ def propose_config(
             conn, actor=audit_actor, app_id=app_id, action="edit",
             reach_from=current_reach, reach_to=current_reach,
         )
+        name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
+        append_app_notice(
+            app_id, f"{name}: {PENDING_STATE}", db=conn, state=PENDING_STATE, reach_after=current_reach,
+        )
     return get_app(app_id, db=db)
 
 
@@ -481,6 +645,11 @@ def replace_config(
             conn, actor=audit_actor, app_id=app_id, action="edit",
             reach_from=current_reach, reach_to=current_reach,
         )
+        name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
+        _ensure_app_key_entries(app_id, name, config, db=conn)
+        append_app_notice(
+            app_id, f"{name}: disconnected", db=conn, state="disconnected", reach_after=current_reach,
+        )
     return get_app(app_id, db=db)
 
 
@@ -517,6 +686,14 @@ def approve_proposal(
                 conn, actor=audit_actor, app_id=app_id, action="approve",
                 reach_from=current_reach, reach_to=current_reach,
             )
+            approved = conn.execute(
+                "SELECT name,config_json FROM connected_apps WHERE id=?", (app_id,)
+            ).fetchone()
+            name = approved["name"]
+            _ensure_app_key_entries(app_id, name, json.loads(approved["config_json"]), db=conn)
+            append_app_notice(
+                app_id, f"{name}: disconnected", db=conn, state="disconnected", reach_after=current_reach,
+            )
     if expired:
         agent_name = expired_agent_name or "the agent"
         raise AppProposalExpiredError(
@@ -548,6 +725,11 @@ def decline_proposal(
                     conn, actor=audit_actor, app_id=app_id, action="decline",
                     reach_from=current_reach, reach_to=None,
                 )
+                name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
+                append_app_notice(
+                    app_id, f"{name}: removed", db=conn, state="disconnected", reach_before=current_reach,
+                    removed=True,
+                )
                 conn.execute("DELETE FROM connected_apps WHERE id=?", (app_id,))
                 return {"id": app_id, "removed": True}
             previous = app["pending_previous_state"] or "disconnected"
@@ -561,6 +743,10 @@ def decline_proposal(
             _write_audit(
                 conn, actor=audit_actor, app_id=app_id, action="decline",
                 reach_from=current_reach, reach_to=current_reach,
+            )
+            name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
+            append_app_notice(
+                app_id, f"{name}: {previous}", db=conn, state=previous, reach_after=current_reach,
             )
     return get_app(app_id, db=db)
 
@@ -592,6 +778,11 @@ def delete_app(
         _write_audit(
             conn, actor=audit_actor, app_id=app_id, action="remove",
             reach_from=current_reach, reach_to=None,
+        )
+        name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
+        append_app_notice(
+            app_id, f"{name}: removed", db=conn, state="disconnected", reach_before=current_reach,
+            removed=True,
         )
         conn.execute("DELETE FROM connected_apps WHERE id=?", (app_id,))
     return {"id": app_id, "removed": True}

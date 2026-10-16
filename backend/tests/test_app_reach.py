@@ -105,6 +105,49 @@ def test_reach_replace_is_revision_checked_and_atomic() -> None:
     assert db.execute("SELECT revision FROM connected_apps WHERE id=?", (app["id"],)).fetchone()[0] == 1
 
 
+def test_reach_change_notifies_only_threads_whose_app_availability_changes() -> None:
+    db = _db()
+    app = create_app("GitHub", {}, {"mode": "all", "project_ids": [], "outside_projects": False}, db=db)
+    db.execute("DELETE FROM context_change_journal")
+    db.commit()
+
+    replace_reach(
+        app["id"], {"mode": "selected", "project_ids": ["b"], "outside_projects": False},
+        expected_revision=1, db=db,
+    )
+
+    notices = db.execute(
+        "SELECT object_id,summary,details_json FROM context_change_journal ORDER BY object_id"
+    ).fetchall()
+    assert {row["object_id"] for row in notices} == {"a-thread", "b-child-of-a", "gone", "outside"}
+    assert "b-thread" not in {row["object_id"] for row in notices}
+    assert all(row["summary"] == "GitHub: availability changed" for row in notices)
+    assert all(json.loads(row["details_json"])["path"] == f"connected_apps/{app['id']}" for row in notices)
+
+
+def test_app_state_notices_collapse_to_the_latest_state_per_delivery() -> None:
+    from connections.app_reach import append_app_notice
+    from infra.passive_digest import build_digest
+
+    db = _db()
+    app = create_app(
+        "GitHub", {}, {"mode": "selected", "project_ids": ["a"], "outside_projects": False}, db=db,
+    )
+    db.execute("DELETE FROM context_change_journal")
+    db.commit()
+    append_app_notice(app["id"], "GitHub: working", db=db, state="working")
+    append_app_notice(app["id"], "GitHub: failed", db=db, state="failed")
+
+    rows = db.execute(
+        "SELECT * FROM context_change_journal WHERE object_id='a-thread' ORDER BY seq DESC"
+    ).fetchall()
+    _content, events = build_digest(rows, overflow=False, clock=None)
+
+    assert len(events) == 1
+    assert events[0]["summary"] == "GitHub: failed"
+    assert events[0]["details"]["state"] == "failed"
+
+
 def test_expired_proposals_are_read_as_expired_and_lazily_declined() -> None:
     db = _db()
     db.execute("UPDATE threads SET title='Planning' WHERE id='a-thread'")

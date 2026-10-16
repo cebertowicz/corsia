@@ -11,6 +11,10 @@ from infra.db_async import run_in_db, run_off_db
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 log = logging.getLogger(__name__)
+LOCAL_APP_NOTICE = (
+    "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
+    "Connect only apps you trust."
+)
 
 
 @router.get("/sources")
@@ -95,11 +99,11 @@ def _app_error(exc: Exception) -> HTTPException:
     return _refusal(str(exc))
 
 
-async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], app_id: str) -> None:
+async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], app_id: str) -> dict[str, object]:
     """Send a persisted Connected Apps action to its app-id runtime seam."""
     from tools.connected_apps_runtime import apply_connected_app_runtime
 
-    await apply_connected_app_runtime(action, app_id)
+    return await apply_connected_app_runtime(action, app_id)
 
 
 def _agent_thread(user: dict, db) -> tuple[str, dict]:
@@ -166,6 +170,10 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     return {**config, "key_refs": refs}
 
 
+def _local_app_notice(config: object) -> str | None:
+    return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
+
+
 def _transport(config: object) -> str | None:
     if not isinstance(config, dict):
         return None
@@ -177,18 +185,24 @@ def _transport(config: object) -> str | None:
 
 
 def _server_row(app: dict[str, object], *, on_here: bool, full: bool) -> dict[str, object]:
+    if app["state"] in {"awaiting_approval", "expired"}:
+        live = {"state": app["state"], "state_since": app["state_since"], "tool_count": 0, "failure_class": None}
+    else:
+        from tools.mcp_runtime import connected_app_state
+
+        live = connected_app_state(app["id"])
     if not full:
-        return {"name": app["name"], "state": app["state"], "on_here": False}
+        return {"name": app["name"], "state": live["state"], "on_here": False}
     config = app["config"]
     assert isinstance(config, dict)
     return {
         "id": app["id"],
         "name": app["name"],
         "transport": _transport(config),
-        "state": app["state"],
-        "state_since": app["state_since"],
-        "tool_count": None,
-        "failure_class": None,
+        "state": live["state"],
+        "state_since": live["state_since"] or app["state_since"],
+        "tool_count": live["tool_count"],
+        "failure_class": live["failure_class"],
         "key_refs": config.get("key_refs", []),
         "config": config,
         "pending_config": app["pending_config"],
@@ -287,7 +301,8 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
         raise _app_error(exc) from None
     if human:
         await _run_app_runtime("connect", result["id"])
-    return result
+    notice = _local_app_notice(config)
+    return {**result, **({"notice": notice} if notice else {})}
 
 
 @router.patch("/servers/{app_id}")
@@ -364,7 +379,8 @@ async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dic
     except Exception as exc:
         raise _app_error(exc) from None
     await _run_app_runtime("connect", app_id)
-    return result
+    notice = _local_app_notice(result["config"])
+    return {**result, **({"notice": notice} if notice else {})}
 
 
 @router.post("/servers/{app_id}/decline")
@@ -405,7 +421,7 @@ async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict
 
 @router.post("/servers/{app_id}/reconnect")
 async def reconnect_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """Reserve the shared reconnect contract until per-app runtime ownership lands."""
+    """Reconnect exactly one reachable app, bounded to one restart per ten seconds."""
     def authorize() -> None:
         from connections.app_reach import app_reaches_thread, get_app
 
@@ -421,6 +437,11 @@ async def reconnect_server(app_id: str, user: dict = Depends(require_user)) -> d
 
     try:
         await run_in_db(authorize)
+        state = await _run_app_runtime("reconnect", app_id)
     except Exception as exc:
+        from tools.mcp_runtime import MCPReconnectRateLimitError
+
+        if isinstance(exc, MCPReconnectRateLimitError):
+            raise _refusal(str(exc), 429) from None
         raise _app_error(exc) from None
-    raise _refusal("Reconnect is unavailable until this app starts; try again after the next restart.", 409)
+    return {"id": app_id, **state}

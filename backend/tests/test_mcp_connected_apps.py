@@ -37,8 +37,12 @@ def connected_apps_client(monkeypatch):
     app = FastAPI()
     app.include_router(mcp.router)
     app.dependency_overrides[require_user] = lambda: actor
+    async def runtime_noop(_action: str, _app_id: str) -> dict[str, object]:
+        return {"state": "disconnected", "state_since": "t", "tool_count": 0, "failure_class": None}
+
     monkeypatch.setattr(mcp, "run_in_db", immediate)
     monkeypatch.setattr(mcp, "_db", lambda: db)
+    monkeypatch.setattr(mcp, "_run_app_runtime", runtime_noop)
     with TestClient(app) as client:
         yield client, db, actor
     db.close()
@@ -120,6 +124,26 @@ def test_agent_create_uses_server_thread_scope_and_refuses_reach(connected_apps_
     }
 
 
+def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client) -> None:
+    client, _db, actor = connected_apps_client
+    actor.clear()
+    actor.update({"id": "user", "token_kind": "session"})
+
+    response = client.post(
+        "/api/mcp/servers",
+        json={
+            "name": "A", "config": {"command": "a"}, "key_refs": [],
+            "reach": {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False},
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["notice"] == (
+        "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
+        "Connect only apps you trust."
+    )
+
+
 def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_client, monkeypatch) -> None:
     from api import mcp
 
@@ -149,6 +173,30 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     removed = client.delete(f"/api/mcp/servers/{app_id}")
     assert removed.status_code == 200
     assert actions == [("connect", app_id), ("reconnect", app_id), ("remove", app_id)]
+
+
+def test_reconnect_uses_the_app_runtime_and_returns_its_live_state(connected_apps_client, monkeypatch) -> None:
+    from api import mcp
+
+    client, db, actor = connected_apps_client
+    app = create_app(
+        "A", {"command": "a", "key_refs": []},
+        {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}, db=db,
+    )
+    calls = []
+
+    async def reconnect(action: str, app_id: str) -> dict[str, object]:
+        calls.append((action, app_id))
+        return {"state": "working", "state_since": "now", "tool_count": 2, "failure_class": None}
+
+    monkeypatch.setattr(mcp, "_run_app_runtime", reconnect)
+    response = client.post(f"/api/mcp/servers/{app['id']}/reconnect")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": app["id"], "state": "working", "state_since": "now", "tool_count": 2, "failure_class": None,
+    }
+    assert calls == [("reconnect", app["id"])]
 
 
 def test_expired_proposal_is_listed_and_cannot_be_approved(connected_apps_client) -> None:
@@ -227,7 +275,6 @@ def test_delete_removes_only_a_persons_stable_app_keys(connected_apps_client) ->
     config = {"command": "a", "key_refs": [{"kind": "env", "name": "SERVICE_TOKEN"}]}
     agent_app = create_app("Agent app", config, reach, db=db)
     agent_key = key_entry_names(agent_app["id"], config).pop()
-    db.execute("INSERT INTO key_store_entries(name,created_at) VALUES (?,?)", (agent_key, "t"))
     db.commit()
 
     deleted_by_agent = client.delete(f"/api/mcp/servers/{agent_app['id']}")
@@ -238,7 +285,6 @@ def test_delete_removes_only_a_persons_stable_app_keys(connected_apps_client) ->
 
     person_app = create_app("Person app", config, reach, db=db)
     person_key = key_entry_names(person_app["id"], config).pop()
-    db.execute("INSERT INTO key_store_entries(name,created_at) VALUES (?,?)", (person_key, "t"))
     db.commit()
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
@@ -250,7 +296,6 @@ def test_delete_removes_only_a_persons_stable_app_keys(connected_apps_client) ->
 
     rolled_back_app = create_app("Rollback app", config, reach, db=db)
     rolled_back_key = key_entry_names(rolled_back_app["id"], config).pop()
-    db.execute("INSERT INTO key_store_entries(name,created_at) VALUES (?,?)", (rolled_back_key, "t"))
     db.execute(
         "CREATE TRIGGER prevent_app_delete BEFORE DELETE ON connected_apps "
         f"WHEN OLD.id='{rolled_back_app['id']}' BEGIN SELECT RAISE(ABORT, 'injected'); END"
@@ -311,7 +356,7 @@ def test_conductor_policy_blocks_agent_approval_routes() -> None:
     assert off_limits("/api/mcp/servers/app-id/decline", "POST")
 
 
-def test_reconnect_endpoint_authorizes_but_does_not_fake_runtime(connected_apps_client) -> None:
+def test_reconnect_endpoint_authorizes_and_returns_the_runtime_state(connected_apps_client) -> None:
     client, db, actor = connected_apps_client
     app = create_app(
         "A", {"command": "a", "key_refs": []},
@@ -320,8 +365,10 @@ def test_reconnect_endpoint_authorizes_but_does_not_fake_runtime(connected_apps_
 
     deferred = client.post(f"/api/mcp/servers/{app['id']}/reconnect")
 
-    assert deferred.status_code == 409
-    assert "unavailable" in deferred.json()["detail"].lower()
+    assert deferred.status_code == 200
+    assert deferred.json() == {
+        "id": app["id"], "state": "disconnected", "state_since": "t", "tool_count": 0, "failure_class": None,
+    }
 
     actor["thread_id"] = "thread-b"
     refused = client.post(f"/api/mcp/servers/{app['id']}/reconnect")

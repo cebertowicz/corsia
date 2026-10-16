@@ -156,7 +156,7 @@ def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
     from infra.platform_paths import APPLICATION_ID
 
     cache_dir = (
-        Path.home() / "Library" / "Caches" / APPLICATION_ID / "mcp" / _mcp_app_id(name)
+        Path.home() / "Library" / "Caches" / APPLICATION_ID / "mcp" / name
     ).resolve(strict=False)
     if any(
         cache_dir == root or cache_dir.is_relative_to(root) or root.is_relative_to(cache_dir)
@@ -164,7 +164,6 @@ def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
     ):
         raise MCPConfigError("local MCP cache must be outside CORSIA workspace and state")
     return cache_dir
-
 
 
 def _mcp_denial_guidance(text: str) -> str | None:
@@ -201,7 +200,7 @@ def _mcp_oserror_detail(error: OSError) -> str:
     return _mcp_denial_guidance(str(error)) or str(error)
 
 
-def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: dict[str, str]):
+def _safehouse_stdio_parameters(name: str, config: dict, command: str, args: list[str], env: dict[str, str]):
     """Build a fail-closed direct-exec Safehouse launch for one local app."""
     from mcp import StdioServerParameters
 
@@ -210,13 +209,16 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
     from tools.shell_guard import _safehouse_executable, safehouse_version_error
 
     if version_error := safehouse_version_error():
-        if "FileNotFound" in version_error or "unavailable" in version_error.lower():
+        if "unavailable" in version_error.lower():
             from host_access.refusal_messages import safehouse_unavailable_refusal
 
             raise MCPConfigError(safehouse_unavailable_refusal(os.environ.get("PATH")))
         raise MCPConfigError(_mcp_setup_refusal(version_error))
     workspace = Path(WORKSPACE).expanduser().resolve(strict=False)
-    cache_dir = _mcp_cache_dir(name, workspace, Path(STATE_ROOT))
+    cache_identity = config.get("connected_app_id") or _mcp_app_id(name)
+    if not isinstance(cache_identity, str) or not cache_identity:
+        raise MCPConfigError("connected app identity must be a nonempty string")
+    cache_dir = _mcp_cache_dir(cache_identity, workspace, Path(STATE_ROOT))
     cwd = cache_dir / "cwd"
     cwd.mkdir(parents=True, exist_ok=True)
     shim_path = write_no_proctitle_shim(cache_dir)
@@ -247,7 +249,7 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
             env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,
             executable=lambda: safehouse_path,
         )
-    except (FileNotFoundError, OSError, ValueError) as error:
+    except (OSError, ValueError) as error:
         profile_path.unlink(missing_ok=True)
         raise MCPConfigError(_mcp_setup_refusal(type(error).__name__)) from None
     return StdioServerParameters(command=argv[0], args=argv[1:], env=server_env, cwd=cwd), profile_path
@@ -262,7 +264,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     if config.get("secret_headers"):
         # A legacy credential header stays refused at launch, before any value is read.
         raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
-    secret_env, _ = await run_in_db(resolve, name, config)
+    secret_env, _ = await run_in_db(resolve, config.get("connected_app_id", name), config)
     if config.get("command"):
         if config.get("bearer_file"):
             raise MCPConfigError("bearer_file is supported only for HTTP MCP servers")
@@ -270,7 +272,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
 
         env = {**(config.get("env") or {}), **secret_env}
         params, profile_path = await asyncio.to_thread(
-            _safehouse_stdio_parameters, name, config["command"], config.get("args", []), env,
+            _safehouse_stdio_parameters, name, config, config["command"], config.get("args", []), env,
         )
         stack.callback(profile_path.unlink, missing_ok=True)
         try:
@@ -371,7 +373,7 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
     complete allowlisted set atomically, without replacing built-ins.
     """
     errors = {}
-    registry.mcp_server_configs = dict(mcp_servers)
+    registry.mcp_server_configs = {**getattr(registry, "mcp_server_configs", {}), **mcp_servers}
     from tools.catalog import TOOL_CATALOG
 
     for name, config in mcp_servers.items():

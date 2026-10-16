@@ -44,6 +44,11 @@ def runtime(monkeypatch):
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
     monkeypatch.setattr(mcp_runtime, "_connected", set())
+    monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
+    monkeypatch.setattr(mcp_runtime, "_app_tools", {})
+    monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_states", {})
+    monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
     monkeypatch.setattr(state, "_agent", None)
     tools: list[_FakeTool] = []
     gate = {"hold": None}
@@ -52,8 +57,11 @@ def runtime(monkeypatch):
         if gate["hold"] is not None:
             gate["entered"].set()
             await gate["hold"].wait()
-        for name in config:
-            tool = _FakeTool(f"{name}_tool")
+        registry.mcp_server_configs = {**getattr(registry, "mcp_server_configs", {}), **config}
+        for name, server in config.items():
+            suffix = server.get("version", "tool")
+            tool = _FakeTool(f"{name}_{suffix}")
+            tool.mcp_app_id = server.get("connected_app_id")
             tools.append(tool)
             registry.register(tool)
 
@@ -154,3 +162,46 @@ def test_import_adds_tools_to_the_native_block_and_it_is_stable_afterwards(runti
     assert first == second == third  # one prefix change at the import, none after
     names = [d["function"]["name"] for d in json.loads(first)]
     assert names == sorted(names)  # order does not depend on registration order
+
+
+def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, monkeypatch):
+    from infra import state
+    from tools.registry import ToolRegistry
+
+    mcp_runtime, tools, _ = runtime
+    versions = {"app-1": 1}
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            app_id = args[0]
+            return "GitHub", {"connected_app_id": app_id, "version": versions[app_id]}
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+
+    async def scenario():
+        await mcp_runtime.start_mcp_runtime({})
+        agent = type("Agent", (), {"tools": ToolRegistry()})()
+        monkeypatch.setattr(state, "_agent", agent)
+        first = await mcp_runtime.apply_connected_app_runtime("connect", "app-1")
+        assert first["state"] == "working"
+        assert agent.tools.has("GitHub_1")
+        versions["app-1"] = 2
+        replacement = await mcp_runtime.apply_connected_app_runtime("reconnect", "app-1")
+        assert replacement["state"] == "working"
+        assert agent.tools.has("GitHub_2")
+        assert not agent.tools.has("GitHub_1")
+        await mcp_runtime.apply_connected_app_runtime("remove", "app-1")
+        assert not agent.tools.has("GitHub_2")
+        assert mcp_runtime.connected_app_state("app-1")["state"] == "disconnected"
+        assert mcp_runtime._app_tools == {}
+        assert mcp_runtime._app_servers == {}
+        assert getattr(mcp_runtime._registry, "mcp_server_configs", {}) == {}
+        await mcp_runtime.stop_mcp_runtime()
+
+    asyncio.run(scenario())
+
+    assert [tool.name for tool in tools] == ["GitHub_1", "GitHub_2"]
+    assert not any(tool.session_open for tool in tools)

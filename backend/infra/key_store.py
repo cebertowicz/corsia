@@ -173,6 +173,28 @@ def add_entry(
     return entry_metadata(name, db=db)
 
 
+def ensure_managed_entry(
+    name: str, label: str, description: str = "", *, db: sqlite3.Connection | None = None,
+) -> None:
+    """Make one code-owned key visible for a person to set, without a value."""
+    if not is_managed_name(name):
+        raise KeyStoreError("No key has that name.")
+    _name, clean_label, clean_description = validate_new_entry("person-key", label, description)
+    now = utc_now_iso()
+    with write_transaction(db, scope="key_store_managed_entry") as conn:
+        row = _row(name, conn)
+        if row is None:
+            conn.execute(
+                "INSERT INTO key_store_entries (name,label,description,created_at) VALUES (?,?,?,?)",
+                (name, clean_label, clean_description, now),
+            )
+        elif row["label"] is None:
+            conn.execute(
+                "UPDATE key_store_entries SET label=?,description=? WHERE name=?",
+                (clean_label, clean_description, name),
+            )
+
+
 def set_value(name: str, value: object, *, db: sqlite3.Connection | None = None) -> None:
     """Store ``value`` for an existing entry, replacing any earlier one.
 

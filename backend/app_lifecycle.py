@@ -145,9 +145,10 @@ async def lifespan(app: FastAPI):
         from doceditor.live_runtime import start_documents
         from infra.settings import get_mcp_servers
         from llm.lifecycle import autostart_local_providers
-        from tools.mcp_runtime import start_mcp_runtime
+        from tools.mcp_runtime import start_connected_app_runtime, start_mcp_runtime
 
         await start_mcp_runtime(await run_in_db(get_mcp_servers))
+        await start_connected_app_runtime()
 
         startup_tasks[0] = asyncio.create_task(autostart_local_providers())
         startup_tasks[1] = asyncio.create_task(_startup_cloud_discovery())
