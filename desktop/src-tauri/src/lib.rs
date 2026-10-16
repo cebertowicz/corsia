@@ -19,14 +19,25 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
-use tauri::Manager;
+use serde::{Deserialize, Serialize};
+use tauri::{ipc::CapabilityBuilder, Manager};
 
 mod app_paths;
+mod classify;
+mod discovery;
 mod first_run;
 mod lifecycle;
+mod pairing;
+mod proxy;
+mod remote;
+mod remote_config;
+mod remote_lifecycle;
 mod service_management;
 mod startup_failure;
+#[cfg(test)]
+mod test_tls;
+mod trust;
+mod version_check;
 mod update_stage;
 mod update_swap;
 
@@ -41,6 +52,13 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
+}
+
+#[derive(Default)]
+struct RemoteRuntime {
+    browser: Mutex<Option<discovery::Browser>>,
+    connection: Mutex<remote::RemoteConnection>,
+    proxy: Mutex<Option<proxy::ProxyHandle>>,
 }
 
 /// The app binary's command-line modes; anything else opens the window.
@@ -97,6 +115,7 @@ const DRAG_INIT_SCRIPT: &str = r#"
 (function () {
   if (window.__corsia_drag_handler_installed) return;
   window.__corsia_drag_handler_installed = true;
+  window.__CORSIA_SHELL__ = window.__CORSIA_SHELL__ || { mode: 'local' };
 
   // Mark the document so CSS can apply Tauri-shell-only treatments
   // (e.g. left-pad chrome to clear macOS traffic lights). Apply on
@@ -509,6 +528,273 @@ fn configure_work_folder(
     Ok(())
 }
 
+fn remote_shell_context(connection: &remote::RemoteConnection) -> serde_json::Value {
+    match connection.state() {
+        remote::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
+        _ => serde_json::json!({ "mode": "local" }),
+    }
+}
+
+fn remote_startup_state(state: &remote::LaunchState) -> Option<serde_json::Value> {
+    match state {
+        remote::LaunchState::Connecting { name } => Some(serde_json::json!({ "kind": "connecting", "name": name })),
+        remote::LaunchState::Unreachable { name, cause } => Some(serde_json::json!({ "kind": "unreachable", "name": name, "cause": match cause { remote::Unreachable::Network => "network", remote::Unreachable::Server => "server" } })),
+        remote::LaunchState::Incompatible { name, app, host } => Some(serde_json::json!({ "kind": "incompatible", "name": name, "app": app, "host": host })),
+        remote::LaunchState::TooOld { name } => Some(serde_json::json!({ "kind": "too_old", "name": name })),
+        remote::LaunchState::KeyChanged { name } => Some(serde_json::json!({ "kind": "key_changed", "name": name })),
+        _ => None,
+    }
+}
+
+fn update_remote_state(
+    app: &tauri::AppHandle,
+    update: impl FnOnce(&mut remote::RemoteConnection),
+) -> Result<(), String> {
+    let runtime = app.state::<RemoteRuntime>();
+    let state = {
+        let mut connection = runtime.connection.lock().map_err(|_| "remote connection state is unavailable")?;
+        update(&mut connection);
+        connection.state().clone()
+    };
+    if let (Some(window), Some(payload)) = (app.get_webview_window("main"), remote_startup_state(&state)) {
+        window.eval(format!("window.__corsiaShowRemoteState?.({payload});")).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn grant_remote_proxy_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, proxy_port: u16) -> Result<(), String> {
+    app.add_capability(
+        CapabilityBuilder::new("remote-proxy-origin")
+            .remote(format!("http://127.0.0.1:{proxy_port}"))
+            .window("main")
+            .permission("allow-disconnect-remote")
+            .permission("allow-start-window-drag"),
+    ).map_err(|error| format!("could not grant remote proxy commands: {error}"))
+}
+
+async fn connect_saved_remote(app: tauri::AppHandle, saved: remote_config::RemoteRecord) {
+    let name = saved.name.clone();
+    let _ = update_remote_state(&app, |connection| connection.retry(name.clone()));
+    let trust = match trust::Trust::try_from(&saved.trust) {
+        Ok(trust) => trust,
+        Err(_) => {
+            let _ = update_remote_state(&app, |connection| connection.key_changed(name.clone()));
+            return;
+        }
+    };
+    let (host, port) = match &saved.locator {
+        remote_config::Locator::Address { host, port } => (host.clone(), *port),
+        remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
+            Ok(address) => address,
+            Err(_) => {
+                let _ = update_remote_state(&app, |connection| connection.unreachable(name.clone(), remote::Unreachable::Network));
+                return;
+            }
+        },
+    };
+    match version_check::check(&host, port, &trust).await {
+        Ok(version_check::Compat::Ok) => {}
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => {
+            let _ = update_remote_state(&app, |connection| connection.incompatible(name.clone(), app_version, host));
+            return;
+        }
+        Ok(version_check::Compat::TooOld) => {
+            let _ = update_remote_state(&app, |connection| connection.too_old(name.clone()));
+            return;
+        }
+        Err(pairing::PairError::Unreachable(cause)) => {
+            let cause = match cause { classify::Unreachable::Network => remote::Unreachable::Network, classify::Unreachable::Server => remote::Unreachable::Server };
+            let _ = update_remote_state(&app, |connection| connection.unreachable(name.clone(), cause));
+            return;
+        }
+        Err(_) => {
+            let _ = update_remote_state(&app, |connection| connection.unreachable(name.clone(), remote::Unreachable::Server));
+            return;
+        }
+    }
+    let callback_app = app.clone();
+    let callback_name = name.clone();
+    let proxy = match proxy::start(saved.locator.clone(), trust, saved.proxy_port, move || {
+        let _ = update_remote_state(&callback_app, |connection| connection.key_changed(callback_name.clone()));
+    }).await {
+        Ok(proxy) => proxy,
+        Err(proxy::ProxyError::Unreachable(cause)) => {
+            let cause = match cause { classify::Unreachable::Network => remote::Unreachable::Network, classify::Unreachable::Server => remote::Unreachable::Server };
+            let _ = update_remote_state(&app, |connection| connection.unreachable(name.clone(), cause));
+            return;
+        }
+        Err(_) => {
+            let _ = update_remote_state(&app, |connection| connection.unreachable(name.clone(), remote::Unreachable::Server));
+            return;
+        }
+    };
+    if grant_remote_proxy_origin(&app, proxy.port).is_err() {
+        proxy.stop();
+        let _ = update_remote_state(&app, |connection| connection.unreachable(name.clone(), remote::Unreachable::Server));
+        return;
+    }
+    let app_dir = match default_app_dir(&app) {
+        Ok(app_dir) => app_dir,
+        Err(_) => {
+            proxy.stop();
+            return;
+        }
+    };
+    let record = remote_config::RemoteRecord { proxy_port: proxy.port, ..saved };
+    if remote_config::save_remote(&app_dir, record).is_err() {
+        proxy.stop();
+        return;
+    }
+    if let Ok(mut slot) = app.state::<RemoteRuntime>().proxy.lock() {
+        *slot = Some(proxy);
+    }
+    let _ = update_remote_state(&app, |connection| connection.connected(name.clone()));
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.eval(format!("window.__CORSIA_SHELL__ = {{ mode: 'remote', name: {} }}; window.location.replace('http://127.0.0.1:{}');", serde_json::to_string(&name).unwrap_or_default(), app.state::<RemoteRuntime>().proxy.lock().ok().and_then(|proxy| proxy.as_ref().map(|proxy| proxy.port)).unwrap_or_default()));
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RemoteTarget {
+    DnsSd { instance: String },
+    Address { host: String, port: Option<u16> },
+}
+
+#[derive(Deserialize)]
+struct RemotePairRequest {
+    target: RemoteTarget,
+    code: String,
+}
+
+#[derive(Serialize)]
+struct RemoteNames {
+    names: Vec<String>,
+    denied: bool,
+}
+
+fn discovery_policy_denied(error: &discovery::DiscoveryError) -> bool {
+    matches!(error, discovery::DiscoveryError::Service(-65_570))
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum RemotePairResponse {
+    Success { ok: bool, name: String },
+    Failure { ok: bool, reason: String, app_version: Option<String>, host_version: Option<String> },
+}
+
+#[tauri::command]
+fn remote_discovered(remote: tauri::State<'_, RemoteRuntime>) -> Result<RemoteNames, String> {
+    let mut browser = remote.browser.lock().map_err(|_| "remote browser state is unavailable")?;
+    if browser.is_none() {
+        match discovery::Browser::start() {
+            Ok(started) => *browser = Some(started),
+            Err(error) if discovery_policy_denied(&error) => return Ok(RemoteNames { names: Vec::new(), denied: true }),
+            Err(error) => return Err(format!("could not start discovery: {error:?}")),
+        }
+    }
+    Ok(RemoteNames { names: browser.as_ref().expect("browser created").names(), denied: false })
+}
+
+fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
+    use classify::Unreachable;
+    use pairing::PairError;
+    let reason = match error {
+        PairError::WrongCode => "wrong_code",
+        PairError::Expired => "expired",
+        PairError::TooManyTries => "too_many_tries",
+        PairError::Paused => "paused",
+        PairError::Busy => "busy",
+        PairError::Unreachable(Unreachable::Network) => "network",
+        PairError::Unreachable(Unreachable::Server) => "server",
+        PairError::TooOld => "too_old",
+        PairError::Protocol(_) => "server",
+    };
+    RemotePairResponse::Failure { ok: false, reason: reason.into(), app_version: None, host_version: None }
+}
+
+#[tauri::command]
+async fn remote_pair(
+    request: RemotePairRequest,
+    app: tauri::AppHandle,
+    remote: tauri::State<'_, RemoteRuntime>,
+) -> Result<RemotePairResponse, String> {
+    update_remote_state(&app, |connection| connection.begin_pairing())?;
+    let locator = match request.target {
+        RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
+        RemoteTarget::Address { host, port } => remote_config::Locator::Address { host, port: port.unwrap_or(47_901) },
+    };
+    let (host, port) = match &locator {
+        remote_config::Locator::Address { host, port } => (host.clone(), *port),
+        remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
+            Ok(address) => address,
+            Err(_) => return Ok(RemotePairResponse::Failure { ok: false, reason: "network".into(), app_version: None, host_version: None }),
+        },
+    };
+    let paired = match pairing::pair(&host, port, &request.code).await {
+        Ok(paired) => paired,
+        Err(error) => return Ok(remote_pair_error(error)),
+    };
+    match version_check::check(&paired.host, paired.port, &paired.trust).await {
+        Ok(version_check::Compat::Ok) => {}
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(RemotePairResponse::Failure { ok: false, reason: "incompatible".into(), app_version: Some(app_version), host_version: host }),
+        Ok(version_check::Compat::TooOld) => return Ok(RemotePairResponse::Failure { ok: false, reason: "too_old".into(), app_version: None, host_version: None }),
+        Err(error) => return Ok(remote_pair_error(error)),
+    }
+    let proxy = proxy::start(locator.clone(), paired.trust.clone(), 0, || {}).await.map_err(|error| format!("could not start remote proxy: {error:?}"))?;
+    let proxy_port = proxy.port;
+    grant_remote_proxy_origin(&app, proxy_port)?;
+    let app_dir = default_app_dir(&app)?;
+    let record = remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: proxy.port };
+    remote_config::save_remote(&app_dir, record)?;
+    if unregister_service().is_err() {
+        proxy.stop();
+        remote_config::forget_remote(&app_dir)?;
+        return Ok(RemotePairResponse::Failure { ok: false, reason: "server".into(), app_version: None, host_version: None });
+    }
+    *remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")? = Some(proxy);
+    update_remote_state(&app, |connection| connection.connected(paired.name.clone()))?;
+    if let Some(window) = app.get_webview_window("main") {
+        let name = serde_json::to_string(&paired.name).map_err(|error| error.to_string())?;
+        window.eval(format!("window.__CORSIA_SHELL__ = {{ mode: 'remote', name: {name} }}; window.location.replace('http://127.0.0.1:{proxy_port}');")).map_err(|error| error.to_string())?;
+    }
+    Ok(RemotePairResponse::Success { ok: true, name: paired.name })
+}
+
+fn saved_proxy_origin_allows(remote: Option<&remote_config::RemoteRecord>, actual: &str) -> bool {
+    remote.is_some_and(|saved| actual.trim_end_matches('/') == format!("http://127.0.0.1:{}", saved.proxy_port))
+}
+
+#[tauri::command]
+fn disconnect_remote(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+    remote: tauri::State<'_, RemoteRuntime>,
+    webview: tauri::Webview,
+) -> Result<(), String> {
+    let app_dir = default_app_dir(&app)?;
+    let saved = remote_config::load_remote(&app_dir)?;
+    let actual = webview.url().map_err(|error| format!("could not read calling origin: {error}"))?;
+    if !saved_proxy_origin_allows(saved.as_ref(), actual.as_str()) {
+        return Err("disconnect_remote is allowed only from the saved proxy origin".into());
+    }
+    update_remote_state(&app, |connection| connection.begin_disconnect())?;
+    if let Some(proxy) = remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")?.take() {
+        proxy.stop();
+    }
+    remote_config::forget_remote(&app_dir)?;
+    run_service_command("register")?;
+    let startup = start_service(&app, &service)?;
+    update_remote_state(&app, |connection| connection.local())?;
+    if let ServiceStartup::Ready { url } = startup {
+        if let Some(window) = app.get_webview_window("main") {
+            window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn start_local_service(
     app: tauri::AppHandle,
@@ -681,6 +967,10 @@ fn sync_window_chrome(window: &tauri::WebviewWindow) {
     }
 }
 
+fn generated_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Every command-line mode is dispatched here, before any window exists.
@@ -703,7 +993,7 @@ pub fn run() {
         }
         Some(CommandLineMode::UpdateStage(_)) | None => {}
     }
-    let context = tauri::generate_context!();
+    let context = generated_context();
     if let Some(CommandLineMode::UpdateStage(operation_id)) = mode {
         std::process::exit(update_stage::run(context, operation_id));
     }
@@ -724,6 +1014,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            remote_discovered,
+            remote_pair,
+            disconnect_remote,
             choose_work_folder,
             configure_work_folder,
             lifecycle::retry_quit,
@@ -736,7 +1029,15 @@ pub fn run() {
             // Inject the drag handler on every page load. Idempotent —
             // the script self-guards via __corsia_drag_handler_installed
             // so multiple injections don't double-bind.
-            let _ = webview.eval(DRAG_INIT_SCRIPT);
+            let (shell_context, startup_state) = webview
+                .app_handle()
+                .state::<RemoteRuntime>()
+                .connection
+                .lock()
+                .map(|connection| (remote_shell_context(&connection), remote_startup_state(connection.state())))
+                .unwrap_or_else(|_| (serde_json::json!({ "mode": "local" }), None));
+            let show_state = startup_state.map(|state| format!("window.__corsiaShowRemoteState?.({state});")).unwrap_or_default();
+            let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
             // Re-apply traffic-light position after each navigation —
             // the startup-shell → local-app redirect rebuilds the view tree
             // and can reset button positions on some macOS versions.
@@ -775,6 +1076,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppServiceState::default());
+            app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
             #[cfg(target_os = "macos")]
             app.set_menu(lifecycle::menu(app.handle())?)?;
@@ -786,6 +1088,18 @@ pub fn run() {
                 use tauri::Manager;
                 if let Some(window) = app.get_webview_window("main") {
                     sync_window_chrome(&window);
+                }
+            }
+            // A saved remote owns launch: do not register or start the local
+            // service, whose login item was intentionally removed on pairing.
+            if let Ok(app_dir) = default_app_dir(app.handle()) {
+                if let Ok(Some(saved)) = remote_config::load_remote(&app_dir) {
+                    if let Ok(mut connection) = app.state::<RemoteRuntime>().connection.lock() {
+                        *connection = remote::RemoteConnection::launch(Some(&saved));
+                    }
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move { connect_saved_remote(app_handle, saved).await; });
+                    return Ok(());
                 }
             }
             // The default window loads the static startup shell while Tauri
@@ -854,6 +1168,154 @@ mod tests {
     use super::*;
     use base64::Engine;
     use std::fs;
+
+    const SHELL_COMMANDS: &[&str] = &[
+        "start_local_service",
+        "remote_discovered",
+        "remote_pair",
+        "disconnect_remote",
+        "choose_work_folder",
+        "configure_work_folder",
+        "retry_quit",
+        "open_login_items",
+        "get_service_log_path",
+        "save_setup_report",
+        "start_window_drag",
+    ];
+
+    fn acl_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .invoke_handler(|invoke| {
+                if SHELL_COMMANDS.contains(&invoke.message.command()) {
+                    invoke.resolver.resolve(serde_json::Value::Null);
+                    true
+                } else {
+                    false
+                }
+            })
+            .build(generated_context())
+            .unwrap()
+    }
+
+    fn invoke_from(webview: &tauri::WebviewWindow<tauri::test::MockRuntime>, command: &str, url: &str) -> Result<tauri::ipc::InvokeResponseBody, serde_json::Value> {
+        tauri::test::get_ipc_response(webview, tauri::webview::InvokeRequest {
+            cmd: command.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: url.parse().unwrap(),
+            body: tauri::ipc::InvokeBody::default(),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        })
+    }
+
+    #[test]
+    fn remote_only_commands_are_refused_from_remote_and_non_shell_origins() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        for command in ["disconnect_remote", "start_window_drag"] {
+            for origin in ["https://studio.example", "https://untrusted.example"] {
+                let refusal = invoke_from(&webview, command, origin).unwrap_err();
+                assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {origin}: {refusal}");
+            }
+        }
+    }
+
+    #[test]
+    fn info_plist_declares_the_local_network_prompt_and_the_bonjour_service() {
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("<key>NSLocalNetworkUsageDescription</key>"));
+        assert!(plist.contains("<key>NSBonjourServices</key>"));
+        assert!(plist.contains("<string>_corsia._tcp</string>"));
+    }
+
+    #[test]
+    fn no_app_command_is_allowed_from_a_foreign_http_or_https_origin() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        for command in SHELL_COMMANDS {
+            for origin in ["https://studio.example", "http://studio.example", "https://127.0.0.1:47911", "http://127.0.0.1:47911"] {
+                let refusal = invoke_from(&webview, command, origin).unwrap_err();
+                assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {origin}: {refusal}");
+            }
+        }
+    }
+
+    #[test]
+    fn remote_only_commands_reach_their_handlers_from_the_shell_origin() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        assert!(invoke_from(&webview, "disconnect_remote", "tauri://localhost").is_ok());
+        assert!(invoke_from(&webview, "start_window_drag", "tauri://localhost").is_ok());
+    }
+
+    #[test]
+    fn runtime_proxy_capability_allows_only_its_exact_origin_and_commands() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let proxy_origin = "http://127.0.0.1:47911";
+        grant_remote_proxy_origin(app.handle(), 47911).unwrap();
+
+        for command in ["disconnect_remote", "start_window_drag"] {
+            assert!(invoke_from(&webview, command, proxy_origin).is_ok(), "{command} was refused from the granted proxy origin");
+            assert!(invoke_from(&webview, command, "http://127.0.0.1:47912").is_err(), "{command} was allowed from an ungranted proxy port");
+        }
+        for command in SHELL_COMMANDS {
+            if ["disconnect_remote", "start_window_drag"].contains(command) {
+                continue;
+            }
+            assert!(invoke_from(&webview, command, proxy_origin).is_err(), "{command} was allowed from the proxy origin");
+        }
+    }
+
+    #[test]
+    fn discovery_policy_denial_is_reported_to_the_remote_connect_ui() {
+        assert!(discovery_policy_denied(&discovery::DiscoveryError::Service(-65_570)));
+        assert!(!discovery_policy_denied(&discovery::DiscoveryError::Service(-65_571)));
+        assert!(!discovery_policy_denied(&discovery::DiscoveryError::Timeout));
+    }
+
+    #[test]
+    fn opener_allows_only_the_exact_local_network_system_settings_url() {
+        let capability: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let opener = capability["permissions"].as_array().unwrap().iter().find(|permission| permission["identifier"] == "opener:allow-open-url").unwrap();
+        assert_eq!(opener["allow"], serde_json::json!([
+            { "url": "http://*" },
+            { "url": "https://*" },
+            { "url": "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork" }
+        ]));
+    }
+
+    #[test]
+    fn shell_context_is_remote_only_after_the_connection_is_live() {
+        let saved = remote_config::RemoteRecord {
+            locator: remote_config::Locator::Address { host: "192.168.1.20".into(), port: 47901 },
+            trust: remote_config::RemoteTrust::System,
+            name: "Studio".into(),
+            proxy_port: 47911,
+        };
+        let mut connection = remote::RemoteConnection::launch(Some(&saved));
+        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        connection.connected("Studio");
+        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio" }));
+        connection.unreachable("Studio", remote::Unreachable::Network);
+        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+    }
+
+    #[test]
+    fn disconnect_accepts_only_the_current_saved_proxy_origin() {
+        let remote = remote_config::RemoteRecord {
+            locator: remote_config::Locator::Address { host: "192.168.1.20".into(), port: 47901 },
+            trust: remote_config::RemoteTrust::System,
+            name: "Studio".into(),
+            proxy_port: 47911,
+        };
+        assert!(saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47911"));
+        assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47912"));
+        assert!(!saved_proxy_origin_allows(Some(&remote), "https://127.0.0.1:47911"));
+        assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47895"));
+        assert!(!saved_proxy_origin_allows(None, "http://127.0.0.1:47911"));
+    }
 
     #[test]
     fn local_requests_name_the_port_the_backend_guard_requires() {

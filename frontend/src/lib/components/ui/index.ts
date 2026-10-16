@@ -13,3 +13,4 @@ export { default as Toggle } from './Toggle.svelte';
 export { default as RailRow } from './RailRow.svelte';
 export { default as RailSection } from './RailSection.svelte';
 export { default as ListRow } from './ListRow.svelte';
+export { default as CodeInput } from './CodeInput.svelte';

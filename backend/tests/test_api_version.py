@@ -157,3 +157,20 @@ def test_clean_status_read_is_false_not_unknown(monkeypatch):
     assert api_version._is_dirty() is False
     monkeypatch.setattr(api_version.subprocess, "check_output", lambda *_a, **_k: b" M f\n")
     assert api_version._is_dirty() is True
+
+
+def test_version_payload_carries_the_app_version_and_shell_protocol(monkeypatch):
+    """The shell's compatibility check reads ``app``; the computer name is never on this public route."""
+    import api.version as api_version
+
+    app = {"version": "0.4.1", "shell_protocol": 1}
+    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {"app": app})
+    monkeypatch.setattr(api_version, "_current_head_info", lambda: _UNAVAILABLE_HEAD)
+    payload = api_version._version_payload()
+    assert payload["app"] == app
+    assert "name" not in payload["app"]
+
+    monkeypatch.setattr(api_version, "_read_frontend_build_info", api_version._placeholder_frontend_info)
+    placeholder = api_version._version_payload()["app"]
+    assert isinstance(placeholder["shell_protocol"], int)
+    assert placeholder["version"] == "unknown"

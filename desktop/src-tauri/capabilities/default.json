@@ -7,11 +7,23 @@
   ],
   "permissions": [
     "core:default",
+    "allow-choose-work-folder",
+    "allow-configure-work-folder",
+    "allow-disconnect-remote",
+    "allow-get-service-log-path",
+    "allow-open-login-items",
+    "allow-remote-discovered",
+    "allow-remote-pair",
+    "allow-retry-quit",
+    "allow-save-setup-report",
+    "allow-start-local-service",
+    "allow-start-window-drag",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "http://*" },
-        { "url": "https://*" }
+        { "url": "https://*" },
+        { "url": "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork" }
       ]
     }
   ]
