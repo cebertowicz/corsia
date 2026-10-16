@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button, Field, Message } from '$lib/components/ui';
-	import SetupShell, { type SetupStep } from './SetupShell.svelte';
+	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
 	import { token, user } from '$lib/stores/auth';
