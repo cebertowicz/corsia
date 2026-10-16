@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from core.device_pairing import DevicePairing
 from infra.devices_listener import DevicesListener, lan_addresses, remote_connect_name
 from infra.dns_sd import DNSServiceAnnouncement
+from infra.state.ws import schedule_devices_updated
 
 
 NameResolver = Callable[[DNSServiceAnnouncement | None], str]
@@ -21,7 +22,7 @@ class DevicesRuntime:
     _name_resolver: NameResolver = field(init=False, repr=False)
 
     def __init__(self, *, name_resolver: NameResolver | None = None) -> None:
-        self.pairing = DevicePairing()
+        self.pairing = DevicePairing(on_update=schedule_devices_updated)
         self.listener = None
         self._name_resolver = name_resolver or remote_connect_name
 

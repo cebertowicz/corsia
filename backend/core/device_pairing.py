@@ -9,6 +9,7 @@ import secrets
 import time
 import unicodedata
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -48,8 +49,9 @@ class DevicePairing:
     disabling a code invalidates every exchange created from it.
     """
 
-    def __init__(self, *, clock=time.monotonic):
+    def __init__(self, *, clock=time.monotonic, on_update: Callable[[], None] | None = None):
         self._clock = clock
+        self._on_update = on_update or (lambda: None)
         self._enabled = False
         self._code: str | None = None
         self._pairing_secret: bytes | None = None
@@ -71,6 +73,7 @@ class DevicePairing:
     def disable(self) -> None:
         self._enabled = False
         self._end_code()
+        self._on_update()
 
     def status(self, *, include_code: bool = False) -> dict:
         self._expire_if_needed()
@@ -101,6 +104,7 @@ class DevicePairing:
             PAIRING_IDENTITY + b"\0" + self._code.encode()
         ).digest()
         self._expires_at = self._clock() + CODE_TTL_SECONDS
+        self._on_update()
         return self._code
 
     def require_active(self) -> None:
@@ -146,6 +150,7 @@ class DevicePairing:
             raise PairingError(self._failure_reason())
         normalized_name = pairing_computer_name(name)
         self._end_code()
+        self._on_update()
         return (
             hmac.new(
                 server_key,
@@ -165,6 +170,7 @@ class DevicePairing:
     def _expire_if_needed(self) -> None:
         if self._expires_at is not None and self._expires_at <= self._clock():
             self._end_code()
+            self._on_update()
 
     def _end_code(self) -> None:
         self._code = None
@@ -186,8 +192,10 @@ class DevicePairing:
         if len(self._failures) >= MAX_HOURLY_FAILURES:
             self._paused = True
             self._end_code()
+            self._on_update()
         elif self._wrong_tries >= MAX_WRONG_TRIES:
             self._end_code()
+            self._on_update()
 
     def _failure_reason(self) -> Literal["wrong_code", "too_many_tries", "paused"]:
         if self._paused:

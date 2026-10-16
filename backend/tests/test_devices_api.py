@@ -351,6 +351,8 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
         writes.append((function, args))
 
     runtime.pairing.disable()
+    updates: list[dict[str, str]] = []
+    monkeypatch.setattr(runtime.pairing, "_on_update", lambda: updates.append({"type": "devices_updated"}))
     monkeypatch.setattr(DevicesRuntime, "enable", fake_enable)
     monkeypatch.setattr(devices_api, "run_in_db", fake_run_in_db)
     monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "Studio")
@@ -379,6 +381,7 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
     assert direct_enable.status_code == direct_code.status_code == 200
     assert direct_enable.json()["code"]["state"] == "active"
     assert direct_code.json()["code"]
+    assert updates == [{"type": "devices_updated"}, {"type": "devices_updated"}]
     assert writes == [(set_devices_enabled, (True,))]
     for refused in (forwarded_enable, forwarded_code, devices_enable, devices_code):
         assert refused.status_code == 403

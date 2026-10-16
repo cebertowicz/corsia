@@ -152,6 +152,8 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
         SimpleNamespace(announcement=SimpleNamespace(announced_name=None, error="DNS-SD failed")),
     )
     client_pairing = _client_pairing(_enable_pairing())
+    updates: list[str] = []
+    monkeypatch.setattr(runtime.pairing, "_on_update", lambda: updates.append("updated"))
     msg_c = client_pairing.start()
     client = TestClient(app)
     started = _start(client, msg_c, host="Studio.Local.")
@@ -167,6 +169,7 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
     assert finished.status_code == 200
     expected_confirm_s = hmac.new(server_key, transcript + b"name:Studio", hashlib.sha256).digest()
     assert finished.json() == {"confirm_s": _encoded(expected_confirm_s), "name": name}
+    assert updates == ["updated"]
     assert not hmac.compare_digest(
         base64.b64decode(finished.json()["confirm_s"]),
         hmac.new(server_key, transcript + b"name:Other", hashlib.sha256).digest(),
@@ -174,6 +177,7 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
     repeated = _finish(client, payload["exchange_id"], confirm_c)
     assert repeated.status_code == 409
     assert repeated.json()["detail"]["reason"] == "expired"
+    assert updates == ["updated"]
 
 
 def test_pair_finish_normalizes_and_caps_name_at_a_utf8_boundary(monkeypatch):
