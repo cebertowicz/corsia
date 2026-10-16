@@ -1,5 +1,6 @@
 """Reach checks for MCP tools bound to durable connected-app identities."""
 
+import sqlite3
 from typing import Any
 
 from tools.base import Tool
@@ -42,9 +43,8 @@ def mcp_tool_visible_here(tool: Tool) -> bool:
     db = get_db()
     try:
         return mcp_tool_reaches_thread(tool, thread_id, db=db)
-    except Exception:
-        # Discovery is fail-closed: unavailable identity or reach state must
-        # never disclose an app's server, schema, or configuration references.
+    except (OSError, sqlite3.Error):
+        # Discovery is fail-closed when the reach store is unavailable.
         return False
     finally:
         db.close()
