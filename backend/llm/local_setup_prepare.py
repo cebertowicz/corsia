@@ -37,7 +37,7 @@ NONE_FITS = "none_fits"
 FAILED = "failed"
 
 #: The one message for both too little memory and nothing fitting.
-NO_LOCAL_MODEL = "This Mac can't run a local model well. Connect a subscription or an API key in the app."
+NO_LOCAL_MODEL = "This computer can't run a local model well. Connect a subscription or an API key in the app."
 
 
 @dataclass

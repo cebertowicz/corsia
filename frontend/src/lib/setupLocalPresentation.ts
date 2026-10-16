@@ -34,9 +34,9 @@ export function localJob(source: ModelSource | undefined, downloading: boolean, 
 export function setupFinishNote(source: ModelSource | undefined, downloading: boolean, startError: string): string {
 	if (startError || source?.setup_error) return 'The local model couldn’t start. Try again, or choose another source.';
 	if (!downloading) return 'Connect Claude Code or Codex, or add an API key, to continue.';
-	if (source?.download_stalled) return 'Download paused. Check your connection, then try again.';
-	const eta = remainingTime(source?.download_eta_seconds);
-	return eta ? `Ready ${eta}. You can close this window; CORSIA keeps going.` : 'Ready when the download finishes. You can close this window; CORSIA keeps going.';
+	if (source?.download_stalled) return 'Download paused. It will resume when progress returns.';
+	const eta = measuredDownloadTime(source?.download_eta_seconds);
+	return eta ? `Ready when the download finishes, ${eta}. You can close this window; CORSIA keeps going.` : 'Ready when the download finishes. You can close this window; CORSIA keeps going.';
 }
 
 export function setupSourceMeta(source: ModelSource, startError: string, modelSize: string): string {

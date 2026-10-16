@@ -76,6 +76,7 @@ def test_welcome_shows_the_recommenders_pick_for_each_memory_size(monkeypatch, g
     view = asyncio.run(_prepared())
 
     if PICKS[gib] is None:
+        assert prepare.NO_LOCAL_MODEL == "This computer can't run a local model well. Connect a subscription or an API key in the app."
         assert view == {"state": "low_memory", "model": None, "message": prepare.NO_LOCAL_MODEL}
         assert mac.started == [] and mac.omlx.calls == []
         return

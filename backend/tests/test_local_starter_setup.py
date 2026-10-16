@@ -771,6 +771,9 @@ def test_download_progress_estimates_only_after_measured_progress_and_marks_a_st
     assert progress.eta_seconds == 35 and progress.stalled is False
     progress.observe(300, 1_000, 41)
     assert progress.eta_seconds is None and progress.stalled is True
+    # Polling continues through a pause; new transfer progress clears it without a retry.
+    progress.observe(500, 1_000, 51)
+    assert progress.eta_seconds == 25 and progress.stalled is False
 
 
 def test_cancelled_local_setup_is_a_successful_terminal_noop_for_the_source(monkeypatch):

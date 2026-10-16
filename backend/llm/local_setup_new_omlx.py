@@ -63,7 +63,7 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
     if model is None:
         model = prepare.picked_model()
     if model is None:
-        report("Finding the model that fits this Mac")
+        report("Finding the model that fits this computer")
         model = await prepare.ask(server_id, port)
     if model is None:
         ls._emit("skipped", reason="none_fits")
