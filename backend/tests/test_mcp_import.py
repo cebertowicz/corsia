@@ -84,13 +84,36 @@ def test_legacy_import_writer_is_refused_without_writing_settings():
         mcp_import.save_import({"server": {"command": "existing"}})
 
 
-def test_import_route_is_refused_with_connected_apps_remedy():
+def test_import_route_rejects_override_fields():
     from fastapi import HTTPException
     from api import mcp
 
     with pytest.raises(HTTPException) as error:
         asyncio.run(mcp.import_servers({"servers": [{"source": "cursor", "name": "server", "url": "https://bad.test"}]}, {}))
     assert error.value.status_code == 422
+    assert error.value.detail == "each selected app must contain only source and name"
+
+
+def test_import_route_returns_awaiting_approval_for_a_valid_selection(tmp_path, isolated_db, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.mcp import router
+    from infra.auth import require_user_header_only
+
+    _json(tmp_path / ".cursor/mcp.json", {"mcpServers": {"fixture": {"command": "npx"}}})
+    monkeypatch.setattr(mcp_import, "_home", lambda: tmp_path)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user_header_only] = lambda: {"id": "importer"}
+
+    response = TestClient(app).post("/api/mcp/import", json={
+        "servers": [{"source": "cursor", "name": "fixture"}],
+    })
+
+    assert response.status_code == 200
+    assert response.json()["rows"] == [{
+        "id": response.json()["rows"][0]["id"], "name": "fixture", "state": "awaiting_approval",
+    }]
 
 
 def test_import_selected_creates_pending_app_and_keeps_key_out_of_row(tmp_path):
@@ -124,6 +147,69 @@ def test_import_selected_creates_pending_app_and_keeps_key_out_of_row(tmp_path):
     assert app["config"]["key_refs"] == [{"kind": "header", "name": "Authorization"}]
     assert app["reach"] == {"mode": "selected", "project_ids": ["project"], "outside_projects": False}
     assert db.execute("SELECT value FROM settings WHERE key='tools'").fetchone() is None
+
+
+def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeypatch, caplog):
+    import sqlite3
+
+    from connections.app_reach import get_app
+    from infra import state
+    from infra.database import initialize_schema
+    from tools import mcp_runtime
+    from tools.registry import ToolRegistry
+
+    secret = "backend-environment-secret-for-codex-fixture"
+    monkeypatch.setenv("X", secret)
+    _json(tmp_path / ".codex/config.toml", {})
+    (tmp_path / ".codex/config.toml").write_text(
+        '[mcp_servers.codex]\nurl = "https://example.test/mcp"\nbearer_token_env_var = "X"\n'
+        '[mcp_servers.codex.env_http_headers]\nAuthorization = "X"\n',
+        encoding="utf-8",
+    )
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+
+    imported = mcp_import.import_selected(
+        [{"source": "codex", "name": "codex"}], db=db, home=tmp_path, actor="agent",
+    )
+    app = get_app(imported["rows"][0]["id"], db=db)
+
+    assert imported["rows"][0]["state"] == "awaiting_approval"
+    assert app["config"]["needs_token"] is True
+    assert secret not in json.dumps({"row": app, "response": imported})
+    assert secret not in str(db.execute("SELECT name,value_ref FROM key_store_entries").fetchall())
+
+    monkeypatch.setattr(mcp_runtime, "_stopped", False)
+    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
+    monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
+    monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
+    monkeypatch.setattr(mcp_runtime, "_app_tools", {})
+    monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_states", {})
+    monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    monkeypatch.setattr(state, "_agent", None)
+    published = []
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return "codex", {**app["config"], "connected_app_id": args[0]}
+        if fn.__name__ == "record_runtime_app_state":
+            published.append(args[1])
+            return None
+        raise AssertionError(fn.__name__)
+
+    async def should_not_connect(*_args):
+        raise AssertionError("an imported environment token must not open a connection")
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", should_not_connect)
+    result = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", str(app["id"])))
+
+    assert result["state"] == "needs_token"
+    assert [item["state"] for item in published] == ["connecting", "needs_token"]
+    assert secret not in json.dumps(result)
+    assert secret not in caplog.text
 
 
 def test_project_reach_uses_real_paths_components_and_deepest_match(tmp_path):

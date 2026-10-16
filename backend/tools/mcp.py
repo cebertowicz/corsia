@@ -210,6 +210,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from tools.mcp_secrets import resolve
 
     auth = None
+    transport_task: asyncio.Task | None = None
     secret_env, secret_headers = await run_in_db(resolve, config.get("connected_app_id", name), config)
     if config.get("command"):
         if config.get("bearer_file"):
@@ -244,21 +245,66 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
             session = await stack.enter_async_context(ClientSession(read, write))
             initialized = await session.initialize()
         elif transport == "http":
-            client = await stack.enter_async_context(httpx.AsyncClient(**options))
-            read, write, _ = await stack.enter_async_context(
-                streamable_http_client(config["url"], http_client=client),
-            )
-            session = await stack.enter_async_context(ClientSession(read, write))
+            initialize_statuses: set[int] = set()
+
+            async def record_initialize_status(response: httpx.Response) -> None:
+                if response.request.method == "POST":
+                    initialize_statuses.add(response.status_code)
+
+            client = await stack.enter_async_context(httpx.AsyncClient(
+                **options, event_hooks={"response": [record_initialize_status]},
+            ))
+            stream_ready = asyncio.get_running_loop().create_future()
+            stream_closed = asyncio.Event()
+
+            async def own_streamable_session() -> None:
+                try:
+                    async with AsyncExitStack() as stream_stack:
+                        read, write, _ = await stream_stack.enter_async_context(
+                            streamable_http_client(config["url"], http_client=client),
+                        )
+                        stream_session = await stream_stack.enter_async_context(ClientSession(read, write))
+                        stream_initialized = await stream_session.initialize()
+                        stream_ready.set_result((stream_session, stream_initialized))
+                        await stream_closed.wait()
+                except BaseException as error:
+                    if not stream_ready.done():
+                        stream_ready.set_exception(error)
+                    else:
+                        raise
+
+            stream_task = asyncio.create_task(own_streamable_session())
+
+            async def close_streamable_session() -> None:
+                stream_closed.set()
+                await asyncio.gather(stream_task, return_exceptions=True)
+
             try:
-                initialized = await session.initialize()
-            except httpx.HTTPStatusError as error:
-                if error.response.status_code not in {404, 405}:
+                session, initialized = await asyncio.shield(stream_ready)
+            except asyncio.CancelledError:
+                await close_streamable_session()
+                if not (stream_task.done() and initialize_statuses.intersection({404, 405})):
                     raise
                 read, write = await stack.enter_async_context(
                     sse_client(config["url"], headers=options["headers"], auth=auth),
                 )
                 session = await stack.enter_async_context(ClientSession(read, write))
                 initialized = await session.initialize()
+            except (Exception, BaseExceptionGroup):
+                await close_streamable_session()
+                # The MCP SDK turns a 404 into JSON-RPC termination and can
+                # contain a 405 in its task group, so its public exception type
+                # is not a reliable status signal. The client response hook is.
+                if not initialize_statuses.intersection({404, 405}):
+                    raise
+                read, write = await stack.enter_async_context(
+                    sse_client(config["url"], headers=options["headers"], auth=auth),
+                )
+                session = await stack.enter_async_context(ClientSession(read, write))
+                initialized = await session.initialize()
+            else:
+                transport_task = stream_task
+                stack.push_async_callback(close_streamable_session)
         else:
             raise MCPConfigError("MCP transport is not supported")
     else:
@@ -267,13 +313,13 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         session = await stack.enter_async_context(ClientSession(read, write))
         initialized = await session.initialize()
     instructions = getattr(initialized, "instructions", None)
-    return session, auth, instructions if isinstance(instructions, str) else None
+    return session, auth, instructions if isinstance(instructions, str) else None, transport_task
 
 
 async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     allowlist = allowed_names(config)
     tool_timeout = timeout_seconds(config, "tool_timeout", 30)
-    session, auth, instructions = await _open_session(name, config, stack)
+    session, auth, instructions, transport_task = await _open_session(name, config, stack)
     discovered = []
     cursor = None
     while True:
@@ -289,9 +335,9 @@ async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     app_id = config.get("connected_app_id")
     if app_id is not None and (not isinstance(app_id, str) or not app_id):
         raise MCPConfigError("connected app identity must be a nonempty string")
-    return [MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth,
-                           instructions=instructions, app_id=app_id)
-            for tool in discovered if allowlist is None or tool.name in allowlist]
+    return ([MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth,
+                            instructions=instructions, app_id=app_id)
+             for tool in discovered if allowlist is None or tool.name in allowlist], transport_task)
 
 
 class _ServerConnection:
@@ -307,12 +353,32 @@ class _ServerConnection:
     async def _run(self):
         try:
             async with AsyncExitStack() as stack:
-                wrappers = await _discover_tools(self.name, self.config, stack)
+                wrappers, transport_task = await _discover_tools(self.name, self.config, stack)
                 for wrapper in wrappers:
                     wrapper._connection = self
                 self.ready.set_result(wrappers)
-                await self.stop.wait()
-        except Exception as error:
+                if transport_task is None:
+                    await self.stop.wait()
+                else:
+                    stop_wait = asyncio.create_task(self.stop.wait())
+                    done, _ = await asyncio.wait(
+                        {stop_wait, transport_task}, return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if stop_wait in done:
+                        return
+                    stop_wait.cancel()
+                    await asyncio.gather(stop_wait, return_exceptions=True)
+                    transport_task.result()
+                    raise MCPConfigError("streamable HTTP connection closed")
+        except asyncio.CancelledError as error:
+            if self.stop.is_set():
+                raise
+            self.error = safe_error(error)
+            if not self.ready.done():
+                self.ready.set_exception(
+                    MCPConnectionError(self.error, mcp_failure_class(error, self.config))
+                )
+        except (Exception, BaseExceptionGroup) as error:
             self.error = safe_error(error)
             if not self.ready.done():
                 self.ready.set_exception(

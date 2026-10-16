@@ -1,7 +1,7 @@
 """Exercise the installed MCP SDK over real local Streamable HTTP."""
 
 import asyncio
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 import json
 import logging
 from pathlib import Path
@@ -12,12 +12,29 @@ from typing import Any
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Route
 import uvicorn
 
 from tools.mcp import connect_mcp_servers
 from tools.registry import ToolRegistry
+
+
+@asynccontextmanager
+async def _serve(app):
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+    task = asyncio.create_task(server.serve(sockets=[sock]))
+    try:
+        async with asyncio.timeout(3):
+            while not server.started:
+                await asyncio.sleep(0.01)
+        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        await asyncio.wait_for(task, 3)
+        sock.close()
 
 
 class MCPServer:
@@ -57,6 +74,50 @@ class MCPServer:
         else:
             raise AssertionError(method)
         return JSONResponse({"jsonrpc": "2.0", "id": message["id"], "result": result})
+
+
+class LegacySSEServer:
+    """Legacy SSE endpoint paired with a streamable-HTTP refusal."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.headers: list[str | None] = []
+        self.http_attempts = 0
+        self.events: asyncio.Queue[bytes] = asyncio.Queue()
+        self.token = "stored-key-for-sse-fixture"
+
+    async def mcp(self, request: Request):
+        if request.method == "POST":
+            self.http_attempts += 1
+            return Response(status_code=self.status)
+        self.headers.append(request.headers.get("authorization"))
+
+        async def event_stream():
+            yield b"event: endpoint\ndata: /messages\n\n"
+            while True:
+                yield await self.events.get()
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    async def messages(self, request: Request):
+        self.headers.append(request.headers.get("authorization"))
+        message = await request.json()
+        if "id" in message:
+            if message["method"] == "initialize":
+                result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "legacy", "version": "1"}}
+            elif message["method"] == "tools/list":
+                result = {"tools": [{"name": "read_profile", "description": "Read fixture data",
+                                     "inputSchema": {"type": "object", "properties": {}}}]}
+            elif message["method"] == "tools/call":
+                result = {"content": [{"type": "text", "text": "ok"}]}
+            else:
+                raise AssertionError(message["method"])
+            await self.events.put((
+                "event: message\ndata: " + json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result})
+                + "\n\n"
+            ).encode())
+        return Response(status_code=202)
 
 
 @pytest.fixture
@@ -103,6 +164,105 @@ async def test_http_bearer_allowlist_and_identity(tmp_path, http_mcp):
         assert set(http_mcp.headers) == {f"Bearer {http_mcp.token}"}
         assert http_mcp.token not in json.dumps(registry.get_definitions())
         assert http_mcp.token not in json.dumps(config)
+
+
+@pytest.mark.asyncio
+async def test_stored_header_key_is_not_sent_to_a_redirect_target(isolated_db, caplog):
+    from infra import key_store
+    from tools import mcp_secrets
+
+    origin_headers: list[str | None] = []
+    redirected_headers: list[str | None] = []
+    stored_key = "Bearer_redirect_key_for_fixture"
+
+    async def redirected(request: Request):
+        redirected_headers.append(request.headers.get("authorization"))
+        return Response(status_code=500)
+
+    async with _serve(Starlette(routes=[Route("/mcp", redirected, methods=["POST"])])) as redirected_url:
+        async def redirecting(request: Request):
+            origin_headers.append(request.headers.get("authorization"))
+            return RedirectResponse(f"{redirected_url}/mcp", status_code=307)
+
+        async with _serve(Starlette(routes=[Route("/mcp", redirecting, methods=["POST"])])) as origin_url:
+            key_store.set_managed_value(
+                mcp_secrets.entry_name("redirect", "headers", "Authorization"), stored_key,
+            )
+            config = {
+                "url": f"{origin_url}/mcp", "secret_headers": ["Authorization"],
+                "allowed_tools": ["read_profile"], "connect_timeout": 1,
+            }
+            registry = ToolRegistry()
+            async with AsyncExitStack() as stack:
+                errors = await connect_mcp_servers({"redirect": config}, registry, stack)
+
+    assert errors["redirect"]
+    assert registry.tool_names == []
+    assert origin_headers == [stored_key]
+    assert redirected_headers == []
+    assert stored_key not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sse_endpoint_on_another_origin_never_receives_stored_key(isolated_db, caplog):
+    from infra import key_store
+    from tools import mcp_secrets
+
+    origin_headers: list[str | None] = []
+    redirected_headers: list[str | None] = []
+    stored_key = "Bearer_cross_origin_key_for_fixture"
+
+    async def redirected(request: Request):
+        redirected_headers.append(request.headers.get("authorization"))
+        return Response(status_code=500)
+
+    async with _serve(Starlette(routes=[Route("/messages", redirected, methods=["POST"])])) as redirected_url:
+        async def sse(request: Request):
+            origin_headers.append(request.headers.get("authorization"))
+
+            async def event_stream():
+                yield f"event: endpoint\ndata: {redirected_url}/messages\n\n".encode()
+
+            return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+        async with _serve(Starlette(routes=[Route("/mcp", sse, methods=["GET"])])) as origin_url:
+            key_store.set_managed_value(
+                mcp_secrets.entry_name("cross-origin", "headers", "Authorization"), stored_key,
+            )
+            config = {
+                "url": f"{origin_url}/mcp", "transport": "sse", "secret_headers": ["Authorization"],
+                "allowed_tools": ["read_profile"], "connect_timeout": 1,
+            }
+            registry = ToolRegistry()
+            async with AsyncExitStack() as stack:
+                errors = await connect_mcp_servers({"cross-origin": config}, registry, stack)
+
+    assert errors["cross-origin"]
+    assert registry.tool_names == []
+    assert origin_headers == [stored_key]
+    assert redirected_headers == []
+    assert stored_key not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 405])
+async def test_http_initialize_404_or_405_falls_back_to_sse(tmp_path, status):
+    legacy = LegacySSEServer(status)
+    app = Starlette(routes=[
+        Route("/mcp", legacy.mcp, methods=["GET", "POST"]),
+        Route("/messages", legacy.messages, methods=["POST"]),
+    ])
+    async with _serve(app) as base_url:
+        legacy.url = f"{base_url}/mcp"
+        config = server_config(tmp_path, legacy, connect_timeout=1)
+        registry = ToolRegistry()
+        async with AsyncExitStack() as stack:
+            assert await connect_mcp_servers({"legacy": config}, registry, stack) == {}
+            assert registry.tool_names == ["work_read_profile"]
+            assert await registry.get("work_read_profile").execute() == "ok"
+
+    assert legacy.http_attempts == 1
+    assert set(legacy.headers) == {f"Bearer {legacy.token}"}
 
 
 @pytest.mark.asyncio

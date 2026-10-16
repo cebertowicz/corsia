@@ -3,7 +3,6 @@
 import os
 from contextvars import ContextVar
 import logging
-from typing import Any
 from pathlib import Path
 import re
 import stat
@@ -61,7 +60,7 @@ class BearerFileAuth(httpx.Auth):
         return value
 
 
-_active_auth: ContextVar[Any] = ContextVar("mcp_auth", default=None)
+_active_auth: ContextVar[httpx.Auth | None] = ContextVar("mcp_auth", default=None)
 
 
 class _TransportLogFilter(logging.Filter):

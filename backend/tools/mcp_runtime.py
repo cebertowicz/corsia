@@ -90,7 +90,7 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
         name, config = await run_in_db(load_runtime_app_config, app_id)
         connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
         await _publish_app_state(app_id, connecting)
-        if await run_in_db(missing_app_key_refs, app_id):
+        if config.get("needs_token") is True or await run_in_db(missing_app_key_refs, app_id):
             result = {
                 "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
                 "failure_class": None,
@@ -126,7 +126,8 @@ async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
     global _stopped
     from connections.app_reach import load_runtime_app_ids
 
-    _stopped = False
+    async with _lock:
+        _stopped = False
     results = {}
     for app_id in await run_in_db(load_runtime_app_ids):
         results[app_id] = await apply_connected_app_runtime("connect", app_id)
