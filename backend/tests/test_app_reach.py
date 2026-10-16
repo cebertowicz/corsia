@@ -38,10 +38,10 @@ def _db() -> sqlite3.Connection:
     thread_projects: tuple[tuple[str, str | None], ...] = (
         ("a-thread", "a"), ("b-thread", "b"), ("outside", None), ("gone", "deleted")
     )
-    for thread_id, project_id in thread_projects:
+    for thread_id, thread_project_id in thread_projects:
         db.execute(
             "INSERT INTO threads(id,user_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?)",
-            (thread_id, "person", project_id, "t", "t"),
+            (thread_id, "person", thread_project_id, "t", "t"),
         )
     db.execute(
         "INSERT INTO threads(id,user_id,project_id,parent_thread_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
