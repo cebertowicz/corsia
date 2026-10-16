@@ -83,6 +83,10 @@
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
 
+	function decisionMeta(decision: DecisionDetail): string {
+		return `Decision · ${decision.source.thread_label}${decision.source.project_label ? ` · ${decision.source.project_label}` : ''}`;
+	}
+
 	/** Focus returns to the exact control that opened the chip. */
 	async function close() {
 		collapse();
@@ -278,6 +282,7 @@
 			{#key current.external_id}
 				<AdaptiveDrawer
 					ariaLabel={`Decision — ${label(current)}`}
+						mobileMeta={decisionMeta(current.detail as DecisionDetail)}
 					opaque
 					flushBottom
 					open={showChip}

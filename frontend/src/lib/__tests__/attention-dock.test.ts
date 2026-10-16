@@ -167,6 +167,24 @@ describe("AttentionDock — one item at a time", () => {
     expect(host.textContent).toContain("P5 needs one canonical home");
   });
 
+  it("renders exactly one decision eyebrow beside Done at 393 and 1440", async () => {
+    for (const width of [393, 1440]) {
+      component = mount(AttentionDock, { target: host });
+      await settle();
+      dockBar().click();
+      await settle();
+
+      const drawer = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+      expect(drawer.querySelectorAll(".drawer-eyebrow"), `${width}px chrome eyebrow`).toHaveLength(1);
+      expect(drawer.querySelectorAll(".decision-chip .eyebrow"), `${width}px duplicate body eyebrow`).toHaveLength(0);
+
+      unmount(component);
+      component = null;
+      host.replaceChildren();
+      __reset();
+    }
+  });
+
   it("closes back to the bar and returns focus to it", async () => {
     await openChip();
     (host.querySelector(".drawer-done") as HTMLElement).click();
