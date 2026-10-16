@@ -179,6 +179,7 @@ from infra.migration_119_to_120_withdraw_retired_user_asks import migrate_119_to
 from infra.migration_120_to_121_action_drafts import migrate_120_to_121
 from infra.migration_121_to_122_email_screens import migrate_121_to_122
 from infra.migration_122_to_123_connected_apps import migrate_122_to_123
+from infra.migration_123_to_124_drop_title_source import migrate_123_to_124
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -786,6 +787,7 @@ MIGRATIONS[119] = migrate_119_to_120
 MIGRATIONS[120] = migrate_120_to_121
 MIGRATIONS[121] = migrate_121_to_122
 MIGRATIONS[122] = migrate_122_to_123
+MIGRATIONS[123] = migrate_123_to_124
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

@@ -302,12 +302,7 @@ def read_sidecars(socket_dir: Path, session: str) -> BrowserSidecars:
                            version=version, artifacts=artifacts)
 
 
-def daemon_environment_matches(
-    process: psutil.Process,
-    *,
-    session: str,
-    socket_dir: Path,
-) -> bool:
+def daemon_environment_matches(process: psutil.Process, *, session: str, socket_dir: Path) -> bool:
     try:
         env = process.environ()
     except psutil.NoSuchProcess as exc:
@@ -316,6 +311,8 @@ def daemon_environment_matches(
         raise BrowserExitTornRead("browser daemon environment identity is unavailable") from exc
     except OSError as exc:
         raise BrowserIdentityError("browser daemon environment identity is unavailable") from exc
+    if not env:  # A live daemon always has an environment; an exiting one serves none before it is a zombie.
+        raise BrowserExitTornRead("browser daemon environment identity is unavailable")
     return (
         env.get("AGENT_BROWSER_DAEMON") == "1"
         and env.get("AGENT_BROWSER_SESSION") == session
