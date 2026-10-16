@@ -15,9 +15,13 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 
 ## TL;DR
 
+- **The chat view is the reference screen (§0).** Each role (row, label,
+  status, action, card, accent) has one treatment taken from it; match it, and
+  never use a treatment §0.2 lists as out.
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
-  `Field`, `IconButton`, `Message`, `Modal`, `Section`, `StatePill`, `Toggle`.
-  Don't roll your own.
+  `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
+  Don't roll your own. (`StatePill` still exists, but status is a dot or
+  coloured text, never a pill: §0.2.)
 - **All design values are tokens** in `frontend/src/app-tokens.css` (imported
   by `app.css`). Never hardcode colors, spacing, type, blurs, radii, motion,
   press behavior, elevations, or scrim alphas.
@@ -33,6 +37,81 @@ support, and the live token split in `app-tokens.css` + `app.css`.
   doc must be updated in the same change.
 - If a needed primitive variant doesn't exist, **propose adding it** — don't
   build a one-off.
+
+---
+
+## 0. The reference screen: the chat view
+
+**Status:** approved look, 2026-10-15. Every other screen is brought into line
+with it, one screen at a time. Where an older section below disagrees, it
+carries a **Superseded by §0** note at that point, and this section wins.
+
+**What this section is.** For each role on the screen, it gives the treatment the approved chat view
+actually draws, with its tokens and the component that draws it. It describes
+the approved view and nothing more. A new role is added here when a screen
+first needs it, from what that screen gets approved with.
+
+**Two rules decide what's left over:**
+
+- **Frosted is where you act; plain is what you read.** Surfaces that float
+  over content and take input (the composer, the Needs-you card) are frosted
+  cards. Content you read sits flat on its pane's own surface, with no box.
+- **One treatment per role, and one token per meaning.** If two elements do
+  the same job, they look the same, whichever component draws them.
+
+### 0.1 Roles
+
+| Role | Treatment | Drawn by |
+|---|---|---|
+| Pane header | Height `--header-height`. Title `--text-body`, `--fw-semibold`, `--text-primary`. 12px side inset. No bottom line. The chat header is the one glass header over scrolling content: `--header-gradient-top` into `--glass-thin`, `--glass-blur`, `--glass-rim`. | `Header.svelte` `.shell-header`, `.h-title` |
+| Section label | `--text-footnote`, `--fw-semibold`, `--text-tertiary`, sentence case. No fill, border or rule. | `Pane.svelte` cap label; `SidebarThreadList.svelte` group label |
+| List row | Flat on the pane surface: no border or fill at rest. Min height 38px. Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row |
+| Second line | `--text-caption`, `--text-tertiary`. When the line states a status, it takes that status's text colour (Needs you `--amber-text`). | `SidebarThreadRow.svelte` update line; `PlanRowFace.svelte` subline |
+| Trailing detail and row action | `--text-caption`, `--text-tertiary`. An action is text that turns `--text-primary` on hover, with no button chrome at rest. | `PlanHeadControls.svelte`, `PlanChildControls.svelte`, `AttentionDock.svelte` Answer |
+| Status | A dot or coloured text, never a filled badge. Needs you: `--amber` mark, `--amber-text` text. Working: `--status-in-progress`. Done: `--green`. Failed: `--red`. | `PlanRowFace.svelte`, `SidebarThreadRow.svelte` |
+| Accent | One accent. The default is project blue (`--accent`). A project's own colour replaces it through `accentRoles`, which steps text to 4.5:1 and picks the ink. Use the role tokens (§2.1): `--accent` for focus and selection marks, `--accent-text` for text, `--accent-fill` with `--accent-on-fill` ink for a solid fill, `--accent-line` for a border, `--accent-wash` for a wash. Never a hex. | `app-tokens.css`; `+layout.svelte`; `utils/projectColors.ts` `accentRoles` |
+| Lines | Only at pane edges: 1px `--border-subtle`. A floating card's edge is 1px `--border`. No line between items inside a pane. | `Sidebar.svelte`, `PaneShell.svelte`, `ArtifactTabStrip.svelte` `.strip` |
+| Frosted card (where you act) | `--glass-thin`, 1px `--border`, `--radius-xl`, shadow `--glass-rim, --shadow-chip`. The composer adds `--glass-blur`. | `InputBar.css` composer; `AttentionDock.svelte` `.dock-bar` |
+| Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
+| Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
+| Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
+| Project mark | A 9px dot in the project's colour with an 8% `--text-primary` ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
+| Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
+| Time | Formatted only by `lib/time.ts` (`relLabel` for recency, `formatMoment` for plan times). Never formatted inside a component. | `time.ts` |
+| Spacing | `--space-*` tokens. A raw px value is allowed only where this table names one. | `app-tokens.css` |
+
+### 0.2 Treatments that are out
+
+These are the old treatments the chat view removed. Review refuses them on
+any screen:
+
+1. A box around content (a border, tint or shadow) that isn't a pane, an input or a frosted card.
+2. A tinted alert banner.
+3. A divider between items inside a pane.
+4. A filled badge or pill holding a count or a status.
+5. A filled or outlined button where a text action would do.
+6. A decorative icon in front of a label.
+7. A heavy border or a drop shadow.
+8. Two or more colours for one meaning.
+9. A `⋯` button on a row.
+
+### 0.3 Known gaps inside the reference screen
+
+The approved view still has members that differ from their role. They're
+recorded here so no one copies them; they're not a reason to change the
+approved look on its own. **Owner:** Product Experience. **Trigger:** each gap
+is fixed in the coherence pass of the screen that draws it (Settings is
+first), or sooner in any change that touches its component; the fix removes
+its line here.
+
+- Row insets: sidebar row `7px 10px`, plan row `6px 8px`. The artifact and document rows have no minimum height, and the document row has a 24px left inset and a 2px accent edge when selected.
+- Section labels: the artifact lane uses raw weight `600`. The document source label is caption, bold and uppercase. Every label's padding differs.
+- Second line: the artifact and document rows use `--text-footnote`.
+- Status: the child-plan dot shows working in `--blue`, not `--status-in-progress`. `--status-done` and `--status-failed` aren't used for row status.
+- Pane headers: the right pane's side inset is 18px. The leaf tab strip pads `0 6px 0 10px`.
+- Local icon button sizes: 28px (tab collapse) and 36px.
+- The Needs-you card has no `--glass-blur`; the composer does.
+- Raw spacing values off the 4px scale: 1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14 and 18px.
 
 ---
 
@@ -463,6 +542,10 @@ Weight/line-height/tracking ladders (`--fw-*`, `--lh-*`, `--ls-*`)
 unchanged. Markdown content uses `--text-callout` and scales down inside
 `.live-reasoning-text` / `.reasoning-content` (subhead / 1.5).
 
+**Superseded by §0:** a section label is sentence case, `--text-footnote`,
+`--fw-semibold`, `--text-tertiary` (§0.1). The uppercase caps below are the
+old treatment, kept until each screen's pass removes them; don't add new ones.
+
 **Section caps** (PROJECTS, PINNED, CONVERSATIONS, etc. — used by
 `Section.svelte` and ad-hoc sidebar headers):
 - 9.5–10.5px / weight 700 / 0.10–0.12em letter-spacing / uppercase
@@ -790,6 +873,10 @@ match the visual contract.
 
 ### 3.5 StatePill
 
+**Superseded by §0:** show a status as a dot or coloured text (§0.1 Status);
+a filled pill holding a status is out (§0.2 item 4). Don't add new StatePill
+uses; existing ones go in each screen's pass.
+
 `ui/StatePill.svelte`. Small uppercase pill that visualizes a state.
 
 ```ts
@@ -812,9 +899,8 @@ interface Props {
 - `idle`, `default` → neutral (`--bg-tertiary` + `--text-tertiary`)
 
 **Don't:** Build a per-component badge with hardcoded `rgba(...)` (Timeline
-does this for active badges — flagged in §8.2). Use StatePill, or — when
-you genuinely need a smaller / non-state pill — propose adding `Badge`
-(see §4.5).
+does this for active badges — flagged in §8.2). Show the state as a dot or
+coloured text (§0.1 Status).
 
 ### 3.6 Section
 
@@ -830,6 +916,7 @@ interface Props {
 ```
 
 Title styling: 9.5px / 700 / 0.12em / uppercase / `--text-tertiary`.
+**Superseded by §0:** new and revised titles use the §0.1 Section label.
 Body uses `display: contents` (no wrapper div).
 
 Use this for a logical grouping inside a modal body or panel. **Not** for
@@ -837,6 +924,11 @@ sidebar section caps (PROJECTS, CONVERSATIONS) — those have a slightly
 different aesthetic; see §5.2.
 
 ### 3.7 Message
+
+**Superseded by §0:** a tinted banner is out (§0.2 items 1 and 2). New and
+revised screens state a result as coloured text in the §0.1 Status colours,
+with no fill or border. The banner below is the existing primitive, kept until
+each screen's pass replaces it.
 
 `ui/Message.svelte`. Inline status banner — pairs with form actions and
 modal bodies.
@@ -952,6 +1044,9 @@ border-bottom.
 
 ### 4.5 Badge
 
+**Superseded by §0** for counts and statuses (§0.2 item 4): never put either
+in a badge.
+
 Smaller / less-formal than StatePill — a colored pill that semantically
 labels (e.g., "local", "tailscale", "active") rather than visualizing a
 state. Today: `entry-badge` (Timeline, hardcoded rgba), `ep-kind` (v7),
@@ -1014,6 +1109,10 @@ navigate sessions from anywhere.
 ### 5.2 Sidebars
 
 Material: `--glass-thick`. **Must include `box-shadow: var(--glass-rim)`.**
+
+**Superseded by §0:** sidebar group labels use the §0.1 Section label
+(sentence case, `--text-tertiary`, as `SidebarThreadList.svelte` draws it).
+The caps below are the older treatment.
 
 Section caps inside the sidebar (PROJECTS, PINNED, CONVERSATIONS) are
 unified at 10.5px / weight 700 / 0.1em letter-spacing /
@@ -1155,8 +1254,8 @@ The following are *don'ts*. Violations should be caught in review.
    Variable Convention rule. Numeric fallbacks (`var(--radius-xs, 4px)`)
    are fine.
 10. **Defining tokens inside components.** Tokens belong in `app-tokens.css`.
-11. **Nesting Modal inside Modal** for confirm-deletes. Use inline
-    `<Message>` + danger button instead.
+11. **Nesting Modal inside Modal** for confirm-deletes. Use an inline
+    confirm line (coloured text, §0.1 Status) + danger button instead.
 12. **Skipping the rim** on a glass surface.
 13. **Inlining new easing curves and durations.** New transitions pick a
     curve from §2.7.1 and a duration from §2.7.2, or propose adding to

@@ -22,7 +22,7 @@ from connections.app_reach import (
     get_reach,
 )
 from infra.database import initialize_schema
-from infra.migration_121_to_122_connected_apps import migrate_121_to_122
+from infra.migration_122_to_123_connected_apps import migrate_122_to_123
 from tools.mcp_secrets import entry_name
 
 
@@ -212,7 +212,7 @@ def test_migration_moves_name_config_and_key_reference_to_app_id() -> None:
         (old_entry,),
     )
 
-    migrate_121_to_122(db)
+    migrate_122_to_123(db)
 
     app = db.execute("SELECT id,name,config_json,reach_mode,outside_projects FROM connected_apps").fetchone()
     assert app["name"] == "GitHub"

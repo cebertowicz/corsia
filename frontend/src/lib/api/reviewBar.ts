@@ -36,12 +36,15 @@ export async function fetchReviewBar(artifactId: string): Promise<ReviewBarRead>
 	return response.json();
 }
 
-/** Answer every raised ask on the artifact; a refusal that carries a code throws `ReviewRefusal`. */
-export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string): Promise<ReviewAnswer> {
+/**
+ * Answer the raised asks the bar showed (`holdIds`); the server refuses as stale once a newer ask replaced them.
+ * A refusal that carries a code throws `ReviewRefusal`.
+ */
+export async function answerReview(artifactId: string, verdict: ReviewVerdict, note: string, holdIds: string[]): Promise<ReviewAnswer> {
 	const response = await fetchWithTimeout(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null }),
+		body: JSON.stringify({ token: get(token) ?? '', outcome: 'answer', verdict, note: note.trim() || null, hold_ids: holdIds }),
 	}, COMMENT_POST_TIMEOUT_MS);
 	if (response.ok) {
 		const body = await response.json();

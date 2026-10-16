@@ -201,7 +201,10 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
 
     assert refused.value.code == "note_required"
     assert _open_holds(db, node) == 1
-    assert attention.get_attention_state(artifact, db=db) == "raised"
+    # The open hold is the ask's raised state; the pile reads it from there.
+    assert [item["metadata"]["attention_state"] for item in attention.list_raised(db=db)] == [
+        "raised",
+    ]
 
     _answer(db, artifact, "changes_requested", "Cut section 3.")
     assert _last_ask_wake(db) == _answer_notice(
@@ -271,6 +274,46 @@ def test_a_retired_ask_returns_stale(db):
         attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
 
     assert refused.value.code == "ask_stale"
+
+
+def test_a_verdict_on_a_document_never_asked_about_returns_stale(db):
+    artifact = seed_document(db, "owner", name="proposal.md")
+
+    with pytest.raises(review_bar.AnswerRefused) as refused:
+        attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
+
+    assert refused.value.code == "ask_stale"
+
+
+def test_a_verdict_on_a_replaced_ask_is_stale_and_leaves_the_replacement_open(db):
+    artifact = seed_document(db, "owner", name="proposal.md")
+    node = _ask(db, artifact)
+    shown = review_bar.round_state(db, artifact)["hold_ids"]
+    plan_id = service.ensure_plan("thread", "owner", db=db).id
+    mutate(
+        plan_id, "block_node", {
+            "node_id": node, "reason_key": "review", "reason": "Please read the new draft",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": artifact,
+            "expected_revision": service._node_row(db, node)["revision"],
+        }, actor=OWNER, provenance="test.review_bar",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+    db.commit()
+
+    with pytest.raises(review_bar.AnswerRefused) as refused:
+        attention.clear_attention(
+            artifact, outcome="answer", verdict="approved", hold_ids=shown, db=db,
+        )
+    assert refused.value.code == "ask_stale"
+    assert _open_holds(db, node) == 1
+
+    current = review_bar.round_state(db, artifact)
+    assert current["ask_reason"] == "Please read the new draft"
+    attention.clear_attention(
+        artifact, outcome="answer", verdict="approved", hold_ids=current["hold_ids"], db=db,
+    )
+    db.commit()
+    assert _open_holds(db, node) == 0
 
 
 @pytest.mark.parametrize("outcome", ["acknowledge", "dismiss", "supersede", "defer"])

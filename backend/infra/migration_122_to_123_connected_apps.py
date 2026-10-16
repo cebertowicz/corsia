@@ -1,4 +1,4 @@
-"""Schema 121 -> 122: move MCP apps from mutable setting names to stable ids."""
+"""Schema 122 -> 123: move MCP apps from mutable setting names to stable ids."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from infra.time import utc_now_iso
 from tools.mcp_secrets import entry_name, referenced_entries
 
 
-def migrate_121_to_122(conn: sqlite3.Connection) -> None:
+def migrate_122_to_123(conn: sqlite3.Connection) -> None:
     """Move each configured server and its credential references in the caller's transaction.
 
     The old settings key and old credential entry names disappear together. The
