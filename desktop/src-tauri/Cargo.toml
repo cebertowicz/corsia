@@ -49,6 +49,6 @@ tempfile = "3"
 # windowEffects. We re-apply the inset directly to the NSButton frames
 # after the window is shown. See lib.rs for the implementation.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSOpenPanel", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }

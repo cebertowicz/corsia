@@ -13,7 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from llm import local_profiles, local_setup, local_setup_gates as gates
+from llm import local_profiles, local_setup, local_setup_gates as gates, local_setup_operation
 
 GIB = 1024**3
 PROFILE_IDS = ["starter", "qwen-27b-oq4e", "qwen-27b-oq8e", "flash-next-oq4e", "flash-next-oq6e"]
@@ -21,6 +21,7 @@ PROFILE_IDS = ["starter", "qwen-27b-oq4e", "qwen-27b-oq8e", "flash-next-oq4e", "
 
 @pytest.fixture(autouse=True)
 def fresh_flight(monkeypatch):
+    local_setup_operation.clear()
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: None)
     monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
@@ -443,6 +444,7 @@ def test_route_passes_the_profile_and_turns_a_refusal_into_a_400(client, monkeyp
         return {"ok": True, "in_progress": True}
 
     monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
+    monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: False)
 
     assert client.post("/api/providers/local/setup").json() == {"ok": True, "in_progress": True}
     assert calls[-1] == {"no_subscription_only": False, "automatic": False, "profile_id": None}

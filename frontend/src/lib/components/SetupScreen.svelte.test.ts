@@ -168,15 +168,32 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Downloading');
 	});
 
-	it('shows the bootstrapped work folder without allowing it to change', async () => {
+	it('persists a protected native folder choice before creating the account', async () => {
+		if (component) await unmount(component);
+		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
+			? { state: 'ready', path: '/Users/me/Documents/corsia', protected_folder: 'Documents' }
+			: undefined);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
 		await settle();
-		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
-		action?.click();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
 		await settle();
-		expect(host.textContent).toContain('Work folder');
-		expect(host.textContent).toContain('~/CORSIA');
-		expect(host.textContent).not.toContain('Change');
-		expect(host.querySelector('[aria-label="Work folder"]')).toBeNull();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Change'))?.click();
+		await settle();
+		expect(host.textContent).toContain('/Users/me/Documents/corsia');
+		expect(host.textContent).toContain('macOS will ask before CORSIA can use Documents.');
+		for (const [id, value] of [['setup-name', 'Ada'], ['setup-username', 'ada'], ['setup-password', 'password1'], ['setup-confirm-password', 'password1']] as const) {
+			const input = host.querySelector(`#${id}`) as HTMLInputElement;
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Continue')?.click();
+		await settle();
+		expect(invoke).toHaveBeenNthCalledWith(1, 'choose_work_folder');
+		expect(invoke).toHaveBeenNthCalledWith(2, 'configure_work_folder', { path: '/Users/me/Documents/corsia' });
+		vi.mocked(connect).mockClear();
 	});
 
 	it('binds every account input to its visible label', async () => {

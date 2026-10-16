@@ -213,6 +213,41 @@ fn should_prevent_quit(operation_state: Result<bool, String>) -> bool {
     matches!(operation_state, Ok(true))
 }
 
+fn setup_account_exists_response(response: &str) -> Result<bool, String> {
+    if !response.starts_with("HTTP/1.1 200") {
+        return Err("could not read whether a CORSIA account already exists".into());
+    }
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .ok_or("the CORSIA setup-status response was malformed")?;
+    serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "the CORSIA setup-status response was malformed".to_string())?
+        .get("has_users")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "the CORSIA setup-status response was malformed".into())
+}
+
+fn setup_account_exists(port: u16) -> Result<bool, String> {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("could not read CORSIA setup status: {error}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("could not read CORSIA setup status: {error}"))?;
+    stream
+        .write_all(b"GET /api/setup/status HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    setup_account_exists_response(&response)
+}
+
 fn operation_is_active(port: u16) -> Result<bool, String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
@@ -233,18 +268,27 @@ fn operation_is_active(port: u16) -> Result<bool, String> {
     operation_is_active_response(&response)
 }
 
-fn unregister_service() -> Result<(), String> {
+fn run_service_command(action: &str) -> Result<(), String> {
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
     let status = Command::new(executable)
-        .args(["--service", "unregister"])
+        .args(["--service", action])
         .status()
-        .map_err(|error| format!("could not unregister the CORSIA service: {error}"))?;
+        .map_err(|error| format!("could not {action} the CORSIA service: {error}"))?;
     if status.success() {
         Ok(())
     } else {
-        Err(format!("CORSIA service unregistration exited {status}"))
+        Err(format!("CORSIA service {action} exited {status}"))
     }
+}
+
+fn unregister_service() -> Result<(), String> {
+    run_service_command("unregister")
+}
+
+fn restart_service() -> Result<(), String> {
+    unregister_service()?;
+    run_service_command("register")
 }
 
 fn service_url(port: u16) -> String {
@@ -390,6 +434,94 @@ fn start_service(
             Err("CORSIA service definition is missing from this app bundle".into())
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn open_folder_dialog() -> Result<Option<PathBuf>, String> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
+
+    let marker = MainThreadMarker::new().ok_or("the folder chooser must run on the main thread")?;
+    let panel = NSOpenPanel::openPanel(marker);
+    panel.setCanChooseDirectories(true);
+    panel.setCanChooseFiles(false);
+    panel.setAllowsMultipleSelection(false);
+    panel.setCanCreateDirectories(true);
+    if panel.runModal() != NSModalResponseOK {
+        return Ok(None);
+    }
+    panel
+        .URL()
+        .and_then(|url| url.path())
+        .map(|path| PathBuf::from(path.to_string()))
+        .map(Some)
+        .ok_or_else(|| "macOS did not return the selected folder".into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_folder_dialog() -> Result<Option<PathBuf>, String> {
+    Err("Choosing a work folder is only available in the macOS app".into())
+}
+
+#[tauri::command]
+fn choose_work_folder(app: tauri::AppHandle) -> Result<Option<first_run::FolderClassification>, String> {
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let _ = sender.send(open_folder_dialog());
+    })
+    .map_err(|error| format!("could not open the folder chooser: {error}"))?;
+    let Some(path) = receiver
+        .recv()
+        .map_err(|_| "the folder chooser closed unexpectedly")??
+    else {
+        return Ok(None);
+    };
+    Ok(Some(first_run::classify_folder(
+        &path,
+        &home,
+        first_run::ensure_folder_writable,
+    )))
+}
+
+#[tauri::command]
+fn configure_work_folder(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+    path: PathBuf,
+) -> Result<(), String> {
+    let state_dir = default_state_dir(&app)?;
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+    first_run::ensure_folder_writable(&path)?;
+    let port = first_run::recorded_port(&state_dir).unwrap_or(DEFAULT_SERVICE_PORT);
+    let resources = bundled_resource_dir(&app).ok();
+    first_run::apply_chosen_folder(
+        &path,
+        &first_run::default_workspace(&home),
+        &state_dir,
+        port,
+        || setup_account_exists(port),
+        |workspace| {
+            first_run::git_init(
+                workspace,
+                resources.as_deref(),
+                first_run::command_line_tools_installed,
+            )
+        },
+        restart_service,
+        || wait_for_service(port, &state_dir),
+    )?;
+    *service
+        .state_dir
+        .lock()
+        .map_err(|_| "service state is unavailable")? = Some(state_dir);
+    Ok(())
 }
 
 #[tauri::command]
@@ -565,6 +697,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            choose_work_folder,
+            configure_work_folder,
             lifecycle::retry_quit,
             open_login_items,
             get_service_log_path,
@@ -761,6 +895,19 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         assert_eq!(port_for_startup(&first_run::FirstRun::Configured, Some(port)), Ok(port));
+    }
+
+    #[test]
+    fn setup_status_response_reports_whether_an_account_exists() {
+        assert_eq!(
+            setup_account_exists_response("HTTP/1.1 200 OK\r\n\r\n{\"has_users\":false}"),
+            Ok(false)
+        );
+        assert_eq!(
+            setup_account_exists_response("HTTP/1.1 200 OK\r\n\r\n{\"has_users\":true}"),
+            Ok(true)
+        );
+        assert!(setup_account_exists_response("HTTP/1.1 500 Server Error\r\n\r\n").is_err());
     }
 
     #[test]
