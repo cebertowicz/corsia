@@ -240,7 +240,8 @@ class TestAppPath:
         from onboarding import first_run_wake
 
         app_facts = {
-            "first_run_path": "app", "harness_ready": ["codex"], "gmail_eligible": True,
+            "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
+            "local_download": {"state": "none"}, "gmail_eligible": True,
             "web_search_ready": False, "github_ready": False, "own_omlx_source": False,
             "setup": {"setup_decisions": []},
             "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
@@ -255,6 +256,55 @@ class TestAppPath:
         assert "app instructions" in wake
         assert set(app_facts) == first_run_wake.APP_FACT_KEYS
         assert not any(key in wake for key in ("mcp_sources", "your_model", "model_sources", "host_access_reviewer"))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("source_states", "expected_missing"), [
+        (("ready", "ready"), {}),
+        (("not_installed", "ready"), {"claude_code": "not_installed"}),
+        (("ready", "needs_auth"), {"codex": "needs_auth"}),
+    ])
+    @pytest.mark.parametrize(("status", "expected_download"), [
+        ({"state": "downloading", "stage": "Downloading 50%", "result": None}, {"state": "downloading", "progress": "Downloading 50%"}),
+        ({"state": "succeeded", "stage": None, "result": {"ok": True}}, {"state": "done"}),
+        ({"state": "failed", "stage": None, "result": {"ok": False, "message": "Free disk space"}}, {"state": "failed", "message": "Free disk space"}),
+        ({"state": "idle", "stage": None, "result": None}, {"state": "none"}),
+    ])
+    async def test_app_setup_facts_carry_every_f8_source_and_download_state(
+        self, monkeypatch, source_states, expected_missing, status, expected_download,
+    ):
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [
+                {"source": "claude-code", "state": source_states[0]},
+                {"source": "codex", "state": source_states[1]},
+            ],
+            "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
+        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
+        monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+
+        assert facts["sources_missing"] == expected_missing
+        assert facts["local_download"] == expected_download
+        assert {"sources_missing", "local_download"} <= set(facts)
+
+    def test_f8_instructed_routes_remain_open_in_conductor_policy(self):
+        from tools.conductor_api_policy import off_limits
+
+        for method, path in (
+            ("GET", "/api/providers/local/setup"),
+            ("POST", "/api/providers/cli/codex/install"),
+            ("GET", "/api/providers/cli/codex/install"),
+            ("GET", "/api/vendor-accounts"),
+            ("POST", "/api/vendor-accounts/account-id/signin/check"),
+        ):
+            assert not off_limits(path, method), (method, path)
 
     @pytest.mark.asyncio
     async def test_unserved_app_path_falls_back_to_script_facts_and_warns_once(self, monkeypatch, caplog):
@@ -300,7 +350,8 @@ class TestAppPath:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failed, expected", [
-        ("model_sources", ("harness_ready", "github_ready")),
+        ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
+        ("local_download", ("local_download",)),
         ("gmail_eligible", ("gmail_eligible",)),
         ("web_search_ready", ("web_search_ready",)),
         ("own_omlx_source", ("own_omlx_source",)),
@@ -323,6 +374,8 @@ class TestAppPath:
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
         if failed == "model_sources":
             monkeypatch.setattr(first_run_wake, "_model_sources", fail)
+        elif failed == "local_download":
+            monkeypatch.setattr(first_run_wake, "_app_local_download", fail)
         elif failed == "gmail_eligible":
             monkeypatch.setattr(first_run_wake, "_gmail_eligible", fail)
         elif failed == "web_search_ready":
@@ -351,9 +404,28 @@ class TestAppPath:
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
+    def test_app_reference_covers_reviewed_source_and_local_failure_edges(self):
+        from infra import system_package
+        from onboarding import first_run_wake
+
+        reference = first_run_wake.instructions("app")
+        local_offer = system_package.system_resource_source(
+            "skills/conductor-bootstrap/references/local-model-offer.md",
+        ).read_text(encoding="utf-8")
+
+        assert "setup adds no models to it: don't make the offer" in local_offer
+        assert "download lands in the person's oMLX" not in local_offer
+        assert "When `harness_ready` is empty, omit the first sentence" in reference
+        assert "if you have a [Claude | ChatGPT] subscription" in reference
+        assert "Sign in to [Claude Code | Codex] in Settings › Accounts, then tell me when it's done." in reference
+        assert "If it shows the source is ready, carry on." in reference
+        assert "If it is still unsigned, once post" in reference
+        assert "already `failed` in these initial facts was shown by the screens: say nothing about it" in reference
+        assert "first time a later read shows it done or failed" in reference
+        assert "handle that reply first, then post its `message` and the fix it names" in reference
+
     # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
     # (`setup.setup_decisions`, the `user_profile` fields), which are not facts of their own.
-    @pytest.mark.skipif(not __import__("onboarding.first_run_wake", fromlist=["app_reference_served"]).app_reference_served(), reason="first-run-app.md is not served on this base")
     def test_served_app_reference_names_the_app_fact_keys(self):
         import re
 
