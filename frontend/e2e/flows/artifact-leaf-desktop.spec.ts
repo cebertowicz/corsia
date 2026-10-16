@@ -73,8 +73,6 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await expect(tab).toBeVisible();
 		await expect(page.getByText('Artifact leaf E2E')).toBeVisible();
 		await expect(divider).toBeVisible();
-		await expect(page.locator('.dcp-name')).toHaveText(fileName);
-		await expect(page.getByText('No comments yet.')).toBeVisible();
 
 		const collapseButton = page.getByRole('button', { name: 'Collapse artifact panel' });
 		const [headerBox, collapseBox] = await Promise.all([
@@ -100,6 +98,5 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await rail.click();
 		await expect(tab).toBeVisible();
 		await expect(divider).toBeVisible();
-		await expect(page.locator('.dcp-name')).toHaveText(fileName);
 	});
 });

@@ -11,5 +11,5 @@
 <svg class="check-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Current"><path d="M20 6L9 17l-5-5"/></svg>
 
 <style>
-	.check-glyph { position: absolute; left: 10px; top: var(--check-top, 50%); transform: translateY(-50%); color: var(--violet-text); }
+	.check-glyph { position: absolute; left: 10px; top: var(--check-top, 50%); transform: translateY(-50%); color: var(--accent-scope-text); }
 </style>

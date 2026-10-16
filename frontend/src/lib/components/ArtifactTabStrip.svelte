@@ -106,7 +106,7 @@
 		padding: 0 2px 0 12px; background: none; border: none; cursor: pointer;
 		color: inherit; font: inherit;
 	}
-	.tab:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; border-radius: var(--radius-pill); }
+	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-pill); }
 	.tab-ico { flex-shrink: 0; }
 	.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 	.tab-err {

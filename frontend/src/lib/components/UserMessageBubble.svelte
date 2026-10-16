@@ -261,7 +261,7 @@
 	}
 	.delivery-action:disabled { cursor: wait; opacity: 0.45; }
 	.user-bubble {
-		background: var(--accent); color: var(--on-accent);
+		background: var(--accent); color: var(--accent-on-fill);
 		border-radius: 18px 18px 4px 18px; padding: 10px 16px;
 		min-width: 0; max-width: 100%; overflow: hidden;
 	}
@@ -298,7 +298,7 @@
 		background: var(--bg-hover);
 		color: var(--text-primary);
 	}
-	.msg-time { font-size: var(--text-caption); color: var(--on-accent); margin-top: 4px; opacity: 0.75; display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+	.msg-time { font-size: var(--text-caption); color: var(--accent-on-fill); margin-top: 4px; opacity: 0.75; display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
 	@media (pointer: coarse) {
 		/* Touch needs a real target: these sat at caption size with no padding,
 		   so adjacent actions were a coin flip to hit. */

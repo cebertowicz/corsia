@@ -251,8 +251,8 @@
 	.submenu-item .item-label {
 		flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 	}
-	.submenu-item.selected { color: var(--violet-text); }
-	.submenu-item .check { color: var(--violet-text); flex-shrink: 0; }
+	.submenu-item.selected { color: var(--accent-scope-text); }
+	.submenu-item .check { color: var(--accent-scope-text); flex-shrink: 0; }
 	.submenu-divider { height: 1px; background: var(--border-subtle); margin: 4px 2px; }
 	.submenu-empty {
 		padding: 8px 10px; font-size: var(--text-footnote); color: var(--text-tertiary); text-align: center;

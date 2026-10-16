@@ -6,7 +6,9 @@
 	} from '$lib/stores/checkpoints';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
+	import { emitProductEvent } from '$lib/product_events';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
+	import { isYourMove, slotThreeWord } from './threadRowMark';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
 	import ThreadDoneMark from './ThreadDoneMark.svelte';
 
@@ -72,12 +74,26 @@
 	);
 	const planState = $derived($threadPlanStates[thread.id]);
 	const updateSummary = $derived(planState?.latest_update?.summary);
-	const needsYou = $derived(planState?.state === 'needs_input' || planState?.state === 'blocked_on_you');
-	const blocker = $derived((updateSummary ?? planState?.attention_items?.[0]?.title ?? '').replace(/^Blocked:\s*/i, ''));
-	const needsYouText = $derived(blocker ? `Needs you · ${blocker}` : 'Needs you');
+	const needsYou = $derived(isYourMove(planState));
+	const attentionCount = $derived((planState?.attention_items ?? []).length);
+	// ThreadPlanStateEntry has no structured blocker field. The first attention item
+	// is the available structured action label; never infer one from update prose.
+	const needsYouText = $derived(!needsYou
+		? ''
+		: attentionCount === 0
+			? 'Needs you'
+			: planState?.attention_items?.[0]?.title
+				? `Needs you · ${planState.attention_items[0].title}`
+				: 'Needs you');
 
-	function openNeedsYou(event: MouseEvent) {
+	function openNeedsYou(event: MouseEvent): void {
 		event.stopPropagation();
+		emitProductEvent('sidebar', 'attention_opened', {
+			thread_id: thread.id,
+			state: planState?.state,
+			word: slotThreeWord(planState),
+			count: attentionCount,
+		});
 		onOpenAttention?.(thread.id, needsYouText);
 	}
 </script>
@@ -166,12 +182,14 @@
 						>{checkpointLabel}</span>
 					{/if}
 					{#if !needsYou}
-							<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
-						{/if}
+						<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
+					{/if}
 				</div>
-				{#if !renaming && needsYou}
-						<button type="button" class="thread-update-summary needs-you" title={needsYouText} onclick={openNeedsYou}>{needsYouText}</button>
-					{:else if !renaming && updateSummary}
+				{#if needsYou && attentionCount === 0}
+					<span class="thread-update-summary needs-you static" title={needsYouText}>{needsYouText}</span>
+				{:else if needsYou}
+					<button type="button" class="thread-update-summary needs-you" title={needsYouText} onclick={openNeedsYou} onpointerdown={(event) => event.stopPropagation()}>{needsYouText}</button>
+				{:else if updateSummary}
 					<span class="thread-update-summary" title={updateSummary}>{updateSummary}</span>
 				{/if}
 			{/if}
@@ -296,6 +314,7 @@
 		white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
 	}
 	.thread-update-summary.needs-you { color: var(--amber-text); cursor: pointer; }
+	.thread-update-summary.needs-you.static { cursor: default; }
 	.thread-update-summary.needs-you:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
 	.thread-cutover {
 		flex-shrink: 0;

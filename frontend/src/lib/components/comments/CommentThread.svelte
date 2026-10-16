@@ -342,7 +342,7 @@
 	/* A 44 px target around the 18 px number on touch. */
 	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
 	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
-	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--on-accent); background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
+	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
 	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
 	.ct-suggestion-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.ct-suggestion-accept:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); opacity: 1; }
@@ -378,7 +378,7 @@
 	.ct-chev.open { transform: rotate(90deg); }
 	.ct-res-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 10px 8px; }
 	.ct-res-acts { display: flex; align-items: center; gap: 8px; }
-	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--violet-text); background: none; border: none; padding: 0; cursor: pointer; }
+	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-scope-text); background: none; border: none; padding: 0; cursor: pointer; }
 	.ct-link:hover { text-decoration: underline; }
 	.ct-res-hint { font-size: var(--text-caption); color: var(--text-tertiary); }
 

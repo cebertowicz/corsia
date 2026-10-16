@@ -167,7 +167,7 @@
 		position: relative;
 		width: 48px; height: 48px; border-radius: var(--radius-circle);
 		display: flex; align-items: center; justify-content: center;
-		background: var(--accent); color: var(--on-accent); border: none; cursor: pointer;
+		background: var(--accent); color: var(--accent-on-fill); border: none; cursor: pointer;
 		/* The one elevation its rail peers (`MobileScrollFab`, `PlanDrawerControl`)
 		   already carry. Feedback stays in the transforms below, so elevation never
 		   forks into a per-component ladder. */
@@ -217,7 +217,7 @@
 	.scope-pill-here {
 		flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-bold);
 		text-transform: uppercase; letter-spacing: var(--ls-cap);
-		color: var(--violet-text); background: color-mix(in srgb, var(--accent) 14%, transparent);
+		color: var(--accent-scope-text); background: color-mix(in srgb, var(--accent) 14%, transparent);
 		padding: 1px 6px; border-radius: var(--radius-pill);
 	}
 

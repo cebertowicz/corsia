@@ -46,15 +46,7 @@ export function createRowMenu<T>(canAct: (item: T) => boolean) {
 			return open;
 		},
 		close,
-		/** The trailing ⋯: the menu opens under it, and closing returns focus to it. */
-		openFrom(event: MouseEvent, item: T) {
-			if (!canAct(item)) return;
-			event.stopPropagation();
-			const trigger = event.currentTarget as HTMLElement;
-			const box = trigger.getBoundingClientRect();
-			show(item, box.right - 220, box.bottom + 4, trigger, 'top right');
-		},
-		onContextMenu(event: MouseEvent, item: T) {
+				onContextMenu(event: MouseEvent, item: T) {
 			if (!canAct(item)) return;
 			event.preventDefault();
 			show(item, event.clientX, event.clientY, event.target as HTMLElement | null);

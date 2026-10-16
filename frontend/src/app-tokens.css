@@ -81,8 +81,6 @@
   --accent-subtle: rgba(96, 165, 250, 0.12);
   --accent-bg: rgba(96, 165, 250, 0.08);
   --accent-bg-hover: rgba(96, 165, 250, 0.14);
-  /* Ink on an accent fill; a project scope with a pale colour sets it dark. */
-  --on-accent: #0a0a0b;
   --green: #34d399;
   --green-bg: rgba(52, 211, 153, 0.08);
   --green-border: rgba(52, 211, 153, 0.25);
@@ -141,6 +139,10 @@
   --accent-text: var(--violet-text, var(--violet));
   --accent-line: var(--accent);
   --accent-wash: var(--violet-bg);
+  /* Scope-aware application accent roles; preserve legacy violet pixels during migration. */
+  --accent-scope-text: var(--violet-text);
+  --accent-scope-wash: var(--violet-bg);
+  --accent-scope-line: var(--violet-line);
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
   --teal-line: rgba(45, 212, 191, 0.28);
@@ -189,7 +191,6 @@
   --accent-subtle: rgba(37, 99, 235, 0.08);
   --accent-bg: rgba(37, 99, 235, 0.10);
   --accent-bg-hover: rgba(37, 99, 235, 0.16);
-  --on-accent: #ffffff;
   --green: #34d399;
   --green-bg: #f0fdf4;
   --green-border: rgba(34, 197, 94, 0.3);
@@ -234,6 +235,10 @@
   --accent-text: var(--violet-text, var(--violet));
   --accent-line: var(--accent);
   --accent-wash: var(--violet-bg);
+  /* Scope-aware application accent roles; preserve legacy violet pixels during migration. */
+  --accent-scope-text: var(--violet-text);
+  --accent-scope-wash: var(--violet-bg);
+  --accent-scope-line: var(--violet-line);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);

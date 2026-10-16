@@ -175,7 +175,7 @@
 <style>
 	.row-outer { display: flex; align-items: center; gap: 0; }
 
-	.pin-mark { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--violet-text); }
+	.pin-mark { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--accent-scope-text); }
 
 	.row {
 		position: relative; display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
@@ -189,7 +189,7 @@
 
 	.name { font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 	.row.disabled .name { color: var(--text-tertiary); }
-	.reply-mark { flex-shrink: 0; color: var(--violet-text); }
+	.reply-mark { flex-shrink: 0; color: var(--accent-scope-text); }
 	.sp { flex: 1; }
 
 	.meta { font-size: var(--text-footnote); color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }

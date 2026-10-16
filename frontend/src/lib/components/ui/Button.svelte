@@ -93,13 +93,13 @@
 
 	/* The one solid accent fill per view, inked like every other accent fill (send, compose, your messages). */
 	.btn.primary {
-		background: var(--violet);
-		border-color: var(--violet);
-		color: var(--on-accent);
+		background: var(--accent);
+		border-color: var(--accent);
+		color: var(--accent-on-fill);
 	}
 	.btn.primary:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--violet) 88%, var(--text-primary));
-		border-color: color-mix(in srgb, var(--violet) 88%, var(--text-primary));
+		background: color-mix(in srgb, var(--accent) 88%, var(--text-primary));
+		border-color: color-mix(in srgb, var(--accent) 88%, var(--text-primary));
 	}
 
 	.btn.danger {

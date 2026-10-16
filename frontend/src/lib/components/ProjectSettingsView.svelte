@@ -469,7 +469,7 @@
 		border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary);
 		font-size: var(--text-subhead); padding: 6px 12px; font-family: inherit;
 	}
-	.add:hover { color: var(--violet-text); border-color: var(--accent); }
+	.add:hover { color: var(--accent-scope-text); border-color: var(--accent); }
 	.add:disabled { opacity: 0.45; cursor: not-allowed; }
 	.boot-create-row {
 		display: grid;
