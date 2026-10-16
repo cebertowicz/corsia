@@ -17,7 +17,7 @@ type Frame = {
 };
 const SIZES = { w1440: { width: 1440, height: 1000 }, w393: { width: 393, height: 852 } };
 
-const pickStudio = async (page: Page) => { await page.getByRole('button', { name: /Steve’s Mac Studio/ }).click(); };
+const pickStudio = async (page: Page) => { await page.getByRole('button', { name: /Alex’s Mac mini/ }).click(); };
 const toCode = async (page: Page) => { await pickStudio(page); await page.getByRole('button', { name: 'Continue' }).click(); await expect(page.getByRole('heading', { name: 'Enter the code' })).toBeVisible(); };
 const typeCode = async (page: Page) => { await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label')?.startsWith('Code, character 1')); await page.keyboard.type('K7QX', { delay: 40 }); };
 const setup = (query: string) => `/_design/remote-connect?kind=setup&${query}`;
@@ -31,7 +31,7 @@ const frames: Frame[] = [
 	{ id: 'r1-none-found', url: setup('discover=empty'), size: 'w1440', element: 'text=No other computer running CORSIA found yet.', line: 'After five seconds with nothing found the screen says what to check.', act: async (page) => { await expect(page.getByText('No other computer running CORSIA found yet.')).toBeVisible({ timeout: 8000 }); } },
 	{ id: 'r6-denied', url: setup('discover=denied'), size: 'w1440', element: 'button:has-text("Open System Settings")', line: 'macOS blocked the local network; one action opens the setting.' },
 	{ id: 'r4-network', url: setup('discover=found&pair=network'), size: 'w1440', element: '.field .err', line: 'The computer did not answer: the network line sits under the address field.', act: async (page) => { await toCode(page); await typeCode(page); await expect(page.getByRole('heading', { name: 'Connect to CORSIA on another computer' })).toBeVisible(); } },
-	{ id: 'r4-incompatible', url: setup('discover=found&pair=incompatible'), size: 'w1440', element: 'text=This computer has CORSIA 1.4 and Steve’s Mac Studio has 1.2', line: 'Both versions are named and the older one is told to update.', act: async (page) => { await toCode(page); await typeCode(page); await expect(page.getByRole('heading', { name: 'Connect to CORSIA on another computer' })).toBeVisible(); } },
+	{ id: 'r4-incompatible', url: setup('discover=found&pair=incompatible'), size: 'w1440', element: 'text=This computer has CORSIA 1.4 and Alex’s Mac mini has 1.2', line: 'Both versions are named and the older one is told to update.', act: async (page) => { await toCode(page); await typeCode(page); await expect(page.getByRole('heading', { name: 'Connect to CORSIA on another computer' })).toBeVisible(); } },
 	{ id: 'r7-code', url: setup('discover=found'), size: 'w1440', element: '[data-testid="host-steps"]', line: 'Three numbered crops of the other computer and four empty boxes with the cursor in the first.', act: toCode },
 	{ id: 'r7-wrong-code', url: setup('discover=found&pair=wrong_code'), size: 'w1440', element: 'p.err >> text=That code doesn’t match.', line: 'A wrong code: boxes cleared, cursor back in the first, the refusal line below.', act: async (page) => { await toCode(page); await typeCode(page); await expect(page.locator('p.err')).toBeVisible(); } },
 	{ id: 'r7-expired', url: setup('discover=found&pair=expired'), size: 'w1440', element: 'p.err >> text=That code expired.', line: 'An expired code names Open CORSIA › Settings › System and asks for a new one.', act: async (page) => { await toCode(page); await typeCode(page); await expect(page.locator('p.err')).toBeVisible(); } },
@@ -46,17 +46,17 @@ const frames: Frame[] = [
 	{ id: 'dev-on', url: devices('on'), size: 'w1440', element: 'text=Visible as Studio', line: 'On and visible with no code: the status dot and New code.' },
 	{ id: 'dev-code', url: devices('code'), size: 'w1440', element: 'text=Ends in 9 min', line: 'A code is showing in four read-only boxes with a countdown in minutes.' },
 	{ id: 'dev-ending', url: devices('ending'), size: 'w1440', element: 'text=Ends in under a minute', line: 'Under sixty seconds the countdown reads Ends in under a minute.' },
-	{ id: 'dev-code-consumed', url: devices('consumed'), size: 'w1440', element: 'text=Visible as Steve’s Mac Studio', line: 'A joiner paired: the host’s devices_updated reached the page’s websocket handler and the code boxes collapsed back to New code.', act: async (page) => { await expect(page.getByText('Ends in 9 min')).toBeVisible(); await page.evaluate(() => (window as unknown as { __remoteFrame: { pair: () => void } }).__remoteFrame.pair()); await expect(page.getByText('Ends in 9 min')).toHaveCount(0); } },
+	{ id: 'dev-code-consumed', url: devices('consumed'), size: 'w1440', element: 'text=Visible as Alex’s Mac mini', line: 'A joiner paired: the host’s devices_updated reached the page’s websocket handler and the code boxes collapsed back to New code.', act: async (page) => { await expect(page.getByText('Ends in 9 min')).toBeVisible(); await page.evaluate(() => (window as unknown as { __remoteFrame: { pair: () => void } }).__remoteFrame.pair()); await expect(page.getByText('Ends in 9 min')).toHaveCount(0); } },
 	{ id: 'dev-not-announced', url: devices('not-announced'), size: 'w1440', element: 'text=This computer isn’t visible on the network', line: 'On but not announced: the addresses to type, in monospace.' },
 	{ id: 'dev-paused', url: devices('paused'), size: 'w1440', element: 'text=Pairing is paused after too many wrong codes.', line: 'Paused after too many wrong codes, in the error tone, with New code.' },
 	{ id: 'dev-starting', url: devices('starting'), size: 'w1440', element: 'text=Starting…', line: 'Turned on and locked while the host starts.', act: async (page) => { await page.locator('button[aria-label="Let other devices connect"]').click(); } },
 	{ id: 'dev-ports-taken', url: devices('ports-taken'), size: 'w1440', element: 'text=Other apps are using the connections CORSIA needs', line: 'Every port taken: off, the restart line and Try again.' },
 	{ id: 'dev-load-failed', url: devices('load-failed'), size: 'w1440', element: 'text=Couldn’t load device settings.', line: 'The read failed: no switch, one line and Try again.' },
 	{ id: 'dev-read-only', url: devices('read-only'), size: 'w1440', element: 'text=Manage connections on Studio itself.', line: 'Seen from a connected computer: no switch, the manage line.' },
-	{ id: 'dev-long-name', url: devices('long-name-read-only'), size: 'w1440', element: 'text=Manage connections on Steve’s Mac Studio (2)', line: 'A long computer name stays whole in the manage line.' },
+	{ id: 'dev-long-name', url: devices('long-name-read-only'), size: 'w1440', element: 'text=Manage connections on Alex’s Mac mini (2)', line: 'A long computer name stays whole in the manage line.' },
 	{ id: 'dev-code-393', url: devices('code'), size: 'w393', element: 'text=Ends in 9 min', line: 'The code row at phone width: the switch sits under the text.' },
 	{ id: 'dev-not-announced-393', url: devices('not-announced'), size: 'w393', element: 'text=This computer isn’t visible on the network', line: 'The not-visible line wraps its addresses at phone width.' },
-	{ id: 'dev-long-name-393', url: devices('long-name-read-only'), size: 'w393', element: 'text=Manage connections on Steve’s Mac Studio (2)', line: 'The long name wraps under its first word at phone width.' },
+	{ id: 'dev-long-name-393', url: devices('long-name-read-only'), size: 'w393', element: 'text=Manage connections on Alex’s Mac mini (2)', line: 'The long name wraps under its first word at phone width.' },
 	{ id: 'dev-code-dark', url: devices('code', '&theme=dark'), size: 'w1440', element: 'text=Ends in 9 min', line: 'The code row, dark.' },
 ];
 

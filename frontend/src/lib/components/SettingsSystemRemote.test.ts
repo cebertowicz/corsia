@@ -48,12 +48,12 @@ afterEach(() => {
 
 describe('Settings › System with a shell', () => {
 	it('on a computer connected to another, shows who it is connected to and Disconnect confirms first', async () => {
-		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Steve’s Mac Studio' };
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Alex’s Mac mini' };
 		await show();
-		expect(flat(host.querySelector('[data-testid="account-computer"]')?.textContent)).toContain('Connected to Steve’s Mac Studio');
+		expect(flat(host.querySelector('[data-testid="account-computer"]')?.textContent)).toContain('Connected to Alex’s Mac mini');
 		button('Disconnect')?.click(); flushSync();
-		expect(flat(host.textContent)).toContain('Disconnect from Steve’s Mac Studio?');
-		expect(flat(host.textContent)).toContain('Your work stays on Steve’s Mac Studio. This app signs out and returns to setup.');
+		expect(flat(host.textContent)).toContain('Disconnect from Alex’s Mac mini?');
+		expect(flat(host.textContent)).toContain('Your work stays on Alex’s Mac mini. This app signs out and returns to setup.');
 		expect(order).toEqual([]);
 		button('Disconnect')?.click();
 		await settle();

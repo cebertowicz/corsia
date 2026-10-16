@@ -40,7 +40,7 @@ describe('viewFromApi', () => {
 		expect(seen).toMatchObject({ readOnly: true, pairing: 'idle', code: null });
 	});
 	it('uses the connected computer’s name over the one the server reports', () => {
-		expect(viewFromApi(api(), true, 'Steve’s Mac Studio').hostName).toBe('Steve’s Mac Studio');
+		expect(viewFromApi(api(), true, 'Alex’s Mac mini').hostName).toBe('Alex’s Mac mini');
 	});
 });
 
@@ -160,8 +160,8 @@ describe('createDevices', () => {
 	});
 
 	it('takes the connected computer’s name from the shell', async () => {
-		const devices = createDevices({ now: () => clock, remoteName: () => 'Steve’s Mac Studio' });
+		const devices = createDevices({ now: () => clock, remoteName: () => 'Alex’s Mac mini' });
 		await devices.read();
-		expect(devices.view).toMatchObject({ readOnly: true, hostName: 'Steve’s Mac Studio' });
+		expect(devices.view).toMatchObject({ readOnly: true, hostName: 'Alex’s Mac mini' });
 	});
 });

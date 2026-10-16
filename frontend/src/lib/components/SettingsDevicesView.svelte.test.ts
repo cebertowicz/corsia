@@ -70,8 +70,8 @@ describe('SettingsDevicesView', () => {
 		expect(toggle()).toBeNull();
 	});
 	it('read-only (seen from a connected computer): no switch, no New code, and where to manage it', () => {
-		const text = show({ readOnly: true, enabled: true, announced: true, hostName: 'Steve’s Mac Studio' });
-		expect(text).toContain('Manage connections on Steve’s Mac Studio itself.');
+		const text = show({ readOnly: true, enabled: true, announced: true, hostName: 'Alex’s Mac mini' });
+		expect(text).toContain('Manage connections on Alex’s Mac mini itself.');
 		expect(toggle()).toBeNull();
 		expect(text).not.toContain('New code');
 	});

@@ -20,7 +20,7 @@
 	const which = query.get('state') ?? 'on';
 	const theme = query.get('theme') ?? 'light';
 
-	const LONG = 'Steve’s Mac Studio (2)';
+	const LONG = 'Alex’s Mac mini (2)';
 	const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 	const server = (patch: Record<string, unknown> = {}, name: string | null = 'Studio') => ({
 		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local',
@@ -45,7 +45,7 @@
 			loading: () => new Promise<Response>(() => {}),
 			'read-only': () => json(server({ code: { state: 'active', expires_in_seconds: 300 } }, name)),
 			// A joiner is about to pair: a code shows until the page's own websocket handler receives devices_updated.
-			consumed: () => json(server({ code: paired ? { state: 'none' } : active(540) }, 'Steve’s Mac Studio')),
+			consumed: () => json(server({ code: paired ? { state: 'none' } : active(540) }, 'Alex’s Mac mini')),
 			'long-name': () => json(server({}, name)),
 			'long-name-read-only': () => json(server({}, name)),
 		};
@@ -62,12 +62,12 @@
 
 	function installSetup() {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
-		const names = discover === 'found' ? ['Steve’s Mac Studio', 'Living room mini'] : [];
+		const names = discover === 'found' ? ['Alex’s Mac mini', 'Living room mini'] : [];
 		(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
 			invoke: async (command: string) => {
 				if (command === 'remote_discovered') return { names, denied: discover === 'denied' };
 				if (command === 'remote_pair') {
-					return pair === 'ok' ? { ok: true, name: 'Steve’s Mac Studio' }
+					return pair === 'ok' ? { ok: true, name: 'Alex’s Mac mini' }
 						: pair === 'incompatible' ? { ok: false, reason: pair, app_version: '1.4', host_version: '1.2' }
 						: { ok: false, reason: pair };
 				}

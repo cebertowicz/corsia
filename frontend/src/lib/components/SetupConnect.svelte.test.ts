@@ -37,7 +37,7 @@ async function openConnect() {
 	await settle();
 }
 
-async function toCodeScreen(pick = 'Steve’s Mac Studio') {
+async function toCodeScreen(pick = 'Alex’s Mac mini') {
 	await openConnect();
 	expect(host.textContent).toContain(pick);
 	buttons().find((candidate) => candidate.textContent?.includes(pick))?.click();
@@ -48,8 +48,8 @@ async function toCodeScreen(pick = 'Steve’s Mac Studio') {
 
 beforeEach(() => {
 	vi.useFakeTimers();
-	discovered = { names: ['Steve’s Mac Studio', 'Living room mini'] };
-	pairResult = { ok: true, name: 'Steve’s Mac Studio' };
+	discovered = { names: ['Alex’s Mac mini', 'Living room mini'] };
+	pairResult = { ok: true, name: 'Alex’s Mac mini' };
 	onLeaveConnect.mockClear(); openExternalUrl.mockClear();
 	invoke = vi.fn(async (command: string) => command === 'remote_discovered' ? discovered : command === 'remote_pair' ? pairResult : undefined);
 	Element.prototype.scrollIntoView = vi.fn();
@@ -152,7 +152,7 @@ describe('Enter the code (r7)', () => {
 		await mountSetup();
 		await toCodeScreen();
 		expect(host.querySelector('h1')?.textContent).toBe('Enter the code');
-		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On Steve’s Mac Studio: ${flat(SETTINGS_PATH)}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.`);
+		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On Alex’s Mac mini: ${flat(SETTINGS_PATH)}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.`);
 		expect(boxes()).toHaveLength(4);
 		expect(document.activeElement).toBe(boxes()[0]);
 		const steps = host.querySelectorAll('[data-testid="host-steps"] li');
@@ -169,8 +169,8 @@ describe('Enter the code (r7)', () => {
 		await toCodeScreen();
 		paste('K7QX');
 		await settle();
-		expect(invoke).toHaveBeenCalledWith('remote_pair', { target: { kind: 'dns_sd', instance: 'Steve’s Mac Studio' }, code: 'K7QX' });
-		expect(flat(host.textContent)).toContain('Connecting to Steve’s Mac Studio…');
+		expect(invoke).toHaveBeenCalledWith('remote_pair', { target: { kind: 'dns_sd', instance: 'Alex’s Mac mini' }, code: 'K7QX' });
+		expect(flat(host.textContent)).toContain('Connecting to Alex’s Mac mini…');
 	});
 	it('pairs a typed address with its port', async () => {
 		await mountSetup();
@@ -186,11 +186,11 @@ describe('Enter the code (r7)', () => {
 	});
 
 	const onCodeScreen: Array<[PairReason, RegExp]> = [
-		['wrong_code', /^That code doesn’t match\. Open CORSIA › Settings › System on Steve’s Mac Studio to check it\.$/],
-		['expired', /^That code expired\. Open CORSIA › Settings › System on Steve’s Mac Studio to get a new one\.$/],
-		['too_many_tries', /^Too many wrong codes\. Open CORSIA › Settings › System on Steve’s Mac Studio to get a new one\.$/],
-		['paused', /^Pairing is paused on Steve’s Mac Studio\. Open CORSIA › Settings › System on it and press New code to start again\.$/],
-		['busy', /^Steve’s Mac Studio is busy with another computer\./],
+		['wrong_code', /^That code doesn’t match\. Open CORSIA › Settings › System on Alex’s Mac mini to check it\.$/],
+		['expired', /^That code expired\. Open CORSIA › Settings › System on Alex’s Mac mini to get a new one\.$/],
+		['too_many_tries', /^Too many wrong codes\. Open CORSIA › Settings › System on Alex’s Mac mini to get a new one\.$/],
+		['paused', /^Pairing is paused on Alex’s Mac mini\. Open CORSIA › Settings › System on it and press New code to start again\.$/],
+		['busy', /^Alex’s Mac mini is busy with another computer\./],
 	];
 	it.each(onCodeScreen)('maps %s to its approved line, clears the boxes and puts the cursor back in the first', async (reason, line) => {
 		pairResult = { ok: false, reason };
@@ -206,10 +206,10 @@ describe('Enter the code (r7)', () => {
 	});
 
 	const onChooseScreen: Array<[PairReason, string, string]> = [
-		['server', '', 'Steve’s Mac Studio answered, but CORSIA isn’t running there.'],
-		['network', '', 'CORSIA can’t reach Steve’s Mac Studio. Check that it’s on and on the same network as this computer.'],
-		['incompatible', '1.4/1.2', 'This computer has CORSIA 1.4 and Steve’s Mac Studio has 1.2. Update the older one, then try again.'],
-		['too_old', '', 'Steve’s Mac Studio has an older CORSIA. Update it, then try again.'],
+		['server', '', 'Alex’s Mac mini answered, but CORSIA isn’t running there.'],
+		['network', '', 'CORSIA can’t reach Alex’s Mac mini. Check that it’s on and on the same network as this computer.'],
+		['incompatible', '1.4/1.2', 'This computer has CORSIA 1.4 and Alex’s Mac mini has 1.2. Update the older one, then try again.'],
+		['too_old', '', 'Alex’s Mac mini has an older CORSIA. Update it, then try again.'],
 	];
 	it.each(onChooseScreen)('maps %s to the choose screen’s line under the address field', async (reason, versions, line) => {
 		const [app_version, host_version] = versions ? versions.split('/') : [undefined, undefined];
