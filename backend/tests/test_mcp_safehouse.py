@@ -21,8 +21,8 @@ import json, os, signal, subprocess, sys
 def respond(request_id, result):
     print(json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result}), flush=True)
 
-def text(value):
-    return {"content": [{"type": "text", "text": value}]}
+def text(value, *, is_error=False):
+    return {"content": [{"type": "text", "text": value}], "isError": is_error}
 
 for line in sys.stdin:
     request = json.loads(line)
@@ -42,12 +42,14 @@ for line in sys.stdin:
             respond(request["id"], text(json.dumps({"returncode": child.wait(timeout=5)})))
         else:
             reports = []
+            denied = False
             for path in (os.environ["MCP_KEY_PATH"], os.environ["MCP_DB_PATH"]):
                 try:
                     reports.append({"path": path, "content": open(path, encoding="utf-8").read()})
                 except OSError as error:
+                    denied = True
                     reports.append({"path": path, "errno": error.errno, "message": str(error)})
-            respond(request["id"], text(json.dumps(reports)))
+            respond(request["id"], text(json.dumps(reports), is_error=denied))
 '''
 
 _NODE_SERVER = r'''
