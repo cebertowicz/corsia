@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contrastRatio, parseColor } from './contrast';
+import { contrastRatio, inkOn, parseColor } from './contrast';
 import { ACCENT_SWATCHES, accentRoles } from './projectColors';
 
 describe('accentRoles', () => {
@@ -10,6 +10,12 @@ describe('accentRoles', () => {
 				expect(contrastRatio(parseColor(colour)!, parseColor(onFill)!)).toBeGreaterThanOrEqual(4.5);
 			}
 		}
+	});
+
+	it('uses the shared maximum-contrast ink rule near the crossover', () => {
+		const colour = '#767676';
+		expect(accentRoles(colour, 'light').onFill).toBe(inkOn(colour));
+		expect(accentRoles(colour, 'dark').onFill).toBe(inkOn(colour));
 	});
 
 	it('keeps CORSIA blue readable with each default theme ink', () => {

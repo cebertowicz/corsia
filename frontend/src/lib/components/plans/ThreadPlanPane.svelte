@@ -3,7 +3,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from './PlanTree.svelte';
 	import PlanDrillView from './PlanDrillView.svelte';
-	import { activeId, requestFocus } from '$lib/stores/attentionDock.svelte';
+	import { requestFocus } from '$lib/stores/attentionDock.svelte';
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
 	import { foldedOf, hasFolded } from './planFoldLevels';
@@ -11,7 +11,7 @@
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId } from '$lib/stores/threads';
-	import { expand, reload, visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
@@ -145,15 +145,23 @@
 		openPlanAsk(threadId, artifact, nodeTitle, () => { void openDecisions(); });
 	}
 
+	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
+		if (outcome === 'requested') return;
+		if (outcome === 'empty') {
+			decisionMessage = 'That item no longer needs you. Refreshing the plan.';
+			query.retry();
+			return;
+		}
+		decisionMessage = 'The item couldn’t open. Try again.';
+	}
+
 	async function openDecision(item: AttentionQueueItem): Promise<void> {
 		if (decisionBusy) return;
 		decisionBusy = true;
-		await reload();
-		const refreshed = $visibleQueue.items.find((candidate) => candidate.external_id === item.external_id);
+		decisionMessage = null;
+		const outcome = await requestFocus(item.external_id);
 		decisionBusy = false;
-		if (!refreshed) return;
-		activeId.set(refreshed.external_id);
-		expand(refreshed, false);
+		showDecisionOutcome(outcome);
 	}
 
 	async function openDecisions(): Promise<void> {
@@ -162,13 +170,7 @@
 		decisionMessage = null;
 		const outcome = await requestFocus();
 		decisionBusy = false;
-		if (outcome === 'requested') return;
-		if (outcome === 'empty') {
-			decisionMessage = 'That item no longer needs you. Refreshing the plan.';
-			query.retry();
-			return;
-		}
-		decisionMessage = 'The item couldn’t open. Try again.';
+		showDecisionOutcome(outcome);
 	}
 
 	/**
@@ -244,10 +246,10 @@
 		{/if}
 		{#if showDecisionRows}
 			{#each activeDecisionItems as item (item.external_id)}
-				<button class="decision-row" type="button" onclick={() => openDecision(item)}>
+				<button class="decision-row" type="button" disabled={decisionBusy} onclick={() => openDecision(item)}>
 					<span class="decision-mark" aria-hidden="true">!</span>
 					<span class="decision-copy"><span class="decision-title">{item.detail.title}</span>{#if item.detail.source}<span class="decision-subline">{item.detail.source.thread_label}</span>{/if}</span>
-					<span class="decision-open">Open</span>
+					<span class="decision-open">{decisionBusy ? 'Loading…' : 'Open'}</span>
 				</button>
 			{/each}
 		{:else if decisionCount > 0}

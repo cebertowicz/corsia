@@ -132,8 +132,8 @@
   --violet-bg: var(--accent-bg);
   --violet-line: rgba(96, 165, 250, 0.28);
   --violet-brand: #8b5cf6;
-  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
-     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
+  /* Accent roles are used throughout the app; +layout derives --accent-on-fill and the scoped roles from the selected
+     project colour, while these values preserve the unscoped CORSIA-blue default. */
   --accent-fill: var(--violet-text);
   --accent-on-fill: #0a0a0b;
   --accent-text: var(--violet-text, var(--violet));
@@ -228,8 +228,8 @@
   --violet-text: var(--accent-hover);
   --violet-bg: var(--accent-bg);
   --violet-line: rgba(37, 99, 235, 0.32);
-  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
-     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
+  /* Accent roles are used throughout the app; +layout derives --accent-on-fill and the scoped roles from the selected
+     project colour, while these values preserve the unscoped CORSIA-blue default. */
   --accent-fill: var(--violet-text);
   --accent-on-fill: #ffffff;
   --accent-text: var(--violet-text, var(--violet));

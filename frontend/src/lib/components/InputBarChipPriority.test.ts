@@ -65,4 +65,9 @@ describe('composer action row: who gives way first', () => {
 			/@container action-row \(max-width: 360px\)\s*\{\s*\.context-chip \{[^}]*\}\s*\.context-chip \.ctx-pct \{\s*display: none;/
 		);
 	});
+
+	it('uses the scoped readable accent token for model and effort labels', () => {
+		expect(model.color).toBe('var(--accent-scope-text, var(--accent))');
+		expect(declarations('.effort-chip').color).toBe('var(--accent-scope-text, var(--accent))');
+	});
 });

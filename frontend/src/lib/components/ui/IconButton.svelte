@@ -10,7 +10,6 @@
 		type?: 'button' | 'submit';
 		class?: string;
 		style?: string;
-
 		onclick?: (e: MouseEvent) => void;
 		children: Snippet;
 	}
@@ -28,7 +27,7 @@
 	class="ico-btn {variant} {size} {extraClass}"
 	{style}
 	aria-label={ariaLabel}
-		{title}
+	{title}
 	{disabled}
 	{onclick}
 >
