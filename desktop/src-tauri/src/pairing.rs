@@ -42,14 +42,26 @@ impl From<reqwest::Error> for PairError {
             return Self::Unreachable(Unreachable::Network);
         }
         if error.is_connect() {
+            let message = error.to_string().to_ascii_lowercase();
+            let debug = format!("{error:?}").to_ascii_lowercase();
+            // Rustls reports a TLS ClientHello answered by HTTP only in the
+            // reqwest error's debug chain as InvalidContentType. A listener
+            // answered, so this is the remote-server recovery state, not a
+            // network outage.
+            if debug.contains("invalidcontenttype") {
+                return Self::Unreachable(classify_tls_against_plain_http());
+            }
             let mut source = error.source();
+            let mut io_classification = None;
             while let Some(cause) = source {
                 if let Some(io) = cause.downcast_ref::<std::io::Error>() {
-                    return Self::Unreachable(classify_connect_error(io));
+                    io_classification = Some(classify_connect_error(io));
                 }
                 source = cause.source();
             }
-            let message = error.to_string().to_ascii_lowercase();
+            if let Some(classification) = io_classification {
+                return Self::Unreachable(classification);
+            }
             if message.contains("plain http") || message.contains("wrong version") {
                 return Self::Unreachable(classify_tls_against_plain_http());
             }
