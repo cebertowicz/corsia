@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -22,6 +23,66 @@ def _wrapper_for_output(output: str, *, is_error: bool):
             inputSchema={"type": "object", "properties": {}},
         ),
     )
+
+
+def test_unbound_mcp_wrapper_is_hidden_and_refused_before_session_access():
+    from tools.connected_app_visibility import mcp_tool_visible_here
+    from tools.tool_execution_context import mcp_reach_refusal
+
+    wrapper = _wrapper_for_output("ok", is_error=False)
+
+    assert mcp_tool_visible_here(wrapper) is False
+    assert asyncio.run(mcp_reach_refusal(wrapper, {"id": "thread"})) == (
+        "Error: This connected app is not available to this project. Ask the person who manages "
+        "Connected apps to grant this project access, then retry."
+    )
+
+
+def test_registry_runs_plain_tools_but_refuses_unbound_or_unreachable_mcp_wrappers(monkeypatch):
+    from tools.base import Tool
+    from tools.registry import ToolRegistry
+
+    class PlainTool(Tool):
+        @property
+        def name(self) -> str:
+            return "plain"
+
+        @property
+        def description(self) -> str:
+            return "plain fixture"
+
+        @property
+        def parameters(self) -> dict:
+            return {"type": "object", "properties": {}}
+
+        async def execute(self, **_kwargs) -> str:
+            return "plain ran"
+
+    registry = ToolRegistry()
+    registry.register(PlainTool())
+    unbound = _wrapper_for_output("unbound ran", is_error=False)
+    registry.register(unbound)
+
+    async def context():
+        return {"id": "thread"}, None
+
+    async def authorized(tool, _name, model_params, _execution_params, _thread_context):
+        return await tool.execute(**model_params)
+
+    async def unreachable(_callable):
+        return False
+
+    monkeypatch.setattr(registry, "_load_thread_context", context)
+    monkeypatch.setattr(registry, "_authorized_execute", authorized)
+    monkeypatch.setattr("infra.db_async.run_in_db", unreachable)
+
+    assert asyncio.run(registry.execute("plain", {})) == "plain ran"
+    assert "not available to this project" in asyncio.run(registry.execute(unbound.name, {}))
+
+    bound = _wrapper_for_output("bound ran", is_error=False)
+    bound.mcp_app_id = "app-id"
+    registry.register(bound)
+    assert "not available to this project" in asyncio.run(registry.execute(bound.name, {}))
 
 
 def test_mcp_denied_paths_include_shell_and_native_formats():

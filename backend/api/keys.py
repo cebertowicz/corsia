@@ -157,14 +157,27 @@ async def _guarded(
     return {"key": _public(entry)}
 
 
+async def _reconnect_connected_app_for_key(name: str) -> None:
+    """Refresh one approved MCP app after its person-only key write."""
+    from connections.app_reach import runtime_app_id_for_key_entry
+
+    app_id = await run_in_db(runtime_app_id_for_key_entry, name)
+    if app_id is not None:
+        from tools.connected_apps_runtime import apply_connected_app_runtime
+
+        await apply_connected_app_runtime("reconnect", app_id)
+
+
 @router.put("/{name}/value")
 async def set_key_value(
     name: str, request: Request, session: tuple[dict, str] = Depends(_human_session),
 ) -> dict:
-    """Set or replace an entry's value. The response never shows it back."""
-    return await _guarded(
+    """Set or replace an entry's value, then refresh its approved MCP app."""
+    result = await _guarded(
         request, session, name, lambda body: key_store.set_value(name, body.get("value")), "write",
     )
+    await _reconnect_connected_app_for_key(name)
+    return result
 
 
 @router.post("/{name}/clear")

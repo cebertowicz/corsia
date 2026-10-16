@@ -124,21 +124,7 @@ def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[
     return result, lifted
 
 
-def store_secrets(values: dict[str, str], *, db: sqlite3.Connection | None = None) -> None:
-    """Write each value to its entry, replacing any earlier one."""
-    for name, value in values.items():
-        try:
-            key_store.set_managed_value(name, value, db=db)
-        except key_store.KeyStoreError:
-            raise MCPConfigError(
-                "a credential value cannot be saved: use printable characters, with no spaces, up to 4096"
-            ) from None
-
-
-def stored_matches(values: dict[str, str], *, db: sqlite3.Connection | None = None) -> bool:
-    """Whether the store already holds exactly these values."""
-    return key_store.resolve_names(values, db=db) == values
-
+# Values are written only through the Settings > Keys API.
 
 def resolve(
     server: str, config: dict, *, db: sqlite3.Connection | None = None,
@@ -167,32 +153,4 @@ def resolve(
     return resolved[SECRET_ENV], resolved[SECRET_HEADERS]
 
 
-def replace_servers(old: dict, new: dict, *, db: sqlite3.Connection | None = None) -> dict:
-    """Store the credential values of the new set and return its configs with references.
-
-    Removes the entries the old set referenced and the new one no longer does,
-    a removed server included. Pass the settings write's connection: the
-    values, the removals and the settings commit together, so a failed write
-    leaves every old config resolvable. A reference the new set carries without
-    a value must already resolve, so the replacement cannot leave a server
-    unable to start. Nothing is stored when any server is refused.
-    """
-    cleaned: dict[str, dict] = {}
-    lifted: dict[str, str] = {}
-    for server, config in new.items():
-        cleaned[server], values = split_secrets(server, config)
-        lifted.update(values)
-    referenced = set().union(*(referenced_entries(server, config) for server, config in cleaned.items()))
-    unresolved = referenced - set(lifted) - set(key_store.resolve_names(referenced - set(lifted), db=db))
-    if unresolved:
-        raise MCPConfigError("a credential reference has no value in the key store; include the value")
-    store_secrets(lifted, db=db)
-    previous = set()
-    for server, config in old.items():
-        try:
-            previous |= referenced_entries(server, config) if isinstance(config, dict) else set()
-        except MCPConfigError:
-            continue
-    for name in sorted(previous - referenced):
-        key_store.drop_managed_entry(name, db=db)
-    return cleaned
+# Server-set replacement belonged to the retired tools.mcpServers writer path.

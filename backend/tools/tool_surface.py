@@ -24,6 +24,12 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from tools.base import Tool
+from tools.connected_app_visibility import (
+    connected_app_reach_refusal,
+    mcp_app_id,
+    mcp_tool_reaches_thread,
+    mcp_tool_visible_here,
+)
 from tools.catalog import (
     TOOL_CATALOG,
     TOOL_PACKS,
@@ -118,6 +124,8 @@ def _server_tools(registry: ToolRegistry) -> dict[str, list[Tool]]:
     """Group the configured MCP tools by server, in each server's own discovery order."""
     grouped: dict[str, list[Tool]] = {}
     for tool in _user_configured_in_order(registry):
+        if not mcp_tool_visible_here(tool):
+            continue
         server = getattr(tool, "mcp_server_name", None)
         if isinstance(server, str) and server:
             grouped.setdefault(server, []).append(tool)
@@ -185,14 +193,26 @@ def _user_configured(registry: ToolRegistry) -> list[Tool]:
     return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
+
+def _hidden_mcp_tool(registry: ToolRegistry, name: str) -> bool:
+    tool = registry.get(name)
+    return bool(tool and tool.user_configured and not mcp_tool_visible_here(tool))
+
+
 def _labelled(name: str) -> str:
     pack = tool_pack(name)
     return f"{name} (pack {pack})" if pack else name
 
 
-def reachable_tool_names(registry: ToolRegistry) -> list[str]:
+def reachable_tool_names(
+    registry: ToolRegistry, *, include_unreachable_mcp: bool = False,
+) -> list[str]:
     """Return the registered tools ``tools_load`` and ``tool_call`` may reach."""
-    configured = {tool.name for tool in _user_configured(registry)}
+    configured = {
+        tool.name
+        for tool in _user_configured(registry)
+        if include_unreachable_mcp or mcp_tool_visible_here(tool)
+    }
     return [
         name for name in registry.tool_names
         if is_reachable(name) or name in configured
@@ -278,6 +298,12 @@ class ToolsLoadTool(Tool):
         """Return requested schemas, or a connected server's compact tool index."""
         servers = _server_tools(self._registry)
         if server is not None:
+            if any(
+                getattr(tool, "mcp_server_name", None) == server
+                and not mcp_tool_visible_here(tool)
+                for tool in _user_configured(self._registry)
+            ):
+                return connected_app_reach_refusal()
             tools = servers.get(server)
             if tools is None:
                 state = getattr(self._registry, "mcp_server_states", {}).get(server)
@@ -296,6 +322,8 @@ class ToolsLoadTool(Tool):
             canonical = normalize_tool_name(name)
             if canonical not in requested:
                 requested.append(canonical)
+        if any(_hidden_mcp_tool(self._registry, name) for name in requested):
+            return connected_app_reach_refusal()
         reachable = reachable_tool_names(self._registry)
         found = [name for name in requested if name in reachable]
         missing = [name for name in requested if name not in found]
