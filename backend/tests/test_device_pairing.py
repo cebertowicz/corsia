@@ -54,6 +54,40 @@ def test_expired_code_is_not_active():
         pairing.start(msg_c=b"client", transcript_prefix=b"test")
 
 
+def test_code_state_changes_notify_once_for_issue_expiry_disable_and_pause():
+    now = [0.0]
+    updates: list[str] = []
+    pairing = DevicePairing(clock=lambda: now[0], on_update=lambda: updates.append("updated"))
+    pairing.enable()
+
+    pairing.issue_code()
+    assert updates == ["updated"]
+
+    updates.clear()
+    now[0] = CODE_TTL_SECONDS
+    pairing.status()
+    pairing.status()
+    assert updates == ["updated"]
+
+    pairing.enable()
+    pairing.issue_code()
+    updates.clear()
+    pairing.disable()
+    assert updates == ["updated"]
+
+    pairing.enable()
+    for _ in range(3):
+        pairing.issue_code()
+        _record_wrong_tries(pairing)
+    pairing.issue_code()
+    _record_wrong_tries(pairing, 4)
+    updates.clear()
+    pairing._record_failure()
+
+    assert pairing.status()["state"] == "paused"
+    assert updates == ["updated"]
+
+
 def test_verified_host_canonicalizes_case_and_trailing_dot():
     assert canonical_verified_host("Studio.Local.") == "studio.local"
     with pytest.raises(ValueError, match="port"):
