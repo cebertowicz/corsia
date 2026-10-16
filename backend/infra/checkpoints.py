@@ -198,7 +198,6 @@ def admit_cold_input(
             raise CheckpointTransitionError("cold checkpoint input is no longer admissible")
 
 
-
 def adopt_cold(
     checkpoint_id: str, *, db: sqlite3.Connection | None = None,
 ) -> None:
@@ -359,33 +358,42 @@ def cancel(
         return _required_record(connection, checkpoint_id) if changed.rowcount == 1 else None
 
 
+def settle_nonterminal(
+    checkpoint_id: str, *, reconciled_at: str,
+    running_error: str = "checkpoint interrupted before capture",
+    db: sqlite3.Connection | None = None,
+) -> CheckpointRecord:
+    """Finish one running or captured checkpoint through its durable owner."""
+    with write_transaction(db, scope="checkpoint_reconcile") as connection:
+        record = _required_record(connection, checkpoint_id)
+        if record.status == "running":
+            changed = connection.execute(
+                "UPDATE checkpoints SET status='failed',error=?,ended_at=? "
+                "WHERE id=? AND status='running'",
+                (running_error, reconciled_at, checkpoint_id),
+            )
+            if changed.rowcount != 1:
+                raise CheckpointTransitionError("checkpoint reconciliation lost its running CAS")
+            return _required_record(connection, checkpoint_id)
+        if record.status == "captured":
+            return install(checkpoint_id, installed_at=reconciled_at, db=connection)
+        return record
+
+
 def reconcile_startup(
     *,
     reconciled_at: str,
     db: sqlite3.Connection | None = None,
 ) -> tuple[CheckpointRecord, ...]:
-    """Fail unpaid running rows and publish already-captured bytes once."""
+    """Finish every durable checkpoint left nonterminal at startup."""
     with write_transaction(db, scope="checkpoint_reconcile") as connection:
         rows = connection.execute(
-            "SELECT id,status FROM checkpoints WHERE status IN ('running','captured') "
+            "SELECT id FROM checkpoints WHERE status IN ('running','captured') "
             "ORDER BY generation_order"
         ).fetchall()
-        reconciled: list[CheckpointRecord] = []
-        for row in rows:
-            checkpoint_id = str(row["id"])
-            if row["status"] == "running":
-                connection.execute(
-                    "UPDATE checkpoints SET status='failed',error=?,ended_at=? "
-                    "WHERE id=? AND status='running'",
-                    ("checkpoint interrupted before capture", reconciled_at, checkpoint_id),
-                )
-                reconciled.append(_required_record(connection, checkpoint_id))
-            else:
-                reconciled.append(
-                    install(
-                        checkpoint_id,
-                        installed_at=reconciled_at,
-                        db=connection,
-                    )
-                )
-        return tuple(reconciled)
+        return tuple(
+            settle_nonterminal(
+                str(row["id"]), reconciled_at=reconciled_at, db=connection,
+            )
+            for row in rows
+        )

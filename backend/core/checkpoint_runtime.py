@@ -164,6 +164,7 @@ async def _execute(
     provider_request: ProviderCheckpointRequest,
     cancel_event: asyncio.Event,
 ) -> CheckpointRecord:
+    record: CheckpointRecord | None = None
     try:
         if cancel_event.is_set():
             raise asyncio.CancelledError
@@ -176,23 +177,27 @@ async def _execute(
         )
         if cancel_event.is_set():
             raise asyncio.CancelledError
-        return await _capture_and_install(checkpoint_id, result)
+        await _capture_and_install(checkpoint_id, result)
     except asyncio.CancelledError:
         await run_in_db(
             checkpoint_store.cancel,
             checkpoint_id,
             ended_at=utc_now_iso(),
         )
-        return await _read(checkpoint_id)
-    except BaseException as error:
-        return await _terminal_failure(checkpoint_id, error)
+    except Exception as error:
+        await _terminal_failure(checkpoint_id, error)
     finally:
         record = await _read(checkpoint_id)
-        if record.status == "running":
-            record = await _terminal_failure(
-                checkpoint_id, RuntimeError("checkpoint task exited without a terminal status"),
+        if record.status in {"running", "captured"}:
+            record = await run_in_db(
+                checkpoint_store.settle_nonterminal,
+                checkpoint_id,
+                reconciled_at=utc_now_iso(),
+                running_error="checkpoint task exited before capture",
             )
         await _notify_completion(record)
+    assert record is not None
+    return record
 
 
 def _forget(checkpoint_id: str, task: asyncio.Task[CheckpointRecord]) -> None:
@@ -336,9 +341,12 @@ async def await_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     if handle is not None:
         return await asyncio.shield(handle.task)
     record = await _read(checkpoint_id)
-    if record.status == "running":
-        return await _terminal_failure(
-            checkpoint_id, RuntimeError("checkpoint task has no local owner"),
+    if record.status in {"running", "captured"}:
+        return await run_in_db(
+            checkpoint_store.settle_nonterminal,
+            checkpoint_id,
+            reconciled_at=utc_now_iso(),
+            running_error="checkpoint task has no local owner",
         )
     return record
 
