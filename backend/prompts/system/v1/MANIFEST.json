@@ -262,10 +262,10 @@
       "sha256": "5a685a30ee4bbb4153706911bb4967e517c2c4850217580fed2d21af288fb94f"
     },
     {
-      "bytes": 5925,
+      "bytes": 8725,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "8988ff538d7eb171b973f7afbb217d536dac87fa62c3c2e41370fdbfad66e4db"
+      "sha256": "df2315e174f31accc7bdf490ffcab1e27060884310a3c8367b1be1befc3f839a"
     },
     {
       "bytes": 2671,

@@ -104,7 +104,10 @@ def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict
 
 @dataclass(frozen=True)
 class CorrectionCandidate:
-    """One persisted user message eligible to be checked."""
+    """One persisted user message eligible to be checked.
+
+    ``arrived`` marks a message classified as it arrives, not by a later scan.
+    """
 
     message_id: str
     thread_id: str
@@ -112,6 +115,7 @@ class CorrectionCandidate:
     content: str
     created_at: str
     context: tuple[tuple[str, str], ...] = ()
+    arrived: bool = False
 
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
