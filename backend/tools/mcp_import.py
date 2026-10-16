@@ -31,7 +31,7 @@ log = logging.getLogger("corsia.key_audit")
 IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
 IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
-IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
+IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
 IMPORT_NEEDS_SIGN_IN = "{App}: needs you to sign in. Press Sign in next to {App} in Settings › Connected apps."
 
 

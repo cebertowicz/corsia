@@ -126,7 +126,7 @@ def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
         "**{App}**: not working yet. Choose where it works, then approve it."
     )
     assert mcp_import.IMPORT_KEY_STAYS_IN_CODEX == (
-        "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
+        "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
     )
     assert all("bearer_file" not in line for line in (
         mcp_import.IMPORT_NONE_FOUND,
