@@ -4,7 +4,6 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 
 use crate::trust::Trust;
-
 const CONFIG_FILE: &str = "config.json";
 const CONFIG_TEMP_FILE: &str = "config.json.remote.tmp";
 
