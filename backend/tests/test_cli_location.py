@@ -59,6 +59,34 @@ def test_service_binary_sees_only_the_service_path(monkeypatch, tmp_path):
     assert cli_location.service_binary("unknown") is None
 
 
+def test_package_manager_for_uses_resolved_paths_and_only_proven_prefixes(monkeypatch, tmp_path):
+    homebrew = tmp_path / "homebrew"
+    npm_root = tmp_path / "npm" / "lib" / "node_modules"
+    claude = _executable(homebrew / "bin" / "claude")
+    codex = _executable(npm_root / "@openai" / "codex" / "bin" / "codex")
+
+    monkeypatch.setattr(cli_location.shutil, "which", lambda name, **_kwargs: f"/{name}")
+    monkeypatch.setattr(cli_location, "_command_prefix", lambda command: homebrew if command[0] == "/brew" else npm_root)
+
+    assert cli_location.package_manager_for("claude-code", str(claude)) == "homebrew"
+    assert cli_location.package_manager_for("codex", str(codex)) == "npm"
+    assert cli_location.package_manager_for("codex", str(_executable(tmp_path / "other" / "codex"))) is None
+
+
+def test_path_shadowed_binary_names_the_service_copy_to_remove(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    current = _executable(tmp_path / "older" / "claude")
+    _executable(home / ".local" / "bin" / "claude")
+
+    monkeypatch.setattr(cli_location.Path, "home", lambda: home)
+    monkeypatch.setattr(cli_location, "service_binary", lambda _vendor: str(current))
+    monkeypatch.setattr(cli_location, "package_manager_for", lambda *_args: None)
+
+    assert cli_location.path_shadowed_binary("claude-code") == str(current.resolve())
+    monkeypatch.setattr(cli_location, "service_binary", lambda _vendor: str(home / ".local" / "bin" / "claude"))
+    assert cli_location.path_shadowed_binary("claude-code") is None
+
+
 def test_every_supported_vendor_has_a_binary():
     assert cli_location.BINARIES == {"claude-code": "claude", "codex": "codex", "omlx": "omlx"}
 

@@ -128,6 +128,14 @@ class TestSeedCodex:
         claude = _sources(client)["claude-code"]
         assert claude["state"] == "unverified" and claude["reason"] == "Not checked yet"
 
+    def test_unverified_cli_reports_a_proven_package_manager(self, isolated_db, client, monkeypatch):
+        import cli_location
+
+        self._seed(monkeypatch, "ready")
+        monkeypatch.setattr(cli_location, "package_manager_for", lambda provider: "homebrew" if provider == "claude-code" else None)
+
+        assert _sources(client)["claude-code"]["cli_package_manager"] == "homebrew"
+
     def test_reseed_keeps_the_last_claude_verdict(self, isolated_db, client, monkeypatch):
         from connections.models import get_connection
         from connections.source_state import apply_check
@@ -773,11 +781,22 @@ class TestRecheck:
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").json() == result
-        assert calls == [{"no_subscription_only": False, "automatic": False, "profile_id": None}]
+        assert calls == [{"no_subscription_only": False, "automatic": False}]
         assert client.post("/api/providers/local/setup", json={
             "no_subscription_only": True, "automatic": True,
         }).json() == result
-        assert calls[-1] == {"no_subscription_only": True, "automatic": True, "profile_id": None}
+        assert calls[-1] == {"no_subscription_only": True, "automatic": True}
+
+    def test_local_cancel_route_uses_the_canonical_flight_owner(self, isolated_db, client, monkeypatch):
+        calls = []
+
+        async def cancel():
+            calls.append(True)
+            return {"ok": True, "cancelled": True}
+
+        monkeypatch.setattr("llm.local_setup.cancel_local_setup", cancel)
+        assert client.post("/api/providers/local/cancel").json() == {"ok": True, "cancelled": True}
+        assert calls == [True]
 
     def test_local_setup_route_requires_existing_omlx_consent(self, isolated_db, client, monkeypatch):
         monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
@@ -791,36 +810,53 @@ class TestRecheck:
         assert response.status_code == 409
         assert response.json() == {"detail": {"code": "consent_required"}}
 
-    def test_local_setup_route_records_accepted_existing_omlx_consent(self, isolated_db, client, monkeypatch):
+    @pytest.mark.parametrize("body,manage", [
+        ({"consent_existing": True}, None),
+        ({"consent_existing": True, "manage_existing": False}, False),
+        ({"consent_existing": True, "manage_existing": True}, True),
+    ])
+    def test_local_setup_route_records_accepted_existing_omlx_consent(
+            self, isolated_db, client, monkeypatch, body, manage):
         monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
         persisted = []
-        monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent", lambda: persisted.append(True))
+        monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent",
+                            lambda *, manage: persisted.append(manage))
 
         async def begin(**kwargs):
             return {"ok": True, "in_progress": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        response = client.post("/api/providers/local/setup", json={"consent_existing": True})
+        response = client.post("/api/providers/local/setup", json=body)
 
         assert response.status_code == 200
         assert response.json() == {"ok": True, "in_progress": True}
-        assert persisted == [True]
+        assert persisted == [manage]
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio
 
-        from llm import local_setup
+        from llm import local_model, local_setup
 
         monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+        monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: True)
+        monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
+        monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: False)
+        not_checked = {"state": "not_checked", "model": None, "message": None}
         assert client.get("/api/providers/local/setup").json() == {
-            "state": "idle", "stage": None, "result": None, "omlx_is_persons_own": ANY,
-            "recommended_profile": ANY}
+            "state": "idle", "stage": None, "result": None, "omlx_is_persons_own": False,
+            "local_model": not_checked}
 
         failure = {"ok": False, "message": "oMLX failed"}
         local_setup._flight.result = failure
         assert client.get("/api/providers/local/setup").json() == {
-            "state": "failed", "stage": None, "result": failure, "omlx_is_persons_own": ANY,
-            "recommended_profile": ANY}
+            "state": "failed", "stage": None, "result": failure, "omlx_is_persons_own": False,
+            "local_model": not_checked}
+
+        # A finished setup's model is what the conductor's offer and Welcome read.
+        installed = local_model.LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)
+        local_model.record_set_up(installed)
+        assert client.get("/api/providers/local/setup").json()["local_model"] == {
+            "state": "picked", "model": installed.view(), "message": None}
 
         local_setup._flight.result = {"ok": True}
         assert client.get("/api/providers/local/setup").json()["state"] == "succeeded"
@@ -840,6 +876,7 @@ class TestRecheck:
         app = FastAPI()
         app.include_router(router)
         assert TestClient(app).get("/api/providers/local/setup").status_code == 401
+        assert TestClient(app).post("/api/providers/local/cancel").status_code == 401
 
     def test_reruns_the_existing_checks_and_returns_the_list(self, isolated_db, client, monkeypatch):
         from llm import network_discovery as nd

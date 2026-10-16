@@ -21,8 +21,9 @@ APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
 #: The whole set of fact reads shares this budget; the first model pick waits no longer.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
-    "first_run_path", "harness_ready", "gmail_eligible", "web_search_ready",
-    "github_ready", "own_omlx_source", "setup", "user_profile",
+    "first_run_path", "harness_ready", "sources_missing", "local_download",
+    "gmail_eligible", "web_search_ready", "github_ready", "own_omlx_source",
+    "setup", "user_profile",
 })
 UNAVAILABLE_READS = {
     "your_model": "none; omit task 1's bracket",
@@ -32,6 +33,8 @@ UNAVAILABLE_READS = {
     "host_access_reviewer": "none; corsia_api hides host-access fields, so treat the reviewer as unknown",
     "web_search_key": "one web_search call",
     "harness_ready": "tool model_sources, once, without recheck",
+    "sources_missing": "tool model_sources, once, without recheck",
+    "local_download": "corsia_api GET /api/providers/local/setup",
     "gmail_eligible": "none; treat as no for gmail_eligible",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
@@ -97,6 +100,30 @@ def _web_search_key() -> bool:
 def _app_harness_ready(snapshot: dict[str, Any]) -> list[str]:
     ready = {row.get("source") for row in snapshot["sources"] if row.get("state") == "ready"}
     return [name for name, source in (("claude_code", "claude-code"), ("codex", "codex")) if source in ready]
+
+
+def _app_sources_missing(snapshot: dict[str, Any]) -> dict[str, str]:
+    """The CLI sources F8 can offer, from the snapshot that owns their states."""
+    states = {row.get("source"): row.get("state") for row in snapshot["sources"]}
+    return {
+        name: state for name, source in (("claude_code", "claude-code"), ("codex", "codex"))
+        if (state := states.get(source)) in {"not_installed", "needs_auth"}
+    }
+
+
+def _app_local_download() -> dict[str, Any]:
+    """The local setup flight in the compact form the app first-run guidance reads."""
+    from llm.local_setup import setup_status
+
+    status = setup_status()
+    state = status["state"]
+    if state in {"running", "downloading"}:
+        return {"state": "downloading", "progress": status["stage"]}
+    if state == "succeeded":
+        return {"state": "done"}
+    if state == "failed":
+        return {"state": "failed", "message": status["result"].get("message")}
+    return {"state": "none"}
 
 
 def _app_github_ready(snapshot: dict[str, Any]) -> bool:
@@ -188,6 +215,7 @@ async def _app_setup_facts() -> dict[str, Any]:
 
     reads = await _read_facts({
         "model_sources": lambda: run_in_db(_model_sources),
+        "local_download": lambda: asyncio.to_thread(_app_local_download),
         "gmail_eligible": lambda: run_off_db(_gmail_eligible),
         "web_search_ready": setup_decisions.web_search_works,
         "own_omlx_source": lambda: run_off_db(_own_omlx_source),
@@ -199,13 +227,17 @@ async def _app_setup_facts() -> dict[str, Any]:
     github_ready: bool | dict[str, str]
     if isinstance(snapshot, dict) and "unavailable" not in snapshot:
         harness_ready = _app_harness_ready(snapshot)
+        sources_missing: dict[str, str] = _app_sources_missing(snapshot)
         github_ready = _app_github_ready(snapshot)
     else:
         harness_ready = _unavailable("harness_ready")
+        sources_missing = _unavailable("sources_missing")
         github_ready = _unavailable("github_ready")
     return {
         "first_run_path": "app",
         "harness_ready": harness_ready,
+        "sources_missing": sources_missing,
+        "local_download": reads["local_download"],
         "gmail_eligible": reads["gmail_eligible"],
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,

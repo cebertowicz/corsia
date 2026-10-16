@@ -13,8 +13,10 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 BINARIES = {"claude-code": "claude", "codex": "codex", "omlx": "omlx"}
+PackageManager = Literal["homebrew", "npm"]
 
 _BEGIN = "__CORSIA_BEGIN__"
 _END = "__CORSIA_END__"
@@ -37,6 +39,47 @@ def service_binary(vendor: str) -> str | None:
     """The vendor's CLI as the service resolves it, or None when the service cannot see it."""
     binary = BINARIES.get(vendor)
     return shutil.which(binary, path=service_path()) if binary else None
+
+
+def _command_prefix(command: list[str]) -> Path | None:
+    """Return one package-manager prefix, treating an unavailable manager as unknown."""
+    try:
+        output = subprocess.run(
+            command, check=True, capture_output=True, text=True, timeout=_SHELL_TIMEOUT_SECONDS,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(output).resolve() if output else None
+
+
+def package_manager_for(vendor: str, binary: str | None = None) -> PackageManager | None:
+    """Name the package manager that owns the service-resolved CLI, if it can be proven."""
+    current = binary or service_binary(vendor)
+    if not current:
+        return None
+    resolved = Path(current).resolve()
+    brew = shutil.which("brew", path=service_path())
+    brew_prefix = _command_prefix([brew, "--prefix"]) if brew else None
+    if brew_prefix and resolved.is_relative_to(brew_prefix):
+        return "homebrew"
+    npm = shutil.which("npm", path=service_path())
+    npm_root = _command_prefix([npm, "root", "-g"]) if npm else None
+    if npm_root and resolved.is_relative_to(npm_root):
+        return "npm"
+    return None
+
+
+def path_shadowed_binary(vendor: str) -> str | None:
+    """Return the older service-resolved copy when the official installer wrote another one first."""
+    current = service_binary(vendor)
+    binary = BINARIES.get(vendor)
+    if not current or not binary or package_manager_for(vendor, current):
+        return None
+    installed = Path.home() / ".local" / "bin" / binary
+    if not installed.is_file():
+        return None
+    used = Path(current).resolve()
+    return str(used) if installed.resolve() != used else None
 
 
 def _shell_value(command: str) -> str | None:
