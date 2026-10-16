@@ -254,7 +254,7 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
             return "codex", {
                 **app["config"], "secret_headers": ["Authorization"], "connected_app_id": args[0],
             }
-        if fn.__name__ == "missing_app_key_refs":
+        if fn.__name__ == "load_missing_app_key_refs":
             return [] if key_is_set else ["Authorization"]
         if fn.__name__ == "record_runtime_app_state":
             published.append(args[1])

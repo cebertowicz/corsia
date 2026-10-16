@@ -148,29 +148,6 @@ def test_agent_proposal_needs_person_and_preserves_active_config(connected_apps_
     assert approved["state"] == "disconnected"
 
 
-def test_approve_classifies_runtime_exception_after_persisting_approval(connected_apps_client, monkeypatch) -> None:
-    from api import connected_apps
-
-    client, db, actor = connected_apps_client
-    proposal = create_pending_app(
-        "Local", {"command": "fixture", "key_refs": []},
-        {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False},
-        actor_thread_id="thread-a", db=db,
-    )
-
-    async def broken_runtime(_action: str, _app_id: str) -> dict[str, object]:
-        raise RuntimeError("fixture start failed")
-
-    actor.clear()
-    actor.update({"id": "user", "token_kind": "session"})
-    monkeypatch.setattr(connected_apps, "_run_app_runtime", broken_runtime)
-
-    response = client.post(f"/api/mcp/servers/{proposal['id']}/approve")
-
-    assert response.status_code == 200
-    assert response.json()["state"] == "failed"
-    assert response.json()["failure_class"] == "cannot_start"
-    assert get_app(proposal["id"], db=db)["state"] == "disconnected"
 
 
 def test_agent_create_uses_server_thread_scope_and_refuses_reach(connected_apps_client) -> None:

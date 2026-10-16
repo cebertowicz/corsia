@@ -299,12 +299,26 @@ def _project_reach(folder: Path | None, *, db) -> tuple[dict[str, object] | None
     if folder is None:
         return {"mode": "all", "project_ids": [], "outside_projects": False}, None
     candidate = folder.expanduser().resolve(strict=False)
+    from core.project_context import resolve_project_row_paths
+    from infra.config import WORKSPACE
+    from infra.workspace_paths import looks_like_workspace_reference
+
     matches: list[tuple[int, str]] = []
-    for row in db.execute("SELECT id,path FROM projects WHERE path IS NOT NULL"):
+    for row in db.execute("SELECT id,name,path FROM projects WHERE path IS NOT NULL"):
         raw_path = row["path"]
-        if not isinstance(raw_path, str) or not raw_path:
+        if looks_like_workspace_reference(raw_path):
+            try:
+                _name, project_path = resolve_project_row_paths(
+                    WORKSPACE, project_name=row["name"], raw_path=raw_path,
+                )
+            except ValueError:
+                log.warning("skipping unresolved project path for project_id=%s", row["id"])
+                continue
+        else:
+            project_path = Path(str(raw_path))
+        if project_path is None:
             continue
-        project_path = Path(raw_path).expanduser().resolve(strict=False)
+        project_path = project_path.resolve(strict=False)
         if candidate == project_path or project_path in candidate.parents:
             matches.append((len(project_path.parts), row["id"]))
     if not matches:

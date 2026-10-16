@@ -297,6 +297,17 @@ def load_runtime_app_config(app_id: str) -> tuple[str, dict[str, object]]:
         db.close()
 
 
+def load_missing_app_key_refs(app_id: str) -> list[str]:
+    """Load unset key references in a DB job without retaining a connection."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return missing_app_key_refs(app_id, db=db)
+    finally:
+        db.close()
+
+
 def load_runtime_app_ids() -> list[str]:
     """Load all startup app ids in one DB job."""
     from infra.database import get_db

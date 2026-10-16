@@ -12,6 +12,8 @@ import asyncio
 import time
 from contextlib import AsyncExitStack
 
+from loguru import logger
+
 from infra import state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
@@ -85,44 +87,58 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             await _remove_connected_app(app_id)
         elif app_id in _app_stacks:
             return _app_states[app_id]
-        from connections.app_reach import load_runtime_app_config, missing_app_key_refs
+        from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
 
         name, config = await run_in_db(load_runtime_app_config, app_id)
         connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
         await _publish_app_state(app_id, connecting)
-        missing_keys = await run_in_db(missing_app_key_refs, app_id)
-        token_without_key_ref = config.get("needs_token") is True and not (
-            config.get("secret_env") or config.get("secret_headers")
-        )
-        if token_without_key_ref or missing_keys:
+        stack: AsyncExitStack | None = None
+        try:
+            missing_keys = await run_in_db(load_missing_app_key_refs, app_id)
+            token_without_key_ref = config.get("needs_token") is True and not (
+                config.get("secret_env") or config.get("secret_headers")
+            )
+            if token_without_key_ref or missing_keys:
+                result = {
+                    "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
+                    "failure_class": None,
+                }
+                await _publish_app_state(app_id, result)
+                return result
+            _app_servers[app_id] = name
+            stack = AsyncExitStack()
+            errors = await connect_mcp_servers({name: config}, _registry, stack)
+            if error := errors.get(name):
+                await stack.aclose()
+                _app_servers.pop(app_id, None)
+                result = {
+                    "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
+                    "failure_class": getattr(error, "failure_class", "protocol_error"),
+                }
+            else:
+                names = {
+                    name for name in _registry.tool_names
+                    if getattr(_registry.get(name), "mcp_app_id", None) == app_id
+                }
+                _app_stacks[app_id] = stack
+                _app_tools[app_id] = names
+                result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
+            await _publish_app_state(app_id, result)
+            if state._agent is not None:
+                register_mcp_tools(state._agent.tools)
+            return result
+        except Exception:
+            logger.exception("connected-app runtime failed for app_id={}", app_id)
+            if stack is not None:
+                await stack.aclose()
+            _app_servers.pop(app_id, None)
+            _app_tools.pop(app_id, None)
             result = {
-                "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
-                "failure_class": None,
+                "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
+                "failure_class": "cannot_start",
             }
             await _publish_app_state(app_id, result)
             return result
-        _app_servers[app_id] = name
-        stack = AsyncExitStack()
-        errors = await connect_mcp_servers({name: config}, _registry, stack)
-        if error := errors.get(name):
-            await stack.aclose()
-            _app_servers.pop(app_id, None)
-            result = {
-                "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-                "failure_class": getattr(error, "failure_class", "protocol_error"),
-            }
-        else:
-            names = {
-                name for name in _registry.tool_names
-                if getattr(_registry.get(name), "mcp_app_id", None) == app_id
-            }
-            _app_stacks[app_id] = stack
-            _app_tools[app_id] = names
-            result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
-        await _publish_app_state(app_id, result)
-        if state._agent is not None:
-            register_mcp_tools(state._agent.tools)
-        return result
 
 
 async def start_connected_app_runtime() -> dict[str, dict[str, object]]:

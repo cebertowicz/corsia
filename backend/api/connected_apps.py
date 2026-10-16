@@ -60,17 +60,6 @@ async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], ap
     return await apply_connected_app_runtime(action, app_id)
 
 
-async def _connect_after_approval(app_id: str) -> dict[str, object]:
-    """Return a safe, classified connection outcome after an app is approved."""
-    try:
-        return await _run_app_runtime("connect", app_id)
-    except Exception:
-        return {
-            "state": "failed",
-            "failure_class": "cannot_start",
-            "reason": "CORSIA couldn't start this app.",
-        }
-
 
 def _agent_thread(user: dict, db) -> tuple[str, dict]:
     """Resolve an agent's scope from its server-provided current thread only."""
@@ -316,7 +305,7 @@ async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dic
         )
     except Exception as exc:
         raise _app_error(exc) from None
-    state = await _connect_after_approval(app_id)
+    state = await _run_app_runtime("connect", app_id)
     notice = _local_app_notice(result["config"])
     return {**result, **state, **({"notice": notice} if notice else {})}
 
