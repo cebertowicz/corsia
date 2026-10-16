@@ -71,7 +71,10 @@
 		min-height: var(--list-row-min-height);
 		border-radius: var(--radius-sm);
 	}
-	.settings-row:hover { background: var(--bg-hover); }
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last row tapped. */
+	@media (hover: hover) {
+		.settings-row:hover { background: var(--bg-hover); }
+	}
 	.face {
 		flex: 1; min-width: 0;
 		display: flex; align-items: center; gap: var(--space-3);

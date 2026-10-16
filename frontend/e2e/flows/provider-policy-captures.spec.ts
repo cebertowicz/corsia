@@ -156,7 +156,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					await region.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 					if (screen === 'R5') {
 						await expect(region.getByRole('button', { name: 'Acme (Team)' })).toBeVisible();
-						await expect(region.getByRole('button', { name: 'Pro' })).toBeVisible();
+						await expect(region.getByRole('button', { name: 'Pro', exact: true })).toBeVisible();
 						await expect(region.getByRole('button', { name: 'Roll over when an account hits its limit' })).toHaveCount(0);
 						await expect(region.getByRole('button', { name: /Move / })).toHaveCount(0);
 					}
@@ -211,7 +211,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await loginByUrl(page, { waitForComposer: false });
 			await openActivity(page);
 			await page.getByRole('button', { name: 'Workspace settings' }).click();
-					await openSettingsSection(page, 'Providers');
+			await openSettingsSection(page, 'Providers');
 			const region = page.getByRole('region', { name: 'Workspace providers' });
 			const first = region.getByRole('button', { name: 'Personal Max', exact: true });
 			const second = region.getByRole('button', { name: 'Acme (Team)', exact: true });

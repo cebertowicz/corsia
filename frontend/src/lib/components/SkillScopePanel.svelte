@@ -112,7 +112,7 @@
 <div class="skills-panel">
 	{#if heading}<div class="skills-scope">Managing skills for {scopeLabel}</div>{/if}
 	<p class="skills-summary">
-		{countLabel}<span class="sep" aria-hidden="true"> · </span><span class:bad={invalidRows.length > 0}>{invalidLabel}</span>
+		{countLabel}<span class="sep" aria-hidden="true">{' · '}</span><span class:bad={invalidRows.length > 0}>{invalidLabel}</span>
 	</p>
 	<p class="skills-hint">{inheritanceHint}</p>
 
@@ -164,11 +164,13 @@
 
 <style>
 	.skills-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+	/* Text starts where a row's label does. */
+	.skills-scope, .skills-summary, .skills-hint, .skills-empty, .skills-error { padding: 0 var(--space-2); }
 	.skills-scope { color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	.skills-summary, .skills-hint, .skills-empty, .skills-error { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.skills-summary .bad, .skills-error { color: var(--red-text); }
 	.skills-list { display: flex; flex-direction: column; }
-	.skills-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--space-2)); }
+	.skills-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 	.skill-create { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) auto; gap: var(--space-2); }
 	.skill-create input {
 		min-width: 0;

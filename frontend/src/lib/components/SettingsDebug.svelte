@@ -242,7 +242,7 @@
 </div>
 
 <style>
-	.settings-section { padding: 24px 32px; max-width: 760px; }
+	.settings-section { max-width: 760px; }
 	.section-header { margin-bottom: 24px; }
 	.section-header h2 { font-size: var(--text-title2); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.section-header p { font-size: var(--text-subhead); color: var(--text-muted); margin: 0; }

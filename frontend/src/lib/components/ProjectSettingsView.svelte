@@ -264,7 +264,7 @@
 			</SettingsRow>
 		</SettingsGroup>
 
-		<div class="group-gap">
+		<div class="group-gap policy">
 			<ProvidersPolicyBlock projectId={project.id} onSignIn={() => requestSettingsSection('providers')} />
 		</div>
 
@@ -310,6 +310,8 @@
 <style>
 	.project-page { display: flex; flex-direction: column; }
 	.group-gap { margin-top: var(--space-6); }
+	/* The policy block draws edge to edge; inset it to the page's row edge. */
+	.policy { padding: 0 var(--space-2); }
 	.note { margin: 0; padding: 0 var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
 	.note.failed { color: var(--red-text); }
 	.fld { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); }

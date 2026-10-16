@@ -1,3 +1,9 @@
+<script module lang="ts">
+	// The last open request a SettingsView has acted on. It outlives a mount because a gear's
+	// request usually arrives before Settings mounts.
+	let consumedRequest = 0;
+</script>
+
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { loadProviders } from '$lib/stores/providers';
@@ -69,12 +75,12 @@
 
 	// Phone: the section list is the whole screen; a tapped row opens its section full-screen.
 	let mobileOpen = $state(false);
-	// A deep link (a gear, a chat link) opens its section, not the list.
-	let seenRequest = $settingsOpenRequest;
+	// A deep link (a gear, a chat link) opens its section, not the list, whether it opened
+	// Settings or arrived while Settings was already showing.
 	$effect(() => {
 		const request = $settingsOpenRequest;
-		if (request !== seenRequest) {
-			seenRequest = request;
+		if (request !== consumedRequest) {
+			consumedRequest = request;
 			mobileOpen = true;
 		}
 	});
@@ -134,7 +140,7 @@
 	<div class="settings-content" class:mobile-section={mobileOpen} use:toastAnchorSurface>
 		<div class="section-host">
 			{#if $settingsActiveSection === 'providers'}
-				<ProviderManager />
+				<div class="inset"><ProviderManager /></div>
 				<div class="policy"><ProvidersPolicyBlock /></div>
 			{:else if $settingsActiveSection === 'skills'}
 				<h2 class="page-title">Skills</h2>
@@ -145,12 +151,14 @@
 			{:else if $settingsActiveSection === 'projects'}
 				<SettingsProjects />
 			{:else if $settingsActiveSection === 'system'}
-				<SettingsSystem {systemStatus} onSwitchSection={(s) => settingsActiveSection.set(s as SettingsSection)} />
-				<SystemBulletinsSetting />
+				<div class="inset">
+					<SettingsSystem {systemStatus} onSwitchSection={(s) => settingsActiveSection.set(s as SettingsSection)} />
+					<SystemBulletinsSetting />
+				</div>
 			{:else if $settingsActiveSection === 'keys'}
-				<SettingsKeys />
+				<div class="inset"><SettingsKeys /></div>
 			{:else if $settingsActiveSection === 'debug'}
-				<SettingsDebug />
+				<div class="inset"><SettingsDebug /></div>
 			{/if}
 		</div>
 	</div>
@@ -212,6 +220,8 @@
 		padding: 0 var(--space-2);
 		font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary);
 	}
+	/* Sections that draw their own title: inset them to the edge the list pages use. */
+	.inset { padding: 0 var(--space-2); }
 	.policy { margin-top: var(--space-8); padding: 0 var(--space-2); }
 	.mobile-root { display: none; }
 
@@ -222,6 +232,8 @@
 		.settings-content.mobile-section { display: block; }
 		/* The app header names the page on a phone; the page title is not repeated under it. */
 		.section-host :global(.page-title) { display: none; }
+		.inset :global(.page-head) { justify-content: flex-end; }
+		.inset :global(.page-head h2), .inset :global(.section-header h2) { display: none; }
 		.mobile-root { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: var(--space-3); }
 		.mobile-root.hidden { display: none; }
 		.mobile-group { display: flex; flex-direction: column; }

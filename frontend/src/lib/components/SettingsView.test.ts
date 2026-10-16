@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsView from './SettingsView.svelte';
 import { token } from '$lib/stores/auth';
-import { SETTINGS_SECTIONS, settingsActiveSection } from '$lib/stores/settingsNavigation';
+import { SETTINGS_SECTIONS, openProjectSettings, settingsActiveSection, settingsDrill, settingsProject } from '$lib/stores/settingsNavigation';
+import { get } from 'svelte/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -60,5 +61,30 @@ describe('SettingsView navigation', () => {
 		flushSync();
 
 		expect(host.textContent).toContain('Debug');
+	});
+
+	it('opens a gear request made before Settings mounts to its page, not the phone list', () => {
+		openProjectSettings('p-garden');
+
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(true);
+		expect(get(settingsDrill)?.backLabel).toBe('Projects');
+		settingsProject.set(null);
+	});
+
+	it('shows the phone list when Settings opens without a new request', () => {
+		openProjectSettings('p-garden');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		unmount(component);
+		component = null;
+		settingsProject.set(null);
+
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(false);
 	});
 });
