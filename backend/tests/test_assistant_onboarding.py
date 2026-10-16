@@ -87,7 +87,7 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
     result_lines = IMPORT_RESULT_LINES.read_text(encoding="utf-8")
     for status in ("awaiting_approval", "already_exists", "outside_project", "cannot_connect", "failed"):
         assert f"`{status}`" in result_lines or f'"{status}"' in result_lines
-    assert "`You'll find them in Settings › Connected apps.`" in result_lines
+    assert "`Approve them in [Settings › System › Connected apps](/settings/system#connected-apps).`" in result_lines
     assert "Every CORSIA agent can use what you bring over" not in first_run
     assert "**The Assistant:**" in first_run
     assert "never offer the Assistant" in first_run
