@@ -48,9 +48,11 @@ describe('ConnectAppFlow', () => {
 	it('moves from What to the Mac setup step and confines the safety notice there', () => {
 		render();
 		expect(host.textContent).toContain('What');
+		expect(host.textContent).toContain('Opens a chat with CORSIA to sign in.');
 		expect(host.textContent).not.toContain('It can do anything you can do on this Mac');
 		press('Continue');
 		expect(host.textContent).toContain('Set it up');
+		expect(host.textContent).not.toContain('They may call it an MCP server.');
 		expect(host.textContent).toContain("It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. Connect only apps you trust.");
 	});
 
@@ -70,6 +72,10 @@ describe('ConnectAppFlow', () => {
 		press('Continue');
 		expect(host.textContent).toContain('Where it works');
 		expect(host.textContent).toContain('All projects');
+		expect(host.textContent).not.toContain('Agents in Garden plan, Outside projects and any new project will be able to use it.');
+		(host.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).click();
+		flushSync();
+		expect(host.textContent).toContain('Only agents in Outside projects will be able to use it.');
 		expect(host.textContent).not.toContain('They may call it an MCP server.');
 		expect(host.textContent).not.toContain('It can do anything you can do on this Mac');
 	});

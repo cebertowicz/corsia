@@ -119,18 +119,17 @@
 	<div class="flow">
 		{#if step === 'what'}
 			<section aria-labelledby="connect-app-what">
-				<h2 id="connect-app-what">What</h2>
+				<h2 class="step-heading" id="connect-app-what">What</h2>
 				<p class="hint">Follow the app's setup instructions. They may call it an MCP server.</p>
 				<div class="choices">
 					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'local'} onchange={() => selectKind('local')} /><span><strong>An app that runs on this Mac</strong><small>Its setup instructions give you something to run, often starting with npx or uvx.</small></span></label>
 					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'web'} onchange={() => selectKind('web')} /><span><strong>An app at a web address</strong><small>Its setup instructions give you an address starting with https://, on the internet or your network.</small></span></label>
-					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'google'} onchange={() => selectKind('google')} /><span><strong>Google (email and calendar)</strong></span></label>
+					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'google'} onchange={() => selectKind('google')} /><span><strong>Google (email and calendar)</strong><small>Opens a chat with CORSIA to sign in.</small></span></label>
 				</div>
 			</section>
 		{:else if step === 'setup'}
 			<section aria-labelledby="connect-app-setup">
-				<h2 id="connect-app-setup">Set it up</h2>
-				<p class="hint">Follow the app's setup instructions. They may call it an MCP server.</p>
+				<h2 class="step-heading" id="connect-app-setup">Set it up</h2>
 				{#if kind === 'local'}
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
 					<label class="field"><span>What it runs</span><small>Paste what the app's setup instructions say to run</small><input aria-label="What it runs" value={command} oninput={(event) => command = event.currentTarget.value} placeholder="npx -y @example/app" /></label>
@@ -142,10 +141,9 @@
 			</section>
 		{:else if step === 'where'}
 			<section aria-labelledby="connect-app-where">
-				<h2 id="connect-app-where">Where it works</h2>
+				<h2 class="step-heading" id="connect-app-where">Where it works</h2>
 				<div class="choices">
 					<label class="choice"><input type="radio" name="reach" checked={mode === 'all'} onchange={useAllProjects} /><span><strong>All projects</strong><small>Includes new projects and Outside projects</small></span></label>
-					{#if mode === 'all'}<p class="impact">{reachLine}</p>{/if}
 					<label class="choice"><input type="radio" name="reach" checked={mode === 'selected'} onchange={useIndividualProjects} /><span><strong>Select individually</strong></span></label>
 					{#if mode === 'selected'}
 						<div class="checklist">
@@ -181,16 +179,18 @@
 <style>
 	.flow, .choices { display: grid; gap: var(--space-3); }
 	.flow section { display: grid; gap: var(--space-3); }
-	h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
-	.hint, .choice small, .impact, .field small, .notice { color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.45; margin: 0; }
+	.step-heading { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
+	section[aria-live] h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
+	.hint, .choice small, .impact, .field small, .notice { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; margin: 0; }
 	.choice { display: flex; align-items: flex-start; gap: var(--space-3); cursor: pointer; color: var(--text-primary); }
+	.choice input, .checklist input { accent-color: var(--accent); align-self: flex-start; flex: none; margin-top: var(--space-1); }
 	.choice span, .field { display: grid; gap: var(--space-1); }
-	.field > span { color: var(--text-primary); font-size: var(--text-footnote); font-weight: 600; }
+	.choice strong { font-size: var(--text-body); font-weight: var(--fw-regular); }
+	.field > span { color: var(--text-primary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	.field input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font: inherit; padding: var(--space-2) var(--space-3); }
 	.field input:focus { outline: none; border-color: var(--accent); }
-	.notice { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); padding: var(--space-3); }
 	.checklist { display: grid; gap: var(--space-2); padding-left: var(--space-6); color: var(--text-secondary); }
-	.checklist label { display: flex; align-items: center; gap: var(--space-2); }
+	.checklist label { display: flex; align-items: flex-start; gap: var(--space-2); }
 	.error { margin: 0; color: var(--red); font-size: var(--text-footnote); }
-	.actions { display: flex; justify-content: flex-end; gap: var(--space-2); width: 100%; }
+	.actions { display: flex; gap: var(--space-2); margin-left: auto; }
 </style>
