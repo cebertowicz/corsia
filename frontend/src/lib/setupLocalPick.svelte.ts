@@ -64,6 +64,8 @@ export function createSetupLocalPick() {
 			wanted = eligible && (storedWanted() ?? true);
 			if (wanted && !ownOmlx) void start();
 		},
+		/** Setup resumed after the account exists: the switch keeps its answer from this session, and the download that answer started carries on. */
+		resume() { wanted = storedWanted() ?? true; },
 		/** The switch moved; a person's own oMLX has no pick to start or stop. */
 		change(next: boolean, ownOmlx: boolean) {
 			wanted = next;

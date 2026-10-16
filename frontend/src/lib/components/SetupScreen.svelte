@@ -98,18 +98,12 @@
 		}
 	});
 
-	async function readStatus(destination: 'welcome' | 'models' = 'welcome') {
+	async function readStatus() {
 		statusError = '';
 		page = 'checking';
 		try {
 			const response = await fetch('/api/setup/status');
-			if (response.status === 409) {
-				// A resumed authenticated setup necessarily has an account already. Its
-				// recovery destination is the model step, not the signed-out app shell.
-				if (resume) { page = 'models'; return; }
-				onExistingAccount();
-				return;
-			}
+			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error(`setup status ${response.status}`);
 			status = await response.json();
 			folder = status.work_folder || folder;
@@ -117,8 +111,8 @@
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.apple_silicon === false || status.macos_supported === false || status.app_location === 'disk_image') page = 'hard-stop';
 			else {
+				page = 'welcome';
 				localPick.open(status.local_eligible !== false, Boolean(status.existing_omlx));
-				page = destination;
 			}
 		} catch {
 			statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.';
@@ -347,8 +341,15 @@
 		finally { savingKey = false; }
 	}
 
+	/** An account already exists, so the pre-account status gate is closed: pick up at the AI step with what this session remembers. */
+	function resumeModels() {
+		localPick.resume();
+		page = 'models';
+		void Promise.all([refreshSources(), classifier.read(), loadProviders()]);
+	}
+
 	onMount(() => {
-		if (resume) void Promise.all([readStatus('models'), refreshSources(), classifier.read(), loadProviders()]);
+		if (resume) resumeModels();
 		else void readStatus();
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });

@@ -85,13 +85,12 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
-	it('keeps an authenticated incomplete setup on Connect an AI when setup status says the account exists', async () => {
+	it('resumes on Connect an AI without asking the pre-account status gate', async () => {
 		if (component) await unmount(component);
 		calls = [];
 		const onExistingAccount = vi.fn();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ code: 'setup_complete' }, 409);
 			if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: [{ source: 'codex', name: 'Codex', state: 'needs_sign_in' }] });
 			return json({});
 		}));
@@ -100,6 +99,7 @@ describe('SetupScreen', () => {
 
 		await settle();
 
+		expect(calls).not.toContain('/api/setup/status');
 		expect(onExistingAccount).not.toHaveBeenCalled();
 		expect(host.textContent).toContain('Connect an AI');
 	});
@@ -113,7 +113,6 @@ describe('SetupScreen', () => {
 		token.set('resume-token'); calls = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input); calls.push(url);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
 			if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: [{ source: 'omlx', name: 'This computer', state: 'needs_setup' }] });
 			return json({ sources: [] });
 		}));
@@ -122,7 +121,7 @@ describe('SetupScreen', () => {
 
 		await settle();
 
-		expect(calls).toContain('/api/setup/status');
+		expect(calls).not.toContain('/api/setup/status');
 		expect(host.textContent).toContain('Connect an AI');
 		expect(host.textContent).not.toContain('This computer');
 	});
@@ -946,7 +945,7 @@ describe('SetupScreen', () => {
 				if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 				if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 				if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: fake.sources });
-				if ((url === '/api/providers/cli/claude-code/install' || url === '/api/providers/cli/claude-code/update') && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
+				if (url === '/api/providers/cli/claude-code/install' && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
 				if (url === '/api/providers/cli/claude-code/install') return json(fake.install);
 				if (url === '/api/providers/cli/claude-code/link') return json({ ok: true, outcome: 'linked' });
 				if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'conductor-1' } });
@@ -1014,7 +1013,6 @@ describe('SetupScreen', () => {
 			await openConnectStep([claude('unverified')]);
 
 			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).not.toContain('Update');
-			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/update');
 		});
 
 		it('lets an unverified package-manager CLI recheck or sign in without suggesting an update', async () => {

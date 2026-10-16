@@ -71,7 +71,6 @@ async def read_designation(user: dict, scope: str) -> dict:
         "target": {
             "thread_id": thread_id,
             "title": thread_row.get("title"),
-            "setup_incomplete": pending and not truth.get("model"),
             "bootloader_files": thread_row.get("bootloader_files"),
             # The thread list omits the designated thread; this is the server
             # time that orders its model against a later committed switch.

@@ -7,6 +7,7 @@ import {
 	fetchScopeTarget,
 	firstRunLanding,
 	landOnFirstRun,
+	setupIncomplete,
 	corsiaAgentId,
 } from '../conductor';
 import type { UiScope } from '$lib/stores/uiScope';
@@ -231,5 +232,17 @@ describe('landOnFirstRun', () => {
 		activeThreadId.set('other');
 		landOnFirstRun(pending, null, open);
 		expect(open).not.toHaveBeenCalled();
+	});
+});
+
+describe('setupIncomplete', () => {
+	const target = (model: string | null) => ({ kind: 'target' as const, firstRunPending: true, target: { thread_id: 'agent', model } });
+
+	it('is true only for a pending first run with no model chosen', () => {
+		expect(setupIncomplete(target(null))).toBe(true);
+		expect(setupIncomplete(target('ready-model'))).toBe(false);
+		expect(setupIncomplete({ ...target(null), firstRunPending: false })).toBe(false);
+		expect(setupIncomplete({ kind: 'unknown' })).toBe(false);
+		expect(setupIncomplete({ kind: 'absent' })).toBe(false);
 	});
 });

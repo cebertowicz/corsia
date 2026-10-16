@@ -66,7 +66,7 @@ function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
 	};
 }
 
-export type CliInstallRefusal = 'already_installed' | 'invisible_binary' | 'not_installed' | 'package_managed';
+export type CliInstallRefusal = 'already_installed' | 'invisible_binary';
 
 /**
  * Start one vendor CLI installation; callers poll its bounded per-vendor flight. A CLI that is
@@ -78,7 +78,7 @@ async function startCliJob(t: string, vendor: string): Promise<CliInstallRefusal
 	});
 	if (response.status === 409) {
 		const reason = (await response.json().catch(() => null))?.reason;
-		if (reason === 'already_installed' || reason === 'invisible_binary' || reason === 'not_installed' || reason === 'package_managed') return reason;
+		if (reason === 'already_installed' || reason === 'invisible_binary') return reason;
 	}
 	if (!response.ok) throw new Error(`CLI install ${response.status}`);
 	return null;
