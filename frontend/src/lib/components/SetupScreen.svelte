@@ -454,14 +454,19 @@
 	{#if page === 'welcome'}
 		<div class="welcome-copy">
 			{#if status.local_eligible === false}
-				<p>This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.</p>
+				<p>This computer doesn’t have enough memory to run an AI model itself. CORSIA will use Claude Code or Codex with your subscription, or an API key.</p>
 			{:else if (status.free_disk_gb ?? Infinity) < (status.model_size_gb ?? 0)}
 				<p>Needs {modelSize} free; {status.free_disk_gb} GB is free.</p>
 				<Button variant="chip" onclick={readStatus}>Free up space, then check again</Button>
 			{:else}
 				<div class="download-choice">
-					<div class="switch"><Toggle checked={localWanted} onchange={(next) => localWanted = next} ariaLabel={`Download ${downloadModelLabel} now`} /><span>Download {downloadModelLabel} now</span></div>
-					<span class="local-meta">{modelSize} · runs on this computer</span>
+					<span class="switch"><Toggle checked={localWanted} onchange={(next) => localWanted = next} ariaLabel="Also run AI on this computer" /></span>
+					<div class="choice-copy">
+						<span class="choice-name">Also run AI on this computer</span>
+						<span class="why">Free, private, and works offline. It’s slower than Claude or ChatGPT, so it’s for work you’d rather keep on this computer, and you can move background jobs onto it.</span>
+						<span class="spec">{downloadModelLabel} · {modelSize} · runs in oMLX</span>
+						<span class="spec">The download starts in the background when you press Get started.</span>
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -544,9 +549,12 @@
 	.welcome-copy p, .consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }
 	.consent-actions { display: flex; gap: var(--space-2); }
-	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
-	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
-	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
+	.download-choice { display: flex; align-items: flex-start; gap: var(--space-3); }
+	.switch { flex: none; display: inline-flex; padding-top: var(--space-1); }
+	.choice-copy { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+	.choice-name { color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-medium); }
+	.why { color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); text-wrap: pretty; }
+	.spec { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-normal); text-wrap: pretty; }
 	.api-key-action { align-self: flex-start; }
 	/* Rows keep the narrow window's width in a wide one, so an action stays beside its text. */
 	.rows { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 10); }

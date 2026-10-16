@@ -141,13 +141,17 @@ describe('SetupScreen', () => {
 		flushSync();
 
 		await settle();
-		expect(host.textContent).toContain('This computer can’t run a local model.');
-		expect(host.textContent).not.toContain('This Mac can’t run a local model.');
+		expect(host.textContent).toContain('This computer doesn’t have enough memory to run an AI model itself. CORSIA will use Claude Code or Codex with your subscription, or an API key.');
+		expect(host.textContent).not.toContain('Also run AI on this computer');
 	});
 
 	it('keeps the setup shell mounted while Get started moves the local download into the rail', async () => {
 		await settle();
-		expect(host.textContent).toContain('Download Example model now');
+		expect(host.textContent).toContain('Also run AI on this computer');
+		expect(host.textContent).toContain('Free, private, and works offline.');
+		expect(host.textContent).toContain('Example model · 30 GB · runs in oMLX');
+		expect(host.textContent).toContain('The download starts in the background when you press Get started.');
+		expect(host.querySelector('button[aria-label="Also run AI on this computer"], [role="switch"][aria-label="Also run AI on this computer"]')).not.toBeNull();
 		const shell = host.querySelector('.setup-shell');
 		expect(shell).not.toBeNull();
 		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
