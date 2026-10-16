@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 mod app_paths;
@@ -49,6 +49,12 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
+}
+
+#[derive(Default)]
+struct RemoteRuntime {
+    browser: Mutex<Option<discovery::Browser>>,
+    proxy: Mutex<Option<proxy::ProxyHandle>>,
 }
 
 /// The app binary's command-line modes; anything else opens the window.
@@ -517,6 +523,95 @@ fn configure_work_folder(
     Ok(())
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RemoteTarget {
+    DnsSd { instance: String },
+    Address { host: String, port: Option<u16> },
+}
+
+#[derive(Deserialize)]
+struct RemotePairRequest {
+    target: RemoteTarget,
+    code: String,
+}
+
+#[derive(Serialize)]
+struct RemoteNames {
+    names: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "ok", rename_all = "snake_case")]
+enum RemotePairResponse {
+    True { name: String },
+    False { reason: String, app_version: Option<String>, host_version: Option<String> },
+}
+
+#[tauri::command]
+fn remote_discovered(remote: tauri::State<'_, RemoteRuntime>) -> Result<RemoteNames, String> {
+    let mut browser = remote.browser.lock().map_err(|_| "remote browser state is unavailable")?;
+    if browser.is_none() {
+        *browser = Some(discovery::Browser::start().map_err(|error| format!("could not start discovery: {error:?}"))?);
+    }
+    Ok(RemoteNames { names: browser.as_ref().expect("browser created").names() })
+}
+
+fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
+    use classify::Unreachable;
+    use pairing::PairError;
+    let reason = match error {
+        PairError::WrongCode => "wrong_code",
+        PairError::Expired => "expired",
+        PairError::TooManyTries => "too_many_tries",
+        PairError::Paused => "paused",
+        PairError::Busy => "busy",
+        PairError::Unreachable(Unreachable::Network) => "network",
+        PairError::Unreachable(Unreachable::Server) => "server",
+        PairError::TooOld => "too_old",
+        PairError::Protocol(_) => "server",
+    };
+    RemotePairResponse::False { reason: reason.into(), app_version: None, host_version: None }
+}
+
+#[tauri::command]
+async fn remote_pair(
+    request: RemotePairRequest,
+    app: tauri::AppHandle,
+    remote: tauri::State<'_, RemoteRuntime>,
+) -> Result<RemotePairResponse, String> {
+    let locator = match request.target {
+        RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
+        RemoteTarget::Address { host, port } => remote_config::Locator::Address { host, port: port.unwrap_or(47_901) },
+    };
+    let (host, port) = match &locator {
+        remote_config::Locator::Address { host, port } => (host.clone(), *port),
+        remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
+            Ok(address) => address,
+            Err(_) => return Ok(RemotePairResponse::False { reason: "network".into(), app_version: None, host_version: None }),
+        },
+    };
+    let paired = match pairing::pair(&host, port, &request.code).await {
+        Ok(paired) => paired,
+        Err(error) => return Ok(remote_pair_error(error)),
+    };
+    match version_check::check(&paired.host, paired.port, &paired.trust).await {
+        Ok(version_check::Compat::Ok) => {}
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(RemotePairResponse::False { reason: "incompatible".into(), app_version: Some(app_version), host_version: host }),
+        Ok(version_check::Compat::TooOld) => return Ok(RemotePairResponse::False { reason: "too_old".into(), app_version: None, host_version: None }),
+        Err(error) => return Ok(remote_pair_error(error)),
+    }
+    let proxy = proxy::start(locator.clone(), paired.trust.clone(), 0, || {}).await.map_err(|error| format!("could not start remote proxy: {error:?}"))?;
+    let app_dir = default_app_dir(&app)?;
+    remote_config::save_remote(&app_dir, remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: proxy.port })?;
+    *remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")? = Some(proxy);
+    unregister_service()?;
+    if let Some(window) = app.get_webview_window("main") {
+        window.eval(format!("window.location.replace('http://127.0.0.1:{}');", remote_config::load_remote(&app_dir)?.expect("saved remote").proxy_port)).map_err(|error| error.to_string())?;
+    }
+    Ok(RemotePairResponse::True { name: paired.name })
+}
+
 #[tauri::command]
 fn start_local_service(
     app: tauri::AppHandle,
@@ -732,6 +827,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            remote_discovered,
+            remote_pair,
             choose_work_folder,
             configure_work_folder,
             lifecycle::retry_quit,
@@ -783,6 +880,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppServiceState::default());
+            app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
             #[cfg(target_os = "macos")]
             app.set_menu(lifecycle::menu(app.handle())?)?;
