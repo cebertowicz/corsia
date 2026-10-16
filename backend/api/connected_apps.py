@@ -103,6 +103,8 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     config = body.get("config")
     if isinstance(config, dict) and {"key_refs", "asked_by_thread_id"}.intersection(config):
         raise _refusal(f"key_refs and asked_by_thread_id go beside config, not inside it. {BODY_SHAPE}")
+    if isinstance(config, dict) and "source_folder" in config:
+        raise _refusal(f"source_folder is set by CORSIA when it imports an app, not inside config. {BODY_SHAPE}")
     if not isinstance(config, dict):
         raise _refusal(f"config must be an object. {BODY_SHAPE}")
     command, url, args = config.get("command"), config.get("url"), config.get("args", [])

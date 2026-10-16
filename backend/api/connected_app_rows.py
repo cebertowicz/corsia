@@ -100,6 +100,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "revision": app["revision"],
         "reach": app["reach"],
         "on_here": on_here,
+        **({"folder": app["source_folder"]} if app.get("source_folder") else {}),
         **({"sign_in": sign_in} if sign_in is not None else {}),
     }
 

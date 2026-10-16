@@ -14,6 +14,7 @@ from pathlib import Path
 import tomllib
 from typing import Any
 
+from connections.app_source_folder import clean_folder_label
 from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
 from tools.mcp_import_reach import project_reach
@@ -191,7 +192,7 @@ def detected_sources(home: Path | None = None) -> list[dict[str, Any]]:
             item: dict[str, str] = {"name": name, "kind": kind}
             if folder is not None:
                 # Path.name is the only persisted/displayed part of a project path.
-                item["folder"] = folder.name or folder.resolve(strict=False).name
+                item["folder"] = clean_folder_label(folder.name or folder.resolve(strict=False).name) or ""
             servers.append(item)
         if servers:
             results.append({"source": source, "app": _SOURCE_LABELS[source], "servers": servers})
@@ -353,14 +354,14 @@ def import_selected(
             with write_transaction(db, scope="mcp_import"):
                 result = create_pending_app(
                     name, config, reach, actor_thread_id=actor, app_id=app_id,
-                    audit_actor=("agent", actor), db=db,
+                    source_folder=outside_folder, audit_actor=("agent", actor), db=db,
                 )
                 for entry_name, value in lifted.items():
                     key_store.set_managed_value(entry_name, value, db=db)
                     audit_import_key_write(actor, _SOURCE_LABELS[source], name)
             row = {"id": str(result["id"]), "name": name, "state": "awaiting_approval"}
             if outside_folder is not None:
-                row["folder"] = outside_folder
+                row["folder"] = clean_folder_label(outside_folder) or ""
                 row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE.format(App=name)
             rows.append(row)
         except AppNameOverlapError:

@@ -12,6 +12,10 @@ export interface ConnectedApp {
 	tool_count?: number;
 	failure_class?: string | null;
 	reach: { mode: 'all' | 'selected'; project_ids: string[]; outside_projects: boolean };
+	/** `stdio` is an app that runs on this Mac; `http` is an app at a web address. */
+	transport?: 'stdio' | 'http' | null;
+	/** Display label only: the last segment of the Claude Code folder the app was set up for. Plain text. */
+	folder?: string;
 	/** Present for an app at a web address. Never holds a token or the sign-in link. */
 	sign_in?: SignInView;
 }

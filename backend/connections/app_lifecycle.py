@@ -10,6 +10,7 @@ from connections.app_lifecycle_support import (
     _write_audit, _write_projects,
 )
 from connections.app_notices import append_app_notice
+from connections.app_source_folder import SOURCE_FOLDER_KEY, clean_folder_label
 from connections.app_reach import (
     AppNotFoundError, AppPendingApprovalError, AppProposalExpiredError,
     AppReachError, AppRevisionConflictError, PENDING_STATE, _proposal_expired,
@@ -119,16 +120,23 @@ def create_pending_app(
     actor_thread_id: str,
     app_id: str | None = None,
     asked_by_thread_id: str | None = None,
+    source_folder: str | None = None,
     audit_actor: tuple[str, str] | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Persist an agent's new app proposal without starting it."""
+    """Persist an agent's new app proposal without starting it.
+
+    ``source_folder`` is a display label (the imported folder's last segment); like the asking
+    thread it rides beside the config and never reaches the launch.
+    """
     if not isinstance(actor_thread_id, str) or not actor_thread_id:
         raise AppReachError("missing proposing thread")
     if asked_by_thread_id is not None:
         if not isinstance(asked_by_thread_id, str) or not asked_by_thread_id or not isinstance(config, dict):
             raise AppReachError("invalid asking thread")
         config = {**config, "asked_by_thread_id": asked_by_thread_id}
+    if (label := clean_folder_label(source_folder)) is not None and isinstance(config, dict):
+        config = {**config, SOURCE_FOLDER_KEY: label}
     return create_app(
         name,
         config,

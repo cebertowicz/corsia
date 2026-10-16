@@ -362,3 +362,76 @@ def test_replace_reach_still_refuses_a_waiting_row(folder_app):
 
     with pytest.raises(AppPendingApprovalError):
         replace_reach(row["id"], EMPTY, expected_revision=1, db=db)
+
+
+# --- the folder label: display only (Governance C3) ---
+
+def test_the_label_is_stored_beside_the_config_and_never_in_the_runtime_config(folder_app):
+    from connections.app_reach import runtime_app_config
+
+    db, row, _folder = folder_app
+    stored = json.loads(db.execute("SELECT config_json FROM connected_apps WHERE id=?", (row["id"],)).fetchone()[0])
+    assert stored["source_folder"] == "notes"
+    app = get_app(row["id"], db=db)
+    assert app["source_folder"] == "notes" and "source_folder" not in app["config"]
+    db.execute("UPDATE connected_apps SET state='disconnected' WHERE id=?", (row["id"],))
+    _name, runtime = runtime_app_config(row["id"], db=db)
+    assert "source_folder" not in runtime and "notes" not in json.dumps(runtime)
+
+
+def test_only_the_display_surfaces_read_the_label():
+    """A new reader of the label must be reviewed: nothing may use it for reach, launch or matching."""
+    import re
+
+    backend = Path(__file__).resolve().parent.parent
+    readers = sorted(
+        str(path.relative_to(backend))
+        for path in backend.rglob("*.py")
+        if "tests" not in path.parts and ".venv" not in path.parts and re.search(r"source_folder|SOURCE_FOLDER_KEY", path.read_text(encoding="utf-8"))
+    )
+    assert readers == [
+        "api/connected_app_rows.py", "api/connected_apps.py", "connections/app_lifecycle.py",
+        "connections/app_reach.py", "connections/app_source_folder.py", "tools/mcp_import.py",
+    ]
+
+
+def test_the_row_the_app_list_returns_carries_the_label_and_no_path(api, tmp_path):
+    client, _db_, row, _actor, _connects = api
+    servers = client.get("/api/mcp/servers").json()["servers"]
+    assert servers[0]["folder"] == "notes"
+    assert str(tmp_path) not in json.dumps(servers)
+
+
+def test_an_agent_cannot_forge_the_label_inside_a_posted_config(api):
+    client, db, _row, actor, _connects = api
+    actor.clear()
+    actor.update({"id": "user", "thread_id": "thread-a", "token_kind": "internal"})
+    response = client.post("/api/mcp/servers", json={
+        "name": "Forged", "config": {"command": "npx", "source_folder": "Your bank"}, "key_refs": [],
+    })
+    assert response.status_code in {400, 422}
+    assert db.execute("SELECT COUNT(*) FROM connected_apps WHERE name='Forged'").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("shop", "shop"),
+    ("  my  ‮shop\x00\n ", "my shop"),
+    ("line break", "line break"),
+    ("", None), ("   ", None), ("\x07\x1b", None), (None, None), (7, None),
+    ("x" * 60, "x" * 60),
+    ("x" * 61, "x" * 59 + "…"),
+])
+def test_the_sanitizer_keeps_plain_text_and_caps_the_length(raw, expected):
+    from connections.app_source_folder import clean_folder_label
+
+    assert clean_folder_label(raw) == expected
+
+
+def test_a_hostile_folder_name_comes_over_as_a_short_plain_label(tmp_path):
+    db = _db()
+    folder = tmp_path / ("a‮b" + "z" * 120)
+    folder.mkdir()
+    _claude_config(tmp_path, folder, {"Postgres": {"command": "npx"}})
+    row = _import(tmp_path, db)
+    assert len(row["folder"]) == 60 and row["folder"].endswith("…")
+    assert "‮" not in row["folder"] and get_app(row["id"], db=db)["source_folder"] == row["folder"]
