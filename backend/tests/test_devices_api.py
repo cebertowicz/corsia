@@ -11,10 +11,12 @@ import api.devices as devices_api
 import api.system as system_api
 from core.device_pairing import DevicePairing
 from core.devices_runtime import DevicesRuntime, runtime
+from infra import dns_sd
 from infra.auth import require_human_user
-from infra.devices_listener import DevicesApp
+from infra.devices_listener import DevicesApp, DevicesListener
 from infra.settings import set_devices_enabled
 from main import app
+from tests.test_dns_sd import _DNSLibrary, _install_dns_seams
 
 
 def test_devices_switch_has_one_person_only_writer(monkeypatch):
@@ -234,6 +236,87 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
         "state": "active",
         "expires_at": devices_listener.json()["code"]["expires_at"],
     }
+
+
+_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "lan_addresses", "code"}
+_NAME_CONFLICT = -65548
+
+
+def _register_conflict():
+    return _DNSLibrary(register_results=[_NAME_CONFLICT]), lambda library, announcement: None
+
+
+def _callback_conflict():
+    def report(library, _announcement):
+        library.callback(None, 0, _NAME_CONFLICT, None, None, None, None)
+
+    return _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR]), report
+
+
+def _daemon_lost():
+    def lose(library, announcement):
+        announcement._process(library)
+        announcement._process(library)
+
+    library = _DNSLibrary(
+        register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR, dns_sd._KDNS_SERVICE_ERR_NO_ERROR],
+        process_results=[dns_sd._KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING] * 2,
+    )
+    return library, lose
+
+
+def _response_keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _response_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _response_keys(item)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [_register_conflict, _callback_conflict, _daemon_lost],
+    ids=["register-conflict", "callback-conflict", "daemon-lost"],
+)
+def test_devices_status_omits_dns_sd_failure_cause(monkeypatch, failure):
+    """G12: a DNS-SD failure reaches GET /api/devices only as no announced name."""
+    import core.devices_runtime as devices_runtime
+
+    library, fail = failure()
+    with pytest.MonkeyPatch.context() as dns_seams:
+        _install_dns_seams(dns_seams, library)
+        announcement = dns_sd.DNSServiceAnnouncement(47901)
+        announcement.start()
+        fail(library, announcement)
+    raw_error = announcement.error
+    assert raw_error is not None and "DNS-SD" in raw_error
+    listener = DevicesListener(app, port=47901, announcement=announcement)
+    runtime.pairing.disable()
+    runtime.pairing.enable()
+    monkeypatch.setattr(runtime, "listener", listener)
+    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio.local")
+    monkeypatch.setattr(devices_runtime, "lan_addresses", lambda *, include_link_local: ["192.168.1.20"])
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        devices_api.require_human_user,
+        lambda: {"id": "person", "token_kind": "session"},
+    )
+
+    response = TestClient(app, client=("127.0.0.1", 1234)).get("/api/devices")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == _DOCUMENTED_DEVICES_KEYS
+    assert body["listening"] == {"port": 47901}
+    assert body["announced_name"] is None
+    assert body["code"] == {"state": "none", "expires_at": None}
+    assert not {"cause", "error", "reason", "detail", "message"} & set(_response_keys(body))
+    assert raw_error not in response.text
+    assert "DNS-SD" not in response.text
+    assert str(_NAME_CONFLICT) not in response.text
+    assert str(dns_sd._KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING) not in response.text
 
 
 def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
