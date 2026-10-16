@@ -13,7 +13,7 @@ against the connector manifest's live filterable fields.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -142,7 +142,8 @@ def list_rules(connector: str, *, enabled_only: bool = True, db=None) -> list[Ru
                + ("AND enabled=1 " if enabled_only else "")
                + "ORDER BY precedence ASC, created_at ASC")
         rows = _db.execute(sql, (connector,)).fetchall()
-        return [_row_to_rule(r) for r in rows]
+        resolved = (_resolve_designation(_row_to_rule(r), _db) for r in rows)
+        return [r for r in resolved if r is not None]
     finally:
         if not db:
             _db.close()
@@ -282,3 +283,54 @@ def bind_owner(envelope: EventEnvelope, *, repair_owner: str | None = None,
     """Envelope-shaped wrapper over :func:`bind_owner_for`."""
     return bind_owner_for(envelope.artifact_ref, envelope.facts,
                           envelope.connector, repair_owner=repair_owner, db=db)
+
+# ── Rules that follow a designation ──────────────────────────────────────────
+
+DESIGNATION_PREFIX = "designation:"
+WORKSPACE_DESIGNATION_SCOPE = DESIGNATION_PREFIX + "workspace"
+
+
+def ensure_designation_rule(
+    *, connector: str, fact: str, value: str, precedence: int = 100,
+    designation: str = "workspace", db=None,
+) -> Rule | None:
+    """Create (once) a rule that routes to a scope coordinator and follows it.
+
+    ``designation`` is ``'workspace'`` (the CORSIA agent) or a project id
+    (that project's conductor). The persisted destination is a creation-time
+    placeholder; reads resolve the current designation, so a move needs no
+    copied owner to keep current and no sweep. Returns None while unassigned.
+    """
+    rule_scope = DESIGNATION_PREFIX + designation
+    with write_transaction(db, scope="ensure_designation_rule") as _db:
+        existing = _db.execute(
+            "SELECT * FROM connection_rules WHERE scope=? AND connector=? "
+            "AND fact=? AND value=? AND enabled=1",
+            (rule_scope, connector, fact, str(value)),
+        ).fetchone()
+        if existing is not None:
+            return _resolve_designation(_row_to_rule(existing), _db)
+        designated = _designated_thread(designation, _db)
+        if not designated:
+            return None
+        return create_rule(
+            connector=connector, fact=fact, value=value,
+            destination_thread_id=designated, scope=rule_scope,
+            precedence=precedence, db=_db,
+        )
+
+
+def _designated_thread(designation: str, db) -> str | None:
+    from infra.conductor import get_scope_coordinator
+
+    return get_scope_coordinator(designation, db=db)
+
+
+def _resolve_designation(rule: Rule, db) -> Rule | None:
+    """A designation rule pointed at the current designee; None when undesignated."""
+    if not rule.scope.startswith(DESIGNATION_PREFIX):
+        return rule
+    designated = _designated_thread(rule.scope[len(DESIGNATION_PREFIX):], db)
+    if not designated:
+        return None
+    return replace(rule, destination_thread_id=designated)

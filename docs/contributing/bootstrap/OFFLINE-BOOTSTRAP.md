@@ -286,9 +286,9 @@ protected base checkouts, branch pinning, and `worktree_create` actually
 work (`project_repo_policies.project_id` is `NOT NULL`,
 `backend/infra/schema.py`). That is the conductor's job, next.
 
-1. **Open the workspace conductor from the rail.** The first account creates
-   the workspace conductor automatically. `PUT /api/conductor` remains the
-   re-designation API if that conductor ever needs to be replaced.
+1. **Open the CORSIA agent from the rail.** The first account creates
+   the CORSIA agent automatically. `PUT /api/corsia-agent` remains the
+   re-designation API if that agent ever needs to be replaced.
 2. **Hand off.** Tell the human: open that thread and ask it to run the
    `conductor-bootstrap` skill, naming this as a contributor workspace so it
    also follows [`contributor-workspace.md`](contributor-workspace.md) in this directory. From there the

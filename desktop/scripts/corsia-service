@@ -30,7 +30,9 @@ bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info_pli
 export CORSIA_SERVICE_GENERATION="$bundle_short_version+$bundle_version"
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
-login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
+# -P keeps the current directory off sys.path, so only the bundle's
+# cli_location answers, whatever directory the launcher starts in.
+login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -P -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
 base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 # Bundled Git's exec path leads, ahead of the login PATH, so a plain `git` never
 # reaches /usr/bin/git, which asks to install the Command Line Tools on a Mac

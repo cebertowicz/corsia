@@ -1,11 +1,17 @@
 """Counterexamples from the independent review exercise real broker boundaries."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 
 import pytest
 
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 from tools.corsia_api import CorsiaApiTool, _scope
@@ -16,7 +22,7 @@ def _setup():
     try:
         actor = make_session(db, prefix="conductor")
         other = make_session(db, prefix="other")
-        assert set_conductor("workspace", actor, db=db)
+        assert set_corsia_agent(actor, db=db)
         return actor, other
     finally:
         db.close()

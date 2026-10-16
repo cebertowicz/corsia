@@ -83,6 +83,7 @@ pluggy==1.6.0
 propcache==0.5.2
 protobuf==7.36.2
 psutil==7.2.2
+publicsuffixlist==1.1.0.20261010
 pycparser==3.0
 pycrdt==0.14.8
 pydantic==2.13.4

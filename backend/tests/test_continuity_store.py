@@ -395,7 +395,16 @@ def test_thread_delete_cascades():
 
 def test_purge_drops_continuity_while_the_session_row_survives():
     conn = _db()
-    _add(conn)
+    conn.execute("""CREATE TABLE lesson_placement_checks (
+        thread_id TEXT, history_epoch INTEGER, entry_id INTEGER, revision INTEGER,
+        check_name TEXT, flag TEXT, override_reason TEXT, created_at TEXT
+    )""")
+    entry = _add(conn)
+    conn.execute(
+        """INSERT INTO lesson_placement_checks(
+            thread_id,history_epoch,entry_id,revision,check_name,flag,created_at
+        ) VALUES ('t1',0,? ,1,'incident-details','date','now')""", (entry,),
+    )
 
     # Purge keeps the session row, so the cascade never fires and this explicit
     # delete is the only thing stopping condensed content outliving its thread.
@@ -404,3 +413,4 @@ def test_purge_drops_continuity_while_the_session_row_survives():
     assert conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM continuity_entries").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM continuity_store").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM lesson_placement_checks").fetchone()[0] == 0

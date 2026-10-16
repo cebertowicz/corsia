@@ -137,7 +137,7 @@ describe('SettingsUpdate', () => {
 		expect(host.textContent).toContain('Last update');
 		expect(host.textContent).toContain("Couldn't download the update.");
 		expect(host.textContent).toContain('CORSIA kept running and nothing was changed.');
-		expect(host.textContent).toContain('Your workspace conductor has been told.');
+		expect(host.textContent).toContain('The CORSIA agent has been told.');
 		expect(host.textContent).not.toContain('\u234c');
 		const details = host.querySelector('details')!;
 		expect(details.querySelector('summary')?.textContent?.trim()).toBe('Details');

@@ -80,12 +80,12 @@ def _live_fetch_due(state: dict[str, int | str | None], now: datetime) -> bool:
 
 def _prepare_check() -> tuple[dict[str, Any] | None, str | None, str | None]:
     """Read/claim durable state on a DB worker before any async delivery."""
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db, write_transaction
 
     db = get_db()
     try:
-        conductor = get_conductor(WORKSPACE_SCOPE, db=db)
+        conductor = get_corsia_agent(db=db)
         with write_transaction(db, scope="prepare_system_bulletin_delivery"):
             pending = bulletin_ledger.pending_system_change(db)
         preferences = bulletins.live_preferences(db)

@@ -25,7 +25,8 @@ def _build(root: Path, context: str, system_skills: dict[str, str],
            kit_skills: dict[str, str] | None = None,
            project_skills: dict[str, str] | None = None,
            system_references: dict[str, dict[str, str]] | None = None,
-           conductor: str = "Use skill `conductor-bootstrap`.\n") -> None:
+           conductor: str = "Use skill `conductor-bootstrap`.\n",
+           corsia_agent: str = "Use skill `conductor-bootstrap`.\n") -> None:
     files = []
 
     def add(rel: str, kind: str, text: str) -> None:
@@ -45,6 +46,7 @@ def _build(root: Path, context: str, system_skills: dict[str, str],
     for name, text in (project_skills or {}).items():
         _write(root, f"{KIT}/project-skills/{name}/SKILL.md", text)
     _write(root, "backend/prompts/conductor/core-v2.md", conductor)
+    _write(root, "backend/prompts/conductor/corsia-agent-v2.md", corsia_agent)
     _write(root, f"{SYSTEM}/MANIFEST.json", json.dumps({"files": files}))
 
 
@@ -165,6 +167,27 @@ def test_missing_conductor_prompt_fails(tmp_path: Path):
     errors = compute(tmp_path).errors
 
     assert any("closure source missing on disk" in error for error in errors)
+
+
+def test_corsia_agent_prompt_declarations_seed_closure(tmp_path: Path):
+    _build(
+        tmp_path, "x\n", _baseline({"agent-only": "x\n"}),
+        corsia_agent="Use skill `agent-only`.\n",
+    )
+
+    result = compute(tmp_path)
+
+    assert "agent-only" in result.computed
+    assert "backend/prompts/conductor/corsia-agent-v2.md:1" in result.chains["agent-only"]
+
+
+def test_missing_corsia_agent_prompt_fails(tmp_path: Path):
+    _build(tmp_path, "x\n", _baseline())
+    (tmp_path / "backend/prompts/conductor/corsia-agent-v2.md").unlink()
+
+    errors = compute(tmp_path).errors
+
+    assert any("corsia-agent-v2.md" in error for error in errors)
 
 
 def test_missing_manifest_fails(tmp_path: Path):

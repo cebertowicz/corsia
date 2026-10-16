@@ -18,7 +18,7 @@
     "/api/threads/{thread_id}/context-snapshot/next-turn"
   ],
   "progress_every": 100,
-  "reason": "Hosted speed-gate run 38217142983 re-recorded /api/measurement/agents and /api/measurement/series.",
+  "reason": "The workspace scope's agent moved from /api/conductor?scope=workspace to /api/corsia-agent; the old read now answers 404 by design.",
   "routes": {
     "/api/agents": {
       "bytes": 221,
@@ -55,7 +55,7 @@
       "statements": 1,
       "steps": 0
     },
-    "/api/conductor": {
+    "/api/corsia-agent": {
       "bytes": 78,
       "statements": 2,
       "steps": 0

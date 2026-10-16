@@ -100,6 +100,8 @@ def _gmail_payload(message_id: str, thread_id: str, sender: str,
         "message_id": message_id, "thread_id": thread_id,
         "from": sender, "to": "me@example.com", "label": label,
         "subject": "hello", "snippet": "first contact",
+        # Screened, unflagged, needs the person now: the declared actionable rule.
+        "screen_status": "screened", "injection": False, "needs_person": "now",
     }
 
 
@@ -175,8 +177,9 @@ GMAIL_REPEAT = _add(Scenario(
     event_class="actionable",
     resolution="path_a_resolve", disposition="owner_digest",
     acs=("AC-2.1", "AC-1.6"), slice_owner="S4",
-    notes="event_class is type-level (email.received=actionable); the digest vs "
-          "wake split is a lifecycle decision in the S4 disposition table.",
+    notes="email.received is informational by type; its actionable_when fact rule "
+          "promotes this message. The digest vs wake split is a lifecycle "
+          "decision in the S4 disposition table.",
 ))
 
 GITHUB_PR = _add(Scenario(

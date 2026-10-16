@@ -149,7 +149,7 @@ def _create_account(
     require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
     before_commit=None,
 ):
-    """Insert the account (and the first one's conductor) in one transaction.
+    """Insert the account (and the first one's CORSIA agent) in one transaction.
 
     ``before_commit`` runs as its last step. Returns the effects owed after
     the commit, for the caller to run once it has seen the commit succeed.
@@ -176,11 +176,9 @@ def _create_account(
             (name, encoded, now, now),
         )
         if not had_users:
-            from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
+            from infra.corsia_agent import ensure_corsia_agent
 
-            conductor_id = ensure_scope_conductor(
-                WORKSPACE_SCOPE, name, model=None, db=conn,
-            )
+            conductor_id = ensure_corsia_agent(name, model=None, db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -221,10 +219,13 @@ def create_user(
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
-    The first account also gets the workspace conductor; ``first_run_wake``
-    queues that conductor's first-run wake in the same transaction. Only a caller
-    with no person waiting on the conductor (the eval harness) passes False.
-    First-account callers use :func:`create_first_account`, which enforces the data-owner rule.
+    The first account also gets the CORSIA agent; ``first_run_wake``
+    queues that agent's first-run wake in the same transaction. Only a
+    caller with no person waiting on the CORSIA agent (the eval harness)
+    passes False. ``require_first`` atomically refuses if another account
+    already exists. Callers that create the install's first account on behalf of
+    a person use :func:`create_first_account`, which also enforces the
+    data-owner rule.
     """
     name, encoded = _credentials(username, password)
     _create_account(name, encoded, db=db, first_run_wake=first_run_wake)()

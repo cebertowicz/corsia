@@ -13,7 +13,7 @@ from core.thread_identity import thread_agent_identity
 from core.skill_scanning import skill_files
 from core.system_tier import system_tier_manifest
 from core.workspace_layout import ThreadRootResolver, resolve_workspace_root
-from infra.conductor import workspace_conductor_id
+from infra.corsia_agent import corsia_agent_thread_id
 from infra.guidance_git import MAX_GUIDANCE_BYTES
 
 SOURCE_DISCOVERY_ISSUE = "Read-only guidance source discovery (legacy issue #3364)"
@@ -44,8 +44,8 @@ def _source_rows(db, thread_ids: tuple[str, ...], user_id: str):
                ) AS root_is_project_conductor,
                (
                    SELECT value FROM settings
-                   WHERE key = 'workspace_conductor_session_id'
-               ) AS workspace_conductor_value
+                   WHERE key = 'corsia_agent_thread_id'
+               ) AS corsia_agent_value
         FROM ancestry
         JOIN threads AS thread ON thread.id = ancestry.id
         JOIN threads AS root ON root.id = ancestry.root_id
@@ -98,9 +98,9 @@ def source_inputs(db, workspace: Path, scope) -> tuple[dict, list, list]:
         root_id = str(row["root_id"])
         grouped = by_root.setdefault(root_id, {})
         grouped[str(row["id"])] = row
-    workspace_conductor = (
-        workspace_conductor_id({"value": rows[0]["workspace_conductor_value"]})
-        if rows and rows[0]["workspace_conductor_value"] is not None
+    corsia_agent = (
+        corsia_agent_thread_id({"value": rows[0]["corsia_agent_value"]})
+        if rows and rows[0]["corsia_agent_value"] is not None
         else None
     )
     # Each filesystem call releases the GIL, so a project's planning root and a thread's
@@ -142,8 +142,13 @@ def source_inputs(db, workspace: Path, scope) -> tuple[dict, list, list]:
             unavailable.append({"path": f"thread://{thread}/roles",
                                 "reason": f"role source resolution unavailable: {type(exc).__name__}"})
             continue
-        is_conductor = bool(root_row["root_is_project_conductor"]) or thread == workspace_conductor
-        selected_roles = ROLE_ORDER if is_conductor else (("agent",) if is_agent else ())
+        selected_roles = tuple(
+            role for role in ROLE_ORDER
+            if (role == "agent" and (is_agent or thread == corsia_agent
+                                     or bool(root_row["root_is_project_conductor"])))
+            or (role == "conductor" and bool(root_row["root_is_project_conductor"]))
+            or (role == "corsia_agent" and thread == corsia_agent)
+        )
         role_roots = [RoleScopeRoot("workspace", "workspace", workspace_root)]
         if project_id and planning is not None:
             role_roots.append(RoleScopeRoot("project", str(project_id), project_roots.canonical(planning)))
