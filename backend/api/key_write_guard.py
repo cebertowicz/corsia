@@ -11,7 +11,7 @@ Load-bearing properties:
 
 - **Wrong passwords here never touch sign-in's throttle** (``api.auth``), so
   an agent cannot use them to lock the owner out of sign-in.
-- **Three wrong in a row end that session only** (``accounts.revoke_token``);
+- **Three wrong in a row end that session only** (``token_admin.revoke_token``);
   the person's other sessions stay signed in. The count is per session in the
   database, so a restart does not reset it; only a correct password does.
 - **An attempt is reserved before it waits.** Each request takes a place in
@@ -34,7 +34,7 @@ from typing import Callable
 
 from fastapi import HTTPException
 
-from infra import accounts
+from infra import accounts, token_admin
 from infra.database import write_transaction
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
@@ -90,7 +90,7 @@ def _record_wrong(token: str) -> bool:
         if int(row[0]) < MAX_WRONG:
             return False
         conn.execute("DELETE FROM key_write_attempts WHERE token_hash = ?", (digest,))
-        accounts.revoke_token(token, db=conn)
+        token_admin.revoke_token(token, db=conn)
         return True
 
 

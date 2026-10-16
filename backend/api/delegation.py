@@ -10,7 +10,7 @@ from loguru import logger
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_in_db
-from infra.conductor import get_conductor_scopes
+from infra.conductor import get_coordination_scopes
 from infra.delegation import DelegationModelRequired, require_explicit_thread_model
 from infra.delegation_scope import target_scope_authority, validate_send_target_scope
 from infra.execution_class import is_subagent
@@ -352,7 +352,7 @@ async def thread_status(thread_id: str, token: str, messages: int = 5):
             "WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
             (thread_id, n),
         ).fetchall() if n else []
-        conductor_scopes = get_conductor_scopes(thread_id, db=db)
+        conductor_scopes = get_coordination_scopes(thread_id, db=db)
         db.close()
         return dict(thread_row), (dict(active) if active else None), \
             conductor_scopes, \

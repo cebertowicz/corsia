@@ -104,6 +104,8 @@
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
+		position: relative;
+		--check-top: calc(6px + 0.5lh); /* the first line's centre: the figures may wrap to a second line */
 		display: flex; align-items: baseline; gap: 8px;
 		width: 100%; box-sizing: border-box;
 		padding: 6px 10px 6px 32px;
@@ -115,8 +117,8 @@
 	button.account-usage-row.picker:hover:not(:disabled):not(.marked) { background: var(--bg-hover); }
 	button.account-usage-row.picker:disabled { cursor: default; }
 	.account-usage-row.picker.blocked { color: var(--text-secondary); }
-	/* The account's selected fill shares the model row's inset; its label remains aligned with the model status dot. */
-	.account-usage-row.picker.marked { margin-left: 22px; width: calc(100% - 22px); padding-left: 10px; background: color-mix(in srgb, var(--violet) 10%, transparent); }
+	/* The selected account only gains the fill, as the model row does: its content stays where an unselected row's is, and its check enters the left gutter. */
+	.account-usage-row.picker.marked { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 	/* Rollover rows use the model-dot gutter for their order and the model-row gap before the account label. */
 	.account-usage-row.picker.ordered { padding-left: 32px; gap: 3px; }
 	.picker.ordered .order { flex: 0 0 14px; margin: 0; text-align: center; color: var(--text-tertiary); font-size: var(--text-caption); font-weight: 600; }
@@ -130,7 +132,7 @@
 	.figures .amber { color: var(--amber-text); }
 	.figures .red { color: var(--red-text); }
 	/* The model rows' own pending marker, so a held account choice reads as a held model switch does. */
-	.switch-marker { font-size: var(--text-caption); color: var(--accent); white-space: nowrap; }
+	.switch-marker { font-size: var(--text-caption); color: var(--accent-text); white-space: nowrap; }
 	@media (max-width: 480px) {
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */

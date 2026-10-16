@@ -7,6 +7,12 @@ after admission with "Codex context changed before provider delivery".
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -45,7 +51,7 @@ async def test_idle_owner_wake_after_context_change_is_delivered(
     main_db, monkeypatch, invalidate,
 ):
     """Every invalidated idle session is replaced by a fresh one, never rejected."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.thread_execution import execute_claimed_batch
     from llm.resolution import resolve_execution_target
     from registry.service import register_codex_thread
@@ -75,7 +81,7 @@ async def test_idle_owner_wake_after_context_change_is_delivered(
     monkeypatch.setitem(_APP_SESSIONS, "main-1", idle)
     monkeypatch.setitem(_CODEX_THREADS, "main-1", idle.codex_thread_id)
     if invalidate == "epoch":
-        assert set_conductor("workspace", "main-1", db=main_db)
+        assert set_corsia_agent("main-1", db=main_db)
     if invalidate == "window":
         main_db.execute(
             "UPDATE models SET context_window=context_window+1000 WHERE id=?",

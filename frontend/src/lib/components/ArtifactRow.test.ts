@@ -98,6 +98,18 @@ describe('ArtifactRow external links', () => {
 		expect(get(toasts)).toHaveLength(0);
 	});
 
+	it('opens row actions from a focused disabled artifact with the ContextMenu key', () => {
+		mountRow(externalLinkNode({ external_id: 'not-a-pr-id' }));
+
+		const row = host.querySelector<HTMLElement>('.row.disabled');
+		expect(row?.getAttribute('tabindex')).toBe('0');
+		expect(row?.getAttribute('aria-disabled')).toBe('true');
+		row!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
+		flushSync();
+
+		expect(document.querySelector('[role="menu"]')?.textContent).toContain('Remove from pane');
+	});
+
 	it('shows the passive reply glyph with its accessible name when waiting', () => {
 		mountRow(externalLinkNode({ reply_waiting: true }));
 

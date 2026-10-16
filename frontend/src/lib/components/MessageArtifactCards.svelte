@@ -127,7 +127,7 @@
 		font-size: var(--text-subhead);
 		cursor: pointer;
 	}
-	.more:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+	.more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	@media (pointer: coarse) { .more { min-height: 36px; } }
 	/* A phone scrolls the strip instead of wrapping it; while more lies to the right, the next chip peeks under the
 	   edge fade as the cue, and once scrolled the leading edge fades the same way. A chip's focus ring is inset, so the scroller has nothing to clip. */

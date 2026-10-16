@@ -108,7 +108,7 @@
 		letter-spacing: inherit; cursor: pointer;
 	}
 	.group-jump:focus-visible {
-		outline: 2px solid var(--violet); outline-offset: 3px; border-radius: var(--radius-xs);
+		outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-xs);
 	}
 	.group-summary { color: var(--text-tertiary); font-size: var(--text-caption); }
 	.more-toggle {
@@ -117,12 +117,12 @@
 		font-size: var(--text-caption); cursor: pointer;
 	}
 	.more-toggle:focus-visible {
-		outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-xs);
+		outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs);
 	}
 	.group-rows.complete { opacity: 0.82; }
 	/* Hover colour is for a pointer; a tap leaves :hover stuck on the last target. */
 	@media (hover: hover) {
-		.group-jump:hover { color: var(--violet-text); }
+		.group-jump:hover { color: var(--accent-text); }
 		.more-toggle:hover { color: var(--text-primary); }
 	}
 	@media (max-width: 620px) {

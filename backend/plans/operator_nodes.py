@@ -79,6 +79,9 @@ def _present_node(
         "kind": node["kind"],
         "title": node["title"],
         "description": node["description"],
+        # A person step names only this plan's open dependents; cross-plan
+        # dependents remain private to their plan owner.
+        "waiting_on": node["dependent_titles"] if node["assignee"] == "user" else [],
         "acceptance_criteria": node["acceptance_criteria"],
         "state": node["state"],
         "unmet_dependencies": list(node["unmet_dependencies"]),
@@ -285,12 +288,18 @@ def _apply_branches(
     for node, row in zip(nodes, raw):
         node["folded"] = node["id"] in fold
         node["scheduled_until"] = scheduled[node["id"]]
+        # A parent with its own ask on the user has an obligation of its own, so it
+        # reads as itself and its ask is counted once, here; its leaves count theirs.
+        node["container"] = (
+            node["id"] in parents and is_container(row, True)
+            and not node["requires_user_action"]
+        )
         if node["id"] not in parents:
             node["status_reason"] = node["status_reason"] or _queued_reason(node)
             continue
         own = counts[node["id"]]
         node["branch_progress"] = {"done": own["done"], "total": sum(own.values())}
-        if is_container(row, True):
+        if node["container"]:
             node["requires_user_action"] = needs_user[node["id"]]
             node["display"] = branch_display(
                 own, needs_user=needs_user[node["id"]], working=working[node["id"]],

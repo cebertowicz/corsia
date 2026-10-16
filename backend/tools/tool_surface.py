@@ -19,9 +19,17 @@ from __future__ import annotations
 
 import difflib
 import json
+import re
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from tools.base import Tool
+from tools.connected_app_visibility import (
+    connected_app_reach_refusal,
+    mcp_app_id,
+    mcp_tool_reaches_thread,
+    mcp_tool_visible_here,
+)
 from tools.catalog import (
     TOOL_CATALOG,
     TOOL_PACKS,
@@ -75,26 +83,109 @@ def dispatch_metadata(name: str, arguments: Any) -> dict[str, str]:
 
 _MCP_SUMMARY_CHARS = 120
 
+# A person reads an app by its maker's name; unknown apps keep their configured name.
+_APP_DISPLAY_NAMES = {
+    "github": "GitHub", "filesystem": "Files", "playwright": "Playwright",
+    "linear": "Linear", "notion": "Notion", "atlassian": "Atlassian",
+    "stripe": "Stripe", "sentry": "Sentry", "postgres": "Postgres", "slack": "Slack",
+}
+
+
+def app_display_name(server: str) -> str:
+    """The name the context sheet shows for a connected app."""
+    return _APP_DISPLAY_NAMES.get(server.lower(), server)
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_CAMEL = re.compile(r"([a-z])([A-Z])")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
+_PURPOSE_TOPICS = 6
+# Generic verbs and filler that say nothing about what a server is for.
+_PURPOSE_STOP = frozenset({
+    "get", "list", "create", "update", "delete", "add", "remove", "read", "write",
+    "search", "post", "patch", "put", "retrieve", "set", "edit", "move", "handle",
+    "run", "show", "a", "an", "the", "of", "to", "or", "and", "by", "for", "in",
+    "api", "mcp", "multiple", "all", "new", "request", "file", "with", "open",
+})
+
+
+def _one_line(value: str) -> str:
+    """Control characters become spaces; the line is capped at the index width."""
+    return _CONTROL.sub(" ", value).strip()[:_MCP_SUMMARY_CHARS]
+
+
+def _first_line(tool: Tool) -> str:
+    """A tool's first description line, as the index and the server listing show it."""
+    lines = (tool.description or "").strip().splitlines()
+    return _one_line(lines[0] if lines else tool.name)
+
+
+def _server_tools(registry: ToolRegistry) -> dict[str, list[Tool]]:
+    """Group the configured MCP tools by server, in each server's own discovery order."""
+    grouped: dict[str, list[Tool]] = {}
+    for tool in _user_configured_in_order(registry):
+        if not mcp_tool_visible_here(tool):
+            continue
+        server = getattr(tool, "mcp_server_name", None)
+        if isinstance(server, str) and server:
+            grouped.setdefault(server, []).append(tool)
+    return dict(sorted(grouped.items()))
+
+
+def _topics(tools: list[Tool]) -> list[str]:
+    """The words the server's own tool names repeat most: count, then first appearance."""
+    counts: Counter[str] = Counter()
+    first: dict[str, int] = {}
+    for position, tool in enumerate(tools):
+        name = getattr(tool, "mcp_tool_name", None) or tool.name
+        for word in re.split(r"[_\-\s]+", _CAMEL.sub(r"\1_\2", name)):
+            word = word.lower()
+            if word and word not in _PURPOSE_STOP and len(word) >= 3:
+                counts[word] += 1
+                first.setdefault(word, position)
+    return sorted(counts, key=lambda word: (-counts[word], first[word]))[:_PURPOSE_TOPICS]
+
+
+def _server_purpose(name: str, tools: list[Tool]) -> str:
+    """What one server is for: an override, its own instructions, one tool, then its names."""
+    config = getattr(tools[0], "mcp_server_config", None) or {}
+    override = config.get("purpose")
+    if isinstance(override, str) and override.strip():
+        return _one_line(override)
+    instructions = getattr(tools[0], "mcp_instructions", None)
+    if isinstance(instructions, str) and instructions.strip():
+        return _one_line(_SENTENCE_END.split(instructions.strip(), maxsplit=1)[0])
+    if len(tools) == 1:
+        return _first_line(tools[0])
+    return ", ".join(_topics(tools)) or _one_line(name)
+
+
+def _server_label(name: str) -> str:
+    return _CONTROL.sub("", name)
+
 
 def pack_index(registry: ToolRegistry) -> str:
-    """Render the always-on index: one line per non-core tool, by pack.
-
-    Tools from the user's configured MCP servers follow under their own
-    heading; they load by name, not by pack.
-    """
+    """Render the always-on index: core packs plus one line per MCP server."""
     lines = []
     for pack, names in pack_members().items():
-        if not names:
-            continue
-        lines.append(f"[{pack}] {TOOL_PACKS[pack]}")
-        lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in names)
-    configured = _user_configured(registry)
-    if configured:
-        lines.append("[mcp] Tools from your configured MCP servers (load by name)")
-        for tool in configured:
-            summary = (tool.description.strip().splitlines() or [tool.name])[0]
-            lines.append(f"- {tool.name}: {summary[:_MCP_SUMMARY_CHARS]}")
+        if names:
+            lines.append(f"[{pack}] {TOOL_PACKS[pack]}")
+            lines.extend(f"- {name}: {TOOL_CATALOG[name].summary}" for name in names)
+    servers = _server_tools(registry)
+    if servers:
+        lines.append('[mcp] Tool servers. Load one with tools_load(server="<name>") to see its tools.')
+        lines.extend(
+            f"- {_server_label(name)}: {len(tools)} tool{'s' if len(tools) != 1 else ''}; "
+            f"{_server_purpose(name, tools)}"
+            for name, tools in servers.items()
+        )
     return "\n".join(lines)
+
+
+def _user_configured_in_order(registry: ToolRegistry) -> list[Tool]:
+    """Configured tools in registration order, which is each server's discovery order."""
+    tools = (registry.get(name) for name in registry.tool_names)
+    return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
 def _user_configured(registry: ToolRegistry) -> list[Tool]:
@@ -102,14 +193,26 @@ def _user_configured(registry: ToolRegistry) -> list[Tool]:
     return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
+
+def _hidden_mcp_tool(registry: ToolRegistry, name: str) -> bool:
+    tool = registry.get(name)
+    return bool(tool and tool.user_configured and not mcp_tool_visible_here(tool))
+
+
 def _labelled(name: str) -> str:
     pack = tool_pack(name)
     return f"{name} (pack {pack})" if pack else name
 
 
-def reachable_tool_names(registry: ToolRegistry) -> list[str]:
+def reachable_tool_names(
+    registry: ToolRegistry, *, include_unreachable_mcp: bool = False,
+) -> list[str]:
     """Return the registered tools ``tools_load`` and ``tool_call`` may reach."""
-    configured = {tool.name for tool in _user_configured(registry)}
+    configured = {
+        tool.name
+        for tool in _user_configured(registry)
+        if include_unreachable_mcp or mcp_tool_visible_here(tool)
+    }
     return [
         name for name in registry.tool_names
         if is_reachable(name) or name in configured
@@ -172,6 +275,10 @@ class ToolsLoadTool(Tool):
                     "enum": list(TOOL_PACKS),
                     "description": "Load every tool in this pack.",
                 },
+                "server": {
+                    "type": "string",
+                    "description": "Load the per-tool index for one connected MCP server.",
+                },
                 "names": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -185,14 +292,38 @@ class ToolsLoadTool(Tool):
         }
 
     async def execute(
-        self, pack: str | None = None, names: list[str] | None = None, **_: Any,
+        self, pack: str | None = None, names: list[str] | None = None,
+        server: str | None = None, **_: Any,
     ) -> str:
-        """Return the requested schemas and how to call them."""
+        """Return requested schemas, or a connected server's compact tool index."""
+        servers = _server_tools(self._registry)
+        if server is not None:
+            if any(
+                getattr(tool, "mcp_server_name", None) == server
+                and not mcp_tool_visible_here(tool)
+                for tool in _user_configured(self._registry)
+            ):
+                return connected_app_reach_refusal()
+            tools = servers.get(server)
+            if tools is None:
+                state = getattr(self._registry, "mcp_server_states", {}).get(server)
+                if state:
+                    return f"Error: MCP server '{server}' is not connected: {state}."
+                known = ", ".join(servers) or "(none)"
+                return f"Error: MCP server '{server}' is not connected. Known connected servers: {known}."
+            lines = [
+                f"Tools on {_server_label(server)}. Load by name with tools_load(names=[...]), "
+                "then call with tool_call.",
+            ]
+            lines.extend(f"- {tool.name}: {_first_line(tool)}" for tool in tools)
+            return "\n".join(lines)
         requested = list(pack_members().get(pack, ())) if pack else []
         for name in names or ():
             canonical = normalize_tool_name(name)
             if canonical not in requested:
                 requested.append(canonical)
+        if any(_hidden_mcp_tool(self._registry, name) for name in requested):
+            return connected_app_reach_refusal()
         reachable = reachable_tool_names(self._registry)
         found = [name for name in requested if name in reachable]
         missing = [name for name in requested if name not in found]

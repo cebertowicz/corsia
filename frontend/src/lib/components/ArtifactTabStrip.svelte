@@ -41,7 +41,9 @@
 					onclick={() => onSelect(key)}
 					onkeydown={(e) => onKeydown(e, i)}
 				>
-					{#if t.kind !== 'document'}
+					{#if t.kind === 'browser'}
+							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9S14.4 18.5 12 21M12 3C9.6 5.5 8.4 8.5 8.4 12S9.6 18.5 12 21" /></svg>
+					{:else if t.kind !== 'document'}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" /></svg>
 						{:else if imageTabIds.has(key)}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 9" /></svg>
@@ -86,9 +88,10 @@
 		gap: 2px;
 	}
 	.tabs::-webkit-scrollbar { display: none; }
+	/* A tab is a pill in the transcript's pill geometry (32 px, fully round); wide enough for a typical file name. */
 	.tab-wrap {
 		display: flex; align-items: center; flex-shrink: 0;
-		max-width: 200px; margin: 6px 0; border-radius: var(--radius-sm);
+		max-width: 260px; height: 32px; margin: auto 0; border-radius: var(--radius-pill);
 		color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-medium);
 	}
 	/* Hover eases in; the active mark moves in the same frame as the content it labels, never fading behind it. */
@@ -96,10 +99,10 @@
 	.tab-wrap.active { background: var(--bg-active); color: var(--text-primary); transition: none; }
 	.tab {
 		display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%;
-		padding: 0 2px 0 10px; background: none; border: none; cursor: pointer;
+		padding: 0 2px 0 12px; background: none; border: none; cursor: pointer;
 		color: inherit; font: inherit;
 	}
-	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-pill); }
 	.tab-ico { flex-shrink: 0; }
 	.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 	.tab-err {
@@ -114,7 +117,7 @@
 	.tab-ro { flex-shrink: 0; display: flex; color: var(--text-tertiary); }
 	.tab-close {
 		display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-		width: 18px; height: 18px; margin-right: 6px; border-radius: var(--radius-2xs);
+		width: 18px; height: 18px; margin-right: 8px; border-radius: var(--radius-circle);
 		background: none; border: none; cursor: pointer; color: inherit; opacity: 0.7;
 	}
 	.tab-close:hover { opacity: 1; background: var(--bg-hover); color: var(--red); }

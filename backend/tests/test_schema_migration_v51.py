@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from tests.schema_rewind import rewind_to_v88_policy
 
 from contextlib import closing
@@ -10,7 +16,7 @@ import sqlite3
 
 import pytest
 
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from infra.database_migrations import migrate_to_current
 from infra.fresh_threads import create_fresh_thread
@@ -19,7 +25,7 @@ from tools.agent_roster_update import AgentRosterEntryTool, AgentRosterUpdateToo
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 113
+    assert SCHEMA_VERSION == 123
 
 
 def test_roster_revision_migration_backfills_existing_threads(tmp_path):
@@ -87,7 +93,7 @@ async def test_migrated_database_gives_new_threads_a_usable_roster_revision(isol
         migrate_to_current(db, SCHEMA_VERSION)
         conductor = create_fresh_thread(user_id="user", thread_id="conductor", db=db)["id"]
         target = create_fresh_thread(user_id="user", thread_id="target", db=db)["id"]
-        assert set_conductor("workspace", conductor, db=db)
+        assert set_corsia_agent(conductor, db=db)
     finally:
         db.close()
 

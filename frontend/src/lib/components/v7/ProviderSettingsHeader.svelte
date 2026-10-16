@@ -93,7 +93,7 @@
 		white-space: nowrap;
 	}
 	.tab:hover { color: var(--text-primary); }
-	.tab.active { color: var(--violet-text, var(--violet)); border-bottom-color: var(--violet); }
+	.tab.active { color: var(--accent-text, var(--accent)); border-bottom-color: var(--accent); }
 
 	@media (max-width: 480px) {
 		.head { padding: 14px 16px; }

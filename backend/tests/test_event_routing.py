@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -353,7 +361,7 @@ class TestRouting:
     async def test_no_owner_does_not_fall_back_to_workspace_conductor(self, isolated_db):
         conductor_thread = _mk_session("cond-1")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         with patch("events.router.delivery.deliver_to_thread") as mock_deliver:
             res = await _route("webhook.github.pr_opened", _pr_payload("o/r", 77))
@@ -387,7 +395,7 @@ class TestRouting:
         _register_pr("o/r", 5, owner)
         conductor_thread = _mk_session("cond-2")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         from infra.database import get_db
         db = get_db()

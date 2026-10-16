@@ -5,6 +5,7 @@ import {
 	nodeDisplayLabel,
 	nodeDisplayState,
 	nodeStateTone,
+	nodeSubline,
 	planCardState,
 } from '$lib/components/plans/planDisplay';
 import type {
@@ -59,7 +60,7 @@ function node(over: Partial<OperatorNode> = {}): OperatorNode {
 		id: 'n1', parent_id: null, depth: 0, kind: 'task', title: 'Task',
 		description: null, acceptance_criteria: 'DOD', state: 'pending',
 		unmet_dependencies: [], held_by: null, revision: 1, requirements_revision: 1,
-		commitment_id: 'n1', updated_at: 'now', last_transition_at: 'now', folded: false,
+		commitment_id: 'n1', updated_at: 'now', last_transition_at: 'now', folded: false, container: false,
 		requires_user_action: false,
 		executor: { thread_id: 't1', label: 'Agent' },
 		execution: {
@@ -122,12 +123,11 @@ describe('contract-v2 server display keys', () => {
 		expect(nodeStateTone(value)).toBe('waiting');
 	});
 
-	it('renders every server node label key', () => {
+	it('renders every non-settled server node label key', () => {
 		const labels = {
 			working: 'Working',
 			needs_you: 'Needs you',
 			waiting: 'Waiting',
-			finished: 'Finished',
 		} as const;
 		for (const [label_key, label] of Object.entries(labels)) {
 			expect(nodeDisplayLabel(node({
@@ -136,14 +136,35 @@ describe('contract-v2 server display keys', () => {
 		}
 	});
 
-	it('renders a closed node in its own quiet tone, never as complete or failed', () => {
-		const value = node({
-			state: 'closed',
-			display: { label_key: 'finished', tone_key: 'closed' },
-		});
-		expect(nodeDisplayLabel(value)).toBe('Finished');
-		expect(nodeStateTone(value)).toBe('closed');
+	it.each([
+		['accepted', 'complete', 'Done'],
+		['closed', 'closed', 'Won’t do'],
+		['failed', 'failed', 'Failed'],
+	] as const)('uses the settled outcome word for a %s node', (state, tone, label) => {
+		const value = node({ state, display: { label_key: 'finished', tone_key: tone } });
+		expect(nodeDisplayLabel(value)).toBe(label);
+		expect(nodeStateTone(value)).toBe(tone);
 		expect(nodeDisplayState(value)).toBe('finished');
+	});
+
+	it('keeps an unsettled archived node reading Finished, with Archived below', () => {
+		const value = node({ state: 'pending', display: { label_key: 'finished', tone_key: 'closed' } });
+		expect(nodeDisplayLabel(value)).toBe('Finished');
+		expect(nodeSubline(value)).toMatch(/^Archived/);
+	});
+
+	it.each([
+		['complete', 'Done'],
+		['closed', 'Won’t do'],
+		['failed', 'Failed'],
+	] as const)('says what an open container’s %s work did, row and details alike', (tone, label) => {
+		const value = node({
+			state: 'active',
+			branch_progress: { done: 3, total: 3 },
+			display: { label_key: 'finished', tone_key: tone },
+		});
+		expect(nodeDisplayLabel(value)).toBe(label);
+		expect(nodeSubline(value)).toMatch(new RegExp(`^${label}`));
 	});
 
 	it('labels every server plan state', () => {

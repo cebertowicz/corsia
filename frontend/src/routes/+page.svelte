@@ -20,10 +20,10 @@
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { closeScopeSettings, workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { settingsOpenRequest } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
-	import { fetchConductor, landOnFirstRun, type ConductorLookup } from '$lib/utils/conductor';
+	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
 	import type ChatPanel from '$lib/components/ChatPanel.svelte';
 	import HomePageView from '$lib/components/HomePageView.svelte';
 	import { docLens, selectedDocId } from '$lib/stores/documentsSurface';
@@ -50,7 +50,7 @@
 
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
 	let sidebarOpen = $state(false);
-	let conductorLookup = $state<ConductorLookup>({ kind: 'unknown' });
+	let conductorLookup = $state<CoordinationLookup>({ kind: 'unknown' });
 	const conductorThreadId = $derived(conductorLookup.kind === 'target' ? conductorLookup.target.thread_id : null);
 	const conductorKnownAbsent = $derived(conductorLookup.kind === 'absent');
 
@@ -123,7 +123,7 @@
 	async function goConductor(): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
-		conductorLookup = await fetchConductor($token, $uiScope);
+		conductorLookup = await fetchScopeTarget($token, $uiScope);
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
 			if ('reasoning_effort' in target) reasoningEffort.set(target.reasoning_effort ?? null);
@@ -133,7 +133,7 @@
 		// A user with no conductor has nothing to land on, so the chat surface stays.
 		if (conductorLookup.kind === 'absent') { resetSurface('chat'); return true; }
 		// Unresolved lookup: keep the surface, leave the rail retryable.
-		toasts.show("Couldn't load the conductor — try again", 'error');
+		toasts.show(`Couldn't load ${$uiScope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
 	$effect(() => {
@@ -142,7 +142,7 @@
 		if (!authenticated) return;
 		let active = true;
 		const firstRunIntent = selectionIntent;
-		void fetchConductor(t, scope).then((lookup) => {
+		void fetchScopeTarget(t, scope).then((lookup) => {
 			if (!active) return;
 			conductorLookup = lookup;
 			const ownsFirstRunSelection = () =>
@@ -291,7 +291,7 @@
 			threads: $threads,
 			closeProjectSettings: () => projectSettingsOpen.set(false),
 			closeThreadSettings,
-			closeSettings: openActivity,
+			closeSettings: () => closeSettingsBack((id) => selectThread(id, 'other'), openActivity),
 			closeDocuments: closeDocumentsView,
 		});
 	});
@@ -424,7 +424,7 @@
 		const filtered = reconcileThreadModelSnapshots(data.threads as Thread[]);
 		filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 		threads.set(filtered);
-		void fetchConductor(t, $uiScope); // the list omits the conductor; re-read its model too
+		void fetchScopeTarget(t, $uiScope); // the list omits the target; re-read its model too
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -490,7 +490,7 @@
 	onToggleSidebar={toggleSidebar} onTogglePane={togglePane} onOpenLightbox={openLightbox}
 	onAutoCreateThread={async () => { await newThread($uiScope?.id ?? undefined); }}
 	onPickProject={pickProject} onPickProjectAndClosePane={pickProjectAndClosePane}
-	onCloseSettings={openActivity}
+	onCloseSettings={() => closeSettingsBack((id) => selectThread(id, 'other'), openActivity)}
 	onMeasurement={() => resetSurface('measurement', { preserveActiveThread: true })}
 	onCloseMeasurement={() => closeMeasurementSurface({ resetSurface, setActiveThread: (threadId) => activeThreadId.set(threadId) })}
 	onPickConversation={(id) => selectThread(id, 'sidebar')}

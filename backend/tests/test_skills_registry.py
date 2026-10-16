@@ -606,7 +606,7 @@ def test_invalid_role_skill_root_is_reported_as_an_error_source(tmp_path):
     assert "cannot be a symlink" in error.metadata["errors"][0]
 
 
-def test_conductor_role_skill_explicitly_overrides_agent_role_in_the_same_scope(tmp_path):
+def test_corsia_agent_role_skill_explicitly_overrides_agent_role_in_the_same_scope(tmp_path):
     from core.skills_registry import resolve_effective_skills
 
     workspace = tmp_path / "workspace"
@@ -618,14 +618,14 @@ def test_conductor_role_skill_explicitly_overrides_agent_role_in_the_same_scope(
     )
     _skill(
         workspace,
-        "context/roles/conductor/skills/operate",
-        _valid("operate", "Conductor operation"),
+        "context/roles/corsia_agent/skills/operate",
+        _valid("operate", "CORSIA agent operation"),
     )
     conn = _db()
     conn.execute("INSERT INTO threads (id, agent_enabled) VALUES ('conductor', 0)")
     conn.execute(
         "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-        ("workspace_conductor_session_id", '{"session_id": "conductor"}', "t"),
+        ("corsia_agent_thread_id", '{"session_id": "conductor"}', "t"),
     )
 
     resolved = resolve_effective_skills(
@@ -639,7 +639,7 @@ def test_conductor_role_skill_explicitly_overrides_agent_role_in_the_same_scope(
         (row.description, row.role)
         for row in resolved.included
         if row.scope != "system"
-    ] == [("Conductor operation", "conductor")]
+    ] == [("CORSIA agent operation", "corsia_agent")]
     assert [(row.description, row.role) for row in resolved.omitted] == [
         ("Agent operation", "agent")
     ]

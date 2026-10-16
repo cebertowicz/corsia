@@ -39,7 +39,7 @@ describe('parseUTC', () => {
 
 describe('what reads a server stamp through parseUTC', () => {
 	it('formatTime shows the same clock for a naive and an explicit-offset stamp, in each zone', () => {
-		const clocks: Record<string, string> = { 'America/Los_Angeles': '09:00 PM', 'Asia/Kolkata': '09:30 AM', UTC: '04:00 AM' };
+		const clocks: Record<string, string> = { 'America/Los_Angeles': '9:00 PM', 'Asia/Kolkata': '9:30 AM', UTC: '4:00 AM' };
 		for (const zone of ZONES) {
 			inZone(zone, () => {
 				expect(formatTime('2026-10-02T04:00:00')).toBe(clocks[zone]);
@@ -52,17 +52,17 @@ describe('what reads a server stamp through parseUTC', () => {
 	it('formatTime follows both daylight-saving changes in Pacific time and ignores them in a zone without one', () => {
 		inZone('America/Los_Angeles', () => {
 			// Clocks go forward: 1:59 AM PST is followed by 3:00 AM PDT.
-			expect(formatTime('2026-03-08T09:59:00')).toBe('01:59 AM');
-			expect(formatTime('2026-03-08T10:00:00+00:00')).toBe('03:00 AM');
+			expect(formatTime('2026-03-08T09:59:00')).toBe('1:59 AM');
+			expect(formatTime('2026-03-08T10:00:00+00:00')).toBe('3:00 AM');
 			// Clocks go back: 1:59 AM PDT is followed by 1:00 AM PST.
-			expect(formatTime('2026-11-01T08:59:00')).toBe('01:59 AM');
-			expect(formatTime('2026-11-01T09:00:00+00:00')).toBe('01:00 AM');
+			expect(formatTime('2026-11-01T08:59:00')).toBe('1:59 AM');
+			expect(formatTime('2026-11-01T09:00:00+00:00')).toBe('1:00 AM');
 		});
 		inZone('Asia/Kolkata', () => {
-			expect(formatTime('2026-03-08T09:59:00')).toBe('03:29 PM');
-			expect(formatTime('2026-03-08T10:00:00+00:00')).toBe('03:30 PM');
-			expect(formatTime('2026-11-01T08:59:00')).toBe('02:29 PM');
-			expect(formatTime('2026-11-01T09:00:00+00:00')).toBe('02:30 PM');
+			expect(formatTime('2026-03-08T09:59:00')).toBe('3:29 PM');
+			expect(formatTime('2026-03-08T10:00:00+00:00')).toBe('3:30 PM');
+			expect(formatTime('2026-11-01T08:59:00')).toBe('2:29 PM');
+			expect(formatTime('2026-11-01T09:00:00+00:00')).toBe('2:30 PM');
 		});
 	});
 

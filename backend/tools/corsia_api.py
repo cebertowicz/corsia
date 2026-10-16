@@ -15,6 +15,7 @@ from infra.internal_principal import internal_request
 from tools.base import Tool
 from tools.conductor_api_policy import (
     contains_forbidden_fields,
+    off_limits_reason,
     refused_body_field,
     refused_repo_link,
     registered_routes,
@@ -37,7 +38,7 @@ class ApiCallError(ValueError):
 
 
 def conductor_user(actor_thread_id: str) -> str:
-    from infra.conductor import get_conductor_scopes
+    from infra.conductor import get_coordination_scopes
     from infra.database import get_db
     from infra.queries import thread_available_sql
 
@@ -47,8 +48,8 @@ def conductor_user(actor_thread_id: str) -> str:
             f"SELECT user_id FROM threads WHERE id=? AND {thread_available_sql()}",
             (actor_thread_id,),
         ).fetchone()
-        if actor is None or not get_conductor_scopes(actor_thread_id, db=db):
-            raise ApiCallError("Missing conductor capability; only a designated workspace or project conductor can use corsia_api")
+        if actor is None or not get_coordination_scopes(actor_thread_id, db=db):
+            raise ApiCallError("Missing conductor capability; only the CORSIA agent or a designated project conductor can use corsia_api")
         return str(actor["user_id"])
     finally:
         db.close()
@@ -91,9 +92,14 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
     if route is None:
         raise ApiCallError(f"No CORSIA API route matches {scope['method']} {scope['path']}")
     if route_class(route) != "open":
-        raise ApiCallError("Route is off-limits for corsia_api (person-only); use the human surface and report the missing capability")
+        reason = off_limits_reason(scope["path"], scope["method"])
+        raise ApiCallError(
+            f"Route is off-limits for corsia_api (person-only): {reason}; "
+            "use the human surface and report the missing capability"
+        )
     status = 500
     response = bytearray()
+    response_headers: dict[bytes, bytes] = {}
     consumed = False
     completed = asyncio.Event()
 
@@ -106,9 +112,10 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
         return {"type": "http.disconnect"}
 
     async def send(message: dict) -> None:
-        nonlocal status
+        nonlocal status, response_headers
         if message["type"] == "http.response.start":
             status = message["status"]
+            response_headers = dict(message.get("headers", []))
         elif message["type"] == "http.response.body":
             if len(response) + len(message.get("body", b"")) > MAX_RESPONSE_BYTES:
                 raise ApiCallError("Response exceeds the native tool size limit; request a smaller page or summary")
@@ -121,6 +128,13 @@ async def call_application(app, scope: dict, payload: bytes, user_id: str, actor
             await app(scope, receive, send)
     if status >= 400:
         result: dict[str, Any] = {"status": status, "error": "API request failed; check the route schema, target and current state"}
+        if status == 403 and (remedy := response_headers.get(b"x-corsia-agent-remedy")):
+            try:
+                text = remedy.decode("ascii")
+            except UnicodeDecodeError:
+                text = ""
+            if text and len(text) <= 512 and text.isprintable():
+                result["remedy"] = text
         if status == 422:
             try:
                 details = json.loads(response).get("detail", [])
@@ -149,8 +163,8 @@ class CorsiaApiTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Call any CORSIA API route in-process as the designated conductor (workspace or project). "
-            "Load skill conductor-api before use. No credential is needed. Full access except the "
+            "Call any CORSIA API route in-process as the CORSIA agent or a project conductor. "
+            "Load skill coordination-api before use. No credential is needed. Full access except the "
             "person-only list: auth and users, credentials and secrets, host-access authority, "
             "answering the person's decisions, conductor designation, sign-in flows, webhooks, "
             "UI handlers that record the person as actor, and tool recursion. "
@@ -174,7 +188,7 @@ class CorsiaApiTool(Tool):
                       body: dict | None = None, **kwargs: Any) -> str:
         actor = kwargs.get("_thread_id")
         if not isinstance(actor, str) or not actor:
-            return "Error: current thread identity is unavailable; retry from a live conductor turn."
+            return "Error: current thread identity is unavailable; retry from a live CORSIA agent or conductor turn."
         if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
             return "Error: method must be GET, POST, PUT, PATCH or DELETE."
         try:

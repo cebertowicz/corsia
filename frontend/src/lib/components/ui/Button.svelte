@@ -2,7 +2,12 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+		/**
+		 * `pill` and `chip` are approved setup-only variants. Their colours use the semantic accent roles.
+		 * Do not expand their usage beyond setup without a Product Experience decision. Each remains one
+		 * rule block below, so a future decision changes this file alone.
+		 */
+		variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'pill' | 'chip';
 		size?: 'sm' | 'md';
 		type?: 'button' | 'submit';
 		disabled?: boolean;
@@ -62,8 +67,10 @@
 		border: 1px solid;
 	}
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.btn:not(:disabled):active { transform: scale(0.98); }
 	.btn.loading { cursor: wait; }
 	.btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+	@media (prefers-reduced-motion: reduce) { .btn:not(:disabled):active { transform: none; } }
 	@media (max-width: 768px) {
 		.btn::after { content: ''; position: absolute; border-radius: inherit; }
 		.btn.md::after { inset: -6px; }
@@ -79,19 +86,20 @@
 		color: var(--text-secondary);
 	}
 	.btn.secondary:hover:not(:disabled) {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text, var(--violet));
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
+		color: var(--accent-text, var(--accent));
 	}
 
+	/* The one solid accent fill per view, inked like every other accent fill (send, compose, your messages). */
 	.btn.primary {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text, var(--violet));
+		background: var(--accent-fill);
+		border-color: var(--accent-fill);
+		color: var(--accent-on-fill);
 	}
 	.btn.primary:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--violet) 18%, transparent);
-		border-color: var(--violet);
+		background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary));
+		border-color: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary));
 	}
 
 	.btn.danger {
@@ -113,6 +121,23 @@
 		background: var(--bg-tertiary);
 		color: var(--text-primary);
 	}
+
+	/* Setup-only primary action: semantic Fill and On-fill roles. */
+	.btn.pill {
+		height: calc(var(--space-7) + var(--space-2)); padding: 0 var(--space-5);
+		border-radius: var(--radius-pill); border-color: transparent;
+		background: var(--accent-fill); color: var(--accent-on-fill);
+		font-size: var(--text-callout); font-weight: var(--fw-semibold);
+	}
+	.btn.pill:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary)); }
+	.btn.pill:disabled { opacity: 0.3; }
+
+	/* Setup-only secondary action: semantic Text role, without a box. */
+	.btn.chip {
+		background: transparent; border-color: transparent; color: var(--accent-text);
+		font-weight: var(--fw-semibold); padding: 0 var(--space-2); border-radius: var(--radius-sm);
+	}
+	.btn.chip:hover:not(:disabled) { background: var(--accent-wash); }
 
 	.spinner {
 		display: inline-block;

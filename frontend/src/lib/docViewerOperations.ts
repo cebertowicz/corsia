@@ -1,10 +1,13 @@
-import { fetchContent, markArtifactVerified, type DocContent } from '$lib/api/docs';
+import { fetchContent, markArtifactVerified } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import { viewerContent, type ViewerContent } from '$lib/docViewerLoading';
+import { shouldReloadPresenceEdit } from '$lib/docPresence';
+import { effectiveDraftTarget, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
 
 // The viewer retains retry state; the composer needs the rejection to keep its draft.
@@ -40,18 +43,20 @@ export function createCommentRetryToast(toastStore: { dismiss: (id: string) => v
 	};
 }
 
+/** Prepares a clean reload of a document another participant edited; it applies only while this tab holds no edit of its own. */
 export async function prepareDocumentReload(
 	target: DocViewerTarget,
 	isCurrent: () => boolean,
-	fallbackArtifactId: string | null,
-	apply: (response: DocContent, fallbackArtifactId: string | null) => void,
+	apply: (content: ViewerContent) => void,
 ): Promise<(() => void) | null> {
-	if (!isCurrent()) return null;
+	const current = () => isCurrent() && shouldReloadPresenceEdit(existingDraft(target));
+	if (!current()) return null;
+	const fallbackArtifactId = effectiveDraftTarget(target).artifactId;
 	// Claim a load only at reveal: a prepared reload that is never revealed
 	// must not discard a load already in flight.
 	const response = await fetchContent(target.path, { projectId: target.projectId, threadId: target.threadId });
 	return () => {
-		if (isCurrent()) apply(response, fallbackArtifactId);
+		if (current()) apply(viewerContent(response, fallbackArtifactId));
 	};
 }
 

@@ -73,7 +73,7 @@
 		font-size: var(--text-subhead); color: var(--text-primary);
 		margin: 0 0 14px; line-height: 1.5;
 	}
-	.lede strong { color: var(--violet-text, var(--violet)); }
+	.lede strong { color: var(--accent-text, var(--accent)); }
 
 	.bar { margin: 14px 0 16px; }
 	.bar-track {

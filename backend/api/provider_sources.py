@@ -56,7 +56,7 @@ def _harness_source(provider: str) -> dict[str, Any]:
     view = row_state(get_connection(provider))
     fix = {"not_installed": install, "needs_auth": login,
            "unverified": CHECK_AGAIN}.get(view["state"])
-    from connections.conductor_account import source_account_view
+    from connections.corsia_agent_account import source_account_view
 
     # The first-run card's account lines (the picker's account rows for this vendor)
     # and the conductor's binding when its account was removed or turned off.
@@ -131,6 +131,7 @@ async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
     profile: str | None = Body(None, embed=True),
+    consent_existing: bool = Body(False, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start the local setup flight, or report the one already running.
@@ -139,7 +140,12 @@ async def setup_local_source(
     """
     from llm.local_setup import begin_local_setup
     from llm.local_setup_gates import ProfileRefused
+    from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent
 
+    if existing_omlx_requires_consent():
+        if not consent_existing:
+            raise HTTPException(status_code=409, detail={"code": "consent_required"})
+        record_existing_omlx_consent()
     try:
         return await begin_local_setup(
             no_subscription_only=no_subscription_only, automatic=automatic, profile_id=profile,

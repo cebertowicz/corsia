@@ -24,7 +24,7 @@ from connections.account_profiles import profile_for, sign_out_account
 from connections.account_receipts import account_receipt
 from connections.account_evidence import readiness_reason
 from connections.account_signin_commit import SameAccount, commit_signed_in
-from connections.conductor_account import FirstRunBind, finish_signin
+from connections.corsia_agent_account import FirstRunBind, finish_signin
 from connections.harness_process import killed_on_exit
 from connections.vendor_accounts import (
     AUTH_CLEANUP_CAUSES,

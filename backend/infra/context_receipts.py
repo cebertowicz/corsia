@@ -131,13 +131,40 @@ def current_context_receipt_identity(
     )
 
 
+def _loaded_tool_entries(value: Any) -> list[dict[str, Any]]:
+    """Keep only well-formed per-app lookup rows, so a bad list never widens the receipt."""
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        server, tokens = entry.get("server"), entry.get("tokens")
+        display = entry.get("display_name")
+        if (
+            not isinstance(server, str) or not server
+            or isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0
+            or not (display is None or isinstance(display, str))
+        ):
+            continue
+        entries.append({"server": server, "display_name": display or server, "tokens": tokens})
+    return entries
+
+
 def context_usage_summary(context_usage: dict[str, Any]) -> dict[str, Any]:
-    """Return the scalar CTX fields safe for message and websocket payloads."""
-    return {
+    """Return the compact CTX fields safe for message and websocket payloads.
+
+    Every field is scalar except ``loaded_tool_tokens``, the per-app lookup rows
+    the context sheet shows after a turn.
+    """
+    summary = {
         field: context_usage[field]
         for field in _SUMMARY_FIELDS
         if field in context_usage and isinstance(context_usage[field], _SCALAR_TYPES)
     }
+    if "loaded_tool_tokens" in context_usage:
+        summary["loaded_tool_tokens"] = _loaded_tool_entries(context_usage["loaded_tool_tokens"])
+    return summary
 
 
 def live_context_usage_payload(context_usage: dict[str, Any]) -> dict[str, Any]:

@@ -335,7 +335,11 @@ curl() {
             printf '%s' '{"ok":true,"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
             ;;
         *)
-            printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            if [[ " $* " == *" --write-out "* ]]; then
+                printf '%s\n200' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            else
+                printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            fi
             ;;
     esac
 }
@@ -375,7 +379,11 @@ curl() {
         *)
             if [ -s "$OPERATION" ]; then
                 current="$(cat "$OPERATION")"
-                printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+                if [[ " $* " == *" --write-out "* ]]; then
+                    printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}\n200' "$current"
+                else
+                    printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+                fi
             else
                 printf '%s' '{"active":false,"activeProcesses":0}'
             fi
@@ -553,7 +561,7 @@ curl() {
     case " $* " in
         *" -X DELETE "*) return 0 ;;
         *" -X POST "*) printf '%s\n200' "$START_PAYLOAD" ;;
-        *) printf '{"operation_id":"%s","status":"in_flight","phase":"steering"}' "$operation_id" ;;
+        *) printf '{"operation_id":"%s","status":"in_flight","phase":"holding","error":null,"kind":"restart","trigger":null,"target_version":null,"drain_total":null,"failure_code":null,"failure_detail":null,"conductor_told_at":null}' "$operation_id" ;;
     esac
 }
 drain_and_wait restart 9999
@@ -3900,12 +3908,15 @@ def test_owned_redeploy_sources_updated_script_in_same_shell_with_original_tuple
     home.mkdir()
     updated_script = checkout / "scripts" / "corsia"
     updated_script.parent.mkdir(parents=True)
-    # The prefix sources account helpers and validates its own backend roots, so
-    # the updated checkout carries the same backend shape as a real redeploy.
+    # The prefix sources the account and app-mode helpers and validates its own
+    # backend roots, so the updated checkout carries the same shape as a real
+    # redeploy.
     helpers = updated_script.parent / "corsia.d"
     helpers.mkdir()
-    accounts_helper = source_script.parent / "corsia.d" / "accounts.sh"
-    (helpers / "accounts.sh").write_text(accounts_helper.read_text())
+    for helper in ("accounts.sh", "app_mode.sh"):
+        (helpers / helper).write_text(
+            (source_script.parent / "corsia.d" / helper).read_text()
+        )
     (checkout / "backend").symlink_to(
         source_script.parents[1] / "backend", target_is_directory=True
     )

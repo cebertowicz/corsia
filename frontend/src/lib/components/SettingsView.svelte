@@ -6,8 +6,10 @@
 	import SystemBulletinsSetting from './SystemBulletinsSetting.svelte';
 	import SettingsDebug from './SettingsDebug.svelte';
 	import SettingsKeys from './SettingsKeys.svelte';
+	import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 	import { loadServerVersion } from '$lib/version';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import { settingsActiveSection, settingsAnchorRequest, type SettingsSection } from '$lib/stores/settingsNavigation';
 
 	let { onClose, systemStatus = {} as any }: {
@@ -65,7 +67,7 @@
 		{/each}
 	</nav>
 
-	<div class="settings-content">
+	<div class="settings-content" use:toastAnchorSurface>
 		{#if $settingsActiveSection === 'providers'}
 			<div class="providers-host">
 				<ProviderManager />
@@ -73,6 +75,7 @@
 		{:else if $settingsActiveSection === 'system'}
 			<SettingsSystem {systemStatus} onSwitchSection={(s) => { settingsActiveSection.set(s as SettingsSection); }} />
 			<SystemBulletinsSetting />
+			<ConnectedAppsSettings />
 		{:else if $settingsActiveSection === 'keys'}
 			<SettingsKeys />
 		{:else if $settingsActiveSection === 'debug'}
@@ -99,7 +102,7 @@
 <style>
 	/* The shell header overlays the top of main; start below it, as the project
 	   settings view does, so its buttons do not take this view's clicks. */
-	.settings-view { display: flex; flex: 1; min-height: 0; background: var(--bg-primary); overflow: hidden; position: relative; padding-top: calc(var(--header-height, 60px) + env(safe-area-inset-top, 0px)); }
+	.settings-view { display: flex; flex: 1; min-height: 0; background: var(--bg-primary); overflow: hidden; position: relative; padding-top: var(--header-bottom); }
 
 	.desktop-nav { width: 200px; flex-shrink: 0; background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; padding: 0; }
 	.settings-nav-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 16px 12px; border-bottom: 1px solid var(--border-subtle); }
@@ -107,7 +110,7 @@
 
 	.nav-item { display: flex; align-items: center; gap: 9px; padding: 9px 16px; background: none; border: none; cursor: pointer; font-size: var(--text-callout); color: var(--text-secondary); text-align: left; width: 100%; border-radius: 0; transition: background var(--dur-tight), color var(--dur-tight); font-family: inherit; }
 	.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.nav-item.active { background: var(--accent-subtle); color: var(--accent); font-weight: 500; }
+	.nav-item.active { background: var(--accent-subtle); color: var(--accent-text); font-weight: 500; }
 	.nav-item svg { flex-shrink: 0; opacity: 0.8; }
 	.nav-item.active svg { opacity: 1; }
 
@@ -117,7 +120,7 @@
 	.mobile-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px 10px; background: none; border: none; color: var(--text-tertiary); font-family: inherit; font-size: var(--text-caption); font-weight: 500; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: color var(--dur-tight); }
 	.mobile-tab:active { border-radius: var(--radius-sm); }
 	.mobile-tab:hover { color: var(--text-secondary); }
-	.mobile-tab.active { color: var(--accent); }
+	.mobile-tab.active { color: var(--accent-text); }
 
 	.providers-host {
 		background: transparent;

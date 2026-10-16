@@ -545,20 +545,18 @@ class ProcessOwner(ManagedLifecycleMixin):
         timeout: float = 30.0, show_window: bool | None = None,
     ) -> str:
         """Delegate one browser command to the composed session owner."""
-        if self._browser_owner is None:
-            raise ProcessOwnerError("browser session owner is unavailable")
-        return await self._browser_owner.run(
-            thread_id,
-            args,
-            lease_id=lease_id,
-            timeout=timeout, show_window=show_window,
+        return await self.browser_sessions().run(
+            thread_id, args, lease_id=lease_id, timeout=timeout, show_window=show_window,
         )
 
     async def close_browser(self, thread_id: str) -> str:
         """Close only the composed browser session for one exact thread."""
+        return await self.browser_sessions().close_thread(thread_id)
+
+    def browser_sessions(self) -> BrowserSessionOwner:
         if self._browser_owner is None:
             raise ProcessOwnerError("browser session owner is unavailable")
-        return await self._browser_owner.close_thread(thread_id)
+        return self._browser_owner
 
     def _log_path_for(self, handle: str) -> Path:
         self.process_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

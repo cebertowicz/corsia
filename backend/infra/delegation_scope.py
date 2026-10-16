@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from infra.conductor import ConductorSettingError, get_conductor
+from infra.conductor import get_scope_coordinator
+from infra.corsia_agent import CorsiaAgentSettingError
 from infra.queries import thread_available_sql, thread_unavailable_reason
 
 
@@ -25,17 +26,17 @@ def scope_label(project_id: str | None) -> str:
 def target_scope_authority(project_id: str | None, *, db) -> dict:
     """Return the configured authority slot for a target scope.
 
-    This consumes the existing conductor designation seam; it does not create a
+    This consumes the existing coordination designation seam; it does not create a
     second authority model for /send.
     """
     try:
-        authority_thread_id = get_conductor(
+        authority_thread_id = get_scope_coordinator(
             project_id or WORKSPACE_SCOPE_ID,
             db=db,
         )
-    except ConductorSettingError as exc:
+    except CorsiaAgentSettingError as exc:
         log.warning(
-            "Malformed workspace_conductor_session_id setting; "
+            "Malformed corsia_agent_thread_id setting; "
             "cross-scope repair will require authority reconfiguration: %s",
             exc,
         )
@@ -69,7 +70,7 @@ def target_scope_authority(project_id: str | None, *, db) -> dict:
 def native_endpoint_gap(
     row: dict,
     *,
-    workspace_conductor_id: str | None,
+    corsia_agent_id: str | None,
     project_conductor: tuple[str, str] | None = None,
 ) -> str | None:
     """Return why a thread cannot be a cross-scope native send endpoint.
@@ -78,7 +79,7 @@ def native_endpoint_gap(
     qualifies through its designation, so a conductor never has to be
     registered a second time as an agent to be reachable. Both designations
     are supplied by the caller as the live value for the scope that owns the
-    row: ``workspace_conductor_id`` for the workspace, and
+    row: ``corsia_agent_id`` for the workspace, and
     ``project_conductor`` as that project's ``(project_id, thread_id)``. A
     designation read from some other scope never reaches this rule, so a
     thread designated for one project stays an unregistered endpoint in
@@ -89,10 +90,10 @@ def native_endpoint_gap(
         return unavailable
     if (row.get("agent_status") or "active") != "active":
         return "agent is not active"
-    if workspace_conductor_id and row.get("id") == workspace_conductor_id:
+    if corsia_agent_id and row.get("id") == corsia_agent_id:
         if row.get("project_id") is None:
             return None
-        return "designated workspace conductor is not a workspace thread"
+        return "the CORSIA agent is not a workspace thread"
     if project_conductor and row.get("id") == project_conductor[1]:
         # Defensive: callers pair a row with its own project's designation, so
         # a mismatch means a caller wired the wrong scope's authority in.
@@ -126,7 +127,7 @@ def cross_scope_send_detail(
     return {
         "code": "cross_scope_send_blocked",
         "message": (
-            "Cross-scope sends to the designated workspace conductor require "
+            "Cross-scope sends to the CORSIA agent require "
             "the server-bound native delegate_send tool."
             if workspace_contact
             else "Cross-scope /send blocked. Same-scope routing is the default; "

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import plans.service as service
-from plans import folded_reads
+from plans import closure, folded_reads
 from plans.folded_reads import PAGE_SIZE
 from plans.operator_projection import OperatorNotFound
 from tests.plan_writer_authorizer import raw_plan_seed
@@ -51,6 +51,20 @@ def test_history_pages_newest_first_without_gaps_or_repeats(db):
     first = pages[0]["items"][0]
     assert first["state"] == "accepted" and first["display"] == {"label_key": "finished", "tone_key": "complete"}
     assert first["folds"] == {"done": 0, "failed": 0, "closed": 0} and first["has_folded_children"] is False
+
+
+def test_a_folded_row_carries_why_it_settled(db):
+    plan = service.ensure_plan("thread", "parent", db=db)
+    closed = _task(plan.id, "Retire the draft", db=db).id
+    accepted = _task(plan.id, "Wrote the guide", db=db).id
+    _task(plan.id, "Still open", db=db)
+    closure.close_node(closed, reason="No longer needed", db=db)
+    _settle_all(db, [accepted])
+    items = {item["id"]: item for page in _pages(plan.id, db) for item in page["items"]}
+    assert items[closed]["status_reason"] == "No longer needed"
+    assert items[accepted]["status_reason"] is None
+    path = folded_reads.read_path(plan.id, closed, actor=_actor(), db=db)
+    assert path["node"]["status_reason"] == "No longer needed"
 
 
 def test_equal_fold_times_page_by_id_without_losing_a_row(db):

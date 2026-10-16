@@ -25,6 +25,23 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const animate = vi.fn();
 
+type FakeAnimation = Animation & { cancel: ReturnType<typeof vi.fn>; finish: () => void };
+
+function fakeAnimation(): FakeAnimation {
+	let finish = () => {};
+	const finished = new Promise<void>((resolve) => { finish = resolve; });
+	return { cancel: vi.fn(), finished, finish } as unknown as FakeAnimation;
+}
+
+function currentStyle(element: Element, values: Record<string, string>): ReturnType<typeof vi.spyOn> {
+	const original = window.getComputedStyle.bind(window);
+	return vi.spyOn(window, 'getComputedStyle').mockImplementation((node) => {
+		const style = original(node);
+		if (node !== element) return style;
+		return new Proxy(style, { get: (target, property) => typeof property === 'string' && property in values ? values[property] : Reflect.get(target, property) }) as CSSStyleDeclaration;
+	});
+}
+
 beforeEach(() => {
 	host = document.createElement('div');
 	document.body.appendChild(host);
@@ -101,6 +118,51 @@ describe('blockSlot', () => {
 		expect(slotSource).toMatch(/--dur-standard/);
 		expect(slotSource).toMatch(/--ease-entrance/);
 	});
+
+	it('cancels a filling exit and settles a reversed entry at its rest height', async () => {
+		const el = document.createElement('div');
+		el.getBoundingClientRect = () => ({ height: 100 } as DOMRect);
+		document.body.appendChild(el);
+		const exit = fakeAnimation();
+		const entry = fakeAnimation();
+		animate.mockImplementationOnce(() => exit).mockImplementationOnce(() => entry);
+		blockSlot(el, undefined, { direction: 'out' });
+		const style = currentStyle(el, { height: '40px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px', gridTemplateRows: '0.4fr', opacity: '0.4', boxSizing: 'border-box' });
+		try {
+			expect(blockSlot(el, undefined, { direction: 'in' })).toEqual({ duration: 132 });
+			const [frames, options] = animate.mock.calls[1];
+			expect(exit.cancel).toHaveBeenCalledOnce();
+			expect(frames[0]).toMatchObject({ height: '40px', opacity: '0.4' });
+			expect(frames.at(-1)).toMatchObject({ height: '100px', opacity: 1 });
+			expect(options.fill).toBeUndefined();
+			entry.finish();
+			await Promise.resolve();
+			expect(el.style.overflow).toBe('');
+		} finally {
+			style.mockRestore();
+			el.remove();
+		}
+	});
+
+	it('begins a reversed exit at the current height', () => {
+		const el = document.createElement('div');
+		el.getBoundingClientRect = () => ({ height: 100 } as DOMRect);
+		document.body.appendChild(el);
+		const entry = fakeAnimation();
+		const exit = fakeAnimation();
+		animate.mockImplementationOnce(() => entry).mockImplementationOnce(() => exit);
+		blockSlot(el, undefined, { direction: 'in' });
+		const style = currentStyle(el, { height: '40px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px', gridTemplateRows: '0.4fr', opacity: '0.4', boxSizing: 'border-box' });
+		try {
+			expect(blockSlot(el, undefined, { direction: 'out' })).toEqual({ duration: 61.6 });
+			const [frames] = animate.mock.calls[1];
+			expect(entry.cancel).toHaveBeenCalledOnce();
+			expect(frames[0]).toMatchObject({ height: '40px', opacity: '0.4' });
+		} finally {
+			style.mockRestore();
+			el.remove();
+		}
+	});
 });
 
 function hoursAgo(hours: number): string {
@@ -163,7 +225,74 @@ describe('PlanTree fold rows', () => {
 	});
 
 	it('hands the person-initiated changes to blockSlot and leaves the fold wave alone', () => {
-		expect(treeSource).toMatch(/in:blockSlot\|global=\{\{ off: !userPaging \}\}/);
-		expect(treeSource).toMatch(/out:blockSlot\|global=\{\{ off: !userPaging \}\}/);
+		expect(treeSource).toMatch(/in:blockSlot\|global=\{\{ off: !userDisclosure \}\}/);
+		expect(treeSource).toMatch(/out:blockSlot\|global=\{\{ off: !userDisclosure \}\}/);
+	});
+});
+
+describe('PlanTree disclosure motion', () => {
+	function mountDisclosures() {
+		component = mount(PlanTree, {
+			target: host,
+			props: withFolds({ nodes: [
+				node({ id: 'detail', title: 'Detail task' }),
+				node({ id: 'branch', title: 'Branch task', branch_progress: { done: 0, total: 1 } }),
+				node({ id: 'child', title: 'Branch child', parent_id: 'branch', depth: 1 }),
+			] }),
+		});
+		flushSync();
+	}
+
+	async function pressRow(title: string): Promise<void> {
+		const button = [...host.querySelectorAll<HTMLButtonElement>('.row-body')].find((item) => item.textContent?.includes(title));
+		expect(button, `row body ${title}`).toBeTruthy();
+		button!.click();
+		await tick();
+		flushSync();
+	}
+
+	it('uses the shared press-gated block motion for details and branch children', async () => {
+		mountDisclosures();
+		await pressRow('Detail task');
+		expect(host.querySelector('.node-details')).toBeTruthy();
+		expect(animate.mock.calls.filter(([frames]) => frames[0]?.height === '0px')).toHaveLength(1);
+		animate.mockClear();
+		await pressRow('Detail task');
+		expect([...host.querySelectorAll<HTMLButtonElement>('.row-body')].find((item) => item.textContent?.includes('Detail task'))?.getAttribute('aria-expanded')).toBe('false');
+		expect(animate.mock.calls.filter(([frames]) => frames.at(-1)?.height === '0px')).toHaveLength(1);
+
+		animate.mockClear();
+		const branch = host.querySelector<HTMLButtonElement>('.branch-toggle');
+		expect(branch).toBeTruthy();
+		branch!.click();
+		await tick();
+		flushSync();
+		expect(host.textContent).toContain('Branch child');
+		expect(animate.mock.calls.filter(([frames]) => frames[0]?.height === '0px')).toHaveLength(1);
+		animate.mockClear();
+		branch!.click();
+		await tick();
+		flushSync();
+		expect(branch!.getAttribute('aria-expanded')).toBe('false');
+		expect(animate.mock.calls.filter(([frames]) => frames.at(-1)?.height === '0px')).toHaveLength(1);
+	});
+
+	it('does not leave a detail slot after rapid repeated presses', async () => {
+		mountDisclosures();
+		const button = [...host.querySelectorAll<HTMLButtonElement>('.row-body')].find((item) => item.textContent?.includes('Detail task'));
+		expect(button).toBeTruthy();
+		button!.click();
+		button!.click();
+		await tick();
+		flushSync();
+		expect(host.querySelectorAll('.details-slot')).toHaveLength(0);
+	});
+
+	it('keeps press disclosures instant only under reduced motion', async () => {
+		reduced.store?.set(true);
+		mountDisclosures();
+		await pressRow('Detail task');
+		const fades = animate.mock.calls.filter(([frames]) => frames[0]?.opacity !== undefined && frames.every((frame: Keyframe) => frame.height === undefined));
+		expect(fades).toHaveLength(1);
 	});
 });

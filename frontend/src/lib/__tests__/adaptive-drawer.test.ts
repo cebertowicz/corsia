@@ -1,7 +1,6 @@
 import { get } from "svelte/store";
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toastClearance } from "$lib/stores/toastClearance";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
 
 // The reduced-motion preference, read when the drawer subscribes; false unless a test sets it.
@@ -50,6 +49,21 @@ afterEach(() => {
 });
 
 describe("AdaptiveDrawer", () => {
+  it("keeps content-owned context beside Done at desktop width", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: vi.fn(), contextLabel: "Decision · Reviewer subagent · CORSIA" },
+    });
+    await settle();
+
+    const header = host.querySelector(".drawer-head") as HTMLElement;
+    expect(header.querySelector("h2")).toBeNull();
+    expect(header.querySelector(".drawer-context")?.textContent).toBe("Decision · Reviewer subagent · CORSIA");
+    expect(header.querySelectorAll(".drawer-context")).toHaveLength(1);
+    expect(header.querySelector(".drawer-done")?.textContent?.trim()).toBe("Done");
+    expect(header.querySelector(".drawer-context + .drawer-done")).toBeTruthy();
+  });
+
   it("gives its content a bounded flex column only when asked to fill", async () => {
     component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
     await settle();
@@ -248,21 +262,6 @@ describe("AdaptiveDrawer", () => {
     handle.dispatchEvent(pointer("pointermove", 280, 8));
     handle.dispatchEvent(pointer("pointerup", 280, 8));
     expect(close).toHaveBeenCalledTimes(1);
-  });
-
-  it("registers desktop resting occupancy including its bottom margin and releases it at close start", async () => {
-    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
-    await settle();
-
-    const panel = host.querySelector(".drawer-panel") as HTMLElement;
-    panel.style.marginBottom = "16px";
-    Object.defineProperty(panel, "offsetHeight", { configurable: true, value: 440 });
-    window.dispatchEvent(new Event("resize"));
-
-    expect(get(toastClearance)).toBe(456);
-
-    (host.querySelector("[data-adaptive-drawer]") as HTMLElement).dispatchEvent(new Event("outrostart"));
-    expect(get(toastClearance)).toBe(0);
   });
 
   it("keeps a dedicated independently scrollable body for long content", async () => {

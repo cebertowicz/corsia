@@ -10,6 +10,7 @@
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
+	import CommentPlacementRecovery, { type PlacementRecoveryProps } from './comments/CommentPlacementRecovery.svelte';
 	import ImageRegionThumb from './ImageRegionThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
@@ -22,17 +23,11 @@
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	/**
-	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
-	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
-	 */
+	/** Image comments (DCOL-FR13.6): the thumbnail heads the list; tags and cards share number, colour, hover and selected-scroll state. */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
-	/**
-	 * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
-	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
-	 */
+	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, covered = false, onDrawerShown }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -67,10 +62,14 @@
 		images?: DocImageComments | null;
 		/** The open document's batch: while it holds messages not sent yet the drawer ends in their Send now footer. */
 		feedback?: DocFeedback | null;
+		/** Re-resolves orphaned live comment ranges from the existing comments drawer. */
+		placementRecovery?: PlacementRecoveryProps;
 		/** An image opened from the document covers it, the drawer with it: the drawer stays open beneath, and gets its focus back after. */
 		covered?: boolean;
 		/** Whether the comment list's drawer is on screen, in either form: true from its mount until its outro has ended. */
 		onDrawerShown?: (shown: boolean) => void;
+		/** The sheet controller's modal presence, including its closing scrim. */
+		onSheetModalChange?: (open: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
@@ -111,6 +110,8 @@
 		onClose: () => onClose(),
 		onCancelDraft: () => (onCancelDraft ?? onClose)(),
 	});
+	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
+	$effect(() => onSheetModalChange?.(sheet.modalOpen));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -307,7 +308,6 @@
 	{@const src = images?.srcOf(group[0])}
 	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
 {/snippet}
-
 {#snippet content()}
 	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
@@ -323,7 +323,6 @@
 		<CommentList bind:replyDrafts bind:replySelections leavingIds={held.leaving} reduced={$prefersReducedMotion} comments={displayed} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} {onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
-
 {#snippet listBody()}
 	<div class="drawer-heading"><h2 tabindex="-1" data-drawer-focus-home>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
 		<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
@@ -338,7 +337,10 @@
 		{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		</div>{/key}</div>
 	</div>
-	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight use:footerFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')}><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
+	<div class="drawer-footers" use:drawerFooterHeight>
+		{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:footerFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')}><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
+		<CommentPlacementRecovery {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')} />
+	</div>
 {/snippet}
 
 {#if surfaceState || sheet.closing}
@@ -368,17 +370,19 @@
 	.filter-popup { position: absolute; z-index: 2; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 9rem; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--shadow-chip); }
 	.filter-popup button { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); text-align: left; }
 	.filter-check { display: inline-flex; flex: none; width: 12px; height: 12px; }
-	.filter-popup button[aria-checked="true"] { color: var(--accent); font-weight: var(--fw-semibold); }
+	.filter-popup button[aria-checked="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
 	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: 44px; } }
 	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */
 	.peers { display: grid; }
 	.peer { grid-area: 1 / 1; min-width: 0; }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
-	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
+	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
-	/* Pinned under the list and contained by the drawer, opaque so cards never show through it. */
-	.drawer-unsent { container: drawer-footer / inline-size; flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
+	/* The one measured wrapper owns the drawer's pinned-footer height, including either or both child footers. */
+	.drawer-footers { flex: none; }
+	.drawer-footers > :not(:last-child) { border-radius: 0; }
+	.drawer-unsent { container: drawer-footer / inline-size; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	/* A long owner name is cut only where the footer is too narrow to hold it on one line of the sentence. */
 	@container drawer-footer (max-width: 30rem) { .drawer-footer-owner { display: inline-block; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; } }
@@ -386,10 +390,10 @@
 	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent); cursor: pointer; }
+	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
 	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
-	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
+	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
 	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }
 	.suggestion-status details { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.suggestion-status p { margin: 4px 0; }

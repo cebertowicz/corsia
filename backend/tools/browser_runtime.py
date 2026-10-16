@@ -4,7 +4,7 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
-from host_access import browser_cli
+from host_access import browser_cli, browser_control
 from host_access.browser_identity import BrowserIdentityError
 from host_access.browser_sessions import (
     BrowserSessionCleanupError,
@@ -83,6 +83,8 @@ class BrowserCloseTool(Tool):
             return await PROCESS_OWNER.close_browser(thread_id)
         except BrowserSessionCleanupError as exc:
             return exc.tool_message
+        except BrowserSessionError as exc:
+            return f"Error: {exc}"
         except Exception:
             return "Error: browser cleanup could not be verified. Stop retrying browser tools and inform the user."
 

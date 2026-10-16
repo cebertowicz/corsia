@@ -1,9 +1,11 @@
 """SQLite schema DDL used by database initialization."""
-from __future__ import annotations
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
+from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
+from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
 from infra.bulletin_schema import BULLETIN_SCHEMA_SQL
 from infra.connection_schema import CONNECTION_SCHEMA_SQL
+from infra.connected_apps_schema import CONNECTED_APPS_SCHEMA_SQL
 from infra.vendor_policy_schema import VENDOR_SUBSCRIPTION_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from infra.context_change_schema import CONTEXT_CHANGE_SCHEMA_SQL
@@ -15,6 +17,7 @@ from infra.delivery_foundation_schema import DELIVERY_FOUNDATION_SCHEMA_SQL
 from infra.host_access_schema import HOST_ACCESS_LEASE_SCHEMA_SQL
 from infra.key_store_schema import KEY_STORE_SCHEMA_SQL
 from infra.learning_schema import LEARNING_INDEX_SQL
+from infra.lesson_placement_check_schema import LESSON_PLACEMENT_CHECK_SCHEMA_SQL
 from infra.managed_process_schema import MANAGED_PROCESS_SCHEMA_SQL
 from infra.measurement_schema import MEASUREMENT_INDEX_SQL
 from infra.message_schema import MESSAGE_SCHEMA_SQL
@@ -24,18 +27,14 @@ from infra.plan_schema import STRUCTURED_PLAN_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.project_repo_policy_schema import PROJECT_REPO_POLICY_TABLE_SQL
 from infra.provider_availability_schema import PROVIDER_AVAILABILITY_TABLE_SQL
+from infra.settings_schema import SETTINGS_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-
-SCHEMA_VERSION = 113
+SCHEMA_VERSION = 123
 SCHEMA_SQL = f"""
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+    {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
     CREATE TABLE IF NOT EXISTS threads (
         id TEXT PRIMARY KEY,
@@ -70,10 +69,7 @@ SCHEMA_SQL = f"""
         history_epoch INTEGER NOT NULL DEFAULT 0,
         runtime_context_epoch INTEGER NOT NULL DEFAULT 0 CHECK (typeof(runtime_context_epoch) = 'integer' AND runtime_context_epoch >= 0),
         last_context_change_seq INTEGER NOT NULL DEFAULT 0
-            CHECK (
-                typeof(last_context_change_seq) = 'integer'
-                AND last_context_change_seq >= 0
-            ),
+            CHECK (typeof(last_context_change_seq) = 'integer' AND last_context_change_seq >= 0),
         execution_epoch INTEGER NOT NULL DEFAULT 0
             CHECK (typeof(execution_epoch) = 'integer' AND execution_epoch >= 0),
         pending_model TEXT,
@@ -113,8 +109,9 @@ SCHEMA_SQL = f"""
     {STAGING_SCHEMA_SQL}
     {CONTINUITY_SCHEMA_SQL}
     {PRESENCE_SCHEMA_SQL}
-    {THREAD_UPDATES_SCHEMA_SQL}
+    {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}{EMAIL_SCREENS_SCHEMA_SQL}
     {OUTCOME_EVENTS_SCHEMA_SQL}
+    {LESSON_PLACEMENT_CHECK_SCHEMA_SQL}
     {PROVIDER_AVAILABILITY_TABLE_SQL};
     CREATE TABLE IF NOT EXISTS model_profiles (
         model_id TEXT PRIMARY KEY,
@@ -237,6 +234,7 @@ SCHEMA_SQL = f"""
     {USAGE_SCHEMA_SQL}
     {ACCOUNTS_SCHEMA_SQL}
     {KEY_STORE_SCHEMA_SQL}
+    {CONNECTED_APPS_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS fact_extraction_runs (
         run_date TEXT PRIMARY KEY,
@@ -400,11 +398,13 @@ SCHEMA_SQL = f"""
         phase TEXT,
         cutoff_at TEXT,
         updated_at TEXT,
-        error TEXT
+        error TEXT,
+        kind TEXT, trigger TEXT, target_version TEXT, drain_total INTEGER,
+        changes TEXT, outcome_seen_at TEXT, failure_code TEXT, failure_detail TEXT,
+        conductor_told_at TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_self_restart_requests_status
-        ON self_restart_requests(status);
-
+    CREATE INDEX IF NOT EXISTS idx_self_restart_requests_status ON self_restart_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_self_restart_requests_update_attempts ON self_restart_requests(kind, requested_at);
     {PLAN_LIVENESS_SCHEMA_SQL}
 
     {ARTIFACT_IDENTITY_SCHEMA_SQL}
@@ -515,12 +515,10 @@ SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS reviewer_gate_state (
         pr_key       TEXT PRIMARY KEY,
         reviewed_sha TEXT NOT NULL
     );
-
     {DOCUMENT_SCHEMA_SQL}
     {MEASUREMENT_INDEX_SQL}
     {WRITE_HOLD_INDEX_SQL}

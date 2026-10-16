@@ -3,7 +3,85 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
-## v2026.10.13 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
+## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
+
+Released 2026-10-16.
+
+### Upgrading
+
+- This update adds `flatbuffers`, `onnxruntime`, `protobuf`, and `publicsuffixlist`; the update installs them as part of its normal dependency setup.
+
+### Updates
+
+- Updates now have a complete in-app journey: notice, decision, progress, result, and release notes. You can schedule an update overnight, once or automatically, and a completed restart clears an old staged-update failure.
+- Update failures retain a clear cause, update progress stays in one notice, and notices stay readable and out of the way while work continues.
+
+### Shared Browser
+
+- A Browser tab lets you watch an agent’s browser and explicitly take control when needed.
+- The browser fits its pane, follows your theme, supports navigation and input while you are in control, and keeps rendering and page commands smooth while work continues.
+- The first time an agent opens the browser, it opens reliably instead of failing before a page exists.
+
+### Documents and Collaboration
+
+- Returning to a document tab no longer lets an older restore disturb the tab you switched to, and open tabs return directly to their saved place without a loading flash.
+- Mobile document comments stay clear of save status and selection controls; save feedback stays quiet for fast saves and appears when needed; review headers remain compact on phones with an ask open.
+- Markdown links refresh when their source finishes parsing.
+- A document carries one open review request at a time, and a review request on a sub-step counts once in your chat list. Withdrawn, closed and replaced review requests leave your list and say the request has ended.
+
+### Chat and Interface
+
+- The chat view is tidied: the sidebar, chat, plan and document panes share one style for each repeated element, with dated boxes and heavy borders removed and no information or action lost.
+- Project colours keep text readable on every coloured control, in light and dark themes.
+- On phones, the header clears the screen's safe areas and keeps its faded frosted blur while content scrolls underneath. In installed iOS 27 apps, the header and first sidebar row sit below the system's top-edge blur, and chat text no longer shows through the header title.
+- The decision drawer's footer no longer covers its options on phones. A decision shows its reasoning on the option it recommends, and its labels match the rest of the chat view.
+- Plan decisions stay listed while the decision queue is still loading, and a decision row opens the decision it names.
+- Document row menus, collapse and expand, and keyboard access to row actions work reliably.
+
+### Agents and Plans
+
+- Plans use clearer Done and Won’t do language, complete summaries on smaller screens, and smoother open and close motion. The chat thread list no longer shows a misleading Stuck status.
+- Steps needing your action show clear in-place instructions and what they unblock. Nested plan review requests now appear in chat, and a stopped review or failing item no longer prevents other scheduled follow-through from running.
+- Agents see and are prompted to resume work they intentionally set aside, browser sign-in requests open a clear task and settle only when completion is observed, and a new input stays queued behind a live Codex writer instead of failing.
+
+### Providers
+
+- Model switches can use another eligible account when the selected one has reached its limit, and the model picker preserves known usage limits and reset times when a fresh check is unavailable.
+- Providers can be turned off without losing their settings, and queued work resumes when they are turned back on. The model picker also aligns its account chooser, selected account, and current indicators.
+
+### Connected Apps and Google
+
+- MCP servers imported from your other AI tools arrive as connected apps waiting for your approval. Settings › Connected apps lets you approve, decline, reconnect or remove each one and choose which projects it works in.
+- Connected apps that CORSIA runs on your Mac are sandboxed away from CORSIA's private state and stored keys.
+- Google sign-in is held by CORSIA itself and gives agents email and calendar tools. An agent sends an email or invite only from the exact draft open in its document, and only after your latest message.
+- The context sheet shows what each connected app costs in context.
+
+### Measurement
+
+- Corrections are checked locally with the installed, verified corrections classifier instead of the retired provider-backed checker. Its current asset version and any unavailable or failed state are available to Measurement.
+- Corrections classifier failures, version checks, and repeated load crashes stay recoverable instead of ending the flow.
+- Work-per-hour reporting stays comparable across reviewers and declared work sizes.
+
+### First Run and Setup
+
+- First-run setup guides you through local setup and connecting your first account, and asks before importing detected MCP servers.
+- Setup is shorter when an AI is already installed and signed in: it skips Connect an AI. Otherwise Claude Code or Codex installs after a one-line confirm and signs in without leaving setup. The Welcome intro and the app mark are new.
+- Setup lets you choose your work folder before you create your account.
+- When a local model download is already running, first run shows its progress instead of offering it again, and an interrupted download resumes after a restart.
+- Setup shows clear background-download progress and a smoother step indicator.
+- The supported setup for 16 GB Macs is now documented.
+
+### Packaged Mac App
+
+- The macOS desktop app ships as a self-contained local CORSIA service, including its frontend, backend, Python runtime, and local AI dependencies. On a fresh Mac, opening it creates the local workspace and starts CORSIA without prior configuration; an existing install is left untouched, with the reason shown.
+- The app includes its own Git, asks before reusing an existing local AI runtime, and keeps optional background downloads from delaying Start using CORSIA while showing progress and recovery if they fail.
+- Closing the CORSIA window keeps its background service running, with recovery if macOS disables it.
+- The app updates itself. It downloads and verifies a newer version, and Update installs it in place and relaunches onto it. If the new version does not start healthy, the app restores the previous version and says so. Your data lives outside the app, so an update never touches it.
+- Settings › Restart works in the packaged app.
+
+## v0.3.0 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
+
+Released 2026-10-13.
 
 ### Documents and Images
 
@@ -47,7 +125,9 @@ the later entry describes the current behavior.
 
 - The README now leads with giving an agent a problem to own, with the measurement screenshots first.
 
-## v2026.10.11 — Images you can review, keys in one place, and a sharper Measurement page
+## v0.2.0 — Images you can review, keys in one place, and a sharper Measurement page
+
+Released 2026-10-11.
 
 ### Upgrading
 
@@ -76,7 +156,7 @@ the later entry describes the current behavior.
 - The page gains a dollars-per-hour-of-work measure for agents and models, plus dollars per task and a model's share of spend.
 - Each headline names the dates it pooled and counts only that window; the cost line counts local records and classifies by the model that actually ran.
 - Attention is measured from when you were actually present, and minutes between your messages count across your whole message stream.
-- Tasks are sized by the effort a person would need, and corrections you make in messages are recorded and checked independently.
+- Tasks are sized by the effort a person would need, and corrections you make in messages are recorded and checked independently once the local corrections classifier is installed (setup support: #704).
 - Biggest changes ranks only the page's own measures; cards are square, tables fit a phone, and the phone scroller starts below the header.
 - The page loads faster by reading costs and outcomes once per refresh.
 
@@ -102,7 +182,9 @@ the later entry describes the current behavior.
 - The code reviewer runs confined to its own folders with tighter rules on what it may run.
 - Git branch and layout answers are reused while nothing changes, and chat card refreshes are bounded.
 
-## v2026.10.09 — A guided start, live documents, and a measured view
+## v0.1.0 — A guided start, live documents, and a measured view
+
+Released 2026-10-09.
 
 ### Upgrading
 
@@ -199,7 +281,10 @@ the later entry describes the current behavior.
 
 - Stored data rises from schema 76 to 103 and migrates automatically at startup.
 
-## v2026.10.01 — Plan limits hold and release work cleanly
+Releases before v0.1.0 predate the public repository and carry date labels
+instead of version numbers.
+
+## 2026-10-01 — Plan limits hold and release work cleanly
 
 ### Providers and Models
 
@@ -214,7 +299,7 @@ the later entry describes the current behavior.
 
 - Repository tests no longer fail on a slow or busy machine, and a concurrent continuation test waits for both runs — determinism fixes for the backend suite.
 
-## v2026.09.30.1 — Document collaboration ships, plans say their times, Focus sharpens
+## 2026-09-30, second release — Document collaboration ships, plans say their times, Focus sharpens
 
 ### Documents and Artifacts
 
@@ -260,7 +345,7 @@ the later entry describes the current behavior.
 
 - The contributor backlog tooling keeps its retention sweep going past a stuck tree, preserves mint errors, sniffs HEIC/HEIF/TIFF uploads as images, and fixes its worktree repo lookup and issue catalog link.
 
-## v2026.09.30 — Model availability you can read, plans that finish themselves, jobs that run for hours
+## 2026-09-30 — Model availability you can read, plans that finish themselves, jobs that run for hours
 
 ### Providers and Models
 
@@ -302,7 +387,7 @@ the later entry describes the current behavior.
 - An evaluation case that refuses an oversized input now fails its test instead of releasing the input into an endless retry chain.
 - The contributor skill index names, per harness, the read tool that harness actually has.
 
-## v2026.09.29.2 — Comments stay on their words, and an agent's answer reaches you
+## 2026-09-29, third release — Comments stay on their words, and an agent's answer reaches you
 
 ### Documents and Comments
 
@@ -324,7 +409,7 @@ the later entry describes the current behavior.
 
 - Message formatting is split into modules with one owner each — display text, model history, tool lineage, reasoning provenance, and row primitives — and the dead code it had accumulated is gone. No behavior change.
 
-## v2026.09.29.1 — Waiting work resumes itself, delegated work reads as current, and Measurement gets its first page
+## 2026-09-29, second release — Waiting work resumes itself, delegated work reads as current, and Measurement gets its first page
 
 ### Plans and Coordination
 
@@ -386,7 +471,7 @@ the later entry describes the current behavior.
 - Test suite stabilization: lifecycle tests no longer depend on host sign-in state or wall-clock bounds, browser-close tests release their fixture daemon explicitly, and tests that used to time out under full-suite load now pass.
 - The identity rename's groundwork lands: persisted identity seeds are frozen ahead of it, with a name-map tool and a hardened policy.
 
-## v2026.09.29 — Work that reschedules instead of stalling, chats that keep their memory on the move, guidance that keeps its history
+## 2026-09-29 — Work that reschedules instead of stalling, chats that keep their memory on the move, guidance that keeps its history
 
 ### Plans and Coordination
 
@@ -459,7 +544,7 @@ the later entry describes the current behavior.
 - The overnight trim of old tool payloads no longer holds the database writer for tens of seconds in one pass, so turns are no longer killed by a lock while it runs; it now bounds each write by size and time as well as row count.
 - When the protected shell cannot start, the refusal now names the location it searched and the two ways to recover it, and service start, stop and restart say plainly which of them keeps your installed definition.
 
-## v2026.09.28 — Models that say when they cannot run, plans that clear themselves, turns that finish
+## 2026-09-28 — Models that say when they cannot run, plans that clear themselves, turns that finish
 
 ### Providers and Models
 - A model whose account has hit its usage limit now reads as unavailable, and returns to the picker when the limit clears.
@@ -532,7 +617,7 @@ the later entry describes the current behavior.
 - Contributors see the blocking checks before they push: the local gate now mirrors the CI suite, and the pre-push hook runs it.
 - Anywhere the product called a conversation a "session" now says "thread", and its API routes moved to match.
 
-## v2026.09.25 — Model cards you control, working copies that tidy themselves, and a shell that starts at once
+## 2026-09-25 — Model cards you control, working copies that tidy themselves, and a shell that starts at once
 
 ### Providers and Models
 - Settings gains a card for each coding tool: choose which of its models the picker offers, and rename the ones you keep.
@@ -582,7 +667,7 @@ the later entry describes the current behavior.
 - A leaked process from a stopped turn is reaped instead of stalling a test runner for fifteen minutes.
 - Request and tool timings are recorded, so a slowdown is measured against history rather than guessed at.
 
-## v2026.09.24 — Delegated work comes back, pauses mean it, endpoints are editable
+## 2026-09-24 — Delegated work comes back, pauses mean it, endpoints are editable
 
 ### Plans and Coordination
 - A delegated step now reports back when the worker's turn actually ends, so a result can never read as arrived before it exists.
@@ -646,7 +731,7 @@ the later entry describes the current behavior.
 - Native browser use works again, and agent shells can launch a headless browser.
 - Reviewer runs skip draft pull requests, and stale review threads resolve themselves instead of lingering.
 
-## v2026.09.19.2 — Why a checkpoint was skipped, stated precisely
+## 2026-09-19, third release — Why a checkpoint was skipped, stated precisely
 
 ### Context and Memory
 - When a background checkpoint doesn't run, the reason is now recorded precisely — too small, no boundary, a turn in progress, already covered, or nothing to build from — instead of a generic refusal.
@@ -654,7 +739,7 @@ the later entry describes the current behavior.
 ### Chat and Delivery
 - A database connection used to look up a thread's project is now released when the query fails, so repeated failures no longer hold resources.
 
-## v2026.09.19.1 — External MCP tools everywhere, Codex stop and receipt reliability
+## 2026-09-19, second release — External MCP tools everywhere, Codex stop and receipt reliability
 
 ### Providers and Models
 - Tools from the external MCP servers you configure now reach every harness, instead of only some of them.
@@ -671,7 +756,7 @@ the later entry describes the current behavior.
 ### Getting Started and Contributing
 - Added a private Tailscale guide for reaching CORSIA from your phone, and corrected the prerequisite that left user-installed command-line tools invisible to background services.
 
-## v2026.09.19 — Agent capacity that frees itself, clearer event chips, tool mistakes that explain themselves
+## 2026-09-19 — Agent capacity that frees itself, clearer event chips, tool mistakes that explain themselves
 
 ### Plans and Coordination
 - A delegated step waiting on its own owner's verdict no longer reads as if the work came back, so a result stops skipping a level in the chain.
@@ -688,7 +773,7 @@ the later entry describes the current behavior.
 ### Getting Started and Contributing
 - An issue a pull request says it fixes now closes when that pull request lands on the working branch, not only on the release branch.
 
-## v2026.09.18.1 — Calmer delegation, faster context sheet, clearer access decisions
+## 2026-09-18, second release — Calmer delegation, faster context sheet, clearer access decisions
 
 ### Plans and Coordination
 - Finished plan work folds away on its own, with one clear control to bring it back.
@@ -712,7 +797,7 @@ the later entry describes the current behavior.
 - Multi-line scripts reach the access reviewer as written, so valid code isn't rejected as a syntax error.
 - Read-only checks inside an approved area are allowed without needing each one spelled out in the plan.
 
-## v2026.09.18 — Quieter delegation, tool-load efficiency, usage durability
+## 2026-09-18 — Quieter delegation, tool-load efficiency, usage durability
 
 ### Plans and Coordination
 - A delegated worker's ordinary progress now reaches you as a quiet update; you're only woken when a step actually needs your judgment.
@@ -729,7 +814,7 @@ the later entry describes the current behavior.
 ### Data and Migrations
 - Fixed a data-migration script that could refuse to convert two older record shapes it didn't recognize.
 
-## v2026.09.17.2 — Image-send stall fix, stop and switch reliability
+## 2026-09-17, third release — Image-send stall fix, stop and switch reliability
 
 ### Chat and Delivery
 - Sending a large image no longer ties up shared database workers and stalls unrelated work.
@@ -751,7 +836,7 @@ the later entry describes the current behavior.
 - Added a release-time check that keeps the published setup docs in step with the code they describe.
 - Removed personal paths and internal working scratch from the repository.
 
-## v2026.09.17.1 — Conductor model picker, plan costs, usage accuracy
+## 2026-09-17, second release — Conductor model picker, plan costs, usage accuracy
 
 ### Chat and Delivery
 - The model shown when you open the conductor is now the conductor's own model.
@@ -771,7 +856,7 @@ the later entry describes the current behavior.
 - Split the offline setup guide into a short path to a running conductor and a longer setup reference.
 - Added setup guidance for phone access, the desktop app, and the conductor's own project setup.
 
-## v2026.09.17 — First release to main
+## 2026-09-17 — First release to main
 
 ### Getting Started and Contributing
 - Rewrote the README around what CORSIA is, what it needs, and how to run it.

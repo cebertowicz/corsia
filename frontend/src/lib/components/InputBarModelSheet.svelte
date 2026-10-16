@@ -11,7 +11,7 @@
 	import PickerAccountHeader from './PickerAccountHeader.svelte';
 	import PickerModelGroupHeader from './PickerModelGroupHeader.svelte';
 	import { choosePickerAccount } from '$lib/stores/pickerAccountChoice';
-	import { workspaceConductorId } from '$lib/utils/conductor';
+	import { corsiaAgentId } from '$lib/utils/conductor';
 	import { requestProviderCard } from '$lib/stores/settingsNavigation';
 	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
@@ -56,13 +56,24 @@
 	const hasLocalGroup = $derived(groups.some(isLocalGroup));
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: 'starter' | 'setup') {
-		if (!(await retryLocalSetup(kind))) toasts.show("Couldn't set up the local model.", 'error');
+		const result = await retryLocalSetup(kind);
+		if (result.code === 'consent_required') {
+			toasts.showAction(
+				'CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.',
+				{ label: 'Use existing oMLX', run: async () => {
+					const consented = await retryLocalSetup('setup', true);
+					if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
+				} },
+			);
+		} else if (!result.ok) {
+			toasts.show("Couldn't set up the local model.", 'error');
+		}
 	}
 
 	async function chooseAccount(row: PickerAccount) {
 		if (accountChoiceBusy) return;
 		accountChoiceBusy = true;
-		const result = await choosePickerAccount($activeThreadId, $activeModelId, $workspaceConductorId, row);
+		const result = await choosePickerAccount($activeThreadId, $activeModelId, $corsiaAgentId, row);
 		accountChoiceBusy = false;
 		if (!result.ok) toasts.show(result.message, 'error');
 	}
@@ -282,7 +293,7 @@
 
 	.switch-marker {
 		font-size: var(--text-caption);
-		color: var(--accent);
+		color: var(--accent-text);
 	}
 
 	.switch-marker.failed {
@@ -328,7 +339,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
-		padding-left: 22px;
 	}
 
 	.model-list-item .model-list-name {
@@ -341,7 +351,7 @@
 	}
 
 	.rollover-settings { padding: 2px 10px 6px 32px; }
-	.rollover-settings button { padding: 0; color: var(--accent); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
+	.rollover-settings button { padding: 0; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
 
 	.row-note {
 		min-width: 0;

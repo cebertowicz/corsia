@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, FACT_LABELS, MAX_REASON_CHARS
+from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
@@ -180,12 +180,14 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "basis": enum_attr(*BASES),
         "size_class": enum_attr(*SIZE_CLASSES),
     },
-    # Independent correction classifications retain their short reason but no
-    # source message text. Every other field is an opaque id or closed enum.
+    # Local correction classifications retain only versioned result metadata,
+    # never source-message text or an LLM explanation.
     CORRECTION_EVENT: {
-        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "reason"}},
-        "label": enum_attr(*FACT_LABELS),
-        "reason": text_attr(MAX_REASON_CHARS),
+        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "threshold", "truncated", "original_tokens"}},
+        "label": enum_attr(*CORRECTION_LABELS),
+        "threshold": id_attr(),
+        "truncated": enum_attr("true", "false"),
+        "original_tokens": count_attr(),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.closed": {

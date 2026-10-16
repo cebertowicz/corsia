@@ -4,7 +4,7 @@
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
 	import { activeModelId, bindActiveThreadModel } from '$lib/stores/models';
-	import { workspaceConductorId } from '$lib/utils/conductor';
+	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
@@ -19,7 +19,6 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { loadRunRange } from '$lib/focusRunLoader';
-
 	import InputBar from './InputBar.svelte';
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
 	import ChatWarmToast from './ChatWarmToast.svelte';
@@ -27,6 +26,7 @@
 	import MobileScrollFab from './MobileScrollFab.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
 	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
@@ -325,7 +325,7 @@
 	});
 </script>
 <div class="chat-shell">
-	<div class="chat-content">
+	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList
 			bind:this={messageListRef}
 			bind:messagesEl
@@ -353,7 +353,7 @@
 			its decision cannot be obscured by the dock or mobile controls.
 		-->
 		<ChatAttentionStack>
-			{#if $activeThreadId && $activeThreadId === $workspaceConductorId && !$activeModelId}
+			{#if $activeThreadId && $activeThreadId === $corsiaAgentId && !$activeModelId}
 				<ConductorSourcesPanel threadId={$activeThreadId} />
 			{/if}
 			{#if $activeThreadId}

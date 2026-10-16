@@ -7,6 +7,12 @@ durable handoff exists. Every test runs against a real database.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 import sqlite3
@@ -76,9 +82,9 @@ def events(monkeypatch):
 
 
 def _conductor() -> str:
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
 
-    conductor_id = get_conductor(WORKSPACE_SCOPE)
+    conductor_id = get_corsia_agent()
     assert conductor_id
     return conductor_id
 
@@ -233,6 +239,44 @@ class TestWakeAndSetupPlan:
         ]
         assert [row["title"] for row in rows] == SETUP_TITLES
 
+    def test_app_path_without_the_served_reference_uses_script_setup(self, fresh_install, monkeypatch):
+        from infra import accounts, onboarding_events
+        from infra.database import get_db
+
+        started = Mock()
+        monkeypatch.setattr(onboarding_events, "start_first_run_task", started)
+        monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: False)
+        accounts.create_first_account("newcomer", SECRET_ENOUGH, first_run_path="app")
+
+        [wake] = _first_run_rows()
+        assert json.loads(wake["metadata"])["first_run_path"] == "script"
+        # The path is decided once at creation: serving the reference later does not flip it.
+        monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: True)
+        db = get_db()
+        try:
+            assert onboarding_events.held_first_run_path(_conductor(), db=db) == "script"
+        finally:
+            db.close()
+        assert [row["title"] for row in _rows(
+            """SELECT n.title FROM plan_nodes n JOIN plans p ON p.id = n.plan_id
+               WHERE p.owner_kind='thread' AND p.owner_id=? AND n.archived_at IS NULL ORDER BY n.order_key""",
+            _conductor(),
+        )] == SETUP_TITLES
+        started.assert_called_once()
+
+    def test_served_app_path_seeds_no_setup_tasks_or_start(self, fresh_install, monkeypatch):
+        from infra import accounts, onboarding_events
+
+        started = Mock()
+        monkeypatch.setattr(onboarding_events, "start_first_run_task", started)
+        monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: True)
+        accounts.create_first_account("newcomer", SECRET_ENOUGH, first_run_path="app")
+
+        [wake] = _first_run_rows()
+        assert json.loads(wake["metadata"])["first_run_path"] == "app"
+        assert _rows("SELECT n.title FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE p.owner_id=?", _conductor()) == []
+        started.assert_not_called()
+
     def test_the_seeded_tasks_do_not_depend_on_what_the_install_finds(
         self, fresh_install, monkeypatch,
     ):
@@ -296,7 +340,7 @@ class TestWakeAndSetupPlan:
         from infra import accounts, conductor
         from registry import shared_ownership_assignment
 
-        monkeypatch.setattr(conductor, "ensure_scope_conductor", Mock(return_value=None))
+        monkeypatch.setattr(conductor, "ensure_project_conductor", Mock(return_value=None))
         monkeypatch.setattr(shared_ownership_assignment, "enforce_scaffold_ownership", Mock())
 
         assert accounts.create_user("newcomer", SECRET_ENOUGH) == "newcomer"
@@ -570,25 +614,27 @@ class TestPending:
         assert _pending(_conductor()) is False
 
     @pytest.mark.asyncio
-    async def test_the_route_reports_it_for_the_workspace_scope_only(self, fresh_install, monkeypatch):
+    async def test_the_corsia_agent_route_reports_it_and_a_project_route_never_does(self, fresh_install, monkeypatch):
         from api import conductor as conductor_routes
+        from api import corsia_agent as corsia_agent_routes
         from infra import accounts
-        from infra.conductor import set_conductor
+        from infra.conductor import set_project_conductor
 
         async def truth(*_a, **_k):
             return {}
 
         monkeypatch.setattr(conductor_routes, "read_runtime_truth", truth)
         monkeypatch.setattr(conductor_routes, "authenticate", lambda _t: {"id": "newcomer"})
+        monkeypatch.setattr(corsia_agent_routes, "authenticate", lambda _t: {"id": "newcomer"})
         accounts.create_user("newcomer", SECRET_ENOUGH)
         conductor_id = _conductor()
 
-        body = await conductor_routes.get_conductor_route(token="caller", scope="workspace")
+        body = await corsia_agent_routes.get_corsia_agent_route(token="caller")
         assert body["thread_id"] == conductor_id
         assert body["first_run_pending"] is True
 
         _mark_update(conductor_id, "report")
-        body = await conductor_routes.get_conductor_route(token="[REDACTED]", scope="workspace")
+        body = await corsia_agent_routes.get_corsia_agent_route(token="[REDACTED]")
         assert body["first_run_pending"] is False
 
         from infra.database import write_transaction
@@ -596,7 +642,7 @@ class TestPending:
         with write_transaction(None, scope="test_project") as db:
             db.execute("INSERT INTO projects (id,name,path,created_at,updated_at)"
                        " VALUES ('proj-a','A','/a','t','t')")
-        assert set_conductor("proj-a", conductor_id) is True
+        assert set_project_conductor("proj-a", conductor_id) is True
         body = await conductor_routes.get_conductor_route(token="caller", scope="proj-a")
         assert body["thread_id"] == conductor_id
         assert body["first_run_pending"] is False

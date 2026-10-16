@@ -261,6 +261,11 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
     BEGIN
         SELECT RAISE(ABORT, 'plan holds cannot be deleted');
     END;
+    -- Deferrals belong to open asks; watches alone end them, so no condition is stored here.
+    CREATE TABLE IF NOT EXISTS plan_ask_deferrals (
+        hold_id TEXT PRIMARY KEY REFERENCES plan_node_holds(id),
+        deferred_at TEXT NOT NULL
+    );
 """ + HOLD_UPDATE_GUARD_SQL + PLAN_STATUS_DIRTY_SCHEMA_SQL + f"""
     CREATE TABLE IF NOT EXISTS plan_node_artifact_links (
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,

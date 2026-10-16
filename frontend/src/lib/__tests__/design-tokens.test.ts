@@ -22,6 +22,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--chat-attention-occupied-height',
 	'--floater-bottom-pad',
 	'--input-bar-height',
+	// BrowserLeaf assigns the shared session owner's colour with Svelte `style:--presence-color`.
+	'--presence-color',
 	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.
 	'--pane-overlay-inset',
 	// ReviewBar measures it (its bindable `capsuleClearance`) and the image viewer writes it with `style:--x`: the room
@@ -40,9 +42,13 @@ const RUNTIME_PROVIDED = new Set([
 	'--doc-rail',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',
-	// ToastContainer's `style:--toast-clearance` (the toastClearance store) and `style:--toast-height`.
-	'--toast-clearance',
-	'--toast-height',
+	// ToastContainer's `style:--toast-top` (the toastTop store: the lowest edge of the header and status banners), and the
+	// column it centres on (`style:--toast-anchor-x` and `--toast-anchor-width`, from the toastAnchor store).
+	'--toast-top',
+	'--toast-anchor-x',
+	'--toast-anchor-width',
+	// HomeShell's `style:--artifact-header-inset` on main: the expanded artifact column plus divider, from ChatArtifactSplit.
+	'--artifact-header-inset',
 ]);
 
 /**
@@ -53,11 +59,9 @@ const RUNTIME_PROVIDED = new Set([
  * This list may only shrink. A new entry means a new silently-dropped
  * declaration and should be fixed instead of appended.
  */
-const KNOWN_UNRESOLVED_BASELINE_COUNT = 7;
+const KNOWN_UNRESOLVED_BASELINE_COUNT = 5;
 const KNOWN_UNRESOLVED = new Set([
 	'lib/components/ThreadAgentPanel.svelte:356 → var(--text-quaternary)',
-	'lib/components/InputBar.css:133 → var(--amber-2)',
-	'lib/components/InputBar.css:143 → var(--sky-2)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:137 → var(--surface-2)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:143 → var(--link)',
 	'lib/components/v7/OmlxServerInfoPanel.svelte:150 → var(--err)',
@@ -114,8 +118,8 @@ describe('design tokens', () => {
 	});
 
 	it('keeps the known-unresolved baseline shrink-only', () => {
-		// Fixes may remove entries. Appending a tenth silently-dropped declaration
-		// fails until the new reference itself is fixed.
+		// Fixes may remove entries, and the baseline drops with them. Appending another
+		// silently-dropped declaration fails until the new reference itself is fixed.
 		expect(KNOWN_UNRESOLVED.size).toBeLessThanOrEqual(KNOWN_UNRESOLVED_BASELINE_COUNT);
 	});
 

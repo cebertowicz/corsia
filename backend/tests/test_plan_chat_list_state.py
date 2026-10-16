@@ -108,6 +108,82 @@ def test_each_thread_reads_its_one_state(db):
     assert [key for key, value in states.items() if value["paused"]] == ["paused"]
 
 
+def test_a_child_review_counts_once_not_again_as_its_parent_rollup(db):
+    owner = _thread(db, "child-review")
+    plan = _plan(db, "child-review")
+    parent = service.add_node(
+        plan.id, kind="phase", title="Review phase", acceptance_criteria="Reviewed", db=db,
+    )
+    child = task(db, plan.id, "Review the document", parent_id=parent.id, assignee="user")
+    _activate(db, plan.id, child.id, HUMAN)
+    plan_update(db, plan.id, "request_review", {
+        "node_id": child.id, "evidence": "Ready for you",
+        "expected_revision": revision(db, child.id),
+    }, actor=HUMAN)
+
+    state = _states(db, [owner.thread_id])[owner.thread_id]
+
+    assert state["attention_items"] == [{
+        "kind": "review", "title": "Review the document", "node_id": child.id,
+    }]
+
+
+def test_a_started_parent_still_counts_its_own_ask(db):
+    owner = _thread(db, "parent-review")
+    plan = _plan(db, "parent-review")
+    parent = service.add_node(
+        plan.id, kind="phase", title="Sign off the release", acceptance_criteria="Signed off",
+        assignee="user", db=db,
+    )
+    task(db, plan.id, "Prepare notes", parent_id=parent.id)
+    _activate(db, plan.id, parent.id, HUMAN)
+    plan_update(db, plan.id, "request_review", {
+        "node_id": parent.id, "evidence": "Ready for you",
+        "expected_revision": revision(db, parent.id),
+    }, actor=HUMAN)
+
+    state = _states(db, [owner.thread_id])[owner.thread_id]
+
+    assert [item["node_id"] for item in state["attention_items"]] == [parent.id]
+
+
+def test_an_unstarted_parent_counts_its_own_ask_beside_its_child(db):
+    from plans import artifact_links
+    from registry import attention, models
+
+    owner = _thread(db, "container-ask")
+    plan = _plan(db, "container-ask")
+    parent = service.add_node(
+        plan.id, kind="phase", title="Approve the plan", acceptance_criteria="Approved", db=db,
+    )
+    child = task(db, plan.id, "Review the document", parent_id=parent.id, assignee="user")
+    _activate(db, plan.id, child.id, HUMAN)
+    plan_update(db, plan.id, "request_review", {
+        "node_id": child.id, "evidence": "Ready for you",
+        "expected_revision": revision(db, child.id),
+    }, actor=HUMAN)
+    # The parent's own raised artifact is a need of its own, not its child's rollup.
+    # Only a task holds a review request, so the parent's is non-ask attention.
+    models.register_artifact(
+        integration="github", type="pr", external_id="container-ask#1",
+        parent_thread_id="container-ask", title="Merge the release", db=db,
+    )
+    raised = db.execute(
+        "SELECT id FROM artifact_identities WHERE external_id='container-ask#1'",
+    ).fetchone()["id"]
+    attention.raise_attention(raised, db=db)
+    artifact_links.link(
+        parent.id, raised, "attention", actor_id=None, provenance="test", db=db,
+    )
+    db.commit()
+
+    state = _states(db, [owner.thread_id])[owner.thread_id]
+
+    assert sorted(item["node_id"] for item in state["attention_items"]) == sorted(
+        [parent.id, child.id]
+    )
+
+
 def test_what_the_user_owes_outranks_a_pause(db):
     """Pause contract rule 5 (#1972): the chat list, the header and the agent's
     summary all say the user's move before they say paused."""
@@ -296,8 +372,6 @@ def test_access_request_reaches_a_planless_thread_row(db):
         "label_key": None,
         "paused": False,
         "attention_items": [{"kind": "access", "title": "Inspect host", "node_id": None}],
-        "stuck_overdue_waits": 0,
-        "next_overdue_at": None,
         "settled": False,
         "latest_update": None,
         "has_update": False,
@@ -321,8 +395,6 @@ def test_child_plan_access_request_reaches_its_visible_thread_row(db):
         "label_key": None,
         "paused": False,
         "attention_items": [{"kind": "access", "title": "Inspect child host", "node_id": None}],
-        "stuck_overdue_waits": 0,
-        "next_overdue_at": None,
         "settled": False,
         "latest_update": None,
         "has_update": False,
@@ -546,24 +618,20 @@ def _deadline_wait(db, plan_id: str, actor: PlanActor, title: str, ends_at: str)
     }, actor=actor)
 
 
-def test_three_overdue_waits_read_stuck_without_attention_items(db):
+def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
     actor = _thread(db, "three-overdue")
     plan = _plan(db, "three-overdue")
     overdue = (datetime.now(UTC) - not_moving.OVERDUE_GRACE - timedelta(seconds=1)).isoformat()
     for number in range(3):
         _deadline_wait(db, plan.id, actor, f"Wait {number}", overdue)
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    _deadline_wait(db, plan.id, actor, "Wait later", future)
 
     state = _states(db, ["three-overdue"])["three-overdue"]
 
-    assert state["state"] == "stuck"
+    assert state["state"] == "idle"
     assert state["attention_items"] == []
-    assert state["stuck_overdue_waits"] == 3
-    assert state["next_overdue_at"] == (datetime.fromisoformat(future) + not_moving.OVERDUE_GRACE).isoformat()
 
 
-def test_owed_then_failed_outrank_stuck_and_paused_never_reads_stuck(db):
+def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
     actor = _thread(db, "stuck-precedence")
     plan = _plan(db, "stuck-precedence")
     overdue = (datetime.now(UTC) - not_moving.OVERDUE_GRACE - timedelta(seconds=1)).isoformat()
@@ -582,10 +650,10 @@ def test_owed_then_failed_outrank_stuck_and_paused_never_reads_stuck(db):
     plan_update(db, plan.id, "pause", {
         "expected_revision": service._plan_row(db, plan.id)["revision"],
     }, actor=HUMAN)
-    assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] != "stuck"
+    assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] == "blocked_on_you"
 
 
-def test_future_waits_stay_idle_and_name_the_next_overdue_read(db):
+def test_a_future_wait_is_idle(db):
     actor = _thread(db, "future-waits")
     plan = _plan(db, "future-waits")
     ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
@@ -594,5 +662,3 @@ def test_future_waits_stay_idle_and_name_the_next_overdue_read(db):
     state = _states(db, ["future-waits"])["future-waits"]
 
     assert state["state"] == "idle"
-    assert state["stuck_overdue_waits"] == 0
-    assert state["next_overdue_at"] == (datetime.fromisoformat(ends) + not_moving.OVERDUE_GRACE).isoformat()

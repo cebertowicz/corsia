@@ -18,20 +18,16 @@
 		onOpen: (opener: HTMLElement) => void;
 	} & { [attribute: `data-${string}`]: string | boolean } = $props();
 
-	const uid = $props.id();
-	const unplacedId = `unplaced-${uid}`;
-	// Threads name the pill; messages name the unsent delivery state.
-	const label = $derived(`${count} open thread${count === 1 ? '' : 's'}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
+	// Threads, unplaced comments, and unsent messages each contribute their already-visible status to the pill name.
 	const unplacedPhrase = $derived(`${unplaced} comment${unplaced === 1 ? '' : 's'} couldn't be placed`);
+	const label = $derived(`${count} open thread${count === 1 ? '' : 's'}${unplaced ? `, ${unplacedPhrase}` : ''}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
 </script>
 
 <button type="button" class={look} {...data} bind:this={element} aria-expanded={expanded} {disabled}
 	aria-label={loading ? 'Loading comments' : label}
-	aria-describedby={unplaced ? unplacedId : undefined}
 	title={loading ? 'Comments are loading' : unplaced ? unplacedPhrase : undefined} onclick={(event) => onOpen(event.currentTarget)}>
 	<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if unplaced}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
 	<span class="count">{loading ? '…' : count}</span>{#if !loading}<span class="count-unit">{count === 1 ? 'thread' : 'threads'}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
-	{#if unplaced}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
 </button>
 
 <style>
@@ -41,7 +37,6 @@
 	.count { font-variant-numeric: tabular-nums; }
 	.count-unit { color: var(--text-tertiary); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
-	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@container doc-canvas (max-width: 600px) {
 		.count-unit { display: none; }
 	}

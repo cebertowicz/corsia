@@ -49,7 +49,7 @@
 					<span class="separator" aria-hidden="true">{' · '}</span>
 					<span class="account-name">{rollover ? `Auto · ${account.label.name}` : account.label.name}</span>
 				{/if}
-				<span class="chooser-caret" aria-hidden="true">⌄</span>
+				<span class="chooser-caret" class:open aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
 			</button>
 		{:else}
 			<span class="picker-account-title"><span class="vendor">{vendor}</span>{#if account}<span class="separator" aria-hidden="true">{' · '}</span><span class="account-name">{account.label.name}</span>{/if}</span>
@@ -91,11 +91,13 @@
 	.separator, .usage { color: var(--text-tertiary); }
 	button.usage { padding: 0; font: inherit; background: none; border: 0; cursor: pointer; }
 	.account-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.chooser-caret { flex: 0 0 auto; margin-left: auto; padding-left: 4px; color: var(--text-tertiary); font-size: var(--text-subhead); line-height: 1; }
+	.chooser-caret { display: flex; flex: 0 0 auto; align-self: center; margin-left: auto; padding-left: 4px; color: var(--text-tertiary); }
+	.chooser-caret svg { display: block; transition: transform var(--dur-tight); }
+	.chooser-caret.open svg { transform: rotate(180deg); }
 	.usage { min-width: 0; font-variant-numeric: tabular-nums; }
 	.usage .amber { color: var(--amber-text); }
 	.usage .red { color: var(--red-text); }
-	.recovery { padding: 0; color: var(--accent); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
+	.recovery { padding: 0; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
 	.picker-account-usage { padding: 2px 0 2px; font-size: var(--text-caption); color: var(--text-tertiary); }
 	@media (max-width: 480px) {
 		.picker-account-title { flex-basis: 100%; }

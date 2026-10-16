@@ -71,13 +71,13 @@ class TestDelegationDefaultCleanup:
         try:
             db.execute(
                 "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-                ("workspace_conductor_session_id", json.dumps("cond-workspace"), "t"),
+                ("corsia_agent_thread_id", json.dumps("cond-workspace"), "t"),
             )
             db.commit()
         finally:
             db.close()
 
-        assert get_setting("workspace_conductor_session_id") is None
+        assert get_setting("corsia_agent_thread_id") is None
 
 class TestCreateThread:
     def test_auth_required(self, client):

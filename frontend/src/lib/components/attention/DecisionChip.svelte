@@ -10,7 +10,6 @@
 	 * once, and a failed write returns the decision here with its reason.
 	 */
 	import Button from '$lib/components/ui/Button.svelte';
-	import StatePill from '$lib/components/ui/StatePill.svelte';
 	import {
 		isPickAny,
 		OTHER_OPTION_ID,
@@ -90,6 +89,9 @@
 	const locked = $derived(writesDisabled || failure?.kind === 'unauthorized');
 	const pickAny = $derived(isPickAny(decision));
 	const recommendedSet = $derived(recommendedIds(decision));
+	const rationaleOptionId = $derived(
+		decision.options.find((option) => recommendedSet.includes(option.id))?.id ?? null,
+	);
 	const ticked = $derived(picked ?? recommendedSet);
 	const asRecommended = $derived(
 		ticked.length === recommendedSet.length && ticked.every((id) => recommendedSet.includes(id)),
@@ -157,9 +159,6 @@
 <section class="decision-chip" aria-labelledby={headingId}>
 	<header>
 		<div>
-			<span class="eyebrow">
-				Decision · {decision.source.thread_label}{#if decision.source.project_label}<span class="scope"> · {decision.source.project_label}</span>{/if}
-			</span>
 			<h3 id={headingId} tabindex="-1" data-drawer-autofocus>{decision.title}</h3>
 			{#if !decision.source.parent_reviewed}
 				<p class="source-note">Raised directly — no parent review.</p>
@@ -173,7 +172,9 @@
 			</div>
 			<dl>
 				<div><dt>Tradeoff</dt><dd>{decision.tradeoff}</dd></div>
-				<div><dt>Why</dt><dd>{decision.rationale}</dd></div>
+				{#if !rationaleOptionId}
+					<div><dt>Why</dt><dd>{decision.rationale}</dd></div>
+				{/if}
 			</dl>
 		</div>
 		<div class="options" aria-label="Decision options">
@@ -183,6 +184,7 @@
 				{#each decision.options as option (option.id)}
 					{@const isTicked = ticked.includes(option.id)}
 					{@const isRecommended = recommendedSet.includes(option.id)}
+					{@const carriesRationale = option.id === rationaleOptionId}
 					<label class="option-row" class:selected={isTicked}>
 						<input
 							type="checkbox"
@@ -190,17 +192,20 @@
 							checked={isTicked}
 							disabled={locked}
 							aria-label={isRecommended ? `${option.label}, recommended` : option.label}
-							aria-describedby={option.detail ? `${headingId}-${option.id}-detail` : undefined}
+							aria-describedby={`${headingId}-${option.id}-detail${carriesRationale ? ` ${headingId}-${option.id}-rationale` : ''}`}
 							onchange={(event) => togglePick(option.id, event.currentTarget.checked)}
 						/>
 						<span class="option-text">
 							<span class="option-label-row">
 								<b>{option.label}</b>
 								{#if isRecommended}
-									<StatePill state="active" size="sm" label="Recommended" />
+									<span class="recommended">Recommended</span>
 								{/if}
 							</span>
 							<small id={`${headingId}-${option.id}-detail`}>{option.detail}</small>
+							{#if carriesRationale}
+								<p class="option-rationale" id={`${headingId}-${option.id}-rationale`}><span>Why</span>{decision.rationale}</p>
+							{/if}
 						</span>
 					</label>
 				{/each}
@@ -225,6 +230,7 @@
 					class="option-button press-tint"
 					class:selected={selected === option.id}
 					aria-pressed={selected === option.id}
+					aria-describedby={`${headingId}-${option.id}-detail${option.id === rationaleOptionId ? ` ${headingId}-${option.id}-rationale` : ''}`}
 					disabled={locked}
 					onclick={() => chooseOption(option.id)}
 				>
@@ -233,10 +239,13 @@
 						<span class="option-label-row">
 							<b>{option.label}</b>
 							{#if recommended && option.id === recommended.id}
-								<StatePill state="active" size="sm" label="Recommended" />
+								<span class="recommended">Recommended</span>
 							{/if}
 						</span>
-						<small>{option.detail}</small>
+						<small id={`${headingId}-${option.id}-detail`}>{option.detail}</small>
+						{#if option.id === rationaleOptionId}
+							<p class="option-rationale" id={`${headingId}-${option.id}-rationale`}><span>Why</span>{decision.rationale}</p>
+						{/if}
 					</span>
 				</button>
 			{/each}
@@ -283,53 +292,56 @@
 
 <style>
 	.decision-chip { background: transparent; overflow: visible; }
-	/* Sticky over scrolling content: the same material and blur as the drawer
-	   panel that contains it. `--surface-1` never existed, so this whole
-	   declaration used to be dropped and the bar was transparent. */
-	header { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
-	.eyebrow { display: block; margin-bottom: var(--space-1); color: var(--violet-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
-	.eyebrow .scope { color: var(--text-tertiary); }
+	/* The decision drawer is opaque: its sticky heading and sticky actions footer must be
+	   the same opaque sheet material, otherwise scrolled options visibly pass behind them. */
+	header { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); }
+	/* Context belongs to the drawer chrome so the title remains the chip's only header fact. */
 	h3 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); line-height: var(--lh-tight); }
 	.source-note { margin: var(--space-1) 0 0; color: var(--text-tertiary); font-size: var(--text-caption); }
-	.decision-body { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4) 0 var(--space-5); }
+	.decision-body { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4) 0 0; }
 	.decision-top { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(220px, .85fr); gap: var(--space-4); }
 	.decision-context > p { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	dl { display: grid; gap: var(--space-2); margin: 0; }
-	dl div { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--bg-primary); }
-	dt { margin-bottom: var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
+	dl div { padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); }
+	dt { margin-bottom: var(--space-1); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	dd { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.options { display: flex; flex-direction: column; gap: var(--space-2); }
 	.option-button { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); text-align: left; cursor: pointer; }
-	.option-button.selected { border-color: var(--violet); background: var(--violet-bg); }
+	.option-button.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.option-button:disabled { opacity: 0.5; cursor: not-allowed; }
 	.option-button > strong { display: grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--radius-xs); background: var(--bg-tertiary); color: var(--text-secondary); font-size: var(--text-footnote); }
-	.option-button > span { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
-	.option-label-row { display: flex; align-items: center; gap: var(--space-2); }
+	.option-button > span { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-1); }
+	.option-label-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 	.option-button b { font-size: var(--text-subhead); }
 	.option-button small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
+	.option-rationale { display: flex; gap: var(--space-1); margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
+	.option-rationale span { flex: none; color: var(--text-tertiary); font-weight: var(--fw-semibold); }
+	/* Recommended is coloured text, never a filled pill (DESIGN-SYSTEM §0.2). */
+	.recommended { color: var(--accent-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	.other-option { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--text-footnote); }
-	.other-option.selected { border-color: var(--violet); background: var(--violet-bg); }
+	.other-option.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.other-option > span:first-child { padding-top: var(--space-1); }
 	.other-option textarea { min-width: 0; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-primary); padding: var(--space-1) var(--space-2); outline: none; font-family: inherit; font-size: inherit; line-height: var(--lh-normal); resize: none; overflow-y: auto; min-height: calc(1em * var(--lh-normal) + var(--space-2)); max-height: min(40vh, 12em); }
 	.other-option textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 	.decision-buttons { display: flex; flex: none; align-items: center; gap: var(--space-2); }
-	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0; border-top: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); color: var(--text-tertiary); font-size: var(--text-footnote); }
+	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--bg-secondary); color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.receipt { flex: 1; min-width: 0; margin: 0; }
 	.hint { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	fieldset.pick-any { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
-	fieldset.pick-any legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
+	fieldset.pick-any legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	.option-row { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
-	.option-row.selected { border-color: var(--violet); background: var(--violet-bg); }
+	.option-row.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.option-row:has(.tick:disabled) { opacity: 0.5; cursor: not-allowed; }
 	/* A native checkbox, drawn in CSS: the whole row is its label, so the row is the tap target. */
 	.tick { appearance: none; -webkit-appearance: none; display: grid; place-items: center; flex: none; width: 18px; height: 18px; margin: 1px; border: 1.5px solid var(--text-tertiary); border-radius: 5px; background: transparent; cursor: inherit; }
-	.tick:checked { border-color: var(--violet); background: var(--violet); }
+	.tick:checked { border-color: var(--accent); background: var(--accent); }
 	.tick:checked::after { content: ''; width: 4px; height: 8px; margin-top: -2px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-	.option-text { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
+	.option-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-1); }
 	.option-row b { font-size: var(--text-subhead); }
 	.option-row small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
-	.option-row:has(.tick:focus-visible) { outline: 2px solid var(--violet); outline-offset: 2px; }
-	.option-button:focus-visible, .other-option:focus-within { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.option-row:has(.tick:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.option-button:focus-visible, .other-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* The drawer chrome owns the single context line beside Done at every width. */
 	@media (max-width: 720px) {
 		.decision-top { grid-template-columns: 1fr; gap: var(--space-3); }
 		.option-button, .other-option { min-height: 44px; }

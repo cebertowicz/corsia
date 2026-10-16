@@ -4,7 +4,7 @@
 	import { activeThread, activeThreadId } from '$lib/stores/threads';
 	import { token } from '$lib/stores/auth';
 	import { uiScope } from '$lib/stores/uiScope';
-	import { fetchConductor, type ConductorTarget } from '$lib/utils/conductor';
+	import { fetchScopeTarget, type CoordinationTarget } from '$lib/utils/conductor';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import SkillScopePanel from './SkillScopePanel.svelte';
 
@@ -14,43 +14,45 @@
 		conductor?: boolean;
 	} = $props();
 
-	let conductorTarget = $state<ConductorTarget | null>(null);
+	let scopeTarget = $state<CoordinationTarget | null>(null);
 	let conductorLoading = $state(conductor);
 	$effect(() => {
 		if (!conductor || !$activeThreadId) return;
 		let active = true;
 		const threadId = $activeThreadId;
-		conductorTarget = null;
+		scopeTarget = null;
 		conductorLoading = true;
-		fetchConductor($token, $uiScope).then((lookup) => {
+		fetchScopeTarget($token, $uiScope).then((lookup) => {
 			if (active) {
 				// Absent and unknown both leave the settings unavailable to retry:
 				// only a matching target can back this view.
 				const target = lookup?.kind === 'target' ? lookup.target : null;
-				conductorTarget = target?.thread_id === threadId ? target : null;
+				scopeTarget = target?.thread_id === threadId ? target : null;
 				conductorLoading = false;
 			}
 		});
 		return () => { active = false; };
 	});
 
-	const settingsThreadId = $derived(conductor ? conductorTarget?.thread_id ?? null : $activeThread?.id ?? null);
-	const projectId = $derived(conductor ? conductorTarget?.project_id ?? null : $activeThread?.project_id ?? null);
+	const settingsThreadId = $derived(conductor ? scopeTarget?.thread_id ?? null : $activeThread?.id ?? null);
+	const projectId = $derived(conductor ? scopeTarget?.project_id ?? null : $activeThread?.project_id ?? null);
 	const agentScope = $derived(projectId ? 'project' : 'workspace');
+	// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
+	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
 </script>
 
 <div class="ts-scroll">
 	<div class="ts">
-		{#if conductor && !conductorTarget}
-			<p role="status">{conductorLoading ? 'Loading conductor settings…' : 'Conductor settings unavailable. Try reopening this view.'}</p>
+		{#if conductor && !scopeTarget}
+			<p role="status">{conductorLoading ? `Loading ${designatedName === 'CORSIA' ? 'CORSIA' : 'conductor'} settings…` : `${designatedName} settings unavailable. Try reopening this view.`}</p>
 		{:else}
 		<section class="sec">
 			<div class="sec-cap">Context files</div>
 			<p class="sec-hint">Files pinned to this thread.</p>
 			<ThreadContextPanel
 				threadId={settingsThreadId}
-				hiddenThread={conductorTarget ? { id: conductorTarget.thread_id, title: conductorTarget.title ?? 'Conductor', project_id: conductorTarget.project_id ?? null, bootloader_files: conductorTarget.bootloader_files ?? null } : null}
-				onHiddenThreadFilesChanged={(files) => { if (conductorTarget) conductorTarget = { ...conductorTarget, bootloader_files: files }; }}
+				hiddenThread={scopeTarget ? { id: scopeTarget.thread_id, title: scopeTarget.title ?? designatedName, project_id: scopeTarget.project_id ?? null, bootloader_files: scopeTarget.bootloader_files ?? null } : null}
+				onHiddenThreadFilesChanged={(files) => { if (scopeTarget) scopeTarget = { ...scopeTarget, bootloader_files: files }; }}
 				onBrowseExisting={onBrowseContextFiles}
 			/>
 		</section>
@@ -62,7 +64,7 @@
 				scope="thread"
 				threadId={settingsThreadId}
 				projectId={projectId}
-				scopeLabel={`Thread: ${conductor ? 'Conductor' : $activeThread?.title ?? 'Current thread'}`}
+				scopeLabel={`Thread: ${conductor ? designatedName : $activeThread?.title ?? 'Current thread'}`}
 				inheritanceHint="This thread inherits global, project, and ancestor-thread skills. Same-name local skills override inherited ones."
 				onBrowseSkills={onBrowseSkills}
 				onOpenSkill={() => threadSettingsOpen.set(false)}
@@ -85,7 +87,7 @@
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
-		padding-top: calc(var(--header-height, 60px) + env(safe-area-inset-top, 0px));
+		padding-top: var(--header-bottom);
 	}
 
 	.ts {

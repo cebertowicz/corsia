@@ -58,8 +58,9 @@ config.json
 # the legacy top-level `.qa/` patterns above remain for historical entries.
 frontend/.qa/
 desktop/src-tauri/target/
-desktop/src-tauri/Cargo.lock
 desktop/src-tauri/gen/
+desktop/.build-macos/
+desktop/bundle/
 
 # Retired local PostHog runtime residue can remain in pre-OSS self-hosting
 # checkouts. Keep secrets and generated trees ignored until machine cleanup.

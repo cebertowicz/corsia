@@ -7,7 +7,7 @@ export function isYourMove(entry: ThreadPlanStateEntry | undefined): boolean {
 }
 
 /**
- * The word slot 3 shows by precedence your move > Failed > Stuck (AS3);
+ * The word slot 3 shows by precedence your move > Failed (AS3);
  * empty when neither applies, which leaves slot 3 to the update dot.
  */
 export function slotThreeWord(entry: ThreadPlanStateEntry | undefined): string {
@@ -15,10 +15,6 @@ export function slotThreeWord(entry: ThreadPlanStateEntry | undefined): string {
 	const items = entry.attention_items ?? [];
 	const count = items.length;
 	if (entry.state === 'failed') return count > 1 ? `${count} ${attentionKindWord('failed')}` : attentionKindWord('failed');
-	if (entry.state === 'stuck') {
-		const overdue = entry.stuck_overdue_waits ?? 0;
-		return overdue > 1 ? `${overdue} Stuck` : 'Stuck';
-	}
 	if (!isYourMove(entry)) return '';
 	const kind = items[0]?.kind;
 	if (count === 0) return chatStateWord(entry.state);
@@ -30,7 +26,7 @@ export function slotThreeWord(entry: ThreadPlanStateEntry | undefined): string {
 /**
  * Mark read/unread moves only the update dot, so the menu offers it only when
  * the dot is slot 3's mark: the thread has a seen record and no owed or
- * Failed or Stuck word outranks the dot.
+ * Failed word outranks the dot.
  */
 export function canMarkSeen(entry: ThreadPlanStateEntry | undefined): boolean {
 	return Boolean(entry?.opened) && slotThreeWord(entry) === '';

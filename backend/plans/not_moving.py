@@ -46,6 +46,7 @@ def read_from_facts(
     paused_by_user: int,
     wait_deadlines: list[tuple[str, str]],
     child_running: bool = False,
+    set_aside: int | None = None,
 ) -> dict[str, Any] | None:
     """Reduce aggregate leaf facts into the canonical still-plan summary."""
     if not still_count(counts) or any(counts[key] for key in MOTION_KEYS):
@@ -70,13 +71,14 @@ def read_from_facts(
     earliest = min(
         (first for first, _last in deadlines), default=None,
     )
-    return {
+    facts = {
         "need_you": counts["review_human"] + counts["blocked"] + user_ready,
         "next_wait_ends_at": earliest[1] if earliest is not None else None,
         "next_overdue_at": min(turns_overdue).isoformat() if turns_overdue else None,
         "overdue_waits": overdue,
         "paused_by_you": paused_by_user,
     }
+    return {**facts, "set_aside": set_aside} if set_aside is not None else facts
 
 
 def read(
@@ -93,9 +95,9 @@ def read(
     leaves the user paused. The plan is still only when every ready leaf the
     counts hold is shown to be the user's.
     """
-    from plans import node_states, operator_node_state
+    from plans import node_states, operator_node_state, operator_scheduled
 
-    user_ready = user_blocked = paused_by_user = 0
+    user_ready = user_blocked = paused_by_user = set_aside = 0
     deadlines: list[tuple[str, str]] = []
     has_child_running = False
     for node in node_states.leaves(nodes):
@@ -109,6 +111,7 @@ def read(
         if bucket == "paused" and (plan["state"] == "paused" or _user_pause(causes)):
             paused_by_user += 1
         if bucket == "waiting":
+            set_aside += operator_scheduled.only_set_aside(causes)
             found = deadline_range(causes)
             if found is not None:
                 deadlines.append(found)
@@ -119,6 +122,7 @@ def read(
         paused_by_user=paused_by_user,
         wait_deadlines=deadlines,
         child_running=has_child_running,
+        set_aside=set_aside,
     )
 
 
@@ -144,6 +148,12 @@ def note(facts: dict[str, Any]) -> str:
             f"{head} · {overdue} {plural} past the deadline. Check each: resolve it if it "
             "cleared, wait again with a new deadline and a reason, raise a decision, or close "
             "the task."
+        )
+    set_aside = facts.get("set_aside", 0)
+    if set_aside:
+        return (
+            f"{head}. You scheduled {set_aside} of these yourself; nothing releases them early "
+            "unless you do. Review them in plan order and start any you can drive now."
         )
     owed = f"until {ends}" if ends else "until something changes"
     return f"{head}. Pick up anything you can move; otherwise nothing is owed {owed}."

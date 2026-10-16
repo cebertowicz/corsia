@@ -7,6 +7,12 @@ notice for the consuming thread's next independent activity.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 import uuid
 from pathlib import Path
@@ -104,9 +110,9 @@ def test_editor_save_of_configured_bootloader_source_journals_passive_notice(
         # A new project enforces shared ownership from creation, so a file
         # placed on disk outside the registry is first claimed by its conductor.
         if managed:
-            from infra.conductor import get_conductor
+            from infra.conductor import get_scope_coordinator
 
-            expected_parent = get_conductor(project_id, db=db)
+            expected_parent = get_project_conductor(project_id, db=db)
         else:
             expected_parent = writer
     finally:

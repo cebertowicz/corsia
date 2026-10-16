@@ -262,18 +262,15 @@ describe('ThreadPlanStateMark', () => {
 		expect(host.querySelector<HTMLElement>('.plan-state')?.textContent).toBe('2 Failed');
 	});
 
-	it('renders Stuck as an accessible tertiary mark that opens the thread and hides the dot', () => {
+	it('shows the existing update dot for an idle row', () => {
 		const onOpenThread = renderUpdate({
-			state: 'stuck', label_key: null, paused: false, attention_items: [],
-			stuck_overdue_waits: 1, has_update: true,
+			state: 'idle', label_key: null, paused: false, attention_items: [], has_update: true,
 		});
-		const mark = host.querySelector<HTMLElement>('.plan-state.stuck')!;
-		expect(mark.textContent).toBe('Stuck');
-		expect(mark.getAttribute('aria-label')).toBe('Stuck · 1 wait past the deadline');
-		expect(mark.title).toBe('Stuck · 1 wait past the deadline');
-		expect(host.querySelector('.update-dot')).toBeNull();
-		mark.click();
-		mark.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		expect(host.querySelector('.plan-state:not(.update-dot)')).toBeNull();
+		const dot = host.querySelector<HTMLElement>('.update-dot')!;
+		expect(dot.getAttribute('aria-label')).toBe('Update since your last visit');
+		dot.click();
+		dot.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		expect(onOpenThread).toHaveBeenCalledTimes(2);
 	});
 
@@ -297,6 +294,8 @@ describe('ThreadPlanStateMark', () => {
 		const phoneTarget = source.match(/@media \(max-width: 768px\)[\s\S]*\.plan-state\[role="button"\]::before\s*\{([^}]*)\}/)?.[1] ?? '';
 		expect(phoneTarget).toMatch(/width:\s*max\(calc\(100% \+ 20px\), 44px\);/);
 		expect(phoneTarget).toMatch(/height:\s*max\(100%, 44px\);/);
+		// A row's second line keeps its box, so the row's own tap is never taken.
+		expect(source).toMatch(/\.plan-state\.line\[role="button"\]::before\s*\{\s*content:\s*none;\s*\}/);
 		expect(source).toMatch(/\.plan-state:focus-visible/);
 	});
 

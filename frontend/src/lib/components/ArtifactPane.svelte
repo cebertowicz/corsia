@@ -4,14 +4,12 @@
 	import { token } from '$lib/stores/auth';
 	import { on } from '$lib/ws/events';
 	import { Button } from '$lib/components/ui';
-	import {
-		reconcileArtifactsApply,
-		fetchArtifactPane
-	} from '$lib/api/docs';
+	import { reconcileArtifactsApply, fetchArtifactPane } from '$lib/api/docs';
 	import type { ArtifactNode, PaneData } from '$lib/api/artifactPane';
 	import { removeArtifactWithUndo } from '$lib/artifactPaneRemoval';
 	import { togglePin } from '$lib/artifactPanePin';
 	import { toasts } from '$lib/stores/toast';
+	import { openBrowserPane } from '$lib/stores/artifactWorkspace';
 	import ArtifactRow from './ArtifactRow.svelte';
 	import ArtifactWorktreeGroup from './ArtifactWorktreeGroup.svelte';
 	import AttentionCard from './AttentionCard.svelte';
@@ -162,6 +160,7 @@
 			on('doc_comment_changed', (d) => shown(d) && load()),
 			on('turn_complete', (d) => mine(d) && load()),
 			on('attention_changed', () => conductorMode && refreshRaised()),
+			on('plans_changed', () => conductorMode && refreshRaised()),
 		];
 		return () => offs.forEach((off) => off && off());
 	});
@@ -333,21 +332,29 @@
 
 {/if}
 
-{#if threadId && onBrowseDocuments}
+{#if threadId}
+<div class="pane-links">
+{#if onBrowseDocuments}
 	<button class="browse" type="button" onclick={() => onBrowseDocuments(threadId)}>
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
 		Browse documents…
 	</button>
+{/if}
+	<button class="browse" type="button" onclick={() => openBrowserPane(threadId)}>
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+		Open browser
+	</button>
+</div>
 {/if}
 
 <style>
 	.muted { padding: 10px 14px; font-size: var(--text-subhead, 13px); color: var(--text-tertiary); line-height: 1.5; }
 
 	.lane-cap {
-		padding: 8px 8px 3px; font-size: var(--text-caption); font-weight: 700; letter-spacing: 0.09em;
-		text-transform: uppercase; color: var(--text-tertiary);
+		padding: 8px 8px 3px; font-size: var(--text-footnote); font-weight: 600;
+		color: var(--text-tertiary);
 	}
-	.lane-cap.needs, .lane-cap.needs-attention { color: var(--amber); }
+	.lane-cap.needs, .lane-cap.needs-attention { color: var(--amber-text); }
 	.raised-error {
 		padding: 6px 10px; margin: 2px 0; border-radius: var(--radius-sm);
 		background: color-mix(in srgb, var(--amber) 10%, transparent);
@@ -381,14 +388,13 @@
 	.attn-row .name { flex-shrink: 0; max-width: 45%; }
 	.attn-reason { color: var(--text-tertiary); font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.retry-wrap { margin: 2px 8px 6px; }
-
-
+	.pane-links { margin-top: var(--space-3); }
 	.browse {
 		display: flex; align-items: center; gap: 8px; width: 100%;
-		margin-top: 6px; padding: 8px; border: none; border-top: 1px solid var(--border-subtle);
+		padding: 8px; border: none;
 		background: none; cursor: pointer; font: inherit;
 		font-size: var(--text-subhead); color: var(--text-tertiary); text-align: left;
 	}
-	.browse:hover { color: var(--accent); }
+	.browse:hover { color: var(--text-secondary); }
 	.browse svg { width: 15px; height: 15px; flex-shrink: 0; }
 </style>

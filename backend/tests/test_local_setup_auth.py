@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from api.network_servers import _public_server_view
-from llm import local_setup, local_setup_auth
+from llm import local_setup, local_setup_auth, local_setup_operation
 from llm.providers import omlx_endpoints as ep
 from omlx_admin_fixtures import KEY, OTHER_KEY, omlx  # noqa: F401
 
@@ -39,6 +39,7 @@ class Wiring:
 def wiring(monkeypatch, omlx):  # noqa: F811
     """A fresh oMLX, an in-memory registry, and every stage but the oMLX calls stubbed."""
     omlx.key = None
+    local_setup_operation.clear()
     wired = Wiring()
 
     async def register(*, port=8000, api_key=None):

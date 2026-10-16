@@ -1,9 +1,15 @@
 """``corsia user`` and ``corsia token`` — creating accounts and credentials.
 
-This is the only way an account comes into existence, and that is deliberate:
-the backend binds ``0.0.0.0``, so a first-run web form would hand the install
-to whoever reached the port first. Running a command proves local access to
-the machine.
+An account comes into existence in one of two ways: ``corsia user add``, or the
+pre-auth first-account route ``/api/setup/first-account``. That route exists
+only while no account exists, only for a direct loopback browser request, behind
+the host, origin, forwarded-header, content-type and single-flight gates, and
+only for the first account. The backend binds ``0.0.0.0``, so the route refuses
+every non-loopback caller: a remote visitor cannot create the first account, and
+running a command still proves local access to the machine. Both paths create
+the first account through ``infra.accounts.create_first_account``, which
+refuses a name outside the existing data owners and writes no account when the
+workspace profile cannot be written; later accounts come only from this command.
 
 Three rules about output, because other programs read it:
 
@@ -184,15 +190,6 @@ def _prompt_contact_email() -> str:
     return _email_choice(input("Pick one, type another, or press Enter for 1: "), found)
 
 
-def _seed_user_profile(call_name: str, email: str = "") -> None:
-    """Create the workspace profile from the answers and the Mac's timezone, if missing."""
-    from infra import config
-    from infra.user_profile import add_profile_email, mac_timezone, write_user_profile
-
-    if not write_user_profile(config.WORKSPACE, call_name, mac_timezone(), email):
-        add_profile_email(config.WORKSPACE, email)
-
-
 def cmd_user_add(args: argparse.Namespace) -> int:
     """Create an account, offering the data-owner names already in use."""
     _ensure_schema()
@@ -208,28 +205,28 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         return _fail(str(error))
     except EOFError:
         return _fail(_INPUT_ENDED)
-    if owners and name not in owners and not accounts.has_users():
-        # The first account on an install that already has data decides who
-        # can reach it; any other name would strand every existing thread.
-        return _fail(
-            f"'{name}' owns none of the existing data. Create the first "
-            f"account as one of: {', '.join(owners)}. Add others after."
-        )
     # The first interactive account is who the profile describes. That also
     # fires on an upgrade with no accounts yet; an existing profile is never touched.
-    seeds_profile = not accounts.has_users() and not args.password_stdin
+    first = not accounts.has_users()
+    seeds_profile = first and not args.password_stdin
     try:
-        call_name = _prompt_profile_name(name) if seeds_profile else ""
+        call_name = _prompt_profile_name(name) if seeds_profile else None
         email = _prompt_contact_email() if seeds_profile else ""
     except EOFError:
         return _fail(_INPUT_ENDED)
     password = _read_password(args.password_stdin)
     try:
-        accounts.create_user(name, password)
+        if first:
+            accounts.create_first_account(name, password, call_name=call_name, email=email)
+        else:
+            accounts.create_user(name, password)
     except accounts.AccountError as error:
         return _fail(str(error))
-    if seeds_profile:
-        _seed_user_profile(call_name, email)
+    except OSError:
+        return _fail(
+            "The workspace profile could not be written, so no account was created. "
+            "Check that the work folder is writable."
+        )
     print(f"Account '{name}' created.")
     return 0
 
@@ -281,22 +278,22 @@ def cmd_token_create(args: argparse.Namespace) -> int:
 
 def cmd_token_service(args: argparse.Namespace) -> int:
     """Mint the lifecycle shell's short-lived service token, stdout only."""
-    from infra import accounts
+    from infra import accounts, token_admin
 
     users = accounts.list_users()
     if not users:
         raise SystemExit("No account exists yet. Run: corsia user add")
-    token, _ = accounts.issue_token(users[0]["id"], kind="service", label="lifecycle")
+    token = token_admin.issue_service_token(users[0]["id"], "lifecycle")
     print(token)
     return 0
 
 
 def cmd_token_list(args: argparse.Namespace) -> int:
     """List token labels, kinds and ages — never a token value."""
-    from infra import accounts
+    from infra import token_admin
 
     user = args.user and _resolve_user(args.user)
-    tokens = accounts.list_tokens(user)
+    tokens = token_admin.list_tokens(user)
     if not tokens:
         print("No tokens.")
         return 0
@@ -311,10 +308,10 @@ def cmd_token_list(args: argparse.Namespace) -> int:
 
 def cmd_token_revoke(args: argparse.Namespace) -> int:
     """Delete every token of one account carrying a label."""
-    from infra import accounts
+    from infra import token_admin
 
     user = _resolve_user(args.user)
-    revoked = accounts.revoke_label(user, args.label)
+    revoked = token_admin.revoke_label(user, args.label)
     if not revoked:
         return _fail(f"No token labelled '{args.label}' for '{user}'.")
     print(f"Revoked {revoked} token(s) labelled '{args.label}' for '{user}'.")

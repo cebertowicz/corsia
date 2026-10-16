@@ -250,11 +250,7 @@
 			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 		});
 	}
-	// The composer's floater and the measured attention rail both grow the
-	// transcript's terminal reservation. If either grows while the user is at
-	// live edge, that edge moves below the viewport even though the user never
-	// scrolled. Re-pin only in that case: reading history keeps its position and
-	// may intentionally pass beneath the overlay.
+	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
@@ -358,15 +354,15 @@
 	   sticky chrome then pins at `--sticky-top`, 8px under the header. */
 	.messages {
 		flex: 1; overflow-y: auto;
-		--sticky-top: calc(var(--header-height, 0px) + 8px);
-		--messages-lead: calc(var(--header-height) + 24px);
+		--sticky-top: calc(var(--header-bottom) + 8px);
+		--messages-lead: calc(var(--header-bottom) + 24px);
 		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
 		.messages {
-			--sticky-top: calc(var(--header-height, 0px) + env(safe-area-inset-top, 0px) + 8px);
-			--messages-lead: var(--messages-pad-top, calc(var(--header-height) + 24px + env(safe-area-inset-top, 0px)));
+			--sticky-top: calc(var(--header-bottom) + 8px);
+			--messages-lead: var(--messages-pad-top, calc(var(--header-bottom) + 24px));
 			padding-left: 12px;
 			padding-right: 12px;
 			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);

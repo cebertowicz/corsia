@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from functools import partial
 
-from plans import boundary_dispatch, delegate_attach, holds, service, status_cursor
+from plans import (
+    boundary_dispatch, delegate_attach, holds, service, status_cursor, system_user_steps,
+)
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
 from tests.plan_ask_helpers import document_ask
@@ -451,6 +453,19 @@ def _user_block_on_decision_artifact(db, scene):
     return _user_block(db, scene, ask_artifact_id=str(ask))
 
 
+def _user_block_on_document_asked_elsewhere(db, scene):
+    """Another task already holds the one open review request on this document."""
+    ask = document_ask(db, "root")
+    _user_block(db, scene, ask_artifact_id=ask)()
+    return partial(
+        _mutate, db, scene.plan_id, "block_node", {
+            "node_id": scene.own, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "ask_artifact_id": ask,
+            "expected_revision": _revision(db, scene.own),
+        }, _mid(),
+    )
+
+
 def _user_block_on_non_document(db, scene):
     ask = _artifact(db, external_id="user-ask-pr", owner="root")
     return _user_block(db, scene, ask_artifact_id=ask)
@@ -520,6 +535,9 @@ _CASES = {
         '"a decision is not blocked on; raise it, and it holds its task by itself"',
     ): _user_block_on_decision_artifact,
     ("user_ask.py", "NOT_ASKABLE"): _user_block_on_non_document,
+    ("one_open_ask.py", 'f"this document already has an open review request on {held}, waiting for " '
+                        '"the user\'s answer. It is theirs to answer, so do not resolve it; ask again " '
+                        '"once they have answered it"'): _user_block_on_document_asked_elsewhere,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
         "add", {"kind": "epic", "title": "T", "acceptance_criteria": "DOD"},
@@ -590,6 +608,10 @@ _CASES = {
         # A closing operation accepts the field, so only its type can refuse it.
         "request_review", {"node_id": OWN, "expected_revision": REV,
                            "evidence": "Focused checks passed.", "next_node_id": 7},
+    ),
+    ("boundary_fields.py", "USER_STEP_DESCRIPTION_REFUSAL"): _operation(
+        "add", {"kind": "task", "title": "Run command", "acceptance_criteria": "Done",
+                "assignee": "user"},
     ),
     ("boundary_fields.py", '"edit requires at least one changed field"'):
         _operation("edit", {"node_id": NODE, "expected_revision": REV}),
@@ -813,4 +835,16 @@ _CASES = {
         "current.py",
         'INCLUDE_FOLDED_CURSOR.format(cut=str(cut["f"]).lower())',
     ): _folded_cursor_contradicted,
+    # --- plans/system_user_steps.py (system code, not the plan tool) ---
+    ("system_user_steps.py", '"open_user_step needs a non-empty key"'): lambda db, scene: partial(
+        system_user_steps.open_user_step, db, "root", key=" ", title="T",
+        description="D", provenance="test",
+    ),
+    (
+        "system_user_steps.py",
+        '"settle_user_step settles only a step open_user_step opened"',
+    ): lambda db, scene: partial(
+        system_user_steps.settle_user_step, db, scene.own,
+        evidence="E", provenance="test",
+    ),
 }

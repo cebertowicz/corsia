@@ -79,7 +79,7 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(network_discovery, "get_servers", lambda: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
     monkeypatch.setattr(harness_models, "_REFRESH_TASKS", {})
-    monkeypatch.setattr(mcp_runtime, "_stack", None)
+    monkeypatch.setattr(mcp_runtime, "_stack", None, raising=False)
     monkeypatch.setattr(mcp_runtime, "_stopped", False)
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
@@ -836,6 +836,7 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         "network health",
         "turn-buffer sweeper",
         "plan liveness",
+        "corrections classifier",
     }
     started = {name: asyncio.Event() for name in worker_names}
     stopped: set[str] = set()
@@ -906,6 +907,10 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         turn_buffers,
         "start_sweeper",
         lambda: asyncio.create_task(block("turn-buffer sweeper")),
+    )
+    monkeypatch.setattr(
+        "jobs.corrections_realtime._startup_worker",
+        lambda: block("corrections classifier"),
     )
 
     async def shutdown_refreshes() -> None:

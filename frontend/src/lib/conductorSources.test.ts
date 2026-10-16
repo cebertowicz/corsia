@@ -14,7 +14,7 @@ function source(id: string, name: string, state: ModelSource['state'], extra: Pa
 }
 
 function account(state: SourceAccount['state'], extra: Partial<SourceAccount> = {}): SourceAccount {
-	return { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, conductor_binding: false, ...extra };
+	return { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, corsia_agent_binding: false, ...extra };
 }
 
 describe('anyReady', () => {
@@ -55,6 +55,14 @@ describe('source routes', () => {
 		expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
 			['/api/providers/sources', 'GET'], ['/api/providers/sources/recheck', 'POST'], ['/api/providers/local/setup', 'POST'],
 		]);
+	});
+
+	it('returns a structured consent requirement so callers can recover', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({
+			ok: false, status: 409, json: async () => ({ detail: { code: 'consent_required' } }),
+		})));
+
+		expect(await setupLocalSource('tok')).toEqual({ ok: false, code: 'consent_required' });
 	});
 
 	it('throws on a failed read so the panel can say it could not read', async () => {

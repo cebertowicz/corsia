@@ -93,7 +93,7 @@ def _role_layers(collection: Any) -> tuple[tuple[Any, ...], ...]:
         (
             "conductor",
             "conductor",
-            "Conductor templates",
+            "Conductor and CORSIA agent templates",
             "corsia://context/conductor-templates",
             "conductor-designation",
             [entry for entry in sources if entry.origin_section == "conductor"],
@@ -109,6 +109,19 @@ def _role_layers(collection: Any) -> tuple[tuple[Any, ...], ...]:
                 for entry in sources
                 if entry.metadata.get("provider") == "role_context"
                 and entry.metadata.get("role") == "conductor"
+            ],
+        ),
+        (
+            "corsia-agent-role",
+            "role",
+            "CORSIA agent role context",
+            "corsia://context/roles/corsia_agent",
+            "document-viewer",
+            [
+                entry
+                for entry in sources
+                if entry.metadata.get("provider") == "role_context"
+                and entry.metadata.get("role") == "corsia_agent"
             ],
         ),
         (

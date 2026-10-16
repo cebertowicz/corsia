@@ -1,11 +1,11 @@
-"""Fetch visible project agents and the designated workspace conductor contact."""
+"""Fetch visible project agents and the CORSIA agent contact."""
 
 from __future__ import annotations
 
 import sqlite3
 from typing import Any
 
-from infra.conductor import WORKSPACE_SCOPE, ConductorSettingError, get_conductor
+from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
 from infra.delegation_scope import native_endpoint_gap
 from infra.queries import thread_available_sql
 
@@ -31,35 +31,35 @@ _CONTACT_COLUMNS = (
 )
 
 
-def workspace_conductor_contact(
+def corsia_agent_contact(
     user_id: str, db,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Return the designated workspace conductor contact, or why there is none.
+    """Return the CORSIA agent contact, or why there is none.
 
     The contact qualifies under the same endpoint rule native delegate_send
-    enforces, so the roster lists the conductor exactly when a send can reach it.
+    enforces, so the roster lists the CORSIA agent exactly when a send can reach it.
     """
     try:
-        conductor_id = get_conductor(WORKSPACE_SCOPE, db=db)
-    except ConductorSettingError:
-        return None, "the workspace conductor setting is malformed"
-    if not conductor_id:
+        corsia_agent_id = get_corsia_agent(db=db)
+    except CorsiaAgentSettingError:
+        return None, "the CORSIA agent setting is malformed"
+    if not corsia_agent_id:
         return None, "none designated"
     row = db.execute(
         f"SELECT {','.join(_CONTACT_COLUMNS)},user_id,agent_enabled,"
         "lifecycle_state,archived_reason FROM threads WHERE id=?",
-        (conductor_id,),
+        (corsia_agent_id,),
     ).fetchone()
     if row is None:
-        return None, f"designated conductor {conductor_id} does not exist"
+        return None, f"designated CORSIA agent {corsia_agent_id} does not exist"
     if row["user_id"] != user_id:
-        return None, "designated conductor belongs to another account"
-    gap = native_endpoint_gap(dict(row), workspace_conductor_id=conductor_id)
+        return None, "designated CORSIA agent belongs to another account"
+    gap = native_endpoint_gap(dict(row), corsia_agent_id=corsia_agent_id)
     if gap:
-        return None, f"designated conductor {conductor_id} is unreachable: {gap}"
+        return None, f"designated CORSIA agent {corsia_agent_id} is unreachable: {gap}"
     contact = {column: row[column] for column in _CONTACT_COLUMNS}
     contact["agent_responsibility"] = (
-        contact["agent_responsibility"] or "Designated workspace conductor."
+        contact["agent_responsibility"] or "Designated CORSIA agent."
     )
     return contact, None
 
@@ -67,8 +67,8 @@ def workspace_conductor_contact(
 def agent_rows(thread_id: str, db) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Return the caller and only its visible active agents plus workspace contact.
 
-    For a project caller whose workspace conductor cannot be listed, the
-    caller dict carries ``workspace_conductor_gap`` so renderers say why.
+    For a project caller whose CORSIA agent cannot be listed, the
+    caller dict carries ``corsia_agent_gap`` so renderers say why.
     """
     columns = _table_columns(db, "threads")
     if not AGENT_COLUMNS <= columns:
@@ -105,9 +105,9 @@ def agent_rows(thread_id: str, db) -> tuple[dict[str, Any], list[dict[str, Any]]
     visible = [dict(row) for row in rows]
     caller = dict(current)
     if project_id is not None:
-        contact, gap = workspace_conductor_contact(current["user_id"], db)
+        contact, gap = corsia_agent_contact(current["user_id"], db)
         if contact is not None:
             visible.append(contact)
         else:
-            caller["workspace_conductor_gap"] = gap
+            caller["corsia_agent_gap"] = gap
     return caller, visible

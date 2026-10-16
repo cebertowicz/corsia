@@ -253,7 +253,9 @@ def test_the_saved_email_is_read_from_the_workspace_profile(tmp_path, monkeypatc
 
     monkeypatch.setattr(config, "WORKSPACE", tmp_path)
     assert REAL_SAVED_EMAIL() == ""
-    assert user_profile.write_user_profile(tmp_path, "Pat", "America/Los_Angeles", "pat@gmail.com")
+    path = tmp_path / user_profile.PROFILE_RELATIVE_PATH
+    path.parent.mkdir(parents=True)
+    path.write_text(user_profile.profile_text("Pat", "America/Los_Angeles", "pat@gmail.com"), encoding="utf-8")
     assert REAL_SAVED_EMAIL() == "pat@gmail.com"
 
 

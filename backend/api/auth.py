@@ -1,4 +1,11 @@
-"""Sign-in — the only routes that turn a password into a token.
+"""Sign-in — the routes that turn a password into a token.
+
+An account is created by ``corsia user add`` or by the pre-auth first-account
+route ``/api/setup/first-account`` (``api/setup.py``): that route exists only
+while no account exists, only for a direct loopback browser request, behind the
+host, origin, forwarded-header, content-type and single-flight gates, and only
+for the first account. Apart from it, the routes here are the only ones that
+turn a password into a token.
 
 Three endpoints, and each is public for a reason: ``status`` because the login
 screen must be able to say "no account exists yet" before anyone can
@@ -33,7 +40,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from infra import accounts
+from infra import accounts, token_admin
 from infra.auth import authenticate, token_from_request
 from infra.db_async import run_in_db
 from infra.time import utc_storage_iso_to_api
@@ -186,5 +193,5 @@ async def logout(authorization: str | None = Header(None)) -> dict:
     token = token_from_request(None, authorization)
     if not authenticate(token):
         raise HTTPException(401, "Invalid or expired session")
-    await run_in_db(accounts.revoke_token, token)
+    await run_in_db(token_admin.revoke_token, token)
     return {"ok": True}

@@ -40,9 +40,9 @@ export function node(over: Partial<OperatorNode>): OperatorNode {
 	const id = over.id ?? 'n';
 	return {
 		id, parent_id: null, depth: 0, kind: 'task', title: 'Task',
-		description: null, acceptance_criteria: 'DOD', state, unmet_dependencies: [], held_by: null, assignee: null,
+		description: null, waiting_on: [], acceptance_criteria: 'DOD', state, unmet_dependencies: [], held_by: null, assignee: null,
 		revision: 1, requirements_revision: 1, commitment_id: id,
-		updated_at: 'now', last_transition_at: 'now', folded: false, requires_user_action: false,
+		updated_at: 'now', last_transition_at: 'now', folded: false, container: false, requires_user_action: false,
 		executor: { thread_id: 'agent', label: 'Agent' },
 		execution: {
 			condition,

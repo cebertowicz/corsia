@@ -33,6 +33,7 @@ from subagents.codex_runtime_errors import (
     surface_exit_error,
 )
 from subagents.codex_runtime_events import record_terminal_marker
+from subagents.codex_retirement import retire_if_current
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _arm_delivery_event_barrier,
     await_delivery_settlement as _await_delivery_settlement,
@@ -153,28 +154,6 @@ async def capture_retirement_owner(thread_id: str):
             )
             owner = current_handle_fingerprint(thread_id)
         return owner
-
-
-async def retire_if_current(
-    thread_id: str,
-    *,
-    expected_owner,
-    db=None,
-    broadcast=None,
-) -> bool:
-    """Retire only the Codex owner captured before a context commit."""
-    lock = _LIVE.lock(thread_id)
-    async with lock:
-        current_owner = current_handle_fingerprint(thread_id)
-        if expected_owner is None:
-            return current_owner is None
-        if current_owner != expected_owner:
-            return False
-        return await _retire_locked(
-            thread_id,
-            db=db,
-            broadcast=broadcast,
-        )
 
 
 async def retarget_if_current(

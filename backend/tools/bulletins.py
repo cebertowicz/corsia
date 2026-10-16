@@ -12,15 +12,15 @@ def _record_disposition(
 ) -> tuple[str, str | None]:
     """Run every synchronous disposition operation in the DB worker."""
     import infra.bulletin_ledger as bulletin_ledger
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db, write_transaction
 
     db = get_db()
     try:
-        if not thread_id or get_conductor(WORKSPACE_SCOPE, db=db) != thread_id:
+        if not thread_id or get_corsia_agent(db=db) != thread_id:
             return (
-                "Error: Only the designated workspace conductor records bulletin dispositions. "
-                "Bulletins are delivered to that conductor; no action is needed from you.",
+                "Error: Only the CORSIA agent records bulletin dispositions. "
+                "Bulletins are delivered to it; no action is needed from you.",
                 None,
             )
         with write_transaction(db, scope="bulletin_disposition"):
@@ -52,7 +52,7 @@ def _record_disposition(
 
 
 class BulletinDispositionTool(Tool):
-    """Record a workspace conductor's disposition for a delivered bulletin."""
+    """Record the CORSIA agent's disposition for a delivered bulletin."""
 
     self_describing_errors = True
 
@@ -62,7 +62,7 @@ class BulletinDispositionTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Record the designated workspace conductor's disposition for a System change or bulletin"
+        return "Record the CORSIA agent's disposition for a System change or bulletin"
 
     @property
     def parameters(self) -> dict[str, Any]:

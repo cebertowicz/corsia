@@ -281,8 +281,11 @@ class TestRestartInstanceIsolation:
             patch("api.settings_restart._prepare_current_release") as prepare,
             patch("subprocess.Popen") as popen,
         ):
-            client.post(f"/api/system/restart?token={_valid_token()}&mode=update")
+            response = client.post(f"/api/system/restart?token={_valid_token()}&mode=update")
         prepare.assert_called_once()
+        # An app bundle stages under the operation id, so prepare must carry it.
+        prepare_env = prepare.call_args[0][1]
+        assert prepare_env["CORSIA_RESTART_OPERATION_ID"] == response.json()["operation_id"]
         cmd = popen.call_args[0][0]
         assert "restart-prepared" in cmd
         assert "server" not in cmd
@@ -311,7 +314,7 @@ class TestRestartInstanceIsolation:
         ) == [{
             "status": "failed",
             "phase": None,
-            "error": "settings restart preparation failed",
+            "error": "pip check failed",
         }]
 
     def test_update_launch_failure_aborts_operation_and_retains_stage(self, isolated_db):
@@ -906,6 +909,52 @@ def test_prepare_current_release_returns_bounded_terminal_failure_with_full_log(
     assert branch_noise in log_path.read_text()
     assert terminal_error in log_path.read_text()
     assert "\x1b" not in exc.value.detail
+
+
+@pytest.mark.parametrize(
+    ("returncode", "failure_code"),
+    [
+        (41, "fetch_failed"), (42, "build_failed"), (43, "index_locked"), (44, "checkout_detached"),
+        (45, "checkout_dirty"), (46, "restart_pending"), (99, "prepare_failed"),
+    ],
+)
+def test_prepare_current_release_names_every_refusal_it_knows(
+    tmp_path: Path, returncode: int, failure_code: str | None,
+):
+    """Each explicit shell status is its own durable cause; an unknown one is still named."""
+    import subprocess
+
+    from fastapi import HTTPException
+
+    import api.settings_restart as settings_restart
+
+    completed = subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr="failed")
+    with (
+        patch("subprocess.run", return_value=completed),
+        patch("api.settings_restart._update_log_path", return_value=tmp_path / "update.log"),
+        pytest.raises(HTTPException) as raised,
+    ):
+        settings_restart._prepare_current_release(Path("/tmp/corsia"), {})
+
+    assert getattr(raised.value, "update_failure_code", None) == failure_code
+
+
+def test_prepare_current_release_timeout_is_its_own_cause(tmp_path: Path):
+    """A preparation timeout names itself instead of falling back to generic copy."""
+    import subprocess
+
+    from fastapi import HTTPException
+
+    import api.settings_restart as settings_restart
+
+    with (
+        patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["corsia"], 600)),
+        patch("api.settings_restart._update_log_path", return_value=tmp_path / "update.log"),
+        pytest.raises(HTTPException) as raised,
+    ):
+        settings_restart._prepare_current_release(Path("/tmp/corsia"), {})
+
+    assert getattr(raised.value, "update_failure_code", None) == "update_timed_out"
 
 
 def _corsia_script_text() -> str:

@@ -124,7 +124,7 @@
 	.nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.badge {
 		font-size: var(--text-caption); font-weight: 700; font-family: var(--font-mono, monospace);
-		color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+		color: var(--accent-text); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
 		padding: 0 5px; border-radius: var(--radius-pill); flex-shrink: 0;
 	}
 
@@ -144,7 +144,7 @@
 	.btn.push { margin-left: auto; }
 	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
 	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent); color: #fff; }
+	.btn.primary { background: var(--accent-fill); color: var(--accent-on-fill); }
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 </style>

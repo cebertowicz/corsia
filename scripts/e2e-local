@@ -7,6 +7,7 @@
 #   bash scripts/e2e-local --visual                  # visual regression only
 #   bash scripts/e2e-local --reuse                   # reuse existing servers
 #   bash scripts/e2e-local --grep <pat>              # subset matching pat
+#   CORSIA_E2E_INCLUDE_STRESS=1 bash scripts/e2e-local --grep @stress  # opt-in stress flow
 #
 # Real mode never reads a production database or the real CORSIA bootstrap
 # config (see scripts/seed-worktree-db --help for its full synthetic-seeding
@@ -81,6 +82,9 @@ WORKSPACE="${CORSIA_E2E_WORKSPACE:-$DEFAULT_WORKSPACE}"
 STATE_ROOT="${CORSIA_E2E_STATE_DIR:-$DEFAULT_STATE_ROOT}"
 WORKSPACE_DB="${STATE_ROOT}/corsia.db"
 BOOT_PORT="${CORSIA_E2E_BACKEND_PORT:-3110}"
+# Every disposable backend owns a fresh agent-browser socket identity, so it never reuses a
+# stale browser daemon from production or a failed earlier E2E run.
+export CORSIA_BROWSER_INSTANCE_KEY="${CORSIA_BROWSER_INSTANCE_KEY:-e2e-${BOOT_PORT}-${RANDOM}}"
 # Keep the boot log inside the repo rather than $TMPDIR: it stays with the run
 # that produced it, and it does not depend on a temp directory an agent
 # execution context may not be allowed to write.

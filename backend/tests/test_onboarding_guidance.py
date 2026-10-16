@@ -158,5 +158,62 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 
 
 def test_first_run_stays_within_its_body_size():
-    # Its size after the fuller conductor-role intro, rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17200
+    # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
+    # rounded up; #674 tracks the real cap.
+    assert len(FIRST_RUN.read_bytes()) <= 17600  # +the router to first-run-app.md
+
+
+LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"
+
+
+def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits_on_it():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+    running = offer.split("## Setup already running", 1)[1]
+
+    assert offer.index("`state` is `running` or `downloading`") < offer.index("2. Ask once")
+    assert "make no offer" in offer
+    # A succeeded flight's result outlives its connection (kept in memory until restart),
+    # so it only stops the offer while a local model is still connected.
+    assert "if none is, that result is old: carry on as if it were absent" in offer
+    assert "never holds up a setup task" in running
+    assert "at the end of each later setup task" in running
+    assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
+    assert "never post `result.next_action`" in running
+    assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
+HANDOFF = "That's everything. So, what's taking up your time this week?"
+
+
+def test_first_run_routes_the_app_path_to_its_own_reference():
+    assert "`first_run_path`" in FIRST_RUN.read_text(encoding="utf-8")
+    assert "references/first-run-app.md" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    steps = app.split("## The steps, in this order", 1)[1].split("## The hand-off", 1)[0]
+    titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
+
+    assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
+    assert len(titles) == 7
+    assert titles[0] == "About you."
+    assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
+    assert "never skill `assistant-onboarding`" in steps
+    assert "no setup task list" in app
+    assert "Read nothing until a yes" in steps
+
+
+def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "`model_sources` `recheck: true`" in app
+    # A running flight sets only setup_stage; a backgrounded one sets setup_downloading
+    # (test_local_source_sends_the_download_percent_as_a_number). The setup screen reads both.
+    assert "`setup_stage` set or `setup_downloading` true is still setting up, not failed: say nothing about it" in app
+
+
+def test_app_path_reads_no_other_app_settings_before_a_yes():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "mcp_sources" not in app
+    assert "none of another app's settings" in app

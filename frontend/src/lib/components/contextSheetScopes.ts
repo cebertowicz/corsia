@@ -18,11 +18,11 @@ export type ScopeGroupId = (typeof SCOPE_GROUPS)[number]['id'];
 
 /** Categorical colours for the bar and the group labels; names and counts carry the meaning too. */
 export const GROUP_COLOR: Record<ScopeGroupId, string> = {
-	system: 'var(--violet)',
+	system: 'var(--purple)',
 	workspace: 'var(--sky)',
 	project: 'var(--teal)',
-	agent: 'var(--violet-2)',
-	thread: 'var(--violet-2)',
+	agent: 'var(--purple-2)',
+	thread: 'var(--purple-2)',
 	tools: 'var(--orange)',
 	history: 'var(--green)',
 	other: 'var(--text-tertiary)',

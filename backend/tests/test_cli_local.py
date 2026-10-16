@@ -92,6 +92,25 @@ def test_local_setup_does_not_retry_a_reachable_server_error(monkeypatch, capsys
     assert "could not start on the backend" in capsys.readouterr().out
 
 
+def test_local_setup_directs_existing_omlx_consent_to_the_app(monkeypatch, capsys):
+    import io
+
+    import cli_local
+
+    monkeypatch.setattr(cli_local, "_read_token", lambda: "service-token")
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1", 409, "Conflict", {},
+        io.BytesIO(b'{"detail": {"code": "consent_required"}}'),
+    )
+    monkeypatch.setattr(cli_local, "request_json", lambda *_args: (_ for _ in ()).throw(error))
+
+    assert cli_local.cmd_setup(_args()) == 2
+    assert capsys.readouterr().out == (
+        "CORSIA needs your permission to inspect the existing oMLX.\n"
+        "Open the CORSIA app and choose Use it in local model setup.\n"
+    )
+
+
 def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, capsys):
     import cli_local
 

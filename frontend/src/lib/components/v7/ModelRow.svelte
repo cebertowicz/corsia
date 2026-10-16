@@ -166,14 +166,14 @@
 	.mr:hover { background: var(--bg-hover); }
 	.mr + :global(.mr) { box-shadow: inset 0 1px 0 var(--border-subtle); }
 
-	.mr.loaded { background: var(--violet-bg); }
+	.mr.loaded { background: var(--accent-wash); }
 	.mr.loaded::before {
 		content: '';
 		position: absolute; left: 0; top: 4px; bottom: 4px;
 		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--violet);
+		background: var(--accent);
 	}
-	.mr.loaded:hover { background: color-mix(in srgb, var(--violet) 16%, transparent); }
+	.mr.loaded:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
 	.mr.loading-row { background: var(--amber-bg); }
 	.mr.loading-row::before {
@@ -243,7 +243,7 @@
 		cursor: default;
 	}
 	.cap[data-cap="vision"]    { background: var(--sky-bg);    color: var(--sky);    box-shadow: inset 0 0 0 1px var(--sky-line); }
-	.cap[data-cap="reasoning"] { background: var(--violet-bg); color: var(--violet-text); box-shadow: inset 0 0 0 1px var(--violet-line); }
+	.cap[data-cap="reasoning"] { background: var(--purple-bg); color: var(--purple-text); box-shadow: inset 0 0 0 1px var(--purple-line); }
 	.cap[data-cap="tools"]     { background: var(--teal-bg);   color: var(--teal);   box-shadow: inset 0 0 0 1px var(--teal-line); }
 
 	.tg {
@@ -269,9 +269,9 @@
 		box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 	}
 	.tg.on {
-		background: linear-gradient(180deg, var(--violet-2), var(--violet));
-		border-color: var(--violet);
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 8px color-mix(in srgb, var(--violet) 30%, transparent);
+		background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+		border-color: var(--accent);
+		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
 	}
 	.tg.on::after {
 		left: calc(var(--w) - 14.5px);

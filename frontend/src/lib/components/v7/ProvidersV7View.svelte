@@ -67,13 +67,6 @@
 		openProvider = p;
 	}
 
-	function accentFor(p: HostProvider): string {
-		if (p.name === 'omlx') return 'var(--violet)';
-		if (p.name === 'lmstudio') return 'var(--green)';
-		if (p.type === 'cloud' || p.type === 'harness') return 'var(--violet)';
-		return 'var(--accent)';
-	}
-
 	function hasLoaded(p: HostProvider): boolean {
 		if (p.type === 'cloud') {
 			return p.raw.has_key === true;
@@ -162,7 +155,6 @@
 					provider={p}
 					expanded={expanded.has(key)}
 					hasLoaded={hasLoaded(p)}
-					accentVar={accentFor(p)}
 					onToggleEnable={() => handleToggleEnable(p)}
 					onSettings={() => handleSettings(p)}
 					onToggleExpand={() => toggleExpand(key)}
@@ -214,14 +206,14 @@
 		transition: all var(--dur-tight) var(--ease-snap);
 	}
 	.add-btn:hover {
-		color: var(--violet-text);
-		border-color: var(--violet-line);
-		background: var(--violet-bg);
+		color: var(--accent-text);
+		border-color: var(--accent-line);
+		background: var(--accent-wash);
 	}
 	.add-btn.primary {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text);
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
+		color: var(--accent-text);
 		margin-top: 12px;
 	}
 

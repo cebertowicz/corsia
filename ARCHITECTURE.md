@@ -44,6 +44,16 @@ send and dispatch services before entering the selected execution provider.
 Deeper callable maps live in `BACKEND.md` and `FRONTEND.md`. Visual work also
 follows `frontend/DESIGN-SYSTEM.md`.
 
+### Verified ONNX assets
+
+`backend/core/onnx_asset.py` is the single owner of verified ONNX asset
+manifests, source pins, file hashing and stat caching, session construction,
+and self-tests. `backend/core/onnx_child.py` owns the isolated child lifecycle:
+network blocking, child-side and parent-polled RSS ceilings, request timeouts,
+and shutdown escalation. Each feature defines only an `OnnxAssetSpec` and a
+module-level scorer. `corrections_classifier.py` provides the corrections
+specification and converts generic score replies into its recorded value.
+
 ### oMLX public authentication
 
 `backend/llm/providers/omlx_public_auth.py` derives a public Bearer header from
@@ -349,17 +359,17 @@ returns a reason or `None`. A registered agent qualifies while active and
 available. A designated conductor qualifies through its designation alone
 (re-read on every send), still requiring an available, active thread of the
 same user, so a conductor is never registered a second time as an agent to be
-reachable. The designation is scoped: the workspace conductor is the one the
+reachable. The designation is scoped: the CORSIA agent is the one the
 workspace designates, and a project conductor is the one its own project
 designates, so a thread designated for one project is not an endpoint in
-another even though `PUT /api/conductor` validates only account ownership.
+another even though `PUT /api/conductor` and `PUT /api/corsia-agent` validate only account ownership.
 Cross-scope send (`backend/tools/delegation_send_context.py`) checks each
 endpoint against the live designation of the scope that owns that row, and
 `validate_send_target_scope` still decides which pairs may cross scope at all:
-only a pair that includes the designated workspace conductor, so
+only a pair that includes the designated CORSIA agent, so
 project-to-project sends and ordinary chats stay refused. The roster's
-workspace-conductor contact (`backend/core/agent_roster_queries.py`) calls the
-same rule with no project designation, so it lists the workspace conductor
+CORSIA-agent contact (`backend/core/agent_roster_queries.py`) calls the
+same rule with no project designation, so it lists the CORSIA agent
 exactly when a send can reach it and never grows a project conductor; neither
 caller keeps its own gate. When a project agent cannot get the contact, the
 roster says why instead of omitting it.
@@ -581,7 +591,7 @@ launchers strip; `CORSIA_LOG_CAPTURE_TEST_ENABLE=1` opts an isolated test
 instance in.
 
 `log_read` is listed for every thread, because the tool index is shared.
-Execution refuses a thread that `get_conductor_scopes` does not name. It filters
+Execution refuses a thread that `get_coordination_scopes` does not name. It filters
 by UTC window, minimum level, logger prefix and case-insensitive text, and
 returns records newest first with a 16 KiB response bound and a paging note.
 This path adds no redaction layer: secrets must not be logged at the source.

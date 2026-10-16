@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from plans import service
+from plans.user_ask import ask_attention_state_sql, askable_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
-_ATTENTION_STATE_SQL = "json_extract(i.metadata, '$.attention_state')"
+
+# An ask link's state belongs to its open review request. The one state SQL
+# definition is node-scoped here so a replaced ask on another node cannot leak
+# into this link's presentation.
+_ATTENTION_STATE_SQL = f"""CASE
+    WHEN l.role='attention' AND {askable_sql('i')}
+        THEN {ask_attention_state_sql('l.artifact_id', node_id_sql='l.node_id')}
+    ELSE json_extract(i.metadata, '$.attention_state')
+END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,
     {_ATTENTION_STATE_SQL} AS attention_state"""
 

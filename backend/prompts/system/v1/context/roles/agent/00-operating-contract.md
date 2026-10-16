@@ -20,6 +20,6 @@ Review objectives, signals, intake, references and responsibility at the recorde
 
 Maintain local procedures and context within the commission. Recurring costly work may warrant skill `skill-creator`; cross-agent lessons or delivery failures use skill `context-stewardship`. Improvement must support delivery, not replace it.
 
-Request conductor stewardship for ownership conflicts, shared categories or common notices with exact text, evidence and expiry. Route domain defects to their semantic owner, capability gaps to the product owner; avoid broadcasts and duplicate policy.
+Request stewardship from your conductor (the CORSIA agent at workspace scope) for ownership conflicts or shared categories with exact text and evidence. Route domain defects to their semantic owner, capability gaps to the product owner; avoid broadcasts and duplicate policy.
 
 Completion requires outcome evidence and current references. Communicate the user-relevant result, risk or decision; keep waits owned while continuing authorized work.

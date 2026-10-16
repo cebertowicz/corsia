@@ -3,24 +3,32 @@
 
 	interface Props {
 		label: string;
+		labelFor?: string;
 		hint?: string;
 		error?: string;
 		required?: boolean;
 		layout?: 'row' | 'stacked';
+		/**
+		 * `chip` is approved for setup only: the control drawn as the composer's chip
+		 * (hairline border, large radius, soft shadow, no filled box), label above and no divider. Only setup uses it.
+		 */
+		variant?: 'default' | 'chip';
 		trailing?: Snippet;
 		children: Snippet;
 	}
 
 	const {
-		label, hint, error, required = false,
-		layout = 'row', trailing, children,
+		label, labelFor, hint, error, required = false,
+		layout = 'row', variant = 'default', trailing, children,
 	}: Props = $props();
 </script>
 
-<div class="field {layout}" class:has-error={!!error}>
-	<span class="l">
-		{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}
-	</span>
+<div class="field {layout}" class:chip={variant === 'chip'} class:has-error={!!error}>
+	{#if labelFor}
+		<label class="l" for={labelFor}>{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</label>
+	{:else}
+		<span class="l">{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</span>
+	{/if}
 	<div class="c">
 		{@render children()}
 	</div>
@@ -100,8 +108,8 @@
 	.c :global(select:focus),
 	.c :global(textarea:focus) {
 		outline: none;
-		border-color: var(--violet);
-		box-shadow: 0 0 0 3px var(--violet-bg);
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-wash);
 	}
 
 	.c :global(select) {
@@ -135,6 +143,26 @@
 		grid-area: msg;
 		font-size: var(--text-footnote); color: var(--red);
 	}
+
+	/* Approved for setup-only use: the composer chip's look for a text control or a select. A shared rollout needs a Product Experience decision. */
+	.field.chip { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }
+	.field.chip .t { display: none; }
+	.field.chip .l { font-size: var(--text-footnote); color: var(--text-secondary); padding-left: var(--space-1); }
+	.field.chip .c :global(input),
+	.field.chip .c :global(select) {
+		height: var(--space-7); padding: 0 var(--space-4);
+		background: var(--glass-thin); border: 1px solid var(--border); border-radius: var(--radius-lg);
+		box-shadow: var(--glass-rim), var(--shadow-chip);
+		font-size: var(--text-input); transition: border-color var(--dur-tight);
+	}
+	.field.chip .c :global(select) { width: auto; flex: none; padding-right: calc(var(--space-6) + var(--space-3)); background-position: right var(--space-4) center; }
+	.field.chip .c :global(input::placeholder) { color: var(--text-tertiary); }
+	.field.chip .c :global(input:focus),
+	.field.chip .c :global(select:focus) {
+		border-color: var(--accent); box-shadow: var(--glass-rim), var(--shadow-chip), 0 0 0 3px var(--accent-wash);
+	}
+	.field.chip.has-error .c :global(input) { border-color: var(--red-text); }
+	.field.chip .hint, .field.chip .err { padding-left: var(--space-1); }
 
 	@media (max-width: 720px) {
 		.field {

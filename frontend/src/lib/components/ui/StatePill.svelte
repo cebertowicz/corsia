@@ -6,9 +6,14 @@
 		state: State;
 		label?: string;
 		size?: 'sm' | 'md';
+		/**
+		 * `dot` is approved for setup only: a small dot and the word, as the "Update"
+		 * mark under a chat message, with no box. Only setup uses it.
+		 */
+		look?: 'pill' | 'dot';
 	}
 
-	const { state, label, size = 'md' }: Props = $props();
+	const { state, label, size = 'md', look = 'pill' }: Props = $props();
 
 	const display = $derived(label ?? humanize(state));
 
@@ -18,9 +23,22 @@
 	}
 </script>
 
-<span class="pill {state} {size}">{display}</span>
+{#if look === 'dot'}
+	<span class="dotmark {state}"><i class="dot" aria-hidden="true"></i>{display}</span>
+{:else}
+	<span class="pill {state} {size}">{display}</span>
+{/if}
 
 <style>
+	/* Approved for setup-only use: dot and word. A shared rollout needs a Product Experience decision. */
+	.dotmark { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
+	.dotmark .dot { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--text-tertiary); flex: none; }
+	.dotmark.loaded .dot, .dotmark.active .dot { background: var(--accent); }
+	.dotmark.success .dot { background: var(--green); }
+	.dotmark.loading .dot, .dotmark.warning .dot { background: var(--amber); }
+	.dotmark.error .dot { background: var(--red); }
+	.dotmark.available .dot { background: var(--sky); }
+
 	.pill {
 		display: inline-flex; align-items: center;
 		font-weight: 600; letter-spacing: 0.04em;
@@ -33,9 +51,9 @@
 	.pill.sm { font-size: var(--text-caption); padding: 1px 6px; }
 
 	.pill.loaded, .pill.active {
-		background: var(--violet-bg);
-		color: var(--violet-text, var(--violet));
-		border-color: var(--violet-line);
+		background: var(--accent-wash);
+		color: var(--accent-text, var(--accent));
+		border-color: var(--accent-line);
 	}
 	.pill.loading, .pill.warning {
 		background: var(--amber-bg);

@@ -12,6 +12,7 @@ import { decodeOperatorEnvelope } from './plansDecode';
 
 export * from './activityIndexTypes';
 export * from './plansCostTypes';
+export * from './plansExecutionTypes';
 export * from './plansTypes';
 export type { OperatorFoldLevel } from './plansFolded';
 
@@ -183,7 +184,7 @@ export async function readOperatorChild(
 }
 
 /** The chat list's word for a thread (#2220); the server derives it from canonical plan and lease state. */
-export type ThreadPlanState = 'moving' | 'needs_input' | 'blocked_on_you' | 'failed' | 'stuck' | 'paused' | 'idle';
+export type ThreadPlanState = 'moving' | 'needs_input' | 'blocked_on_you' | 'failed' | 'paused' | 'idle';
 export type ThreadAttentionKind = 'decision' | 'review' | 'access' | 'hold' | 'failed';
 export interface ThreadAttentionItem {
 	kind: ThreadAttentionKind;
@@ -209,10 +210,6 @@ export interface ThreadPlanStateEntry {
 	has_update?: boolean;
 	/** The user has opened the thread, so Mark read/unread has a record to write. */
 	opened?: boolean;
-	/** Number of overdue waits when this row's state is Stuck; zero otherwise. */
-	stuck_overdue_waits?: number;
-	/** The earliest instant another wait in a still plan may become Stuck; null without one. */
-	next_overdue_at?: string | null;
 	/** Plan fact: finished work, nothing open, not paused (AS16). The row also checks activity and higher marks. */
 	settled?: boolean;
 }

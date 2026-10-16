@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 MARKER_NAME = "local_setup_installed_omlx"
+CONSENT_MARKER_NAME = "local_setup_existing_omlx_consented"
 OMLX_FORMULA = "jundot/omlx/omlx"
 DEFAULT_PORT = 8000
 
@@ -30,11 +31,24 @@ def marker_path() -> Path:
     return Path(STATE_ROOT) / MARKER_NAME
 
 
+def consent_marker_path() -> Path:
+    from infra.config import STATE_ROOT
+
+    return Path(STATE_ROOT) / CONSENT_MARKER_NAME
+
+
 def mark_installed_by_setup() -> None:
     """Record, durably, that local setup itself installed oMLX."""
     path = marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("installed by corsia local setup\n", encoding="utf-8")
+
+
+def record_existing_omlx_consent() -> None:
+    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root."""
+    path = consent_marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("consented to existing oMLX\n", encoding="utf-8")
 
 
 _BROKEN_RETURN_CODES = (126, 127)
@@ -67,6 +81,21 @@ def _is_broken_leftover(path: str) -> bool:
     _broken_cache.clear()
     _broken_cache[key] = broken
     return broken
+
+
+def existing_omlx_requires_consent() -> bool:
+    """Whether setup must ask before inspecting a pre-existing oMLX.
+
+    This deliberately checks only PATH and CORSIA's ownership/consent markers.
+    In particular, it must not execute oMLX before the person has consented;
+    a broken leftover follows the same consent journey and is repaired after
+    that consent by local setup.
+    """
+    return bool(
+        shutil.which("omlx")
+        and not marker_path().exists()
+        and not consent_marker_path().exists()
+    )
 
 
 def installed_omlx() -> str | None:

@@ -89,8 +89,19 @@ def workers_to_retire(params: dict[str, Any], *, db) -> list[str]:
     return _live(db, _workers(db, [*below, node_id]))
 
 
-def settle(operation: str, params: dict[str, Any], actor, common: dict) -> dict:
-    """Settle the row and every open row beneath it after every worker stopped."""
+def settle(
+    operation: str,
+    params: dict[str, Any],
+    verified_by: str,
+    common: dict,
+    *,
+    evidence: str = EVIDENCE,
+) -> dict:
+    """Settle the row and every open row beneath it after every worker stopped.
+
+    ``verified_by`` and ``evidence`` record whose word accepted it: the user's
+    own, or the system's observation of the person (``plans.system_user_steps``).
+    """
     from plans import admission, user_steering
 
     db, node_id = common["db"], params["node_id"]
@@ -99,22 +110,27 @@ def settle(operation: str, params: dict[str, Any], actor, common: dict) -> dict:
     reason = (params.get("reason") or "").strip() or CLOSE_REASON
     below = _open_below(db, node_id)
     for row_id in below:
-        _settle_one(db, row_id, operation, reason, actor, common)
+        _settle_one(db, row_id, operation, reason, (verified_by, evidence), common)
         admission.release(row_id, OUTCOMES[operation], db=db)
-    _settle_one(db, node_id, operation, reason, actor, common)
+    _settle_one(db, node_id, operation, reason, (verified_by, evidence), common)
     if operation == "mark_done":
         result = after.after_transition(node_id, "accepted", common)
     else:
         result = after.after_close(node_id, service.CLOSED, params, common)
     # Last: a wake the settle sends (``plan_wake``) materializes the owner's
-    # pending digest, and this line belongs in the next one it reads.
-    user_steering.tell_owner(
-        operation, {"node_id": node_id, "reason": reason}, common, below=len(below),
-    )
+    # pending digest, and this line belongs in the next one it reads. A system
+    # settle has no actor; the owner reads it as its own receipt of the
+    # transition (``plan_events.append_node_transition``), not as a user act.
+    if common["actor_id"] is not None:
+        user_steering.tell_owner(
+            operation, {"node_id": node_id, "reason": reason}, common, below=len(below),
+        )
     return result
 
 
-def _settle_one(db, node_id: str, operation: str, reason: str, actor, common: dict) -> None:
+def _settle_one(
+    db, node_id: str, operation: str, reason: str, word: tuple[str, str], common: dict,
+) -> None:
     """One row: a question is withdrawn, anything else stands its worker down and settles."""
     from plans import decision_lifecycle, node_settlement
 
@@ -132,15 +148,15 @@ def _settle_one(db, node_id: str, operation: str, reason: str, actor, common: di
             provenance=common["provenance"], db=db,
         )
         return
-    _accept(db, node_id, actor, common)
+    _accept(db, node_id, word, common)
     decision_lifecycle.withdraw_for_source(
         db, node_id, reason=decision_lifecycle.SOURCE_DONE,
         actor_id=common["actor_id"], provenance=common["provenance"],
     )
 
 
-def _accept(db, node_id: str, actor, common: dict) -> None:
-    """Clear the row's stops, record the user's word as evidence, accept.
+def _accept(db, node_id: str, word: tuple[str, str], common: dict) -> None:
+    """Clear the row's stops, record the settling word as evidence, accept.
 
     A row already awaiting review keeps the evidence it has, with the user's
     word appended as the verdict; one with none takes the user's word as its
@@ -148,19 +164,20 @@ def _accept(db, node_id: str, actor, common: dict) -> None:
     """
     from plans import review_evidence
 
+    verified_by, evidence = word
     clear_stops(db, node_id, common)
     if service._node_row(db, node_id)["state"] == "pending":
         service.transition_node(node_id, "active", **common)
     if service._node_row(db, node_id)["state"] == "active":
         review_evidence.submit(
-            node_id, evidence=EVIDENCE, expected_revision=None,
+            node_id, evidence=evidence, expected_revision=None,
             paused_plan_binds=False, **common,
         )
     else:
-        review_evidence.record_verdict(node_id, EVIDENCE, verdict="Accepted", **common)
+        review_evidence.record_verdict(node_id, evidence, verdict="Accepted", **common)
     service.transition_node(
         node_id, "accepted", verification_result="passed",
-        verified_by=actor.audit_id, **common,
+        verified_by=verified_by, **common,
     )
 
 

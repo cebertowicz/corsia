@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Protocol
 
+from loguru import logger
+
 from automation.continuation import admission, execution, state, triggers
 from automation.continuation.sources.feedback_batches import FeedbackBatchSource
 from automation.continuation.sources.harvest import HarvestSource
@@ -72,10 +74,19 @@ def _prepare(now: str, sources: list[TriggerSource], db) -> list[str]:
     Returns the threads those writes gave a plan wake, for the sweep to drive.
     """
     woken: list[str] = []
+    shared_db = db if db is not None else get_db()
     for source in sources:
         prepare = getattr(source, "prepare", None)
         if callable(prepare):
-            woken.extend(prepare(now, db=db) or ())
+            was_clean = not shared_db.in_transaction
+            try:
+                woken.extend(prepare(now, db=db) or ())
+            except Exception:
+                logger.exception(
+                    "continuation {} source prepare failed", source.kind,
+                )
+                if was_clean and shared_db.in_transaction:
+                    shared_db.rollback()
     return woken
 
 
@@ -87,11 +98,17 @@ def _collect(
 ):
     """Derive source requests before atomically enqueueing their triggers."""
     read_db = db if db is not None else get_db()
-    requests = [
-        (request, source)
-        for source in sources
-        for request in source.due(now, db=read_db)
-    ]
+    requests: list[tuple[triggers.TriggerRequest, TriggerSource]] = []
+    for source in sources:
+        was_clean = not read_db.in_transaction
+        try:
+            requests.extend(
+                (request, source) for request in source.due(now, db=read_db)
+            )
+        except Exception:
+            logger.exception("continuation {} source due failed", source.kind)
+            if was_clean and read_db.in_transaction:
+                read_db.rollback()
     rows = []
     with write_transaction(db, scope="continuation_collect") as connection:
         for request, source in requests:
@@ -200,6 +217,16 @@ async def _run_batch(
         )
 
 
+async def _drive_scripts(now_iso: str, db) -> None:
+    """System phase: start due model-free script runs, never failing the sweep."""
+    from automation import script_runner
+
+    try:
+        await script_runner.drive(now_iso, db=db)
+    except Exception:  # noqa: BLE001 - liveness must outlive a script fault
+        logger.exception("continuation script phase failed")
+
+
 async def sweep(
     now_iso: str,
     *,
@@ -227,6 +254,7 @@ async def sweep(
     # System phase, not a trigger source: release every stored account limit
     # whose reset has passed. It also recovers any release across a restart.
     await drive_limit_releases(state.parse_iso(now_iso))
+    await _drive_scripts(now_iso, db)
     await public.drive_threads(
         await run_in_db_unless_owned(db, _prepare, now_iso, active_sources, db),
     )

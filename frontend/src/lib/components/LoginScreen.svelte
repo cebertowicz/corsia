@@ -6,6 +6,8 @@
 	import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
 	import { Button } from '$lib/components/ui';
 
+	interface Props { onNoAccount?: () => void; }
+	const { onNoAccount } = $props<Props>();
 	type Phase = 'checking' | 'no-account' | 'form';
 
 	let phase = $state<Phase>('checking');
@@ -15,12 +17,23 @@
 	let submitting = $state(false);
 	let checkingAgain = $state(false);
 
+	// Setup is reachable only from the computer CORSIA runs on; the setup routes
+	// answer 403 to anyone else, who keeps the `corsia user add` guidance.
+	async function setupCapable(): Promise<boolean> {
+		try {
+			return (await fetch('/api/setup/status')).ok;
+		} catch {
+			return false;
+		}
+	}
+
 	async function loadStatus() {
 		try {
 			const res = await fetch('/api/auth/status');
 			if (!res.ok) throw new Error(`status check failed (${res.status})`);
 			const data = await res.json();
 			phase = data.has_users ? 'form' : 'no-account';
+			if (!data.has_users && (await setupCapable())) onNoAccount?.();
 		} catch {
 			// Can't tell whether an account exists; fail open to the form so a
 			// reachable login endpoint still lets the user try to sign in.

@@ -45,8 +45,6 @@
 	const label = $derived(
 		`${asker} asked for your review: ${ask}${others.length ? `. ${others.join(' and ')} also asked.` : ''}`,
 	);
-	/** Whom the answer goes to, shown in the phone capsule while nothing else is being said there (PE F2). */
-	const toText = $derived(`To ${asker}${others.length ? ` and ${others.length} other${others.length === 1 ? '' : 's'}` : ''}`);
 	const alsoSends = $derived(round > 0 ? `Also sends your ${pending} to ${asker}` : undefined);
 	const receiptText = $derived.by(() => {
 		const receipt = bar.receipt;
@@ -201,9 +199,9 @@
 			</span>
 		</section>
 	{:else if bar.phase === 'stale'}
-		<section class="review-bar stale" role="status" aria-label="Review request replaced" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
+		<section class="review-bar stale" role="status" aria-label="Review request ended" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 			<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M13 8a5 5 0 11-1.5-3.6M13 2.5v3h-3" /></svg>
-			<span class="rb-text">This review request was replaced</span><span class="rb-sub">Refreshing</span>
+			<span class="rb-text">This review request has ended</span><span class="rb-sub">Refreshing</span>
 		</section>
 	{:else}
 		<section class="review-bar ask" class:noting class:expanded aria-label="Review request" aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
@@ -225,9 +223,8 @@
 			</span>
 			<span class="rb-row2">
 				<div class="rb-capsule" class:suppressed bind:this={capsuleEl} out:capsuleOut|global>
-					<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward; when nothing else is said there it names whom the answer goes to. -->
+					<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
 					<span class="rb-status" class:busy role="status">{busy ? 'Sending your review…' : bar.failure}</span>
-					{#if !busy && !bar.failure && !noting}<span class="rb-to">{toText}</span>{/if}
 					{#if noting}
 						<textarea class="rb-note" rows="1" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000" readonly={busy}
 							bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
@@ -263,15 +260,23 @@
 	.review-bar.receipt, .review-bar.stale { min-height: calc(var(--space-7) * 2); }
 	/* The ask block is two lines at every width. Line 1: the asker, the ask on one line and the expand chevron (D8).
 	   Line 2: a status slot on the left and the answer on the right. */
-	.review-bar.ask { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+	/* The canvas already owns the document-review surface. Keep this row in its
+	   existing header chrome; raised needs-you cards live only on chat objects. */
+	.review-bar.ask {
+		flex-direction: column; align-items: stretch; gap: 0;
+		padding: 0 var(--space-1) 0 0;
+		border: 0; border-radius: 0;
+		background: transparent; box-shadow: none;
+	}
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The avatar and name; it lays nothing out itself except in the narrow header below. */
 	.rb-lead { display: contents; }
-	/* A long name shrinks to its head and tail instead of pushing the ask and the header's controls out of the row. */
-	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; white-space: nowrap; }
-	.rb-who strong { display: flex; min-width: 0; font-weight: var(--fw-semibold); }
+	/* The requester takes its natural width up to the header cap, leaving the ask the remaining one-line space. */
+	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.rb-who strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
+	/* This wrapper constrains the name; MiddleName owns its head/tail truncation within it. */
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	.rb-ask { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
@@ -286,7 +291,6 @@
 	.rb-row2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 	.rb-status { flex: 1 1 0; min-width: 0; color: var(--amber-text); }
 	.rb-status.busy { color: var(--text-secondary); }
-	.rb-to { display: none; }
 	.review-bar.noting .rb-row2 { flex-wrap: wrap; }
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }
@@ -305,7 +309,7 @@
 	.review-bar.stale .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
 	.review-bar.stale .rb-sub { margin-left: auto; opacity: 0.85; }
 
-	/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or a replaced notice takes the first column at the same height and keeps its text on line 1. */
+	/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or an ended notice takes the first column at the same height and keeps its text on line 1. */
 	:global(.document-header) .rb-slot { grid-template-columns: subgrid; }
 	:global(.document-header) .rb-slot > .review-bar { grid-area: 1 / 1 / 2 / 2; }
 	:global(.document-header) .rb-slot > .review-bar.ask { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
@@ -343,6 +347,14 @@
 			.review-bar { min-height: var(--rb-hit); }
 			.review-bar.ask { min-height: 0; }
 			.rb-line { min-height: var(--rb-hit); }
+			/* A closed ask keeps its existing requester/ask markup in one 44px line: the requester has a bounded natural width and the ask end-ellipsizes in the remaining space. */
+			:global(.document-header) .review-bar.ask:not(.expanded) { grid-template-rows: var(--rb-hit); }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 55%; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
+			/* Centre the ask's text line within the touch row; its former block line box sat above the requester's centred content. */
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: flex; align-items: center; align-self: stretch; flex: 1 1 0; min-width: 0; }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
 			/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
 			:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others { padding-right: var(--space-3); }
 			.review-bar.receipt, .review-bar.stale { min-height: var(--rb-hit); }
@@ -356,13 +368,12 @@
 			.rb-capsule.suppressed { transform: translateY(calc(100% + var(--space-3) + var(--safe-bottom))); pointer-events: none; visibility: hidden; transition-duration: calc(var(--dur-standard) * 0.7), 0s; transition-delay: 0s, calc(var(--dur-standard) * 0.7); }
 			.review-bar.ask .rb-capsule .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
 			.review-bar.ask .rb-capsule .rb-status:empty { display: none; }
-			.review-bar.ask .rb-capsule .rb-to { display: block; order: -1; flex: 1 0 100%; padding: 0 var(--space-2); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 			.rb-capsule .rb-actions { flex: 1 1 auto; margin-left: 0; }
 			.rb-capsule :global(.btn) { flex: 1 1 0; min-width: 0; min-height: var(--rb-hit); }
 			/* Request changes: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and Request changes right-aligned (PE B3). */
 			.rb-capsule .rb-note { flex: 1 0 100%; min-height: var(--rb-hit); max-height: calc(4lh + 2 * var(--space-2)); padding: var(--space-2); font-size: var(--text-input); line-height: var(--lh-normal); }
 			.review-bar.noting .rb-capsule .rb-actions { flex: 1 0 100%; justify-content: flex-end; }
-			.review-bar.noting .rb-capsule :global(.btn) { flex: 0 0 auto; min-width: max-content; }
+			.review-bar.noting .rb-capsule .rb-actions :global(.btn) { flex: 0 0 auto; min-width: max-content; }
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
