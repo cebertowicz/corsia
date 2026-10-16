@@ -10,7 +10,6 @@
 	 * once, and a failed write returns the decision here with its reason.
 	 */
 	import Button from '$lib/components/ui/Button.svelte';
-	import StatePill from '$lib/components/ui/StatePill.svelte';
 	import {
 		isPickAny,
 		OTHER_OPTION_ID,
@@ -175,7 +174,7 @@
 				<div><dt>Tradeoff</dt><dd>{decision.tradeoff}</dd></div>
 				{#if !rationaleOptionId}
 					<div><dt>Why</dt><dd>{decision.rationale}</dd></div>
-					{/if}
+				{/if}
 			</dl>
 		</div>
 		<div class="options" aria-label="Decision options">
@@ -185,7 +184,7 @@
 				{#each decision.options as option (option.id)}
 					{@const isTicked = ticked.includes(option.id)}
 					{@const isRecommended = recommendedSet.includes(option.id)}
-						{@const carriesRationale = option.id === rationaleOptionId}
+					{@const carriesRationale = option.id === rationaleOptionId}
 					<label class="option-row" class:selected={isTicked}>
 						<input
 							type="checkbox"
@@ -200,13 +199,13 @@
 							<span class="option-label-row">
 								<b>{option.label}</b>
 								{#if isRecommended}
-									<StatePill state="active" size="sm" label="Recommended" />
+									<span class="recommended">Recommended</span>
 								{/if}
 							</span>
 							<small id={`${headingId}-${option.id}-detail`}>{option.detail}</small>
-								{#if carriesRationale}
-									<p class="option-rationale" id={`${headingId}-${option.id}-rationale`}><span>Why</span>{decision.rationale}</p>
-								{/if}
+							{#if carriesRationale}
+								<p class="option-rationale" id={`${headingId}-${option.id}-rationale`}><span>Why</span>{decision.rationale}</p>
+							{/if}
 						</span>
 					</label>
 				{/each}
@@ -231,7 +230,7 @@
 					class="option-button press-tint"
 					class:selected={selected === option.id}
 					aria-pressed={selected === option.id}
-						aria-describedby={`${headingId}-${option.id}-detail${option.id === rationaleOptionId ? ` ${headingId}-${option.id}-rationale` : ''}`}
+					aria-describedby={`${headingId}-${option.id}-detail${option.id === rationaleOptionId ? ` ${headingId}-${option.id}-rationale` : ''}`}
 					disabled={locked}
 					onclick={() => chooseOption(option.id)}
 				>
@@ -240,13 +239,13 @@
 						<span class="option-label-row">
 							<b>{option.label}</b>
 							{#if recommended && option.id === recommended.id}
-								<StatePill state="active" size="sm" label="Recommended" />
+								<span class="recommended">Recommended</span>
 							{/if}
 						</span>
 						<small id={`${headingId}-${option.id}-detail`}>{option.detail}</small>
-							{#if option.id === rationaleOptionId}
-								<p class="option-rationale" id={`${headingId}-${option.id}-rationale`}><span>Why</span>{decision.rationale}</p>
-							{/if}
+						{#if option.id === rationaleOptionId}
+							<p class="option-rationale" id={`${headingId}-${option.id}-rationale`}><span>Why</span>{decision.rationale}</p>
+						{/if}
 					</span>
 				</button>
 			{/each}
@@ -304,7 +303,7 @@
 	.decision-context > p { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	dl { display: grid; gap: var(--space-2); margin: 0; }
 	dl div { padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); }
-	dt { margin-bottom: var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
+	dt { margin-bottom: var(--space-1); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	dd { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.options { display: flex; flex-direction: column; gap: var(--space-2); }
 	.option-button { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); text-align: left; cursor: pointer; }
@@ -316,7 +315,9 @@
 	.option-button b { font-size: var(--text-subhead); }
 	.option-button small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
 	.option-rationale { display: flex; gap: var(--space-1); margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
-	.option-rationale span { color: var(--accent-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
+	.option-rationale span { flex: none; color: var(--text-tertiary); font-weight: var(--fw-semibold); }
+	/* Recommended is coloured text, never a filled pill (DESIGN-SYSTEM §0.2). */
+	.recommended { color: var(--accent-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	.other-option { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--text-footnote); }
 	.other-option.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.other-option > span:first-child { padding-top: var(--space-1); }
@@ -327,7 +328,7 @@
 	.receipt { flex: 1; min-width: 0; margin: 0; }
 	.hint { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	fieldset.pick-any { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
-	fieldset.pick-any legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
+	fieldset.pick-any legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }
 	.option-row { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); cursor: pointer; }
 	.option-row.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.option-row:has(.tick:disabled) { opacity: 0.5; cursor: not-allowed; }
@@ -340,7 +341,7 @@
 	.option-row small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
 	.option-row:has(.tick:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.option-button:focus-visible, .other-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* The drawer chrome owns the single context eyebrow beside Done at every width. */
+	/* The drawer chrome owns the single context line beside Done at every width. */
 	@media (max-width: 720px) {
 		.decision-top { grid-template-columns: 1fr; gap: var(--space-3); }
 		.option-button, .other-option { min-height: 44px; }

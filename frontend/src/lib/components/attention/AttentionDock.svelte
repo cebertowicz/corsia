@@ -282,7 +282,7 @@
 			{#key current.external_id}
 				<AdaptiveDrawer
 					ariaLabel={`Decision — ${label(current)}`}
-						mobileMeta={decisionMeta(current.detail as DecisionDetail)}
+					contextLabel={decisionMeta(current.detail as DecisionDetail)}
 					opaque
 					flushBottom
 					open={showChip}

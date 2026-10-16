@@ -131,7 +131,7 @@ describe("pick any — what the person sees", () => {
     expect(host.querySelector("fieldset legend")?.textContent).toBe("Choose any that apply");
     expect(boxes()).toHaveLength(3);
     expect(boxes().map((item) => item.checked)).toEqual([true, true, false]);
-    expect(host.querySelectorAll(".pill").length).toBe(2);
+    expect(host.querySelectorAll(".recommended").length).toBe(2);
     expect(host.textContent).toContain("Recommended");
     expect(receipt()).toBe("2 of 3 chosen · as recommended");
     expect(answerButton().disabled).toBe(false);
@@ -182,12 +182,12 @@ describe("pick any — what the person sees", () => {
     expect(receipt()).toBe("None chosen, with a note.");
   });
 
-  it("S6: an empty recommendation starts with nothing ticked and no pills", async () => {
+  it("S6: an empty recommendation starts with nothing ticked and no Recommended mark", async () => {
     body = queueBody(pickAnyItem({ recommendation: [] }), 1);
     await openChip();
 
     expect(boxes().map((item) => item.checked)).toEqual([false, false, false]);
-    expect(host.querySelectorAll(".pill").length).toBe(0);
+    expect(host.querySelectorAll(".recommended").length).toBe(0);
     expect(receipt()).toBe("None chosen. Answering tells the agent you want none of these.");
   });
 

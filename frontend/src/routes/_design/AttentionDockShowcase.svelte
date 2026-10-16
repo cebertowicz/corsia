@@ -90,7 +90,7 @@
 				'Completed branches should collapse, but hiding them before the user sees the update makes the rollup feel untrustworthy.',
 			tradeoff:
 				'More visibility preserves continuity; less visibility keeps the landing surface calm.',
-			recommendation: 'B',
+			recommendation: 'A',
 			rationale:
 				'The passive witness gives the person a clear, reversible receipt at the moment it matters, while avoiding a second acknowledgement step or a persistent history surface that asks them to keep managing already-finished work.',
 			options: [

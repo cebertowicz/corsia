@@ -175,7 +175,7 @@ describe("AttentionDock — one item at a time", () => {
       await settle();
 
       const drawer = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
-      expect(drawer.querySelectorAll(".drawer-eyebrow"), `${width}px chrome eyebrow`).toHaveLength(1);
+      expect(drawer.querySelectorAll(".drawer-context"), `${width}px chrome context line`).toHaveLength(1);
       expect(drawer.querySelectorAll(".decision-chip .eyebrow"), `${width}px duplicate body eyebrow`).toHaveLength(0);
 
       unmount(component);

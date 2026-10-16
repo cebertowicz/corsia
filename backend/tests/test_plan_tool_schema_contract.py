@@ -150,7 +150,7 @@ def test_plan_decision_schema_covers_exact_operation_vocabulary():
             assert "decision revision" in revision["description"].lower()
 
 
-def test_plan_decision_draft_refusal_explains_the_rationale_purpose():
+def test_plan_decision_rationale_publishes_its_purpose_and_limit():
     from tools.plans import PlanDecisionTool
 
     errors = PlanDecisionTool().validate_params({
@@ -172,10 +172,9 @@ def test_plan_decision_draft_refusal_explains_the_rationale_purpose():
         },
     })
 
-    assert errors == [
-        "params.rationale must be at most 240 chars. Why you recommend it: "
-        "the one point that clinches it, in a sentence or two. Not a second tradeoff."
-    ]
+    assert errors == ["params.rationale must be at most 240 chars"]
+    rationale = PlanDecisionTool().parameters["properties"]["params"]["properties"]["rationale"]
+    assert rationale["description"].startswith("Why you recommend it")
 
 
 @pytest.mark.parametrize("operation", sorted(_MUTATION_REQUIRED))

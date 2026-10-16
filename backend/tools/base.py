@@ -122,23 +122,20 @@ class Tool(ABC):
                 decoded[key] = parsed
         return decoded
 
-    def _validate_all_of(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
-        """Apply conditional rules after the schema's common validation."""
-        base_schema = {key: value for key, value in schema.items() if key != "allOf"}
-        errors = self._validate(val, base_schema, path)
-        for rule in schema["allOf"]:
-            condition = rule.get("if")
-            if condition is not None and self._validate(val, condition, path):
-                continue
-            consequence = rule.get("then")
-            if consequence is not None:
-                errors.extend(self._validate(val, consequence, path))
-        # The base schema and an operation's rule can refuse the same field.
-        return list(dict.fromkeys(errors))
-
     def _validate(self, val: Any, schema: dict[str, Any], path: str) -> list[str]:
         if "allOf" in schema:
-            return self._validate_all_of(val, schema, path)
+            rules = schema["allOf"]
+            base_schema = {key: value for key, value in schema.items() if key != "allOf"}
+            errors = self._validate(val, base_schema, path)
+            for rule in rules:
+                condition = rule.get("if")
+                if condition is not None and self._validate(val, condition, path):
+                    continue
+                consequence = rule.get("then")
+                if consequence is not None:
+                    errors.extend(self._validate(val, consequence, path))
+            # The base schema and an operation's rule can refuse the same field.
+            return list(dict.fromkeys(errors))
 
         # Exact operation contracts use the conditional allOf path above.
 
@@ -174,12 +171,7 @@ class Tool(ABC):
             if "minLength" in schema and len(val) < schema["minLength"]:
                 errors.append(f"{label} must be at least {schema['minLength']} chars")
             if "maxLength" in schema and len(val) > schema["maxLength"]:
-                purpose = (
-                    f" {schema['description']}"
-                    if path.endswith("rationale") and schema.get("description")
-                    else ""
-                )
-                errors.append(f"{label} must be at most {schema['maxLength']} chars.{purpose}")
+                errors.append(f"{label} must be at most {schema['maxLength']} chars")
         if t == "object":
             if "minProperties" in schema and len(val) < schema["minProperties"]:
                 errors.append(
