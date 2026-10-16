@@ -31,6 +31,7 @@ mod pairing;
 mod proxy;
 mod remote;
 mod remote_config;
+mod remote_lifecycle;
 mod service_management;
 mod startup_failure;
 mod trust;
