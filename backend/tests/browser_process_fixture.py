@@ -12,7 +12,7 @@ import tempfile
 
 import psutil
 import pytest
-from host_access import browser_identity as identity, browser_sessions as sessions
+from host_access import browser_cdp, browser_cli, browser_identity as identity, browser_sessions as sessions
 
 # Bounds only a child that never starts; a healthy one returns at once. Loaded CI runners took >3 s (#2679).
 CHILD_READY_TIMEOUT = 30
@@ -162,6 +162,16 @@ def synthetic_browser(monkeypatch):
     monkeypatch.setattr(owner, '_invoke', fake.invoke)
     monkeypatch.setattr(asyncio, 'open_unix_connection', fake.connect)
     monkeypatch.setattr(identity, 'connected_peer_pid', fake.peer_pid)
+    # The synthetic daemon has no page: lifecycle tests see a page without a password field
+    # (the guard has its own tests) and the host's installed Chrome never reaches the argv.
+    async def synthetic_page(_run):
+        return 'ws://synthetic.test/devtools/page/1'
+
+    async def no_password_field(endpoint, _visit, _known):
+        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset(), endpoint)
+    monkeypatch.setattr(browser_cdp, 'page_endpoint', synthetic_page)
+    monkeypatch.setattr(browser_cdp, 'page_password_probe', no_password_field)
+    monkeypatch.setattr(browser_cli, 'chrome_executable', lambda: (None, 'default'))
     yield fake
     fake.finish()
     shutil.rmtree(root)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { contrastRatio, readableTone, suggestionTones } from './suggestion-tones';
+import { contrastRatio } from '$lib/utils/contrast';
+import { readableTone, suggestionTones } from './suggestion-tones';
 
 const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 const mix = (colour: string, background: string, amount: number) =>

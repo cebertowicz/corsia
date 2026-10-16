@@ -322,6 +322,8 @@ async def prelaunch_settings_restart(
         if operation_id is None:
             return None
 
+        # Set before prepare: an app bundle stages its update under this id.
+        restart_env["CORSIA_RESTART_OPERATION_ID"] = operation_id
         if prepared:
             await _check_room_or_compensate(operation_id, acquired_ids)
             await _prepare_owned_release(
@@ -347,7 +349,6 @@ async def prelaunch_settings_restart(
             await _compensate_cancelled_acquire(acquired_ids, error)
             raise
 
-        restart_env["CORSIA_RESTART_OPERATION_ID"] = operation_id
         process = await _launch_settings_restart(
             operation_id,
             prepared,

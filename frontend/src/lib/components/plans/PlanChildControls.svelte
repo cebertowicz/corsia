@@ -104,6 +104,8 @@
 		display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		border: 0; border-radius: var(--radius-xs); background: transparent;
 		color: var(--text-tertiary); cursor: pointer;
+		/* The glyph, not the hit area, ends on the row's trailing column. */
+		margin-right: -4px;
 	}
 	.child-open svg {
 		width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
@@ -113,7 +115,7 @@
 	@media (hover: hover) {
 		.spawn-chip:hover, .child-open:hover { color: var(--text-primary); background: var(--bg-hover); }
 	}
-	.spawn-chip:focus-visible, .child-open:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	.spawn-chip:focus-visible, .child-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	@keyframes child-pulse { 50% { opacity: 0.38; transform: scale(0.82); } }
 	@media (prefers-reduced-motion: reduce) {
 		.child-dot.active { animation: none; }

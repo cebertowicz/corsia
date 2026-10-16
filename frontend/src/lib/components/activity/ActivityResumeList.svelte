@@ -56,10 +56,10 @@
 	.resume-row:last-child { border-bottom: 0; }
 	/* Pointer-only: a tap leaves :hover stuck on the last row touched. */
 	@media (hover: hover) {
-		.resume-row:hover .resume-copy strong { color: var(--violet-text); }
+		.resume-row:hover .resume-copy strong { color: var(--accent-text); }
 	}
 	.resume-row:focus-visible {
-		outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-xs);
+		outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs);
 	}
 	.resume-mark {
 		display: inline-flex; width: 32px; height: 32px; flex: none; align-items: center; justify-content: center;
@@ -74,7 +74,7 @@
 	.resume-copy span { color: var(--text-tertiary); font-size: var(--text-caption); }
 	.resume-state { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.resume-state.active { color: var(--status-in-progress); }
-	.resume-state.done { color: var(--violet-text); }
+	.resume-state.done { color: var(--purple-text); }
 	.resume-chevron { color: var(--text-tertiary); font-size: 20px; }
 	.quiet-empty { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); }
 	@media (max-width: 620px) {

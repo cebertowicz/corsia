@@ -135,7 +135,7 @@
 	}
 	.cost-bar .cb-bar > span {
 		display: block; height: 100%;
-		background: linear-gradient(90deg, var(--violet), var(--violet-2));
+		background: linear-gradient(90deg, var(--accent), var(--accent-hover));
 	}
 	.cost-bar .cb-val {
 		color: var(--text-primary);

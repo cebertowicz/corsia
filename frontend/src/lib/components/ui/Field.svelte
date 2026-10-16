@@ -3,6 +3,7 @@
 
 	interface Props {
 		label: string;
+		labelFor?: string;
 		hint?: string;
 		error?: string;
 		required?: boolean;
@@ -17,15 +18,17 @@
 	}
 
 	const {
-		label, hint, error, required = false,
+		label, labelFor, hint, error, required = false,
 		layout = 'row', variant = 'default', trailing, children,
 	}: Props = $props();
 </script>
 
 <div class="field {layout}" class:chip={variant === 'chip'} class:has-error={!!error}>
-	<span class="l">
-		{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}
-	</span>
+	{#if labelFor}
+		<label class="l" for={labelFor}>{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</label>
+	{:else}
+		<span class="l">{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</span>
+	{/if}
 	<div class="c">
 		{@render children()}
 	</div>
@@ -105,8 +108,8 @@
 	.c :global(select:focus),
 	.c :global(textarea:focus) {
 		outline: none;
-		border-color: var(--violet);
-		box-shadow: 0 0 0 3px var(--violet-bg);
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-wash);
 	}
 
 	.c :global(select) {
@@ -156,7 +159,7 @@
 	.field.chip .c :global(input::placeholder) { color: var(--text-tertiary); }
 	.field.chip .c :global(input:focus),
 	.field.chip .c :global(select:focus) {
-		border-color: var(--accent-line); box-shadow: var(--glass-rim), var(--shadow-chip), 0 0 0 3px var(--accent-wash);
+		border-color: var(--accent); box-shadow: var(--glass-rim), var(--shadow-chip), 0 0 0 3px var(--accent-wash);
 	}
 	.field.chip.has-error .c :global(input) { border-color: var(--red-text); }
 	.field.chip .hint, .field.chip .err { padding-left: var(--space-1); }

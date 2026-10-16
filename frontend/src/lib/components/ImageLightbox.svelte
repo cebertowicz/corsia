@@ -360,7 +360,7 @@
 	@media (hover: hover) {
 		.lightbox :global(.control:hover:not(:disabled):not(:active):not([aria-pressed='true']):not([aria-expanded='true'])) { background: var(--bg-hover); color: var(--text-primary); }
 	}
-	.lightbox :global(.control[aria-pressed='true']), .lightbox :global(.control[aria-expanded='true']) { background: var(--accent-bg); color: var(--accent); }
+	.lightbox :global(.control[aria-pressed='true']), .lightbox :global(.control[aria-expanded='true']) { background: var(--accent-wash); color: var(--accent-text); }
 	.lightbox :global(.control:disabled) { opacity: 0.4; cursor: default; }
 	/* Press-down tints at once, in place of the app's press scale. */
 	.lightbox :global(.control:not(:disabled):active) { scale: none; background: var(--press-bg); transition-duration: 0s; }

@@ -95,6 +95,26 @@ def admitted_version(output: str) -> str:
     )
 
 
+def _application_dirs() -> tuple[Path, ...]:
+    return Path("/Applications"), Path.home() / "Applications"
+
+
+def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]]:
+    """Choose the Chrome agent-browser launches; None keeps its own download.
+
+    That download (Chrome for Testing 152) stops sending screencast frames in about
+    half of fresh sessions, so an installed Google Chrome is preferred. Only the
+    binary changes: agent-browser keeps its temporary profile either way.
+    """
+    if explicit := os.environ.get("AGENT_BROWSER_EXECUTABLE_PATH"):
+        return explicit, "env"
+    for folder in _application_dirs():
+        candidate = folder / "Google Chrome.app/Contents/MacOS/Google Chrome"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate), "system"
+    return None, "default"
+
+
 def resolve_native(binary: str) -> tuple[str, str]:
     """Reject scripts/wrappers before invoking even --version; follow symlinks."""
     selected = shutil.which(binary) if not Path(binary).is_absolute() else binary

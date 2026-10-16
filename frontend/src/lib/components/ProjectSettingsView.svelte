@@ -417,7 +417,7 @@
 <style>
 	.ps-scroll {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding-top: calc(var(--header-height, 60px) + env(safe-area-inset-top, 0px));
+		padding-top: var(--header-bottom);
 	}
 	.ps {
 		width: 100%; max-width: 600px; margin: 0 auto;
@@ -469,7 +469,7 @@
 		border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary);
 		font-size: var(--text-subhead); padding: 6px 12px; font-family: inherit;
 	}
-	.add:hover { color: var(--accent); border-color: var(--accent); }
+	.add:hover { color: var(--accent-text); border-color: var(--accent); }
 	.add:disabled { opacity: 0.45; cursor: not-allowed; }
 	.boot-create-row {
 		display: grid;

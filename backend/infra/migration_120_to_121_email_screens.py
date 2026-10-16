@@ -1,4 +1,4 @@
-"""Schema 119 -> 120: the local screen's per-message results.
+"""Schema 120 -> 121: the local screen's per-message results.
 
 Purely additive: one new table, no data to convert. The DDL is copied rather
 than imported so this step keeps producing the shape it was written for.
@@ -26,6 +26,6 @@ _EMAIL_SCREENS_120_DDL = """
 """
 
 
-def migrate_119_to_120(conn: sqlite3.Connection) -> None:
+def migrate_120_to_121(conn: sqlite3.Connection) -> None:
     """Create the email screens table."""
     conn.execute(_EMAIL_SCREENS_120_DDL)

@@ -10,7 +10,6 @@ import time
 from typing import Literal, Sequence, TypeAlias
 
 from host_access import browser_cli, browser_control, browser_identity as identity, browser_reporting
-from host_access.browser_streaming import StreamPortResult, prepare_stream_port
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -44,6 +43,7 @@ class BrowserSessionOwner:
         self.socket_dir = identity.socket_dir_for_namespace(namespace, instance_key)
         self.close_timeout = max(0.01, float(close_timeout))
         self._native: browser_cli.NativeExecutable | None = None
+        self._chrome: str | None = None
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
@@ -61,47 +61,23 @@ class BrowserSessionOwner:
 
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
-                  show_window: bool | None = None, control_token: str | None = None,
-                  session: SessionAdmission = "any") -> str:
-        """Run a stock CLI command through the exact opaque thread session, as ``control_token``'s pane."""
-        if not isinstance(thread_id, str) or not thread_id:
-            raise BrowserSessionError("browser command requires exact thread identity")
-        invalid_preference = show_window is not None and not isinstance(show_window, bool)
-        if not args or not all(isinstance(arg, str) and arg for arg in args) or timeout <= 0 or invalid_preference:
-            raise BrowserSessionError("browser command is invalid")
-        if args[0] in {"close", "quit", "exit"}:
-            raise BrowserSessionError("browser close requires owned session teardown")
-        browser_control.require_page_control(thread_id, control_token)
-        try:
-            await asyncio.to_thread(browser_cli.check_local_mode, args)
-        except identity.BrowserIdentityError as exc:
-            raise BrowserSetupError(str(exc)) from exc
-        # Preflight has no session effects and must not poison an existing binding.
-        await self._pin_native()
-        runtime = await self._admit(
-            thread_id, lease_id=lease_id, show_window=show_window, session=session,
-        )
-        result, unfinished = await self._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
-        if result.timed_out and args[0] == "wait":
-            return browser_cli.WAIT_TIMED_OUT
-        rendered = self._model_result(result, runtime.record)
-        if args[0] == "open" and runtime.record.show_window and not unfinished and not rendered.startswith("Error:"):
-            browser_control.announce_browser_opened(thread_id)
-        return rendered
+                  show_window: bool | None = None,
+                  session: SessionAdmission = "any", pane: bool = False) -> str:
+        """Run one command through the shared-browser command path; `pane` marks the person's own
+        command from the browser pane, which the password guard never refuses."""
+        from host_access.browser_session_commands import run
+        return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout,
+                         show_window=show_window, session=session, pane=pane)
 
-    async def stream_port(self, thread_id: str) -> StreamPortResult:
-        """Prepare an existing session's private stream through the same command path."""
+    async def page_endpoint(self, thread_id: str) -> str:
+        """The thread's shared page target, resolved exactly as for its agent's commands."""
+        from host_access.browser_session_commands import page_endpoint
+        return await page_endpoint(self, thread_id)
+
+    async def has_session(self, thread_id: str) -> bool:
+        """Report whether this thread has a browser for a pane to show."""
         async with self._owner_lock:
-            runtime = self._sessions.get(thread_id)
-        if runtime is None:
-            return StreamPortResult()
-        try:
-            await self._pin_native()
-            return await prepare_stream_port(lambda args: self._run_admitted(
-                runtime, args, lease_id=runtime.record.lease_id, timeout=10.0,
-            ))
-        except (BrowserSessionError, BrowserSessionCleanupError, BrowserSetupError) as exc:
-            return StreamPortResult(error=str(exc))
+            return thread_id in self._sessions
 
     async def _run_admitted(self, runtime: BrowserRuntime, args: Sequence[str], *,
                             lease_id: str | None, timeout: float) -> tuple[CommandResult, bool]:
@@ -204,6 +180,8 @@ class BrowserSessionOwner:
                 if await asyncio.to_thread(browser_cli.resolve_native, self.binary) != (path, fingerprint):
                     raise identity.BrowserIdentityChanged(_EXECUTABLE_CHANGED)
                 self._native = browser_cli.NativeExecutable(path, fingerprint, version)
+                self._chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
+                logger.info("agent-browser launches Chrome from %s (%s)", self._chrome or "its default", source)
             except identity.BrowserIdentityError as exc:
                 # Setup refusal precedes admission; it never enters cleanup state.
                 raise BrowserSetupError(str(exc)) from exc
@@ -211,6 +189,7 @@ class BrowserSessionOwner:
     def _session_argv(self, runtime: BrowserRuntime, args: Sequence[str]) -> tuple[str, ...]:
         assert self._native is not None
         return (self._native.path, "--session", runtime.record.session,
+                *(("--executable-path", self._chrome) if self._chrome else ()),
                 *(("--headed",) if runtime.record.show_window else ()), "--json", *args)
 
     async def _observe(self, runtime: BrowserRuntime, peer_socket: socket.socket | None = None) -> identity.Observation:
@@ -255,6 +234,7 @@ class BrowserSessionOwner:
         runtime = self._sessions.get(thread_id)
         if runtime is None:
             return "Browser session is already closed."
+        browser_control.browser_closed(thread_id)
         await self._close_runtime(runtime)
         return "Browser session closed."
 

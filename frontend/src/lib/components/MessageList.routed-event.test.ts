@@ -316,7 +316,8 @@ describe('MessageList routed event display', () => {
 
 		renderList();
 
-		expect(host.textContent).toContain('oMLX · Model-9B-mlx-mxfp8');
+		expect(host.textContent).toContain('Model-9B-mlx-mxfp8');
+		expect(host.textContent).not.toContain('oMLX ·');
 		expect(host.textContent).not.toContain('ns-test');
 		expect(host.textContent).not.toContain('🖥️');
 	});

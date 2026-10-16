@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 LESSON_KEY = "lesson"
-STATES = ("trial", "retired", "promoted")
+STATES = ("watch", "trial", "retired", "promoted")
 KINDS = ("instruction", "preference", "constraint", "hypothesis")
 PERMANENT_KINDS = frozenset(KINDS) - {"hypothesis"}
 
@@ -37,7 +37,7 @@ INDEX_TOKEN_BUDGET = 1_000
 REVIEW_REF_PREFIX = "plan-node:"
 _FIELDS = frozenset({
     "id", "state", "owner", "review_after", "source_refs", "review_ref",
-    "origin", "destination",
+    "origin", "destination", "originating_subjects",
 })
 
 TRIAL_SCHEMA: dict[str, Any] = {
@@ -46,9 +46,11 @@ TRIAL_SCHEMA: dict[str, Any] = {
     "required": ["kind", "review_after"],
     "properties": {
         "kind": {"type": "string", "enum": list(KINDS)},
+        "state": {"type": "string", "enum": ["watch", "trial"]},
         "review_after": {"type": "string", "description": "Future ISO date to review it."},
         # The hold replies name these three and say what each takes.
         "boundary": {"type": ["string", "null"]},
+        "incident_detail_reason": {"type": ["string", "null"]},
         "derivation": {"type": ["string", "null"]},
         "literal_ref": {
             "type": ["object", "null"],
@@ -70,7 +72,9 @@ class Trial:
 
     kind: str
     review_after: str
+    state: str = "trial"
     boundary: str | None = None
+    incident_detail_reason: str | None = None
     derivation: str | None = None
     literal_ref: dict[str, Any] | None = None
 
@@ -84,6 +88,7 @@ class Lesson:
     owner: str
     review_after: str
     source_refs: tuple[dict[str, str], ...]
+    originating_subjects: tuple[str, ...] = ()
     review_ref: str | None = None
     origin: dict[str, str] | None = None
     destination: dict[str, str] | None = None
@@ -128,6 +133,8 @@ def validate_trial(raw: object) -> Trial | None:
         raise ValueError(f"trial has unknown keys: {', '.join(unknown)}")
     if raw.get("kind") not in KINDS:
         raise ValueError(f"trial.kind must be one of {', '.join(KINDS)}")
+    if raw.get("state", "trial") not in ("watch", "trial"):
+        raise ValueError("trial.state must be watch or trial")
     when = parse_instant(raw.get("review_after"))
     if when is None:
         raise ValueError(
@@ -136,7 +143,9 @@ def validate_trial(raw: object) -> Trial | None:
     return Trial(
         kind=str(raw["kind"]),
         review_after=when.isoformat(),
+        state=str(raw.get("state", "trial")),
         boundary=_clean(raw.get("boundary")),
+        incident_detail_reason=_clean(raw.get("incident_detail_reason")),
         derivation=_clean(raw.get("derivation")),
         literal_ref=_literal_ref(raw.get("literal_ref")),
     )
@@ -206,6 +215,19 @@ def _refs(value: object) -> tuple[dict[str, str], ...] | None:
     return tuple(refs)
 
 
+def _subjects(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, list):
+        return None
+    subjects = []
+    for raw in value:
+        if not _clean(raw):
+            return None
+        subject = str(raw).strip()
+        if subject not in subjects:
+            subjects.append(subject)
+    return tuple(subjects)
+
+
 def _pair(value: object, first: str, second: str) -> dict[str, str] | None:
     """A mapping carrying ``first`` and optionally ``second``, both text."""
     if not isinstance(value, dict) or not _clean(value.get(first)) or set(value) - {first, second}:
@@ -233,6 +255,8 @@ def lesson_errors(block: object, description: str | None, body: str) -> list[str
         errors.append("corsia.lesson.review_after must be an ISO date or instant")
     if _refs(block.get("source_refs")) is None:
         errors.append("corsia.lesson.source_refs must list at least one {kind, reference}")
+    if "originating_subjects" in block and _subjects(block["originating_subjects"]) is None:
+        errors.append("corsia.lesson.originating_subjects must be a list of non-empty subject keys")
     if "review_ref" in block and not _clean(block.get("review_ref")):
         errors.append("corsia.lesson.review_ref must be a non-empty string")
     if "origin" in block and _pair(block["origin"], "id", "behavioral_sha256") is None:
@@ -265,6 +289,7 @@ def parse_lesson(metadata: dict[str, Any]) -> Lesson | None:
         owner=str(block.get("owner") or "").strip(),
         review_after=when.isoformat() if when else "",
         source_refs=_refs(block.get("source_refs")) or (),
+        originating_subjects=_subjects(block.get("originating_subjects")) or (),
         review_ref=_clean(block.get("review_ref")),
         origin=_pair(block.get("origin"), "id", "behavioral_sha256"),
         destination=_pair(block.get("destination"), "path", "version"),

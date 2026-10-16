@@ -10,6 +10,7 @@ import { measurementScope } from '$lib/stores/measurement';
 import { projects } from '$lib/stores/projects';
 import { measurementOrigin } from '$lib/stores/measurementNavigation';
 import Header from './Header.svelte';
+import headerSource from './Header.svelte?raw';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -231,5 +232,30 @@ describe('Header title on the Measurement page', () => {
 		activeThreadId.set('thread-1');
 		render('chat');
 		expect(title()).toContain('Bugs');
+	});
+});
+
+describe('Header glass layers', () => {
+	const rule = (css: string, selector: string) => {
+		const start = css.indexOf(`${selector} {`);
+		return start < 0 ? '' : css.slice(start, css.indexOf('}', start));
+	};
+	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
+
+	it('keeps the phone header blur on the masked layer so it fades out at the bottom', () => {
+		// An unmasked blur layer ends in a hard line across the transcript.
+		expect(rule(phone, '.shell-header::before')).not.toMatch(/backdrop-filter: none;/);
+		const base = rule(headerSource, '.shell-header::before');
+		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
+		expect(base).toMatch(/mask-image: linear-gradient/);
+	});
+
+	it('keeps the phone glass opaque behind the header row', () => {
+		// The transcript shows through wherever the mask is below 1, so it stays opaque down to
+		// the bottom of the row's glyphs, 9px below the row centre, and only then fades.
+		expect(rule(phone, '.shell-header')).toContain('padding-top: var(--header-pad-top);');
+		expect(rule(phone, '.shell-header::before')).toContain(
+			'mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);',
+		);
 	});
 });

@@ -112,17 +112,17 @@
 	.group { margin-bottom: 18px; }
 	.group:last-child { margin-bottom: 4px; }
 	.cap-row { display: flex; align-items: center; gap: 6px; }
-	.cap-actions { flex: none; padding-bottom: 8px; }
+	.cap-actions { flex: none; padding: 0 8px 8px 0; }
 	.cap {
 		display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; width: 100%; text-align: left;
 		background: none; border: none; cursor: pointer; padding: 2px 8px 8px;
-		font-size: var(--text-caption); font-weight: var(--fw-bold); text-transform: uppercase;
-		letter-spacing: var(--ls-cap); color: var(--text-tertiary);
+		font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary);
 	}
 	.cap-meta { margin-left: auto; font-family: var(--font-mono); font-weight: var(--fw-semibold); letter-spacing: 0; text-transform: none; }
 	.chev { flex-shrink: 0; transition: transform var(--dur-tight) ease; }
 	.chev.open { transform: rotate(90deg); }
-	.card { background: var(--lg-card-fill); border: none; border-radius: var(--lg-card-radius); overflow: hidden; box-shadow: var(--glass-rim); }
+	/* Groups sit on the pane's own surface: spacing and the section label do the grouping, in both themes. */
+	.card { background: none; border: none; border-radius: var(--lg-card-radius); overflow: hidden; }
 	.stub-row {
 		padding: 11px 14px; font-size: var(--text-subhead); color: var(--text-tertiary);
 	}
@@ -143,6 +143,6 @@
 		border-top: 1px solid var(--border-subtle);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.proj-new:hover { background: var(--lg-row-hover, var(--bg-hover)); color: var(--accent); }
+	.proj-new:hover { background: var(--lg-row-hover, var(--bg-hover)); color: var(--accent-text); }
 	.proj-new-plus { font-size: var(--text-callout); line-height: 1; width: 9px; text-align: center; }
 </style>

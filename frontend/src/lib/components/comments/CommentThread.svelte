@@ -342,11 +342,11 @@
 	/* A 44 px target around the 18 px number on touch. */
 	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
 	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
-	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
+	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
 	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
 	.ct-suggestion-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
-	.ct-suggestion-accept:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); opacity: 1; }
-	.ct-link:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
+	.ct-suggestion-accept:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); opacity: 1; }
+	.ct-link:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
 	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
 	.ct-body { font-size: var(--text-subhead); line-height: var(--lh-normal); color: var(--text-primary); margin: 0; }
 	.ct-more { align-self: flex-start; min-height: var(--space-6); font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--text-secondary); background: none; border: none; padding: 0; cursor: pointer; }
@@ -378,7 +378,7 @@
 	.ct-chev.open { transform: rotate(90deg); }
 	.ct-res-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 10px 8px; }
 	.ct-res-acts { display: flex; align-items: center; gap: 8px; }
-	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; }
+	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); background: none; border: none; padding: 0; cursor: pointer; }
 	.ct-link:hover { text-decoration: underline; }
 	.ct-res-hint { font-size: var(--text-caption); color: var(--text-tertiary); }
 

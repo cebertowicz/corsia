@@ -370,9 +370,7 @@ async def update_schedule(body: dict, user: dict = Depends(require_user)):
 
 
 @router.post("/system/update-operations/{operation_id}/outcome-seen")
-async def system_update_outcome_seen(
-    operation_id: str, user: dict = Depends(require_human_user)
-):
+async def system_update_outcome_seen(operation_id: str, user: dict = Depends(require_human_user)):
     """Mark one settled Update's outcome as shown; the first client to do so wins."""
     from automation.update_outcome import mark_outcome_seen
     from infra.db_async import run_in_db

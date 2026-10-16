@@ -61,7 +61,7 @@ def test_a_plain_skill_and_a_valid_lesson_both_validate():
         (VALID_BLOCK + "    scope: project\n", "corsia.lesson.scope is an unknown key"),
         (VALID_BLOCK.replace(LESSON, "not-a-uuid"), "corsia.lesson.id must be a UUID"),
         (VALID_BLOCK.replace("state: trial", "state: active"),
-         "corsia.lesson.state must be one of trial, retired, promoted"),
+         "corsia.lesson.state must be one of watch, trial, retired, promoted"),
         (VALID_BLOCK.replace("    owner: owner\n", ""), "corsia.lesson.owner is required"),
         (VALID_BLOCK.replace(f"'{AFTER}'", "soon"),
          "corsia.lesson.review_after must be an ISO date or instant"),
@@ -229,3 +229,15 @@ def test_a_capture_file_records_its_identity_and_is_never_a_skill():
     assert not validate_skill_text(text).ok
     assert lesson_files.read_trial(text) is None
     assert lesson_files.read_capture("# Just a note\n") is None
+
+
+def test_a_watch_keeps_subject_anchors_and_is_never_offered():
+    text = _trial_text(
+        trial=Trial(kind="hypothesis", review_after=AFTER, state="watch"),
+        originating_subjects=("message:first", "message:second", "message:first"),
+    )
+    watch = lesson_files.read_trial(lesson_files.with_review_ref(text, "node-1")).lesson
+
+    assert watch.state == "watch"
+    assert watch.originating_subjects == ("message:first", "message:second")
+    assert lesson_trials.offer_refusal(watch, NOW) == "lesson is watch"

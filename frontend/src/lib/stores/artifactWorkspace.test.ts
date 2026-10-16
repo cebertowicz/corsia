@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	threadWorkspaces, splitWidth, emptyWorkspace, getActiveTab,
 	openArtifactTab, openAgentDocumentTab, openBrowserPane, openSubagentConversationTab, openLegacyDiscussionArchiveTab,
-	closeArtifactTab, setActiveTab, setActiveSurface, setLeafVisible, markTabStatus,
+	closeArtifactTab, setActiveTab, setActiveSurface, setLeafVisible, markTabStatus, setBrowserPaneLabel,
 } from './artifactWorkspace';
 import { token } from './auth';
 import { canvasCompact } from './artifactCanvas';
@@ -32,6 +32,15 @@ describe('openBrowserPane', () => {
 		openBrowserPane('browser-first', true);
 		const ws = get(threadWorkspaces)['browser-first'];
 		expect(ws).toMatchObject({ visible: true, activeSurface: 'artifact', activeTabId: ws.tabs[0].instanceId });
+	});
+
+	it('updates the browser tab label without changing its selection', () => {
+		openBrowserPane('browser-label');
+		const before = get(threadWorkspaces)['browser-label'];
+		setBrowserPaneLabel('browser-label', 'Example page');
+		const after = get(threadWorkspaces)['browser-label'];
+		expect(after.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Example page');
+		expect(after.activeTabId).toBe(before.activeTabId);
 	});
 
 	it('does not interrupt the tab or surface after an agent reopens its browser', () => {

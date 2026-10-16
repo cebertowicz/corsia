@@ -239,6 +239,44 @@ class TestWakeAndSetupPlan:
         ]
         assert [row["title"] for row in rows] == SETUP_TITLES
 
+    def test_app_path_without_the_served_reference_uses_script_setup(self, fresh_install, monkeypatch):
+        from infra import accounts, onboarding_events
+        from infra.database import get_db
+
+        started = Mock()
+        monkeypatch.setattr(onboarding_events, "start_first_run_task", started)
+        monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: False)
+        accounts.create_first_account("newcomer", SECRET_ENOUGH, first_run_path="app")
+
+        [wake] = _first_run_rows()
+        assert json.loads(wake["metadata"])["first_run_path"] == "script"
+        # The path is decided once at creation: serving the reference later does not flip it.
+        monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: True)
+        db = get_db()
+        try:
+            assert onboarding_events.held_first_run_path(_conductor(), db=db) == "script"
+        finally:
+            db.close()
+        assert [row["title"] for row in _rows(
+            """SELECT n.title FROM plan_nodes n JOIN plans p ON p.id = n.plan_id
+               WHERE p.owner_kind='thread' AND p.owner_id=? AND n.archived_at IS NULL ORDER BY n.order_key""",
+            _conductor(),
+        )] == SETUP_TITLES
+        started.assert_called_once()
+
+    def test_served_app_path_seeds_no_setup_tasks_or_start(self, fresh_install, monkeypatch):
+        from infra import accounts, onboarding_events
+
+        started = Mock()
+        monkeypatch.setattr(onboarding_events, "start_first_run_task", started)
+        monkeypatch.setattr("onboarding.first_run_wake.app_reference_served", lambda: True)
+        accounts.create_first_account("newcomer", SECRET_ENOUGH, first_run_path="app")
+
+        [wake] = _first_run_rows()
+        assert json.loads(wake["metadata"])["first_run_path"] == "app"
+        assert _rows("SELECT n.title FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE p.owner_id=?", _conductor()) == []
+        started.assert_not_called()
+
     def test_the_seeded_tasks_do_not_depend_on_what_the_install_finds(
         self, fresh_install, monkeypatch,
     ):

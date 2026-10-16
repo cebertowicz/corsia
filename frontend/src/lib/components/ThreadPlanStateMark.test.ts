@@ -294,6 +294,8 @@ describe('ThreadPlanStateMark', () => {
 		const phoneTarget = source.match(/@media \(max-width: 768px\)[\s\S]*\.plan-state\[role="button"\]::before\s*\{([^}]*)\}/)?.[1] ?? '';
 		expect(phoneTarget).toMatch(/width:\s*max\(calc\(100% \+ 20px\), 44px\);/);
 		expect(phoneTarget).toMatch(/height:\s*max\(100%, 44px\);/);
+		// A row's second line keeps its box, so the row's own tap is never taken.
+		expect(source).toMatch(/\.plan-state\.line\[role="button"\]::before\s*\{\s*content:\s*none;\s*\}/);
 		expect(source).toMatch(/\.plan-state:focus-visible/);
 	});
 

@@ -7,6 +7,7 @@
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
+	import { isYourMove } from './threadRowMark';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
 	import ThreadDoneMark from './ThreadDoneMark.svelte';
 
@@ -70,7 +71,10 @@
 	const checkpointLabel = $derived(
 		checkpoint?.trigger === 'model_switch' ? 'switching' : checkpoint ? 'checkpointing' : null,
 	);
-	const updateSummary = $derived($threadPlanStates[thread.id]?.latest_update?.summary);
+	const planState = $derived($threadPlanStates[thread.id]);
+	const updateSummary = $derived(planState?.latest_update?.summary);
+	// What the user owes takes the second line, in place of the update summary; the mark owns it either way.
+	const needsYou = $derived(isYourMove(planState));
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -156,18 +160,23 @@
 							: 'Checkpointing context'}
 						>{checkpointLabel}</span>
 					{/if}
-					<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
-					{#if activity === 'active'}
-						<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-					{:else if $descendantRunning.has(thread.id)}
-						<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+					{#if !needsYou}
+						<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
 					{/if}
 				</div>
-				{#if !renaming && updateSummary}
+				{#if needsYou}
+					<ThreadPlanStateMark threadId={thread.id} line {onOpenAttention} onOpenThread={onSelect} />
+				{:else if updateSummary}
 					<span class="thread-update-summary" title={updateSummary}>{updateSummary}</span>
 				{/if}
 			{/if}
 		</div>
+		<!-- The trailing column: centred on the whole row, so one line or two, the spinner sits in the middle. -->
+		{#if !renaming && activity === 'active'}
+			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+		{:else if !renaming && $descendantRunning.has(thread.id)}
+			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+		{/if}
 		<div class="thread-hover-actions">
 			<button
 				class="thread-action-btn"
@@ -199,7 +208,7 @@
 	.action-zone .zone-label { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.01em; }
 	.left-zone {
 		left: 0; width: 80px;
-		background: var(--violet);
+		background: var(--accent-fill); color: var(--accent-on-fill);
 		border-top-left-radius: var(--radius-sm);
 		border-bottom-left-radius: var(--radius-sm);
 	}
@@ -223,7 +232,8 @@
 	}
 	.action-zone.armed { filter: brightness(1.12); }
 	.thread-item {
-		width: 100%; text-align: left; padding: 7px 10px;
+		/* The row's height no longer comes from the out-of-flow action, so it is held at the list's 38px pitch. */
+		width: 100%; min-height: 38px; text-align: left; padding: 7px 10px;
 		border-radius: var(--radius-sm); cursor: pointer;
 		background: transparent;
 		border: none; color: var(--text-primary); font-family: inherit;
@@ -242,11 +252,19 @@
 		will-change: transform;
 	}
 	.thread-content { flex: 1; min-width: 0; }
+	/* Out of flow, so the hidden action reserves no width: the name and its second line run to the trailing edge. */
 	.thread-hover-actions {
+		position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
 		display: flex; align-items: center; gap: 2px;
-		opacity: 0; flex-shrink: 0; transition: opacity var(--dur-tight);
+		opacity: 0; pointer-events: none; transition: opacity var(--dur-tight);
 	}
-	.thread-item:hover .thread-hover-actions { opacity: 1; }
+	.thread-hover-actions:focus-within { opacity: 1; pointer-events: auto; }
+	@media (hover: hover) {
+		.thread-item:hover .thread-hover-actions { opacity: 1; pointer-events: auto; }
+		/* On hover the action takes the trailing slot: the text stops short of it and the spinner steps aside. */
+		.thread-item:hover .thread-content { padding-right: 28px; }
+		.thread-item:hover > .spinner { display: none; }
+	}
 	.thread-action-btn {
 		width: 24px; height: 24px; border-radius: var(--radius-2xs);
 		background: none; border: none; color: var(--text-tertiary);
@@ -256,18 +274,10 @@
 	.thread-action-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
 	.thread-item:hover { background: var(--bg-hover); }
 	.thread-item.active {
-		background: var(--violet-bg);
-	}
-	.thread-item.active::before {
-		content: '';
-		position: absolute;
-		left: 0; top: 0; bottom: 0;
-		width: 2px;
-		background: var(--violet);
-		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+		background: var(--accent-wash);
 	}
 	.thread-title-row {
-		display: flex; align-items: center; gap: 6px;
+		display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
 	}
 	.thread-title {
 		font-size: var(--text-subhead); font-weight: 500;

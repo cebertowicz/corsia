@@ -77,26 +77,8 @@
 		}
 	}
 
-	let accountConfirm = $state<'logout' | 'reset-url' | null>(null);
+	let accountConfirm = $state<'logout' | null>(null);
 	let accountInProgress = $state(false);
-	let isTauri = $state(false);
-	$effect(() => {
-		if (typeof window !== 'undefined') {
-			isTauri = !!((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
-		}
-	});
-
-	async function resetServerUrl() {
-		const tauri = (window as any).__TAURI_INTERNALS__ ?? (window as any).__TAURI__;
-		const invoke = tauri?.invoke ?? (window as any).__TAURI__?.core?.invoke;
-		if (!invoke) {
-			settingsError = 'Tauri runtime not available — open in the desktop shell.';
-		return;
-	}
-	await invoke('reset_server_url');
-	await logout();
-	window.location.href = 'tauri://localhost';
-	}
 
 	function memoryColor(pressure: string): string {
 		if (pressure === 'critical') return 'var(--red)';
@@ -165,7 +147,7 @@
 
 <div class="settings-card">
 	<h3>Account</h3>
-	<p class="card-desc">Sign out of this CORSIA instance, or {isTauri ? 'reset the desktop shell back to the server picker' : 'sign in again with a different token'}.</p>
+	<p class="card-desc">Sign out of this CORSIA instance and return to its login screen.</p>
 
 	<div class="service-grid">
 		<div class="service-row">
@@ -181,27 +163,7 @@
 				{/if}
 			</div>
 		</div>
-		{#if isTauri}
-			<div class="service-row">
-				<span class="service-name">Reset URL</span>
-				<span class="service-status">Forgets this server and reopens the CORSIA picker.</span>
-				<div class="service-actions">
-					{#if accountConfirm !== 'reset-url'}
-						<Button size="sm" onclick={() => accountConfirm = 'reset-url'}>Reset</Button>
-					{:else}
-						<span class="confirm-text">Reset and reopen picker?</span>
-						<Button variant="danger" size="sm" disabled={accountInProgress} onclick={async () => {
-							accountInProgress = true;
-							try { await resetServerUrl(); }
-							catch (e) { settingsError = String(e); }
-							accountConfirm = null;
-							accountInProgress = false;
-						}}>{accountInProgress ? 'Resetting…' : 'Confirm'}</Button>
-						<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
-					{/if}
-				</div>
-			</div>
-		{/if}
+
 	</div>
 </div>
 
@@ -239,7 +201,7 @@
 	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
 	.theme-opt { padding: 6px 16px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.theme-opt:hover { color: var(--text-primary); }
-	.theme-opt.active { background: var(--accent); color: #fff; }
+	.theme-opt.active { background: var(--accent-fill); color: var(--accent-on-fill); }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
 	.settings-error { background: color-mix(in srgb, var(--red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); color: var(--red); border-radius: var(--radius-xs); padding: 10px 14px; font-size: var(--text-subhead); margin-bottom: 16px; }

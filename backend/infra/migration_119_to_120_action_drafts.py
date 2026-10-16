@@ -1,4 +1,4 @@
-"""Schema 118 -> 119: drafts of outbound actions.
+"""Schema 119 -> 120: drafts of outbound actions.
 
 Purely additive: one new table, no data to convert. The DDL is copied rather
 than imported so this step keeps producing the shape it was written for.
@@ -26,6 +26,6 @@ _ACTION_DRAFTS_119_DDL = """
 """
 
 
-def migrate_118_to_119(conn: sqlite3.Connection) -> None:
+def migrate_119_to_120(conn: sqlite3.Connection) -> None:
     """Create the action drafts table."""
     conn.execute(_ACTION_DRAFTS_119_DDL)

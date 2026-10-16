@@ -217,6 +217,21 @@ describe('a keystroke that grows the composer', () => {
 		expect(writes).toEqual([CONTENT]);
 	});
 
+	it('re-pins after the frame lays out, so a reservation published by a later observer is included', () => {
+		// The attention slot publishes its reserved height from its own
+		// ResizeObserver; a same-callback write pinned to the old bottom and left
+		// the phone transcript's last row under the dock.
+		const panel = mountPanel();
+		const writes = recordScrollWrites(panel.scroller);
+
+		panel.band.height = BAND + BAND_GROWTH;
+		fireObservers();
+		expect(writes).toEqual([]);
+
+		runFrames();
+		expect(writes).toEqual([CONTENT]);
+	});
+
 	it('writes nothing while the user is reading history', async () => {
 		const panel = mountPanel();
 		userScrollsTo(panel.scroller, 0);
