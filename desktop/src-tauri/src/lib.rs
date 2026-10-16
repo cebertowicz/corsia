@@ -1222,6 +1222,26 @@ mod tests {
     }
 
     #[test]
+    fn info_plist_declares_the_local_network_prompt_and_the_bonjour_service() {
+        let plist = include_str!("../Info.plist");
+        assert!(plist.contains("<key>NSLocalNetworkUsageDescription</key>"));
+        assert!(plist.contains("<key>NSBonjourServices</key>"));
+        assert!(plist.contains("<string>_corsia._tcp</string>"));
+    }
+
+    #[test]
+    fn no_app_command_is_allowed_from_a_foreign_http_or_https_origin() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        for command in SHELL_COMMANDS {
+            for origin in ["https://studio.example", "http://studio.example", "https://127.0.0.1:47911", "http://127.0.0.1:47911"] {
+                let refusal = invoke_from(&webview, command, origin).unwrap_err();
+                assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {origin}: {refusal}");
+            }
+        }
+    }
+
+    #[test]
     fn remote_only_commands_reach_their_handlers_from_the_shell_origin() {
         let app = acl_test_app();
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();

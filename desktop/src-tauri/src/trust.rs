@@ -178,9 +178,36 @@ pub fn client_config(trust: &Trust) -> Result<ClientConfig, Error> {
 mod tests {
     use super::*;
 
+    use std::time::Duration;
+
+    fn verify_at(verifier: &PinnedVerifier, certificate: &CertificateDer<'_>, seconds: u64) -> Result<ServerCertVerified, Error> {
+        let name = ServerName::try_from("127.0.0.1").expect("literal address is a server name");
+        verifier.verify_server_cert(certificate, &[], &name, &[], UnixTime::since_unix_epoch(Duration::from_secs(seconds)))
+    }
+
     #[test]
     fn malformed_certificate_cannot_be_pinned() {
         let certificate = CertificateDer::from(vec![1, 2, 3]);
         assert!(spki_sha256(&certificate).is_err());
+    }
+
+    #[test]
+    fn pinned_verifier_accepts_the_pinned_key_before_and_after_the_certificate_dates() {
+        let host = crate::test_tls::generated_self_signed_identity();
+        let verifier = PinnedVerifier::new(host.pin).expect("verifier builds");
+        // The generated certificate is valid for one day from now: 1_000_000 s is
+        // before it was issued and 4_000_000_000 s is long after it expired.
+        assert!(verify_at(&verifier, &host.certificate, 1_000_000).is_ok());
+        assert!(verify_at(&verifier, &host.certificate, 4_000_000_000).is_ok());
+    }
+
+    #[test]
+    fn pinned_verifier_refuses_a_relay_presenting_another_certificate() {
+        let host = crate::test_tls::generated_self_signed_identity();
+        let relay = crate::test_tls::generated_self_signed_identity();
+        assert_ne!(host.pin, relay.pin, "two generated identities must have different keys");
+        let verifier = PinnedVerifier::new(host.pin).expect("verifier builds");
+        let refusal = verify_at(&verifier, &relay.certificate, 1_000_000).unwrap_err();
+        assert!(refusal.to_string().contains("does not match the saved pin"), "{refusal}");
     }
 }

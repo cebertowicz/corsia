@@ -5,6 +5,7 @@ use rustls::{pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer}, Ser
 pub(crate) struct TlsIdentity {
     pub(crate) config: Arc<ServerConfig>,
     pub(crate) pin: [u8; 32],
+    pub(crate) certificate: CertificateDer<'static>,
 }
 
 pub(crate) fn generated_self_signed_identity() -> TlsIdentity {
@@ -60,12 +61,13 @@ pub(crate) fn generated_self_signed_identity() -> TlsIdentity {
     ));
     let config = ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(vec![certificate], private_key)
+        .with_single_cert(vec![certificate.clone()], private_key)
         .expect("generated certificate and key are compatible");
 
     TlsIdentity {
         config: Arc::new(config),
         pin,
+        certificate,
     }
 }
 
