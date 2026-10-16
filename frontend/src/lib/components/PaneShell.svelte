@@ -104,8 +104,8 @@
 		}
 		.pane.open, .pane.dragging { display: flex; }
 		.pane-top {
-			height: calc(var(--header-height, 56px) + env(safe-area-inset-top, 0px));
-			padding-top: env(safe-area-inset-top, 0px);
+			height: var(--header-bottom);
+			padding-top: var(--safe-top);
 		}
 	}
 </style>

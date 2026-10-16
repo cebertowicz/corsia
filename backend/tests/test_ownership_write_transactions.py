@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 import sqlite3
 from contextlib import closing
@@ -153,10 +159,10 @@ def test_ownership_reads_are_protected_until_mutation(isolated_db, monkeypatch, 
 
 
 def _parent_setup(db):
-    from infra.conductor import WORKSPACE_SCOPE, set_conductor
+    from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 
     _seed(db)
-    set_conductor(WORKSPACE_SCOPE, "conductor", db=db)
+    set_corsia_agent("conductor", db=db)
 
 
 def _reroute(db=None):

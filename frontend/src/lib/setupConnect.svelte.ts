@@ -1,6 +1,7 @@
 import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
 import { accountToSignIn, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startSignin } from '$lib/conductorSourcesApi';
 import { openExternalUrl } from '$lib/linkTargetResolver';
+import { fetchCorsiaAgent } from '$lib/utils/conductor';
 
 // One vendor's place in install and sign-in; absent means the row shows its source's own state.
 type ConnectPhase = { phase: 'confirm' | 'installing' | 'signing-in' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin'; reason?: string | null };
@@ -34,11 +35,11 @@ export function createSetupConnect(deps: ConnectDeps) {
 		flow = { ...flow, [vendor]: next };
 	}
 
-	async function conductorThread(current: string): Promise<string> {
-		const conductor = await fetch('/api/conductor', { headers: { Authorization: `Bearer ${current}` } });
-		const target = (await conductor.json())?.target?.thread_id;
-		if (!target) throw new Error('conductor unavailable');
-		return target;
+	/** The workspace's CORSIA agent: the thread a sign-in binds its account to. */
+	async function corsiaAgentThread(current: string): Promise<string> {
+		const lookup = await fetchCorsiaAgent(current);
+		if (lookup.kind !== 'target') throw new Error('CORSIA agent unavailable');
+		return lookup.target.thread_id;
 	}
 
 	/** Start the vendor's browser sign-in in place; the poll below sees it complete. */
@@ -48,7 +49,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const vendor = source.source;
 		setConnect(vendor, { phase: 'signing-in', installed });
 		try {
-			const target = await conductorThread(current);
+			const target = await corsiaAgentThread(current);
 			const accountId = await accountToSignIn(current, vendor, source.name);
 			const result = await startSignin(current, accountId, target);
 			if (result.status === 'failed' || result.status === 'unavailable' || result.status === 'refused') throw new Error(`signin ${result.status}`);

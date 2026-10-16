@@ -22,7 +22,7 @@ The rules are fixed so the page reads the same on every install:
 * each measure carries one fixed action line, identical for every subject.
 
 Agents read this route as well as the page: the System skill ``attention-watch`` has the
-workspace conductor read it once a day (``project=all``, ``agent=none``, ``grain=days``).
+CORSIA agent read it once a day (``project=all``, ``agent=none``, ``grain=days``).
 Each row's ``subject`` (``kind``, ``id``, ``name``), ``label``, ``format``, ``previous``,
 ``latest``, ``n``, ``action`` and ``worse``, plus ``period`` ``latest``/``previous``, are a
 consumed contract pinned in the tests: changing one changes that skill too.

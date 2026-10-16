@@ -1,6 +1,6 @@
 """The first-run wake and OB10's content-free onboarding events.
 
-The wake is the workspace conductor's first input on a new install. The events
+The wake is the CORSIA agent's first input on a new install. The events
 measure time to the first governed outcome locally in DuckDB
 (``TIME_TO_FIRST_OUTCOME_SQL``); nothing leaves the machine. Every event is
 non-load-bearing: a failure is logged and never changes the caller's result.
@@ -293,10 +293,10 @@ def _emit_first(action: str, **properties: object) -> None:
         _emitted.add(action)
 
 
-def _is_workspace_conductor(thread_id: str, db: sqlite3.Connection) -> bool:
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+def _is_corsia_agent(thread_id: str, db: sqlite3.Connection) -> bool:
+    from infra.corsia_agent import get_corsia_agent
 
-    return get_conductor(WORKSPACE_SCOPE, db=db) == thread_id
+    return get_corsia_agent(db=db) == thread_id
 
 
 def _guarded(action: str, read) -> None:
@@ -323,10 +323,10 @@ def _guarded(action: str, read) -> None:
 
 
 def note_first_model_selected(thread_id: str, model: str) -> None:
-    """``first_model_selected`` when the workspace conductor gets its first model."""
+    """``first_model_selected`` when the CORSIA agent gets its first model."""
 
     def read(db: sqlite3.Connection) -> dict | None:
-        if not _is_workspace_conductor(thread_id, db):
+        if not _is_corsia_agent(thread_id, db):
             return None
         source = model.split("/", 1)[0].split("@", 1)[0]
         return {"source_kind": source,
@@ -336,10 +336,10 @@ def note_first_model_selected(thread_id: str, model: str) -> None:
 
 
 def note_turn_completed(thread_id: str) -> None:
-    """``first_turn_completed`` on the workspace conductor's first finished turn."""
+    """``first_turn_completed`` on the CORSIA agent's first finished turn."""
 
     def read(db: sqlite3.Connection) -> dict | None:
-        if not _is_workspace_conductor(thread_id, db):
+        if not _is_corsia_agent(thread_id, db):
             return None
         return {"seconds_since_account": _seconds_since_account(db, _utcnow())}
 
@@ -353,7 +353,7 @@ def note_decision_answered(node_id: str, option_id: str) -> None:
         from plans import public
 
         owner_id = public.decision_owner_id(db, node_id=node_id)
-        if owner_id is None or not _is_workspace_conductor(owner_id, db):
+        if owner_id is None or not _is_corsia_agent(owner_id, db):
             return None
         return {"option": str(option_id)[:8]}
 

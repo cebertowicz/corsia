@@ -467,6 +467,37 @@ def test_composed_render_identifies_recorded_reads_on_one_git_process(report_tar
 
 
 @pytest.mark.asyncio
+async def test_shipped_tool_links_a_correction_named_only_in_the_lesson_file(report_target):
+    """Subjects live in files read after the first snapshot; the tool still joins their facts."""
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    db, _app, tool = report_target
+    lesson_id = "55555555-5555-4555-8555-555555555555"
+    path = tool.workspace / "skills" / "corrected" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(render_trial(
+        lesson_id=lesson_id, owner="owner", name="corrected", description="Correction fixture.",
+        text="Corrected body.", trial=Trial("hypothesis", "2026-10-01"),
+        source_refs=[{"kind": "test", "reference": "correction"}],
+        originating_subjects=("message:corrected", "message:never-classified"),
+    ))
+    db.execute(
+        "INSERT INTO outcome_events(id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes) "
+        "VALUES('fact','correction:fact','measurement.correction','corsia','observed',?,?,'message:corrected',?)",
+        ("2026-10-14T00:00:00+00:00", "2026-10-14T00:00:00+00:00", json.dumps({"label": "correction"})),
+    )
+    db.commit()
+
+    detail = json.loads(await tool.execute(_thread_id="owner", lesson_id=lesson_id))["detail"]
+
+    assert detail["correction_status"] == "linked" and detail["recurrence_count"] == 1
+    assert detail["correction_facts"] == [
+        {"subject": "message:corrected", "id": "fact", "ts": "2026-10-14T00:00:00+00:00"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_http_pages_summarize_only_their_slice_and_match_the_tool(report_target, monkeypatch):
     from core import lesson_report
     _db, app, tool = report_target

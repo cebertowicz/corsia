@@ -356,8 +356,10 @@ describe('SetupScreen', () => {
 
 	it('renders Claude Code and Codex beside an inert local download state', async () => {
 		if (component) await unmount(component);
+		const calls: string[] = [];
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
+			calls.push(url);
 			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'setup-user', name: 'First Person' } });
@@ -366,6 +368,9 @@ describe('SetupScreen', () => {
 				{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
 				{ source: 'codex', name: 'Codex', state: 'needs_auth' },
 			] });
+			if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'corsia-agent' } });
+			if (url === '/api/vendor-accounts?provider=claude-code') return json({ accounts: [{ id: 'account-1', is_default: false, state: 'signed_out' }] });
+			if (url === '/api/vendor-accounts/account-1/signin') return json({ state: 'pending' });
 			return json({ sources: [] });
 		}));
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
@@ -392,6 +397,10 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Sign in')?.click();
+		await settle();
+		expect(calls.some((url) => url.startsWith('/api/corsia-agent?token='))).toBe(true);
+		expect(calls).not.toContain('/api/conductor');
 	});
 
 	async function reachModels(classifier: unknown, options: { onRequest?: (url: string, init?: RequestInit) => void; sourceReady?: boolean; onFinished?: () => void; posts?: Array<unknown | (() => Promise<unknown>)> } = {}) {
@@ -600,7 +609,7 @@ describe('SetupScreen', () => {
 				if (url === '/api/providers/cli/claude-code/install' && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
 				if (url === '/api/providers/cli/claude-code/install') return json(fake.install);
 				if (url === '/api/providers/cli/claude-code/link') return json({ ok: true, outcome: 'linked' });
-				if (url === '/api/conductor') return json({ target: { thread_id: 'conductor-1' } });
+				if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'conductor-1' } });
 				if (url.startsWith('/api/vendor-accounts?provider=')) return json({ accounts: [] });
 				if (url === '/api/vendor-accounts') return json({ id: 'acct-1' });
 				if (url === '/api/vendor-accounts/acct-1/signin') return json({ account_id: 'acct-1', status: 'waiting' });

@@ -26,6 +26,7 @@
 	const h = $derived($canvasHeader);
 	const isTakeover = $derived(h != null);
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
+	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
 
 	// isConductor only when no thread is active at all (home/conductor landing).
@@ -97,7 +98,7 @@
 	{:else if isConductor}
 		<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		<span class="h-scope">{scopeTitle}</span>
-		<span class="h-cond-tag">conductor</span>
+		<span class="h-cond-tag">{$uiScope ? 'conductor' : 'CORSIA'}</span>
 	{:else if $activeThread}
 		{#if isNavAgent($activeThread)}
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
@@ -140,7 +141,7 @@
 			</button>
 		{/if}
 		{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? 'Conductor settings' : 'Thread settings'} aria-label={isConductorThread ? 'Conductor settings' : 'Thread settings'}>
+			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
 				{@render gearIcon()}
 			</button>
 		{:else if activeView === 'activity' && $uiScope && !$projectSettingsOpen}
@@ -248,7 +249,7 @@
 	.h-overflow:hover, .h-overflow.open { background: var(--bg-hover); color: var(--text-primary); }
 	.h-overflow-backdrop { position: fixed; inset: 0; z-index: 59; background: transparent; border: none; }
 	.h-overflow-sheet {
-		position: absolute; top: calc(var(--header-height) - 4px); right: 10px; z-index: 60;
+		position: absolute; top: calc(var(--header-bottom) - 4px); right: 10px; z-index: 60;
 		min-width: 168px; padding: 6px; display: flex; flex-direction: column; gap: 1px;
 		background: var(--glass-regular-thick, var(--bg-secondary));
 		backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
@@ -266,13 +267,16 @@
 	@media (max-width: 768px) {
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
-			height: calc(var(--header-height) + env(safe-area-inset-top, 0px));
-			padding-top: max(8px, calc(env(safe-area-inset-top, 0px) - 28px));
+			height: var(--header-bottom);
+			padding-top: max(8px, calc(var(--safe-top) - 28px));
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
+		/* The blur stays on this masked layer so it fades out with no hard edge.
+		   Known trade-off: the mask also thins the blur, so the transcript can
+		   show faintly through the title row. */
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,

@@ -96,7 +96,7 @@ export function registerHomeLifecycle(options: HomeLifecycleOptions) {
 		if (!isEditableTarget(e.target)) return;
 		document.documentElement.style.setProperty('--kb-toolbar-inset', '60px');
 		document.documentElement.style.setProperty('--floater-bottom-pad', '4px');
-		document.documentElement.style.setProperty('--messages-pad-top', 'calc(env(safe-area-inset-top, 0px) + 12px)');
+		document.documentElement.style.setProperty('--messages-pad-top', 'calc(var(--safe-top) + 12px)');
 		updateCanvasShift();
 		options.chatPanel()?.captureBottomOffset();
 		requestAnimationFrame(() => requestAnimationFrame(() => {

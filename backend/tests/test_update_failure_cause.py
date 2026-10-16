@@ -188,7 +188,7 @@ async def test_failed_update_marks_conductor_only_after_successful_send(isolated
     )
     sent = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        agent_roster_queries, "workspace_conductor_contact", lambda _user, _db: ({"id": "conductor"}, None)
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
     )
     monkeypatch.setattr(delivery, "deliver_to_thread", sent)
 
@@ -221,7 +221,7 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
     assert operation_id is not None
     assert self_restart.abort_operation(operation_id, error="fetch summary", failure_code="fetch_failed")
     monkeypatch.setattr(
-        agent_roster_queries, "workspace_conductor_contact", lambda _user, _db: ({"id": "conductor"}, None)
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
     )
     monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock(return_value=False))
 
@@ -238,6 +238,51 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
 
 
 @pytest.mark.asyncio
+async def test_classifier_failure_notice_uses_one_stable_delivery_key_per_version_and_reason(monkeypatch):
+    from automation import update_failure_notice
+    from jobs import corrections_recording
+
+    delivered = AsyncMock()
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(update_failure_notice, "_tell_conductor_about_owner_notice", delivered)
+
+    await update_failure_notice.tell_conductor_about_corrections_classifier_failure(
+        "v2", "load error:AssertionError", "Retry setup.",
+    )
+    await update_failure_notice.tell_conductor_about_corrections_classifier_failure(
+        "v2", "load error:AssertionError", "Retry setup.",
+    )
+
+    first, second = delivered.await_args_list
+    assert first.args == second.args == ("owner", "Corrections classifier v2 cannot run: Retry setup.")
+    assert first.kwargs["event_type"] == "system.corrections_classifier_failed"
+    assert first.kwargs["notice_name"] == "corrections classifier failure"
+    assert first.kwargs["delivery_id"] == second.kwargs["delivery_id"]
+    assert first.kwargs["delivery_id"].startswith("corrections-classifier-failed:v2:")
+
+
+@pytest.mark.asyncio
+async def test_classifier_load_crash_notice_says_it_will_keep_retrying(monkeypatch):
+    from automation import update_failure_notice
+    from jobs import corrections_recording
+
+    delivered = AsyncMock()
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(update_failure_notice, "_tell_conductor_about_owner_notice", delivered)
+
+    await update_failure_notice.tell_conductor_about_corrections_classifier_load_crash("v2")
+
+    assert delivered.await_args.args == (
+        "owner", "Corrections classifier v2 keeps crashing on load and will keep retrying.",
+    )
+    assert delivered.await_args.kwargs == {
+        "event_type": "system.corrections_classifier_load_crash",
+        "delivery_id": "corrections-classifier-load-crash:v2",
+        "notice_name": "corrections classifier load crash",
+    }
+
+
+@pytest.mark.asyncio
 async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db, monkeypatch):
     """A missing conductor logs the skip and cannot undo a cleared schedule."""
     from automation import update_failure_notice
@@ -247,7 +292,7 @@ async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db
     warnings = []
     monkeypatch.setattr(
         agent_roster_queries,
-        "workspace_conductor_contact",
+        "corsia_agent_contact",
         lambda _user, _db: (None, "no workspace conductor"),
     )
     monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock())

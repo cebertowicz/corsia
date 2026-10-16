@@ -310,7 +310,7 @@ def _checkpoint_status(checkpoint) -> dict[str, Any]:
 
 
 def _read_delegate_status(thread_id: str, user_id: str, message_count: int):
-    from infra.conductor import get_conductor_scopes
+    from infra.conductor import get_coordination_scopes
     from infra.checkpoint_queries import latest_for_thread
     from infra.database import get_db
 
@@ -337,7 +337,7 @@ def _read_delegate_status(thread_id: str, user_id: str, message_count: int):
         return (
             thread,
             dict(active) if active else None,
-            get_conductor_scopes(thread_id, db=db),
+            get_coordination_scopes(thread_id, db=db),
             [_recent_message(row) for row in reversed(recent)],
             None if checkpoint is None else _checkpoint_status(checkpoint),
         )

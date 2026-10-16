@@ -350,22 +350,22 @@
 	}
 	.main:has(:global([data-popover])) { z-index: 12; }
 	.main-close-tap {
-		display: none; position: absolute; inset: var(--header-height) 0 0; z-index: 9;
+		display: none; position: absolute; inset: var(--header-bottom) 0 0; z-index: 9;
 		background: transparent; border: none; cursor: default;
 		opacity: 0; pointer-events: none;
 		-webkit-tap-highlight-color: transparent;
 	}
 	.docs-scroller {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding: calc(var(--header-height) + 8px) 20px 0;
+		padding: calc(var(--header-bottom) + 8px) 20px 0;
 	}
 	.measurement-scroller {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding: calc(var(--header-height) + 20px) 20px 32px;
+		padding: calc(var(--header-bottom) + 20px) 20px 32px;
 	}
 	@media (max-width: 768px) {
 		/* The phone header is a translucent overlay, so a scroller that starts under it shows section titles through it. Start the scroller below the header instead. */
-		.measurement-scroller { margin-top: calc(var(--header-height) + env(safe-area-inset-top, 0px)); padding: 14px 14px 24px; }
+		.measurement-scroller { margin-top: var(--header-bottom); padding: 14px 14px 24px; }
 	}
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

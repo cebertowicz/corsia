@@ -1,4 +1,4 @@
-"""Bind the workspace conductor, before its first model, to an account a person chose.
+"""Bind the CORSIA agent, before its first model, to an account a person chose.
 
 The first-run screen runs before the conductor has a model, so the thread-account
 route cannot read a vendor from it. This step takes the vendor from the account.
@@ -27,12 +27,12 @@ log = logging.getLogger(__name__)
 READY, LIMITED, SIGNED_OUT, UNCHECKED, NO_USABLE_MODEL = (
     "ready", "limited", "signed_out", "unchecked", "no_usable_model")
 REFUSALS = ("not_ready", "limited", "no_usable_model", "unchecked", "stale", "not_permitted",
-            "conductor_started", "account_missing")
+            "corsia_agent_started", "account_missing")
 _NOT_DISCOVERED = ("account_model_not_discovered", "account_login_unverified")
 
 
-class NotWorkspaceConductor(LookupError):
-    """The thread is missing, not this user's, or not the designated workspace conductor."""
+class NotCorsiaAgent(LookupError):
+    """The thread is missing, not this user's, or not the CORSIA agent."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +143,7 @@ def _refusal(thread: dict, account: dict | None, observed: RefreshObservation | 
         return "stale"
     if str(thread["model"] or "").strip() or str(thread["pending_model"] or "").strip() or not movable_thread(
             thread["id"], db=db):
-        return "conductor_started"
+        return "corsia_agent_started"
     projects = thread_project_scopes(thread["id"], None, db=db)
     try:
         admit_account(account["provider"], account["id"], projects, execution=False, db=db)
@@ -154,16 +154,16 @@ def _refusal(thread: dict, account: dict | None, observed: RefreshObservation | 
 
 
 def _conductor(thread_id: str, user_id: str | None, *, db) -> dict:
-    from infra.conductor import get_conductor
+    from infra.corsia_agent import get_corsia_agent
 
     row = db.execute("SELECT id,user_id,model,pending_model FROM threads WHERE id=?", (thread_id,)).fetchone()
-    if row is None or row["user_id"] != user_id or get_conductor(db=db) != thread_id:
-        raise NotWorkspaceConductor(thread_id)
+    if row is None or row["user_id"] != user_id or get_corsia_agent(db=db) != thread_id:
+        raise NotCorsiaAgent(thread_id)
     return dict(row)
 
 
-def require_conductor(thread_id: str, user_id: str, *, db=None) -> None:
-    """Refuse a sign-in's ``bind_thread_id`` that is not this user's workspace conductor."""
+def require_corsia_agent(thread_id: str, user_id: str, *, db=None) -> None:
+    """Refuse a sign-in's ``bind_thread_id`` that is not this user's CORSIA agent."""
     from infra.database import get_db
 
     connection = db or get_db()
@@ -174,9 +174,9 @@ def require_conductor(thread_id: str, user_id: str, *, db=None) -> None:
             connection.close()
 
 
-def bind_conductor_account(thread_id: str, account_id: str, *, user_id: str,
+def bind_corsia_agent_account(thread_id: str, account_id: str, *, user_id: str,
                            observed: RefreshObservation | None = None, db=None) -> dict:
-    """Bind the model-less workspace conductor to ``account_id``; ``{bound, reason}``.
+    """Bind the model-less CORSIA agent to ``account_id``; ``{bound, reason}``.
 
     ``observed`` is a sign-in's own refresh: with it, a newer sign-in or refresh of
     that account makes the bind stale. Without it (a person choosing an account
@@ -186,7 +186,7 @@ def bind_conductor_account(thread_id: str, account_id: str, *, user_id: str,
     from connections.account_selection import rebind_idle_account
     from infra.state.ws import schedule_models_changed
 
-    with write_transaction(db, scope="bind_conductor_account") as connection:
+    with write_transaction(db, scope="bind_corsia_agent_account") as connection:
         thread = _conductor(thread_id, user_id, db=connection)
         try:
             account = get_account(account_id, db=connection)
@@ -260,10 +260,10 @@ def signin_outcome(account_id: str, refresh: str, observed: RefreshObservation |
     if refresh != READY or observed is None:
         return UNCHECKED, None
     try:
-        result = bind_conductor_account(bind.thread_id, account_id, user_id=bind.user_id, observed=observed)
-    except NotWorkspaceConductor:
-        # The thread stopped being this user's workspace conductor while the person signed in.
-        return "bind_refused", "conductor_started"
+        result = bind_corsia_agent_account(bind.thread_id, account_id, user_id=bind.user_id, observed=observed)
+    except NotCorsiaAgent:
+        # The thread stopped being this user's CORSIA agent while the person signed in.
+        return "bind_refused", "corsia_agent_started"
     if result["bound"]:
         return READY, None
     if result["reason"] in (LIMITED, NO_USABLE_MODEL, UNCHECKED):
@@ -299,9 +299,9 @@ def _lost_binding(provider: str, bound, labels: list[dict], project, *, db) -> d
 def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     """One vendor's first-run account lines and its conductor's lost binding.
 
-    Lines: membership is the picker's: the accounts the workspace conductor's scope
+    Lines: membership is the picker's: the accounts the CORSIA agent's scope
     permits (never a removed one), and none when the vendor lists no model.
-    ``conductor_binding`` reads only the conductor's stored binding for the vendor.
+    ``corsia_agent_binding`` reads only the conductor's stored binding for the vendor.
 
     Lost binding: ``{label, reason}`` when that stored binding names an account that
     was removed (``removed``) or that this project turned off (``turned_off``), the
@@ -310,12 +310,12 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     from connections.account_policy import permitted_accounts, thread_scope
     from connections.account_profiles import account_label
     from connections.vendor_accounts import list_accounts
-    from infra.conductor import get_conductor
+    from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
 
     db = get_db()
     try:
-        conductor = get_conductor(db=db)
+        conductor = get_corsia_agent(db=db)
         project = thread_scope(conductor, db=db)["project_id"] if conductor else None
         bound = db.execute("SELECT account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?",
                            (conductor, provider)).fetchone() if conductor else None
@@ -334,7 +334,7 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
                           "label_verified": not (label["email"] is None and label["custom"]),
                           "identified": label["identified"],
                           "state": state, "resets_at": resets_at,
-                          "conductor_binding": bound is not None and str(bound["account_id"]) == account["id"]})
+                          "corsia_agent_binding": bound is not None and str(bound["account_id"]) == account["id"]})
         return lines, lost
     finally:
         db.close()

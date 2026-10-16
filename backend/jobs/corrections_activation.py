@@ -72,7 +72,7 @@ def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: i
 
 async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
     """Send one accepted notice; persist the mark only after delivery accepts it."""
-    from core.agent_roster_queries import workspace_conductor_contact
+    from core.agent_roster_queries import corsia_agent_contact
     from infra.database import get_db
     from infra.settings import get_setting
 
@@ -85,7 +85,7 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
             activation = activations.get(key)
             if not activation or activation.get("conductor_told_at"):
                 return None, None, None
-            contact, gap = workspace_conductor_contact(str(activation.get("owner_user_id") or ""), db)
+            contact, gap = corsia_agent_contact(str(activation.get("owner_user_id") or ""), db)
             return contact, activation, gap
         finally:
             db.close()

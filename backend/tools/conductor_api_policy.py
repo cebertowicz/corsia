@@ -21,9 +21,9 @@ OFF_LIMITS_ROWS = (
      "a conductor could answer the person's own decisions"),
     ("B5", ".*", r"^/api/comments/[^/]+/decision$",
      "a conductor could answer the person's own decisions"),
-    ("B6", "PUT", r"^/api/conductor$",
-     "a conductor could grant or revoke conductor authority, including its own"),
-    # B7 (conductor-account) and PUT /threads/{id}/vendor-account are open: both
+    ("B6", "PUT", r"^/api/(conductor|corsia-agent)$",
+     "a conductor could grant or revoke conductor or CORSIA agent authority, including its own"),
+    # B7 (corsia-agent-account) and PUT /threads/{id}/vendor-account are open: both
     # enforce the project's account allowlist (connections/account_policy.admit_account).
     ("B8", "POST", r"^/api/vendor-accounts/[^/]+/signin$",
      "signs the person's subscription accounts in"),

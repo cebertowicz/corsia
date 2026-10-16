@@ -3,6 +3,12 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## Unreleased
+
+### Measurement
+
+- Corrections are checked locally with the installed, verified corrections classifier instead of the retired provider-backed checker. Its current asset version and any unavailable or failed state are available to Measurement.
+
 ## v0.3.0 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
 
 Released 2026-10-13.

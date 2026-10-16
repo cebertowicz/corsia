@@ -100,7 +100,7 @@
 <style>
 	/* The shell header overlays the top of main; start below it, as the project
 	   settings view does, so its buttons do not take this view's clicks. */
-	.settings-view { display: flex; flex: 1; min-height: 0; background: var(--bg-primary); overflow: hidden; position: relative; padding-top: calc(var(--header-height, 60px) + env(safe-area-inset-top, 0px)); }
+	.settings-view { display: flex; flex: 1; min-height: 0; background: var(--bg-primary); overflow: hidden; position: relative; padding-top: var(--header-bottom); }
 
 	.desktop-nav { width: 200px; flex-shrink: 0; background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; padding: 0; }
 	.settings-nav-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 16px 12px; border-bottom: 1px solid var(--border-subtle); }

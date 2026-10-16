@@ -56,7 +56,7 @@ async function settle() {
 beforeEach(() => {
 	vi.useFakeTimers();
 	conductor._resetFirstRunLandingForTests();
-	conductor.workspaceConductorId.set(null);
+	conductor.corsiaAgentId.set(null);
 	user.set(null);
 	token.set(null);
 	activeThreadId.set(null);
@@ -72,7 +72,7 @@ beforeEach(() => {
 		const url = new URL(String(input), 'http://fixture.invalid');
 		if (init?.method && init.method !== 'GET') throw new Error(`Unexpected write: ${init.method} ${url.pathname}`);
 		if (url.pathname === '/api/auth/status') return json({ has_users: true });
-		if (url.pathname === '/api/conductor') return json({ target: { thread_id: conductorId }, first_run_pending: true });
+		if (url.pathname === '/api/corsia-agent') return json({ target: { thread_id: conductorId }, first_run_pending: true });
 		if (url.pathname === '/api/threads') return json({ threads: [] });
 		if (url.pathname === '/api/models') return json({ models: [] });
 		if (url.pathname === '/api/settings') return json({ features: { focus_mode: true } });

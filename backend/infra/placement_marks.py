@@ -236,7 +236,7 @@ def stage_checkpoint_review(
     prior: list[sqlite3.Row],
     params: dict[str, Any],
     *,
-    insert: Callable[..., None],
+    insert: Callable[..., None], history_epoch: int,
 ) -> dict[str, Any]:
     """Stage a checkpoint verdict, checking the answer and the write queue against ``db``."""
     import functools
@@ -251,7 +251,9 @@ def stage_checkpoint_review(
     )
     return stage_review(
         entries, prior, params, insert=insert,
-        answer=functools.partial(stage, db, thread_id),
+        answer=lambda entry, placement, room: stage(
+            db, thread_id, {**entry, "history_epoch": history_epoch}, placement, room,
+        ),
         verify=functools.partial(verify, db, thread_id),
         writes_left=OUTSTANDING_CAP - outstanding_count(db) - staged,
     )

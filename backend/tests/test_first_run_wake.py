@@ -8,6 +8,12 @@ model, only while no Turn has read it.
 from __future__ import annotations
 
 import json
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -46,11 +52,11 @@ def _wake_row() -> dict:
 
 async def _new_install_picks(model: str) -> str:
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
     from thread.model import switch_model
 
     accounts.create_user("newcomer", SECRET_ENOUGH)
-    conductor_id = get_conductor(WORKSPACE_SCOPE)
+    conductor_id = get_corsia_agent()
     await switch_model(
         conductor_id, model, user_id="newcomer", actor_kind="user",
         actor_id="newcomer", reason="harness_model_switch",
@@ -187,11 +193,11 @@ class TestFirstModelChoice:
 class TestOnlyAnUnreadWakeChanges:
     def _queue(self, delivery_state: str, delivery_error: str | None) -> str:
         from infra import accounts
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import write_transaction
 
         accounts.create_user("newcomer", SECRET_ENOUGH)
-        conductor_id = get_conductor(WORKSPACE_SCOPE)
+        conductor_id = get_corsia_agent()
         with write_transaction(None, scope="test_wake_state") as db:
             db.execute(
                 "UPDATE messages SET delivery_state=?, delivery_error=? WHERE thread_id=?",

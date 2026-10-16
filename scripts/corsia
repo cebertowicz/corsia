@@ -484,9 +484,9 @@ case "${1:-status}" in
         run_sources_cli "$@"
         exit $?
         ;;
-    conductor)
+    agent)
         shift
-        run_conductor_cli "$@"
+        run_corsia_agent_cli "$@"
         exit $?
         ;;
     setup)

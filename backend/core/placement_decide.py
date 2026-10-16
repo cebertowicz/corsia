@@ -57,7 +57,8 @@ Then:
   otherwise null.
 - rationale: one short line on why this destination.
 - trial: only for your own unproven hypothesis about how to work, to try as a
-  skill until a review date; otherwise leave it out. Never for what a person
+  skill until a review date; otherwise leave it out. Set state watch when the
+  hypothesis should be recorded but not delivered yet; trial is the default. Never for what a person
   told you: an instruction, preference or constraint keeps its permanent home.
   With it: q1 agent, kind hypothesis, review_after (a future date), a new
   skill_name, skill_description (when it applies, at most 40 words) and
@@ -100,6 +101,7 @@ class Decision:
     reference_file: str | None
     rationale: str
     trial: Trial | None = None
+    originating_subjects: tuple[str, ...] = ()
 
 
 def _optional(raw: dict[str, Any], key: str) -> str | None:

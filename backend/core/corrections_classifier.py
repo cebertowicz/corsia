@@ -95,6 +95,10 @@ class AssetManifest:
             raise AssetError("manifest does not describe the supported corrections asset")
         if "correction" not in manifest.heads or len(manifest.self_test) != 4:
             raise AssetError("manifest is missing the correction head or four self-test vectors")
+        try:
+            float(manifest.heads["correction"]["threshold"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise AssetError("manifest has no usable correction threshold") from error
         return manifest
 
     def verify_files(self) -> None:

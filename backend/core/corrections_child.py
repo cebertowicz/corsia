@@ -3,9 +3,12 @@
 The child owns one ONNX session, refuses network access, checks its memory ceiling and
 answers one request at a time. The parent separates two kinds of failure:
 
-- ``ClassifierUnavailable``: an outage. The model never became ready (load timeout,
-  self-test mismatch, memory ceiling during load, exit before any reply) or the parent was
-  shut down. Nothing is recorded; the message stays pending.
+- ``ClassifierUnavailable``: a retryable outage. The model never became ready (load timeout,
+  a native exit before any reply) or the parent was shut down. Nothing is recorded; the message
+  stays pending. Deterministic startup failures (a self-test mismatch or a load-time memory-ceiling
+  breach) are marked for version exclusion instead. A caller may exclude repeated native exits
+  only when another verified version can serve; otherwise it keeps the version retryable and
+  rate-limits later load attempts.
 - ``MessageFailed``: a child that loaded and passed its self-test failed on this input
   (``timeout``, ``rss`` or ``child_error``). The child is stopped; the next call starts a
   fresh one.
@@ -38,6 +41,11 @@ CLOSE_JOIN_SECONDS = 1.0
 class ClassifierUnavailable(RuntimeError):
     """The model could not load or answer at all; the message stays pending."""
 
+    def __init__(self, reason: str, *, kind: str = "transient", cause: str | None = None) -> None:
+        super().__init__(reason)
+        self.kind = kind
+        self.cause = cause
+
 
 class MessageFailed(RuntimeError):
     """A loaded, self-tested model failed on this input: ``timeout``, ``rss`` or ``child_error``."""
@@ -53,7 +61,7 @@ def _peak_rss_bytes() -> int:
 
 
 def _disable_child_network() -> None:
-    """Inference is local-only: prohibit every outbound socket before ORT imports."""
+    """Disable ORT telemetry and reject TCP connects made through ``socket.socket.connect`` before imports."""
     import socket
 
     def blocked_connect(*_args, **_kwargs):
@@ -76,7 +84,7 @@ def _child_main(connection, manifest_path: str) -> None:
         tokenizer = load_tokenizer(manifest)
         check_self_test(manifest, session, np, tokenizer)
         if _peak_rss_bytes() > RSS_LIMIT_BYTES:
-            connection.send({"error": "rss"})
+            connection.send({"error": "rss", "kind": "deterministic"})
             return
         connection.send({"ready": True})
         while connection.poll(IDLE_SECONDS):
@@ -93,7 +101,8 @@ def _child_main(connection, manifest_path: str) -> None:
                 "original_tokens": original,
             })
     except Exception as error:
-        connection.send({"error": f"error:{type(error).__name__}"})
+        kind = "transient" if isinstance(error, (OSError, MemoryError, TimeoutError)) else "deterministic"
+        connection.send({"error": f"error:{type(error).__name__}", "kind": kind})
 
 
 class ClassifierChild:
@@ -128,7 +137,11 @@ class ClassifierChild:
             self._start()
             reply = self._exchange(None, LOAD_TIMEOUT_SECONDS)
             if "error" in reply:
-                raise ClassifierUnavailable(f"load {reply['error']}")
+                cause = reply.get("cause")
+                raise ClassifierUnavailable(
+                    f"load {reply['error']}", kind=str(reply.get("kind", "transient")),
+                    cause=str(cause) if cause is not None else None,
+                )
             self.loaded = True
 
     def classify(self, context: list[tuple[str, str]], owner: str, *, head: str = "correction") -> Classification:
@@ -193,9 +206,10 @@ class ClassifierChild:
         try:
             if request is not None:
                 connection.send(request)
-            reply = connection.recv() if connection.poll(timeout) else {"error": "timeout"}
+            reply = (connection.recv() if connection.poll(timeout)
+                     else {"error": "timeout", "kind": "transient"})
         except (EOFError, OSError):
-            reply = {"error": "child_exited"}
+            reply = {"error": "child_exited", "kind": "transient", "cause": "child_exited"}
         if self._killed:
             raise ClassifierUnavailable("closed")
         if "error" in reply:

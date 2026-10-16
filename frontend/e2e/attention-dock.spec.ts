@@ -102,7 +102,7 @@ async function openThread(
 ) {
   const title = `${label}-${Date.now()}`;
   await createSession(request, title);
-  // A fresh workspace has a first-run landing: once /api/conductor resolves with
+  // A fresh workspace has a first-run landing: once /api/corsia-agent resolves with
   // first_run_pending, the app opens the conductor thread and loads its
   // messages. Selecting a row before that lands races it, and the conductor can
   // end up on screen with its model-sources panel in the attention stack.
