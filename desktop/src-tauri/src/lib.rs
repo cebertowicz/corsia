@@ -5,14 +5,14 @@
 // loopback health check, then the WebView navigates to the local CORSIA UI.
 
 use std::{
-    env, fs,
+    env,
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command},
+    process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -22,29 +22,32 @@ use serde::Serialize;
 use tauri::Manager;
 
 mod first_run;
+mod lifecycle;
+mod service_management;
+mod startup_failure;
 mod update_stage;
 
+pub fn service_command_from_environment() -> Option<i32> {
+    service_management::command_from_environment()
+}
+
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
+const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const CHILD_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
-const CHILD_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 struct AppServiceState {
-    service: Mutex<ServiceState>,
-}
-
-#[derive(Default)]
-struct ServiceState {
-    child: Option<Child>,
-    port: Option<u16>,
-    state_dir: Option<PathBuf>,
+    state_dir: Mutex<Option<PathBuf>>,
+    quitting: AtomicBool,
+    exit_cleanup_attempted: AtomicBool,
 }
 
 #[derive(Serialize)]
-struct ServiceStartup {
-    url: String,
+#[serde(tag = "state", rename_all = "snake_case")]
+enum ServiceStartup {
+    Ready { url: String },
+    RequiresApproval,
 }
 
 /// Drag-region handler injected into every page (including external URLs
@@ -139,6 +142,15 @@ fn select_port(recorded: Option<u16>) -> Result<u16, String> {
         .map_err(|error| format!("could not determine the fallback service port: {error}"))
 }
 
+fn port_for_startup(first_run: &first_run::FirstRun, recorded: Option<u16>) -> Result<u16, String> {
+    match first_run {
+        first_run::FirstRun::Fresh { .. } => select_port(recorded),
+        // A configured service may already be listening. Reconnect to its
+        // recorded port rather than allocating an unwritten fallback.
+        _ => Ok(recorded.unwrap_or_else(|| preferred_port(None))),
+    }
+}
+
 fn probe_health(port: u16) -> bool {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
@@ -158,82 +170,58 @@ fn probe_health(port: u16) -> bool {
         .is_ok_and(|_| response.starts_with("HTTP/1.1 200"))
 }
 
-fn stop_child(state: &mut ServiceState) {
-    if let Some(mut child) = state.child.take() {
-        request_child_shutdown(&mut child);
+fn operation_is_active_response(response: &str) -> Result<bool, String> {
+    if !response.starts_with("HTTP/1.1 200") {
+        return Err("could not read the current CORSIA operation state".into());
     }
-    state.port = None;
-}
-
-#[cfg(unix)]
-fn request_child_shutdown(child: &mut Child) {
-    let sent_signal = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) } == 0;
-    if !sent_signal {
-        log::warn!(
-            "could not send SIGTERM to bundled service {}; killing it",
-            child.id()
-        );
-        let _ = child.kill();
-        let _ = child.wait();
-        return;
-    }
-
-    let deadline = Instant::now() + CHILD_SHUTDOWN_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return,
-            Err(error) => {
-                log::warn!(
-                    "could not confirm bundled service {} shutdown after SIGTERM: {error}; killing it",
-                    child.id()
-                );
-                let _ = child.kill();
-                let _ = child.wait();
-                return;
-            }
-            Ok(None) if Instant::now() >= deadline => {
-                log::warn!(
-                    "bundled service {} ignored SIGTERM for {:?}; killing it",
-                    child.id(),
-                    CHILD_SHUTDOWN_TIMEOUT
-                );
-                let _ = child.kill();
-                let _ = child.wait();
-                return;
-            }
-            Ok(None) => thread::sleep(CHILD_SHUTDOWN_POLL_INTERVAL),
-        }
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .ok_or("the CORSIA operation-state response was malformed")?;
+    match body.trim() {
+        "{\"active\":true}" => Ok(true),
+        "{\"active\":false}" => Ok(false),
+        _ => Err("the CORSIA operation-state response was malformed".into()),
     }
 }
 
-#[cfg(not(unix))]
-fn request_child_shutdown(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+fn should_prevent_quit(operation_state: Result<bool, String>) -> bool {
+    matches!(operation_state, Ok(true))
 }
 
-#[cfg(unix)]
-fn install_termination_handler(app: tauri::AppHandle) {
-    let terminate_requested = Arc::new(AtomicBool::new(false));
-    if let Err(error) = signal_hook::flag::register(
-        signal_hook::consts::signal::SIGTERM,
-        Arc::clone(&terminate_requested),
-    ) {
-        log::error!("could not install bundled service termination handler: {error}");
-        return;
+fn operation_is_active(port: u16) -> Result<bool, String> {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("could not read CORSIA operation state: {error}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("could not read CORSIA operation state: {error}"))?;
+    stream
+        .write_all(b"GET /api/system/operation-active HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    operation_is_active_response(&response)
+}
+
+fn unregister_service() -> Result<(), String> {
+    let executable = env::current_exe()
+        .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
+    let status = Command::new(executable)
+        .args(["--service", "unregister"])
+        .status()
+        .map_err(|error| format!("could not unregister the CORSIA service: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("CORSIA service unregistration exited {status}"))
     }
-
-    thread::spawn(move || {
-        while !terminate_requested.load(Ordering::Relaxed) {
-            thread::sleep(CHILD_SHUTDOWN_POLL_INTERVAL);
-        }
-        stop_service(&app);
-        std::process::exit(0);
-    });
 }
-
-#[cfg(not(unix))]
-fn install_termination_handler(_app: tauri::AppHandle) {}
 
 fn service_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
@@ -243,12 +231,9 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     match app.path().resource_dir() {
         Ok(path) => Ok(path),
         Err(path_error) => {
-            // `resource_dir` is the canonical Tauri path. Fall back to the
-            // app-bundle-relative location when macOS cannot resolve the
-            // extracted bundle through its path APIs.
             let executable = env::current_exe()
                 .map_err(|error| format!("could not resolve the app executable: {error}"))?;
-            let resources = executable
+            executable
                 .parent()
                 .and_then(|macos| macos.parent())
                 .map(|contents| contents.join("Resources"))
@@ -258,47 +243,24 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
                         "could not resolve bundled resources through Tauri ({path_error}) or from executable {}",
                         executable.display()
                     )
-                })?;
-            Ok(resources)
+                })
         }
     }
 }
 
-fn wait_for_service(service: &AppServiceState, port: u16) -> Result<(), String> {
+fn wait_for_service(port: u16, state_dir: &PathBuf) -> Result<(), String> {
     let deadline = Instant::now() + HEALTH_TIMEOUT;
-    loop {
+    while Instant::now() < deadline {
         if probe_health(port) {
             return Ok(());
         }
-
-        {
-            let mut state = service
-                .service
-                .lock()
-                .map_err(|_| "service state is unavailable")?;
-            let exited = match state.child.as_mut() {
-                Some(child) => child
-                    .try_wait()
-                    .map_err(|error| format!("could not inspect bundled service state: {error}"))?,
-                None => return Err("the bundled service was stopped".into()),
-            };
-            if exited.is_some() {
-                state.child = None;
-                state.port = None;
-                return Err("the bundled service exited before it was ready".into());
-            }
-        }
-
-        if Instant::now() >= deadline {
-            let mut state = service
-                .service
-                .lock()
-                .map_err(|_| "service state is unavailable")?;
-            stop_child(&mut state);
-            return Err("the bundled service did not become ready in time".into());
-        }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
+    Err(startup_failure::timeout_message(&service_log_path(state_dir)))
+}
+
+fn register_or_report_status(port: u16) -> Result<service_management::ServiceStatus, String> {
+    service_management::ensure_registered_from_app(|| operation_is_active(port))
 }
 
 fn start_service(
@@ -320,7 +282,7 @@ fn start_service(
     if let first_run::FirstRun::ExistingInstall { reason } = first_run {
         return Err(reason);
     }
-    let port = select_port(first_run::recorded_port(&state_dir))?;
+    let port = port_for_startup(&first_run, first_run::recorded_port(&state_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
         let resources = bundled_resource_dir(app).ok();
         first_run::apply(&workspace, &state_dir, port, |path| {
@@ -331,51 +293,26 @@ fn start_service(
             )
         })?;
     }
-    fs::create_dir_all(state_dir.join("logs"))
-        .map_err(|error| format!("could not create the CORSIA service log directory: {error}"))?;
+    *service
+        .state_dir
+        .lock()
+        .map_err(|_| "service state is unavailable")? = Some(state_dir.clone());
 
-    {
-        let mut state = service
-            .service
-            .lock()
-            .map_err(|_| "service state is unavailable")?;
-        if let Some(child) = state.child.as_mut() {
-            if child
-                .try_wait()
-                .map_err(|error| error.to_string())?
-                .is_none()
-            {
-                return Ok(ServiceStartup {
-                    url: service_url(state.port.unwrap_or(port)),
-                });
-            }
+    match register_or_report_status(port)? {
+        service_management::ServiceStatus::Enabled => {
+            wait_for_service(port, &state_dir)?;
+            Ok(ServiceStartup::Ready {
+                url: service_url(port),
+            })
         }
-        stop_child(&mut state);
-        let launcher = bundled_resource_dir(app)?
-            .join("bin")
-            .join("corsia-service");
-        state.child = Some(
-            Command::new(launcher)
-                .args(["--host", "127.0.0.1", "--port", &port.to_string()])
-                .env("CORSIA_STATE_DIR", &state_dir)
-                .spawn()
-                .map_err(|error| format!("could not start the bundled CORSIA service: {error}"))?,
-        );
-        state.port = Some(port);
-        state.state_dir = Some(state_dir);
+        service_management::ServiceStatus::RequiresApproval => Ok(ServiceStartup::RequiresApproval),
+        service_management::ServiceStatus::NotRegistered => {
+            Err("CORSIA service registration did not persist".into())
+        }
+        service_management::ServiceStatus::NotFound => {
+            Err("CORSIA service definition is missing from this app bundle".into())
+        }
     }
-
-    wait_for_service(service, port)?;
-    Ok(ServiceStartup {
-        url: service_url(port),
-    })
-}
-
-fn stop_service(app: &tauri::AppHandle) {
-    let service = app.state::<AppServiceState>();
-    if let Ok(mut state) = service.service.lock() {
-        stop_child(&mut state);
-    };
 }
 
 #[tauri::command]
@@ -387,15 +324,19 @@ fn start_local_service(
 }
 
 #[tauri::command]
+fn open_login_items() {
+    service_management::open_login_items();
+}
+
+#[tauri::command]
 fn get_service_log_path(
     app: tauri::AppHandle,
     service: tauri::State<'_, AppServiceState>,
 ) -> Result<String, String> {
     let state_dir = service
-        .service
+        .state_dir
         .lock()
         .map_err(|_| "service state is unavailable")?
-        .state_dir
         .clone()
         .unwrap_or(default_state_dir(&app)?);
     Ok(service_log_path(&state_dir).display().to_string())
@@ -535,6 +476,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            lifecycle::retry_quit,
+            open_login_items,
             get_service_log_path,
             start_window_drag,
         ])
@@ -551,11 +494,22 @@ pub fn run() {
                 sync_window_chrome(&window);
             }
         })
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                stop_service(window.app_handle());
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == lifecycle::QUIT_MENU_ID
+                && lifecycle::route(lifecycle::Input::Quit, false) == lifecycle::Action::CheckQuit
+            {
+                lifecycle::request_quit(app);
             }
-
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if lifecycle::route(lifecycle::Input::CloseMain, false) == lifecycle::Action::Hide {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
             // Keep the DOM's native fullscreen state and normal-window control
             // frames synchronized after focus and resize transitions.
             #[cfg(target_os = "macos")]
@@ -570,7 +524,8 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppServiceState::default());
-            install_termination_handler(app.handle().clone());
+            #[cfg(target_os = "macos")]
+            app.set_menu(lifecycle::menu(app.handle())?)?;
             // Apply traffic-light position once the main window is up.
             // The config-driven path is unreliable for our transparent +
             // windowEffects setup (see inset_traffic_lights doc comment).
@@ -588,15 +543,18 @@ pub fn run() {
             thread::spawn(move || {
                 let service = app_handle.state::<AppServiceState>();
                 match start_service(&app_handle, &service) {
-                    Ok(startup) => {
+                    Ok(ServiceStartup::Ready { url }) => {
                         if let Some(window) = app_handle.get_webview_window("main") {
-                            if let Err(error) =
-                                window.eval(format!("window.location.replace('{}');", startup.url))
-                            {
+                            if let Err(error) = window.eval(format!("window.location.replace('{url}');")) {
                                 log::error!(
                                     "could not navigate to the local CORSIA service: {error}"
                                 );
                             }
+                        }
+                    }
+                    Ok(ServiceStartup::RequiresApproval) => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.eval("window.__corsiaShowBackgroundApproval?.();");
                         }
                     }
                     Err(error) => {
@@ -612,8 +570,31 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(context)
-        .expect("error while running tauri application");
+        .build(context)
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    if lifecycle::route(lifecycle::Input::Reopen, false) == lifecycle::Action::ShowAndFocus {
+                        lifecycle::show_main(app_handle);
+                    }
+                }
+                tauri::RunEvent::Exit => lifecycle::on_exit(app_handle),
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    let quitting = app_handle.state::<AppServiceState>().quitting.load(Ordering::Relaxed);
+                    match lifecycle::route(lifecycle::Input::ExitRequested(code), quitting) {
+                        lifecycle::Action::KeepAlive => api.prevent_exit(),
+                        lifecycle::Action::CheckQuit => {
+                            api.prevent_exit();
+                            lifecycle::request_quit(app_handle);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        });
 }
 
 #[cfg(test)]
@@ -685,6 +666,29 @@ mod tests {
     }
 
     #[test]
+    fn configured_startup_reuses_the_recorded_port_while_service_is_listening() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert_eq!(port_for_startup(&first_run::FirstRun::Configured, Some(port)), Ok(port));
+    }
+
+    #[test]
+    fn operation_lock_response_distinguishes_a_held_operation() {
+        assert_eq!(
+            operation_is_active_response("HTTP/1.1 200 OK\r\n\r\n{\"active\":true}"),
+            Ok(true)
+        );
+        assert_eq!(
+            operation_is_active_response("HTTP/1.1 200 OK\r\n\r\n{\"active\":false}"),
+            Ok(false)
+        );
+        assert!(operation_is_active_response("HTTP/1.1 500 Internal Server Error\r\n\r\n").is_err());
+        assert!(should_prevent_quit(Ok(true)));
+        assert!(!should_prevent_quit(Ok(false)));
+        assert!(!should_prevent_quit(Err("the CORSIA service is unavailable".into())));
+    }
+
+    #[test]
     fn macos_default_state_dir_uses_corsia_not_the_legacy_identifier() {
         let home = Path::new("/tmp/corsia-desktop-state-test");
         let state_dir = default_state_dir_for_home(home);
@@ -700,24 +704,4 @@ mod tests {
             .contains("com.cebertowicz.corsia"));
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn stop_child_escalates_when_the_bundled_service_ignores_sigterm() {
-        let child = Command::new("/bin/sh")
-            .args(["-c", "trap '' TERM; while :; do sleep 1; done"])
-            .spawn()
-            .expect("spawn service that ignores SIGTERM");
-        let mut state = ServiceState {
-            child: Some(child),
-            port: Some(DEFAULT_SERVICE_PORT),
-            state_dir: None,
-        };
-
-        let started = Instant::now();
-        stop_child(&mut state);
-
-        assert!(started.elapsed() < CHILD_SHUTDOWN_TIMEOUT + Duration::from_secs(2));
-        assert!(state.child.is_none());
-        assert!(state.port.is_none());
-    }
 }

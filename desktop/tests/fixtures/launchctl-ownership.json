@@ -1,0 +1,16 @@
+[
+  {"name":"plist_path_first","owned":true,"details":"ai.corsia.service = {\n path = @BUNDLE@/Contents/Library/LaunchAgents/ai.corsia.service.plist\n program = /foreign/service\n}\n"},
+  {"name":"foreign_path_first_owned_program","owned":true,"details":"ai.corsia.service = {\n path = /foreign/job.plist\n program = @BUNDLE@/Contents/Resources/bin/corsia-service\n}\n"},
+  {"name":"relative_identifier_without_program","owned":true,"details":"ai.corsia.service = {\n program identifier = Contents/Resources/bin/corsia-service (mode: 2)\n}\n"},
+  {"name":"absolute_program","owned":true,"details":"ai.corsia.service = {\n program = @BUNDLE@/Contents/Resources/bin/corsia-service\n}\n"},
+  {"name":"quoted_bundle_with_spaces","owned":true,"details":"ai.corsia.service = {\n program identifier = \"@BUNDLE@/Contents/Resources/bin/corsia-service\" (mode: 1)\n}\n"},
+  {"name":"foreign","owned":false,"details":"com.corsia.prod = {\n path = /opt/corsia/service.plist\n program = /opt/corsia/bin/service\n}\n"},
+  {"name":"stale_own_missing_bundle","owned":true,"details":"ai.corsia.service = {\n path = @BUNDLE@/Contents/Library/LaunchAgents/ai.corsia.service.plist\n program identifier = Contents/Resources/bin/corsia-service (mode: 2)\n}\n"},
+  {"name":"undecidable","owned":false,"details":"ai.corsia.service = {\n state = waiting\n}\n"},
+  {"name":"sibling_bundle","owned":false,"details":"ai.corsia.service = {\n program = @BUNDLE@-other/Contents/Resources/bin/corsia-service\n}\n"},
+  {"name":"relative_escape","owned":false,"details":"ai.corsia.service = {\n program identifier = Contents/../../foreign/service (mode: 2)\n}\n"},
+  {"name":"foreign_relative_program","owned":false,"details":"ai.corsia.service = {\n program = Contents/Resources/bin/corsia-service\n}\n"},
+  {"name":"inherited_xpc_nonlaunchd","owned":false,"xpc_service_name":"ai.corsia.service","parent_pid":123,"is_self":false,"details":"ai.corsia.service = {\n program = /foreign/service\n}\n"},
+  {"name":"private_environment","owned":false,"sensitive_values":["s3cr3t"],"details":"ai.corsia.service = {\n path = /foreign/service.plist\n program = /foreign/service\n state = running\n pid = 123\n EnvironmentVariables = {\n  SECRET => s3cr3t\n  program = s3cr3t\n }\n}\n"},
+  {"name":"nested_event_trigger","owned":false,"ignored_metadata":["program = @BUNDLE@/Contents/Resources/bin/corsia-service","state = running"],"details":"ai.corsia.service = {\n event triggers => {\n  network-change => {\n   program = @BUNDLE@/Contents/Resources/bin/corsia-service\n   state = running\n  }\n }\n}\n"}
+]
