@@ -110,3 +110,9 @@ export function refusesOnCodeScreen(reason: PairReason): boolean {
 }
 
 export const SYSTEM_SETTINGS_LOCAL_NETWORK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork';
+
+/** Moves CORSIA's work folder before the account is created (the desktop shell only; a browser has no folder to move). */
+export async function applyWorkFolder(path: string): Promise<void> {
+	const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+	if (invoke) await invoke('configure_work_folder', { path });
+}

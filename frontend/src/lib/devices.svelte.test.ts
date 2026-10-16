@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
 import { token } from '$lib/stores/auth';
 import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
 
@@ -113,19 +112,15 @@ describe('createDevices', () => {
 		expect(devices.view.readOnly).toBe(true);
 	});
 
-	it('counts the code down from the seconds received, and reads again at zero', async () => {
+	it('counts the code down from the seconds received, to 0, where the row reads the host again', async () => {
 		const devices = createDevices({ now: () => clock });
 		responses.push(json(api({ code: { state: 'active', value: 'K7QX', expires_in_seconds: 90 } })));
 		await devices.read();
 		clock += 31_000; devices.tick();
 		expect(devices.view.endsInSeconds).toBe(59);
-		const reads = calls.length;
-		responses.push(json(api({ code: { state: 'none' } })));
 		clock += 60_000; devices.tick();
 		expect(devices.view.endsInSeconds).toBe(0);
-		await vi.waitFor(() => expect(calls.length).toBe(reads + 1));
-		await vi.waitFor(() => expect(devices.view.pairing).toBe('idle'));
-		flushSync();
+		expect(calls).toHaveLength(1);
 	});
 
 	it('takes the connected computer’s name from the shell', async () => {

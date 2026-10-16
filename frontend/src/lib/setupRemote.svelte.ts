@@ -1,5 +1,5 @@
 import {
-	codeRefusalLine, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, unreachableLine,
+	SETTINGS_PATH, codeRefusalLine, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, unreachableLine,
 	type PairResult, type PairTarget,
 } from '$lib/remoteShell';
 
@@ -85,6 +85,18 @@ export function createSetupRemote(deps: Deps = {}) {
 		get connectedTo() { return connectedTo; },
 		/** What the screens call the computer: the picked name, or what was typed. */
 		get label() { return target?.label ?? ''; },
+		/** The sidebar rows while Connect is open. */
+		get steps(): { label: string; icon: 'computer' | 'code'; state: 'todo' | 'current' | 'done' }[] {
+			return [
+				{ label: 'Choose a computer', icon: 'computer', state: stage === 'choose' ? 'current' : 'done' },
+				{ label: 'Enter the code', icon: 'code', state: stage === 'code' ? 'current' : 'todo' },
+			];
+		},
+		/** The shell's title, lede and Continue for the stage. */
+		get view(): { title: string; lede?: string; primary?: { label: string; disabled?: boolean }; onPrimary?: () => void } {
+			if (stage === 'code') return { title: 'Enter the code', lede: `On ${target?.label ?? ''}: ${SETTINGS_PATH}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.` };
+			return { title: 'Connect to CORSIA on another computer', primary: { label: 'Continue', disabled: target === null }, onPrimary: () => this.toCode() };
+		},
 		get canContinue() { return target !== null; },
 		/** Looking… alone at first; the sentence on what to check once nothing has turned up for a while. */
 		get searching() { return names.length === 0 && !denied && !waited; },
