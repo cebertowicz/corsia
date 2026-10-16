@@ -26,6 +26,7 @@ mod adoption;
 mod app_paths;
 mod first_run;
 mod lifecycle;
+mod release_proof;
 mod service_management;
 mod startup_failure;
 mod update_stage;
@@ -37,6 +38,8 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const KNOWN_SCHEMA_VERSION: u32 = 124;
+/// The launchd label of the app's own service (its plist is `ai.corsia.service.plist`).
+const APP_SERVICE_LABEL: &str = "ai.corsia.service";
 static ADOPTION_DRAIN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
@@ -388,10 +391,10 @@ impl adoption::Lifecycle for SourceLifecycle {
 
     fn bootout_old(&mut self) -> Result<(), String> {
         let target = format!("gui/{}/com.corsia.prod", unsafe { libc::geteuid() });
+        let pid = release_proof::launchd_pid(&target);
         let status = Command::new("/bin/launchctl").args(["bootout", "--wait", &target]).status().map_err(|error| format!("could not release the source service: {error}"))?;
         if !status.success() { return Err(format!("source service bootout exited {status}")); }
-        if probe_health(self.source.port) { return Err("the source backend still answers after bootout".into()); }
-        Ok(())
+        release_proof::prove_released(pid, self.source.port, &self.source.python, &self.source.state.join("corsia.db"))
     }
 
     fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
@@ -407,14 +410,16 @@ impl adoption::Lifecycle for SourceLifecycle {
     }
 
     fn start_new(&mut self, _state: &Path, port: u16, app_dir: &Path) -> Result<(), String> {
+        let since = SystemTime::now();
         run_service_command("register")?;
-        wait_for_service(port, app_dir)
+        wait_for_service(port, app_dir)?;
+        release_proof::replaced_since(&format!("gui/{}/{APP_SERVICE_LABEL}", unsafe { libc::geteuid() }), since)
     }
 
-    fn stop_new(&mut self, _state: &Path, port: u16) -> Result<(), String> {
+    fn stop_new(&mut self, state: &Path, port: u16) -> Result<(), String> {
+        let pid = release_proof::launchd_pid(&format!("gui/{}/{APP_SERVICE_LABEL}", unsafe { libc::geteuid() }));
         unregister_service()?;
-        if probe_health(port) { return Err("the app backend still answers after service unregister".into()); }
-        Ok(())
+        release_proof::prove_released(pid, port, &self.source.python, &state.join("corsia.db"))
     }
 
     fn restore_backup(&mut self, state: &Path, snapshot: &Path) -> Result<(), String> {
@@ -425,7 +430,16 @@ impl adoption::Lifecycle for SourceLifecycle {
         status.success().then_some(()).ok_or_else(|| format!("source state restore exited {status}"))
     }
 
-    fn start_old(&mut self) -> Result<(), String> { self.lifecycle_command("start") }
+    fn start_old(&mut self) -> Result<(), String> {
+        let since = SystemTime::now();
+        self.lifecycle_command("start")?;
+        let deadline = Instant::now() + HEALTH_TIMEOUT;
+        while !probe_health(self.source.port) {
+            if Instant::now() >= deadline { return Err("the source service did not answer after it was restarted".into()); }
+            thread::sleep(HEALTH_POLL_INTERVAL);
+        }
+        release_proof::replaced_since(&format!("gui/{}/com.corsia.prod", unsafe { libc::geteuid() }), since)
+    }
 }
 
 fn service_url(port: u16) -> String {
@@ -1077,6 +1091,11 @@ mod tests {
         let request = server.join().expect("test server");
         assert!(request.starts_with("GET /api/system/operation-active HTTP/1.1\r\n"));
         assert!(request.contains(&format!("\r\nHost: 127.0.0.1:{port}\r\n")));
+    }
+
+    #[test]
+    fn the_app_service_label_matches_its_plist() {
+        assert_eq!(format!("{APP_SERVICE_LABEL}.plist"), service_management::PLIST_NAME);
     }
 
     #[test]
