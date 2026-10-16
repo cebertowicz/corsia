@@ -82,3 +82,18 @@ describe('Settings › System with a shell', () => {
 		expect(flat(host.textContent)).not.toContain('Connect to another computer');
 	});
 });
+
+describe('the Devices row countdown', () => {
+	it('reads the host again when the code runs out', async () => {
+		let reads = 0;
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			reads += 1;
+			const code = reads === 1 ? { state: 'active', value: 'K7QX', expires_in_seconds: 1 } : { state: 'none' };
+			return new Response(JSON.stringify({ ...devicesBody, code }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+		}));
+		await show();
+		expect(flat(host.textContent)).toContain('Ends in under a minute');
+		await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+		await vi.waitFor(() => expect(flat(host.textContent)).not.toContain('Ends in'));
+	});
+});
