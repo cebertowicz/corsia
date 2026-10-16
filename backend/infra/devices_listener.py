@@ -13,6 +13,7 @@ import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import psutil
 import uvicorn
@@ -83,7 +84,7 @@ class DevicesServer(uvicorn.Server):
         # Devices must disconnect transports and join their ASGI requests.
         # A streaming generator can be waiting for its next event rather than
         # reading http.disconnect, so closing the socket alone cannot join it.
-        self.config.app.stopping = True
+        cast("DevicesApp", self.config.app).stopping = True
         for connection in list(self.server_state.connections):
             # TLS close() can wait beyond grace for a peer's close_notify;
             # an explicit Devices stop must also release an unread SSE socket.
@@ -169,6 +170,7 @@ class DevicesListener:
         if sock is None:
             self.error = error
             return False
+        assert port is not None
         config = uvicorn.Config(
             DevicesApp(self.app),
             host="::",

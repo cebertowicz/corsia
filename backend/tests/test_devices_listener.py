@@ -66,7 +66,7 @@ def test_local_hostname_is_a_lowercase_mdns_name(monkeypatch):
 class _FakeSocket:
     def __init__(self, bind_error: int | OSError | None = None):
         self.bind_error = bind_error
-        self.options = []
+        self.options: list[tuple[int, int, int]] = []
         self.bound = None
         self.listened = None
         self.blocking = None
