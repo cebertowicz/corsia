@@ -9,22 +9,25 @@
 		ignoredEnvironmentFact,
 		ignoredEnvironmentNote,
 		listKeys,
+		saveMcpKeyValue,
 		removeKey,
 		saveKeyValue,
 		type CheckResult,
 		type KeyEntry,
+		type McpServerRow,
 		type ProviderKeyRow,
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
 	import { requestProviderCard, requestServerCard } from '$lib/stores/settingsNavigation';
 
-	type Action = 'set' | 'clear' | 'remove';
+	type Action = 'set' | 'mcp-set' | 'clear' | 'remove';
 
 	let entries = $state<KeyEntry[]>([]);
 	let providerRows = $state<ProviderKeyRow[]>([]);
 	let serverRows = $state<ServerKeyRow[]>([]);
+	let mcpServers = $state<McpServerRow[]>([]);
 	let loadError = $state('');
-	let open = $state<{ name: string; action: Action } | null>(null);
+	let open = $state<{ name: string; action: Action; server?: string; variable?: string } | null>(null);
 	// Both fields are write-only: emptied after every submit and never restored.
 	let keyValue = $state('');
 	let password = $state('');
@@ -46,6 +49,7 @@
 			entries = listing.keys;
 			providerRows = listing.providerKeys;
 			serverRows = listing.serverKeys;
+			mcpServers = listing.mcpServers;
 			loadError = '';
 		} catch {
 			loadError = KEYS_NOT_SAVED;
@@ -61,8 +65,8 @@
 		return `Set ${date}`;
 	}
 
-	function openForm(name: string, action: Action) {
-		open = { name, action };
+	function openForm(name: string, action: Action, server?: string, variable?: string) {
+		open = { name, action, server, variable };
 		keyValue = '';
 		password = '';
 		formError = '';
@@ -79,7 +83,7 @@
 		event.preventDefault();
 		if (!open || busy) return;
 		const { name, action } = open;
-		if (action === 'set' && !keyValue.trim()) {
+		if ((action === 'set' || action === 'mcp-set') && !keyValue.trim()) {
 			formError = 'Paste the key first.';
 			return;
 		}
@@ -95,7 +99,10 @@
 		formError = '';
 		try {
 			if (action === 'set') await saveKeyValue(name, value, typed);
-			else if (action === 'clear') await clearKeyValue(name, typed);
+			else if (action === 'mcp-set') {
+				if (!open.server || !open.variable) throw new KeyWriteError('invalid_reference', KEYS_NOT_SAVED);
+				await saveMcpKeyValue(open.server, open.variable, value, typed);
+			} else if (action === 'clear') await clearKeyValue(name, typed);
 			else await removeKey(name, typed);
 			open = null;
 			delete checkResults[name];
@@ -143,7 +150,7 @@
 {#snippet keyForm()}
 	{#if open}
 	<form class="key-form" onsubmit={submit}>
-		{#if open.action === 'set'}
+		{#if open.action === 'set' || open.action === 'mcp-set'}
 			<Field label="Key">
 				<input
 					type="password"
@@ -165,8 +172,8 @@
 			<Message variant="err">{formError}</Message>
 		{/if}
 		<div class="card-actions">
-			<Button type="submit" variant={open.action === 'set' ? 'primary' : 'danger'} loading={busy}>
-				{open.action === 'set' ? 'Save' : open.action === 'clear' ? 'Clear' : 'Remove'}
+			<Button type="submit" variant={open.action === 'clear' || open.action === 'remove' ? 'danger' : 'primary'} loading={busy}>
+				{open.action === 'clear' ? 'Clear' : open.action === 'remove' ? 'Remove' : 'Save'}
 			</Button>
 			<Button variant="ghost" disabled={busy} onclick={closeForm}>Cancel</Button>
 		</div>
@@ -203,19 +210,55 @@
 				<Button variant="primary" onclick={() => openForm(entry.name, 'set')}>
 					{entry.is_set ? 'Replace' : 'Set'}
 				</Button>
-				{#if entry.is_set}
+				{#if entry.is_set && !entry.name.startsWith('mcp-')}
 					<Button onclick={() => openForm(entry.name, 'clear')}>Clear</Button>
 				{/if}
 				{#if entry.checkable && entry.is_set}
 					<Button loading={checking === entry.name} onclick={() => check(entry.name)}>Check</Button>
 				{/if}
-				{#if !entry.builtin}
+				{#if !entry.builtin && !entry.name.startsWith('mcp-')}
 					<Button variant="danger" onclick={() => openForm(entry.name, 'remove')}>Remove</Button>
 				{/if}
 			</div>
 		{/if}
 	</div>
 {/each}
+
+{#if mcpServers.length}
+	<h3 class="subhead">MCP servers</h3>
+	{#each mcpServers as server (server.server)}
+		<div class="settings-card" data-mcp-server={server.server}>
+			<h3>{server.server}</h3>
+			<div class="key-meta"><span>{server.transport === 'stdio' ? 'Local stdio server' : 'Remote server'}</span></div>
+			{#if server.keys.length}
+				{#each server.keys as credential (credential.variable)}
+					<div class="mcp-key-row" data-mcp-variable={credential.variable}>
+						<div class="row-line">
+							<span class="row-label">{credential.variable}</span>
+							<span class="row-sep" aria-hidden="true">·</span>
+							<span class="key-status">{credential.is_set ? 'Set' : 'Not set'}</span>
+							{#if !credential.supported}<span class="row-note">Not editable in Keys.</span>{/if}
+							{#if credential.supported && open?.name !== `mcp:${server.server}:${credential.variable}`}
+								<span class="row-actions"><Button variant="ghost" size="sm" onclick={() => openForm(`mcp:${server.server}:${credential.variable}`, 'mcp-set', server.server, credential.variable)}>{credential.is_set ? 'Replace' : 'Set'}</Button></span>
+							{/if}
+						</div>
+						{#if credential.pending_restart}
+							<p class="row-note" data-pending-restart>Saved. Restart the CORSIA backend to use this value for new MCP connections.</p>
+						{/if}
+						{#if open?.name === `mcp:${server.server}:${credential.variable}`}
+							{@render keyForm()}
+						{/if}
+					</div>
+				{/each}
+			{:else}
+				<p class="row-note">{server.transport === 'remote' ? 'No editable CORSIA key is configured here. Credentials managed outside CORSIA are not shown on this page.' : 'No CORSIA-held key is configured for this server.'}</p>
+			{/if}
+			{#if server.unsupported_references.length}
+				<p class="row-note">Some credential references are not supported in Keys: {server.unsupported_references.join(', ')}.</p>
+			{/if}
+		</div>
+	{/each}
+{/if}
 
 {#if providerRows.length || serverRows.length}
 	<h3 class="subhead">Provider keys</h3>

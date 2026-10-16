@@ -41,10 +41,26 @@ export interface ServerKeyRow {
 	is_set: boolean;
 }
 
+export interface McpCredentialRow {
+	variable: string;
+	is_set: boolean;
+	set_at: string | null;
+	pending_restart: boolean;
+	supported: boolean;
+}
+
+export interface McpServerRow {
+	server: string;
+	transport: 'stdio' | 'remote';
+	keys: McpCredentialRow[];
+	unsupported_references: string[];
+}
+
 export interface KeyListing {
 	keys: KeyEntry[];
 	providerKeys: ProviderKeyRow[];
 	serverKeys: ServerKeyRow[];
+	mcpServers: McpServerRow[];
 }
 
 export type CheckResult = { outcome: 'works' | 'key_refused' | 'failed' | 'not_set'; reason: string | null };
@@ -97,6 +113,7 @@ export async function listKeys(): Promise<KeyListing> {
 		keys: body.keys as KeyEntry[],
 		providerKeys: (body.provider_keys ?? []) as ProviderKeyRow[],
 		serverKeys: (body.server_keys ?? []) as ServerKeyRow[],
+		mcpServers: (body.mcp_servers ?? []) as McpServerRow[],
 	};
 }
 
@@ -113,6 +130,10 @@ export function ignoredEnvironmentNote(variable: string): string {
 async function write(path: string, method: 'PUT' | 'POST', body: Record<string, string>): Promise<void> {
 	const res = await fetch(path, { method, headers: headers(true), body: JSON.stringify(body) });
 	if (!res.ok) throw await refusal(res);
+}
+
+export function saveMcpKeyValue(server: string, variable: string, value: string, password: string): Promise<void> {
+	return write('/api/keys/mcp/secret/value', 'PUT', { server, variable, value, password });
 }
 
 export function saveKeyValue(name: string, value: string, password: string): Promise<void> {

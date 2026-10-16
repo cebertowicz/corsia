@@ -12,12 +12,14 @@ import asyncio
 from contextlib import AsyncExitStack
 
 from infra import state
+from infra.time import utc_now_iso
 from tools.mcp import connect_mcp_servers
 from tools.registry import ToolRegistry
 
 _registry = ToolRegistry()
 _stack: AsyncExitStack | None = None
 _connected: set[str] = set()
+_connection_started_at: dict[str, str] = {}
 _stopped = False
 _lock = asyncio.Lock()
 
@@ -40,8 +42,18 @@ async def start_mcp_runtime(config: dict) -> dict[str, str]:
 async def _connect_new(config: dict) -> dict[str, str]:
     """Connect configured servers that are not yet connected into the live set."""
     pending = {name: server for name, server in config.items() if name not in _connected}
-    errors = await connect_mcp_servers(pending, _registry, _stack)
-    _connected.update(name for name in pending if name not in errors)
+    started_at = utc_now_iso()
+    _connection_started_at.update({name: started_at for name in pending})
+    try:
+        errors = await connect_mcp_servers(pending, _registry, _stack)
+    except BaseException:
+        for name in pending:
+            _connection_started_at.pop(name, None)
+        raise
+    connected = {name for name in pending if name not in errors}
+    _connected.update(connected)
+    for name in pending.keys() - connected:
+        _connection_started_at.pop(name, None)
     return errors
 
 
@@ -73,6 +85,11 @@ async def reload_mcp_runtime(config: dict) -> dict[str, str]:
         return errors
 
 
+def connection_started_at(server: str) -> str | None:
+    """When this process began opening a server connection or connected it."""
+    return _connection_started_at.get(server)
+
+
 def register_mcp_tools(registry: ToolRegistry) -> None:
     """Populate native and harness registries from the completed startup snapshot."""
     for name in _registry.tool_names:
@@ -86,6 +103,7 @@ async def _close() -> None:
     global _stack, _registry
     stack, _stack = _stack, None
     _connected.clear()
+    _connection_started_at.clear()
     try:
         if stack is not None:
             await stack.aclose()

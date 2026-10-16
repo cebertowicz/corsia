@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -25,6 +26,7 @@ from api.key_write_guard import NOT_SAVED, refusal, verified_write
 from infra import key_store
 from infra.auth import authenticate, is_person_session, require_user, token_from_request
 from infra.db_async import run_in_db
+from infra.database import get_db, write_transaction
 from infra.time import utc_storage_iso_to_api
 from tools.web_search_outcome import CHECK_QUERY, run_search
 
@@ -89,6 +91,69 @@ def _server_rows() -> list[dict]:
     return server_key_rows(get_servers())
 
 
+def _pending_mcp_restart(set_at: str | None, connected_at: str | None) -> bool:
+    if not set_at or not connected_at:
+        return False
+    try:
+        active_time = datetime.fromisoformat(connected_at)
+        changed_time = datetime.fromisoformat(set_at)
+        if active_time.tzinfo is None:
+            active_time = active_time.replace(tzinfo=UTC)
+        if changed_time.tzinfo is None:
+            changed_time = changed_time.replace(tzinfo=UTC)
+        return active_time < changed_time
+    except ValueError:
+        return False
+
+
+def _mcp_server_rows() -> list[dict]:
+    """Safe metadata for configured MCP servers and CORSIA-held stdio env keys."""
+    from infra.settings import get_setting
+    from tools.mcp_runtime import connection_started_at
+    from tools.mcp_secrets import SECRET_ENV, SECRET_HEADERS, entry_name
+
+    tools = get_setting("tools") or {}
+    servers = tools.get("mcpServers", {}) if isinstance(tools, dict) else {}
+    if not isinstance(servers, dict):
+        return []
+    db = get_db()
+    rows = []
+    for server, config in sorted(servers.items()):
+        if not isinstance(server, str) or not isinstance(config, dict):
+            continue
+        stdio = isinstance(config.get("command"), str) and bool(config.get("command"))
+        variables = config.get(SECRET_ENV, [])
+        if not isinstance(variables, list):
+            variables = []
+        keys = []
+        for variable in variables:
+            if not isinstance(variable, str) or not variable:
+                continue
+            name = entry_name(server, SECRET_ENV, variable)
+            stored = key_store.resolve_names((name,), db=db).get(name)
+            row = db.execute("SELECT set_at FROM key_store_entries WHERE name = ?", (name,)).fetchone()
+            set_at = row["set_at"] if row else None
+            connected_at = connection_started_at(server) if stdio else None
+            pending = stored is not None and _pending_mcp_restart(set_at, connected_at)
+            keys.append({
+                "variable": variable,
+                "is_set": stored is not None,
+                "set_at": utc_storage_iso_to_api(set_at),
+                "pending_restart": pending,
+                "supported": stdio,
+            })
+        unsupported = config.get(SECRET_HEADERS, [])
+        if not isinstance(unsupported, list):
+            unsupported = []
+        rows.append({
+            "server": server,
+            "transport": "stdio" if stdio else "remote",
+            "keys": keys,
+            "unsupported_references": [name for name in unsupported if isinstance(name, str)] + (variables if not stdio else []),
+        })
+    return rows
+
+
 def _kind(name: str) -> str:
     if name in key_store.BUILTINS:
         return "builtin"
@@ -118,9 +183,10 @@ async def list_keys(user: dict = Depends(require_user)) -> dict:
     """Every entry's metadata. Never a value."""
     entries = await run_in_db(key_store.list_entries)
     return {
-        "keys": [_public(entry) for entry in entries],
+        "keys": [_public(entry) for entry in entries if not entry["name"].startswith(key_store.MCP_PREFIX)],
         "provider_keys": await run_in_db(_provider_rows),
         "server_keys": await run_in_db(_server_rows),
+        "mcp_servers": await run_in_db(_mcp_server_rows),
     }
 
 
@@ -165,6 +231,46 @@ async def set_key_value(
     return await _guarded(
         request, session, name, lambda body: key_store.set_value(name, body.get("value")), "write",
     )
+
+
+@router.put("/mcp/secret/value")
+async def replace_mcp_secret(
+    request: Request, session: tuple[dict, str] = Depends(_human_session),
+) -> dict:
+    """Replace one active stdio secret_env value without returning it."""
+    user, token = session
+    body = await _body(request)
+    server, variable = body.get("server"), body.get("variable")
+
+    pending_restart = False
+
+    def effect() -> None:
+        nonlocal pending_restart
+        from infra.settings import get_setting
+        from tools.mcp_runtime import connection_started_at
+        from tools.mcp_secrets import SECRET_ENV, entry_name
+
+        with write_transaction(None, scope="mcp_key_replace") as db:
+            tools = get_setting("tools", db=db) or {}
+            servers = tools.get("mcpServers", {}) if isinstance(tools, dict) else {}
+            config = servers.get(server) if isinstance(servers, dict) and isinstance(server, str) else None
+            variables = config.get(SECRET_ENV, []) if isinstance(config, dict) else []
+            is_stdio = isinstance(config, dict) and isinstance(config.get("command"), str) and bool(config.get("command"))
+            if not isinstance(variable, str) or not is_stdio or not isinstance(variables, list) or variable not in variables:
+                raise refusal(400, "mcp_reference", NOT_SAVED)
+            name = entry_name(server, SECRET_ENV, variable)
+            key_store.set_managed_value(name, body.get("value"), db=db)
+            row = db.execute("SELECT set_at FROM key_store_entries WHERE name = ?", (name,)).fetchone()
+            pending_restart = _pending_mcp_restart(row["set_at"] if row else None, connection_started_at(server))
+
+    try:
+        await verified_write(token, user["id"], body.get("password"), effect)
+        from tools.mcp_secrets import SECRET_ENV, entry_name
+        name = entry_name(server, SECRET_ENV, variable)
+        audit_key_write(user, kind="mcp", name=name, action="write")
+    except key_store.KeyStoreError as exc:
+        raise _store_refusal(exc) from None
+    return {"saved": True, "pending_restart": pending_restart}
 
 
 @router.post("/{name}/clear")

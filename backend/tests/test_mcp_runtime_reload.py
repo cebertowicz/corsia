@@ -44,6 +44,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
     monkeypatch.setattr(mcp_runtime, "_connected", set())
+    monkeypatch.setattr(mcp_runtime, "_connection_started_at", {})
     monkeypatch.setattr(state, "_agent", None)
     tools: list[_FakeTool] = []
     gate = {"hold": None}
@@ -87,6 +88,48 @@ def test_import_racing_shutdown_leaves_no_open_sessions(runtime):
     assert {tool.name for tool in tools} == {"old_tool", "new_tool"}
     assert not any(tool.session_open for tool in tools)
     assert mcp_runtime._stack is None
+
+
+def test_connection_timestamp_tracks_successful_sessions_and_clears_on_restart(runtime, monkeypatch):
+    mcp_runtime, _, _ = runtime
+    times = iter(("2030-01-01T00:00:00", "2030-01-01T00:00:01", "2030-01-01T00:00:02"))
+    monkeypatch.setattr(mcp_runtime, "utc_now_iso", lambda: next(times))
+
+    async def scenario():
+        await mcp_runtime.start_mcp_runtime({"first": {}})
+        first = mcp_runtime.connection_started_at("first")
+        await mcp_runtime.reload_mcp_runtime({"first": {}, "second": {}})
+        second = mcp_runtime.connection_started_at("second")
+        assert mcp_runtime.connection_started_at("first") == first
+        await mcp_runtime.stop_mcp_runtime()
+        assert mcp_runtime.connection_started_at("first") is None
+        await mcp_runtime.start_mcp_runtime({"first": {}})
+        restarted = mcp_runtime.connection_started_at("first")
+        await mcp_runtime.stop_mcp_runtime()
+        return first, second, restarted
+
+    first, second, restarted = asyncio.run(scenario())
+    assert first == "2030-01-01T00:00:00"
+    assert second == "2030-01-01T00:00:01"
+    assert restarted == "2030-01-01T00:00:02"
+
+
+def test_connection_timestamp_is_visible_while_startup_connects_and_clears_when_stopped(runtime):
+    mcp_runtime, _, gate = runtime
+    gate["hold"], gate["entered"] = asyncio.Event(), asyncio.Event()
+
+    async def scenario():
+        task = asyncio.create_task(mcp_runtime.start_mcp_runtime({"waiting": {}}))
+        await gate["entered"].wait()
+        attempted_at = mcp_runtime.connection_started_at("waiting")
+        assert attempted_at is not None
+        gate["hold"].set()
+        await task
+        assert mcp_runtime.connection_started_at("waiting") == attempted_at
+        await mcp_runtime.stop_mcp_runtime()
+        assert mcp_runtime.connection_started_at("waiting") is None
+
+    asyncio.run(scenario())
 
 
 def test_reload_after_stop_opens_nothing(runtime):
