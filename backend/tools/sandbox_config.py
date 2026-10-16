@@ -14,7 +14,6 @@ Allowlist composition:
 
 import os
 import shutil
-import stat
 from pathlib import Path
 
 from infra.config import WORKSPACE
@@ -26,6 +25,7 @@ from infra.project_repo_policy import (
 from tools.repo_worktree_guidance import protected_checkout_worktree_guidance
 from tools.sandbox_ignored_files import is_ignored_untracked_file
 from tools.sandbox_git import verified_worktree_marker
+from tools.sandbox_worktree_listing import list_verified_entries
 from tools.unix_socket_policy import thread_bind_roots
 
 
@@ -114,31 +114,6 @@ def registered_repo_for_path(
 
 _DEPS_KEY = "sandbox-verified-worktree-deps"
 
-# repo -> (anchor identity, {entry name: (deps, fingerprint, verified root)}).
-# A verdict is reused only while every path it consulted keeps the same
-# identity, content stamp and change time, so a forged, edited, replaced or
-# removed worktree is re-verified on the very next call.
-_WORKTREE_LISTING_CACHE: dict[Path, tuple[tuple, dict[str, tuple]]] = {}
-
-
-def _stat_stamp(path: Path) -> tuple | None:
-    try:
-        st = os.lstat(path)
-    except OSError:
-        return None
-    if stat.S_ISDIR(st.st_mode):
-        # A directory's times move whenever its contents do; its identity and
-        # type are what a verdict depends on (symlink swap, replacement).
-        return (st.st_mode, st.st_ino, st.st_dev)
-    return (
-        st.st_mode, st.st_ino, st.st_dev, st.st_size,
-        st.st_mtime_ns, st.st_ctime_ns,
-    )
-
-
-def _fingerprint(deps: list[Path]) -> tuple:
-    return tuple(_stat_stamp(dep) for dep in deps)
-
 
 def _verified_worktree_root_and_gitdir(
     path: Path, repo_root: Path, *, cache: dict | None = None,
@@ -193,57 +168,14 @@ def repo_worktree_branch(
     return worktree, branch if head.startswith(prefix) and branch else None
 
 
-def _verify_listed_entry(entry: Path, repo: Path) -> tuple:
-    """Verify one ``.worktrees`` entry and record what the verdict rests on.
-
-    The verdict is computed twice around the fingerprint; if the consulted
-    files moved in between, the fingerprint is withheld so the next call
-    re-verifies instead of pinning a verdict to state it did not see.
-    """
-    for _ in range(2):
-        deps: list[Path] = [entry]
-        root = repo_worktree_root(entry, repo, cache={_DEPS_KEY: deps})
-        if root != entry.resolve(strict=False):
-            root = None
-        deps = list(dict.fromkeys(deps))
-        fingerprint = _fingerprint(deps)
-        again: list[Path] = [entry]
-        confirmed = repo_worktree_root(entry, repo, cache={_DEPS_KEY: again})
-        if confirmed != entry.resolve(strict=False):
-            confirmed = None
-        if confirmed == root and _fingerprint(list(dict.fromkeys(again))) == fingerprint:
-            return deps, fingerprint, root
-    # Unstable: report the latest verdict but never match a later fingerprint.
-    return deps, (object(),), root
-
-
 def list_repo_worktrees(repo_root: Path) -> list[Path]:
     """List verified linked worktrees beneath the required local directory."""
-    repo = repo_root.expanduser().resolve(strict=False)
-    parent = repo / ".worktrees"
-    if not parent.is_dir():
-        _WORKTREE_LISTING_CACHE.pop(repo, None)
-        return []
-    # The directories the per-entry verdicts resolve through must keep their
-    # identity; anything else invalidates every cached verdict.
-    anchor = _fingerprint([repo, parent, repo / ".git" / "worktrees"])
-    prior = _WORKTREE_LISTING_CACHE.get(repo)
-    reusable = prior[1] if prior is not None and prior[0] == anchor else {}
-    records: dict[str, tuple] = {}
-    worktrees: list[Path] = []
-    try:
-        for entry in parent.iterdir():
-            record = reusable.get(entry.name)
-            if record is None or _fingerprint(record[0]) != record[1]:
-                record = _verify_listed_entry(entry, repo)
-            records[entry.name] = record
-            if record[2] is not None:
-                worktrees.append(record[2])
-    except OSError:
-        _WORKTREE_LISTING_CACHE.pop(repo, None)
-        return []
-    _WORKTREE_LISTING_CACHE[repo] = (anchor, records)
-    return sorted(worktrees)
+    return list_verified_entries(
+        repo_root,
+        lambda entry, repo, deps: repo_worktree_root(
+            entry, repo, cache={_DEPS_KEY: deps},
+        ),
+    )
 
 
 
