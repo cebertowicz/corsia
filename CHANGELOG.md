@@ -28,6 +28,7 @@ Released 2026-10-16.
 - Returning to a document tab no longer lets an older restore disturb the tab you switched to, and open tabs return directly to their saved place without a loading flash.
 - Mobile document comments stay clear of save status and selection controls; save feedback stays quiet for fast saves and appears when needed; review headers remain compact on phones with an ask open.
 - Markdown links refresh when their source finishes parsing.
+- A document tab that opened before CORSIA finished connecting reopens on its own when the connection returns, instead of waiting for Retry. An unsaved draft keeps its text.
 - A document carries one open review request at a time, and a review request on a sub-step counts once in your chat list. Withdrawn, closed and replaced review requests leave your list and say the request has ended.
 
 ### Chat and Interface
