@@ -3,7 +3,7 @@
 Integration journeys through the public plan (``mutate``) and registry
 (``attention``, ``dispose``, ``watches``) entry points, read back through the
 pile's own routes (``/raised``, ``/rollup``, ``/queue``) and the chat list's
-needs-you items. Design: ``shared/documents/DRAFT-ask-state-single-owner.md`` §7.
+needs-you items.
 """
 from __future__ import annotations
 
@@ -152,8 +152,8 @@ def test_an_open_ask_is_in_the_pile_and_needs_you(db):
     assert [item["node_id"] for item in _needs_you(db)] == [node_id]
 
 
-# §7 test 4 and reviewer item 3a: the agent withdraws, the task closes, the task
-# is archived. The pile and needs-you change in the ending's own transaction.
+# The agent withdraws, the task closes, the task is archived. The pile and
+# needs-you change in the ending's own transaction.
 @pytest.mark.parametrize(("ending", "ended", "card"), [
     ("withdraw", "withdrawn", "withdrawn"),
     ("close_node", "closed", "closed"),
@@ -229,7 +229,7 @@ def test_answering_an_ended_ask_is_not_offered_and_reports_that_it_ended(db):
     assert "ended" in str(refused.value)
 
 
-# §7 test 5: a parent approval never outlives the agent's withdrawal.
+# A parent approval never outlives the agent's withdrawal.
 @pytest.mark.parametrize("approved", ["before_the_ask", "while_asked"])
 def test_approve_to_user_then_withdraw_leaves_the_pile(db, approved):
     from parent_review.disposition import APPROVE_TO_USER, dispose
@@ -254,18 +254,16 @@ def test_approve_to_user_then_withdraw_leaves_the_pile(db, approved):
     assert _needs_you(db) == []
 
 
-# §7 test 7: rows written before this change leave the pile with no migration run.
+# Rows written before asks owned their state leave the pile with no migration run.
 def test_a_legacy_raised_approval_on_an_ended_ask_is_absent_without_migration(db):
-    from parent_review.disposition import APPROVE_TO_USER, dispose
+    from parent_review.disposition import APPROVE_TO_USER
     from plans import artifact_links
 
+    approved = json.dumps({"attention_state": "raised", "disposition_outcome": APPROVE_TO_USER})
     plan_id, node_id, artifact_id, hold_id = _asked(db)
     _withdraw(db, plan_id, node_id, hold_id)
-    # The old reconciler's leftovers: raised metadata with a parent approval.
-    dispose(artifact_id, APPROVE_TO_USER, review_result=SimpleNamespace(blocking_failure=False), db=db)
-    assert json.loads(db.execute(
-        "SELECT metadata FROM artifact_identities WHERE id=?", (artifact_id,),
-    ).fetchone()["metadata"])["attention_state"] == "raised"
+    # Raised metadata with a parent approval, as the old reconciler left it.
+    db.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (approved, artifact_id))
     # A phantom: an ask link from a task that never held a hold.
     phantom = service.add_node(
         plan_id, kind="task", title="Old ask", acceptance_criteria="Reviewed", db=db,
@@ -274,10 +272,7 @@ def test_a_legacy_raised_approval_on_an_ended_ask_is_absent_without_migration(db
     artifact_links.link(
         phantom.id, legacy_id, "attention", actor_id="owner", provenance="test.legacy", db=db,
     )
-    db.execute(
-        "UPDATE artifact_identities SET metadata=? WHERE id=?",
-        (json.dumps({"attention_state": "raised", "disposition_outcome": APPROVE_TO_USER}), legacy_id),
-    )
+    db.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (approved, legacy_id))
     db.commit()
 
     assert _in_pile(db, "proposal.md") == set()
@@ -285,7 +280,20 @@ def test_a_legacy_raised_approval_on_an_ended_ask_is_absent_without_migration(db
     assert _needs_you(db) == []
 
 
-# §7 test 8: a deferral binds only to the hold it deferred.
+def test_an_approval_after_the_ask_ended_is_refused(db):
+    from doceditor import review_bar
+    from parent_review.disposition import APPROVE_TO_USER, DispositionError, dispose
+
+    plan_id, node_id, artifact_id, hold_id = _asked(db)
+    _withdraw(db, plan_id, node_id, hold_id)
+
+    with pytest.raises(DispositionError, match=review_bar.STALE):
+        dispose(artifact_id, APPROVE_TO_USER, review_result=SimpleNamespace(blocking_failure=False), db=db)
+    assert "disposition_outcome" not in _metadata(db, artifact_id)
+    assert _in_pile(db, "proposal.md") == set()
+
+
+# A deferral binds only to the hold it deferred.
 def test_defer_expiry_withdraw_and_reask_follow_the_open_hold(db):
     from automation import watches
     from registry import attention
@@ -331,8 +339,8 @@ def test_a_stale_deferral_stamp_does_not_defer_a_new_ask(db):
     assert [row["node_id"] for row in _needs_you(db)] == [node_id]
 
 
-# §7 test 9 and review answer 5(b): each person disposition on an open ask clears
-# the hold, releases the task, empties the pile and reaches the asker once.
+# Each person disposition on an open ask clears the hold, releases the task,
+# empties the pile and reaches the asker once.
 @pytest.mark.parametrize(("outcome", "ended", "extra"), [
     ("reject_with_reason", "rejected", {}),
     ("request_revision", "revision_requested", {}),
@@ -368,6 +376,31 @@ def test_each_disposition_releases_the_task_with_exactly_one_asker_input(
     assert _metadata(db, artifact_id)["disposition_outcome"] == outcome
 
 
+def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db):
+    from parent_review.disposition import REJECT_WITH_REASON, dispose
+    from registry.ownership import rehome_artifact
+
+    db.execute(
+        """INSERT INTO threads (id,user_id,project_id,title,model,created_at,updated_at)
+           VALUES ('writer','user','project','Writer','test/model','t','t')"""
+    )
+    _plan_id, _node_id, artifact_id, _hold_id = _asked(db)
+    # The document moves to another thread while its ask still holds the asker's task.
+    rehome_artifact(
+        integration="workspace", type="document", external_id="proposal.md",
+        new_owner_thread_id="writer", actor_thread_id="owner", authority="test",
+        reason="Hand-off", source_path="test.ask_pile", db=db,
+    )
+
+    result = dispose(artifact_id, REJECT_WITH_REASON, reason="Not yet", db=db)
+
+    assert result.routed_to == "writer"
+    assert result.route_disposition is not None
+    assert db.execute(
+        "SELECT COUNT(*) FROM context_change_journal WHERE change_kind='artifact.disposition'",
+    ).fetchone()[0] == 1
+
+
 def test_an_approval_on_an_open_ask_records_its_audit_but_not_its_state(db):
     from parent_review.disposition import APPROVE_TO_USER, dispose
 
@@ -387,7 +420,7 @@ def _metadata(db, artifact_id: str) -> dict:
     ).fetchone()["metadata"] or "{}")
 
 
-# §7 test 10: retirement ends the ask whatever the metadata reads.
+# Retirement ends the ask whatever the metadata reads.
 def test_retiring_an_asked_artifact_ends_its_ask_as_retired(db):
     from registry import models
 
@@ -448,7 +481,7 @@ def test_open_requests_are_defined_once():
     assert [site.split(":")[0] for site in sites] == ["plans/user_ask.py"], sites
 
 
-# Review answer 7: the pile refetches on ``plans_changed``, so placing an ask,
+# The pile refetches on ``plans_changed``, so placing an ask,
 # the agent withdrawing it and the person answering it in the pile each nudge
 # the person after commit.
 def test_ask_place_withdraw_and_pile_answer_each_nudge_the_person(db, monkeypatch):
@@ -493,8 +526,8 @@ def test_ask_place_withdraw_and_pile_answer_each_nudge_the_person(db, monkeypatc
     }
 
 
-# §7 test 11: two open asks on one document, left from before the one-open-ask
-# rule, show once in the pile and once per asking task in needs-you.
+# Two open asks on one document, left from before the one-open-ask rule, show
+# once in the pile and once per asking task in needs-you.
 def test_legacy_duplicate_asks_show_once_in_the_pile_and_once_per_task(db):
     from api.attention import _summarize_raised
     from plans import holds, user_ask

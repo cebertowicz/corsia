@@ -161,17 +161,12 @@ def clear(
     is_open_ask = expected_kind == "blocked" and db.execute(
         open_asks_sql("1", by="node") + " AND h.id=?", (node_id, hold_id),
     ).fetchone() is not None
-    if is_open_ask:
-        clear_write(
-            node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
-            provenance=provenance,
-            detail=ask_endings.detail(why="resolved", actor_id=actor_id), db=db,
-        )
-    else:
-        clear_write(
-            node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
-            provenance=provenance, db=db,
-        )
+    clear_write(
+        node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
+        provenance=provenance,
+        detail=ask_endings.detail(why="resolved", actor_id=actor_id) if is_open_ask else None,
+        db=db,
+    )
     from plans import admission
 
     admission.reconcile_plan(

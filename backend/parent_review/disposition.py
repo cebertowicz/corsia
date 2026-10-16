@@ -79,17 +79,28 @@ def _record_state(identity: dict, patch: dict, db) -> None:
                            identity["external_id"], patch, db=db)
 
 
+def _clear_ask(identity: dict, child_owner: str | None, outcome: str,
+               release, db) -> bool:
+    """End the artifact's open ask; return whether that already woke the child owner."""
+    from plans import public as plans_public
+
+    woken: list[str] = []
+    with plans_public.collect_wake_recipients(db, woken):
+        plans_public.ask_cleared(str(identity["id"]), outcome, release=release, db=db)
+    return child_owner is not None and child_owner in woken
+
+
 def _route_back(identity: dict, child_owner: str | None, outcome: str,
-                reason: str | None, released: bool, db) -> str | None:
+                reason: str | None, owner_woken: bool, db) -> str | None:
     """Record an owner-visible (NOT user-visible) route-back to the child owner.
 
-    A released ask hold already wakes the child with the outcome, so it gets no
+    A child owner the ask's release already woke with the outcome gets no
     second route-back.
     """
     if child_owner is None:
         return None
     label = None
-    if not released:
+    if not owner_woken:
         label = delivery_disposition("owner", "actionable")  # owner_wake
         models.record_artifact_change(
             artifact_id=identity["id"],
@@ -193,13 +204,23 @@ def dispose(
 
 def _do_approve(identity, artifact_id, review_result, override_blocking,
                 authority, reason, actor_thread, db) -> DispositionResult:
-    audit = _enforce_blocking(artifact_id, identity, review_result,
-                              override_blocking, authority, reason, actor_thread, db)
     from plans import public as plans_public
 
+    open_ask = bool(plans_public.open_ask_artifacts(db, str(identity["id"])))
+    if not open_ask and db.execute(
+        "SELECT 1 FROM artifact_identities i"
+        f" WHERE i.id=? AND {plans_public.ask_linked_sql('i')}", (identity["id"],),
+    ).fetchone() is not None:
+        # Its open ask alone shows an asked document to the person; with none
+        # left, its request has ended and an approval would reach nobody.
+        from doceditor import review_bar
+
+        raise DispositionError(review_bar.STALE)
+    audit = _enforce_blocking(artifact_id, identity, review_result,
+                              override_blocking, authority, reason, actor_thread, db)
     patch = {"disposition_outcome": APPROVE_TO_USER, "disposition_audit": audit}
     # An open ask's hold owns its state; metadata raises only non-ask attention.
-    if not plans_public.open_ask_artifacts(db, str(identity["id"])):
+    if not open_ask:
         patch["attention_state"] = "raised"
     _record_state(identity, patch, db)
     emit_product_event("parent_disposition", APPROVE_TO_USER,
@@ -217,12 +238,11 @@ def _do_route_back(identity, artifact_id, child_owner, outcome, reason,
     _record_state(identity, {"attention_state": state,
                              "disposition_outcome": outcome,
                              "disposition_reason": reason}, db)
-    released = plans_public.ask_cleared(
-        str(identity["id"]), outcome,
-        release=plans_public.AskRelease({"note": reason}) if reason else None,
-        db=db,
+    owner_woken = _clear_ask(
+        identity, child_owner, outcome,
+        plans_public.AskRelease({"note": reason}) if reason else None, db,
     )
-    label = _route_back(identity, child_owner, outcome, reason, bool(released), db)
+    label = _route_back(identity, child_owner, outcome, reason, owner_woken, db)
     return DispositionResult(artifact_id, outcome, user_visible=False,
                              attention_state=state, routed_to=child_owner,
                              route_disposition=label, reason=reason)
@@ -294,12 +314,11 @@ def _do_supersede(identity, artifact_id, child_owner, replacement_id, reason,
                              "disposition_outcome": SUPERSEDE,
                              "superseded_by": replacement_id,
                              "disposition_reason": reason}, db)
-    released = plans_public.ask_cleared(
-        str(identity["id"]), SUPERSEDE,
-        release=plans_public.AskRelease({"note": reason}) if reason else None,
-        db=db,
+    owner_woken = _clear_ask(
+        identity, child_owner, SUPERSEDE,
+        plans_public.AskRelease({"note": reason}) if reason else None, db,
     )
-    label = _route_back(identity, child_owner, SUPERSEDE, reason, bool(released), db)
+    label = _route_back(identity, child_owner, SUPERSEDE, reason, owner_woken, db)
     return DispositionResult(artifact_id, SUPERSEDE, user_visible=False,
                              attention_state="superseded", routed_to=child_owner,
                              route_disposition=label, reason=reason,
