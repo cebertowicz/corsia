@@ -25,7 +25,9 @@ VERDICTS = {
 }
 NOTE_MAX = 2000
 NOTE_REQUIRED = "Say what should change: this round has no comments, suggestions or edits."
-STALE = "This review request was replaced."
+#: An answer that finds no open ask. A same-task new reason keeps one open ask,
+#: so a refusal here always means the request ended, never that it was replaced.
+STALE = "This review request has ended."
 
 
 class AnswerRefused(ValueError):

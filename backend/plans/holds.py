@@ -165,16 +165,10 @@ def clear(
         (hold_id, node_id, expected_kind),
     ).fetchone()
     if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
-        from plans.boundary import is_user_audit_id
-
         clear_write(
             node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
             provenance=provenance,
-            detail=ask_endings.detail(
-                why="resolved_by_user" if is_user_audit_id(actor_id) else "withdrawn",
-                actor_id=actor_id,
-            ),
-            db=db,
+            detail=ask_endings.detail(why="resolved", actor_id=actor_id), db=db,
         )
     else:
         clear_write(

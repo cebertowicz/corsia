@@ -199,9 +199,9 @@
 			</span>
 		</section>
 	{:else if bar.phase === 'stale'}
-		<section class="review-bar stale" role="status" aria-label="Review request replaced" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
+		<section class="review-bar stale" role="status" aria-label="Review request ended" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 			<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M13 8a5 5 0 11-1.5-3.6M13 2.5v3h-3" /></svg>
-			<span class="rb-text">This review request was replaced</span><span class="rb-sub">Refreshing</span>
+			<span class="rb-text">This review request has ended</span><span class="rb-sub">Refreshing</span>
 		</section>
 	{:else}
 		<section class="review-bar ask" class:noting class:expanded aria-label="Review request" aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
@@ -302,7 +302,7 @@
 	.review-bar.stale .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
 	.review-bar.stale .rb-sub { margin-left: auto; opacity: 0.85; }
 
-	/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or a replaced notice takes the first column at the same height and keeps its text on line 1. */
+	/* In the document header the slot shares the header's columns, so the comments pill and Request review sit at the right end of line 1 (PE M1). The ask's line 1 takes the first column, line 2 spans them all so its buttons end at the header's right edge; a receipt or an ended notice takes the first column at the same height and keeps its text on line 1. */
 	:global(.document-header) .rb-slot { grid-template-columns: subgrid; }
 	:global(.document-header) .rb-slot > .review-bar { grid-area: 1 / 1 / 2 / 2; }
 	:global(.document-header) .rb-slot > .review-bar.ask { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
