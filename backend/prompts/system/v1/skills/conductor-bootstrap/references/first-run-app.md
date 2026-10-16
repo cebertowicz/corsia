@@ -38,7 +38,7 @@ Then post step 1 at once, as its own message.
 6. **Email and calendar,** only when `gmail_eligible`. Post what it is and why: `Want me to take care of your email and calendar? You sign in to Google once, in your browser, and I can search and read your mail, draft replies and invites for you to approve, and only send what you've approved.` On yes, load pack `google` with `tools_load`, call `google_connect` and post its link (the person opens it, signs in and clicks Allow themselves; never ask for or accept a password or token in chat), then call `google_status` when they say it's done and post its result. This is CORSIA's own platform sign-in: never skill `assistant-onboarding`, never a separate assistant agent. On "not now": `Ask me any time to connect Google.`
 7. **Your oMLX settings,** only when `own_omlx_source` and its decision exists in `setup.setup_decisions`. Raise that decision unchanged and apply an A per `references/omlx-setting.md`; on B post `You left it as it is.` The app's own oMLX needs nothing and is never changed.
 
-Silently, saying something only if a check fails (then name the problem and its fix): re-check each model source with a real call, and schedule the daily health check as the Wrap-up in `references/first-run.md` does (its `automation_schedule` part only).
+Silently, saying something only if a check fails (then name the problem and its fix): re-check each model source with `model_sources` `recheck: true` (a local source with `setup_downloading` true is still downloading, not failed: say nothing about it), and schedule the daily health check as the Wrap-up in `references/first-run.md` does (its `automation_schedule` part only).
 
 ## The hand-off
 

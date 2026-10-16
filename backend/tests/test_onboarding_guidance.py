@@ -202,6 +202,12 @@ def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
     assert "Read nothing until a yes" in steps
 
 
+def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "`model_sources` `recheck: true`" in app
+    assert "`setup_downloading` true is still downloading, not failed: say nothing about it" in app
+
+
 def test_app_path_reads_no_other_app_settings_before_a_yes():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "mcp_sources" not in app
