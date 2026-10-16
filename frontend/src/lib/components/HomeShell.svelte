@@ -299,7 +299,6 @@
 		<Pane
 			label={paneConfig.label}
 			sections={paneConfig.sections}
-			{conductorThreadId}
 			{protectArtifactSplit}
 			onPickProject={onPickProjectAndClosePane}
 			onBrowseDocuments={browseDocumentsForThread}

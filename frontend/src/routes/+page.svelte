@@ -203,7 +203,7 @@
 	}
 
 	const paneConfig = $derived(
-		buildPaneConfig(activeView, $activeThread, $uiScope, conductorThreadId, $activeThreadId)
+		buildPaneConfig(activeView, $activeThread, $uiScope, $activeThreadId)
 	);
 
 	function pickProject(p: { id: string; name: string; accent_color?: string | null }) { enterProjectScope(p); resetSurface('activity'); }

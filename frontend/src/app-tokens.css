@@ -76,7 +76,7 @@
   --text-secondary: #adadb2;
   --text-muted: #adadb2;
   --text-tertiary: #919196;
-  --accent: #0083af;
+  --accent: #007faa;
   --accent-hover: var(--accent);
   --accent-subtle: var(--accent-wash);
   --accent-bg-hover: var(--accent-subtle);
@@ -133,13 +133,13 @@
   --purple-line: rgba(139, 92, 246, 0.28);
 
   /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA default, and the
-     default *is* a project colour: the corsia project's own accent, #0083af. Every value below is exactly what
-     `accentRoles('#0083af', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
-     a project painted #0083af look the same. Under a project scope +layout replaces --accent and every role from
+     default *is* a project colour: the corsia project's own accent, #007faa. Every value below is exactly what
+     `accentRoles('#007faa', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
+     a project painted #007faa look the same. Under a project scope +layout replaces --accent and every role from
      accentRoles(); --accent-hover and --accent-subtle (theme blocks) follow through var(). */
   --accent-text: #009cd0;
-  --accent-wash: color-mix(in srgb, #0083af 12%, transparent);
-  --accent-line: color-mix(in srgb, #0083af 30%, transparent);
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
   --violet-brand: #8b5cf6;
@@ -186,7 +186,7 @@
   --text-secondary: #46464b;
   --text-muted: #46464b;
   --text-tertiary: #636368;
-  --accent: #0083af;
+  --accent: #007faa;
   --accent-hover: var(--accent);
   --accent-subtle: var(--accent-wash);
   --accent-bg-hover: var(--accent-subtle);
@@ -227,8 +227,8 @@
 
 [data-theme="light"] {
   --accent-text: #006a8e;
-  --accent-wash: color-mix(in srgb, #0083af 12%, transparent);
-  --accent-line: color-mix(in srgb, #0083af 30%, transparent);
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
   --teal: #0d9488;
@@ -255,7 +255,7 @@
 }
 
 @supports (color: color(display-p3 1 1 1)) {
-  /* The accent and its roles are deliberately absent here: #0083af is authored as sRGB, and a wider-gamut
+  /* The accent and its roles are deliberately absent here: #007faa is authored as sRGB, and a wider-gamut
      variant of it would be an invented colour that `accentRoles()` cannot derive. */
   :root {
     --teal: color(display-p3 0.176 0.831 0.749);

@@ -25,10 +25,6 @@ const CHAT_SECTIONS: Section[] = [
 	{ title: 'Artifacts', kind: 'artifacts' },
 ];
 
-// Conductor thread: ArtifactPane handles the unified Needs you queue internally;
-// no standalone attention-conductor section needed.
-const CONDUCTOR_SECTIONS: Section[] = CHAT_SECTIONS;
-
 /**
  * The right pane's content for the current view, or null when the view has no pane.
  * Only workspace-scope Activity lists Projects; other non-chat views, Settings
@@ -39,18 +35,14 @@ export function buildPaneConfig(
 	activeView: View,
 	activeThread: Thread | null,
 	scope: Scope,
-	conductorThreadId?: string | null,
 	activeThreadId?: string | null,
 ): PaneConfig | null {
 	if (activeView === 'chat') {
 		// Resolve the active thread ID from the full Thread object when available,
 		// falling back to activeThreadId for the window where $activeThreadId is set
-		// but the thread object hasn't loaded into $threads yet (e.g. conductor thread
-		// returned by /api/conductor but absent from the threads list on first load).
+		// but the thread object has not loaded into $threads yet.
 		const resolvedId = activeThread?.id ?? activeThreadId ?? null;
-		const isConductor = conductorThreadId != null && resolvedId === conductorThreadId;
 		const label = scope?.name ?? 'Workspace';
-		if (isConductor) return { label, sections: CONDUCTOR_SECTIONS };
 		// The pane keys off the thread id, so a thread missing from the store (hidden subagent,
 		// or the window before the list loads) still gets its Plan and Artifacts.
 		if (activeThread || resolvedId) return { label, sections: CHAT_SECTIONS };

@@ -57,7 +57,7 @@
 
 	const cpuProfilerOn = $derived($coreSettings?.features?.cpu_profiler === true);
 	const overlayOn = $derived(
-		$coreSettings?.features?.debug_version_overlay !== false,
+		$coreSettings?.features?.debug_version_overlay === true,
 	);
 	const stale = $derived($isFrontendStale);
 	const backendBehind = $derived($isBackendBehindOnDisk);
