@@ -39,7 +39,7 @@ Done when `gh auth status` succeeds.
 ## Connect
 
 1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`, or `signin.cause` with `signin.next`; when it names a cause, do what `next` says instead of waiting.
-2. If you created the agents' account in this setup's shared browser window, open `signin.verification_uri` in that same window: it is already signed in as the agents' account. Otherwise tell the person to open it in a browser signed in **as the agents' GitHub account** (a private window works), never their own. The person enters the code; never type it yourself.
+2. If you created the agents' account in this setup's shared browser window, open `signin.verification_uri` in that same window: it is already signed in as the agents' account. Otherwise tell the person to open it in a browser signed in **as the agents' GitHub account** (a private window works), never their own. Either way, give the person `signin.user_code` to enter; never type it yourself.
 3. Call `action: "check"` until the account reads `ready` or names a cause; on a cause, follow `signin.next`.
 
 For the agents' account, never run `gh auth login`, `gh auth logout`, `gh auth setup-git` or `git config` for credentials or identity in the shell, and never ask for a token, name or email. The account's home is read-only to shells and its identity comes from GitHub.
