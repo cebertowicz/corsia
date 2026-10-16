@@ -64,16 +64,11 @@ def _use_mine_path() -> Path:
     return record_path().with_name(_USE_MINE_NAME)
 
 
-def _originals_models(raw: dict[str, Any], model: LocalModel | None) -> dict[str, dict[str, Any]]:
-    """Per-model values; a record from before they were kept per model belongs to its one ``model``."""
+def _originals_models(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Per-model values in the only record shape CORSIA has shipped."""
     models = raw.get("originals_models")
-    if isinstance(models, dict):
-        return {key: dict(values) for key, values in models.items()
-                if isinstance(key, str) and isinstance(values, dict)}
-    legacy = raw.get("originals_model")
-    if isinstance(legacy, dict) and legacy and model is not None:
-        return {model.model: dict(legacy)}
-    return {}
+    return {key: dict(values) for key, values in models.items()
+            if isinstance(key, str) and isinstance(values, dict)} if isinstance(models, dict) else {}
 
 
 def read() -> Management | None:
@@ -95,7 +90,7 @@ def read() -> Management | None:
         active=raw.get("active") is True,
         model=model,
         originals_global=globals_ if isinstance(globals_, dict) else {},
-        originals_models=_originals_models(raw, model),
+        originals_models=_originals_models(raw),
         key_registered=raw.get("key_registered") is True,
         cannot_check=cannot_check if isinstance(cannot_check, str) else None,
         restore_failed=raw.get("restore_failed") is True,
@@ -149,13 +144,13 @@ def update(**changes: Any) -> None:
 def record_originals(global_values: dict[str, Any], model_values: dict[str, dict[str, Any]]) -> None:
     """Keep each value as it stood before CORSIA's first change to it, before that change is sent.
 
-    ``model_values`` maps an oMLX model id to that model's values. Raises when
-    CORSIA isn't managing this oMLX or the record cannot be written; the caller
-    then sends nothing.
+    ``model_values`` maps an oMLX model id to that model's values. A consented
+    legacy flow can write before choosing management, so its first write creates
+    the active restore record. The caller sends nothing when recording fails.
     """
-    record = read()
-    if record is None or not record.active:
-        raise RuntimeError("CORSIA isn't managing this oMLX")
+    record = read() or Management()
+    if not record.active:
+        record = replace(record, active=True)
     models = {key: dict(values) for key, values in record.originals_models.items()}
     for model_id, values in model_values.items():
         models[model_id] = {**values, **models.get(model_id, {})}

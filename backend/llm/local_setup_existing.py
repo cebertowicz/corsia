@@ -14,20 +14,16 @@ import asyncio
 import logging
 from typing import Callable
 
-from llm import local_model, own_omlx_management
+from llm import local_model, local_profiles, own_omlx_management
 from llm import local_setup as ls
 from llm.local_model import LocalModel, PickUnavailable, omlx_has_recommender
 from llm.local_setup_ownership import own_omlx_admin_key, own_omlx_port
 
 log = logging.getLogger(__name__)
 
-# The starter download for an oMLX CORSIA does not manage, unchanged until #817
+# The data-defined starter for an oMLX CORSIA does not manage, unchanged until #817
 # decides that journey; CORSIA's own oMLX picks through its recommender instead.
-OWN_OMLX_STARTER = LocalModel(
-    repository="prism-ml/Ternary-Bonsai-2-27B-mlx-2bit",
-    download_size_bytes=8_608_739_065,
-    context_window=32_768,
-)
+OWN_OMLX_STARTER = local_profiles.OWN_OMLX_STARTER
 
 
 async def _managed_key(port: int) -> str | None:

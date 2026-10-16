@@ -32,14 +32,13 @@ def fresh_flight(monkeypatch):
     local_setup_operation.clear()
 
 
-def test_the_settings_file_holds_only_model_independent_settings():
+def test_the_settings_file_holds_the_unmanaged_starter_and_model_independent_settings():
     raw = json.loads(local_profiles._PATH.read_text())
-    assert set(raw) == {"omlx_global_settings", "model_settings"}
+    assert set(raw) == {"omlx_global_settings", "model_settings", "starter_model"}
     assert local_profiles.OMLX_GLOBAL_SETTINGS == raw["omlx_global_settings"]
     assert local_profiles.MODEL_SETTINGS == raw["model_settings"]
-    # No model and no sampling: oMLX picks the model and each model keeps its own sampling.
-    assert not {"profiles", "repository", "temperature", "top_p", "top_k", "chat_template_kwargs"} & (
-        raw.keys() | raw["model_settings"].keys())
+    assert local_profiles.OWN_OMLX_STARTER == LocalModel(
+        raw["starter_model"]["repo_id"], raw["starter_model"]["download_bytes"], raw["starter_model"]["max_context"])
 
 
 def test_loader_rejects_malformed_settings_files(tmp_path):
@@ -50,8 +49,9 @@ def test_loader_rejects_malformed_settings_files(tmp_path):
         path.write_text(json.dumps(payload))
         return local_profiles.load_settings(path)
 
-    assert load(good) == (good["omlx_global_settings"], good["model_settings"])
-    for bad in ([], {**good, "profiles": []}, {"model_settings": {}}, {**good, "model_settings": []}):
+    assert load(good) == (good["omlx_global_settings"], good["model_settings"], local_profiles.OWN_OMLX_STARTER)
+    for bad in ([], {**good, "profiles": []}, {"model_settings": {}}, {**good, "model_settings": []},
+                {**good, "starter_model": {}}):
         with pytest.raises(RuntimeError):
             load(bad)
     with pytest.raises(RuntimeError, match="unreadable"):
@@ -309,6 +309,8 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
 
 def _ram(monkeypatch, gib):
     monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: gib * GIB)
+    from llm.local_setup_gates import host_ram_bytes
+    host_ram_bytes.cache_clear()
 
 
 def test_status_route_says_whose_omlx_it_is_and_shows_the_pick(client, monkeypatch):

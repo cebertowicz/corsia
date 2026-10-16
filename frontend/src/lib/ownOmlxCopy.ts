@@ -16,7 +16,9 @@ export const CONSENT_READS_KEY = 'your oMLX’s admin key';
 export const CONSENT_NO_CHANGE = 'It won’t change your oMLX.';
 export const CONSENT_CHANGES = 'It changes your oMLX’s settings only after you approve the changes in chat.';
 /** The This computer row when the person's oMLX is too old to say which model fits. */
-export const CANNOT_CHECK = 'CORSIA couldn’t check which local AI model fits this computer: your oMLX is older than 0.7.1rc1. Updating oMLX lets CORSIA check.';
+export function cannotCheck(version: string): string {
+	return `CORSIA couldn’t check which local AI model fits this computer: your oMLX is older than ${version}. Updating oMLX lets CORSIA check.`;
+}
 export const STOP_MANAGING = 'Stop managing';
 export const STOP_TITLE = 'Stop managing your oMLX?';
 export const RESTORE_FAILED = 'CORSIA couldn’t put your oMLX’s values back.';

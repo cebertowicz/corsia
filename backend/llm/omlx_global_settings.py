@@ -36,6 +36,7 @@ MANAGED_MODEL_SETTINGS = frozenset({
 _observed: dict[str, dict[str, Any]] = {}
 # server id -> (oMLX model id, that model's settings as oMLX reported them, its ``thinking_default``)
 _observed_model: dict[str, tuple[str, dict[str, Any], object]] = {}
+_UNSET = object()
 
 
 def _find(settings: dict[str, Any], key: str) -> tuple[bool, Any]:
@@ -48,18 +49,21 @@ def _find(settings: dict[str, Any], key: str) -> tuple[bool, Any]:
     return False, None
 
 
-def _managed_model() -> LocalModel | None:
-    from llm import own_omlx_management
+def _managed_model(record: Any = _UNSET) -> LocalModel | None:
+    if record is _UNSET:
+        from llm import own_omlx_management
 
-    record = own_omlx_management.read()
+        record = own_omlx_management.read()
     return record.model if record is not None and record.active else None
 
 
-def writable_global_settings() -> frozenset[str]:
+def writable_global_settings(record: Any = _UNSET) -> frozenset[str]:
     """The oMLX-wide settings CORSIA may offer to change on the person's own oMLX now."""
-    from llm import own_omlx_management
+    if record is _UNSET:
+        from llm import own_omlx_management
 
-    return MANAGED_GLOBAL_SETTINGS if own_omlx_management.active() else WRITABLE_GLOBAL_SETTINGS
+        record = own_omlx_management.read()
+    return MANAGED_GLOBAL_SETTINGS if record is not None and record.active else WRITABLE_GLOBAL_SETTINGS
 
 
 def model_recommendations(model: LocalModel, thinking_default: object = None) -> dict[str, Any]:
@@ -97,11 +101,11 @@ async def _observe_model(server: dict[str, Any], model: LocalModel | None, retai
     return False
 
 
-async def _model_arrived() -> None:
+async def _model_arrived() -> bool:
     """The managed model is in their oMLX: its settings decision can list every row now."""
     from onboarding.omlx_settings_wake import rearm
 
-    await rearm()
+    return await rearm()
 
 
 async def record_observation(server: dict[str, Any], *, retain_on_failure: bool = False) -> bool:
@@ -118,7 +122,8 @@ async def record_observation(server: dict[str, Any], *, retain_on_failure: bool 
     if isinstance(settings, dict) and settings:
         _observed[server["id"]] = settings
         if await _observe_model(server, await asyncio.to_thread(_managed_model), retain_on_failure):
-            await _model_arrived()
+            if not await _model_arrived():
+                _observed_model.pop(server["id"], None)
         return True
     if not retain_on_failure:
         _observed.pop(server["id"], None)
@@ -144,7 +149,7 @@ def reports(server_id: str, key: str, model: str | None = None) -> bool:
     return observed is not None and _find(observed, key)[0]
 
 
-def differences(server_ids: list[str]) -> list[dict[str, Any]] | None:
+def differences(server_ids: list[str], record: Any = _UNSET) -> list[dict[str, Any]] | None:
     """Each recommended setting the person's oMLX holds at another value.
 
     ``[]`` when everything observed matches; None when none of the servers has an
@@ -155,7 +160,11 @@ def differences(server_ids: list[str]) -> list[dict[str, Any]] | None:
     present = [sid for sid in server_ids if sid in _observed]
     if not present:
         return None
-    writable = writable_global_settings()
+    if record is _UNSET:
+        from llm import own_omlx_management
+
+        record = own_omlx_management.read()
+    writable = writable_global_settings(record)
     result = []
     for key, recommended in OMLX_GLOBAL_SETTINGS.items():
         if key not in writable:
@@ -163,7 +172,7 @@ def differences(server_ids: list[str]) -> list[dict[str, Any]] | None:
         found, current = _find(_observed[present[0]], key)
         if found and current != recommended:
             result.append({"setting": key, "current": current, "recommended": recommended})
-    model = _managed_model()
+    model = _managed_model(record)
     observed_model = _observed_model.get(present[0])
     if model is not None and observed_model is not None and observed_model[0] == model.model:
         for key, recommended in sorted(model_recommendations(model, observed_model[2]).items()):

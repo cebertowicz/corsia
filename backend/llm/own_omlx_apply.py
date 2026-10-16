@@ -58,15 +58,14 @@ async def apply(server: dict[str, Any], supplied: str) -> dict[str, Any]:
     for row in entries:
         if "model" in row:
             models.setdefault(row["model"], {})[row["setting"]] = row
-    if await asyncio.to_thread(own_omlx_management.active):
-        try:
-            await asyncio.to_thread(
-                own_omlx_management.record_originals,
-                {key: row["current"] for key, row in globals_.items()},
-                {model_id: {key: row["current"] for key, row in rows.items()} for model_id, rows in models.items()},
-            )
-        except Exception:
-            raise ApplyRefused(503, "CORSIA couldn't record your current values, so it changed nothing") from None
+    try:
+        await asyncio.to_thread(
+            own_omlx_management.record_originals,
+            {key: row["current"] for key, row in globals_.items()},
+            {model_id: {key: row["current"] for key, row in rows.items()} for model_id, rows in models.items()},
+        )
+    except Exception:
+        raise ApplyRefused(503, "CORSIA couldn't record your current values, so it changed nothing") from None
     cfg = {"server_id": server["id"]}
     applied: list[str] = []
     if globals_:

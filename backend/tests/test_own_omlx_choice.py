@@ -7,7 +7,6 @@ writers send is observed as oMLX would receive it.
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 
@@ -57,6 +56,9 @@ def test_use_mine_is_told_apart_from_a_consent_that_never_showed_the_choice(
         assert facts.omlx_use_mine is False and decision["title"] == "Change one oMLX setting for CORSIA?"
         assert applied.status_code == 200
         assert omlx.writes == [("POST", "/global-settings", {"max_concurrent_requests": 1})]
+        assert own_omlx_management.read().originals_global == {"max_concurrent_requests": GLOBALS_BEFORE["max_concurrent_requests"]}
+        assert client.post(STOP).status_code == 200
+        assert {key: omlx.globals[key] for key in GLOBALS_BEFORE} == GLOBALS_BEFORE
 
 
 def test_stopping_is_choosing_use_mine_until_the_person_lets_CORSIA_manage_it_again(
@@ -126,16 +128,3 @@ def test_a_failed_model_restore_keeps_only_what_is_left_for_try_again(client, om
     assert client.post(STOP).status_code == 200
     assert [path for _method, path, _body in omlx.writes] == [f"/models/{PICK_B.model}/settings"]
     assert omlx.models[PICK_B.model] == B_BEFORE and omlx.removed_keys == ["srv"]
-
-
-def test_a_record_from_before_values_were_kept_per_model_still_restores(client, omlx):  # noqa: F811
-    _manage()
-    client.post(APPLY, json={"fingerprint": _fingerprint()})
-    stored = json.loads(own_omlx_management.record_path().read_text())
-    legacy = {**{key: value for key, value in stored.items() if key != "originals_models"},
-              "originals_model": stored["originals_models"][MODEL.model]}
-    own_omlx_management.record_path().write_text(json.dumps(legacy))
-
-    assert own_omlx_management.read().originals_models == stored["originals_models"]
-    assert client.post(STOP).status_code == 200
-    assert omlx.models[MODEL.model] == MODEL_BEFORE

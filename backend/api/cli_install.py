@@ -57,7 +57,6 @@ class InstallJob:
 
     state: str = "running"
     reason: str | None = None
-    operation: str = "install"
     path_shadowed_by: str | None = None
     task: asyncio.Task | None = None
 
@@ -184,7 +183,7 @@ async def _start_job(vendor: str, operation: str) -> dict[str, str | None] | JSO
     existing = _jobs.get(vendor)
     if existing and existing.state == "running":
         return _status(vendor)
-    job = InstallJob(operation=operation)
+    job = InstallJob()
     _jobs[vendor] = job
     job.task = asyncio.create_task(_complete_job(vendor, job))
     return _status(vendor)

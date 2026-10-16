@@ -199,6 +199,24 @@ def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):
     assert view["state"] == "failed" and "HTTP 404" in view["message"]
 
 
+def test_overlapping_prepare_requests_start_one_task(monkeypatch):
+    _mac(monkeypatch, 64)
+    runs = []
+
+    async def run():
+        runs.append(True)
+        await asyncio.Event().wait()
+
+    async def exercise():
+        first, second = await asyncio.gather(prepare.begin_prepare(), prepare.begin_prepare())
+        assert first["state"] == second["state"] == "checking"
+        await prepare.stop_prepare()
+
+    monkeypatch.setattr(prepare, "_run", run)
+    asyncio.run(exercise())
+    assert runs == [True]
+
+
 def test_turning_the_switch_off_while_checking_stops_the_pick_and_downloads_nothing(monkeypatch):
     mac = _mac(monkeypatch, 64)
 

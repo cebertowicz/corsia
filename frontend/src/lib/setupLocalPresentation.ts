@@ -1,6 +1,6 @@
 import type { SetupJob } from './components/SetupShell.svelte';
 import { sourceIsReady, type ModelSource } from './conductorSources';
-import { CANNOT_CHECK } from './ownOmlxCopy';
+import { cannotCheck } from './ownOmlxCopy';
 
 export function measuredDownloadTime(seconds: number | null | undefined): string | undefined {
 	if (seconds == null || seconds < 0) return undefined;
@@ -48,7 +48,7 @@ export function setupSourceMeta(source: ModelSource, startError: string, modelSi
 			return source.download_percent == null && source.setup_stage ? source.setup_stage : ['Downloading in the background', eta].filter(Boolean).join(' · ');
 		}
 		if (source.setup_error || startError) return 'Download needs attention';
-		return source.omlx_management?.cannot_check ? CANNOT_CHECK : `Local model · ${modelSize}`;
+		return source.omlx_management?.cannot_check ? cannotCheck(source.omlx_management.required_version) : `Local model · ${modelSize}`;
 	}
 	if (source.state === 'not_installed') return `${source.name} needs its official app installed first.`;
 	if (source.state === 'needs_auth') return 'Sign in to use your subscription';

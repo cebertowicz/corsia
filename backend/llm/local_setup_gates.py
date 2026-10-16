@@ -8,6 +8,7 @@ downloading a model nobody needs.
 from __future__ import annotations
 
 import logging
+from functools import cache
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -22,6 +23,7 @@ class SubscriptionSource:
     label: str | None
 
 
+@cache
 def host_ram_bytes() -> int:
     """This Mac's RAM, read through its canonical owner."""
     from infra.host_resources import host_total_ram_bytes

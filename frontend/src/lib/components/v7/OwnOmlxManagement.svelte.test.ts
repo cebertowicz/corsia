@@ -38,7 +38,7 @@ async function render(state: Management | null) {
 	await tick(); await new Promise((done) => setTimeout(done)); await tick();
 }
 const button = (label: string) => [...document.querySelectorAll('button')].find((item) => item.textContent?.trim() === label);
-const managed = (restores = RESTORES, forgetsKey = true): Management => ({ state: 'managed', cannot_check: null, restores, forgets_key: forgetsKey });
+const managed = (restores = RESTORES, forgetsKey = true): Management => ({ state: 'managed', cannot_check: null, required_version: '0.7.1rc1', restores, forgets_key: forgetsKey });
 
 describe('OwnOmlxManagement', () => {
 	it('shows nothing for the oMLX CORSIA installed', async () => {
@@ -57,7 +57,7 @@ describe('OwnOmlxManagement', () => {
 			+ 'To keep using your oMLX in CORSIA, enter that key again in CORSIA.');
 		expect(posted).toEqual([]);
 
-		management = { state: 'not_managed', cannot_check: null, restores: [], forgets_key: false };
+		management = { state: 'not_managed', cannot_check: null, required_version: '0.7.1rc1', restores: [], forgets_key: false };
 		[...dialog.querySelectorAll('button')].find((item) => item.textContent?.trim() === 'Stop managing')!.click();
 		await vi.waitFor(() => expect(onResult).toHaveBeenCalled());
 		expect(posted).toEqual(['/api/providers/sources/omlx/management/stop']);
@@ -100,7 +100,7 @@ describe('OwnOmlxManagement', () => {
 	});
 
 	it('gives Welcome’s consent before Let CORSIA manage it starts', async () => {
-		await render({ state: 'not_managed', cannot_check: null, restores: [], forgets_key: false });
+		await render({ state: 'not_managed', cannot_check: null, required_version: '0.7.1rc1', restores: [], forgets_key: false });
 		answer = json({ ok: true, in_progress: true });
 		button('Let CORSIA manage it')!.click();
 		flushSync();

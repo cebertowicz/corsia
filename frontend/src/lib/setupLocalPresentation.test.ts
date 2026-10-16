@@ -34,7 +34,7 @@ describe('local setup presentation', () => {
 
 	it('says when their own oMLX is too old to check, with no Try again in the line', () => {
 		const own = (cannotCheck: string | null) => downloading({
-			setup_downloading: false, omlx_management: { state: 'managed', cannot_check: cannotCheck, restores: [], forgets_key: true } });
+			setup_downloading: false, omlx_management: { state: 'managed', cannot_check: cannotCheck, required_version: '0.7.1rc1', restores: [], forgets_key: true } });
 		expect(setupSourceMeta(own('0.6.2'), '', '30 GB'))
 			.toBe('CORSIA couldn’t check which local AI model fits this computer: your oMLX is older than 0.7.1rc1. Updating oMLX lets CORSIA check.');
 		expect(setupSourceMeta(own(null), '', '30 GB')).toBe('Local model · 30 GB');

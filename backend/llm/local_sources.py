@@ -144,6 +144,9 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
     return result
 
 
+_UNSET = object()
+
+
 def _restore_lines(values: dict[str, Any], model: str | None = None) -> list[str]:
     from onboarding import setup_strings as text
 
@@ -156,23 +159,26 @@ def _restore_lines(values: dict[str, Any], model: str | None = None) -> list[str
     return lines
 
 
-def omlx_management() -> dict[str, Any]:
+def omlx_management(record: Any = _UNSET) -> dict[str, Any]:
     """Whether CORSIA manages the person's own oMLX, and what stopping puts back.
 
     ``restore_failed`` covers a stop that did not finish, so Settings offers it again.
     ``cannot_check`` is their oMLX's version while CORSIA manages one too old to recommend.
     ``forgets_key``: stopping removes the admin key, which CORSIA stored only to manage it.
     """
-    from llm import own_omlx_management
+    from llm import local_model, own_omlx_management
 
-    record = own_omlx_management.read()
+    if record is _UNSET:
+        record = own_omlx_management.read()
     if record is None:
-        return {"state": "not_managed", "cannot_check": None, "restores": [], "forgets_key": False}
+        return {"state": "not_managed", "cannot_check": None, "required_version": local_model.OMLX_PIN,
+                "restores": [], "forgets_key": False}
     restores = [*_restore_lines(record.originals_global),
                 *(line for model, values in sorted(record.originals_models.items())
                   for line in _restore_lines(values, model))]
     return {"state": "managed" if record.active else "restore_failed",
-            "cannot_check": record.cannot_check if record.active else None, "restores": restores,
+            "cannot_check": record.cannot_check if record.active else None,
+            "required_version": local_model.OMLX_PIN, "restores": restores,
             "forgets_key": record.key_registered}
 
 
@@ -185,6 +191,7 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     """
     from llm.local_setup import setup_kind
     from llm.local_setup_ownership import existing_install_is_foreign
+    from llm import own_omlx_management
     from llm.omlx_global_settings import differences, fingerprint
 
     result = _omlx_state(membership)
@@ -193,8 +200,9 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     own = existing_install_is_foreign()
     ids = [s["id"] for s in get_servers(provider="omlx")
            if s.get("kind") != "external" and s.get("status") == "online"] if own else []
-    entries = differences(ids) if own and len(ids) == 1 else None
+    record = own_omlx_management.read() if own else None
+    entries = differences(ids, record) if own and len(ids) == 1 else None
     result["omlx_settings"] = ({"differences": entries, "fingerprint": fingerprint(ids[0], entries)}
                                if entries else entries)
-    result["omlx_management"] = omlx_management() if own else None
+    result["omlx_management"] = omlx_management(record) if own else None
     return result

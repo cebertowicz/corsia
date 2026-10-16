@@ -53,6 +53,7 @@ class _Prepare:
 
 
 _prepare = _Prepare()
+_prepare_lock = asyncio.Lock()
 
 
 def _running() -> bool:
@@ -126,13 +127,14 @@ async def begin_prepare() -> dict:
     """
     from llm import local_setup as ls
 
-    view = await pick_view()
-    if view["state"] not in {NOT_CHECKED, FAILED} or ls._running():
-        return view
-    _settle(CHECKING)
-    _prepare.task = asyncio.create_task(_run())
-    _prepare.task.add_done_callback(_observe)
-    return _view(CHECKING)
+    async with _prepare_lock:
+        view = await pick_view()
+        if view["state"] not in {NOT_CHECKED, FAILED} or ls._running():
+            return view
+        _settle(CHECKING)
+        _prepare.task = asyncio.create_task(_run())
+        _prepare.task.add_done_callback(_observe)
+        return _view(CHECKING)
 
 
 async def settled_view() -> dict:

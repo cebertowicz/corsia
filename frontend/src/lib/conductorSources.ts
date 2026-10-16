@@ -59,6 +59,8 @@ export interface OwnOmlxManagement {
 	state: 'managed' | 'not_managed' | 'restore_failed';
 	/** Their oMLX's version while it is too old to say which model fits. */
 	cannot_check: string | null;
+	/** The oldest oMLX release that can recommend a local model. */
+	required_version: string;
 	restores: string[];
 	/** Stopping removes the admin key CORSIA read to manage it. */
 	forgets_key: boolean;
