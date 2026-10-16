@@ -1,13 +1,14 @@
-"""MCP import never exposes client configuration values."""
+"""MCP discovery never exposes client configuration values or bypasses Connected Apps."""
 from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import contextmanager
 
 import pytest
 
+from tests.mcp_import_fixtures import seed_project
 from tools import mcp_import
+from tools.mcp_import_reach import project_reach
 
 
 def _json(path, value):
@@ -17,11 +18,11 @@ def _json(path, value):
 
 def test_detects_documented_client_formats_without_secret_values(tmp_path):
     _json(tmp_path / "Library/Application Support/Claude/claude_desktop_config.json", {
-        "mcpServers": {"desktop": {"command": "npx", "args": ["--token", "desktop-secret"], "env": {"TOKEN": "desktop-secret"}}},
+        "mcpServers": {"desktop": {"command": "npx", "args": ["--token", "desktop-secret"], "env": {"TOKEN": "masked"}}},
     })
     _json(tmp_path / ".claude.json", {
         "mcpServers": {
-            "code": {"type": "http", "url": "https://example.test/mcp?token=code-secret", "headers": {"Authorization": "code-secret"}},
+            "code": {"type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "code-secret"}},
             "broken": {"url": "https://example.test/mcp"},
         },
     })
@@ -30,7 +31,7 @@ def test_detects_documented_client_formats_without_secret_values(tmp_path):
     })
     codex = tmp_path / ".codex/config.toml"
     codex.parent.mkdir(parents=True)
-    codex.write_text('[mcp_servers.codex]\nurl = "https://example.test/mcp?token=codex-secret"\n', encoding="utf-8")
+    codex.write_text('[mcp_servers.codex]\nurl = "https://example.test/mcp"', encoding="utf-8")
 
     detected = mcp_import.detected_sources(tmp_path)
 
@@ -47,7 +48,7 @@ def test_detects_documented_client_formats_without_secret_values(tmp_path):
 def test_prepare_import_keeps_secret_out_of_status_and_rejects_literal_auth(tmp_path):
     _json(tmp_path / ".cursor/mcp.json", {
         "mcpServers": {
-            "good": {"command": "npx", "args": ["-y", "server"], "env": {"TOKEN": "stdio-secret"}},
+            "good": {"command": "npx", "args": ["-y", "server"], "env": {"TOKEN": "masked"}},
             "bad": {"url": "https://example.test/mcp", "headers": {"Authorization": "http-secret"}},
         },
     })
@@ -56,10 +57,10 @@ def test_prepare_import_keeps_secret_out_of_status_and_rejects_literal_auth(tmp_
         [{"source": "cursor", "name": "good"}, {"source": "cursor", "name": "bad"}], tmp_path,
     )
 
-    assert additions["good"]["env"] == {"TOKEN": "stdio-secret"}
+    assert additions["good"]["env"] == {"TOKEN": "masked"}
     assert statuses[0] == {"name": "good", "kind": "stdio", "status": "pending"}
-    assert statuses[1]["name"] == "bad"
-    assert statuses[1]["status"].startswith("failed:")
+    assert additions["bad"]["headers"] == {"Authorization": "http-secret"}
+    assert statuses[1] == {"name": "bad", "kind": "remote", "status": "pending"}
     assert "http-secret" not in json.dumps(statuses)
 
 
@@ -73,215 +74,256 @@ def test_prepare_import_refuses_duplicate_server_names_from_multiple_clients(tmp
 
     assert additions == {}
     assert statuses == [
-        {"name": "same", "status": "failed: selected server name conflicts with another selection"},
-        {"name": "same", "status": "failed: selected server name conflicts with another selection"},
+        {"name": "same", "status": "failed: selected app name conflicts with another selection"},
+        {"name": "same", "status": "failed: selected app name conflicts with another selection"},
     ]
 
 
-class _FakeTool:
-    def __init__(self, name):
-        self.name = name
-        self.session_open = True
+def test_legacy_import_writer_is_refused_without_writing_settings():
+    from tools.mcp_config import MCPConfigError
+
+    with pytest.raises(MCPConfigError, match="Connected apps"):
+        mcp_import.save_import({"server": {"command": "existing"}})
 
 
-@pytest.fixture
-def runtime(monkeypatch):
-    from infra import state
-    from tools import mcp_runtime
-    from tools.registry import ToolRegistry
-
-    monkeypatch.setattr(mcp_runtime, "_stack", None)
-    monkeypatch.setattr(mcp_runtime, "_stopped", False)
-    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
-    monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
-    monkeypatch.setattr(mcp_runtime, "_connected", set())
-    monkeypatch.setattr(state, "_agent", None)
-    attempts = []
-
-    async def fake_connect(config, registry, stack):
-        errors = {}
-        for name, server in config.items():
-            attempts.append(name)
-            if server.get("fail"):
-                errors[name] = "unavailable"
-                continue
-            tool = _FakeTool(f"{name}_tool")
-            registry.register(tool)
-
-            async def close(tool=tool):
-                tool.session_open = False
-
-            stack.push_async_callback(close)
-        return errors
-
-    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", fake_connect)
-    return mcp_runtime, attempts
-
-
-def test_reload_adds_servers_without_disturbing_existing_sessions(runtime, monkeypatch):
-    from infra import state
-    from tools.registry import ToolRegistry
-
-    mcp_runtime, attempts = runtime
-
-    async def scenario():
-        await mcp_runtime.start_mcp_runtime({"old": {}})
-        cached = type("Agent", (), {"tools": ToolRegistry()})()
-        mcp_runtime.register_mcp_tools(cached.tools)
-        monkeypatch.setattr(state, "_agent", cached)
-        old_tool = cached.tools.get("old_tool")
-
-        errors = await mcp_runtime.reload_mcp_runtime(
-            {"old": {}, "new": {}, "offline": {"fail": True}})
-        try:
-            assert errors == {"offline": "unavailable"}
-            assert cached.tools.get("new_tool") is not None
-            assert cached.tools.get("old_tool") is old_tool and old_tool.session_open
-            assert attempts == ["old", "new", "offline"]
-            await mcp_runtime.reload_mcp_runtime({"old": {}, "new": {}, "offline": {}})
-            assert attempts == ["old", "new", "offline", "offline"]
-        finally:
-            await mcp_runtime.stop_mcp_runtime()
-        assert not old_tool.session_open
-
-    asyncio.run(scenario())
-
-
-def test_reload_starts_the_runtime_when_it_never_started(runtime):
-    mcp_runtime, _ = runtime
-
-    async def scenario():
-        try:
-            assert await mcp_runtime.reload_mcp_runtime({"first": {}}) == {}
-            assert mcp_runtime._registry.has("first_tool")
-        finally:
-            await mcp_runtime.stop_mcp_runtime()
-
-    asyncio.run(scenario())
-
-
-def test_save_import_classifies_matching_and_conflicting_existing_servers(monkeypatch):
-    from infra import database, settings
-
-    stored = {"tools": {"mcpServers": {"server": {"command": "existing"}}}}
-
-    @contextmanager
-    def fake_transaction(*_args, **_kwargs):
-        yield object()
-
-    monkeypatch.setattr(database, "write_transaction", fake_transaction)
-    monkeypatch.setattr(settings, "get_setting", lambda key, db: stored.get(key))
-    monkeypatch.setattr(settings, "set_setting", lambda key, value, db: stored.__setitem__(key, value))
-
-    equal = mcp_import.save_import({"server": {"command": "existing"}})
-    conflict = mcp_import.save_import({"server": {"command": "different"}})
-
-    assert equal == {"server": "existing_equal"}
-    assert conflict == {"server": "conflict"}
-    assert stored["tools"]["mcpServers"] == {"server": {"command": "existing"}}
-
-
-def test_import_reports_each_server_status_without_config(monkeypatch):
-    from api import mcp
-    from tools import mcp_import as importer
-
-    async def fake_off_db(fn, *_args):
-        assert fn is importer.prepare_import
-        return ({"working": {"command": "fixture"}, "offline": {"command": "fixture"}}, [
-            {"name": "working", "kind": "stdio", "status": "pending"},
-            {"name": "offline", "kind": "stdio", "status": "pending"},
-        ])
-
-    async def fake_in_db(fn, *_args):
-        if fn is importer.save_import:
-            return {"working": "saved", "offline": "saved"}
-        return {"working": {"command": "fixture"}, "offline": {"command": "fixture"}}
-
-    async def fake_reload(config):
-        assert set(config) == {"working", "offline"}
-        return {"offline": "server unavailable"}
-
-    monkeypatch.setattr(mcp, "run_off_db", fake_off_db)
-    monkeypatch.setattr(mcp, "run_in_db", fake_in_db)
-    monkeypatch.setattr("tools.mcp_runtime.reload_mcp_runtime", fake_reload)
-
-    result = asyncio.run(mcp.import_servers({"servers": [
-        {"source": "cursor", "name": "working"}, {"source": "cursor", "name": "offline"},
-    ]}, {}))
-
-    assert result == {"servers": [
-        {"name": "working", "kind": "stdio", "status": "working"},
-        {"name": "offline", "kind": "stdio", "status": "failed: server unavailable"},
-    ]}
-
-
-def test_import_reloads_a_matching_existing_server(monkeypatch):
-    from api import mcp
-    from tools import mcp_import as importer
-
-    async def fake_off_db(_fn, *_args):
-        return ({"existing": {"command": "fixture"}}, [
-            {"name": "existing", "kind": "stdio", "status": "pending"},
-        ])
-
-    async def fake_in_db(fn, *_args):
-        if fn is importer.save_import:
-            return {"existing": "existing_equal"}
-        return {"existing": {"command": "fixture"}}
-
-    reloaded = []
-
-    async def fake_reload(config):
-        reloaded.append(config)
-        return {}
-
-    monkeypatch.setattr(mcp, "run_off_db", fake_off_db)
-    monkeypatch.setattr(mcp, "run_in_db", fake_in_db)
-    monkeypatch.setattr("tools.mcp_runtime.reload_mcp_runtime", fake_reload)
-
-    result = asyncio.run(mcp.import_servers({"servers": [{"source": "cursor", "name": "existing"}]}, {}))
-
-    assert result == {"servers": [{"name": "existing", "kind": "stdio", "status": "working"}]}
-    assert reloaded == [{"existing": {"command": "fixture"}}]
-
-
-def test_import_reports_conflicting_existing_server_without_reloading(monkeypatch):
-    from api import mcp
-    from tools import mcp_import as importer
-
-    async def fake_off_db(_fn, *_args):
-        return ({"existing": {"command": "fixture"}}, [
-            {"name": "existing", "kind": "stdio", "status": "pending"},
-        ])
-
-    async def fake_in_db(fn, *_args):
-        if fn is importer.save_import:
-            return {"existing": "conflict"}
-        pytest.fail("a conflicting import must not read settings for reload")
-
-    async def fake_reload(_config):
-        pytest.fail("a conflicting import must not reload MCP sessions")
-
-    monkeypatch.setattr(mcp, "run_off_db", fake_off_db)
-    monkeypatch.setattr(mcp, "run_in_db", fake_in_db)
-    monkeypatch.setattr("tools.mcp_runtime.reload_mcp_runtime", fake_reload)
-
-    result = asyncio.run(mcp.import_servers({"servers": [{"source": "cursor", "name": "existing"}]}, {}))
-
-    assert result == {"servers": [{
-        "name": "existing",
-        "kind": "stdio",
-        "status": "failed: a server named existing is already set up in CORSIA; kept the existing one",
-    }]}
-
-
-def test_empty_import_is_rejected():
+def test_import_route_rejects_override_fields():
     from fastapi import HTTPException
     from api import mcp
 
-    with pytest.raises(HTTPException, match="nonempty source/name pairs") as error:
-        asyncio.run(mcp.import_servers({"servers": []}, {}))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(mcp.import_servers({"servers": [{"source": "cursor", "name": "server", "url": "https://bad.test"}]}, {}))
     assert error.value.status_code == 422
+    assert error.value.detail == "each selected app must contain only source and name"
+
+
+def test_import_route_returns_awaiting_approval_for_a_valid_selection(tmp_path, isolated_db, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.mcp import router
+    from infra.auth import require_user_header_only
+
+    _json(tmp_path / ".cursor/mcp.json", {"mcpServers": {"fixture": {"command": "npx"}}})
+    monkeypatch.setattr(mcp_import, "_home", lambda: tmp_path)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user_header_only] = lambda: {"id": "importer"}
+
+    response = TestClient(app).post("/api/mcp/import", json={
+        "servers": [{"source": "cursor", "name": "fixture"}],
+    })
+
+    assert response.status_code == 200
+    assert response.json()["rows"] == [{
+        "id": response.json()["rows"][0]["id"], "name": "fixture", "state": "awaiting_approval",
+    }]
+
+
+def test_proxy_authorization_import_is_classified_as_cannot_connect(tmp_path):
+    import sqlite3
+
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    _json(tmp_path / ".claude.json", {"mcpServers": {"Proxy": {
+        "type": "http", "url": "https://example.test/mcp", "headers": {"Proxy-Authorization": "fake"},
+    }}})
+
+    result = mcp_import.import_selected(
+        [{"source": "claude_code", "name": "Proxy"}], db=db, home=tmp_path, actor="agent",
+    )
+
+    assert result == {"rows": [{"name": "Proxy", "status": "cannot_connect"}]}
+    assert mcp_import.IMPORT_UNSUPPORTED == "CORSIA can't connect to that kind of app yet."
+
+
+def test_import_rolls_back_pending_app_when_key_store_write_fails(tmp_path, monkeypatch):
+    import sqlite3
+
+    from infra import key_store
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    _json(tmp_path / ".claude.json", {"mcpServers": {
+        "fails": {"type": "http", "url": "https://first.test/mcp", "headers": {"Authorization": "one"}},
+        "works": {"type": "http", "url": "https://second.test/mcp", "headers": {"Authorization": "two"}},
+    }})
+    original = key_store.set_managed_value
+    calls = 0
+
+    def fail_once(name, value, *, db=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise key_store.KeyStoreError("injected failure")
+        original(name, value, db=db)
+
+    monkeypatch.setattr(key_store, "set_managed_value", fail_once)
+    result = mcp_import.import_selected(
+        [{"source": "claude_code", "name": "fails"}, {"source": "claude_code", "name": "works"}],
+        db=db, home=tmp_path, actor="agent",
+    )
+
+    assert result["rows"] == [
+        {"name": "fails", "status": "failed"},
+        {"id": result["rows"][1]["id"], "name": "works", "state": "awaiting_approval"},
+    ]
+    assert db.execute("SELECT name FROM connected_apps").fetchall()[0]["name"] == "works"
+
+
+def test_import_selected_creates_pending_app_and_keeps_key_out_of_row(tmp_path):
+    import sqlite3
+
+    from connections.app_reach import get_app
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    project = tmp_path / "corsia"
+    project.mkdir()
+    seed_project(db, "project", project)
+    _json(tmp_path / ".claude.json", {
+        "projects": {str(project): {"mcpServers": {
+            "GitHub": {"type": "http", "url": "https://example.test/mcp", "headers": {"Authorization": "import-secret"}},
+        }}},
+    })
+
+    result = mcp_import.import_selected([{"source": "claude_code", "name": "GitHub"}], db=db, home=tmp_path, actor="agent")
+
+    assert result["rows"][0]["state"] == "awaiting_approval"
+    app = get_app(result["rows"][0]["id"], db=db)
+    rendered = json.dumps(app)
+    assert "import-secret" not in rendered
+    assert app["config"]["key_refs"] == [{"kind": "header", "name": "Authorization"}]
+    assert app["reach"] == {"mode": "selected", "project_ids": ["project"], "outside_projects": False}
+    assert db.execute("SELECT value FROM settings WHERE key='tools'").fetchone() is None
+
+
+def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeypatch, caplog):
+    import sqlite3
+
+    from connections.app_reach import get_app
+    from infra import state
+    from infra.database import initialize_schema
+    from tools import mcp_runtime
+    from tools.registry import ToolRegistry
+
+    secret = "backend-environment-secret-for-codex-fixture"
+    monkeypatch.setenv("X", secret)
+    _json(tmp_path / ".codex/config.toml", {})
+    (tmp_path / ".codex/config.toml").write_text(
+        '[mcp_servers.codex]\nurl = "https://example.test/mcp"\nbearer_token_env_var = "X"\n'
+        '[mcp_servers.codex.env_http_headers]\nAuthorization = "X"\n',
+        encoding="utf-8",
+    )
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+
+    imported = mcp_import.import_selected(
+        [{"source": "codex", "name": "codex"}], db=db, home=tmp_path, actor="agent",
+    )
+    app = get_app(imported["rows"][0]["id"], db=db)
+
+    assert imported["rows"][0]["state"] == "awaiting_approval"
+    assert app["config"]["needs_token"] is True
+    assert app["config"]["key_refs"] == [{"kind": "header", "name": "Authorization"}]
+    assert secret not in json.dumps({"row": app, "response": imported})
+    assert secret not in str(db.execute("SELECT name,value_ref FROM key_store_entries").fetchall())
+
+    monkeypatch.setattr(mcp_runtime, "_stopped", False)
+    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
+    monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
+    monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
+    monkeypatch.setattr(mcp_runtime, "_app_tools", {})
+    monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_states", {})
+    monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    monkeypatch.setattr(state, "_agent", None)
+    published = []
+    key_is_set = False
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return "codex", {
+                **app["config"], "secret_headers": ["Authorization"], "connected_app_id": args[0],
+            }
+        if fn.__name__ == "load_missing_app_key_refs":
+            return [] if key_is_set else ["Authorization"]
+        if fn.__name__ == "record_runtime_app_state":
+            published.append(args[1])
+            return None
+        raise AssertionError(fn.__name__)
+
+    async def should_not_connect(*_args):
+        raise AssertionError("an imported environment token must not open a connection")
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", should_not_connect)
+    result = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", str(app["id"])))
+
+    assert result["state"] == "needs_token"
+    assert [item["state"] for item in published] == ["connecting", "needs_token"]
+
+    key_is_set = True
+
+    async def connects(config, _registry, _stack):
+        assert config["codex"]["secret_headers"] == ["Authorization"]
+        return {}
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connects)
+    result = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", str(app["id"])))
+
+    assert result["state"] == "working"
+    assert secret not in json.dumps(result)
+    assert secret not in caplog.text
+
+
+def test_project_reach_uses_real_paths_components_and_deepest_match(tmp_path):
+    import sqlite3
+
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    outer = tmp_path / "a" / "b"
+    nested = outer / "nested"
+    sibling = tmp_path / "a" / "bc"
+    nested.mkdir(parents=True)
+    sibling.mkdir()
+    for project_id, path in (("outer", outer), ("nested", nested)):
+        seed_project(db, project_id, path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(nested, target_is_directory=True)
+
+    reach, missing = project_reach(alias / "work", db=db)
+    sibling_reach, sibling_missing = project_reach(sibling, db=db)
+
+    assert reach == {"mode": "selected", "project_ids": ["nested"], "outside_projects": False}
+    assert missing is None
+    assert sibling_reach is None
+    assert sibling_missing == "bc"
+
+
+def test_key_descriptor_rejects_non_env_or_header_kind_and_empty_headers_do_not_redact():
+    import sqlite3
+
+    from connections.app_reach import AppReachError, key_ref_descriptors
+    from infra.database import initialize_schema
+    from tools.mcp import _StoredHeadersAuth
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+
+    with pytest.raises(AppReachError):
+        key_ref_descriptors("app", {"key_refs": [{"kind": "runtime_app_config", "name": "bad"}]}, db=db)
+    assert _StoredHeadersAuth({"X-Empty": ""}, "https://example.test").redact("safe") == "safe"
 
 
 def test_conductor_routes_are_open():

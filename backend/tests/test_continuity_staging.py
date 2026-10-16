@@ -425,7 +425,8 @@ def test_checkpoint_metadata_is_reserved_but_tool_surfaces_do_not_change(tmp_pat
     from infra.continuity_staging import checkpoint_execution_scope
     from subagents.harness_tool_bridge import write_cc_mcp_config
     from tools.continuity import ContinuityEditTool
-    from tools.registry import ToolRegistry
+    from tools.registry import ToolRegistry, _is_reserved_execution_param
+    from tools.tool_execution_context import strip_reserved_context
 
     registry = ToolRegistry()
     registry.register(ContinuityEditTool())
@@ -435,8 +436,8 @@ def test_checkpoint_metadata_is_reserved_but_tool_surfaces_do_not_change(tmp_pat
     ), encoding="utf-8").read())
     with checkpoint_execution_scope("cp-1"):
         assert registry.get_definitions() == before
-        assert registry._strip_reserved_context(
-            {"operation": "inspect", "_checkpoint_id": "spoof"}
+        assert strip_reserved_context(
+            {"operation": "inspect", "_checkpoint_id": "spoof"}, _is_reserved_execution_param,
         ) == {"operation": "inspect"}
         second = json.loads(open(write_cc_mcp_config(
             thread_id="thread-1", tool_token="token"

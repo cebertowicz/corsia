@@ -162,6 +162,7 @@ def _result(
     continuity_mode: str,
     model_context_window: int,
     block_reason: str | None = None,
+    delivered_rows: tuple[Any, ...] = (),
 ) -> ContextPreflightResult:
     return ContextPreflightResult(
         status=status,
@@ -173,6 +174,7 @@ def _result(
         source_tokens=usage.source_tokens,
         source_section_tokens=usage.source_section_tokens,
         block_reason=block_reason,
+        delivered_rows=delivered_rows,
     )
 
 
@@ -230,4 +232,5 @@ def check_context_preflight(
         continuity_mode="blocked" if reason else "full",
         model_context_window=resolved_window,
         block_reason=reason,
+        delivered_rows=tuple(rows),
     )

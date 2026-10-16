@@ -57,7 +57,7 @@ async def test_real_handlers_without_a_credential(isolated_db):
 
 BLOCKLIST_ROWS = {
     "B1": 1, "B2": 1, "B3": 1, "B4": 3, "B5": 2, "B6": 1, "B8": 4,
-    "B9": 1, "B10": 1, "B11": 10, "B12": 1,
+    "B9": 1, "B10": 1, "B11": 11, "B12": 1, "B15": 1,
 }
 
 
@@ -104,6 +104,31 @@ async def test_registered_routes_are_open_unless_blocklisted(isolated_db):
 
 
 @pytest.mark.asyncio
+async def test_connected_app_refusals_surface_a_safe_remedy(isolated_db):
+    conductor, _, _ = _actors()
+    tool = CorsiaApiTool()
+
+    refused = json.loads(await tool.execute(
+        "POST", "/api/mcp/servers",
+        body={
+            "name": "test-app", "config": {"command": "test"}, "key_refs": [],
+            "reach": {"mode": "all", "project_ids": [], "outside_projects": False},
+        },
+        _thread_id=conductor,
+    ))
+
+    assert refused == {
+        "status": 403,
+        "error": "API request failed; check the route schema, target and current state",
+        "remedy": "Connected-app reach comes from your current thread; remove reach and retry.",
+    }
+    person_only = await tool.execute(
+        "POST", "/api/mcp/servers/test-app/approve", _thread_id=conductor,
+    )
+    assert "only the signed-in person may approve or decline a connected-app proposal" in person_only
+
+
+@pytest.mark.asyncio
 async def test_previously_refused_settings_read_succeeds(isolated_db):
     # first-run.md tells the conductor to read the reviewer status here; it was off-limits.
     # (`/api/system/settings`, named in the brief, is not a registered route: it 404s.)
@@ -132,6 +157,7 @@ async def test_previously_refused_settings_read_succeeds(isolated_db):
     ("POST", "/api/artifacts/a/comments/root/viewed"),
     ("DELETE", "/api/security/alert"),
     ("PUT", "/api/corsia-agent"),
+    ("POST", "/api/threads/t/messages/m/retry"), ("POST", "/api/threads/t/messages/m/cancel"),
 ])
 def test_each_blocklist_family_is_refused(method, path):
     assert off_limits(path, method), (method, path)
@@ -159,6 +185,8 @@ def test_every_blocklist_row_has_a_refused_representative():
         ("POST", "/api/threads/t/seen"), ("POST", "/api/plans/operator/threads/t/seen"),
         ("POST", "/api/artifacts/a/comments/c/viewed"), ("POST", "/api/doc-reviews"),
         ("DELETE", "/api/security/alert"),
+        ("POST", "/api/threads/t/messages/m/retry"),
+        ("POST", "/api/mcp/servers/app/approve"),
     ]:
         for index, (_, method_pattern, path_pattern, _) in enumerate(OFF_LIMITS_ROWS):
             if re.fullmatch(method_pattern, method) and re.search(path_pattern, path):

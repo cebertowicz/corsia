@@ -1,9 +1,11 @@
 """SQLite schema DDL used by database initialization."""
-from __future__ import annotations
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
+from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
+from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
 from infra.bulletin_schema import BULLETIN_SCHEMA_SQL
 from infra.connection_schema import CONNECTION_SCHEMA_SQL
+from infra.connected_apps_schema import CONNECTED_APPS_SCHEMA_SQL
 from infra.vendor_policy_schema import VENDOR_SUBSCRIPTION_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from infra.context_change_schema import CONTEXT_CHANGE_SCHEMA_SQL
@@ -25,17 +27,14 @@ from infra.plan_schema import STRUCTURED_PLAN_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.project_repo_policy_schema import PROJECT_REPO_POLICY_TABLE_SQL
 from infra.provider_availability_schema import PROVIDER_AVAILABILITY_TABLE_SQL
+from infra.settings_schema import SETTINGS_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 120
+SCHEMA_VERSION = 123
 SCHEMA_SQL = f"""
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+    {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
     CREATE TABLE IF NOT EXISTS threads (
         id TEXT PRIMARY KEY,
@@ -110,7 +109,7 @@ SCHEMA_SQL = f"""
     {STAGING_SCHEMA_SQL}
     {CONTINUITY_SCHEMA_SQL}
     {PRESENCE_SCHEMA_SQL}
-    {THREAD_UPDATES_SCHEMA_SQL}
+    {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}{EMAIL_SCREENS_SCHEMA_SQL}
     {OUTCOME_EVENTS_SCHEMA_SQL}
     {LESSON_PLACEMENT_CHECK_SCHEMA_SQL}
     {PROVIDER_AVAILABILITY_TABLE_SQL};
@@ -235,6 +234,7 @@ SCHEMA_SQL = f"""
     {USAGE_SCHEMA_SQL}
     {ACCOUNTS_SCHEMA_SQL}
     {KEY_STORE_SCHEMA_SQL}
+    {CONNECTED_APPS_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS fact_extraction_runs (
         run_date TEXT PRIMARY KEY,
@@ -519,7 +519,6 @@ SCHEMA_SQL = f"""
         pr_key       TEXT PRIMARY KEY,
         reviewed_sha TEXT NOT NULL
     );
-
     {DOCUMENT_SCHEMA_SQL}
     {MEASUREMENT_INDEX_SQL}
     {WRITE_HOLD_INDEX_SQL}
