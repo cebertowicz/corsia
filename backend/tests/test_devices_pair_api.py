@@ -145,13 +145,15 @@ def test_disabled_pair_start_has_no_listener_or_key_side_effect(tmp_path):
 
 def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypatch):
     name = "Studio"
-    monkeypatch.setattr(devices_api, "local_hostname", lambda: name)
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: name)
     monkeypatch.setattr(
         runtime,
         "listener",
         SimpleNamespace(announcement=SimpleNamespace(announced_name=None, error="DNS-SD failed")),
     )
     client_pairing = _client_pairing(_enable_pairing())
+    updates: list[str] = []
+    monkeypatch.setattr(runtime.pairing, "_on_update", lambda: updates.append("updated"))
     msg_c = client_pairing.start()
     client = TestClient(app)
     started = _start(client, msg_c, host="Studio.Local.")
@@ -167,6 +169,7 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
     assert finished.status_code == 200
     expected_confirm_s = hmac.new(server_key, transcript + b"name:Studio", hashlib.sha256).digest()
     assert finished.json() == {"confirm_s": _encoded(expected_confirm_s), "name": name}
+    assert updates == ["updated"]
     assert not hmac.compare_digest(
         base64.b64decode(finished.json()["confirm_s"]),
         hmac.new(server_key, transcript + b"name:Other", hashlib.sha256).digest(),
@@ -174,12 +177,13 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
     repeated = _finish(client, payload["exchange_id"], confirm_c)
     assert repeated.status_code == 409
     assert repeated.json()["detail"]["reason"] == "expired"
+    assert updates == ["updated"]
 
 
 def test_pair_finish_normalizes_and_caps_name_at_a_utf8_boundary(monkeypatch):
     source_name = "e\u0301" * 31 + "aé"
     expected_name = "é" * 31 + "a"
-    monkeypatch.setattr(devices_api, "local_hostname", lambda: source_name)
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: source_name)
     client_pairing = _client_pairing(_enable_pairing())
     msg_c = client_pairing.start()
     client = TestClient(app)
@@ -207,7 +211,7 @@ def test_pair_finish_normalizes_and_caps_name_at_a_utf8_boundary(monkeypatch):
 
 
 def test_pair_api_client_rejects_confirm_c_replayed_as_confirm_s(monkeypatch):
-    monkeypatch.setattr(devices_api, "local_hostname", lambda: "studio.local")
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "studio.local")
     client_pairing = _client_pairing(_enable_pairing())
     msg_c = client_pairing.start()
     client = TestClient(app)
@@ -242,7 +246,7 @@ def test_pair_api_rejects_fifth_pending_exchange_with_429():
 
 def test_pair_api_failed_finish_consumes_exchange(monkeypatch):
     name = "not-disclosed.local"
-    monkeypatch.setattr(devices_api, "local_hostname", lambda: name)
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: name)
     client_pairing = _client_pairing(_enable_pairing())
     client = TestClient(app)
     started = _start(client, client_pairing.start())
@@ -277,7 +281,7 @@ def test_pair_api_finishes_pinned_exchange_with_spki_binding(monkeypatch):
     name = "studio.local"
     server_spki = bytes(range(32))
     monkeypatch.setattr(devices_api, "host_spki_sha256", lambda: server_spki)
-    monkeypatch.setattr(devices_api, "local_hostname", lambda: name)
+    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: name)
     client_pairing = _client_pairing(_enable_pairing())
     msg_c = client_pairing.start()
     client = TestClient(app)

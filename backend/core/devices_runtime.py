@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from core.device_pairing import DevicePairing
-from infra.devices_listener import DevicesListener, lan_addresses, local_hostname
+from infra.devices_listener import DevicesListener, lan_addresses, remote_connect_name
+from infra.dns_sd import DNSServiceAnnouncement
+from infra.state.ws import schedule_devices_updated
+
+
+NameResolver = Callable[[DNSServiceAnnouncement | None], str]
 
 
 @dataclass(slots=True)
 class DevicesRuntime:
     pairing: DevicePairing
     listener: DevicesListener | None = None
+    _name_resolver: NameResolver = field(init=False, repr=False)
 
-    def __init__(self) -> None:
-        self.pairing = DevicePairing()
+    def __init__(self, *, name_resolver: NameResolver | None = None) -> None:
+        self.pairing = DevicePairing(on_update=schedule_devices_updated)
         self.listener = None
+        self._name_resolver = name_resolver or remote_connect_name
 
     @property
     def enabled(self) -> bool:
@@ -46,6 +54,10 @@ class DevicesRuntime:
         ):
             await self.enable(app)
 
+    def remote_connect_name(self) -> str:
+        announcement = self.listener.announcement if self.listener is not None else None
+        return self._name_resolver(announcement)
+
     def snapshot(self, *, include_code: bool = False) -> dict:
         listening = self.listener.listening if self.listener is not None else {"error": None}
         announcement = self.listener.announcement if self.listener is not None else None
@@ -54,7 +66,7 @@ class DevicesRuntime:
             "enabled": self.enabled,
             "listening": listening,
             "announced_name": announcement.announced_name if announcement else None,
-            "local_hostname": local_hostname(),
+            "local_hostname": self.remote_connect_name(),
             "lan_addresses": lan_addresses(include_link_local=listener_active),
             "code": self.pairing.status(include_code=include_code),
         }
