@@ -19,7 +19,7 @@ import inspect
 
 import pytest
 
-# Identity the registry injects itself (see ToolRegistry._inject_context); these
+# Identity the registry injects itself (see tools.tool_execution_context.inject_context); these
 # are deliberately not declared to the model.
 INJECTED_PREFIX = "_"
 

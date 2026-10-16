@@ -190,10 +190,10 @@
       "sha256": "439a391de2f259ea39ce913808296ca144440758f5fcb919581251036116d3a4"
     },
     {
-      "bytes": 19098,
+      "bytes": 19107,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
-      "sha256": "20129cf258135198b5ffb00c555fa957818be80048fd67856015baa635f6601e"
+      "sha256": "5d4eca967dcc574bff1a264d26843bf2fba309b2cd57e9152766753741638dd6"
     },
     {
       "bytes": 3741,
@@ -220,16 +220,22 @@
       "sha256": "592240d36f01706c044460cde164df00e3339d3fffb64f8bfe4b2cec6126d2ba"
     },
     {
-      "bytes": 9241,
+      "bytes": 9200,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "ad6abea4166917a69fcde7713b13a83e9ced6dc9a0c06ffd2920cd795f13aac9"
+      "sha256": "51cac3b799115766fdf780394ce5a6639b8e8ec95796803787a010ae442ed045"
     },
     {
-      "bytes": 17594,
+      "bytes": 17589,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "6c397277a03dbc9fa86122213c62b7c0c32a9b1b9ffbe33f842b45293db987ed"
+      "sha256": "6fabfc68b5b7131be88fb15122b97d5951f8143c3dfdffe54c01eb6507f286a0"
+    },
+    {
+      "bytes": 851,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/import-result-lines.md",
+      "sha256": "f9950d0cf9ea49a23261623e6e2122d6fd999b5e8d164a3d25b044f81c64e229"
     },
     {
       "bytes": 3542,
@@ -274,16 +280,16 @@
       "sha256": "cd4ebb24a0a98445ad5a85de24f9be6413cb1a413cc7663afb5f474820e949bc"
     },
     {
-      "bytes": 6783,
+      "bytes": 9129,
       "kind": "skill",
       "path": "skills/coordination-api/SKILL.md",
-      "sha256": "764b55e5663be4f84f0bdfaab35684fbde2abc5768b692d7c753377b9365fbb2"
+      "sha256": "122c39cd87851e430f12991331e7252deacf6284b08ef57bb88177d75edfd95b"
     },
     {
-      "bytes": 4113,
+      "bytes": 4161,
       "kind": "skill",
       "path": "skills/decide-or-raise/SKILL.md",
-      "sha256": "af9258a5cb11e5c3be6ca35c2df2344849194a16fb264364e095fd9e69296fbf"
+      "sha256": "6c9597046fccbdd6b5ecde567094c8607fc9f780fd499697a3d87dd3efa04510"
     },
     {
       "bytes": 4698,

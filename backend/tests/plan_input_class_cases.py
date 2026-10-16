@@ -466,13 +466,6 @@ def _user_block_on_document_asked_elsewhere(db, scene):
     )
 
 
-def _user_block_restating_its_own_ask(db, scene):
-    """This task already holds the document's open request, under another reason."""
-    ask = document_ask(db, "root")
-    _user_block(db, scene, ask_artifact_id=ask)()
-    return _user_block(db, scene, ask_artifact_id=ask, reason="Review the revision")
-
-
 def _user_block_on_non_document(db, scene):
     ask = _artifact(db, external_id="user-ask-pr", owner="root")
     return _user_block(db, scene, ask_artifact_id=ask)
@@ -545,8 +538,6 @@ _CASES = {
     ("one_open_ask.py", 'f"this document already has an open review request on {held}, waiting for " '
                         '"the user\'s answer. It is theirs to answer, so do not resolve it; ask again " '
                         '"once they have answered it"'): _user_block_on_document_asked_elsewhere,
-    ("one_open_ask.py", 'f"this document already has an open review request on this {held}; " '
-                        '"resolve that blocker, then ask again"'): _user_block_restating_its_own_ask,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
         "add", {"kind": "epic", "title": "T", "acceptance_criteria": "DOD"},

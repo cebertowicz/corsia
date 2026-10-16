@@ -25,6 +25,7 @@ export interface AttentionItem {
 	defer_condition?: { type: string; value?: string } | null;
 	owner_thread?: string | null;
 	levels?: string[];
+	hold_ids?: string[];
 }
 
 export interface AttentionList {
@@ -126,12 +127,12 @@ export async function clearAttention(
 	token: string,
 	artifactId: string,
 	outcome: string,
-	opts?: { reason?: string; condition?: Record<string, unknown> }
+	opts?: { reason?: string; condition?: Record<string, unknown>; hold_ids?: string[] }
 ): Promise<ClearResult> {
 	return req<ClearResult>(`/api/attention/${encodeURIComponent(artifactId)}/clear`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ token, outcome, reason: opts?.reason, condition: opts?.condition })
+		body: JSON.stringify({ token, outcome, reason: opts?.reason, condition: opts?.condition, hold_ids: opts?.hold_ids })
 	});
 }
 
@@ -148,6 +149,7 @@ export async function disposeAttention(
 		condition?: Record<string, unknown>;
 		replacement_id?: string;
 		actor_thread?: string;
+		hold_ids?: string[];
 	}
 ): Promise<DisposeResult> {
 	return req<DisposeResult>(`/api/attention/${encodeURIComponent(artifactId)}/dispose`, {

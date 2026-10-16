@@ -29,8 +29,10 @@ export function usageSourceRows(usage: ContextUsage): ContextSheetSourceRow[] {
 			tokenLabel: promptTokenLabel(Math.round(usage.tool_def_tokens)),
 		});
 	}
+	const loadedTools = (usage.loaded_tool_tokens ?? []).filter((entry) => Number.isFinite(entry.tokens) && entry.tokens > 0);
+	const loadedTotal = loadedTools.reduce((sum, entry) => sum + Math.round(entry.tokens), 0);
 	if (usage.history_tokens > 0 || usage.history_messages > 0) {
-		const tokenCount = usage.history_tokens > 0 ? Math.round(usage.history_tokens) : null;
+		const tokenCount = usage.history_tokens > 0 ? Math.max(0, Math.round(usage.history_tokens) - loadedTotal) : null;
 		rows.push({
 			id: 'usage:conversation-history',
 			layer: 'history',
@@ -45,9 +47,21 @@ export function usageSourceRows(usage: ContextUsage): ContextSheetSourceRow[] {
 			statusLabel: 'Included',
 			statusClass: 'included',
 			deltaLabel: '',
-			countLabel: usage.history_messages > 0 ? pluralCount(usage.history_messages, 'Message') : '',
+			countLabel: usage.history_messages > 0 ? pluralCount(usage.history_messages, 'message') : '',
 			tokenCount,
 			tokenLabel: promptTokenLabel(tokenCount),
+		});
+	}
+	for (const entry of loadedTools) {
+		const tokenCount = Math.round(entry.tokens);
+		const name = entry.display_name || entry.server;
+		rows.push({
+			id: `usage:loaded-tool:${entry.server}`, layer: 'history', category: 'History',
+			label: `${name}, looked up (estimated)`, stableReference: '', status: 'included',
+			reason: 'Estimated cost of tool definitions this conversation looked up, already inside conversation history',
+			ownerSurface: 'conversation-history', ownerLabel: 'Conversation history',
+			actionLabel: '', statusLabel: 'Included', statusClass: 'included', deltaLabel: '',
+			countLabel: '', tokenCount, tokenLabel: promptTokenLabel(tokenCount),
 		});
 	}
 	if (usage.user_tokens > 0) {

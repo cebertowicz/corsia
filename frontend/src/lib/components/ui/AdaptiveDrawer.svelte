@@ -15,6 +15,7 @@
 		ariaLabel,
 		heading = null,
 		headingMeta = null,
+		contextLabel = null,
 		leading,
 		doneLabel = 'Done',
 		onClose,
@@ -41,6 +42,8 @@
 		heading?: string | null;
 		/** A short fact beside the title, such as a count; shown smaller in the accent colour. */
 		headingMeta?: string | null;
+		/** Context beside Done when content owns the drawer title. */
+		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
 		/** Visible text of the dismiss control; it is also its accessible name. */
@@ -178,7 +181,7 @@
 				</div>
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
-					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else}<span class="drawer-head-spacer"></span>{/if}
+					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
 				</div>{/if}
 			</div>
@@ -319,7 +322,8 @@
 	.drawer-lead { justify-self: start; }
 	.drawer-head.centered .drawer-done { justify-self: end; }
 	/* Holds Done at the trailing edge when the content owns the title. */
-	.drawer-head-spacer { flex: 1; }
+	.drawer-head-spacer, .drawer-context { flex: 1; min-width: 0; }
+	.drawer-context { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
 	.drawer-done {
 		font: inherit;
 		font-size: var(--text-subhead);

@@ -6,6 +6,7 @@
 	import SystemBulletinsSetting from './SystemBulletinsSetting.svelte';
 	import SettingsDebug from './SettingsDebug.svelte';
 	import SettingsKeys from './SettingsKeys.svelte';
+	import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 	import { loadServerVersion } from '$lib/version';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
@@ -74,6 +75,7 @@
 		{:else if $settingsActiveSection === 'system'}
 			<SettingsSystem {systemStatus} onSwitchSection={(s) => { settingsActiveSection.set(s as SettingsSection); }} />
 			<SystemBulletinsSetting />
+			<ConnectedAppsSettings />
 		{:else if $settingsActiveSection === 'keys'}
 			<SettingsKeys />
 		{:else if $settingsActiveSection === 'debug'}

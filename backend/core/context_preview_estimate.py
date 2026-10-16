@@ -64,6 +64,26 @@ def _installed_checkpoint_history(
     )
 
 
+def _looked_up_tools(
+    prepared_history: list[dict[str, Any]] | None, delivered_rows: tuple[Any, ...],
+    retained_provider_tokens: int | None, model: str,
+) -> list[dict[str, Any]]:
+    """Attribute looked-up tool definitions from the history the estimate measured.
+
+    That is the checkpoint-tail message list, or the stored rows admission read
+    when no checkpoint is installed. A provider-resume handle holds its history
+    in the harness and reports none.
+    """
+    from core.loaded_tool_usage import loaded_tool_tokens
+    from tools.mcp_runtime import tool_server_index
+
+    if retained_provider_tokens is not None:
+        return []
+    return loaded_tool_tokens(
+        prepared_history, tool_server_index(), rows=delivered_rows or None, model=model,
+    )
+
+
 def _count_retained_once(estimate: dict[str, Any], retained_provider_tokens: int) -> None:
     """Total a provider-resume preview from the retained count, once.
 
@@ -110,7 +130,7 @@ def estimated_preflight(
     prepared_history, checkpoint_component = (installed.history, installed.component) if installed else (None, "")
     if retained_provider_tokens is not None:
         prepared_history = []
-    estimate = check_context_preflight(
+    admission = check_context_preflight(
         thread_id=thread_id,
         model=model,
         current_user_content=current_user_content,
@@ -120,8 +140,12 @@ def estimated_preflight(
         prepared_history=prepared_history,
         source_collection=source_collection,
         timing=timing,
-    ).to_dict()
+    )
+    estimate = admission.to_dict()
     estimate.pop("prepared_context", None)
+    loaded = _looked_up_tools(
+        prepared_history, admission.delivered_rows, retained_provider_tokens, model,
+    )
     if retained_provider_tokens is not None:
         _count_retained_once(estimate, retained_provider_tokens)
         checkpoint_tokens = 0
@@ -142,6 +166,7 @@ def estimated_preflight(
             else len(prepared_history) if prepared_history is not None else None
         ),
         "checkpoint_tokens": checkpoint_tokens,
+        "loaded_tool_tokens": loaded,
         "model_context_window": live_window,
         "block_reason": None,
         "trigger_reason": None,
