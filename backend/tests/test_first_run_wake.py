@@ -404,6 +404,13 @@ class TestAppPath:
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
+    def test_app_reference_orders_deferred_auth_and_local_failure_after_the_answer(self):
+        from onboarding import first_run_wake
+
+        reference = first_run_wake.instructions("app")
+        assert "`needs_auth`, do not install: go straight" in reference
+        assert "handle that reply first, then post its `message` and the fix it names" in reference
+
     # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
     # (`setup.setup_decisions`, the `user_profile` fields), which are not facts of their own.
     def test_served_app_reference_names_the_app_fact_keys(self):
