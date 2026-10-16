@@ -70,9 +70,8 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
     missing = sorted(variable for variable, entry in wanted.items() if entry not in stored)
     if missing:
         raise AdoptionRefused(
-            "These provider keys are not stored in CORSIA: "
-            f"{', '.join(missing)}. Move them into CORSIA before adopting; "
-            "source .env and plist values were not read."
+            "These provider keys aren’t stored in CORSIA yet: "
+            f"{', '.join(missing)}. Add them in CORSIA › Settings › Keys, then choose Try again."
         )
     needed = sum(
         path.stat().st_size
@@ -84,10 +83,8 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
     free = shutil.disk_usage(state_root).free
     if free < needed + _FREE_FLOOR_BYTES:
         raise AdoptionRefused(
-            f"There is not enough free space for the backup: {free / 1e9:.2f} GB free, "
-            f"{(needed + _FREE_FLOOR_BYTES) / 1e9:.2f} GB needed to copy {needed / 1e9:.2f} GB "
-            f"and keep a {_FREE_FLOOR_BYTES / 1e9:.2f} GB reserve. Free some space and try again; "
-            "nothing has changed."
+            f"The backup needs {(needed + _FREE_FLOOR_BYTES) / 1e9:.1f} GB free and this disk has "
+            f"{free / 1e9:.1f} GB. Free up space, then choose Try again."
         )
 
 

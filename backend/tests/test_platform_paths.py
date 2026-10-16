@@ -168,6 +168,10 @@ def test_adoption_preflight_names_the_stored_keys_it_misses_in_the_single_values
         snapshots.check_adoption_preflight(state, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"])
 
     message = str(refused.value)
+    assert message == (
+        "These provider keys aren’t stored in CORSIA yet: ANTHROPIC_API_KEY. "
+        "Add them in CORSIA › Settings › Keys, then choose Try again."
+    )
     assert "ANTHROPIC_API_KEY" in message
     assert "OPENAI_API_KEY" not in message
     assert "stored-openai-value" not in message
@@ -190,7 +194,12 @@ def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_p
     monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 1 << 60)
 
     assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
-    assert "not enough free space" in capsys.readouterr().err
+    message = capsys.readouterr().err.strip()
+    # The measured numbers and the next step, in the person's terms.
+    assert re.fullmatch(
+        r"The backup needs [\d.]+ GB free and this disk has [\d.]+ GB\. Free up space, then choose Try again\.",
+        message,
+    )
     assert not (state / "backups").exists()
 
 

@@ -308,9 +308,9 @@ pub fn adopt(
 ) -> Result<(), String> {
     plan.preflight(supported_schema)
         .map_err(|error| format!("adoption refused before changes: {error}"))?;
-    lifecycle
-        .check_ready(&plan.source.state, &plan.expected_key_names()?)
-        .map_err(|error| format!("adoption refused before changes: {error}"))?;
+    // The backend's refusal is a whole sentence that tells the person what to
+    // do, so it is shown as written.
+    lifecycle.check_ready(&plan.source.state, &plan.expected_key_names()?)?;
     let started = lifecycle.begin_drain()?;
     let operation_id = started.operation_id.clone();
     let mut status = started;
@@ -973,8 +973,7 @@ mod tests {
             fake.ready_asked,
             vec![BTreeSet::from(["OPENAI_API_KEY".to_string()])]
         );
-        assert!(error.contains("adoption refused before changes"));
-        assert!(error.contains("OPENAI_API_KEY"));
+        assert_eq!(error, "OPENAI_API_KEY is not stored in CORSIA.");
         assert!(!error.contains("never-log-this"));
         assert!(fake.events.is_empty());
     }
