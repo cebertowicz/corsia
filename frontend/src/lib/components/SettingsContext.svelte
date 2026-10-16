@@ -109,5 +109,5 @@
 	.empty, .error { margin: 0; padding: 0 var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
 	.error { color: var(--red-text); }
 	/* Settings action labels share the group label's row-text edge without changing Button globally. */
-	.actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-1); margin-top: var(--space-1); padding-left: var(--space-2); margin-left: calc(-1 * var(--space-2)); }
+	.actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-1); margin-top: var(--space-1); padding-left: var(--space-2); margin-left: -10px; }
 </style>

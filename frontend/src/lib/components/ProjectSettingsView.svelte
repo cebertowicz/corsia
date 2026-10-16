@@ -313,7 +313,8 @@
 	.project-page :global(.settings-group:first-of-type) { margin-top: var(--space-1); }
 	.group-gap { margin-top: var(--space-6); }
 	/* The policy block draws edge to edge; inset it to the page's row edge. */
-	.policy { padding: 0 var(--space-2); }
+	/* Keep the project policy's padded content inside the Settings column on a phone. */
+	.policy { box-sizing: border-box; padding: 0 var(--space-2); }
 	.note { margin: 0; padding: 0 var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
 	.note.failed { color: var(--red-text); }
 	.fld { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); }
