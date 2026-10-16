@@ -89,6 +89,14 @@ def test_service_file_lines_honour_only_the_state_workspace_and_port(tmp_path):
     ]
 
 
+def test_service_file_lines_accept_state_dir_without_an_unsupported_key_note(tmp_path):
+    paths = _platform_paths()
+    service_file = tmp_path / "service.json"
+    service_file.write_text('{"state_dir": "/state"}')
+
+    assert paths.service_file_lines(service_file) == ["state_dir=/state"]
+
+
 def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     paths = _platform_paths()
     state = tmp_path / "Application Support" / "com.cebertowicz.corsia" / "state"
