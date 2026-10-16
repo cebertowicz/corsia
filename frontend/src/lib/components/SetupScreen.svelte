@@ -12,11 +12,12 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
-
+	import SetupAccountForm from './SetupAccountForm.svelte';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
 	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
+	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
 	const classifier = createSetupClassifier();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: () => refreshSources() });
 	let page = $state<Page>('checking');
@@ -28,7 +29,9 @@
 	let password = $state('');
 	let confirmation = $state('');
 	let email = $state('');
-	let folder = $state('~/CORSIA');
+	let folder = $state('~/CORSIA'), folderChanged = $state(false);
+	let folderNotice = $state<FolderNotice>(null);
+	let folderChanging = $state(false);
 	let accountBusy = $state(false);
 	let accountError = $state('');
 	let confirmationError = $state('');
@@ -90,7 +93,7 @@
 			case 'welcome':
 				return { title: 'Welcome to CORSIA', lede: 'Your own AI team, on this computer. It remembers your projects, works with the tools and models you already use, and shows you results, not transcripts.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
 			case 'account':
-				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
+				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
@@ -183,6 +186,14 @@
 		}
 	}
 
+	async function applyFolderBeforeAccount() {
+		if (!folderChanged) return;
+		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+		if (!invoke) return;
+		await invoke('configure_work_folder', { path: folder });
+		folderChanged = false;
+	}
+
 	function validateConfirmation() {
 		confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : '';
 	}
@@ -191,6 +202,13 @@
 		validateConfirmation();
 		if (!name.trim() || !username.trim() || usernameError || password.length < 8 || confirmationError || accountBusy) return;
 		accountBusy = true; accountError = '';
+		try {
+			await applyFolderBeforeAccount();
+		} catch {
+			accountError = 'CORSIA couldn’t prepare this work folder. Choose another folder or try again.';
+			accountBusy = false;
+			return;
+		}
 		try {
 			const response = await fetch('/api/setup/first-account', {
 				method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -342,21 +360,7 @@
 		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} modelSizeGb={status.model_size_gb} {modelSize} modelLabel={downloadModelLabel}
 			wanted={localWanted} onWantedChange={(next) => localWanted = next} onRecheck={readStatus} />
 	{:else if page === 'account'}
-		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
-			<div class="group">
-				<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
-				<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
-			</div>
-			<div class="group">
-				<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
-				<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
-			</div>
-			<div class="group">
-				<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
-			</div>
-			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
-			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
-		</form>
+		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />
 	{:else if page === 'models' && existingOmlxConsent}
 		<div class="sources consent">
 			<p>CORSIA will read:</p>
@@ -387,11 +391,7 @@
 </SetupShell>
 
 <style>
-	.form { display: flex; flex-direction: column; gap: var(--space-3); max-width: calc(var(--space-8) * 8); }
-	.group { display: flex; flex-direction: column; gap: var(--space-2); }
-	.folder { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); color: var(--text-secondary); font-size: var(--text-subhead); }
-	.folder span { flex: none; white-space: nowrap; }
-	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
+	/* Account form styles live with SetupAccountForm. */
 	.sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
 	.consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }
