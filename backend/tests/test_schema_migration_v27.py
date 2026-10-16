@@ -104,7 +104,7 @@ def test_migrating_admits_closed_and_preserves_every_row() -> None:
         fresh.executescript(SCHEMA_SQL)
         result = migrate_to_current(migrated, 27)
 
-        assert SCHEMA_VERSION == 118
+        assert SCHEMA_VERSION == 119
         assert result.migrated is True
         assert (result.from_version, result.to_version) == (26, 27)
 

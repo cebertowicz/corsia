@@ -7,7 +7,11 @@ import socket
 import pytest
 
 
-def _manifest(root, *, policy="modernbert-owner-context-v2-2048"):
+def _exit_before_load_reply(_connection, _manifest_path):
+    """Exit without writing the load reply, like a native child crash."""
+
+
+def _manifest(root, *, version="v1", policy="modernbert-owner-context-v2-2048", threshold=0.595681):
     model = root / "model.onnx"
     tokenizer = root / "tokenizer.json"
     model.write_bytes(b"model")
@@ -17,8 +21,8 @@ def _manifest(root, *, policy="modernbert-owner-context-v2-2048"):
         for path in (model, tokenizer)
     }
     value = {
-        "asset_id": "corrections-classifier", "version": "v1", "files": files,
-        "heads": [{"name": "correction", "threshold": 0.595681, "labels": ["not_correction", "correction"]}],
+        "asset_id": "corrections-classifier", "version": version, "files": files,
+        "heads": [{"name": "correction", "threshold": threshold, "labels": ["not_correction", "correction"]}],
         "input_policy_id": policy,
         "self_test": [{"owner": f"synthetic {index}", "expected_score": 0.5} for index in range(4)],
     }
@@ -69,6 +73,163 @@ def test_verified_manifest_builds_the_named_correction_head(tmp_path):
     )
 
 
+def _install(directory, version, *, threshold=0.595681):
+    directory.mkdir()
+    path = _manifest(directory, version=version, threshold=threshold)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.fixture
+def layout(monkeypatch, tmp_path):
+    """asset_root() is tmp_path/corrections-classifier; siblings are tmp_path/corrections-classifier-<version>."""
+    from core import corrections_asset_pins
+    from jobs import corrections_realtime
+
+    pins: dict[str, str] = {}
+    monkeypatch.setattr(corrections_asset_pins, "PINNED_MANIFESTS", pins)
+    monkeypatch.setenv("CORSIA_CORRECTIONS_ASSET_DIR", str(tmp_path / "corrections-classifier"))
+    return pins
+
+
+def test_pinned_version_labels_are_all_v_and_a_number():
+    import re
+
+    from core.corrections_asset_pins import PINNED_MANIFESTS
+
+    assert PINNED_MANIFESTS
+    assert all(re.fullmatch(r"v(\d+)", key) for key in PINNED_MANIFESTS)
+
+
+@pytest.mark.parametrize("label", ["1", "v", "v1.2", "V1", "v1\n", "v-1", "v１"])
+def test_a_version_label_other_than_v_number_is_refused(label):
+    from core.corrections_classifier import AssetError
+    from jobs.corrections_assets import version_number
+
+    with pytest.raises(AssetError):
+        version_number(label)
+
+
+def test_versions_order_by_number_not_by_text():
+    from jobs.corrections_assets import version_number
+
+    assert version_number("v10") > version_number("v9")
+
+
+def test_highest_verified_pin_wins_and_a_broken_newer_asset_keeps_the_older_one_serving(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+    (tmp_path / "corrections-classifier-v2" / "model.onnx").write_bytes(b"tampered")
+
+    selected, versions = corrections_realtime.select_manifest()
+
+    assert selected.version == "v1"
+    assert versions == [
+        {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
+        {
+            "location": "corrections-classifier-v2", "version": None, "state": "failed",
+            "reason": "asset file model.onnx is absent or has the wrong size",
+        },
+    ]
+
+
+def test_a_verified_newer_sibling_replaces_the_installed_directory(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert selected.version == "v2"
+    assert selected.path.parent == tmp_path / "corrections-classifier-v2"
+
+
+def test_a_tie_goes_to_the_installed_directory(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    assert _install(tmp_path / "corrections-classifier-v1", "v1") == layout["v1"]
+
+    assert corrections_realtime.select_manifest()[0].path.parent == tmp_path / "corrections-classifier"
+
+
+def test_the_installed_directory_alone_keeps_working(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+
+    selected, versions = corrections_realtime.select_manifest()
+    assert selected.version == "v1"
+    assert [item["state"] for item in versions] == ["ready"]
+
+
+def test_a_directory_name_never_decides_the_version(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier-v2", "v1")
+    layout["v2"] = "0" * 64
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert selected.version == "v1"
+    assert selected.path.parent == tmp_path / "corrections-classifier-v2"
+
+
+def test_an_unpinned_sibling_directory_is_never_looked_at(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    _install(tmp_path / "corrections-classifier-v9", "v9")
+
+    selected, versions = corrections_realtime.select_manifest()
+    assert selected.version == "v1"
+    assert [item["location"] for item in versions] == ["corrections-classifier"]
+
+
+def test_nothing_installed_reads_absent_and_nothing_verified_reads_failed(layout, tmp_path):
+    from core.corrections_classifier import AssetError
+    from jobs import corrections_realtime
+
+    layout["v1"] = "0" * 64
+    with pytest.raises(AssetError, match="absent"):
+        corrections_realtime.select_manifest()[0]
+
+    _install(tmp_path / "corrections-classifier", "v1")
+    with pytest.raises(AssetError, match="no verified"):
+        corrections_realtime.select_manifest()[0]
+    assert corrections_realtime._installed() is True
+
+
+def test_every_failed_candidate_keeps_its_snapshot_reason(layout, tmp_path):
+    from jobs.corrections_assets import AssetSelectionError, select_manifest
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+    (tmp_path / "corrections-classifier" / "model.onnx").write_bytes(b"broken-v1")
+    (tmp_path / "corrections-classifier-v2" / "tokenizer.json").write_bytes(b"broken-v2")
+
+    with pytest.raises(AssetSelectionError) as raised:
+        select_manifest()
+
+    assert [(item["location"], item["reason"]) for item in raised.value.versions] == [
+        ("corrections-classifier", "asset file model.onnx is absent or has the wrong size"),
+        ("corrections-classifier-v2", "asset file tokenizer.json has a sha256 mismatch"),
+    ]
+
+
+def test_pinned_v2_with_a_retrained_threshold_is_selected_with_its_own_policy(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2", threshold=0.71)
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert (selected.version, selected.classifier_version().threshold) == ("v2", 0.71)
+
+
 def test_tampered_asset_file_is_refused(tmp_path):
     from core.corrections_classifier import AssetError, AssetManifest
 
@@ -117,6 +278,18 @@ def test_wrong_input_policy_is_refused(tmp_path):
 
     with pytest.raises(AssetError, match="supported corrections asset"):
         AssetManifest.load(_manifest(tmp_path, policy="other"))
+
+
+def test_manifest_threshold_must_be_numeric(tmp_path):
+    from core.corrections_classifier import AssetError, AssetManifest
+
+    path = _manifest(tmp_path)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["heads"][0]["threshold"] = "not-a-number"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(AssetError, match="threshold"):
+        AssetManifest.load(path)
 
 
 def test_child_prohibits_outbound_connections_and_enables_ort_telemetry_opt_out(monkeypatch, tmp_path):
@@ -173,7 +346,24 @@ def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
     finally:
         setattr(socket.socket, "connect", original_connect)
 
-    assert sent == [{"error": "error:AssetError"}]
+    assert sent == [{"error": "error:AssetError", "kind": "deterministic"}]
+
+
+def test_child_marks_a_load_time_rss_breach_deterministic(self_test_asset, monkeypatch):
+    from types import SimpleNamespace
+
+    from core import corrections_child
+
+    sent = []
+    connection = SimpleNamespace(send=sent.append, poll=lambda _timeout: False)
+    original_connect = socket.socket.connect
+    monkeypatch.setattr(corrections_child, "_peak_rss_bytes", lambda: corrections_child.RSS_LIMIT_BYTES + 1)
+    try:
+        corrections_child._child_main(connection, str(self_test_asset / "manifest.json"))
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+    assert sent == [{"error": "rss", "kind": "deterministic"}]
 
 
 class _FakeSession:
@@ -297,17 +487,18 @@ def test_runtime_refuses_an_unpinned_asset_in_the_installed_location(monkeypatch
     root = tmp_path / "corrections-classifier"
     root.mkdir()
     path = _manifest(root)
-    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: root)
+    from jobs import corrections_assets
+    monkeypatch.setattr(corrections_assets, "asset_root", lambda: root)
     monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", "0" * 64)
     with pytest.raises(AssetError, match="sha256 does not match"):
-        corrections_realtime._manifest()
+        corrections_realtime.select_manifest()[0]
     monkeypatch.delitem(corrections_asset_pins.PINNED_MANIFESTS, "v1")
     with pytest.raises(AssetError, match="not pinned"):
-        corrections_realtime._manifest()
+        corrections_realtime.select_manifest()[0]
     monkeypatch.setitem(
         corrections_asset_pins.PINNED_MANIFESTS, "v1", hashlib.sha256(path.read_bytes()).hexdigest(),
     )
-    assert corrections_realtime._manifest().version == "v1"
+    assert corrections_realtime.select_manifest()[0].version == "v1"
 
 
 def test_self_test_wrong_pin_hash_is_refused(self_test_asset):
@@ -488,8 +679,9 @@ def test_pipe_failure_is_an_outage_during_load_and_a_message_failure_after_it(mo
     from core.corrections_child import ClassifierUnavailable, MessageFailed
 
     child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], recv_error=failure))
-    with pytest.raises(ClassifierUnavailable, match="child_exited"):
+    with pytest.raises(ClassifierUnavailable, match="child_exited") as raised:
         child.ensure_loaded()
+    assert raised.value.cause == "child_exited"
     assert not child.loaded
 
     child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], send_error=failure))
@@ -497,6 +689,19 @@ def test_pipe_failure_is_an_outage_during_load_and_a_message_failure_after_it(mo
     with pytest.raises(MessageFailed) as raised:
         child.classify([], "synthetic owner")
     assert raised.value.reason == "child_error"
+    assert not child.loaded and not child.running
+
+
+def test_real_child_exit_during_load_carries_its_structured_cause(tmp_path):
+    from core.corrections_child import ClassifierChild, ClassifierUnavailable
+    from core.corrections_classifier import AssetManifest
+
+    child = ClassifierChild(AssetManifest.load(_manifest(tmp_path)), target=_exit_before_load_reply)
+
+    with pytest.raises(ClassifierUnavailable, match="child_exited") as raised:
+        child.ensure_loaded()
+
+    assert (raised.value.kind, raised.value.cause) == ("transient", "child_exited")
     assert not child.loaded and not child.running
 
 
@@ -516,11 +721,14 @@ def test_a_failed_call_names_its_kind_and_stops_the_child(monkeypatch, tmp_path,
     assert not child.running
 
 
-def test_a_load_error_is_an_outage(monkeypatch, tmp_path):
+def test_a_transient_load_error_carries_its_kind(monkeypatch, tmp_path):
     from core.corrections_child import ClassifierUnavailable
 
-    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"error": "rss"}]))
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([
+        {"error": "error:OSError", "kind": "transient"},
+    ]))
 
-    with pytest.raises(ClassifierUnavailable, match="load rss"):
+    with pytest.raises(ClassifierUnavailable, match="load error:OSError") as raised:
         child.ensure_loaded()
+    assert raised.value.kind == "transient"
     assert not child.loaded and not child.running

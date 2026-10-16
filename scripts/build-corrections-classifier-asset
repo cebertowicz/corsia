@@ -6,7 +6,11 @@ import argparse
 import hashlib
 import json
 import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from core.corrections_classifier import ASSET_ID, INPUT_POLICY_ID
 
 
 def digest(path: Path) -> dict[str, object]:
@@ -25,6 +29,8 @@ def main() -> None:
                         help="attribution notice, copied into the asset as NOTICE")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--threshold", type=float, required=True,
+                        help="holdout threshold emitted by the pinned training run")
     parser.add_argument("--self-test", type=Path, required=True,
                         help="JSON list of exactly four synthetic inputs and expected scores")
     args = parser.parse_args()
@@ -48,11 +54,11 @@ def main() -> None:
         raise SystemExit("self-test must contain exactly four synthetic vectors")
     names = [source.name for source in files] + ["LICENSE", "NOTICE"]
     manifest = {
-        "asset_id": "corrections-classifier", "version": args.version,
+        "asset_id": ASSET_ID, "version": args.version,
         "kind": "classifier", "minimum_onnxruntime": "1.31.0",
-        "input_policy_id": "modernbert-owner-context-v2-2048",
+        "input_policy_id": INPUT_POLICY_ID,
         "files": {name: digest(args.out / name) for name in names},
-        "heads": [{"name": "correction", "labels": ["not_correction", "correction"], "threshold": 0.595681}],
+        "heads": [{"name": "correction", "labels": ["not_correction", "correction"], "threshold": args.threshold}],
         "base_model_license": "Apache-2.0", "self_test": vectors,
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")

@@ -11,8 +11,9 @@ wake that stalls leaves the review pending with no wait, as ready work the
 liveness wake carries by node id once the owner's executor slot is free.
 Neither path completes the review; that is the owner's.
 
-One open review per version, found again by its namespaced key
-(``lesson:<id>:<behavioral_sha256>`` or ``capture:<id>:<capture_hash>``), so a
+One open review per version and lifecycle state, found again by its namespaced key
+(``lesson:<id>:<behavioral_sha256>`` for a trial, ``lesson:<id>:watch:<behavioral_sha256>``
+for a watch, or ``capture:<id>:<capture_hash>``), so a
 retry or appended evidence creates nothing. A settled review is history: the
 same version placed again after its review closed gets a new one, under the
 same key. A new version, a capture completed into a trial, or a change of
@@ -45,9 +46,15 @@ class LessonOwnerError(service.PlanError):
     """The named owner cannot hold a review: no live thread or plan resolves."""
 
 
-def lesson_key(lesson_id: str, behavioral_sha256: str) -> str:
-    """The idempotency key of one lesson version's review."""
-    return f"{LESSON_PREFIX}:{lesson_id}:{behavioral_sha256}"
+def lesson_key(lesson_id: str, behavioral_sha256: str, state: str = "trial") -> str:
+    """The idempotency key of one lesson version in one lifecycle state.
+
+    A trial keeps the original key, so reviews opened before watches existed
+    are still found; only a watch names its state.
+    """
+    if state == "trial":
+        return f"{LESSON_PREFIX}:{lesson_id}:{behavioral_sha256}"
+    return f"{LESSON_PREFIX}:{lesson_id}:{state}:{behavioral_sha256}"
 
 
 def capture_key(capture_id: str, capture_hash: str) -> str:
@@ -164,6 +171,7 @@ def _create(
 
 def ensure_lesson_review(
     db, owner_thread_id: str, *, lesson_id: str, behavioral_sha256: str, artifact_id: str,
+    state: str = "trial",
     title: str, acceptance: str, review_after: str, description: str | None = None,
     capture_id: str | None = None,
 ) -> tuple[str, bool]:
@@ -182,7 +190,7 @@ def ensure_lesson_review(
     Raises:
         LessonOwnerError: the owner is missing or archived; nothing is closed.
     """
-    key = lesson_key(lesson_id, behavioral_sha256)
+    key = lesson_key(lesson_id, behavioral_sha256, state)
     with plan_write.transaction(db) as connection:
         _require_live_owner(connection, owner_thread_id)
         existing = _existing(connection, owner_thread_id, key)
@@ -235,6 +243,7 @@ def ensure_capture_review(
 
 def lesson_review_refusal(
     db, node_id: str, *, owner_thread_id: str, lesson_id: str, behavioral_sha256: str,
+    state: str = "trial",
 ) -> str | None:
     """Why ``node_id`` is not an open review of this lesson version, or None.
 
@@ -248,7 +257,7 @@ def lesson_review_refusal(
            JOIN plan_nodes n ON n.id=l.node_id
            JOIN plans p ON p.id=n.plan_id
            WHERE l.node_id=? AND l.provenance=? AND l.source_event_id=?""",
-        (node_id, PROVENANCE, lesson_key(lesson_id, behavioral_sha256)),
+        (node_id, PROVENANCE, lesson_key(lesson_id, behavioral_sha256, state)),
     ).fetchone()
     if row is None:
         return "no review covers this version of the trial"
