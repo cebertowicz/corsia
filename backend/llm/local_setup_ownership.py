@@ -44,11 +44,20 @@ def mark_installed_by_setup() -> None:
     path.write_text("installed by corsia local setup\n", encoding="utf-8")
 
 
-def record_existing_omlx_consent() -> None:
-    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root."""
+def record_existing_omlx_consent(*, manage: bool = False) -> None:
+    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root.
+
+    ``manage`` is "Let CORSIA manage it": also consent to read that oMLX's admin
+    key and change the settings shown first (``own_omlx_management``). Without it
+    ("Use mine") the key is never read and nothing is written.
+    """
     path = consent_marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("consented to existing oMLX\n", encoding="utf-8")
+    if manage:
+        from llm import own_omlx_management
+
+        own_omlx_management.consent()
 
 
 _BROKEN_RETURN_CODES = (126, 127)

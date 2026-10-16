@@ -1,18 +1,25 @@
 """The flights that use the person's own oMLX: adopt its models, or download the starter into it.
 
-Neither writes any setting to that oMLX. The flight state and the oMLX calls live
-in ``local_setup``; they are read through the module at call time so one set of
-names is patched and observed.
+Neither writes any setting to that oMLX. Under "Let CORSIA manage it"
+(``own_omlx_management``) adoption also reads its admin key and downloads the
+recommender's pick into it unless that model is already there; its settings
+change only once the person approves the shown values (``own_omlx_apply``).
+The flight state and the oMLX calls live in ``local_setup``; they are read
+through the module at call time so one set of names is patched and observed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Callable
 
+from llm import local_model, own_omlx_management
 from llm import local_setup as ls
-from llm.local_model import LocalModel
-from llm.local_setup_ownership import own_omlx_port
+from llm.local_model import LocalModel, PickUnavailable, omlx_has_recommender
+from llm.local_setup_ownership import own_omlx_admin_key, own_omlx_port
+
+log = logging.getLogger(__name__)
 
 # The starter download for an oMLX CORSIA does not manage, unchanged until #817
 # decides that journey; CORSIA's own oMLX picks through its recommender instead.
@@ -23,8 +30,47 @@ OWN_OMLX_STARTER = LocalModel(
 )
 
 
+async def _managed_key(port: int) -> str | None:
+    """Under management only: their oMLX's admin key to register, or None to keep the stored one."""
+    key = await asyncio.to_thread(own_omlx_admin_key)
+    if key is None or await ls.registered_local_key(ls.LOCAL_HOST, port) is not None:
+        return None
+    await asyncio.to_thread(own_omlx_management.update, key_registered=True)
+    return key
+
+
+async def _managed_download(server_id: str, report: Callable[[str], None], listed: set[str]) -> bool:
+    """Download the recommender's pick into their oMLX unless it is there; whether CORSIA set one up.
+
+    An oMLX too old to recommend is recorded so its row says so. A model the person
+    already had stays theirs, so only the two oMLX-wide settings are offered.
+    """
+    version = await asyncio.to_thread(ls.omlx_version)
+    if not omlx_has_recommender(version):
+        await asyncio.to_thread(own_omlx_management.update, cannot_check=version or "unknown")
+        return False
+    await asyncio.to_thread(own_omlx_management.update, cannot_check=None)
+    report("Finding the model that fits this computer")
+    try:
+        pick = await local_model.ask_recommender(server_id)
+    except PickUnavailable as exc:
+        log.warning("Your oMLX could not recommend a model: %s", exc)
+        return False
+    if pick is None:
+        return False
+    record = await asyncio.to_thread(own_omlx_management.read)
+    ours = record is not None and record.model is not None and record.model.model == pick.model
+    if pick.model in listed and not ours:
+        return False
+    await asyncio.to_thread(own_omlx_management.update, model=pick)
+    if pick.model not in listed:
+        ls._record_model(pick)
+        await ls._download(server_id, report, pick)
+    return True
+
+
 async def adopt_existing_omlx(report: Callable[[str], None], events: list[str]) -> dict:
-    """Register the person's own oMLX and its models; write nothing to it."""
+    """Register the person's own oMLX and its models; write no setting to it."""
     from infra.db_async import run_in_db
     from llm.catalog import list_models
     from llm.catalog_network_models import discover_network_models
@@ -33,6 +79,13 @@ async def adopt_existing_omlx(report: Callable[[str], None], events: list[str]) 
         ls._emit("skipped", reason=reason)
         return {"ok": True, "skipped": reason, "message": message, "progress": events}
 
+    async def listed() -> list[dict]:
+        refreshed = await discover_network_models(server_id)
+        if not refreshed.get("ok"):
+            raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
+        return [row for row in await run_in_db(list_models, provider="omlx", include_unavailable=False)
+                if row["litellm_model"].startswith(f"omlx@{server_id}/")]
+
     report("Checking your oMLX")
     port = await asyncio.to_thread(own_omlx_port)
     try:
@@ -40,12 +93,19 @@ async def adopt_existing_omlx(report: Callable[[str], None], events: list[str]) 
     except RuntimeError:
         return declined("existing_omlx_not_running",
                         "oMLX is installed but not running. Start it, then run `corsia local setup`.")
-    server_id = await ls._register_loopback_server(port=port)
-    refreshed = await discover_network_models(server_id)
-    if not refreshed.get("ok"):
-        raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
-    models = [row for row in await run_in_db(list_models, provider="omlx", include_unavailable=False)
-              if row["litellm_model"].startswith(f"omlx@{server_id}/")]
+    managed = await asyncio.to_thread(own_omlx_management.active)
+    server_id = await ls._register_loopback_server(port=port, api_key=await _managed_key(port) if managed else None)
+    models = await listed()
+    ids = {row["litellm_model"].removeprefix(f"omlx@{server_id}/") for row in models}
+    if managed and await _managed_download(server_id, report, ids):
+        # This discovery is the first to see the model's settings, which raises its decision again.
+        report("Refreshing model catalog")
+        models = await listed()
+    if managed:
+        from onboarding.omlx_settings_wake import rearm
+
+        # Managing that starts in Settings comes after the first chat, so its decision is raised here.
+        await rearm()
     if not models:
         return declined("existing_omlx_no_models",
                         "Your oMLX has no models yet. You can add the local model from the app.")

@@ -137,11 +137,13 @@ async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
     consent_existing: bool = Body(False, embed=True),
+    manage_existing: bool = Body(False, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start the local setup flight, or report the one already running.
 
     The model is the one CORSIA's own oMLX picks for this Mac (``local_model`` on GET).
+    ``manage_existing`` is "Let CORSIA manage it" for the person's own oMLX.
     """
     from llm.local_setup import begin_local_setup
     from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent
@@ -149,7 +151,7 @@ async def setup_local_source(
     if existing_omlx_requires_consent():
         if not consent_existing:
             raise HTTPException(status_code=409, detail={"code": "consent_required"})
-        record_existing_omlx_consent()
+        record_existing_omlx_consent(manage=manage_existing)
     return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic)
 
 
@@ -204,47 +206,58 @@ async def recheck_sources_once() -> list[dict[str, Any]]:
         raise SourceChecksIncomplete(_INCOMPLETE) from None
 
 
-@router.post("/sources/omlx/settings/apply")
-async def apply_foreign_omlx_settings(
-    body: dict = Body(...), _user: dict = Depends(require_user_header_only),
-) -> dict[str, Any]:
-    """Apply precisely the foreign-oMLX diff the conductor just showed."""
+async def _own_omlx_server() -> dict[str, Any] | None:
+    """The one reachable oMLX of the person's own, else None; a CORSIA-installed one is refused."""
     from llm.local_setup_ownership import existing_install_is_foreign
-    from llm.omlx_global_settings import WRITABLE_GLOBAL_SETTINGS, differences, fingerprint, record_observation, reports
-    from llm.providers.omlx_settings import save_global_settings
 
-    supplied = body.get("fingerprint") if isinstance(body, dict) and set(body) == {"fingerprint"} else None
-    if not isinstance(supplied, str) or not supplied:
-        raise HTTPException(400, "A shown oMLX settings fingerprint is required")
     if not await asyncio.to_thread(existing_install_is_foreign):
         raise HTTPException(409, "oMLX settings cannot be changed through this route")
     servers = [server for server in await run_in_db(network_discovery.get_servers)
                if server.get("provider") == "omlx" and server.get("kind") != "external"
                and server.get("status") == "online"]
-    if len(servers) != 1:
+    return servers[0] if len(servers) == 1 else None
+
+
+@router.post("/sources/omlx/settings/apply")
+async def apply_foreign_omlx_settings(
+    body: dict = Body(...), _user: dict = Depends(require_user_header_only),
+) -> dict[str, Any]:
+    """Apply precisely the foreign-oMLX diff the conductor just showed."""
+    from llm import own_omlx_apply
+
+    supplied = body.get("fingerprint") if isinstance(body, dict) and set(body) == {"fingerprint"} else None
+    if not isinstance(supplied, str) or not supplied:
+        raise HTTPException(400, "A shown oMLX settings fingerprint is required")
+    server = await _own_omlx_server()
+    if server is None:
         raise HTTPException(409, "Exactly one reachable foreign oMLX is required")
-    server = servers[0]
-    entries = differences([server["id"]])
-    if not entries:
-        raise HTTPException(409, "No shown oMLX settings are available to apply")
-    if any(row["setting"] not in WRITABLE_GLOBAL_SETTINGS for row in entries):
-        raise HTTPException(409, "The settings changed since you were shown them; show the new diff and ask again")
-    if supplied != fingerprint(server["id"], entries):
-        raise HTTPException(409, "the settings changed since you were shown them; show the new diff and ask again")
-    pairs = {row["setting"]: row["recommended"] for row in entries}
-    saved = await save_global_settings({"server_id": server["id"]}, pairs)
-    if not saved.get("ok"):
-        raise HTTPException(int(saved.get("status", 503)), str(saved.get("message")))
-    verified = await record_observation(server, retain_on_failure=True)
-    remaining = (differences([server["id"]]) if verified else entries) or []
-    remaining_names = {row["setting"] for row in remaining}
-    results = []
-    for row in entries:
-        done = verified and row["setting"] not in remaining_names and reports(server["id"], row["setting"])
-        results.append({"setting": row["setting"], "saved": done,
-                        "active": done and row["setting"] in saved.get("runtime_applied", [])})
-    return {"results": results, "verified": verified,
-            "omlx_settings": {"differences": remaining, "fingerprint": fingerprint(server["id"], remaining)}}
+    try:
+        return await own_omlx_apply.apply(server, supplied)
+    except own_omlx_apply.ApplyRefused as refused:
+        raise HTTPException(refused.status, str(refused)) from None
+
+
+@router.post("/sources/omlx/management/start")
+async def start_managing_own_omlx(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
+    """Settings' "Let CORSIA manage it": the consent, then the setup flight that uses it."""
+    from llm.local_setup import begin_local_setup
+    from llm.local_setup_ownership import existing_install_is_foreign, record_existing_omlx_consent
+
+    if not await asyncio.to_thread(existing_install_is_foreign):
+        raise HTTPException(409, "CORSIA already manages the oMLX it installed")
+    await asyncio.to_thread(record_existing_omlx_consent, manage=True)
+    return await begin_local_setup()
+
+
+@router.post("/sources/omlx/management/stop")
+async def stop_managing_own_omlx(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
+    """Settings' "Stop managing": put back every value CORSIA replaced, then stop using the key."""
+    from llm import own_omlx_apply
+
+    try:
+        return await own_omlx_apply.stop(await _own_omlx_server())
+    except own_omlx_apply.ApplyRefused as refused:
+        raise HTTPException(refused.status, str(refused)) from None
 
 
 @router.post("/sources/recheck")

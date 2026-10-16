@@ -40,11 +40,12 @@ _MINIMUM_MACOS_MAJOR = 15
 
 
 class LocalDownloadRequest(BaseModel):
-    """Consent for setup to inspect a pre-existing oMLX."""
+    """Consent for setup to inspect a pre-existing oMLX, and whether CORSIA may manage it."""
 
     model_config = ConfigDict(extra="forbid")
 
     consent_existing: bool = False
+    manage_existing: bool = False
 
 
 class FirstAccountRequest(BaseModel):
@@ -264,7 +265,7 @@ async def local_download(request: Request) -> dict | Response:
     if existing_omlx_requires_consent():
         if not body.consent_existing:
             return JSONResponse(status_code=409, content={"code": "consent_required"})
-        record_existing_omlx_consent()
+        record_existing_omlx_consent(manage=body.manage_existing)
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()
