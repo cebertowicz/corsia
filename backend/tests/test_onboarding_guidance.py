@@ -182,6 +182,18 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
 
 
+def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+
+    # Setup takes the model oMLX recommender picks.
+    for state in ("low_memory", "none_fits", "own_omlx", "picked", "not_checked", "checking", "failed"):
+        assert f"`{state}`" in offer
+    assert "make the offer without a name or size" in offer
+    # Onboarding copy says "computer"; "Mac" is only for Apple facts.
+    assert "Mac" not in offer
+    assert "with body `{}`" in offer
+
+
 FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
 HANDOFF = "That's everything. So, what's taking up your time this week?"
 
@@ -200,7 +212,7 @@ def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
     assert len(titles) == 7
     assert titles[0] == "About you."
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
-    assert "never skill `assistant-onboarding`" in steps
+    assert "follow skill `google-setup`" in steps
     assert "no setup task list" in app
     assert "Read nothing until a yes" in steps
 

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Stamp CORSIA package manifests from one validated release tag.
+# Stamp CORSIA package manifests from one validated stable or development tag.
 set -euo pipefail
 
-[ "$#" -eq 1 ] || { echo "usage: $0 <v0.X.Y>" >&2; exit 64; }
+[ "$#" -eq 1 ] || { echo "usage: $0 <v0.X.Y[-dev.N]>" >&2; exit 64; }
 tag="$1"
-[[ "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]] || {
-  echo "release tag must be v0.X.Y" >&2
+[[ "$tag" =~ ^v0\.[0-9]+\.[0-9]+(-dev\.[0-9]+)?$ ]] || {
+  echo "release tag must be v0.X.Y or v0.X.Y-dev.N" >&2
   exit 1
 }
 version="${tag#v}"

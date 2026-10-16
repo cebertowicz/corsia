@@ -19,10 +19,10 @@
       "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
     },
     {
-      "bytes": 2837,
+      "bytes": 3028,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "7ed47f77172e09d52b6353dceaeceacec46281382948bb3655e81eff12aae2f4"
+      "sha256": "02730e5359ff9e7068d8dc81a9c900d8fd818aef98402daab6cbbc5f88cc4e05"
     },
     {
       "bytes": 862,
@@ -130,12 +130,6 @@
       "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
     },
     {
-      "bytes": 7558,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/SKILL.md",
-      "sha256": "b16b50506e46b75aa4d3650b8cb6e49983d40f1bcefbee776795514eb5334c4b"
-    },
-    {
       "bytes": 4519,
       "kind": "skill",
       "path": "skills/assistant-onboarding/assets/gws-env.sh",
@@ -146,48 +140,6 @@
       "kind": "skill",
       "path": "skills/assistant-onboarding/assets/gws-reply-guard.py",
       "sha256": "70daaac27a3bfded05fab13a8f86d30f55d8e9c0f28afdea741dcd432da7776f"
-    },
-    {
-      "bytes": 2366,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-email-check-skill.md",
-      "sha256": "fb12feb9c83579439606d7ea4699c0fe83128f78de7eeded14e960c7677ee012"
-    },
-    {
-      "bytes": 4314,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-google-setup-skill.md",
-      "sha256": "2bc7d1b45f2ad7c505ae1354dd07fb85e03edd229c95de7ca12e74778759227a"
-    },
-    {
-      "bytes": 3330,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-google-workspace-skill.md",
-      "sha256": "e73659e46ccd9f6f9dd83325ed8d035cd99b9c8cf6a45b4c96706d3756ac89a7"
-    },
-    {
-      "bytes": 2923,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-responsibility.md",
-      "sha256": "70e0c808a90fb100877c75b90ffa20d2024379edf6614582fdc11463efe2c092"
-    },
-    {
-      "bytes": 1334,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/docs-safe-write-skill.md",
-      "sha256": "ac8da4860deb1c8f2feb2af0a0233eeaba278e26e94c56bc1a293f59442de76a"
-    },
-    {
-      "bytes": 1549,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/google-cloud-setup.md",
-      "sha256": "8085fe78c552a4051c31daceb0b37021c2534a29fe13cfa46c5117e70b8ce99b"
-    },
-    {
-      "bytes": 1791,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/gws-reply-guardrail-spec.md",
-      "sha256": "439a391de2f259ea39ce913808296ca144440758f5fcb919581251036116d3a4"
     },
     {
       "bytes": 19107,
@@ -214,22 +166,22 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 2710,
+      "bytes": 2388,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-agent.md",
-      "sha256": "592240d36f01706c044460cde164df00e3339d3fffb64f8bfe4b2cec6126d2ba"
+      "sha256": "cfa50ed3c63ec71dfb14df031270e4f1ce9fa9356ee34a1430e56c39fa77f051"
     },
     {
-      "bytes": 9200,
+      "bytes": 11099,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "51cac3b799115766fdf780394ce5a6639b8e8ec95796803787a010ae442ed045"
+      "sha256": "35ce6301cabcf31861c665cf40d286063d68fe7e11a78776596ba08924eec543"
     },
     {
       "bytes": 17589,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "6fabfc68b5b7131be88fb15122b97d5951f8143c3dfdffe54c01eb6507f286a0"
+      "sha256": "87b1b4d55fda75aa8d7db89bf4a20ba6822e61bd2106d6786f142988e277aff8"
     },
     {
       "bytes": 851,
@@ -238,10 +190,10 @@
       "sha256": "f9950d0cf9ea49a23261623e6e2122d6fd999b5e8d164a3d25b044f81c64e229"
     },
     {
-      "bytes": 3542,
+      "bytes": 3711,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/local-model-offer.md",
-      "sha256": "99662e4c33597f7f2f509afcd2f02ce6bb131903bf0f68223cd0a02d094907db"
+      "sha256": "0508818341c8f33095e0747822703f0be6b69e78a4d473c8df88604e2b0f3400"
     },
     {
       "bytes": 694,
@@ -280,10 +232,10 @@
       "sha256": "cd4ebb24a0a98445ad5a85de24f9be6413cb1a413cc7663afb5f474820e949bc"
     },
     {
-      "bytes": 9129,
+      "bytes": 9888,
       "kind": "skill",
       "path": "skills/coordination-api/SKILL.md",
-      "sha256": "122c39cd87851e430f12991331e7252deacf6284b08ef57bb88177d75edfd95b"
+      "sha256": "47ca9778735b01c01dd3c4f83c41ee48438adf162c69466a76e70d6d45ad7329"
     },
     {
       "bytes": 4161,
@@ -320,6 +272,12 @@
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
       "sha256": "5a737798876019404b7802a8aebf33d712658bb21e1df33ce00a325f558bc175"
+    },
+    {
+      "bytes": 4556,
+      "kind": "skill",
+      "path": "skills/google-setup/SKILL.md",
+      "sha256": "6ca95bae4ae0a6e9413bb79b3e9810fff8f98b8285319bf309cb578a6d384ebb"
     },
     {
       "bytes": 5925,

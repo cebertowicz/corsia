@@ -416,7 +416,7 @@ async def test_automatic_title_journals_only_visible_owner(isolated_db, monkeypa
         return None
 
     monkeypatch.setattr("ws.post_turn.generate_thread_title", _title)
-    await ensure_thread_title("owner", "release", _send)
+    await ensure_thread_title("owner", _send)
 
     db = get_db()
     try:

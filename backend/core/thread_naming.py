@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 TITLE_MAX_OUTPUT_TOKENS = 1024
+THREAD_TITLE_MAX_CHARS = 80
 TITLE_TIMEOUT_SECONDS = 60.0
 _TITLE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -47,10 +48,30 @@ def _clean_title(raw: str) -> str | None:
     reject_patterns = ["thinking process", "analyze the", "step 1", "let me", "i need to"]
     if any(p in title.lower() for p in reject_patterns):
         return None
-    return title[:80] if title else None
+    return title[:THREAD_TITLE_MAX_CHARS] if title else None
+
+
+def _title_object(raw: object) -> object:
+    """Return the structured object a harness reply carries.
+
+    Claude Code and Codex hand the seam a parsed object; Native hands it the
+    model's raw content string, which may wrap the JSON in reasoning tags or a
+    code fence. Anything that is not exactly one JSON object after that raises,
+    so truncated or off-format output never becomes a title.
+    """
+    if not isinstance(raw, str):
+        return raw
+    from llm.isolated_structured import _strict_json_loads
+    from llm.think_tags import strip_think_tags
+
+    text = (strip_think_tags(raw) or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`").removeprefix("json").strip()
+    return _strict_json_loads(text)
 
 
 def _validate_title_payload(raw: object) -> str:
+    raw = _title_object(raw)
     if not isinstance(raw, dict) or set(raw) != {"title"}:
         raise ValueError("title result must be an object with only 'title'")
     title = raw["title"]
@@ -73,6 +94,25 @@ def _resolve_title_target(model: str):
         db.close()
 
 
+def _title_reasoning_effort(target) -> str | None:
+    """``"none"`` when the target's own model reports it can switch reasoning off.
+
+    A short title does not need reasoning, and a reasoning model can spend the
+    whole output cap thinking and return nothing. The switch is only asked for
+    on a Native model that reports one (a thinking toggle, or a level list that
+    includes ``none``); every other target keeps its own default.
+    """
+    if target.harness != "native":
+        return None
+    from llm.reasoning_config import reasoning_config_for_model
+
+    config = reasoning_config_for_model(target.catalog_id) or {}
+    kind = config.get("type")
+    if kind == "boolean" or (kind == "effort_levels" and "none" in (config.get("values") or [])):
+        return "none"
+    return None
+
+
 async def _call_title_llm(prompt: str, model: str, *, thread_id: str | None = None) -> str | None:
     """Generate a title with one fresh isolated call on ``model``."""
     from infra.db_async import run_in_db
@@ -87,6 +127,7 @@ async def _call_title_llm(prompt: str, model: str, *, thread_id: str | None = No
             output_schema=_TITLE_SCHEMA,
             validator=_validate_title_payload,
             max_output_tokens=TITLE_MAX_OUTPUT_TOKENS,
+            reasoning_effort=await run_in_db(_title_reasoning_effort, target),
             timeout_seconds=TITLE_TIMEOUT_SECONDS,
             binary=binary, thread_id=thread_id,
         )
