@@ -113,7 +113,7 @@ describe('AppSignInPanel', () => {
 		['permissions', "Linear can't give CORSIA the access it needs."],
 		['app_error', 'Linear had a problem with the sign-in.'],
 		['app_busy', 'Linear is busy.'],
-		['address_mismatch', "Linear didn't recognize this sign-in from CORSIA."],
+		['address_mismatch', "Linear didn't recognize CORSIA. It needs a code called a client ID."],
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);

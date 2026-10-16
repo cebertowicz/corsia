@@ -41,7 +41,7 @@ export function failureText(name: string, failureClass: string): string {
 		case 'app_error': return `${name} had a problem with the sign-in. Try again.`;
 		case 'app_busy': return `${name} is busy. Try again in a few minutes.`;
 		case 'address_mismatch':
-			return `${name} didn't recognize this sign-in from CORSIA. It needs a client ID: a code that tells ${name} the sign-in is from CORSIA. If whoever manages ${name} for your team gave you one, tell CORSIA in chat what it is. If you manage ${name} yourself, you can create one in ${name}'s settings. Otherwise, ask them for one.`;
+			return `${name} didn't recognize CORSIA. It needs a code called a client ID. If someone else looks after ${name} for you, ask them for one. If you look after it yourself, you can make one in ${name}'s settings. Then tell CORSIA in chat what it is.`;
 		default: return `Sign-in didn't finish, and CORSIA doesn't know why. Try again. If it keeps happening, show what ${name} said to whoever manages ${name} for your team. If that's you, try again later or contact ${name}.`;
 	}
 }
