@@ -408,9 +408,16 @@ mod tests {
             message,
             decode_hex("53f3beca55cf3041ceddcd8ac9aa5c1cad9e1734a4a5093eb9934e76c328db91d1")
         );
+        let shared = state.finish(&decode_hex("531412a5eceda93c395e55c8fb26e83274a036606807f3e41c2154175b54e42e76")).unwrap();
+        assert_eq!(shared, decode_hex("d1cff6e3453c5becbc814318a44bdca35ed9b8366ed26d7b0501c70ec009dfa2"));
+        let (_, server_key) = confirmation_keys(&shared).unwrap();
+        let mut transcript = transcript_prefix("verified", b"studio.local");
+        transcript.extend_from_slice(&decode_hex("531412a5eceda93c395e55c8fb26e83274a036606807f3e41c2154175b54e42e76"));
+        transcript.extend_from_slice(&message);
+        transcript.extend_from_slice(b"name:Studio");
         assert_eq!(
-            state.finish(&decode_hex("531412a5eceda93c395e55c8fb26e83274a036606807f3e41c2154175b54e42e76")).unwrap(),
-            decode_hex("d1cff6e3453c5becbc814318a44bdca35ed9b8366ed26d7b0501c70ec009dfa2")
+            confirmation(&server_key, &transcript),
+            decode_hex("944a40f6df11c32fd42a3a2652610d84113da85571c5d6f62a9e8867423be7e0")
         );
     }
 }
