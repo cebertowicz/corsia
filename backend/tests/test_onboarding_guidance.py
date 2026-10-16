@@ -175,6 +175,7 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     assert "never holds up a setup task" in running
     assert "at the end of each later setup task" in running
     assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
+    assert "never post `result.next_action`" in running
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
 
 
