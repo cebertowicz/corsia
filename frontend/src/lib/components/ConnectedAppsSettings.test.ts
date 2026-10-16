@@ -32,7 +32,7 @@ describe('ConnectedAppsSettings', () => {
 		vi.stubGlobal('fetch', fetch);
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
-		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Approve')) as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), { method: 'POST' }));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
 	});

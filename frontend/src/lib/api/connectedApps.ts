@@ -73,6 +73,18 @@ export function signOutOfApp(id: string): Promise<SignOutResult> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/sign-out`, { method: 'POST' });
 }
 
+export function createConnectedApp(input: Pick<ConnectedApp, 'name' | 'reach'> & { config: Record<string, unknown> }): Promise<ConnectedApp> {
+	return response('/api/mcp/servers', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ...input, key_refs: [] }),
+	});
+}
+
+export function startGoogleSignIn(): Promise<{ url: string }> {
+	return response('/api/google/connect', { method: 'POST' });
+}
+
 export function approveConnectedApp(id: string): Promise<ConnectedApp> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/approve`, { method: 'POST' });
 }
