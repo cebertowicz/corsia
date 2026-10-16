@@ -33,7 +33,7 @@ from llm.local_setup_ownership import existing_install_is_foreign
 from llm.local_setup_ownership import omlx_log_detail, own_omlx_admin_key, own_omlx_port, require_free_disk
 from llm.local_setup_ownership import run_command as _run
 from llm.local_profiles import DEFAULT_PROFILE, LocalProfile, format_size, profile_by_id
-from llm import local_setup_download, local_setup_operation
+from llm import local_setup_cancel, local_setup_download, local_setup_operation
 from llm.local_setup_download import (
     DOWNLOAD_BACKGROUND_POLL_SECONDS,
     DOWNLOAD_FOLLOW_SECONDS,
@@ -74,6 +74,9 @@ async def _download_dir(server_id: str):
 
 async def _download(server_id: str, report: Callable[[str], None], profile: LocalProfile) -> None:
     """Check the disk oMLX downloads to, then request and follow the profile's download."""
+    _flight.server_id = server_id
+    _flight.download_eta_seconds = None
+    _flight.download_stalled = False
     model_dir = await _download_dir(server_id)
     await asyncio.to_thread(require_free_disk, profile.download_size_bytes, model_dir, profile.repository)
     report(f"Downloading {profile.model} ({format_size(profile.download_size_bytes)})")
@@ -88,6 +91,9 @@ class _Flight:
     eligibility: Eligibility | None = None
     following: bool = False
     kind: str | None = None
+    server_id: str | None = None
+    download_eta_seconds: int | None = None
+    download_stalled: bool = False
     operation_lock: IO[str] | None = None
 
 
@@ -153,6 +159,15 @@ def setup_stopped_following() -> dict | None:
     """The last flight's result when CORSIA stopped following a download oMLX still runs."""
     result = _flight.result
     return result if result and result.get("downloading") else None
+
+
+def download_estimate() -> tuple[int | None, bool]:
+    """The live download ETA, or its stalled state, from the one setup flight."""
+    return _flight.download_eta_seconds, _flight.download_stalled
+
+
+async def cancel_local_setup() -> dict:
+    return await local_setup_cancel.cancel_setup(_flight, notify=_notify_models_changed, emit=_emit)
 
 
 def setup_status() -> dict[str, Any]:

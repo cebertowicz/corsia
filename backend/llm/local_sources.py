@@ -61,8 +61,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     A managed server is registered by host and port, so it may be remote.
     """
     from llm.local_setup import (
-        DEFAULT_PROFILE, format_size, profile_eligibility, setup_failure, setup_stage, setup_status,
-        setup_stopped_following,
+        DEFAULT_PROFILE, download_estimate, format_size, profile_eligibility, setup_failure, setup_stage,
+        setup_status, setup_stopped_following,
     )
 
     eligibility = profile_eligibility(DEFAULT_PROFILE)
@@ -83,6 +83,9 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         result = starter_source("needs_setup", stage, OMLX_FIX)
         result["setup_stage"] = stage
         result["download_percent"] = _stage_percent(stage)
+        eta_seconds, stalled = download_estimate()
+        result["download_eta_seconds"] = eta_seconds
+        result["download_stalled"] = stalled
         result["setup_downloading"] = setup_status()["state"] == "downloading"
         return result
     name = "Local model"

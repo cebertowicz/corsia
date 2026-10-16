@@ -81,6 +81,30 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
+	it('shows Save a report only with a working desktop invoke bridge', async () => {
+		if (component) await unmount(component);
+		const invoke = vi.fn(async () => undefined);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		vi.stubGlobal('fetch', vi.fn(async () => json({}, 500)));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Save a report')?.click();
+		await settle();
+		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+	});
+
+	it('does not show Save a report without a desktop invoke bridge', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('fetch', vi.fn(async () => json({}, 500)));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Save a report')).toBe(false);
+	});
+
 	it('shows existing oMLX consent before any adoption request, and Not now leaves it untouched', async () => {
 		if (component) await unmount(component);
 		calls = [];
@@ -398,7 +422,7 @@ describe('SetupScreen', () => {
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
-				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_downloading: true, download_percent: 42 },
+				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_downloading: true, download_percent: 42, download_eta_seconds: 600 },
 				{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
 				{ source: 'codex', name: 'Codex', state: 'needs_auth' },
 			] });
@@ -427,10 +451,14 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Claude Code');
 		expect(text).toContain('Codex');
 		expect(text).toContain('Downloading in the background');
-		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42%');
+		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42% · about 10 min left');
 		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
+		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Cancel')).toBe(true);
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Cancel')?.click();
+		await settle();
+		expect(calls).toContain('/api/providers/local/cancel');
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Sign in')?.click();
 		await settle();
 		expect(calls.some((url) => url.startsWith('/api/corsia-agent?token='))).toBe(true);

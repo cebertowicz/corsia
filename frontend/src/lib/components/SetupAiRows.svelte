@@ -20,9 +20,9 @@
 		<section class="item" aria-label={row.name}>
 			<ListRow name={row.name} meta={[row.meta]} centered>
 				{#snippet actions()}
-					{#if row.pill}<StatePill look="dot" state={row.pill.state} label={row.pill.label} />
-					{:else if row.busy && !row.action}<Spinner size={14} />
-					{:else if row.action}<Button variant="chip" size="sm" loading={row.action.loading} disabled={row.action.loading} onclick={row.action.run}>{row.action.label}</Button>{/if}
+					{#if row.action}<Button variant="chip" size="sm" loading={row.action.loading} disabled={row.action.loading} onclick={row.action.run}>{row.action.label}</Button>
+					{:else if row.pill}<StatePill look="dot" state={row.pill.state} label={row.pill.label} />
+					{:else if row.busy}<Spinner size={14} />{/if}
 				{/snippet}
 			</ListRow>
 			{#if row.detail}<p class="detail" class:err={row.error}>{row.detail}</p>{/if}

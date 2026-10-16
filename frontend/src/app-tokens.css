@@ -152,7 +152,7 @@
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
-  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 92%, transparent);
   --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glass-scrim: rgba(0, 0, 0, 0.28);
   --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.40);

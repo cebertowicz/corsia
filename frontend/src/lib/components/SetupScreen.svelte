@@ -6,13 +6,14 @@
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
 	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
+	import { cancelLocalDownload, fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
+	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
@@ -34,6 +35,7 @@
 	let folderChanging = $state(false);
 	let accountBusy = $state(false);
 	let accountError = $state('');
+	let reportError = $state('');
 	let confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]);
 	let sourceError = $state('');
@@ -52,16 +54,8 @@
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
-	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
-	const localJobMeta = $derived(local?.download_percent == null ? local?.setup_stage || 'Downloading' : `${local.download_percent}%`);
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
-	const localJob = $derived<SetupJob | undefined>(
-		localDownloading
-			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localJobMeta, progress: localProgress }
-			: local?.setup_error || localStartError
-				? { label: status.model_name || local?.name || 'Local model', state: 'error', meta: 'Couldn’t download' }
-				: undefined,
-	);
+	const localJob = $derived(buildLocalJob(local, localDownloading, status.model_name, page, Boolean(get(token)), localStartError, () => void cancelDownload()));
 	const canFinish = $derived(sources.some(sourceIsReady));
 	const jobs = $derived<SetupJob[]>([
 		...(localJob ? [localJob] : []),
@@ -70,13 +64,7 @@
 		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
 		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
 	]);
-	const finishNote = $derived(
-		localStartError || local?.setup_error
-			? 'The local model couldn’t start. Try again, or choose another source.'
-			: localDownloading
-				? 'Ready when the download finishes. You can close this window; CORSIA keeps going.'
-				: 'Connect Claude Code or Codex, or add an API key, to continue.',
-	);
+	const finishNote = $derived(setupFinishNote(local, localDownloading, localStartError));
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
 	const downloadModelLabel = $derived(status.model_name || 'local model');
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
@@ -95,7 +83,7 @@
 			case 'account':
 				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
-				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
+				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
 				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
@@ -268,7 +256,7 @@
 	});
 
 	const harnessSources = $derived(sources.filter(isHarness));
-	const showLocalRow = $derived(Boolean(local) && (localDownloading || Boolean(local?.setup_error || localStartError) || (local && sourceIsReady(local))));
+	const showLocalRow = $derived(page === 'models' && Boolean(local));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows: AiRow[] = harnessSources.map((source) => {
 			const row = connectFlow.row(source);
@@ -277,12 +265,27 @@
 		});
 		if (!showLocalRow || !local) return rows;
 		const ready = sourceIsReady(local);
-		rows.push({ key: 'omlx', name: 'This computer', meta: sourceMeta(local),
+		rows.push({ key: 'omlx', name: 'This computer', meta: setupSourceMeta(local, localStartError, modelSize),
 			pill: ready ? { state: 'success', label: 'Ready' } : localDownloading ? { state: 'loading', label: 'Downloading' } : undefined,
-			action: ready || localDownloading ? undefined : { label: 'Try again', run: retryLocalDownload, loading: localSetupBusy },
-			error: !localDownloading && !ready, detail: !localDownloading && !ready ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : undefined });
+			action: ready ? undefined : localDownloading ? { label: 'Cancel', run: cancelDownload, loading: localSetupBusy } : { label: local?.setup_error || localStartError ? 'Try again' : 'Download', run: retryLocalDownload, loading: localSetupBusy },
+			error: !localDownloading && !ready && Boolean(local?.setup_error || localStartError), detail: !localDownloading && !ready && (local?.setup_error || localStartError) ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : undefined });
 		return rows;
 	});
+
+	async function cancelDownload() {
+		const current = get(token);
+		if (!current || localSetupBusy) return;
+		localSetupBusy = true;
+		sourceError = '';
+		try {
+			await cancelLocalDownload(current);
+			await refreshSources();
+		} catch {
+			sourceError = 'CORSIA couldn’t cancel the local model download. Try again.';
+		} finally {
+			localSetupBusy = false;
+		}
+	}
 
 	async function retryLocalDownload() {
 		const current = get(token);
@@ -309,18 +312,16 @@
 		}
 	}
 
-	function sourceMeta(source: ModelSource): string {
-		if (source.source === 'omlx') {
-			if (source.setup_downloading || source.setup_stage) {
-				return source.download_percent == null && source.setup_stage ? source.setup_stage : 'Downloading in the background';
-			}
-			if (source.setup_error || localStartError) return 'Download needs attention';
-			return `Local model · ${modelSize}`;
+	const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+	async function saveSetupReport() {
+		const invoke = setupReportInvoke();
+		if (!invoke) return;
+		reportError = '';
+		try {
+			await invoke('save_setup_report');
+		} catch {
+			reportError = 'CORSIA couldn’t save the report. Try again.';
 		}
-		if (source.state === 'not_installed') return `${source.name} needs its official app installed first.`;
-		if (source.state === 'needs_auth') return 'Sign in to use your subscription';
-		if (sourceIsReady(source)) return 'Ready to use.';
-		return 'Check this source, then try again.';
 	}
 
 	async function saveApiKey() {
@@ -350,8 +351,8 @@
 	{#snippet secondary()}
 		{#if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
-		{:else if page === 'error'}
-			<Button variant="chip" onclick={() => page = 'account'}>Back</Button>
+		{:else if page === 'error' && setupReportInvoke()}
+			<Button variant="chip" onclick={() => void saveSetupReport()}>Save a report</Button>
 		{/if}
 	{/snippet}
 

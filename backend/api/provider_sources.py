@@ -168,6 +168,14 @@ async def add_starter_model(_user: dict = Depends(require_user_header_only)) -> 
     return await begin_add_starter_model()
 
 
+@router.post("/local/cancel")
+async def cancel_local_source(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
+    """Cancel a running local-model download; a completed flight is a no-op."""
+    from llm.local_setup import cancel_local_setup
+
+    return await cancel_local_setup()
+
+
 @router.get("/local/setup")
 async def get_local_setup(_user: dict = Depends(require_user)) -> dict[str, Any]:
     """The local setup flight record, whose oMLX this is, and the model this Mac suits.
