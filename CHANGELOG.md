@@ -21,6 +21,7 @@ Released 2026-10-15.
 
 - A Browser tab lets you watch an agent’s browser and explicitly take control when needed.
 - The browser fits its pane, follows your theme, supports navigation and input while you are in control, and keeps rendering and page commands smooth while work continues.
+- The first time an agent opens the browser, it opens reliably instead of failing before a page exists.
 
 ### Documents and Collaboration
 
