@@ -153,10 +153,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 				more: copy.page ? [{ label: 'Open the install page', run: () => void openExternalUrl(copy.page) }] : undefined,
 			};
 		}
-		if (source.state === 'not_installed') return {
-			meta: lines(`${copy.cli} is not installed.`),
-			action: copy.page ? { label: 'Open the install page', run: () => void openExternalUrl(copy.page) } : undefined,
-		};
+		if (source.state === 'not_installed') return { meta: lines(`CORSIA installs ${copy.cli} for you.`), action: { label: 'Set up', run: () => setConnect(source.source, { phase: 'confirm' }) } };
 		if (source.limited) return { meta: lines('It has reached its usage limit for now.') };
 		if (source.state === 'unverified' && source.cli_package_manager) {
 			const command = source.cli_package_manager === 'homebrew'

@@ -43,3 +43,17 @@ export async function selectSetupFirstModel(token: string | null, sources: Model
 		return false;
 	}
 }
+
+/** Finishing setup must leave the model picker available when preselection cannot complete. */
+export async function finishSetupWithBestEffortSelection(
+	token: string | null,
+	sources: ModelSource[],
+	onFinished: () => void,
+): Promise<void> {
+	try {
+		await selectSetupFirstModel(token, sources);
+	} catch {
+		// Preselection is optional; the finished app exposes the picker as recovery.
+	}
+	onFinished();
+}

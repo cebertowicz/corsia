@@ -10,7 +10,8 @@
 	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
-	import { connect } from '$lib/ws'; import { selectSetupFirstModel } from '$lib/setupFirstModel';
+	import { connect } from '$lib/ws';
+	import { finishSetupWithBestEffortSelection } from '$lib/setupFirstModel';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -87,7 +88,7 @@
 				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
-				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: () => void selectSetupFirstModel(get(token), sources).then((selected) => { if (selected) onFinished(); }) };
+				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: () => void finishSetupWithBestEffortSelection(get(token), sources, onFinished) };
 		}
 	});
 
@@ -215,12 +216,11 @@
 			connect();
 			await Promise.all([refreshSources(), classifier.read()]);
 			password = ''; confirmation = '';
-			if (status.ready_ai && canFinish && await selectSetupFirstModel(get(token), sources)) { onFinished(); return; }
+			if (status.ready_ai && canFinish) return finishSetupWithBestEffortSelection(get(token), sources, onFinished);
 			page = 'models';
 		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
-
 
 	async function refreshSources() {
 		const current = get(token);

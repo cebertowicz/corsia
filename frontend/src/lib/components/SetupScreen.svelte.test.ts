@@ -1,7 +1,6 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SetupScreen from './SetupScreen.svelte';
-import { openExternalUrl } from '$lib/linkTargetResolver';
 import { connect } from '$lib/ws';
 import { token, user } from '$lib/stores/auth';
 
@@ -744,7 +743,7 @@ describe('SetupScreen', () => {
 		expect(host.textContent).not.toMatch(/classifier|learns from/i);
 	});
 
-	it('skips the AI step when a source is already Ready, with Start using CORSIA on the account step', async () => {
+	it('finishes setup when a ready source has no matching catalog model', async () => {
 		if (component) await unmount(component);
 		const onFinished = vi.fn();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -838,31 +837,44 @@ describe('SetupScreen', () => {
 		const refocus = async () => { window.dispatchEvent(new Event('focus')); await settle(); };
 		const start = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Start using CORSIA') as HTMLButtonElement;
 
-		it('opens each missing CLI official HTTPS install page as its one action, with no installer action', async () => {
+		it('shows one action per row with no Check again, and Start stays off until a source is Ready', async () => {
 			await openConnectStep([claude('not_installed'), { source: 'codex', name: 'Codex', state: 'not_installed' }]);
 
 			expect(host.textContent).toContain('Connect an AI');
-			for (const name of ['Claude Code', 'Codex']) {
-				expect(Array.from(row(name).querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Open the install page']);
-			}
-			await press(row('Claude Code'), 'Open the install page');
-			await press(row('Codex'), 'Open the install page');
-			expect(vi.mocked(openExternalUrl).mock.calls.map(([url]) => url)).toEqual([
-				'https://code.claude.com/docs/en/setup',
-				'https://developers.openai.com/codex/cli',
-			]);
-			expect(fake.posted.some((call) => call.includes('/api/providers/cli/'))).toBe(false);
+			expect(row('Claude Code').textContent).toContain('CORSIA installs Claude Code for you.');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Set up']);
+			expect(Array.from(row('Codex').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Set up']);
 			expect(host.textContent).not.toContain('Check again');
+			expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('Your AI');
 			expect(start().disabled).toBe(true);
 		});
 
-		it('shows Sign in after focus rechecks a CLI installed outside CORSIA', async () => {
+		it('installs through the official installer after a confirm line, waits with up to 3 minutes, then signs in in place', async () => {
 			await openConnectStep([claude('not_installed')]);
+
+			await press(row('Claude Code'), 'Set up');
+			expect(row('Claude Code').textContent).toContain('Set up Claude Code? This runs Anthropic’s official installer, downloaded from claude.ai, and then you sign in to your Claude account.');
+			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/install');
+
+			await press(row('Claude Code'), 'Set up');
+			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/install');
+			expect(row('Claude Code').textContent).toContain('This can take up to 3 minutes.');
+			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
+
+			// The installer finishes; coming back to the window notices it and opens sign-in in place.
+			fake.install = { state: 'done', reason: null };
 			fake.sources = [claude('needs_auth')];
 			await refocus();
+			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
+			expect(row('Claude Code').textContent).toContain('Installed. Finish signing in to your Claude account in the browser window that just opened.');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Open sign-in again']);
+			expect(start().disabled).toBe(true);
 
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Sign in']);
-			expect(fake.posted.some((call) => call.includes('/api/providers/cli/claude-code/install'))).toBe(false);
+			fake.signin = 'completed';
+			fake.sources = [claude('ready', { accounts: [{ state: 'ready' }] })];
+			await refocus();
+			expect(row('Claude Code').textContent).toContain('Ready');
+			expect(start().disabled).toBe(false);
 		});
 
 		it('updates an unverified CLI only after confirmation, then names an older PATH copy', async () => {
@@ -911,6 +923,46 @@ describe('SetupScreen', () => {
 			expect(row('Claude Code').textContent).not.toContain('Installed.');
 		});
 
+
+		it('shows an install failure with its reason, Try again and the install page', async () => {
+			const { openExternalUrl } = await import('$lib/linkTargetResolver');
+			await openConnectStep([claude('not_installed')]);
+			await press(row('Claude Code'), 'Set up');
+			fake.install = { state: 'failed', reason: 'no internet connection' };
+			await press(row('Claude Code'), 'Set up');
+
+			expect(row('Claude Code').textContent).toContain('Couldn’t install Claude Code: no internet connection. Check your connection, then choose Try again.');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Try again', 'Open the install page']);
+
+			await press(row('Claude Code'), 'Open the install page');
+			expect(openExternalUrl).toHaveBeenCalledWith('https://code.claude.com/docs/en/setup');
+
+			fake.install = { state: 'running', reason: null };
+			await press(row('Claude Code'), 'Try again');
+			expect(row('Claude Code').textContent).toContain('This can take up to 3 minutes.');
+		});
+
+		it('treats an already installed CLI as a stale row, not a failure', async () => {
+			await openConnectStep([claude('not_installed')]);
+			fake.installPost = { status: 409, body: { reason: 'already_installed' } };
+			fake.sources = [claude('needs_auth')];
+			await press(row('Claude Code'), 'Set up');
+			await press(row('Claude Code'), 'Set up');
+
+			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
+			expect(row('Claude Code').textContent).not.toContain('Couldn’t install');
+		});
+
+		it('links a CLI the service cannot see, then goes on to sign in', async () => {
+			await openConnectStep([claude('not_installed', { invisible_binary: '/opt/example/bin/claude' })]);
+			fake.installPost = { status: 409, body: { reason: 'invisible_binary' } };
+			fake.sources = [claude('needs_auth')];
+			await press(row('Claude Code'), 'Set up');
+			await press(row('Claude Code'), 'Set up');
+
+			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/link');
+			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
+		});
 
 		it('rechecks the sources when the window regains focus', async () => {
 			await openConnectStep([claude('needs_auth')]);

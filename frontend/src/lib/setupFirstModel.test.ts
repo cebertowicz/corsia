@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { selectSetupFirstModel } from './setupFirstModel';
+import { finishSetupWithBestEffortSelection, selectSetupFirstModel } from './setupFirstModel';
 
 const readyClaude = {
 	id: 'claude-code/sonnet',
@@ -63,5 +63,21 @@ describe('selectSetupFirstModel', () => {
 			'/api/corsia-agent?token=setup-token',
 			'/api/models?thread_id=corsia-thread',
 		]);
+	});
+
+	it('finishes setup when the ready source has no matching catalog model', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/corsia-agent?token=[REDACTED]') return response({ target: { thread_id: 'corsia-thread' } });
+			if (url === '/api/models?thread_id=corsia-thread') return response({ models: [{ ...readyClaude, connection: 'codex' }] });
+			throw new Error(`unexpected request: ${url}`);
+		}));
+		const onFinished = vi.fn();
+
+		await finishSetupWithBestEffortSelection('setup-token', [
+			{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ account_id: 'a', label: 'me', label_verified: true, identified: true, state: 'ready', resets_at: null, corsia_agent_binding: true }] },
+		], onFinished);
+
+		expect(onFinished).toHaveBeenCalledOnce();
 	});
 });
