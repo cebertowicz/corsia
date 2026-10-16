@@ -95,6 +95,7 @@ OMLX_LABELS = {
     "turboquant_kv_bits": "TurboQuant bits per channel",
     "turboquant_skip_last": "TurboQuant skip last layer",
     "mtp_enabled": "Native MTP",
+    "enable_thinking": "Thinking",
 }
 OMLX_DEFAULT = "oMLX default"
 

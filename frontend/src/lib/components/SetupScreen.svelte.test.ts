@@ -154,7 +154,7 @@ describe('SetupScreen', () => {
 		// Let CORSIA manage it is Welcome's recommended choice, so its consent names the admin key.
 		expect(Array.from(host.querySelectorAll('li')).map((item) => item.textContent)).toEqual([
 			'your oMLX port setting', 'the installed oMLX version', 'your oMLX server to find its available models', 'your oMLX’s admin key']);
-		expect(host.textContent).toContain('It changes your oMLX’s settings only after you approve each one in chat.');
+		expect(host.textContent).toContain('It changes your oMLX’s settings only after you approve the changes in chat.');
 		expect(host.textContent).not.toContain('It won’t change your oMLX.');
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
 		await settle();
@@ -190,10 +190,10 @@ describe('SetupScreen', () => {
 			expect(host.textContent).toContain('CORSIA found oMLX on this computer. Both choices use it.');
 			expect(host.textContent).not.toContain('The download starts in the background when you press Get started.');
 			expect(group.querySelector('[aria-current="step"]')?.textContent).toContain('Let CORSIA manage it');
-			expect(group.textContent).toContain('Recommended. CORSIA keeps your oMLX’s settings right for each model.');
+			expect(group.textContent).toContain('Recommended. CORSIA keeps your oMLX’s settings right for the model it sets up.');
 			expect(group.textContent).toContain('CORSIA uses your models and changes nothing. Change settings in oMLX’s own admin page.');
 			expect(host.querySelector('.disclose')?.textContent).toBe(
-				'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer) and Native MTP. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.');
+				'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer), Native MTP and Thinking. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.');
 			expect(calls).toEqual(['/api/setup/status']);
 		});
 

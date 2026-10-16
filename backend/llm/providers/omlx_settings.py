@@ -118,7 +118,7 @@ _OMLX_FIELD_ALIASES_REVERSE = {v: k for k, v in _OMLX_FIELD_ALIASES.items()}
 
 
 async def get_model_settings(cfg: dict, model_id: str) -> dict[str, Any]:
-    """Read per-model admin settings from the model list endpoint."""
+    """Read per-model admin settings, and the model's ``thinking_default``, from the model list endpoint."""
     try:
         resp = await admin_request(cfg, "GET", "/models")
         if resp.status_code != 200:
@@ -132,7 +132,7 @@ async def get_model_settings(cfg: dict, model_id: str) -> dict[str, Any]:
                     _OMLX_FIELD_ALIASES_REVERSE.get(k, k): v
                     for k, v in raw.items()
                 }
-                return {"ok": True, "settings": public}
+                return {"ok": True, "settings": public, "thinking_default": m.get("thinking_default")}
         return {"ok": False, "message": f"Model not found: {model_id}"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -143,12 +143,13 @@ async def update_model_settings(
 ) -> dict[str, Any]:
     """Update per-model admin settings.
 
-    A value sent as None clears that setting to oMLX's default. A failure carries
-    oMLX's ``status``; ``model_missing`` is oMLX's own answer that it has no such
-    model. Both are upstream oMLX's ``PUT /admin/api/models/{model_id}/settings``
-    (github.com/jundot/omlx, tag v0.7.0, ``omlx/admin/routes.py`` 2714-2752:
-    ``model_fields_set`` tells a sent null from an omitted field, and an unknown
-    model is a 404 ``Model not found: {model_id}``).
+    A value sent as None (JSON null) resets that field to its own default; an
+    omitted field is left as it is. A failure carries oMLX's ``status``;
+    ``model_missing`` is oMLX's own answer that it has no such model. Both are
+    upstream oMLX's ``PUT /admin/api/models/{model_id}/settings``
+    (github.com/jundot/omlx, tag v0.7.1rc1, ``omlx/admin/routes.py`` 2691-2730:
+    ``model_fields_set`` at 2730 tells a sent null from an omitted field, and an
+    unknown model is the 404 ``Model not found: {model_id}`` at 2723).
     """
     wire = {_OMLX_FIELD_ALIASES.get(k, k): v for k, v in settings.items()}
     try:

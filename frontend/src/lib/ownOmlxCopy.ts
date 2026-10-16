@@ -4,17 +4,17 @@
  */
 export const OWN_OMLX_FOUND = 'CORSIA found oMLX on this computer. Both choices use it.';
 export const MANAGE_LABEL = 'Let CORSIA manage it';
-export const MANAGE_META = 'Recommended. CORSIA keeps your oMLX’s settings right for each model.';
+export const MANAGE_META = 'Recommended. CORSIA keeps your oMLX’s settings right for the model it sets up.';
 export const USE_MINE_LABEL = 'Use mine';
 export const USE_MINE_META = 'CORSIA uses your models and changes nothing. Change settings in oMLX’s own admin page.';
 /** The disclosure's lead, set in bold before `MANAGE_DISCLOSURE`. */
 export const MANAGE_DISCLOSURE_LEAD = 'Letting CORSIA manage it';
-export const MANAGE_DISCLOSURE = 'means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer) and Native MTP. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.';
+export const MANAGE_DISCLOSURE = 'means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer), Native MTP and Thinking. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.';
 /** Setup's read-only consent (m5), and what managing adds to it. */
 export const CONSENT_READS = ['your oMLX port setting', 'the installed oMLX version', 'your oMLX server to find its available models'];
 export const CONSENT_READS_KEY = 'your oMLX’s admin key';
 export const CONSENT_NO_CHANGE = 'It won’t change your oMLX.';
-export const CONSENT_CHANGES = 'It changes your oMLX’s settings only after you approve each one in chat.';
+export const CONSENT_CHANGES = 'It changes your oMLX’s settings only after you approve the changes in chat.';
 /** The This computer row when the person's oMLX is too old to say which model fits. */
 export const CANNOT_CHECK = 'CORSIA couldn’t check which local AI model fits this computer: your oMLX is older than 0.7.1rc1. Updating oMLX lets CORSIA check.';
 export const STOP_MANAGING = 'Stop managing';

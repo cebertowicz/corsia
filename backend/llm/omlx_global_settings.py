@@ -19,7 +19,7 @@ import json
 from typing import Any
 
 from llm.local_model import LocalModel
-from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS
+from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
 from llm.providers.omlx_settings import get_model_settings, get_settings
 
 READ_TIMEOUT_SECONDS = 3
@@ -30,12 +30,12 @@ MANAGED_GLOBAL_SETTINGS = WRITABLE_GLOBAL_SETTINGS | {"prefill_priority"}
 # The managed model's settings CORSIA may write; ``max_context_window`` is the recommender's.
 MANAGED_MODEL_SETTINGS = frozenset({
     "max_context_window", "max_tokens", "turboquant_kv_enabled", "turboquant_kv_bits",
-    "turboquant_skip_last", "mtp_enabled",
+    "turboquant_skip_last", "mtp_enabled", "enable_thinking",
 })
 
 _observed: dict[str, dict[str, Any]] = {}
-# server id -> (oMLX model id, that model's settings as oMLX reported them)
-_observed_model: dict[str, tuple[str, dict[str, Any]]] = {}
+# server id -> (oMLX model id, that model's settings as oMLX reported them, its ``thinking_default``)
+_observed_model: dict[str, tuple[str, dict[str, Any], object]] = {}
 
 
 def _find(settings: dict[str, Any], key: str) -> tuple[bool, Any]:
@@ -62,12 +62,17 @@ def writable_global_settings() -> frozenset[str]:
     return MANAGED_GLOBAL_SETTINGS if own_omlx_management.active() else WRITABLE_GLOBAL_SETTINGS
 
 
-def model_recommendations(model: LocalModel) -> dict[str, Any]:
-    """What CORSIA sets on the model it downloaded into the person's oMLX."""
+def model_recommendations(model: LocalModel, thinking_default: object = None) -> dict[str, Any]:
+    """What CORSIA sets on the model it downloaded into the person's oMLX.
+
+    ``thinking_default`` is what oMLX reported for that model; only False adds
+    ``enable_thinking``, exactly as CORSIA's own install writes it.
+    """
     values = {key: value for key, value in MODEL_SETTINGS.items() if key in MANAGED_MODEL_SETTINGS}
     values["max_context_window"] = model.context_window
     if model.mtp:
         values["mtp_enabled"] = True
+    values.update(thinking_recommendation(thinking_default))
     return values
 
 
@@ -84,8 +89,8 @@ async def _observe_model(server: dict[str, Any], model: LocalModel | None, retai
         result = {}
     settings = result.get("settings") if result.get("ok") else None
     if isinstance(settings, dict):
-        seen = _observed_model.get(server["id"], (None, {}))[0] == model.model
-        _observed_model[server["id"]] = (model.model, settings)
+        seen = _observed_model.get(server["id"], (None, {}, None))[0] == model.model
+        _observed_model[server["id"]] = (model.model, settings, result.get("thinking_default"))
         return not seen
     if not retain_on_failure:
         _observed_model.pop(server["id"], None)
@@ -161,7 +166,7 @@ def differences(server_ids: list[str]) -> list[dict[str, Any]] | None:
     model = _managed_model()
     observed_model = _observed_model.get(present[0])
     if model is not None and observed_model is not None and observed_model[0] == model.model:
-        for key, recommended in sorted(model_recommendations(model).items()):
+        for key, recommended in sorted(model_recommendations(model, observed_model[2]).items()):
             current = observed_model[1].get(key)
             if current != recommended:
                 result.append({"setting": key, "current": current, "recommended": recommended,

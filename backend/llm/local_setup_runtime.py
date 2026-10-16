@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import httpx
 
 from llm.local_model import LocalModel
-from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS
+from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
 from llm.local_setup_auth import SKIP_AUTH_SETTING
 from llm.local_setup_ownership import omlx_log_detail
 
@@ -70,14 +70,7 @@ async def configure_global(server_id: str) -> None:
 
 
 async def thinking_settings(server_id: str, model: LocalModel) -> dict:
-    """What an agent turn on ``model`` needs written so it thinks.
-
-    oMLX reads each model's thinking default from its chat template
-    (``thinking_default`` on ``GET /admin/api/models``): Qwen 3.x thinks unless
-    told not to, Gemma 4 only when asked, and None means there is no toggle. A
-    family that defaults to off gets ``enable_thinking`` alone; no effort is
-    written, so the template's own default applies.
-    """
+    """What an agent turn on ``model`` needs written so it thinks (``thinking_recommendation``)."""
     from llm.providers.omlx_endpoints import admin_request
 
     response = await admin_request({"server_id": server_id}, "GET", "/models", timeout=15.0)
@@ -88,7 +81,7 @@ async def thinking_settings(server_id: str, model: LocalModel) -> dict:
     row = next((r for r in rows or [] if isinstance(r, dict) and r.get("id") == model.model), None)
     if row is None:
         raise RuntimeError(f"oMLX does not list {model.display_name} after its download.")
-    return {"enable_thinking": True} if row.get("thinking_default") is False else {}
+    return thinking_recommendation(row.get("thinking_default"))
 
 
 async def configure_model_settings(server_id: str, model: LocalModel) -> None:

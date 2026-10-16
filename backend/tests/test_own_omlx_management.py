@@ -43,12 +43,14 @@ class FakeOmlx:
     """oMLX's admin routes: nested global GET, flat global POST, model list GET, model PUT (null unsets).
 
     A PUT for a model oMLX doesn't have answers 404 ``Model not found``, as upstream
-    oMLX v0.7.0 does (``omlx/admin/routes.py`` 2745).
+    oMLX v0.7.1rc1 does (``omlx/admin/routes.py`` 2723). Each listed model carries
+    the ``thinking_default`` its chat template gives it (None unless a test sets one).
     """
 
     def __init__(self):
         self.globals = {**GLOBALS_BEFORE, "port": 8000, "host": "127.0.0.1", "model_dir": "/opt/omlx-models"}
         self.models = {MODEL.model: dict(MODEL_BEFORE), OTHER: dict(OTHER_BEFORE)}
+        self.thinking: dict[str, bool | None] = {}
         self.requests: list[tuple[str, str, dict | None]] = []
         self.fail_writes = False
         self.fail_models: set[str] = set()
@@ -71,7 +73,8 @@ class FakeOmlx:
             self.globals.update(json)
             return _Response(200, {"runtime_applied": list(json)})
         if path == "/models" and method == "GET":
-            return _Response(200, {"models": [{"id": mid, "settings": dict(s)} for mid, s in self.models.items()]})
+            return _Response(200, {"models": [{"id": mid, "settings": dict(s), "thinking_default": self.thinking.get(mid)}
+                                               for mid, s in self.models.items()]})
         if path.startswith("/models/") and path.endswith("/settings") and method == "PUT":
             model_id = path.split("/")[2]
             if self.fail_writes or model_id in self.fail_models:
@@ -168,8 +171,34 @@ def test_no_write_ever_names_a_key_network_folder_default_or_other_model(client,
     client.post(STOP)
 
     assert _written_keys(omlx) <= ALLOWED
-    assert not {"is_default", "enable_thinking", "port", "host", "model_dir"} & _written_keys(omlx)
+    assert not {"is_default", "port", "host", "model_dir"} & _written_keys(omlx)
     assert all(OTHER not in path for _method, path, _body in omlx.writes)
+
+
+@pytest.mark.parametrize("thinking_default, shown", [(False, True), (True, False), (None, False)])
+def test_only_a_model_that_does_not_think_by_default_gets_a_thinking_row(omlx, thinking_default, shown):
+    omlx.thinking[MODEL.model] = thinking_default
+    _manage()
+
+    rows = [row for row in omlx_global_settings.differences(["srv"]) if row["setting"] == "enable_thinking"]
+
+    assert rows == ([{"setting": "enable_thinking", "current": None, "recommended": True, "model": MODEL.model}]
+                    if shown else [])
+
+
+def test_thinking_is_turned_on_as_shown_and_stopping_sends_null_to_reset_it(client, omlx):  # noqa: F811
+    omlx.thinking[MODEL.model] = False
+    _manage()
+
+    assert client.post(APPLY, json={"fingerprint": _fingerprint()}).status_code == 200
+    assert omlx.writes[1][2]["enable_thinking"] is True
+    assert f"Thinking for {MODEL.model} to oMLX default" in local_sources.omlx_management()["restores"]
+
+    omlx.requests.clear()
+    assert client.post(STOP).status_code == 200
+
+    assert omlx.writes[1][2]["enable_thinking"] is None
+    assert omlx.models[MODEL.model] == MODEL_BEFORE
 
 
 def test_the_values_kept_are_the_ones_before_the_first_change(client, omlx):  # noqa: F811
