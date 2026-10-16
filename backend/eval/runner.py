@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
-from inspect_ai import eval as ia_eval, eval_async as ia_eval_async
+from inspect_ai import Task, eval as ia_eval, eval_async as ia_eval_async
 from inspect_ai.log import EvalLog
 
 
@@ -64,7 +64,7 @@ def _ensure_log_dir(log_dir: str | None) -> str:
 
 
 def run_eval(
-    task_name: str,
+    task_name: str | Task,
     *,
     model: str | None = None,
     judge_model: str | None = None,
@@ -73,11 +73,12 @@ def run_eval(
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     **kwargs: Any,
 ) -> list[EvalLog]:
-    resolved = _resolve_task(task_name)
+    resolved = _resolve_task(task_name) if isinstance(task_name, str) else task_name
+    task_label = task_name if isinstance(task_name, str) else getattr(task_name, "name", "task")
     final_log_dir = _ensure_log_dir(log_dir)
 
     if on_progress is not None:
-        on_progress({"phase": "start", "task": task_name})
+        on_progress({"phase": "start", "task": task_label})
 
     eval_kwargs: dict[str, Any] = {
         "log_dir": final_log_dir,
@@ -93,13 +94,42 @@ def run_eval(
     logs = ia_eval(resolved, **eval_kwargs)
 
     if on_progress is not None:
-        on_progress({"phase": "end", "task": task_name, "log_count": len(logs)})
+        on_progress({"phase": "end", "task": task_label, "log_count": len(logs)})
 
     return logs
 
 
+def run_skill_evals(
+    skill_dir: str | Path,
+    *,
+    arm_mode: Literal["with_without", "old_new"] = "with_without",
+    baseline_skill_dir: str | Path | None = None,
+    judge_model: str | None = None,
+    **kwargs: Any,
+) -> list[EvalLog]:
+    """Run a skill folder's open-format evals through the existing Inspect runner."""
+
+    score = kwargs.get("score", True)
+    judge = judge_model.strip() if isinstance(judge_model, str) and judge_model.strip() else None
+    if score is not False and judge is None:
+        raise ValueError(
+            "Model-graded skill evals require an explicit non-empty judge_model; "
+            "ungraded runs must pass score=False.",
+        )
+
+    from eval.skill_evals import build_skill_eval_suite
+
+    suite = build_skill_eval_suite(
+        skill_dir,
+        arm_mode=arm_mode,
+        baseline_skill_dir=baseline_skill_dir,
+        judge_model=judge,
+    )
+    return run_eval(suite.task, judge_model=judge, **kwargs)
+
+
 async def stream_eval(
-    task_name: str,
+    task_name: str | Task,
     *,
     model: str | None = None,
     judge_model: str | None = None,
@@ -108,11 +138,12 @@ async def stream_eval(
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     **kwargs: Any,
 ) -> list[EvalLog]:
-    resolved = _resolve_task(task_name)
+    resolved = _resolve_task(task_name) if isinstance(task_name, str) else task_name
+    task_label = task_name if isinstance(task_name, str) else getattr(task_name, "name", "task")
     final_log_dir = _ensure_log_dir(log_dir)
 
     if on_progress is not None:
-        on_progress({"phase": "start", "task": task_name})
+        on_progress({"phase": "start", "task": task_label})
 
     eval_kwargs: dict[str, Any] = {
         "log_dir": final_log_dir,
@@ -128,9 +159,15 @@ async def stream_eval(
     logs = await ia_eval_async(resolved, **eval_kwargs)
 
     if on_progress is not None:
-        on_progress({"phase": "end", "task": task_name, "log_count": len(logs)})
+        on_progress({"phase": "end", "task": task_label, "log_count": len(logs)})
 
     return logs
 
 
-__all__ = ["run_eval", "stream_eval", "_default_judge_model", "_DEFAULT_LOG_DIR"]
+__all__ = [
+    "run_eval",
+    "run_skill_evals",
+    "stream_eval",
+    "_default_judge_model",
+    "_DEFAULT_LOG_DIR",
+]
