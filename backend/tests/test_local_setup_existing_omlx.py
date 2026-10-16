@@ -536,7 +536,7 @@ def test_add_starter_model_refuses_a_mac_that_cannot_run_it(monkeypatch, calls):
     first, result = asyncio.run(_add_starter())
 
     assert first == {"ok": False, "reason": "mac_cannot_run",
-                     "message": "This Mac can't run a local model well."}
+                     "message": "This computer can't run a local model well."}
     assert result is None and calls == []
 
 

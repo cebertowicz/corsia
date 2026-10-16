@@ -371,9 +371,9 @@ async def begin_local_setup(
     notice = await _limited_subscription_message() if no_subscription_only else None
     if not memory_ok:
         if notice:
-            message = "This Mac can't run a local model well. Connect another subscription or an API key in the app."
+            message = "This computer can't run a local model well. Connect another subscription or an API key in the app."
             return _skipped("ineligible", f"{notice}\n{message}")
-        message = "This Mac can't run a local model well. Connect a subscription or an API key in the app."
+        message = "This computer can't run a local model well. Connect a subscription or an API key in the app."
         if automatic:
             return _skipped("ineligible", message)
         _emit("skipped", reason="ineligible")

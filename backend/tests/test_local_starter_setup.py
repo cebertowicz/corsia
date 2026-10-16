@@ -190,7 +190,7 @@ def test_automatic_ineligible_starter_skips_without_weakening_safety_gate(monkey
     assert result == {
         "ok": True,
         "skipped": "ineligible",
-        "message": "This Mac can't run a local model well. Connect a subscription or an API key in the app.",
+        "message": "This computer can't run a local model well. Connect a subscription or an API key in the app.",
         "progress": [],
     }
 

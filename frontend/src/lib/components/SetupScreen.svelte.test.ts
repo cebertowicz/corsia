@@ -587,7 +587,7 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Codex');
 		expect(text).toContain('Downloading in the background');
 		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42% · about 10 min left');
-		expect(text).toContain('Ready about 10 min left. You can close this window; CORSIA keeps going.');
+		expect(text).toContain('Ready when the download finishes, about 10 min. You can close this window; CORSIA keeps going.');
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Cancel')).toBe(true);
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);

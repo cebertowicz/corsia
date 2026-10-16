@@ -94,7 +94,7 @@ async def begin_add_starter_model() -> dict:
                 "message": "This oMLX was set up by CORSIA; use Set up for the local model."}
     if not await asyncio.to_thread(ls.local_memory_ok):
         ls._emit("skipped", reason="ineligible", existing_omlx=True)
-        return {"ok": False, "reason": "mac_cannot_run", "message": "This Mac can't run a local model well."}
+        return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
     if not ls._claim_operation("starter", OWN_OMLX_STARTER):
         await ls.resume_pending_setup()
         return ls._in_progress_result()
