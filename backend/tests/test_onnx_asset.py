@@ -206,14 +206,15 @@ def test_unreadable_memory_never_sends_an_uncapped_call(monkeypatch, tmp_path):
 
     monkeypatch.setattr(onnx_child, "_child_rss_bytes", unreadable)
     child.ensure_loaded()
-    with pytest.raises(onnx_child.OnnxMessageFailed, match="rss"):
+    with pytest.raises(onnx_child.OnnxUnavailable, match="rss_unavailable") as raised:
         child.score({"owner": "synthetic", "head": "injection"})
 
+    assert raised.value.kind == "transient"  # an outage, never charged to this input
     assert connection.sent == []
     assert not child.running
 
 
-def test_unreadable_memory_during_load_is_deterministic(monkeypatch, tmp_path):
+def test_unreadable_memory_during_load_is_an_outage_not_a_bad_version(monkeypatch, tmp_path):
     from core import onnx_child
     from core.onnx_asset import load_manifest
 
@@ -229,7 +230,23 @@ def test_unreadable_memory_during_load_is_deterministic(monkeypatch, tmp_path):
     with pytest.raises(onnx_child.OnnxUnavailable, match="rss_unavailable") as raised:
         child.ensure_loaded()
 
-    assert raised.value.kind == "deterministic"
+    assert raised.value.kind == "transient"
+    assert not child.running
+
+
+def test_a_load_rss_breach_seen_by_the_parent_excludes_the_version(monkeypatch, tmp_path):
+    from core import onnx_child
+    from core.onnx_asset import load_manifest
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()})
+    child, _connection = _child_with(monkeypatch, load_manifest(path, spec), spec, [{"ready": True}])
+    monkeypatch.setattr(onnx_child, "_child_rss_bytes", lambda _process: spec.rss_limit_bytes + 1)
+
+    with pytest.raises(onnx_child.OnnxUnavailable, match="^load rss$") as raised:
+        child.ensure_loaded()
+
+    assert raised.value.kind == "deterministic"  # same reason the child-side check reports
     assert not child.running
 
 

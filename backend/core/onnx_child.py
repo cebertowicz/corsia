@@ -202,14 +202,13 @@ class OnnxChild:
         except psutil.NoSuchProcess:
             return  # an exited child holds no memory; its closed pipe reports child_exited
         except Exception as error:
+            # An unreadable meter is the parent's environment, not this input or asset version.
             self._stop(graceful=False)
-            if request is None:
-                raise OnnxUnavailable("rss_unavailable", kind="deterministic", cause=type(error).__name__) from error
-            raise OnnxMessageFailed("rss") from error
+            raise OnnxUnavailable("rss_unavailable", cause=type(error).__name__) from error
         if rss > self._spec.rss_limit_bytes:
             self._stop(graceful=False)
             if request is None:
-                raise OnnxUnavailable("rss", kind="deterministic")
+                raise OnnxUnavailable("load rss", kind="deterministic")
             raise OnnxMessageFailed("rss")
 
     def _stop(self, *, graceful: bool) -> None:
