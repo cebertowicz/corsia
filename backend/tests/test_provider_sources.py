@@ -787,6 +787,17 @@ class TestRecheck:
         }).json() == result
         assert calls[-1] == {"no_subscription_only": True, "automatic": True, "profile_id": None}
 
+    def test_local_cancel_route_uses_the_canonical_flight_owner(self, isolated_db, client, monkeypatch):
+        calls = []
+
+        async def cancel():
+            calls.append(True)
+            return {"ok": True, "cancelled": True}
+
+        monkeypatch.setattr("llm.local_setup.cancel_local_setup", cancel)
+        assert client.post("/api/providers/local/cancel").json() == {"ok": True, "cancelled": True}
+        assert calls == [True]
+
     def test_local_setup_route_requires_existing_omlx_consent(self, isolated_db, client, monkeypatch):
         monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
 
@@ -848,6 +859,7 @@ class TestRecheck:
         app = FastAPI()
         app.include_router(router)
         assert TestClient(app).get("/api/providers/local/setup").status_code == 401
+        assert TestClient(app).post("/api/providers/local/cancel").status_code == 401
 
     def test_reruns_the_existing_checks_and_returns_the_list(self, isolated_db, client, monkeypatch):
         from llm import network_discovery as nd

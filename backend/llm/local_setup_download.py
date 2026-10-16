@@ -64,7 +64,11 @@ async def wait_for_download(
         if task is None:
             raise RuntimeError(f"oMLX no longer reports the {profile.display_name} download task.")
         status = str(task.get("status") or "").lower()
-        shown = tracker.due(task.get("downloaded_size"), task.get("total_size"), time.monotonic())
+        observed_at = time.monotonic()
+        tracker.observe(task.get("downloaded_size"), task.get("total_size"), observed_at)
+        flight.download_eta_seconds = tracker.eta_seconds
+        flight.download_stalled = tracker.stalled
+        shown = tracker.due(task.get("downloaded_size"), task.get("total_size"), observed_at)
         if shown is not None:
             progress(f"Downloading {profile.model} ({format_size(profile.download_size_bytes)}, {shown}%)")
         if status in {"completed", "complete", "success", "succeeded"}:

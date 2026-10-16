@@ -727,11 +727,46 @@ def test_local_source_sends_the_download_percent_as_a_number(monkeypatch):
     monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
     monkeypatch.setattr(local_setup, "setup_stage", lambda: "Downloading Starter (8.60 GiB, 40%)")
     monkeypatch.setattr(local_setup, "setup_status", lambda: {"state": "running"})
+    monkeypatch.setattr(local_setup, "download_estimate", lambda: (600, False))
     source = local_sources.omlx_source()
     assert source["download_percent"] == 40 and source["setup_stage"].startswith("Downloading")
+    assert source["download_eta_seconds"] == 600 and source["download_stalled"] is False
     for stage, percent in (("Installing", None), ("Downloading Starter (8.60 GiB, 100%)", 100), ("odd 250%", 100)):
         monkeypatch.setattr(local_setup, "setup_stage", lambda stage=stage: stage)
         assert local_sources.omlx_source()["download_percent"] == percent
+
+
+def test_download_progress_estimates_only_after_measured_progress_and_marks_a_stall():
+    from llm.local_setup_results import DownloadProgress
+
+    progress = DownloadProgress(0)
+    progress.observe(100, 1_000, 0)
+    assert progress.eta_seconds is None and progress.stalled is False
+    progress.observe(300, 1_000, 10)
+    assert progress.eta_seconds == 35 and progress.stalled is False
+    progress.observe(300, 1_000, 41)
+    assert progress.eta_seconds is None and progress.stalled is True
+
+
+def test_cancelled_local_setup_is_a_successful_terminal_noop_for_the_source(monkeypatch):
+    async def run():
+        await asyncio.Event().wait()
+
+    async def scenario():
+        task = asyncio.create_task(run())
+        local_setup._flight.task = task
+        await asyncio.sleep(0)
+        result = await local_setup.cancel_local_setup()
+        return result, task.cancelled()
+
+    monkeypatch.setattr(local_setup.local_setup_operation, "read", lambda: None)
+    monkeypatch.setattr(local_setup.local_setup_operation, "clear", lambda: None)
+    monkeypatch.setattr(local_setup, "_notify_models_changed", lambda: None)
+    result, cancelled = asyncio.run(scenario())
+
+    assert result == {"ok": True, "cancelled": True}
+    assert local_setup._flight.result == {"ok": True, "cancelled": True}
+    assert cancelled
 
 
 @pytest.mark.parametrize(("servers", "membership", "code"), [

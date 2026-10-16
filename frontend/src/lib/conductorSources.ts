@@ -34,6 +34,10 @@ export interface ModelSource {
 	setup_kind?: 'starter' | 'setup';
 	/** The starter download's last reported percent; absent before one is known. */
 	download_percent?: number | null;
+	/** Remaining transfer time from measured throughput; absent until there is a sample. */
+	download_eta_seconds?: number | null;
+	/** True only when measured bytes have stopped advancing. */
+	download_stalled?: boolean;
 	/** Why the local server isn't ready, as a code; `reason` is only its wording. */
 	reason_code?: 'not_running' | 'no_models' | null;
 	/** Set when an unusable CLI belongs to Homebrew or npm; setup leaves it to that manager. */
@@ -73,6 +77,7 @@ export function localPickerStatus(source: ModelSource | undefined): { line: stri
 	if (!source) return null;
 	if (source.setup_stage || source.setup_downloading) {
 		const percent = source.download_percent ?? null;
+		if (source.download_stalled) return { line: percent === null ? 'Download paused' : `Download paused at ${percent}%`, retry: null };
 		return { line: percent === null ? 'Downloading' : `Downloading ${percent}%`, retry: null };
 	}
 	if (source.setup_error) return { line: 'Setup failed', retry: source.setup_kind ?? null };
@@ -101,6 +106,14 @@ export type LocalSetupResult = {
 	progress?: string[];
 	code?: 'consent_required';
 };
+
+export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; cancelled: boolean }> {
+	const response = await fetch('/api/providers/local/cancel', {
+		method: 'POST', headers: { Authorization: `Bearer ${t}` },
+	});
+	if (!response.ok) throw new Error(`local cancel ${response.status}`);
+	return response.json();
+}
 
 export async function setupLocalSource(t: string, consentExisting = false): Promise<LocalSetupResult> {
 	const response = await fetch('/api/providers/local/setup', {

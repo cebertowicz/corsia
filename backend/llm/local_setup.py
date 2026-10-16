@@ -74,6 +74,9 @@ async def _download_dir(server_id: str):
 
 async def _download(server_id: str, report: Callable[[str], None], profile: LocalProfile) -> None:
     """Check the disk oMLX downloads to, then request and follow the profile's download."""
+    _flight.server_id = server_id
+    _flight.download_eta_seconds = None
+    _flight.download_stalled = False
     model_dir = await _download_dir(server_id)
     await asyncio.to_thread(require_free_disk, profile.download_size_bytes, model_dir, profile.repository)
     report(f"Downloading {profile.model} ({format_size(profile.download_size_bytes)})")
@@ -88,6 +91,9 @@ class _Flight:
     eligibility: Eligibility | None = None
     following: bool = False
     kind: str | None = None
+    server_id: str | None = None
+    download_eta_seconds: int | None = None
+    download_stalled: bool = False
     operation_lock: IO[str] | None = None
 
 
@@ -153,6 +159,46 @@ def setup_stopped_following() -> dict | None:
     """The last flight's result when CORSIA stopped following a download oMLX still runs."""
     result = _flight.result
     return result if result and result.get("downloading") else None
+
+
+def download_estimate() -> tuple[int | None, bool]:
+    """The live download ETA, or its stalled state, from the one setup flight."""
+    return _flight.download_eta_seconds, _flight.download_stalled
+
+
+async def cancel_local_setup() -> dict:
+    """Cancel the live oMLX download; a completion race is deliberately a no-op."""
+    task = _flight.task
+    if task is None or task.done():
+        return {"ok": True, "cancelled": False}
+
+    operation = local_setup_operation.read()
+    task_id = operation.task_id if operation else None
+    if task_id and _flight.server_id:
+        from llm.providers.omlx_endpoints import admin_request
+
+        response = await admin_request(
+            {"server_id": _flight.server_id}, "POST", f"/hf/cancel/{task_id}", timeout=15.0,
+        )
+        # oMLX reports a just-finished task as absent or conflicting. It is already
+        # in the requested terminal state, so do not turn that race into an error.
+        if response.status_code not in (200, 202, 204, 404, 409):
+            raise RuntimeError(f"oMLX could not cancel the model download (HTTP {response.status_code}).")
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    _flight.result = {"ok": True, "cancelled": True}
+    _flight.stage = None
+    _flight.following = False
+    _flight.download_eta_seconds = None
+    _flight.download_stalled = False
+    local_setup_operation.clear()
+    _notify_models_changed()
+    _emit("cancelled", profile=operation.profile_id if operation else DEFAULT_PROFILE.id)
+    return {"ok": True, "cancelled": True}
 
 
 def setup_status() -> dict[str, Any]:

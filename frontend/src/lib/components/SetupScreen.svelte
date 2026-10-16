@@ -6,7 +6,7 @@
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
 	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
+	import { cancelLocalDownload, fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
@@ -34,6 +34,7 @@
 	let folderChanging = $state(false);
 	let accountBusy = $state(false);
 	let accountError = $state('');
+	let reportError = $state('');
 	let confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]);
 	let sourceError = $state('');
@@ -51,13 +52,23 @@
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
+	function remainingTime(seconds: number | null | undefined): string | undefined {
+		if (seconds == null || seconds < 0) return undefined;
+		if (seconds < 90) return 'about 1 min left';
+		if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} min left`;
+		return `about ${Math.round(seconds / 3600)} hr left`;
+	}
+
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
-	const localJobMeta = $derived(local?.download_percent == null ? local?.setup_stage || 'Downloading' : `${local.download_percent}%`);
+	const localJobMeta = $derived(local?.download_stalled ? 'Download paused' : local?.download_percent == null ? local?.setup_stage || 'Downloading' : [
+		`${local.download_percent}%`, remainingTime(local.download_eta_seconds),
+	].filter(Boolean).join(' · '));
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived<SetupJob | undefined>(
 		localDownloading
-			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localJobMeta, progress: localProgress }
+			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localJobMeta, progress: localProgress,
+				action: page === 'models' && get(token) ? { label: 'Cancel', onclick: () => void cancelDownload() } : undefined }
 			: local?.setup_error || localStartError
 				? { label: status.model_name || local?.name || 'Local model', state: 'error', meta: 'Couldn’t download' }
 				: undefined,
@@ -95,7 +106,7 @@
 			case 'account':
 				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
-				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
+				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
 				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
@@ -268,7 +279,7 @@
 	});
 
 	const harnessSources = $derived(sources.filter(isHarness));
-	const showLocalRow = $derived(Boolean(local) && (localDownloading || Boolean(local?.setup_error || localStartError) || (local && sourceIsReady(local))));
+	const showLocalRow = $derived(page === 'models' && Boolean(local));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows: AiRow[] = harnessSources.map((source) => {
 			const row = connectFlow.row(source);
@@ -279,10 +290,25 @@
 		const ready = sourceIsReady(local);
 		rows.push({ key: 'omlx', name: 'This computer', meta: sourceMeta(local),
 			pill: ready ? { state: 'success', label: 'Ready' } : localDownloading ? { state: 'loading', label: 'Downloading' } : undefined,
-			action: ready || localDownloading ? undefined : { label: 'Try again', run: retryLocalDownload, loading: localSetupBusy },
-			error: !localDownloading && !ready, detail: !localDownloading && !ready ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : undefined });
+			action: ready ? undefined : localDownloading ? { label: 'Cancel', run: cancelDownload, loading: localSetupBusy } : { label: local?.setup_error || localStartError ? 'Try again' : 'Download', run: retryLocalDownload, loading: localSetupBusy },
+			error: !localDownloading && !ready && Boolean(local?.setup_error || localStartError), detail: !localDownloading && !ready && (local?.setup_error || localStartError) ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : undefined });
 		return rows;
 	});
+
+	async function cancelDownload() {
+		const current = get(token);
+		if (!current || localSetupBusy) return;
+		localSetupBusy = true;
+		sourceError = '';
+		try {
+			await cancelLocalDownload(current);
+			await refreshSources();
+		} catch {
+			sourceError = 'CORSIA couldn’t cancel the local model download. Try again.';
+		} finally {
+			localSetupBusy = false;
+		}
+	}
 
 	async function retryLocalDownload() {
 		const current = get(token);
@@ -312,7 +338,9 @@
 	function sourceMeta(source: ModelSource): string {
 		if (source.source === 'omlx') {
 			if (source.setup_downloading || source.setup_stage) {
-				return source.download_percent == null && source.setup_stage ? source.setup_stage : 'Downloading in the background';
+				if (source.download_stalled) return 'Download paused';
+				const eta = remainingTime(source.download_eta_seconds);
+				return source.download_percent == null && source.setup_stage ? source.setup_stage : ['Downloading in the background', eta].filter(Boolean).join(' · ');
 			}
 			if (source.setup_error || localStartError) return 'Download needs attention';
 			return `Local model · ${modelSize}`;
@@ -321,6 +349,17 @@
 		if (source.state === 'needs_auth') return 'Sign in to use your subscription';
 		if (sourceIsReady(source)) return 'Ready to use.';
 		return 'Check this source, then try again.';
+	}
+
+	async function saveSetupReport() {
+		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
+		if (!invoke) return;
+		reportError = '';
+		try {
+			await invoke('save_setup_report');
+		} catch {
+			reportError = 'CORSIA couldn’t save the report. Try again.';
+		}
 	}
 
 	async function saveApiKey() {
@@ -351,7 +390,7 @@
 		{#if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}
-			<Button variant="chip" onclick={() => page = 'account'}>Back</Button>
+			<Button variant="chip" onclick={() => void saveSetupReport()}>Save a report</Button>
 		{/if}
 	{/snippet}
 

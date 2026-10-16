@@ -16,7 +16,7 @@ use std::{
         Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -536,6 +536,45 @@ fn get_service_log_path(
     Ok(service_log_path(&app_dir).display().to_string())
 }
 
+#[tauri::command]
+fn save_setup_report(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<String, String> {
+    let app_dir = service
+        .app_dir
+        .lock()
+        .map_err(|_| "service state is unavailable")?
+        .clone()
+        .unwrap_or(default_app_dir(&app)?);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "the computer clock is before 1970")?
+        .as_secs();
+    let report = app_dir.join(format!("corsia-setup-report-{stamp}.txt"));
+    let log_path = service_log_path(&app_dir);
+    // This is deliberately an allowlisted report: setup may have handled
+    // credentials, so the service log is referenced but never copied.
+    std::fs::write(
+        &report,
+        format!(
+            "CORSIA setup report\n\nGenerated: {stamp}\nApp version: {}\nSetup did not complete.\n\nService log (not copied here): {}\n",
+            app.package_info().version,
+            log_path.display(),
+        ),
+    )
+    .map_err(|error| format!("could not write the setup report: {error}"))?;
+    let revealed = Command::new("open")
+        .arg("-R")
+        .arg(&report)
+        .status()
+        .map_err(|error| format!("could not show the setup report in Finder: {error}"))?;
+    if !revealed.success() {
+        return Err("could not show the setup report in Finder".into());
+    }
+    Ok(report.display().to_string())
+}
+
 /// Macos traffic-light positioning workaround.
 ///
 /// `tauri.conf.json` `trafficLightPosition` flows through to Tao's
@@ -690,6 +729,7 @@ pub fn run() {
             lifecycle::retry_quit,
             open_login_items,
             get_service_log_path,
+            save_setup_report,
             start_window_drag,
         ])
         .on_page_load(|webview, _payload| {
