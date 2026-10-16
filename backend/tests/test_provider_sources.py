@@ -810,20 +810,27 @@ class TestRecheck:
         assert response.status_code == 409
         assert response.json() == {"detail": {"code": "consent_required"}}
 
-    def test_local_setup_route_records_accepted_existing_omlx_consent(self, isolated_db, client, monkeypatch):
+    @pytest.mark.parametrize("body,manage", [
+        ({"consent_existing": True}, None),
+        ({"consent_existing": True, "manage_existing": False}, False),
+        ({"consent_existing": True, "manage_existing": True}, True),
+    ])
+    def test_local_setup_route_records_accepted_existing_omlx_consent(
+            self, isolated_db, client, monkeypatch, body, manage):
         monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
         persisted = []
-        monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent", lambda: persisted.append(True))
+        monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent",
+                            lambda *, manage: persisted.append(manage))
 
         async def begin(**kwargs):
             return {"ok": True, "in_progress": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        response = client.post("/api/providers/local/setup", json={"consent_existing": True})
+        response = client.post("/api/providers/local/setup", json=body)
 
         assert response.status_code == 200
         assert response.json() == {"ok": True, "in_progress": True}
-        assert persisted == [True]
+        assert persisted == [manage]
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio

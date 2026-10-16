@@ -144,11 +144,44 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
     return result
 
 
+def _restore_lines(values: dict[str, Any], model: str | None = None) -> list[str]:
+    from onboarding import setup_strings as text
+
+    lines = []
+    for key, value in sorted(values.items()):
+        label = text.OMLX_LABELS.get(key, key)
+        shown = text.omlx_value(value)
+        lines.append(text.OMLX_RESTORE_MODEL.format(label=label, model=model, value=shown) if model
+                     else text.OMLX_RESTORE.format(label=label, value=shown))
+    return lines
+
+
+def omlx_management() -> dict[str, Any]:
+    """Whether CORSIA manages the person's own oMLX, and what stopping puts back.
+
+    ``restore_failed`` covers a stop that did not finish, so Settings offers it again.
+    ``cannot_check`` is their oMLX's version while CORSIA manages one too old to recommend.
+    ``forgets_key``: stopping removes the admin key, which CORSIA stored only to manage it.
+    """
+    from llm import own_omlx_management
+
+    record = own_omlx_management.read()
+    if record is None:
+        return {"state": "not_managed", "cannot_check": None, "restores": [], "forgets_key": False}
+    restores = [*_restore_lines(record.originals_global),
+                *(line for model, values in sorted(record.originals_models.items())
+                  for line in _restore_lines(values, model))]
+    return {"state": "managed" if record.active else "restore_failed",
+            "cannot_check": record.cannot_check if record.active else None, "restores": restores,
+            "forgets_key": record.key_registered}
+
+
 def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
     """The local source row, with which flight a download or failure belongs to.
 
     ``omlx_settings`` is set only for the person's own oMLX: None when unknown,
     ``[]`` when its settings match CORSIA's recommended ones, else the differences.
+    ``omlx_management`` is likewise only theirs (``omlx_management()``).
     """
     from llm.local_setup import setup_kind
     from llm.local_setup_ownership import existing_install_is_foreign
@@ -163,4 +196,5 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     entries = differences(ids) if own and len(ids) == 1 else None
     result["omlx_settings"] = ({"differences": entries, "fingerprint": fingerprint(ids[0], entries)}
                                if entries else entries)
+    result["omlx_management"] = omlx_management() if own else None
     return result

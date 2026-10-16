@@ -234,6 +234,27 @@ def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client
     assert calls == 1
 
 
+@pytest.mark.parametrize("body,choice", [
+    ({"consent_existing": True}, None),
+    ({"consent_existing": True, "manage_existing": False}, False),
+    ({"consent_existing": True, "manage_existing": True}, True),
+])
+def test_welcome_s_own_omlx_choice_reaches_the_consent_and_its_absence_records_none(client, monkeypatch, body, choice):
+    from llm import local_setup
+
+    recorded = []
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
+    monkeypatch.setattr(setup_api, "record_existing_omlx_consent", lambda *, manage: recorded.append(manage))
+
+    async def begin_local_setup():
+        return {"ok": True, "in_progress": True}
+
+    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+
+    assert _post(client, "/api/setup/local-download", body).status_code == 200
+    assert recorded == [choice]
+
+
 def test_existing_omlx_consent_check_runs_no_command(monkeypatch):
     from llm import local_setup_ownership
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelSource } from './conductorSources';
-import { setupFinishNote, welcomeModelMeta } from './setupLocalPresentation';
+import { setupFinishNote, setupSourceMeta, welcomeModelMeta } from './setupLocalPresentation';
 
 const downloading = (fields: Partial<ModelSource>): ModelSource => ({
 	source: 'omlx',
@@ -30,5 +30,14 @@ describe('local setup presentation', () => {
 			.toBe('Qwen 3.8 · 30 GB · runs in oMLX · Download paused');
 		expect(setupFinishNote(downloading({ download_eta_seconds: 600, download_stalled: true }), true, ''))
 			.toBe('Download paused. It will resume when progress returns.');
+	});
+
+	it('says when their own oMLX is too old to check, with no Try again in the line', () => {
+		const own = (cannotCheck: string | null) => downloading({
+			setup_downloading: false, omlx_management: { state: 'managed', cannot_check: cannotCheck, restores: [], forgets_key: true } });
+		expect(setupSourceMeta(own('0.6.2'), '', '30 GB'))
+			.toBe('CORSIA couldn’t check which local AI model fits this computer: your oMLX is older than 0.7.1rc1. Updating oMLX lets CORSIA check.');
+		expect(setupSourceMeta(own(null), '', '30 GB')).toBe('Local model · 30 GB');
+		expect(setupSourceMeta(own('0.6.2'), 'failed', '30 GB')).toBe('Download needs attention');
 	});
 });
