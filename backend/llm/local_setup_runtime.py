@@ -8,13 +8,25 @@ from types import SimpleNamespace
 
 import httpx
 
-from llm.local_profiles import LocalProfile, OMLX_GLOBAL_SETTINGS
+from llm.local_model import LocalModel
+from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS
 from llm.local_setup_auth import SKIP_AUTH_SETTING
 from llm.local_setup_ownership import omlx_log_detail
 
 LOCAL_HOST = "127.0.0.1"
 HEALTH_WAIT_SECONDS = 120.0
 LOCAL_SERVER_NAME = "This Mac"
+
+
+async def omlx_answers(port: int) -> bool:
+    """Whether oMLX answers its health check on ``port`` right now."""
+    from llm.providers.omlx_endpoints import health_url
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            return (await client.get(health_url(LOCAL_HOST, port))).status_code == 200
+    except httpx.HTTPError:
+        return False
 
 
 async def wait_for_health(port: int) -> None:
@@ -57,15 +69,44 @@ async def configure_global(server_id: str) -> None:
         raise RuntimeError(str(result.get("message", "oMLX could not save global settings.")))
 
 
-async def configure_model_settings(
-    server_id: str, context_window: int, profile: LocalProfile,
-) -> None:
-    """Set the chosen local profile's oMLX model settings."""
+async def thinking_settings(server_id: str, model: LocalModel) -> dict:
+    """What an agent turn on ``model`` needs written so it thinks.
+
+    oMLX reads each model's thinking default from its chat template
+    (``thinking_default`` on ``GET /admin/api/models``): Qwen 3.x thinks unless
+    told not to, Gemma 4 only when asked, and None means there is no toggle. A
+    family that defaults to off gets ``enable_thinking`` alone; no effort is
+    written, so the template's own default applies.
+    """
     from llm.providers.omlx_endpoints import admin_request
 
-    payload = {**profile.model_settings, "max_context_window": context_window}
+    response = await admin_request({"server_id": server_id}, "GET", "/models", timeout=15.0)
+    if response.status_code != 200:
+        raise RuntimeError(f"oMLX could not list its models (HTTP {response.status_code}).")
+    payload = response.json()
+    rows = payload.get("models") if isinstance(payload, dict) else None
+    row = next((r for r in rows or [] if isinstance(r, dict) and r.get("id") == model.model), None)
+    if row is None:
+        raise RuntimeError(f"oMLX does not list {model.display_name} after its download.")
+    return {"enable_thinking": True} if row.get("thinking_default") is False else {}
+
+
+async def configure_model_settings(server_id: str, model: LocalModel) -> None:
+    """Set the picked model's oMLX settings.
+
+    The window is the recommender's; the model-independent settings come from
+    ``local_profiles.json``; sampling is left unset so the model's own generation
+    config applies.
+    """
+    from llm.providers.omlx_endpoints import admin_request
+
+    payload = {
+        **MODEL_SETTINGS, "max_context_window": model.context_window,
+        **({"mtp_enabled": True} if model.mtp else {}),
+        **await thinking_settings(server_id, model),
+    }
     response = await admin_request(
-        {"server_id": server_id}, "PUT", f"/models/{profile.model}/settings", json=payload, timeout=15.0,
+        {"server_id": server_id}, "PUT", f"/models/{model.model}/settings", json=payload, timeout=15.0,
     )
     if response.status_code != 200:
-        raise RuntimeError(f"oMLX could not save settings for {profile.display_name} (HTTP {response.status_code}).")
+        raise RuntimeError(f"oMLX could not save settings for {model.display_name} (HTTP {response.status_code}).")

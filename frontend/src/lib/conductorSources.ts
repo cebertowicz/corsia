@@ -24,9 +24,10 @@ export interface ModelSource {
 	limited?: boolean;
 	resets_at?: string | null;
 	eligible?: boolean;
-	estimated_context_window?: number;
-	/** The starter model's download size, formatted by the backend. */
-	download_size?: string;
+	/** The picked local model's context window; null before there is a pick. */
+	context_window?: number | null;
+	/** The picked local model's download size, formatted by the backend; null before there is a pick. */
+	download_size?: string | null;
 	setup_stage?: string;
 	/** A download is running (the starter model for the person's own oMLX, or the full setup). */
 	setup_downloading?: boolean;

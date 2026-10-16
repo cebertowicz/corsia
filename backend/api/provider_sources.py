@@ -136,33 +136,26 @@ async def get_sources(_user: dict = Depends(require_user)) -> dict[str, Any]:
 async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
-    profile: str | None = Body(None, embed=True),
     consent_existing: bool = Body(False, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start the local setup flight, or report the one already running.
 
-    ``profile`` names a local model profile (``recommended_profile`` on GET); omitted, the default.
+    The model is the one CORSIA's own oMLX picks for this Mac (``local_model`` on GET).
     """
     from llm.local_setup import begin_local_setup
-    from llm.local_setup_gates import ProfileRefused
     from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent
 
     if existing_omlx_requires_consent():
         if not consent_existing:
             raise HTTPException(status_code=409, detail={"code": "consent_required"})
         record_existing_omlx_consent()
-    try:
-        return await begin_local_setup(
-            no_subscription_only=no_subscription_only, automatic=automatic, profile_id=profile,
-        )
-    except ProfileRefused as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic)
 
 
 @router.post("/local/starter")
 async def add_starter_model(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
-    """Download the default local model into the person's own oMLX, writing none of its settings."""
+    """Download the starter model into the person's own oMLX, writing none of its settings."""
     from llm.local_setup import begin_add_starter_model
 
     return await begin_add_starter_model()
@@ -178,19 +171,19 @@ async def cancel_local_source(_user: dict = Depends(require_user_header_only)) -
 
 @router.get("/local/setup")
 async def get_local_setup(_user: dict = Depends(require_user)) -> dict[str, Any]:
-    """The local setup flight record, whose oMLX this is, and the model this Mac suits.
+    """The local setup flight record, whose oMLX this is, and the model CORSIA's oMLX picked.
 
     ``omlx_is_persons_own`` is true when the oMLX here is one CORSIA did not install;
-    setup adds no models to it, so ``recommended_profile`` is then null.
+    setup adds no models to it. ``local_model`` is Welcome's pick state: its
+    ``model`` is set only once CORSIA's own oMLX has picked (``state`` ``picked``);
+    ``low_memory`` and ``none_fits`` mean this Mac gets no local model.
     """
     from llm.local_setup import setup_status
-    from llm.local_setup_gates import host_ram_bytes, recommended_profile
     from llm.local_setup_ownership import existing_install_is_foreign
+    from llm.local_setup_prepare import pick_view
 
     foreign = await asyncio.to_thread(existing_install_is_foreign)
-    ram_bytes = await asyncio.to_thread(host_ram_bytes)
-    return {**setup_status(), "omlx_is_persons_own": foreign,
-            "recommended_profile": recommended_profile(ram_bytes, foreign)}
+    return {**setup_status(), "omlx_is_persons_own": foreign, "local_model": await pick_view()}
 
 
 async def recheck_sources_once() -> list[dict[str, Any]]:

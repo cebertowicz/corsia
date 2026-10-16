@@ -34,7 +34,10 @@ async function serveSetupState(page: Page, state: SetupState | (() => SetupState
 		await route.fulfill({ json: { has_users: false } });
 	});
 	await page.route('**/api/setup/status', async (route) => {
-		await route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, work_folder: '~/CORSIA' } });
+		await route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' } });
+	});
+	await page.route('**/api/setup/local-model', async (route) => {
+		await route.fulfill({ json: { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null } });
 	});
 	await page.route('**/api/setup/local-download', async (route) => {
 		await route.fulfill({ json: { ok: true, in_progress: currentState() === 'downloading' } });

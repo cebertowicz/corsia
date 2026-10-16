@@ -7,14 +7,15 @@ import subprocess
 import httpx
 from fastapi import HTTPException
 
-from llm.local_profiles import setup_command
+#: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
+SETUP_COMMAND = "corsia local setup"
 
 
-def local_setup_error(message: str, profile_id: str) -> dict:
+def local_setup_error(message: str) -> dict:
     return {
         "ok": False,
         "message": message,
-        "next_action": f"Run `{setup_command(profile_id)}` again after fixing this, or add a subscription/API key.",
+        "next_action": f"Run `{SETUP_COMMAND}` again after fixing this, or add a subscription/API key.",
     }
 
 

@@ -254,19 +254,23 @@ class _Clock:
         self.now += seconds
 
 
-def _starter_row(status: str) -> dict:
-    from llm.local_profiles import DEFAULT_PROFILE
+WARM_MODEL = "Jundot/Qwen3.8-27B-oQ4e-mtp"
 
+
+def _starter_row(status: str) -> dict:
     return {
         "id": "omlx-starter", "status": status, "backend": "network",
-        "provider": "omlx", "litellm_model": f"omlx@srv-1/{DEFAULT_PROFILE.model}",
+        "provider": "omlx", "litellm_model": f"omlx@srv-1/{WARM_MODEL}",
     }
 
 
 @pytest.fixture
 def cli(monkeypatch):
     import cli_corsia_agent
+    from llm.local_model import LocalModel, record_set_up
 
+    # Setup records the model it installed; warm finds that model's catalog row.
+    record_set_up(LocalModel(WARM_MODEL, 16_971_681_558, 262_144))
     monkeypatch.setenv("CORSIA_SOURCES_SERVICE_TOKEN", "svc")
     monkeypatch.delenv("CORSIA_INSTALL_FLOW", raising=False)
     calls: list[str] = []
@@ -325,6 +329,14 @@ def test_cli_is_silent_when_the_starter_is_not_ready(cli, capsys):
     assert (code, text) == (0, "")
     assert capsys.readouterr().err == ""
     assert cli.calls == ["GET /api/models"]
+
+
+def test_cli_is_silent_when_setup_installed_no_local_model(cli):
+    from llm import local_model
+
+    local_model._record_path().unlink()
+    assert _run(cli, None) == (0, "")
+    assert cli.calls == []
 
 
 def test_cli_is_silent_without_a_token(cli, monkeypatch):

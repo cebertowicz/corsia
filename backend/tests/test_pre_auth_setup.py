@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -18,6 +20,7 @@ from api import setup as setup_api  # noqa: E402
 from api import system as system_api  # noqa: E402
 from infra import accounts, token_admin  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
+from omlx_recommender_fixtures import fresh_local_setup  # noqa: E402,F401
 
 
 LOOPBACK_BASE = "http:" + f"//127.0.0.1:{DEFAULT_BACKEND_PORT}"
@@ -74,15 +77,26 @@ def _post(client, path: str, body: dict | None = None, *, headers: dict | None =
     return client.post(path, json=body or {}, headers=headers or JSON_HEADERS)
 
 
-@pytest.mark.parametrize("path", ["/api/setup/status", "/api/setup/local-download", "/api/setup/first-account"])
-def test_refuses_wrong_host_without_detail(client, path):
-    response = (
-        client.get(path, headers={"Host": f"example.com:{DEFAULT_BACKEND_PORT}"})
-        if path.endswith("status")
-        else _post(client, path, {"name": "First", "username": "first", "password": "correct horse battery staple"}, headers={
-            "Host": f"example.com:{DEFAULT_BACKEND_PORT}", "Content-Type": "application/json",
-        })
-    )
+# Every pre-auth route, as the app calls it.
+ROUTES = [
+    ("GET", "/api/setup/status"), ("POST", "/api/setup/local-download"), ("POST", "/api/setup/first-account"),
+    ("GET", "/api/setup/local-model"), ("POST", "/api/setup/local-model"), ("POST", "/api/setup/local-model/stop"),
+]
+POSTS = [path for method, path in ROUTES if method == "POST"]
+ACCOUNT_BODY = {"name": "First", "username": "first", "password": "correct horse battery staple"}
+
+
+def _call(client, method: str, path: str, headers: dict):
+    if method == "GET":
+        return client.get(path, headers=headers)
+    return _post(client, path, ACCOUNT_BODY, headers=headers)
+
+
+@pytest.mark.parametrize(("method", "path"), ROUTES)
+def test_refuses_wrong_host_without_detail(client, method, path):
+    response = _call(client, method, path, {
+        "Host": f"example.com:{DEFAULT_BACKEND_PORT}", "Content-Type": "application/json",
+    })
     assert response.status_code == 403
     assert response.content == b""
 
@@ -103,19 +117,14 @@ def test_accepts_loopback_host_for_its_own_nondefault_port(no_users):
 
 
 @pytest.mark.parametrize("forwarded", ["X-Forwarded-For", "Tailscale-User-Login"])
-@pytest.mark.parametrize("path", ["/api/setup/status", "/api/setup/local-download", "/api/setup/first-account"])
-def test_refuses_forwarded_requests_without_detail(client, path, forwarded):
-    headers = {**JSON_HEADERS, forwarded: "forwarded"}
-    response = (
-        client.get(path, headers=headers)
-        if path.endswith("status")
-        else _post(client, path, {"name": "First", "username": "first", "password": "correct horse battery staple"}, headers=headers)
-    )
+@pytest.mark.parametrize(("method", "path"), ROUTES)
+def test_refuses_forwarded_requests_without_detail(client, method, path, forwarded):
+    response = _call(client, method, path, {**JSON_HEADERS, forwarded: "forwarded"})
     assert response.status_code == 403
     assert response.content == b""
 
 
-@pytest.mark.parametrize("path", ["/api/setup/local-download", "/api/setup/first-account"])
+@pytest.mark.parametrize("path", POSTS)
 def test_post_refuses_foreign_origin_and_form_data_without_detail(client, path):
     foreign = _post(client, path, {"name": "First", "username": "first", "password": "correct horse battery staple"}, headers={
         **JSON_HEADERS, "Origin": "https:" + "//example.com",
@@ -134,8 +143,6 @@ def test_status_exposes_only_screen_facts(client, monkeypatch):
         "app_location": "applications",
         "local_eligible": True,
         "work_folder": "~/corsia",
-        "model_name": "Example model",
-        "model_size_gb": 30.0,
         "required_username": None,
         "existing_omlx": False,
         "ready_ai": None,
@@ -146,14 +153,10 @@ def test_status_exposes_only_screen_facts(client, monkeypatch):
     assert response.json() == facts
 
 
-@pytest.mark.parametrize("path", ["/api/setup/status", "/api/setup/local-download", "/api/setup/first-account"])
-def test_post_setup_returns_complete_code(client, path):
+@pytest.mark.parametrize(("method", "path"), ROUTES)
+def test_post_setup_returns_complete_code(client, method, path):
     accounts.create_user("existing", "correct horse battery staple")
-    response = (
-        client.get(path, headers=LOOPBACK_HEADERS)
-        if path.endswith("status")
-        else _post(client, path, {"name": "First", "username": "first", "password": "correct horse battery staple"})
-    )
+    response = _call(client, method, path, JSON_HEADERS)
     assert response.status_code == 409
     assert response.json() == {"code": "setup_complete"}
 
@@ -459,6 +462,83 @@ def test_routes_are_registered():
             path = getattr(entry, "path", None)
             if path:
                 paths.add(path)
-    assert {
-        "/api/setup/status", "/api/setup/local-download", "/api/setup/first-account",
-    } <= paths
+    assert {path for _method, path in ROUTES} <= paths
+
+
+@pytest.fixture
+def welcome(no_users, monkeypatch, fresh_local_setup):
+    """The setup routes on a non-default bound port, as the app reaches them before any account."""
+    from llm import local_setup
+
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: False)
+    port = 43124
+    headers = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json"}
+    app = FastAPI()
+    app.include_router(setup_api.router)
+    with TestClient(app, base_url=f"http://127.0.0.1:{port}", client=("127.0.0.1", 50102)) as client:
+        def call(method: str, path: str, *, host_port: int = port):
+            sent = {**headers, "Host": f"127.0.0.1:{host_port}"}
+            return client.get(path, headers=sent) if method == "GET" else client.post(path, json={}, headers=sent)
+
+        def until(done, what: str):
+            # The app's event loop runs prepare and the flight; give it real time.
+            deadline = time.monotonic() + 5
+            while not done():
+                assert time.monotonic() < deadline, f"timed out waiting for {what}"
+                time.sleep(0.01)
+
+        yield SimpleNamespace(call=call, until=until, flight=lambda: local_setup._flight)
+
+
+def test_welcome_picks_then_get_started_downloads_that_model_through_the_setup_routes(welcome, monkeypatch):
+    from omlx_recommender_fixtures import mac_with
+
+    mac = mac_with(monkeypatch, 48)
+
+    assert welcome.call("GET", "/api/setup/local-model").json()["state"] == "not_checked"
+    # The POST answers once oMLX has picked: Welcome has no event to wait on before the account.
+    picked = welcome.call("POST", "/api/setup/local-model").json()
+    assert welcome.call("GET", "/api/setup/local-model").json() == picked
+    assert picked == {"state": "picked", "message": None, "model": {
+        "name": "Qwen3.8 27B", "repository": "Jundot/Qwen3.8-27B-oQ4e-mtp",
+        "download_size_bytes": picked["model"]["download_size_bytes"],
+        "download_size_gb": round(picked["model"]["download_size_bytes"] / 1000**3, 1),
+        "context_window": 262_144,
+    }}
+    # Welcome only picked; nothing downloaded and nothing was written to oMLX.
+    assert mac.downloads == [] and mac.omlx.puts() == []
+    # The bound port is part of trust: the same request for another port is refused.
+    assert welcome.call("GET", "/api/setup/local-model", host_port=43125).status_code == 403
+
+    started = welcome.call("POST", "/api/setup/local-download")
+    assert started.status_code == 200 and started.json()["ok"] is True
+    welcome.until(lambda: welcome.flight().task is not None and welcome.flight().task.done(), "the flight")
+
+    assert welcome.flight().result["ok"] is True
+    # Get started downloaded Welcome's pick, without asking the recommender again.
+    assert [model.repository for model in mac.downloads] == ["Jundot/Qwen3.8-27B-oQ4e-mtp"]
+    assert mac.omlx.asks() == 1
+
+
+def test_turning_the_switch_off_on_welcome_stops_the_pick_through_the_setup_routes(welcome, monkeypatch):
+    from omlx_recommender_fixtures import mac_with
+
+    mac = mac_with(monkeypatch, 64)
+    assert welcome.call("POST", "/api/setup/local-model").json()["state"] == "picked"
+
+    stopped = welcome.call("POST", "/api/setup/local-model/stop").json()
+
+    assert stopped == {"state": "not_checked", "model": None, "message": None}
+    assert mac.commands == [["omlx", "stop"]] and mac.downloads == []
+
+
+def test_a_mac_under_24_gb_gets_no_pick_and_starts_nothing_through_the_setup_routes(welcome, monkeypatch):
+    from llm.local_setup_prepare import NO_LOCAL_MODEL
+    from omlx_recommender_fixtures import mac_with
+
+    mac = mac_with(monkeypatch, 16)
+
+    view = welcome.call("POST", "/api/setup/local-model").json()
+
+    assert view == {"state": "low_memory", "model": None, "message": NO_LOCAL_MODEL}
+    assert mac.started == [] and mac.omlx.calls == []
