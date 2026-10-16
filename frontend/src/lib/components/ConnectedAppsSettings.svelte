@@ -129,7 +129,7 @@
 				{:else}
 				<article class:open={isOpen(app)} class="app-row">
 					<button class="summary press-tint" aria-expanded={isOpen(app)} onclick={() => openId = openId === app.id ? null : app.id}>
-						<span class="app-copy"><strong title={app.name}>{app.name}</strong><span>{needsPlace(app) ? stateLine(app) : `${stateLine(app)} · ${placeLine(app)}`}</span></span><span aria-hidden="true">›</span>
+						<span class="app-copy waiting-copy"><strong title={app.name}>{app.name}</strong><span class="second status">{needsPlace(app) ? stateLine(app) : `${stateLine(app)} · ${placeLine(app)}`}</span></span><span aria-hidden="true">›</span>
 					</button>
 					{#if isOpen(app)}
 						<div class="details">
@@ -177,7 +177,7 @@
 	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
 	.app-copy { min-width: 0; display: grid; gap: var(--space-1); }
 	.app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-	.app-copy span, .state { color: var(--text-secondary); font-size: var(--text-footnote); }
+	.state { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.details { padding: var(--space-2) 0 var(--space-2) var(--space-3); }
 	.actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }

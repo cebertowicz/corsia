@@ -40,6 +40,15 @@ describe('ConnectedAppsSettings', () => {
 		expect(connectedRow?.querySelector('[aria-hidden="true"]')?.textContent).toBe('›');
 	});
 
+	it('uses the waiting-row type treatment for connected rows too', async () => {
+		const connected = { ...awaiting, id: 'notes', name: 'Notes', state: 'working', tool_count: 2 };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [connected, awaiting] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-copy strong')).toHaveLength(2));
+		expect(host.querySelector('.app-copy')?.classList.contains('waiting-copy')).toBe(true);
+		expect(host.querySelector('.app-copy .second.status')?.textContent).toContain('Connected · 2 actions');
+	});
+
 	it('calls decline for an awaiting approval row', async () => {
 		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/decline') ? { ...awaiting, state: 'expired' } : { servers: [awaiting] } }));
 		vi.stubGlobal('fetch', fetch);

@@ -21,13 +21,12 @@ test.describe('Connected apps Settings section capture', () => {
 			await route.fulfill({ json: { servers, sign_in_here: false } });
 		});
 
-		await loginByUrl(page, { waitForComposer: false });
 		for (const theme of ['light', 'dark'] as const) {
 			for (const viewport of [1440, 393]) {
 				state = 'empty';
-				await page.reload();
 				await page.setViewportSize({ width: viewport, height: 980 });
-				await page.evaluate((nextTheme) => { document.documentElement.dataset.theme = nextTheme; }, theme);
+				await page.emulateMedia({ colorScheme: theme });
+				await loginByUrl(page, { waitForComposer: false });
 				await openSettings(page);
 				const appsButton = viewport > 768
 					? page.getByRole('button', { name: 'Connected apps' })
@@ -39,7 +38,6 @@ test.describe('Connected apps Settings section capture', () => {
 
 				state = 'apps';
 				await page.reload();
-				await page.evaluate((nextTheme) => { document.documentElement.dataset.theme = nextTheme; }, theme);
 				await openSettings(page);
 				await (viewport > 768
 					? page.getByRole('button', { name: 'Connected apps' })
