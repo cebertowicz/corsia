@@ -60,11 +60,15 @@
 		html[data-theme="light"] .failure-copy, html[data-theme="light"] .log-label { color: var(--muted-light); }
 		.log-label { display: block; margin-top: 16px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
 		.log-path { display: block; margin-top: 6px; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; }
-		.actions { display: flex; justify-content: center; margin-top: 20px; }
+		.actions { display: flex; justify-content: center; gap: 16px; margin-top: 20px; }
 		.approval-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; }
 		.approval-check { display: inline-flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; border: 1px solid var(--accent-border); border-radius: 50%; color: var(--accent-text-dark); font-size: 13px; }
 		html[data-theme="light"] .approval-check { color: var(--accent-text-light); }
-		.approval-check[aria-checked="false"] { color: transparent; }
+		html[data-theme] .approval-check[data-state="off"] { color: transparent; }
+		.approval-description { margin: 8px 0 16px; font-size: 14px; line-height: 1.5; }
+		html[data-theme="dark"] .approval-description { color: var(--muted-dark); }
+		html[data-theme="light"] .approval-description { color: var(--muted-light); }
+		.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 		.approval-action { flex: none; }
 		button {
 			height: 36px;
@@ -98,19 +102,23 @@
 		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
 		<section id="background-approval" class="background-approval" hidden aria-labelledby="status">
+			<p id="approval-description" class="approval-description">Turn this on so your agents keep working when you close this window.</p>
 			<div class="failure-card approval-row">
-				<span id="approval-check" class="approval-check" role="checkbox" aria-checked="false">✓</span>
+				<span id="approval-check" class="approval-check" data-state="off"><span aria-hidden="true">✓</span><span id="approval-state" class="visually-hidden">Off</span></span>
 				<span class="failure-copy">Keep CORSIA running when the window is closed</span>
 				<button id="open-login-items" class="approval-action" type="button">Open Login Items</button>
 			</div>
 		</section>
 		<section id="failure" class="failure" hidden aria-labelledby="status">
 			<div class="failure-card">
-				<p class="failure-copy">CORSIA couldn’t start.</p>
+				<p id="failure-description" class="failure-copy">CORSIA couldn’t start.</p>
 				<p id="failure-reason" class="failure-copy" hidden></p>
 				<span class="log-label">Service log</span>
 				<code id="log-path" class="log-path"></code>
-				<div class="actions"><button id="retry" type="button">Try again</button></div>
+				<div class="actions">
+					<button id="failure-login-items" type="button" hidden>Open Login Items</button>
+					<button id="retry" type="button">Try again</button>
+				</div>
 			</div>
 		</section>
 	</div>
@@ -122,16 +130,26 @@
 			const failure = document.getElementById('failure');
 			const backgroundApproval = document.getElementById('background-approval');
 			const approvalCheck = document.getElementById('approval-check');
+			const approvalState = document.getElementById('approval-state');
 			const openLoginItems = document.getElementById('open-login-items');
 			const logPath = document.getElementById('log-path');
 			const reason = document.getElementById('failure-reason');
 			const retry = document.getElementById('retry');
+			const failureDescription = document.getElementById('failure-description');
+			const failureLoginItems = document.getElementById('failure-login-items');
+			let quitFailure = false;
 			let approvalPoll;
+			let approvalPollInFlight = false;
+			let continuationStarted = false;
 
-			async function showFailure(why) {
+			async function showFailure(why, quitting = false) {
 				clearInterval(approvalPoll);
+				quitFailure = quitting;
+				failure.dataset.mode = quitting ? 'quit' : 'startup';
+				failureDescription.textContent = quitting ? "CORSIA couldn't stop its background service." : 'CORSIA couldn’t start.';
+				failureLoginItems.hidden = !quitting;
 				backgroundApproval.hidden = true;
-				status.textContent = 'CORSIA couldn’t start';
+				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
 				reason.textContent = typeof why === 'string' ? why : '';
 				reason.hidden = !reason.textContent;
 				try {
@@ -144,28 +162,44 @@
 				retry.focus();
 			}
 
-			function continueToService(startup) {
+			function continueToService(startup, showApproval) {
+				if (continuationStarted) return;
+				continuationStarted = true;
 				clearInterval(approvalPoll);
+				status.textContent = 'Starting CORSIA…';
+				if (showApproval) {
+					approvalCheck.dataset.state = 'on';
+					approvalState.textContent = 'On';
+					window.setTimeout(() => window.location.replace(startup.url), 600);
+					return;
+				}
 				window.location.replace(startup.url);
 			}
 
 			async function showBackgroundApproval() {
 				failure.hidden = true;
+				status.textContent = 'Keep CORSIA running';
 				backgroundApproval.hidden = false;
-				approvalCheck.setAttribute('aria-checked', 'false');
+				approvalCheck.dataset.state = 'off';
+				approvalState.textContent = 'Off';
 				clearInterval(approvalPoll);
 				approvalPoll = setInterval(async () => {
+					if (approvalPollInFlight || continuationStarted) return;
+					approvalPollInFlight = true;
 					try {
 						const startup = await invoke('start_local_service');
 						if (startup.state === 'ready') {
-							approvalCheck.setAttribute('aria-checked', 'true');
-							continueToService(startup);
+							continueToService(startup, true);
 						}
-					} catch (_) {}
+					} catch (_) {
+					} finally {
+						approvalPollInFlight = false;
+					}
 				}, 1000);
 			}
 
 			async function start() {
+				if (continuationStarted) return;
 				status.textContent = 'Starting CORSIA…';
 				failure.hidden = true;
 				backgroundApproval.hidden = true;
@@ -186,11 +220,25 @@
 				}
 			}
 
+			async function retryFailure() {
+				if (!quitFailure) return start();
+				retry.disabled = true;
+				status.textContent = 'Stopping CORSIA…';
+				try {
+					await invoke('retry_quit');
+				} catch (_) {
+					await showFailure(undefined, true);
+				}
+			}
+
 			window.__corsiaShowServiceFailure = showFailure;
+			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
 			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
-			retry.addEventListener('click', start);
+			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
+			retry.addEventListener('click', retryFailure);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
+			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();
 	</script>
 </body>

@@ -156,7 +156,6 @@ async def system_restart(
     return {"ok": True, "mode": mode, "operation_id": operation_id, "message": message}
 
 
-
 async def _monitor_restart_process(process, operation_id: str) -> None:
     """Compensate an immediate child exit without joining backend shutdown."""
     poll = getattr(process, "poll", None)

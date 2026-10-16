@@ -22,7 +22,9 @@ use serde::Serialize;
 use tauri::Manager;
 
 mod first_run;
+mod lifecycle;
 mod service_management;
+mod startup_failure;
 
 pub fn service_command_from_environment() -> Option<i32> {
     service_management::command_from_environment()
@@ -36,6 +38,7 @@ const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 struct AppServiceState {
     state_dir: Mutex<Option<PathBuf>>,
     quitting: AtomicBool,
+    exit_cleanup_attempted: AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -137,6 +140,15 @@ fn select_port(recorded: Option<u16>) -> Result<u16, String> {
         .map_err(|error| format!("could not determine the fallback service port: {error}"))
 }
 
+fn port_for_startup(first_run: &first_run::FirstRun, recorded: Option<u16>) -> Result<u16, String> {
+    match first_run {
+        first_run::FirstRun::Fresh { .. } => select_port(recorded),
+        // A configured service may already be listening. Reconnect to its
+        // recorded port rather than allocating an unwritten fallback.
+        _ => Ok(recorded.unwrap_or_else(|| preferred_port(None))),
+    }
+}
+
 fn probe_health(port: u16) -> bool {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
@@ -234,7 +246,7 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     }
 }
 
-fn wait_for_service(port: u16) -> Result<(), String> {
+fn wait_for_service(port: u16, state_dir: &PathBuf) -> Result<(), String> {
     let deadline = Instant::now() + HEALTH_TIMEOUT;
     while Instant::now() < deadline {
         if probe_health(port) {
@@ -242,17 +254,11 @@ fn wait_for_service(port: u16) -> Result<(), String> {
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
-    Err("the CORSIA service did not become ready in time".into())
+    Err(startup_failure::timeout_message(&service_log_path(state_dir)))
 }
 
 fn register_or_report_status() -> Result<service_management::ServiceStatus, String> {
-    match service_management::service_status()? {
-        service_management::ServiceStatus::NotRegistered => {
-            service_management::register_from_app()?;
-            service_management::service_status()
-        }
-        status => Ok(status),
-    }
+    service_management::ensure_registered_from_app()
 }
 
 fn start_service(
@@ -274,7 +280,7 @@ fn start_service(
     if let first_run::FirstRun::ExistingInstall { reason } = first_run {
         return Err(reason);
     }
-    let port = select_port(first_run::recorded_port(&state_dir))?;
+    let port = port_for_startup(&first_run, first_run::recorded_port(&state_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
         let resources = bundled_resource_dir(app).ok();
         first_run::apply(&workspace, &state_dir, port, |path| {
@@ -288,11 +294,11 @@ fn start_service(
     *service
         .state_dir
         .lock()
-        .map_err(|_| "service state is unavailable")? = Some(state_dir);
+        .map_err(|_| "service state is unavailable")? = Some(state_dir.clone());
 
     match register_or_report_status()? {
         service_management::ServiceStatus::Enabled => {
-            wait_for_service(port)?;
+            wait_for_service(port, &state_dir)?;
             Ok(ServiceStartup::Ready {
                 url: service_url(port),
             })
@@ -458,6 +464,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
+            lifecycle::retry_quit,
             open_login_items,
             get_service_log_path,
             start_window_drag,
@@ -475,7 +482,22 @@ pub fn run() {
                 sync_window_chrome(&window);
             }
         })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == lifecycle::QUIT_MENU_ID
+                && lifecycle::route(lifecycle::Input::Quit, false) == lifecycle::Action::CheckQuit
+            {
+                lifecycle::request_quit(app);
+            }
+        })
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if lifecycle::route(lifecycle::Input::CloseMain, false) == lifecycle::Action::Hide {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
             // Keep the DOM's native fullscreen state and normal-window control
             // frames synchronized after focus and resize transitions.
             #[cfg(target_os = "macos")]
@@ -490,6 +512,8 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppServiceState::default());
+            #[cfg(target_os = "macos")]
+            app.set_menu(lifecycle::menu(app.handle())?)?;
             // Apply traffic-light position once the main window is up.
             // The config-driven path is unreliable for our transparent +
             // windowEffects setup (see inset_traffic_lights doc comment).
@@ -537,48 +561,27 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            let tauri::RunEvent::ExitRequested { api, .. } = event else {
-                return;
-            };
-            let service = app_handle.state::<AppServiceState>();
-            if service.quitting.load(Ordering::Relaxed) {
-                return;
-            }
-            api.prevent_exit();
-            let app_handle = app_handle.clone();
-            thread::spawn(move || {
-                let service = app_handle.state::<AppServiceState>();
-                let state_dir = service
-                    .state_dir
-                    .lock()
-                    .ok()
-                    .and_then(|state_dir| state_dir.clone())
-                    .or_else(|| default_state_dir(&app_handle).ok());
-                let port = state_dir
-                    .as_deref()
-                    .and_then(first_run::recorded_port)
-                    .unwrap_or(DEFAULT_SERVICE_PORT);
-                if should_prevent_quit(operation_is_active(port)) {
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
+            match event {
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    if lifecycle::route(lifecycle::Input::Reopen, false) == lifecycle::Action::ShowAndFocus {
+                        lifecycle::show_main(app_handle);
                     }
-                    return;
                 }
-                match unregister_service() {
-                    Ok(()) => {
-                        service.quitting.store(true, Ordering::Relaxed);
-                        app_handle.exit(0);
-                    }
-                    Err(error) => {
-                        log::error!("could not quit CORSIA cleanly: {error}");
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                tauri::RunEvent::Exit => lifecycle::on_exit(app_handle),
+                tauri::RunEvent::ExitRequested { api, code, .. } => {
+                    let quitting = app_handle.state::<AppServiceState>().quitting.load(Ordering::Relaxed);
+                    match lifecycle::route(lifecycle::Input::ExitRequested(code), quitting) {
+                        lifecycle::Action::KeepAlive => api.prevent_exit(),
+                        lifecycle::Action::CheckQuit => {
+                            api.prevent_exit();
+                            lifecycle::request_quit(app_handle);
                         }
+                        _ => {}
                     }
                 }
-            });
+                _ => {}
+            }
         });
 }
 
@@ -648,6 +651,13 @@ mod tests {
             ),
             "updater artifacts must remain disabled"
         );
+    }
+
+    #[test]
+    fn configured_startup_reuses_the_recorded_port_while_service_is_listening() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert_eq!(port_for_startup(&first_run::FirstRun::Configured, Some(port)), Ok(port));
     }
 
     #[test]

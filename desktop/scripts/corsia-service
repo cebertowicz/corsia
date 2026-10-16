@@ -116,6 +116,21 @@ exec >>"$state_dir/logs/service.log" 2>&1
 # Refuse to compete with a different CORSIA job. A deliberate refusal exits
 # successfully so KeepAlive does not turn PK4 into a respawn loop.
 launchctl_command="${CORSIA_TEST_LAUNCHCTL:-launchctl}"
+is_launchd_self() {
+  [ "$1" = "${XPC_SERVICE_NAME:-}" ] && [ "$2" = 1 ]
+}
+# Never persist a raw launchctl block: nested EnvironmentVariables can contain
+# credentials. Ownership and diagnostics share only top-level public metadata.
+job_metadata() {
+  awk '
+    {
+      line=$0; sub(/^[[:space:]]*/, "", line)
+      if (line=="}") { if (depth>0) depth--; next }
+      if (substr(line, length(line), 1)=="{") { depth++; next }
+      if (depth==1 && line ~ /^(path|program|program identifier|state|pid) = /) print line
+    }
+  '
+}
 # `launchctl print gui/<uid>` only summarizes the domain. List candidate
 # labels first, then inspect each job's own record before comparing its program
 # with this bundle. Do not start if either inspection is unavailable: a clean
@@ -126,16 +141,60 @@ if ! corsia_jobs="$("$launchctl_command" list 2>/dev/null)"; then
 fi
 corsia_labels="$(printf '%s\n' "$corsia_jobs" | awk '$3 ~ /^(com|ai)\.corsia\./ { print $3 }')"
 foreign_corsia_label=""
+if [ -n "$corsia_labels" ] || [ -n "${XPC_SERVICE_NAME:-}" ]; then
+  printf 'CORSIA bundled backend: XPC_SERVICE_NAME=%s\n' "${XPC_SERVICE_NAME:-unset}"
+fi
 while IFS= read -r label; do
   [ -n "$label" ] || continue
+  # launchd supplies the current job identity before first-registration metadata
+  # is necessarily complete. Inspection here is diagnostic only; never parse self.
+  if is_launchd_self "$label" "$PPID"; then
+    job="$("$launchctl_command" print "gui/$(id -u)/$label" 2>/dev/null || true)"
+    metadata="$(printf '%s\n' "$job" | job_metadata)"
+    printf 'CORSIA bundled backend: launchctl print %s (self)\n%s\n' "$label" "$metadata"
+    continue
+  fi
   if ! job="$("$launchctl_command" print "gui/$(id -u)/$label" 2>/dev/null)"; then
     printf 'CORSIA bundled backend refused to start: could not inspect CORSIA service %s\n' "$label"
     exit 0
   fi
-  program="$(printf '%s\n' "$job" | awk '
-    /^[[:space:]]*(path|program) = / { value=$3; gsub(/^"|"$/, "", value); print value; exit }
+  metadata="$(printf '%s\n' "$job" | job_metadata)"
+  printf 'CORSIA bundled backend: launchctl print %s\n%s\n' "$label" "$metadata"
+  # Capture the entire named value, including spaces. `path` is a plist;
+  # program identifiers may be relative to the bundle and carry a mode suffix.
+  owned="$(printf '%s\n' "$metadata" | awk -v bundle="$bundle" '
+    function normalize(value, parts, count, i, top, stack, result) {
+      count=split(value, parts, "/"); top=0
+      for (i=1; i<=count; i++) {
+        if (parts[i]=="" || parts[i]==".") continue
+        if (parts[i]=="..") { if (top>0) top--; continue }
+        stack[++top]=parts[i]
+      }
+      result=""
+      for (i=1; i<=top; i++) result=result "/" stack[i]
+      return result
+    }
+    /^[[:space:]]*(path|program|program identifier) = / {
+      line=$0; sub(/^[[:space:]]*/, "", line)
+      key=line; sub(/ = .*/, "", key)
+      value=substr(line, index(line, " = ")+3)
+      sub(/ \(mode: [^)]*\)$/, "", value)
+      gsub(/^"|"$/, "", value)
+      if (value=="") next
+      if (key=="path") {
+        if (normalize(value)==bundle "/Contents/Library/LaunchAgents/ai.corsia.service.plist") owned=1
+      } else {
+        if (substr(value,1,1)!="/") {
+          if (key=="program") next
+          value=bundle "/" value
+        }
+        value=normalize(value)
+        if (index(value, bundle "/")==1) owned=1
+      }
+    }
+    END { print owned ? "yes" : "no" }
   ')"
-  if [ -z "$program" ] || [ "${program#"$bundle"/}" = "$program" ]; then
+  if [ "$owned" != yes ]; then
     foreign_corsia_label="$label"
     break
   fi
