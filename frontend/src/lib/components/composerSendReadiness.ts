@@ -25,8 +25,9 @@ export function composerCanSend(
 	thread: ReadinessThread | undefined,
 	activeModel: Model | undefined,
 	models: Model[],
+	allowUnlistedNoModelThread = false,
 ): boolean {
 	if (activeModel && acceptsSend(activeModel)) return true;
-	if (thread && !thread.model && !thread.pending_model) return true;
+	if ((thread || allowUnlistedNoModelThread) && !thread?.model && !thread?.pending_model) return true;
 	return hasReadySwitchDestination(thread, models);
 }
