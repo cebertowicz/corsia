@@ -123,6 +123,7 @@ exit 1
     launched_environment = capture.read_text().splitlines()
     assert "CORSIA_TEST_MODE=1" not in launched_environment
     assert "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI=1" not in launched_environment
+    assert "CORSIA_DEVICES_DISABLE=1" in launched_environment
 
 
 def test_drain_does_not_cancel_an_unconfirmed_lost_start_response(

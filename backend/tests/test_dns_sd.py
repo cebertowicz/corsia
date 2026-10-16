@@ -109,12 +109,25 @@ def test_dns_sd_conflict_stays_unannounced_without_retry(monkeypatch):
     assert loop.added == []
 
 
+def test_dns_sd_callback_failure_clears_the_announced_name(monkeypatch):
+    conflict = -65548
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    _install_dns_seams(monkeypatch, library)
+    announcement = dns_sd.DNSServiceAnnouncement(47901)
+
+    assert announcement.start() is True
+    announcement.announced_name = "Previous name"
+    library.callback(None, 0, conflict, None, None, None, None)
+
+    assert announcement.announced_name is None
+    assert announcement.error == f"DNS-SD registration failed ({conflict})"
+
+
 @pytest.mark.parametrize(
     "first_process_result",
     [
         dns_sd._KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING,
         dns_sd._KDNS_SERVICE_ERR_DEFUNCT_CONNECTION,
-        EOFError(),
     ],
 )
 def test_dns_sd_daemon_loss_deallocates_and_reregisters_once(monkeypatch, first_process_result):
@@ -126,6 +139,7 @@ def test_dns_sd_daemon_loss_deallocates_and_reregisters_once(monkeypatch, first_
     announcement = dns_sd.DNSServiceAnnouncement(47901)
 
     assert announcement.start() is True
+    announcement.announced_name = "Previous name"
     announcement._process(library)
 
     assert library.deallocated == [1]
@@ -133,9 +147,36 @@ def test_dns_sd_daemon_loss_deallocates_and_reregisters_once(monkeypatch, first_
     assert loop.removed == [101]
     assert [entry[0] for entry in loop.added] == [101, 102]
     assert announcement.error is None
+    assert announcement.announced_name is None
 
     announcement._process(library)
 
     assert library.deallocated == [1, 2]
     assert len(library.register_calls) == 2
     assert announcement.error == "DNS-SD process failed (-65563)"
+    assert announcement.announced_name is None
+
+
+def test_dns_sd_process_propagates_unexpected_eof(monkeypatch):
+    library = _DNSLibrary(
+        register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR],
+        process_results=[EOFError()],
+    )
+    _install_dns_seams(monkeypatch, library)
+    announcement = dns_sd.DNSServiceAnnouncement(47901)
+
+    assert announcement.start() is True
+    with pytest.raises(EOFError):
+        announcement._process(library)
+
+
+def test_dns_sd_stop_clears_the_last_announced_name(monkeypatch):
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    _install_dns_seams(monkeypatch, library)
+    announcement = dns_sd.DNSServiceAnnouncement(47901)
+
+    assert announcement.start() is True
+    announcement.announced_name = "Previous name"
+    announcement.stop(library)
+
+    assert announcement.announced_name is None

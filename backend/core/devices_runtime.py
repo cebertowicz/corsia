@@ -7,12 +7,20 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from core.device_pairing import DevicePairing
+from infra.config import STATE_ROOT, _read_prod_state_root
 from infra.devices_listener import DevicesListener, lan_addresses, remote_connect_name
 from infra.dns_sd import DNSServiceAnnouncement
 from infra.state.ws import schedule_devices_updated
 
 
 NameResolver = Callable[[DNSServiceAnnouncement | None], str]
+_DEVICES_DISABLED_ERROR = "Devices listener disabled"
+
+
+def _matches_bootstrapped_state_root() -> bool:
+    """Whether this process owns the state root selected by the installed bootstrap."""
+    bootstrapped_root = _read_prod_state_root()
+    return bootstrapped_root is not None and STATE_ROOT == bootstrapped_root
 
 
 @dataclass(slots=True)
@@ -31,6 +39,12 @@ class DevicesRuntime:
         return self.pairing.enabled
 
     async def enable(self, app) -> bool:
+        if os.environ.get("CORSIA_DEVICES_DISABLE") == "1":
+            await self.disable()
+            self.listener = DevicesListener(app, error=_DEVICES_DISABLED_ERROR)
+            return False
+        if self.listener is not None and self.listener.task is not None:
+            return True
         self.pairing.enable()
         self.listener = DevicesListener(app)
         if not await self.listener.start():
@@ -50,7 +64,7 @@ class DevicesRuntime:
             enabled
             and os.environ.get("CORSIA_DEVICES_DISABLE") != "1"
             and os.environ.get("CORSIA_TEST_MODE") != "1"
-            and "CORSIA_STATE_DIR" not in os.environ
+            and _matches_bootstrapped_state_root()
         ):
             await self.enable(app)
 

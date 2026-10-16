@@ -5,6 +5,7 @@ import pytest
 from core.device_pairing import (
     CODE_ALPHABET,
     CODE_TTL_SECONDS,
+    EXCHANGE_TTL_SECONDS,
     DevicePairing,
     PairingError,
     canonical_verified_host,
@@ -52,6 +53,20 @@ def test_expired_code_is_not_active():
     assert "expires_in_seconds" not in pairing.status()
     with pytest.raises(PairingError, match="expired"):
         pairing.start(msg_c=b"client", transcript_prefix=b"test")
+
+
+def test_start_prunes_expired_pending_exchanges_before_the_limit():
+    now = [0.0]
+    pairing = DevicePairing(clock=lambda: now[0])
+    pairing.enable()
+    pairing.issue_code()
+    for index in range(4):
+        pairing.start(msg_c=f"client-{index}".encode(), transcript_prefix=b"test")
+
+    now[0] = EXCHANGE_TTL_SECONDS + 1
+    exchange_id, _ = pairing.start(msg_c=b"replacement", transcript_prefix=b"test")
+
+    assert set(pairing._exchanges) == {exchange_id}
 
 
 def test_code_state_changes_notify_once_for_issue_expiry_disable_and_pause():

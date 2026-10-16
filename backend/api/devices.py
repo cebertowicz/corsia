@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -65,12 +66,14 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
     if not isinstance(enabled, bool):
         raise HTTPException(400, "enabled must be a boolean")
     if enabled:
+        was_enabled = runtime.enabled
         started = await runtime.enable(request.app)
         if not started:
             return runtime.snapshot()
-        runtime.pairing.issue_code()
-        _emit("devices_enabled")
-        _emit("pairing_code_issued")
+        if not was_enabled:
+            runtime.pairing.issue_code()
+            _emit("devices_enabled")
+            _emit("pairing_code_issued")
     else:
         await runtime.disable()
         _emit("devices_disabled")
@@ -101,9 +104,13 @@ async def pair_start(body: dict):
             host=body.get("host"),
             spki_sha256=host_spki_sha256() if mode == "pinned" else None,
         )
+        msg_c = _decode(body.get("msg_c"), "msg_c")
+        spake, msg_s = await asyncio.to_thread(runtime.pairing.start_spake)
         exchange_id, msg_s = runtime.pairing.start(
-            msg_c=_decode(body.get("msg_c"), "msg_c"),
+            msg_c=msg_c,
             transcript_prefix=prefix,
+            spake=spake,
+            msg_s=msg_s,
         )
     except PairingError as error:
         _emit("pairing_failed", reason=error.reason)

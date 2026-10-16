@@ -8,10 +8,14 @@ import stat
 from types import SimpleNamespace
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 from infra import devices_listener
 from infra.devices_listener import (
+    DevicesApp,
     DevicesListener,
+    DevicesServer,
     ensure_host_key,
     lan_addresses,
     local_hostname,
@@ -36,6 +40,47 @@ def test_existing_key_with_unsafe_mode_is_refused(tmp_path):
 
     with pytest.raises(RuntimeError, match="unsafe"):
         ensure_host_key(tmp_path)
+
+
+def test_host_key_allows_read_only_private_files(tmp_path):
+    key_path, cert_path = ensure_host_key(tmp_path)
+    os.chmod(key_path, 0o400)
+    os.chmod(cert_path, 0o400)
+
+    assert ensure_host_key(tmp_path) == (key_path, cert_path)
+
+
+def test_cert_only_recovery_regenerates_a_matching_host_identity(tmp_path):
+    key_path, cert_path = ensure_host_key(tmp_path)
+    previous_cert = cert_path.read_bytes()
+    key_path.unlink()
+
+    recovered_key, recovered_cert = ensure_host_key(tmp_path)
+    key = serialization.load_pem_private_key(recovered_key.read_bytes(), password=None)
+    cert = x509.load_pem_x509_certificate(recovered_cert.read_bytes())
+
+    assert recovered_cert.read_bytes() != previous_cert
+    assert key.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo,
+    ) == cert.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+
+def test_key_only_recovery_preserves_its_spki(tmp_path):
+    key_path, cert_path = ensure_host_key(tmp_path)
+    previous_spki = x509.load_pem_x509_certificate(cert_path.read_bytes()).public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    cert_path.unlink()
+
+    _, recovered_cert = ensure_host_key(tmp_path)
+    recovered_spki = x509.load_pem_x509_certificate(recovered_cert.read_bytes()).public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+    assert key_path.exists()
+    assert recovered_spki == previous_spki
 
 
 def test_address_hints_include_only_listener_reachable_lan_addresses():
@@ -231,3 +276,51 @@ async def test_listener_start_surfaces_a_prebind_error_without_starting_a_server
     assert listener.listening == {"error": "Permission denied"}
     assert listener.server is None
     assert listener.task is None
+
+
+@pytest.mark.asyncio
+async def test_listener_start_contains_host_key_failure(monkeypatch, caplog):
+    monkeypatch.setattr(
+        devices_listener,
+        "ensure_host_key",
+        lambda: (_ for _ in ()).throw(RuntimeError("unsafe key")),
+    )
+    listener = DevicesListener(app=object())
+
+    with caplog.at_level(logging.ERROR, logger="infra.devices_listener"):
+        assert await listener.start() is False
+
+    assert listener.listening == {"error": "Devices listener credentials unavailable"}
+    assert listener.server is None
+    assert listener.task is None
+    assert "unsafe key" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_devices_app_authentication_uses_the_db_boundary(monkeypatch):
+    calls = []
+
+    async def fake_run_in_db(function, *args):
+        calls.append((function, args))
+        return {"token_kind": "session"}
+
+    monkeypatch.setattr(devices_listener, "run_in_db", fake_run_in_db)
+
+    assert await DevicesApp._has_human_session({"headers": [(b"authorization", b"Bearer token")]})
+    assert calls == [(devices_listener.authenticate, ("token",))]
+
+
+@pytest.mark.asyncio
+async def test_devices_server_uses_uvicorn_default_wait_outside_049(monkeypatch):
+    calls = []
+
+    async def default_wait(self):
+        calls.append(self)
+
+    monkeypatch.setattr(devices_listener.uvicorn, "__version__", "0.50.0")
+    monkeypatch.setattr(devices_listener.uvicorn.Server, "_wait_tasks_to_complete", default_wait)
+    server = object.__new__(DevicesServer)
+
+    await server._wait_tasks_to_complete()
+
+    assert calls == [server]

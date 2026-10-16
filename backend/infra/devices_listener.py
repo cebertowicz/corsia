@@ -9,6 +9,7 @@ import errno
 import ipaddress
 import logging
 import os
+import secrets
 import socket
 import stat
 import sys
@@ -27,6 +28,7 @@ from starlette.responses import JSONResponse
 
 from infra.auth import authenticate, is_person_session, token_from_request
 from infra.config import STATE_ROOT
+from infra.db_async import run_in_db
 from infra.dns_sd import DNSServiceAnnouncement
 
 
@@ -130,7 +132,10 @@ class DevicesServer(uvicorn.Server):
         yield
 
     async def _wait_tasks_to_complete(self) -> None:
-        # Uvicorn has already sent normal connection shutdown (including WS
+        if uvicorn.__version__ != "0.49.0":
+            await super()._wait_tasks_to_complete()
+            return
+        # Uvicorn 0.49.0 has already sent normal connection shutdown (including WS
         # code 1012). Active SSE responses have no natural end, so disabling
         # Devices must disconnect transports and join their ASGI requests.
         # A streaming generator can be waiting for its next event rather than
@@ -168,11 +173,11 @@ class DevicesApp:
         self.stopping = False
 
     @staticmethod
-    def _has_human_session(scope) -> bool:
+    async def _has_human_session(scope) -> bool:
         headers = dict(scope.get("headers", ()))
         authorization = headers.get(b"authorization", b"").decode("latin-1")
         token = token_from_request(None, authorization)
-        user = authenticate(token)
+        user = await run_in_db(authenticate, token)
         return user is not None and is_person_session(user)
 
     async def __call__(self, scope, receive, send):
@@ -183,7 +188,7 @@ class DevicesApp:
             tagged.get("type") == "http"
             and (path == "/api" or path.startswith("/api/"))
             and (tagged.get("method"), path) not in _PUBLIC_API_ROUTES
-            and not self._has_human_session(tagged)
+            and not await self._has_human_session(tagged)
         ):
             await JSONResponse({"reason": "sign_in_required"}, status_code=401)(
                 tagged, receive, send,
@@ -216,7 +221,12 @@ class DevicesListener:
     async def start(self) -> bool:
         if self.task is not None:
             return True
-        key_path, cert_path = ensure_host_key()
+        try:
+            key_path, cert_path = ensure_host_key()
+        except Exception as exc:
+            logger.error("Devices listener host credentials unavailable: %s", exc)
+            self.error = "Devices listener credentials unavailable"
+            return False
         sock, port, error = _prebind()
         if sock is None:
             self.error = error
@@ -284,24 +294,11 @@ def _key_paths(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
 
 def _secure_file(path: Path) -> None:
     info = path.stat()
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) not in {0o400, 0o600}:
         raise RuntimeError("Devices host key files have unsafe ownership or permissions")
 
 
-def ensure_host_key(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
-    """Load, or securely create once, the host's stable ECDSA identity."""
-    key_path, cert_path = _key_paths(state_root)
-    folder = key_path.parent
-    if key_path.exists() or cert_path.exists():
-        if not key_path.exists() or not cert_path.exists():
-            raise RuntimeError("Devices host key is incomplete; restore or remove both files deliberately")
-        _secure_file(key_path)
-        _secure_file(cert_path)
-        return key_path, cert_path
-
-    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(folder, 0o700)
-    key = ec.generate_private_key(ec.SECP256R1())
+def _certificate_for_key(key) -> bytes:
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CORSIA")])
     cert = (
         x509.CertificateBuilder()
@@ -317,15 +314,40 @@ def ensure_host_key(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
         )
         .sign(key, hashes.SHA256())
     )
-    _write_private_file(
-        key_path,
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        ),
+    return cert.public_bytes(serialization.Encoding.PEM)
+
+
+def _private_key_bytes(key) -> bytes:
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
     )
-    _write_private_file(key_path.with_name("host-cert.pem"), cert.public_bytes(serialization.Encoding.PEM))
+
+
+def ensure_host_key(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
+    """Load, or securely repair, the host's stable ECDSA identity."""
+    key_path, cert_path = _key_paths(state_root)
+    folder = key_path.parent
+    key_exists = key_path.exists()
+    cert_exists = cert_path.exists()
+    if key_exists:
+        _secure_file(key_path)
+    if cert_exists:
+        _secure_file(cert_path)
+    if key_exists and cert_exists:
+        return key_path, cert_path
+
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(folder, 0o700)
+    if key_exists:
+        key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+        _write_private_file(cert_path, _certificate_for_key(key))
+        return key_path, cert_path
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    _write_private_file(key_path, _private_key_bytes(key))
+    _write_private_file(cert_path, _certificate_for_key(key))
     return key_path, cert_path
 
 
@@ -343,6 +365,12 @@ def host_spki_sha256(state_root: Path = STATE_ROOT) -> bytes:
 
 
 def _write_private_file(path: Path, content: bytes) -> None:
-    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    with os.fdopen(descriptor, "wb") as output:
-        output.write(content)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(content)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise

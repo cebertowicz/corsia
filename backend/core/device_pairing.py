@@ -111,18 +111,24 @@ class DevicePairing:
         """Reject work while pairing is disabled, expired, or paused."""
         self._require_active()
 
-    def start(self, *, msg_c: bytes, transcript_prefix: bytes) -> tuple[str, bytes]:
+    def start(
+        self,
+        *,
+        msg_c: bytes,
+        transcript_prefix: bytes,
+        spake: object | None = None,
+        msg_s: bytes | None = None,
+    ) -> tuple[str, bytes]:
         self.require_active()
+        self._prune_expired_exchanges()
         if len(self._exchanges) >= MAX_PENDING_EXCHANGES:
             raise PairingError("too_many_pending")
         if msg_c in self._issued_server_messages:
             self._record_failure()
             raise PairingError("reflected")
-        from spake2 import SPAKE2_Symmetric
-
-        assert self._pairing_secret is not None
-        spake = SPAKE2_Symmetric(self._pairing_secret, idSymmetric=PAIRING_IDENTITY)
-        msg_s = spake.start()
+        if spake is None:
+            spake, msg_s = self.start_spake()
+        assert msg_s is not None
         exchange_id = secrets.token_urlsafe(24)
         self._exchanges[exchange_id] = _Exchange(
             generation=self._generation,
@@ -134,6 +140,23 @@ class DevicePairing:
         )
         self._issued_server_messages.add(msg_s)
         return exchange_id, msg_s
+
+    def start_spake(self) -> tuple[object, bytes]:
+        """Do only the expensive SPAKE2 calculation after checking the active code."""
+        self.require_active()
+        from spake2 import SPAKE2_Symmetric
+
+        assert self._pairing_secret is not None
+        spake = SPAKE2_Symmetric(self._pairing_secret, idSymmetric=PAIRING_IDENTITY)
+        return spake, spake.start()
+
+    def _prune_expired_exchanges(self) -> None:
+        now = self._clock()
+        self._exchanges = {
+            exchange_id: exchange
+            for exchange_id, exchange in self._exchanges.items()
+            if exchange.expires_at > now
+        }
 
     def finish(self, *, exchange_id: str, confirm_c: bytes, name: str) -> tuple[bytes, str]:
         self._require_active()

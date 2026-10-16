@@ -39,6 +39,7 @@ class DNSServiceAnnouncement:
         try:
             library = _load_dns_sd_library()
         except OSError as exc:
+            self.announced_name = None
             self.error = type(exc).__name__
             return False
         callback_type = ctypes.CFUNCTYPE(
@@ -57,6 +58,7 @@ class DNSServiceAnnouncement:
                 self.announced_name = name.decode("utf-8") if name else None
                 self.error = None
             else:
+                self.announced_name = None
                 self.error = f"DNS-SD registration failed ({error_code})"
 
         self._callback = callback_type(registered)
@@ -74,6 +76,7 @@ class DNSServiceAnnouncement:
             self._callback, None,
         )
         if error != _KDNS_SERVICE_ERR_NO_ERROR:
+            self.announced_name = None
             self.error = f"DNS-SD registration failed ({error})"
             return False
         socket_fd = library.DNSServiceRefSockFD
@@ -89,12 +92,10 @@ class DNSServiceAnnouncement:
         process = library.DNSServiceProcessResult
         process.argtypes = [ctypes.c_void_p]
         process.restype = ctypes.c_int
-        try:
-            result = process(self._ref)
-        except EOFError:
-            result = _KDNS_SERVICE_ERR_DEFUNCT_CONNECTION
+        result = process(self._ref)
         if result == _KDNS_SERVICE_ERR_NO_ERROR:
             return
+        self.announced_name = None
         self.stop(library)
         if result in {
             _KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING,
@@ -106,6 +107,7 @@ class DNSServiceAnnouncement:
         self.error = f"DNS-SD process failed ({result})"
 
     def stop(self, library=None) -> None:
+        self.announced_name = None
         if self._ref is None:
             return
         if self._fd is not None:

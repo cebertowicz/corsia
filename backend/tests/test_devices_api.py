@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -107,6 +108,88 @@ def test_failed_listener_start_does_not_mint_code(monkeypatch):
     assert response["code"]["state"] == "none"
 
 
+def test_host_key_failure_leaves_runtime_alive_and_devices_closed(monkeypatch):
+    import infra.devices_listener as listener_module
+
+    local_runtime = DevicesRuntime()
+    monkeypatch.setattr(
+        listener_module,
+        "ensure_host_key",
+        lambda: (_ for _ in ()).throw(RuntimeError("unsafe key")),
+    )
+
+    started = asyncio.run(local_runtime.enable(object()))
+
+    assert started is False
+    assert local_runtime.enabled is False
+    assert local_runtime.snapshot()["listening"] == {"error": "Devices listener credentials unavailable"}
+    assert local_runtime.snapshot()["announced_name"] is None
+
+
+def test_disabled_development_put_refuses_without_binding_or_announcing(monkeypatch):
+    local_runtime = DevicesRuntime()
+
+    async def must_not_start(self):
+        raise AssertionError("development disable must not bind or announce")
+
+    monkeypatch.setenv("CORSIA_DEVICES_DISABLE", "1")
+    monkeypatch.setattr(devices_api, "runtime", local_runtime)
+    monkeypatch.setattr(devices_api, "_require_local_management", lambda request: None)
+    monkeypatch.setattr(DevicesListener, "start", must_not_start)
+
+    response = asyncio.run(
+        devices_api.put_devices(
+            {"enabled": True},
+            request=SimpleNamespace(app=object()),
+            _user={"id": "person", "token_kind": "session"},
+        )
+    )
+
+    assert response["enabled"] is False
+    assert response["listening"] == {"error": "Devices listener disabled"}
+    assert response["announced_name"] is None
+
+
+def test_repeated_enable_preserves_listener_and_announcement_then_disable_tears_down(monkeypatch):
+    local_runtime = DevicesRuntime()
+    started = []
+    stopped = []
+
+    async def fake_start(self):
+        started.append(self)
+        self.task = object()
+        self.port = 47901
+        self.announcement = SimpleNamespace(announced_name="CORSIA")
+        return True
+
+    async def fake_stop(self):
+        stopped.append(self)
+
+    async def fake_run_in_db(*_args):
+        return None
+
+    monkeypatch.setattr(devices_api, "runtime", local_runtime)
+    monkeypatch.setattr(devices_api, "_require_local_management", lambda request: None)
+    monkeypatch.setattr(devices_api, "run_in_db", fake_run_in_db)
+    monkeypatch.setattr(DevicesListener, "start", fake_start)
+    monkeypatch.setattr(DevicesListener, "stop", fake_stop)
+    request = SimpleNamespace(app=object())
+
+    first = asyncio.run(devices_api.put_devices({"enabled": True}, request=request, _user={}))
+    first_listener = local_runtime.listener
+    first_code = first["code"]["value"]
+    repeated = asyncio.run(devices_api.put_devices({"enabled": True}, request=request, _user={}))
+    disabled = asyncio.run(devices_api.put_devices({"enabled": False}, request=request, _user={}))
+
+    assert started == [first_listener]
+    assert repeated["code"]["value"] == first_code
+    assert repeated["announced_name"] == "CORSIA"
+    assert stopped == [first_listener]
+    assert disabled["enabled"] is False
+    assert disabled["announced_name"] is None
+    assert disabled["listening"] == {"error": None}
+
+
 def test_devices_snapshot_uses_its_injected_name_resolver():
     announcements = []
     expected_announcement = SimpleNamespace(announced_name="Announced name")
@@ -154,22 +237,71 @@ def test_non_local_or_devices_listener_enable_mints_no_code(connection_scope):
     assert runtime.pairing.status()["state"] == "none"
 
 
-def test_restore_enabled_devices_does_not_mint_code(monkeypatch):
+def test_restore_enabled_devices_at_bootstrapped_state_root_does_not_mint_code(monkeypatch):
+    import core.devices_runtime as devices_runtime
+
     restored = DevicesRuntime()
 
     async def fake_enable(self, app):
         self.pairing.enable()
         return True
 
+    root = Path("/installed-state")
     monkeypatch.delenv("CORSIA_TEST_MODE", raising=False)
-    monkeypatch.delenv("CORSIA_STATE_DIR", raising=False)
     monkeypatch.delenv("CORSIA_DEVICES_DISABLE", raising=False)
+    monkeypatch.setattr(devices_runtime, "STATE_ROOT", root)
+    monkeypatch.setattr(devices_runtime, "_read_prod_state_root", lambda: root)
     monkeypatch.setattr(DevicesRuntime, "enable", fake_enable)
 
     asyncio.run(restored.restore(object(), enabled=True))
 
     assert restored.enabled is True
     assert restored.pairing.status()["state"] == "none"
+
+
+def test_restore_enabled_devices_skips_a_different_state_root(monkeypatch):
+    import core.devices_runtime as devices_runtime
+
+    restored = DevicesRuntime()
+    enabled = []
+
+    async def fake_enable(self, app):
+        enabled.append(app)
+        self.pairing.enable()
+        return True
+
+    monkeypatch.delenv("CORSIA_TEST_MODE", raising=False)
+    monkeypatch.delenv("CORSIA_DEVICES_DISABLE", raising=False)
+    monkeypatch.setattr(devices_runtime, "STATE_ROOT", Path("/development-state"))
+    monkeypatch.setattr(devices_runtime, "_read_prod_state_root", lambda: Path("/installed-state"))
+    monkeypatch.setattr(DevicesRuntime, "enable", fake_enable)
+
+    asyncio.run(restored.restore(object(), enabled=True))
+
+    assert enabled == []
+    assert restored.enabled is False
+
+
+@pytest.mark.parametrize("veto", ["CORSIA_DEVICES_DISABLE", "CORSIA_TEST_MODE"])
+def test_restore_veto_wins_even_at_the_bootstrapped_state_root(monkeypatch, veto):
+    import core.devices_runtime as devices_runtime
+
+    restored = DevicesRuntime()
+    enabled = []
+    root = Path("/installed-state")
+
+    async def fake_enable(self, app):
+        enabled.append(app)
+        return True
+
+    monkeypatch.setenv(veto, "1")
+    monkeypatch.setattr(devices_runtime, "STATE_ROOT", root)
+    monkeypatch.setattr(devices_runtime, "_read_prod_state_root", lambda: root)
+    monkeypatch.setattr(DevicesRuntime, "enable", fake_enable)
+
+    asyncio.run(restored.restore(object(), enabled=True))
+
+    assert enabled == []
 
 
 def test_other_settings_write_mints_no_code():
@@ -224,6 +356,9 @@ def test_devices_address_hints_are_authenticated_and_not_pre_auth(monkeypatch):
 
 
 def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
+    async def human_session(_scope):
+        return True
+
     runtime.pairing.disable()
     runtime.pairing.enable()
     code = runtime.pairing.issue_code()
@@ -235,7 +370,7 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     monkeypatch.setattr(
         DevicesApp,
         "_has_human_session",
-        staticmethod(lambda _scope: True),
+        staticmethod(human_session),
     )
     main_client = TestClient(app, client=("127.0.0.1", 1234))
     devices_client = TestClient(DevicesApp(app), client=("127.0.0.1", 1234))
@@ -341,6 +476,9 @@ def test_devices_status_omits_dns_sd_failure_cause(monkeypatch, failure):
 
 
 def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
+    async def human_session(_scope):
+        return True
+
     writes = []
 
     async def fake_enable(self, app):
@@ -364,7 +502,7 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
     monkeypatch.setattr(
         DevicesApp,
         "_has_human_session",
-        staticmethod(lambda _scope: True),
+        staticmethod(human_session),
     )
     main_client = TestClient(app, client=("127.0.0.1", 1234))
     devices_client = TestClient(DevicesApp(app), client=("127.0.0.1", 1234))

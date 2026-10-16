@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -229,6 +230,24 @@ def test_pair_api_client_rejects_confirm_c_replayed_as_confirm_s(monkeypatch):
     expected_confirm_s = hmac.new(server_key, transcript + b"name:studio.local", hashlib.sha256).digest()
     assert not hmac.compare_digest(confirm_c, expected_confirm_s)
     assert not hmac.compare_digest(confirm_c, base64.b64decode(finished.json()["confirm_s"]))
+
+
+def test_pair_start_moves_spake2_calculation_off_the_event_loop(monkeypatch):
+    calls = []
+    real_to_thread = asyncio.to_thread
+
+    async def record_to_thread(function, /, *args, **kwargs):
+        calls.append(function)
+        return await real_to_thread(function, *args, **kwargs)
+
+    monkeypatch.setattr(devices_api.asyncio, "to_thread", record_to_thread)
+    code = _enable_pairing()
+    client = TestClient(app)
+
+    started = _start(client, _client_pairing(code).start())
+
+    assert started.status_code == 200
+    assert [function.__name__ for function in calls] == ["start_spake"]
 
 
 def test_pair_api_rejects_fifth_pending_exchange_with_429():
