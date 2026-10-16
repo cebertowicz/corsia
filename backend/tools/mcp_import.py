@@ -110,7 +110,7 @@ def _has_refused_proxy_authorization(config: dict[str, Any]) -> bool:
 
 
 def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
-    """Whether a remote app cannot be imported before C supplies sign-in."""
+    """Whether a remote app must be imported in its sign-in-needed state.""
     if _kind(source, config) != "remote":
         return False
     if "oauth" in config:
