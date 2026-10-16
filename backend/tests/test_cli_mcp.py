@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 import cli
@@ -69,7 +71,7 @@ def test_connected_app_commands_use_the_server_routes(
 def test_list_projects_uses_the_server_query(monkeypatch) -> None:
     from scripts import corsia_api
 
-    call = {}
+    call: dict[str, Any] = {}
     monkeypatch.setattr(corsia_api, "resolve_base", lambda _explicit: "http://api.test")
     monkeypatch.setattr(corsia_api, "resolve_token", lambda _explicit: "cli-token")
     monkeypatch.setattr(
@@ -89,7 +91,7 @@ def test_list_projects_uses_the_server_query(monkeypatch) -> None:
 def test_server_ids_are_path_escaped(monkeypatch) -> None:
     from scripts import corsia_api
 
-    call = {}
+    call: dict[str, Any] = {}
     monkeypatch.setattr(corsia_api, "resolve_base", lambda _explicit: "http://api.test")
     monkeypatch.setattr(corsia_api, "resolve_token", lambda _explicit: "cli-token")
     monkeypatch.setattr(
