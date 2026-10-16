@@ -34,7 +34,7 @@
 		const s = $uiScope;
 		const root = document.documentElement;
 		// The project's colour is the accent and every role comes from it; without a scope, or with a
-		// colour that does not parse, the tokens' defaults (the corsia project's #0083af) apply again.
+		// colour that does not parse, the tokens' defaults (the corsia project's #007faa) apply again.
 		const roles = s ? accentRoles(s.color, $theme) : null;
 		for (const [role, token] of Object.entries(ACCENT_ROLE_TOKENS) as [keyof AccentRoles, string][]) {
 			if (roles) root.style.setProperty(token, roles[role]);

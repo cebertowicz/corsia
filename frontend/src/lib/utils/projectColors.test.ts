@@ -34,8 +34,8 @@ describe('accentRoles', () => {
 				expect(accentRoles(colour, theme)!.fill, `${colour} ${theme}`).toBe(colour);
 			}
 		}
-		expect(accentRoles('#0083af', 'light')!.fill).toBe('#0083af');
-		expect(accentRoles('#0083af', 'dark')!.fill).toBe('#0083af');
+		expect(accentRoles('#007faa', 'light')!.fill).toBe('#007faa');
+		expect(accentRoles('#007faa', 'dark')!.fill).toBe('#007faa');
 	});
 
 	it('inks the fill it paints at the APCA floor or above in both themes across the hue spread', () => {
@@ -75,12 +75,14 @@ describe('accentRoles', () => {
 	});
 
 	it('keeps the default accent readable with the ink its fill takes', () => {
-		// The default (no-project) accent is the corsia project's own #0083af, white ink on it: Lc 74.7 by APCA
-		// against 34.6 for near-black, which is why WCAG 2's ratio (4.87 black vs 4.32 white) is not the rule here.
-		const fill = parseColor('#0083af')!;
-		expect(inkOn('#0083af')).toBe('#ffffff');
-		expect(apcaLc(parseColor('#ffffff')!, fill)).toBeCloseTo(-74.74, 1);
-		expect(apcaLc(parseColor('#0a0a0b')!, fill)).toBeCloseTo(34.64, 1);
+		// The default (no-project) accent is the corsia project's own #007faa, white ink on it: Lc 76.4 by APCA
+		// against 32.9 for near-black. It is also the lightest step of that hue where white meets WCAG AA for body
+		// text, so the default's primary buttons and bubble pass both models.
+		const fill = parseColor('#007faa')!;
+		expect(inkOn('#007faa')).toBe('#ffffff');
+		expect(contrastRatio(parseColor('#ffffff')!, fill)).toBeGreaterThanOrEqual(4.5);
+		expect(apcaLc(parseColor('#ffffff')!, fill)).toBeCloseTo(-76.45, 1);
+		expect(apcaLc(parseColor('#0a0a0b')!, fill)).toBeCloseTo(32.91, 1);
 		expect(apcaLc(parseColor('#0a0a0b')!, fill)).toBeLessThan(Math.abs(apcaLc(parseColor('#ffffff')!, fill)));
 	});
 });
