@@ -78,7 +78,11 @@
 		actionError = '';
 		try {
 			if (action === 'approve') replace(await approveConnectedApp(app));
-			else if (action === 'decline') replace(await declineConnectedApp(app.id));
+			else if (action === 'decline') {
+				// Declining a new request deletes it, so the answer is `removed` and the row goes; a pending change on a working app comes back as that app.
+				const next = await declineConnectedApp(app.id);
+				if (next.removed) apps = apps.filter((row) => row.id !== app.id); else replace(next);
+			}
 			else if (action === 'reconnect') replace(await reconnectConnectedApp(app.id));
 			else { await removeConnectedApp(app.id); apps = apps.filter((row) => row.id !== app.id); }
 		} catch (cause) {

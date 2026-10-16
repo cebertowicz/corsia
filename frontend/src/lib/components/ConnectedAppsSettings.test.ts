@@ -46,6 +46,17 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
 	});
 
+	it('removes the row once Decline deletes a new request, and keeps the others', async () => {
+		const second = { ...awaiting, id: 'linear', name: 'Linear' };
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/decline') ? { id: 'github', removed: true } : { servers: [awaiting, second] } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(2));
+		([...host.querySelectorAll('.waiting-row')[0].querySelectorAll('button')].find((button) => button.textContent?.includes('Decline')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(1));
+		expect(host.querySelector('.waiting-copy strong')?.textContent).toBe('Linear');
+	});
+
 	it('names the projects an app works in on its row', async () => {
 		const catalog = [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }, { id: 'home', name: 'Home renovation', status: 'active', accent_color: null }];
 		const selected = { ...awaiting, state: 'working', reach: { mode: 'selected', project_ids: ['q4', 'home'], outside_projects: true } };

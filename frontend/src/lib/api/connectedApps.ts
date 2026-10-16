@@ -16,6 +16,8 @@ export interface ConnectedApp {
 	transport?: 'stdio' | 'http' | null;
 	/** Display label only: the last segment of the Claude Code folder the app was set up for. Plain text. */
 	folder?: string;
+	/** Only on the answer to Decline when it deleted a new request: the row is gone. */
+	removed?: boolean;
 	/** Present for an app at a web address. Never holds a token or the sign-in link. */
 	sign_in?: SignInView;
 }
