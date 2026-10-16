@@ -181,7 +181,7 @@
 <style>
 	.flow, .choices { display: grid; gap: var(--space-3); }
 	.flow section { display: grid; gap: var(--space-3); }
-	h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title-3); }
+	h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
 	.hint, .choice small, .impact, .field small, .notice { color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.45; margin: 0; }
 	.choice { display: flex; align-items: flex-start; gap: var(--space-3); cursor: pointer; color: var(--text-primary); }
 	.choice span, .field { display: grid; gap: var(--space-1); }
