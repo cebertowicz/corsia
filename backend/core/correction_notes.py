@@ -26,7 +26,6 @@ from core.corrections_recording import (
 
 NOTE_KIND = "correction_note"
 QUOTE_CHARS = 160
-RESERVED_THREADS = ("ui",)
 
 
 def _quote(content: str) -> str:
@@ -59,9 +58,10 @@ def note_text(message_id: str, content: str, created_at: str) -> str:
 
 
 def _has_target(db: sqlite3.Connection, thread_id: str) -> bool:
+    from doceditor.document_scope import UI_THREAD
     from infra.queries import thread_is_available
 
-    if not thread_id or thread_id in RESERVED_THREADS:
+    if not thread_id or thread_id == UI_THREAD:
         return False
     row = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
     return row is not None and thread_is_available(row)
