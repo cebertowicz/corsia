@@ -6,7 +6,6 @@
 //! answered negatively is a server failure.
 
 use crate::discovery::DiscoveryError;
-
 /// The r4 recovery copy distinguishes a network path from a host that is not
 /// serving CORSIA correctly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +43,6 @@ pub fn classify_tls_against_plain_http() -> Unreachable {
 pub fn classify_discovery_error(_error: &DiscoveryError) -> Unreachable {
     Unreachable::Network
 }
-
 /// `/api/health` is part of the remote-connect endpoint contract. Any status
 /// other than 200 proves that the endpoint is not a usable CORSIA host.
 pub fn classify_health_status(status: u16) -> Result<(), Unreachable> {
@@ -57,6 +55,7 @@ pub fn classify_health_status(status: u16) -> Result<(), Unreachable> {
 
 #[cfg(test)]
 mod tests {
+<<<<<<< HEAD
     use super::{
         classify_connect_error, classify_discovery_error, classify_health_status,
         classify_tls_against_plain_http, Unreachable,
