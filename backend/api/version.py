@@ -108,6 +108,7 @@ def _placeholder_frontend_info() -> dict:
         "commit_subject": "(frontend not built)",
         "dirty": None,
         "build_iso": "",
+        "app": {"version": "unknown", "shell_protocol": 1},
     }
 
 
@@ -158,9 +159,14 @@ def _version_payload() -> dict:
     backend = dict(_BACKEND_BUILD)
     backend["current_head"] = None if _APP_BUNDLE is not None else _current_head_info()
     backend["generation"] = os.environ.get("CORSIA_SERVICE_GENERATION")
+    frontend = _read_frontend_build_info()
+    app = frontend.get("app")
+    if not isinstance(app, dict):
+        app = {"version": "unknown", "shell_protocol": 1}
     return {
-        "frontend": _read_frontend_build_info(),
+        "frontend": frontend,
         "backend": backend,
+        "app": app,
     }
 
 

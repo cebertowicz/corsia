@@ -44,6 +44,7 @@ from api import (
     discovered_models_router,
     network_servers_router,
     version_router,
+    devices_router,
     webhooks_router,
     files_router,
     files_revision_router,
@@ -142,6 +143,7 @@ app.include_router(cli_install_router)
 app.include_router(discovered_models_router)
 app.include_router(network_servers_router)
 app.include_router(version_router)
+app.include_router(devices_router)
 app.include_router(registry_router)
 app.include_router(registry_pane_router)
 app.include_router(registry_ownership_router)
