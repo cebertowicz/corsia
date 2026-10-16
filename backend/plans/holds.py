@@ -156,15 +156,12 @@ def clear(
     """
 
     node = _validate_node(db, node_id, expected_revision)
-    hold = db.execute(
-        """SELECT h.owner_id FROM plan_node_holds h
-           JOIN plan_node_artifact_links l
-             ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
-           WHERE h.id=? AND h.node_id=? AND h.kind=? AND h.owner_kind='user'
-             AND h.cleared_at IS NULL""",
-        (hold_id, node_id, expected_kind),
-    ).fetchone()
-    if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
+    from plans.user_ask import open_asks_sql
+
+    is_open_ask = expected_kind == "blocked" and db.execute(
+        open_asks_sql("1", by="node") + " AND h.id=?", (node_id, hold_id),
+    ).fetchone() is not None
+    if is_open_ask:
         clear_write(
             node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
             provenance=provenance,
@@ -290,40 +287,25 @@ def block_hold(
 
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
-    Re-blocking a task on the artifact it already asks about keeps one open
-    hold for that ask: the same reason writes nothing. A new reason atomically
-    replaces the old ask, so the user sees one current request and the caller's
-    revision is checked once before either write.
+    A user hold on an artifact is a review request, so ``one_open_ask.already_open``
+    keeps it to one open request per document. The caller's revision is checked
+    once, before the rule may replace this task's own request.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
             "a blocker anyone but the user clears is a wait, not a hold; "
             "block_node arms it with a deadline"
         )
+    node = None
     if owner_kind == "user" and owner_id is not None:
+        from plans.one_open_ask import already_open
+
         node = _validate_node(db, node_id, expected_revision)
-        # Served by ``idx_plan_holds_active_node``: it reads only this task's
-        # open blocked holds, never its cleared history.
-        existing = db.execute(
-            """SELECT id,reason_key,reason FROM plan_node_holds
-               WHERE node_id=? AND kind='blocked' AND owner_kind='user'
-                 AND owner_id=? AND cleared_at IS NULL""",
-            (node_id, owner_id),
-        ).fetchone()
-        if existing is not None:
-            if (existing["reason_key"], existing["reason"]) == (reason_key, reason):
-                return node
-            clear_write(
-                node_id, str(existing["id"]), expected_kind="blocked", actor_id=actor_id,
-                provenance=provenance, detail=ask_endings.detail(why="replaced", actor_id=actor_id), db=db,
-            )
-            return place_hold(
-                node_id, kind="blocked", reason_key=reason_key, reason=reason,
-                owner_kind=owner_kind, owner_id=owner_id,
-                expected_revision=expected_revision, actor_id=actor_id,
-                provenance=provenance, db=db, raised_in=raised_in,
-                _validated_node=node,
-            )
+        if already_open(
+            db, node_id, owner_id, reason_key=reason_key, reason=reason,
+            actor_id=actor_id, provenance=provenance,
+        ):
+            return node
     return place_hold(
         node_id,
         kind="blocked",
@@ -336,6 +318,7 @@ def block_hold(
         provenance=provenance,
         db=db,
         raised_in=raised_in,
+        _validated_node=node,
     )
 
 

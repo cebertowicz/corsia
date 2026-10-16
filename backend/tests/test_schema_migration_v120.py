@@ -176,8 +176,9 @@ def test_leaves_a_deferred_artifact_with_multiple_open_asks_untouched():
             service._node_row(db, first.id)["plan_id"], kind="task", title="Second review",
             acceptance_criteria="Reviewed", db=db,
         )
-        holds.block_hold(
-            second.id, reason_key="review", reason="Review it", owner_kind="user",
+        # A duplicate from before the one-open-request rule, seeded below it.
+        holds.place_hold(
+            second.id, kind="blocked", reason_key="review", reason="Review it", owner_kind="user",
             owner_id=artifact_id, expected_revision=service._node_row(db, second.id)["revision"],
             actor_id="owner", provenance="test.migration_120", db=db,
         )

@@ -53,8 +53,8 @@ def _legacy_duplicate_ask(db, artifact_id: str, *, title: str) -> str:
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria="Reviewed", db=db,
     )
-    holds.block_hold(
-        node.id, reason_key="review", reason=f"Please read: {title}",
+    holds.place_hold(
+        node.id, kind="blocked", reason_key="review", reason=f"Please read: {title}",
         owner_kind="user", owner_id=artifact_id,
         expected_revision=service._node_row(db, node.id)["revision"],
         actor_id="owner", provenance="test.review_bar.legacy", db=db,

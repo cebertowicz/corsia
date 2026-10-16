@@ -288,7 +288,12 @@ def _apply_branches(
     for node, row in zip(nodes, raw):
         node["folded"] = node["id"] in fold
         node["scheduled_until"] = scheduled[node["id"]]
-        node["container"] = node["id"] in parents and is_container(row, True)
+        # A parent with its own ask on the user has an obligation of its own, so it
+        # reads as itself and its ask is counted once, here; its leaves count theirs.
+        node["container"] = (
+            node["id"] in parents and is_container(row, True)
+            and not node["requires_user_action"]
+        )
         if node["id"] not in parents:
             node["status_reason"] = node["status_reason"] or _queued_reason(node)
             continue

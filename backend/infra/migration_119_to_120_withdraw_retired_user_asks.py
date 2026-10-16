@@ -5,7 +5,8 @@ import json
 import sqlite3
 
 _TABLES = (
-    "artifact_identities", "plan_node_artifact_links", "plan_node_events", "plan_node_holds", "plan_nodes",
+    "artifact_identities", "plan_node_artifact_links", "plan_node_events", "plan_node_holds",
+    "plan_nodes", "plans",
 )
 
 
@@ -17,7 +18,8 @@ def migrate_119_to_120(conn: sqlite3.Connection) -> None:
 
 def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     """Clear orphaned user asks only when their task is positively retired."""
-    from plans.public import TERMINAL_STATES, clear_hold_write
+    from plans.ask_endings import detail
+    from plans.public import TERMINAL_STATES, clear_hold_write, open_asks_sql
 
     present = {str(row[0]) for row in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
@@ -27,22 +29,13 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     terminal = tuple(sorted(TERMINAL_STATES))
     marks = ",".join("?" for _ in terminal)
     rows = conn.execute(
-        f"""SELECT h.id AS hold_id,h.node_id
-              FROM plan_node_holds h
-              JOIN plan_node_artifact_links l
-                ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
-              JOIN plan_nodes n ON n.id=h.node_id
-             WHERE h.kind='blocked' AND h.owner_kind='user' AND h.owner_id IS NOT NULL
-               AND h.cleared_at IS NULL
-               AND (n.archived_at IS NOT NULL OR n.state IN ({marks}))
-             ORDER BY h.created_at,h.id""",
+        open_asks_sql("h.id AS hold_id, h.node_id", by="all")
+        + f" AND (n.archived_at IS NOT NULL OR n.state IN ({marks})) ORDER BY h.created_at, h.id",
         terminal,
     ).fetchall()
     for row in rows:
         # clear_hold_write only appends the hold event and touches the node: it neither
         # validates live state nor reconciles admission, so it is migration-safe.
-        from plans.ask_endings import detail
-
         clear_hold_write(
             str(row["node_id"]), str(row["hold_id"]), expected_kind="blocked",
             actor_id=None, provenance="migration.119_to_120", detail=detail(why="task_ended"), db=conn,
@@ -52,16 +45,15 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
 
 def stamp_deferred_ask_holds(conn: sqlite3.Connection) -> int:
     """Stamp only deferred artifacts with exactly one positively open ask."""
+    from plans.public import open_asks_sql
+
     rows = conn.execute(
         "SELECT id,metadata FROM artifact_identities WHERE json_extract(metadata, '$.attention_state')='deferred'"
     ).fetchall()
     stamped = 0
     for row in rows:
         holds = conn.execute(
-            """SELECT h.id FROM plan_node_holds h JOIN plan_node_artifact_links l
-                 ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
-                WHERE h.kind='blocked' AND h.owner_kind='user' AND h.owner_id=? AND h.cleared_at IS NULL
-                ORDER BY h.created_at,h.id""", (str(row["id"]),),
+            open_asks_sql("h.id") + " ORDER BY h.created_at, h.id", (str(row["id"]),),
         ).fetchall()
         if len(holds) != 1:
             continue

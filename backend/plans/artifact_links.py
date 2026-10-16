@@ -3,30 +3,26 @@
 from __future__ import annotations
 
 from plans import service
+from plans.user_ask import ASKABLE_TYPES, open_asks_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
 
-# An ask link's state belongs to its open user hold. Registry metadata retains
-# only non-ask attention and a deferral stamp for one concrete open ask.
-_ATTENTION_STATE_SQL = """CASE
-    WHEN l.role='attention' AND i.type IN ('document','image') THEN
-        CASE
-            WHEN EXISTS (
-                SELECT 1 FROM plan_node_holds h
-                 WHERE h.node_id=l.node_id AND h.kind='blocked'
-                   AND h.owner_kind='user' AND h.owner_id=l.artifact_id
-                   AND h.cleared_at IS NULL
-                   AND json_extract(i.metadata, '$.attention_state')='deferred'
-                   AND json_extract(i.metadata, '$.deferred_hold_id')=h.id
-            ) THEN 'deferred'
-            WHEN EXISTS (
-                SELECT 1 FROM plan_node_holds h
-                 WHERE h.node_id=l.node_id AND h.kind='blocked'
-                   AND h.owner_kind='user' AND h.owner_id=l.artifact_id
-                   AND h.cleared_at IS NULL
-            ) THEN 'raised'
-            ELSE 'cleared'
-        END
+# An ask link's state belongs to its open review request (``open_asks_sql``),
+# read per link through the active-hold index. Registry metadata retains only
+# non-ask attention and a deferral stamp for one concrete open request. The
+# definition is a derived table so its aliases never shadow this link ``l``.
+_DEFERRED_STAMP = (
+    "json_extract(i.metadata, '$.attention_state')='deferred'"
+    " AND json_extract(i.metadata, '$.deferred_hold_id')=ask.hold_id"
+)
+_ASKABLE = ",".join(f"'{kind}'" for kind in ASKABLE_TYPES)
+_ATTENTION_STATE_SQL = f"""CASE
+    WHEN l.role='attention' AND i.type IN ({_ASKABLE}) THEN COALESCE((
+        SELECT CASE WHEN {_DEFERRED_STAMP} THEN 'deferred' ELSE 'raised' END AS ask_state
+          FROM ({open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id", by="all")}) ask
+         WHERE ask.node_id=l.node_id AND ask.owner_id=l.artifact_id
+         ORDER BY ask_state='deferred' DESC LIMIT 1
+    ), 'cleared')
     ELSE json_extract(i.metadata, '$.attention_state')
 END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,

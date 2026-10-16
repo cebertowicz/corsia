@@ -49,12 +49,13 @@ from typing import Any
 
 from loguru import logger
 
-from core.corrections_child import ClassifierChild
-from core.corrections_classifier import AssetError, AssetManifest, cleanup_staging
+from core.corrections_classifier import CORRECTIONS_SPEC
+from core.onnx_asset import AssetError, AssetManifest, cleanup_staging
+from core.onnx_child import OnnxChild
 from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
-from jobs.corrections_assets import AssetSelectionError, installed as _installed, select_manifest
+from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
 from jobs.corrections_recording import (
     candidate_for_message, record_classification, record_unreadable, unreadable_messages,
 )
@@ -78,7 +79,7 @@ class CorrectionsWorker:
         self.arrived = asyncio.Event()
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
-        self.child: ClassifierChild | None = None
+        self.child: OnnxChild | None = None
         self.child_manifest: AssetManifest | None = None
         self.stopping = False
         self.state = "absent"
@@ -205,7 +206,7 @@ class CorrectionsWorker:
         )
         outcome = await classify(
             self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND, has_fallback=has_fallback,
-            child_factory=ClassifierChild, clock=_clock, record_classification=record_classification,
+            clock=_clock, record_classification=record_classification,
             record_unreadable=record_unreadable,
         )
         if outcome.only_version_load_crash:
@@ -271,7 +272,7 @@ class CorrectionsWorker:
         if manifest is None:
             return f"classifier {self.state}"
         cutoff = measurement_window_start().astimezone(timezone.utc)
-        version = manifest.classifier_version()
+        version = ClassifierVersion(**manifest.head_version(CORRECTIONS_SPEC.required_heads[0]))
         before = None
         while self.queue.empty():
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
@@ -340,7 +341,7 @@ class CorrectionsWorker:
 
     def startup(self) -> None:
         self.stopping = False
-        cleanup_staging()
+        cleanup_staging(asset_root())
         self._release_hold()
         self.scan = "owed"
         self._start_task(_startup_worker())

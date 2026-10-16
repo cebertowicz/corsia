@@ -62,48 +62,53 @@ class AskRelease:
     detail: dict
 
 
+#: Which open review requests ``open_asks_sql`` selects: ``?`` binds the
+#: artifact or the task; ``all`` binds nothing.
+_OPEN_ASKS_BY = {"artifact": " AND l.artifact_id=?", "node": " AND h.node_id=?", "all": ""}
+
+
+def open_asks_sql(columns: str, *, joins: str = "", by: str = "artifact") -> str:
+    """The one definition of open review requests: a SELECT of ``columns``.
+
+    A user block owned by the artifact on a task linked to it for attention.
+    It has no task-state filter: every way a task ends withdraws its requests
+    (``withdraw_node_asks``), so an open one always has a live task to release.
+    ``by`` picks one document's, one task's or every request (``_OPEN_ASKS_BY``);
+    ``l``, ``n``, ``p`` and ``h`` name the link, task, plan and hold. Each scope
+    reads ``idx_plan_holds_active_node``, never the clearance history.
+    """
+    return (
+        f"SELECT {columns} FROM plan_node_artifact_links l"
+        " JOIN plan_nodes n ON n.id = l.node_id"
+        " JOIN plans p ON p.id = n.plan_id"
+        " JOIN plan_node_holds h ON h.node_id = n.id"
+        f" {joins} WHERE l.role='attention'"
+        f" AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id{_OPEN_ASKS_BY[by]}"
+    )
+
+
 def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
-        f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
-                  n.id AS node_id, n.title AS task_title,
-                  p.owner_id AS asker_id, t.title AS asker_name
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
-            ORDER BY h.created_at DESC, h.id DESC""",
+        open_asks_sql(
+            "h.id AS hold_id, h.reason, h.created_at AS raised_at,"
+            " n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name",
+            joins="LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'",
+        ) + " ORDER BY h.created_at DESC, h.id DESC",
         (artifact_id,),
     ).fetchall()
 
 
 def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
-    """Return open asks, optionally only one artifact, through the Plans public boundary.
+    """The open review requests, or one document's, oldest first, as ``open_asks_sql`` defines them.
 
-    The query begins at active holds, so SQLite reads the partial active-hold
-    index rather than the append-only clearance history. Registry callers use
-    this solely to derive their presentation; they never own or mutate a hold.
+    Registry callers use this solely to derive their presentation; they never
+    own or mutate a hold.
     """
-    return [
-        dict(row)
-        for row in db.execute(
-            """SELECT l.artifact_id,h.id AS hold_id
-                 FROM plan_node_holds h
-                 JOIN plan_node_artifact_links l
-                   ON l.node_id=h.node_id AND l.artifact_id=h.owner_id
-                  AND l.role='attention'
-                 JOIN artifact_identities i ON i.id=l.artifact_id
-                WHERE h.kind='blocked' AND h.owner_kind='user'
-                  AND h.owner_id IS NOT NULL AND h.cleared_at IS NULL
-                  AND i.type IN ('document','image') AND i.state='active'
-                  AND (? IS NULL OR l.artifact_id=?)
-                ORDER BY h.created_at,h.id""",
-            (artifact_id, artifact_id),
-        ).fetchall()
-    ]
+    sql = open_asks_sql(
+        "l.artifact_id, h.id AS hold_id", by="all" if artifact_id is None else "artifact",
+    ) + " ORDER BY h.created_at, h.id"
+    return [dict(row) for row in db.execute(sql, () if artifact_id is None else (artifact_id,))]
 
 
 def is_user_block(operation: str, params) -> bool:
@@ -179,21 +184,7 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
         )
     if identity["type"] not in ASKABLE_TYPES or identity["state"] != "active":
         raise service.PlanInputError(NOT_ASKABLE)
-    ask = ask.strip()
-    existing = raised_asks(db, ask)
-    if existing and all(str(row["node_id"]) != node_id for row in existing):
-        raise service.PlanInputError(_already_asked(existing[0]))
-    return ask
-
-
-def _already_asked(open_ask) -> str:
-    """The one-open-ask refusal, naming the exact hold an agent withdraws in one call."""
-    task = open_ask["task_title"] or open_ask["node_id"]
-    return (
-        f"this document already has an open review request on task {task!r} "
-        f"(node_id {open_ask['node_id']}, hold_id {open_ask['hold_id']}); "
-        "withdraw it (resolve the blocker) and ask again"
-    )
+    return ask.strip()
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
@@ -212,12 +203,7 @@ def withdraw_node_asks(
     from plans import holds
 
     rows = db.execute(
-        f"""SELECT h.id AS hold_id
-              FROM plan_node_holds h
-              JOIN plan_node_artifact_links l
-                ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
-             WHERE h.node_id=? AND {open_user_block_sql('h')} AND h.owner_id IS NOT NULL
-             ORDER BY h.created_at,h.id""",
+        open_asks_sql("h.id AS hold_id", by="node") + " ORDER BY h.created_at, h.id",
         (node_id,),
     ).fetchall()
     for row in rows:
@@ -257,21 +243,16 @@ def _release(
     from prompts import plan_wakes as wakes
 
     rows = db.execute(
-        f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
-                  n.revision, n.executor_thread_id, n.owner_thread_id,
-                  p.owner_kind, p.owner_id,
-                  EXISTS (SELECT 1 FROM plan_node_holds other
-                          WHERE other.node_id=n.id AND other.id<>h.id
-                            AND other.cleared_at IS NULL) AS other_holds,
-                  i.title AS ask
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             JOIN artifact_identities i ON i.id = l.artifact_id
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
-            ORDER BY h.created_at, h.id""",
+        open_asks_sql(
+            "h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,"
+            " n.revision, n.executor_thread_id, n.owner_thread_id,"
+            " p.owner_kind, p.owner_id,"
+            " EXISTS (SELECT 1 FROM plan_node_holds other"
+            " WHERE other.node_id=n.id AND other.id<>h.id"
+            " AND other.cleared_at IS NULL) AS other_holds,"
+            " i.title AS ask",
+            joins="JOIN artifact_identities i ON i.id = l.artifact_id",
+        ) + " ORDER BY h.created_at, h.id",
         (artifact_id,),
     ).fetchall()
     detail = dict(release.detail) if release is not None else {}

@@ -147,6 +147,43 @@ def test_a_started_parent_still_counts_its_own_ask(db):
     assert [item["node_id"] for item in state["attention_items"]] == [parent.id]
 
 
+def test_an_unstarted_parent_counts_its_own_ask_beside_its_child(db):
+    from plans import artifact_links
+    from registry import attention, models
+
+    owner = _thread(db, "container-ask")
+    plan = _plan(db, "container-ask")
+    parent = service.add_node(
+        plan.id, kind="phase", title="Approve the plan", acceptance_criteria="Approved", db=db,
+    )
+    child = task(db, plan.id, "Review the document", parent_id=parent.id, assignee="user")
+    _activate(db, plan.id, child.id, HUMAN)
+    plan_update(db, plan.id, "request_review", {
+        "node_id": child.id, "evidence": "Ready for you",
+        "expected_revision": revision(db, child.id),
+    }, actor=HUMAN)
+    # The parent's own raised artifact is a need of its own, not its child's rollup.
+    # Only a task holds a review request, so the parent's is non-ask attention.
+    models.register_artifact(
+        integration="github", type="pr", external_id="container-ask#1",
+        parent_thread_id="container-ask", title="Merge the release", db=db,
+    )
+    raised = db.execute(
+        "SELECT id FROM artifact_identities WHERE external_id='container-ask#1'",
+    ).fetchone()["id"]
+    attention.raise_attention(raised, db=db)
+    artifact_links.link(
+        parent.id, raised, "attention", actor_id=None, provenance="test", db=db,
+    )
+    db.commit()
+
+    state = _states(db, [owner.thread_id])[owner.thread_id]
+
+    assert sorted(item["node_id"] for item in state["attention_items"]) == sorted(
+        [parent.id, child.id]
+    )
+
+
 def test_what_the_user_owes_outranks_a_pause(db):
     """Pause contract rule 5 (#1972): the chat list, the header and the agent's
     summary all say the user's move before they say paused."""

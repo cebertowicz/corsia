@@ -118,11 +118,13 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
         ).fetchall()
         rows = {str(row["id"]): dict(row) for row in metadata_rows}
         if ask_holds:
+            # Every open request is listed, as the review bar and the rule count
+            # it: one still holding a task stays answerable here.
             marks = ",".join("?" * len(ask_holds))
             rows.update({
                 str(row["id"]): dict(row)
                 for row in _db.execute(
-                    f"SELECT * FROM artifact_identities WHERE id IN ({marks}) AND state='active'",
+                    f"SELECT * FROM artifact_identities WHERE id IN ({marks})",
                     tuple(ask_holds),
                 ).fetchall()
             })

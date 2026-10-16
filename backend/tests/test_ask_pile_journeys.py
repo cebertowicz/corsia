@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import json
 from pathlib import Path
+import re
 import sqlite3
 from types import SimpleNamespace
 import uuid
@@ -388,6 +389,24 @@ def test_ended_is_written_only_by_the_one_ask_ending_writer():
     assert [writer.split(":")[0] for writer in writers] == ["plans/ask_endings.py"], writers
 
 
+def test_open_requests_are_defined_once():
+    """The bar, the answer, the rule, the pile and the plan's link state read one query.
+
+    An open review request is a user hold owned by the artifact its task links
+    for attention; only ``user_ask.open_asks_sql`` writes that join.
+    """
+    backend = Path(__file__).resolve().parents[1]
+    join = re.compile(r"h\.owner_id\s*=\s*l\.artifact_id|l\.artifact_id\s*=\s*h\.owner_id")
+    sites = [
+        f"{path.relative_to(backend).as_posix()}:{number}"
+        for path in sorted(backend.rglob("*.py"))
+        if not path.relative_to(backend).as_posix().startswith(("tests/", "venv/", ".venv/"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if join.search(line)
+    ]
+    assert [site.split(":")[0] for site in sites] == ["plans/user_ask.py"], sites
+
+
 # Review answer 7: the pile refetches on ``plans_changed``, so placing an ask,
 # the agent withdrawing it and the person answering it in the pile each nudge
 # the person after commit.
@@ -444,8 +463,9 @@ def test_legacy_duplicate_asks_show_once_in_the_pile_and_once_per_task(db):
     second = service.add_node(
         plan_id, kind="task", title="Second review", acceptance_criteria="Reviewed", db=db,
     )
-    holds.block_hold(
-        second.id, reason_key="review", reason="Review it", owner_kind="user",
+    # Seeded below the rule (``holds.block_hold``): such duplicates predate it.
+    holds.place_hold(
+        second.id, kind="blocked", reason_key="review", reason="Review it", owner_kind="user",
         owner_id=artifact_id, expected_revision=service._node_row(db, second.id)["revision"],
         actor_id="owner", provenance="test.legacy", db=db,
     )
