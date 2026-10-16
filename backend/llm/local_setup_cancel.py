@@ -6,7 +6,6 @@ import asyncio
 from typing import Any, Callable
 
 from llm import local_setup_operation
-from llm.local_profiles import DEFAULT_PROFILE
 from llm.providers.omlx_endpoints import admin_request
 
 
@@ -39,5 +38,6 @@ async def cancel_setup(flight: Any, *, notify: Callable[[], None], emit: Callabl
     flight.download_stalled = False
     local_setup_operation.clear()
     notify()
-    emit("cancelled", profile=operation.profile_id if operation else DEFAULT_PROFILE.id)
+    model = operation.repository if operation else getattr(flight.model, "repository", None)
+    emit("cancelled", model=model)
     return {"ok": True, "cancelled": True}

@@ -357,7 +357,7 @@
 	{/snippet}
 
 	{#if page === 'welcome'}
-		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} wanted={localPick.wanted}
+		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
 			onWantedChange={(next) => localPick.change(next, Boolean(status.existing_omlx))} onRecheck={readStatus} onRetry={() => void localPick.start()} />
 	{:else if page === 'account'}
 		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />

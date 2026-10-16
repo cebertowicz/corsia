@@ -1,17 +1,20 @@
 <script lang="ts">
 	import { Button, Spinner, Toggle } from '$lib/components/ui';
 	import { needsSpace, type LocalPick } from '$lib/setupLocalPick.svelte';
+	import { welcomeModelMeta } from '$lib/setupLocalPresentation';
 
 	interface Props {
 		localEligible?: boolean;
 		freeDiskGb?: number;
 		pick: LocalPick | null;
+		downloadEtaSeconds?: number | null;
+		downloadStalled?: boolean;
 		wanted: boolean;
 		onWantedChange: (next: boolean) => void;
 		onRecheck: () => void;
 		onRetry: () => void;
 	}
-	const { localEligible, freeDiskGb, pick, wanted, onWantedChange, onRecheck, onRetry }: Props = $props();
+	const { localEligible, freeDiskGb, pick, downloadEtaSeconds, downloadStalled, wanted, onWantedChange, onRecheck, onRetry }: Props = $props();
 	// Nothing fits is told the same way as too little memory: there is no local model for this computer.
 	const noModel = $derived(localEligible === false || pick?.state === 'low_memory' || pick?.state === 'none_fits');
 	const modelSize = $derived(pick?.model ? `${pick.model.download_size_gb} GB` : '');
@@ -36,7 +39,7 @@
 					<span class="spec">You can go on and add a local model from the app later.</span>
 					<span class="retry"><Button variant="chip" size="sm" onclick={onRetry}>Try again</Button></span>
 				{:else if pick?.model}
-					<span class="spec">{pick.model.name} · {modelSize} · runs in oMLX</span>
+					<span class="spec">{welcomeModelMeta(pick.model.name, modelSize, downloadEtaSeconds, downloadStalled)}</span>
 				{/if}
 				{#if pick?.state !== 'failed'}
 					<span class="spec">The download starts in the background when you press Get started.</span>
