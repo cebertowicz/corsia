@@ -124,7 +124,11 @@ def _entries_for(app_id: str, db: sqlite3.Connection) -> list[Grant]:
 
 
 def load(app_id: str, user_id: str | None = None, *, db: sqlite3.Connection | None = None) -> Grant | None:
-    """The sign-in for ``app_id`` (for ``user_id`` when given; else the one that exists)."""
+    """The sign-in for ``app_id`` (for ``user_id`` when given; else the only one that exists).
+
+    Without a user, two people's sign-ins are ambiguous, so neither is used: the app reads as
+    signed out rather than acting as whichever person's grant came first.
+    """
     conn = db if db is not None else key_store._db(None)
     try:
         if user_id is not None:
@@ -134,7 +138,7 @@ def load(app_id: str, user_id: str | None = None, *, db: sqlite3.Connection | No
                 register_secrets(grant)
             return grant
         grants = _entries_for(app_id, conn)
-        return grants[0] if grants else None
+        return grants[0] if len(grants) == 1 else None
     finally:
         if db is None:
             conn.close()

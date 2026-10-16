@@ -136,8 +136,19 @@ def test_a_person_can_cancel_and_sign_out(api):  # C-R6
     assert calls["signout"] == [(app_id, OWNER_USER)] and calls["runtime"] == [("sign_out", app_id)]
 
 
-def test_a_persons_remove_signs_out_first_and_an_agents_does_not(api, monkeypatch):  # C-R6
+def _agent_thread_in(project_id: str) -> None:
+    db = get_db()
+    db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES (?,?,?,?)", (project_id, project_id, "t", "t"))
+    db.execute(
+        "INSERT INTO threads(id,user_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?)",
+        (AGENT["thread_id"], OWNER_USER, project_id, "t", "t"),
+    )
+    db.commit()
+
+
+def test_every_remove_signs_out_first_so_no_sign_in_outlives_its_app(api, monkeypatch):  # C-R6
     client, actor, calls, app_id, _ = api
+    _agent_thread_in("project-a")
 
     async def runtime_noop(_action, _app_id):
         return {"state": "disconnected", "state_since": "t", "tool_count": 0, "failure_class": None}
@@ -148,7 +159,21 @@ def test_a_persons_remove_signs_out_first_and_an_agents_does_not(api, monkeypatc
     calls["signout"].clear()
     actor["who"] = AGENT
     other = create_app("Other", {"url": MCP_URL, "key_refs": []}, ALL_REACH, db=get_db())["id"]
-    client().delete(f"/api/mcp/servers/{other}")
+    assert client().delete(f"/api/mcp/servers/{other}").status_code == 200
+    assert calls["signout"] == [(other, "thread-a")]
+
+
+def test_an_agent_cannot_sign_out_an_app_its_project_cannot_reach(api, monkeypatch):  # C-R6
+    client, actor, calls, _, _ = api
+    _agent_thread_in("project-a")
+    get_db().execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES ('project-b','project-b','t','t')")
+    get_db().commit()
+    actor["who"] = AGENT
+    hidden = create_app(
+        "Hidden", {"url": MCP_URL, "key_refs": []},
+        {"mode": "selected", "project_ids": ["project-b"], "outside_projects": False}, db=get_db(),
+    )["id"]
+    assert client().delete(f"/api/mcp/servers/{hidden}").status_code == 403
     assert calls["signout"] == []
 
 

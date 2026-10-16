@@ -87,6 +87,16 @@ def _agent_thread(user: dict, db) -> tuple[str, dict]:
     return thread_id, scope
 
 
+def _reaching_thread(user: dict, app_id: str) -> str:
+    """The agent's thread, or a refusal when its project can't reach ``app_id``."""
+    from connections.app_reach import app_reaches_thread
+
+    thread_id, _scope = _agent_thread(user, _db())
+    if not app_reaches_thread(app_id, thread_id, db=_db()):
+        raise _refusal("This connected app is not available to your project; ask the person in Connected apps.", 403)
+    return thread_id
+
+
 def _agent_reach(thread_id: str, scope: dict, *, db) -> dict[str, object]:
     """Limit ordinary agents to their place; CORSIA proposes workspace apps for all projects."""
     from infra.corsia_agent import is_corsia_agent
@@ -267,10 +277,7 @@ async def update_server(app_id: str, body: dict[str, Any], user: dict = Depends(
                 app_id, config, expected_revision=revision, audit_actor=_audit_actor(user), db=_db()
             )
         from connections.app_lifecycle import propose_config
-        from connections.app_reach import app_reaches_thread
-        thread_id, _scope = _agent_thread(user, _db())
-        if not app_reaches_thread(app_id, thread_id, db=_db()):
-            raise _refusal("This connected app is not available to your project; ask the person in Connected apps.", 403)
+        thread_id = _reaching_thread(user, app_id)
         return propose_config(
             app_id, config, actor_thread_id=thread_id, expected_revision=revision,
             audit_actor=_audit_actor(user), db=_db(),
@@ -347,17 +354,15 @@ async def decline_server(app_id: str, user: dict = Depends(require_user)) -> dic
 @connected_apps_router.delete("/servers/{app_id}")
 async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Remove config; a person's delete also removes only this app's stable-id keys."""
-    if human := is_person_session(user):  # signs out first (revoke, then delete), so no sign-in outlives its app
-        await sign_out(app_id, user_id=user["id"])
+    if not (human := is_person_session(user)):
+        await run_in_db(_reaching_thread, user, app_id)
+    # Every remove signs out first (revoke, then delete): a sign-in has no label and no other
+    # surface, so one left behind by any remover could never be found or removed.
+    await sign_out(app_id, user_id=_audit_actor(user)[1])
 
     def delete() -> dict[str, object]:
         from connections.app_lifecycle import delete_app
-        from connections.app_reach import app_reaches_thread
 
-        if not human:
-            thread_id, _scope = _agent_thread(user, _db())
-            if not app_reaches_thread(app_id, thread_id, db=_db()):
-                raise _refusal("This connected app is not available to your project; ask the person in Connected apps.", 403)
         return delete_app(app_id, remove_keys=human, audit_actor=_audit_actor(user), db=_db())
 
     try:
@@ -376,17 +381,12 @@ async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict
 async def reconnect_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Reconnect exactly one reachable app, bounded to one restart per ten seconds."""
     def authorize() -> None:
-        from connections.app_reach import app_reaches_thread, get_app
+        from connections.app_reach import get_app
 
         if is_person_session(user):
             get_app(app_id, db=_db())
             return
-        thread_id, _scope = _agent_thread(user, _db())
-        if not app_reaches_thread(app_id, thread_id, db=_db()):
-            raise _refusal(
-                "This connected app is not available to your project; ask the person in Connected apps.",
-                403,
-            )
+        _reaching_thread(user, app_id)
 
     try:
         await run_in_db(authorize)

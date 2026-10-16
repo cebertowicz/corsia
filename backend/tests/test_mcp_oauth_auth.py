@@ -120,6 +120,16 @@ async def test_rotation_can_only_replace_an_existing_sign_in(env):  # Governance
     assert store.load(env.app_id) is None
 
 
+async def test_two_peoples_sign_ins_are_never_used_in_each_others_place(env):  # C-R4, one person's grant
+    grant = await signed_in(env)
+    other = store.Grant(**{**grant.__dict__, "user_id": "someone-else", "access_token": "other-access"})
+    store.save_new(other)
+    assert store.load(env.app_id) is None
+    assert store.load(env.app_id, env.user_id).access_token == grant.access_token
+    response = await call(env, OAuthGrantAuth(env.app_id, MCP_URL))
+    assert response.status_code == 401
+
+
 async def test_a_token_is_never_sent_to_another_origin(env):  # Attach rule
     await signed_in(env)
     with pytest.raises(MCPConfigError):
