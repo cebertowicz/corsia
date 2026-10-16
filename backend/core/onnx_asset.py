@@ -85,6 +85,20 @@ class AssetManifest:
                 )
         _VERIFIED[self.path] = tuple(stats)
 
+    def head_version(self, head: str) -> dict[str, Any]:
+        """Return the generic version data for one configured classifier head."""
+        try:
+            threshold = float(self.heads[head]["threshold"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise AssetError(f"manifest has no usable {head} threshold") from error
+        return {
+            "asset_id": self.asset_id,
+            "version": self.version,
+            "head": head,
+            "threshold": threshold,
+            "input_policy_id": self.input_policy_id,
+        }
+
 
 def load_manifest(
     path: Path, spec: OnnxAssetSpec, *, expected_sha256: str | None = None,
@@ -203,6 +217,11 @@ def _validate_manifest(manifest: AssetManifest, spec: OnnxAssetSpec) -> None:
         raise AssetError(f"manifest does not describe the supported {spec.display_name} asset")
     if any(head not in manifest.heads for head in spec.required_heads):
         raise AssetError("manifest is missing a required head")
+    for head in spec.required_heads:
+        try:
+            float(manifest.heads[head]["threshold"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise AssetError(f"manifest has no usable {head} threshold") from error
     if len(manifest.self_test) < spec.min_self_test_vectors:
         raise AssetError("manifest is missing required self-test vectors")
 

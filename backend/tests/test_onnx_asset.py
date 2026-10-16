@@ -102,7 +102,7 @@ def test_second_asset_spec_verifies_self_tests_and_scores_without_corrections_co
 
 
 def test_manifest_is_refused_by_the_wrong_asset_spec(tmp_path):
-    from core.corrections_classifier import AssetManifest as CorrectionsManifest
+    from core.corrections_classifier import CORRECTIONS_SPEC
     from core.onnx_asset import AssetError, load_manifest
 
     other_path = _manifest(tmp_path / "other", asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
@@ -115,7 +115,7 @@ def test_manifest_is_refused_by_the_wrong_asset_spec(tmp_path):
     spec = _other_spec({"v1": hashlib.sha256(other_path.read_bytes()).hexdigest()})
 
     with pytest.raises(AssetError):
-        CorrectionsManifest.load(other_path)
+        load_manifest(other_path, CORRECTIONS_SPEC)
     with pytest.raises(AssetError):
         load_manifest(corrections_path, spec)
 
@@ -259,3 +259,81 @@ def test_a_child_that_exits_during_load_stays_a_transient_crash(monkeypatch, tmp
 
     assert (raised.value.kind, raised.value.cause) == ("transient", "child_exited")
     assert not child.running
+
+
+def test_load_deadline_stays_a_transient_unavailable_error(monkeypatch, tmp_path):
+    from core import onnx_child
+    from core.onnx_asset import load_manifest
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()})
+    child, _connection = _child_with(monkeypatch, load_manifest(path, spec), spec, [])
+    ticks = iter((0.0, spec.load_timeout_seconds + 0.1))
+    monkeypatch.setattr(onnx_child.time, "monotonic", lambda: next(ticks))
+
+    with pytest.raises(onnx_child.OnnxUnavailable, match="load timeout") as raised:
+        child.ensure_loaded()
+
+    assert raised.value.kind == "transient"
+    assert not child.running
+
+
+def test_load_waits_past_the_call_deadline_until_its_own(monkeypatch, tmp_path):
+    from core import onnx_child
+    from core.onnx_asset import load_manifest
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()})
+    assert spec.call_timeout_seconds < spec.load_timeout_seconds - 0.01
+    child, _connection = _child_with(monkeypatch, load_manifest(path, spec), spec, [{"ready": True}])
+    ticks = iter((0.0, spec.load_timeout_seconds - 0.01))
+    monkeypatch.setattr(onnx_child.time, "monotonic", lambda: next(ticks))
+
+    child.ensure_loaded()
+
+    assert child.loaded
+
+
+def test_call_deadline_stays_a_per_message_error(monkeypatch, tmp_path):
+    from core import onnx_child
+    from core.onnx_asset import load_manifest
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()})
+    child, _connection = _child_with(monkeypatch, load_manifest(path, spec), spec, [{"ready": True}])
+    child.ensure_loaded()
+    ticks = iter((0.0, spec.call_timeout_seconds + 0.1))
+    monkeypatch.setattr(onnx_child.time, "monotonic", lambda: next(ticks))
+
+    with pytest.raises(onnx_child.OnnxMessageFailed, match="timeout"):
+        child.score({"owner": "synthetic", "head": "injection"})
+
+    assert not child.running
+
+
+def test_child_that_does_not_exit_stays_an_unavailable_error(monkeypatch, tmp_path):
+    from core import onnx_child
+    from core.onnx_asset import load_manifest
+
+    class StubbornProcess(_FakeProcess):
+        def is_alive(self):
+            return True
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()})
+    child, _connection = _child_with(
+        monkeypatch, load_manifest(path, spec), spec, [{"error": "timeout", "kind": "transient"}],
+    )
+    monkeypatch.setattr(onnx_child, "Process", StubbornProcess)
+    monkeypatch.setattr(onnx_child, "CLOSE_JOIN_SECONDS", 0.0)
+
+    with pytest.raises(onnx_child.OnnxUnavailable, match="child_did_not_exit") as raised:
+        child.ensure_loaded()
+
+    assert raised.value.kind == "transient"

@@ -51,9 +51,8 @@ manifests, source pins, file hashing and stat caching, session construction,
 and self-tests. `backend/core/onnx_child.py` owns the isolated child lifecycle:
 network blocking, child-side and parent-polled RSS ceilings, request timeouts,
 and shutdown escalation. Each feature defines only an `OnnxAssetSpec` and a
-module-level scorer. `corrections_classifier.py` and `corrections_child.py`
-are compatibility adapters that expose corrections-specific versions, labels,
-and existing public imports without duplicating the generic lifecycle.
+module-level scorer. `corrections_classifier.py` provides the corrections
+specification and converts generic score replies into its recorded value.
 
 ### oMLX public authentication
 

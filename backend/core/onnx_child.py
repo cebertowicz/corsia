@@ -69,12 +69,7 @@ def child_main(connection: Any, manifest_path: str, spec: OnnxAssetSpec) -> None
                 return
             connection.send({
                 "score": score,
-                "version": {
-                    "asset_id": manifest.asset_id,
-                    "version": manifest.version,
-                    "head": str(request.get("head", spec.required_heads[0])),
-                    "input_policy_id": manifest.input_policy_id,
-                },
+                "version": manifest.head_version(str(request.get("head", spec.required_heads[0]))),
                 "truncated": truncated,
                 "original_tokens": original,
             })
