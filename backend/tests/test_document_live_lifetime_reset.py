@@ -84,7 +84,9 @@ async def test_last_viewer_cleanup_survives_real_sqlite_error_and_cancellation(o
         async def evicted():
             while entry.artifact_id in manager.documents:
                 await asyncio.sleep(0)
-        await asyncio.wait_for(evicted(), .2)
+        # Eviction must happen, not within a latency budget: a loaded CI runner
+        # delayed the shielded flush and close past 0.2s.
+        await asyncio.wait_for(evicted(), 5)
         assert entry.live.store.path.exists()
         async with old_client(scope, monkeypatch) as client:
             response = await save_old(client, entry.live.path, "legacy after close")
