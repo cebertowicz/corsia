@@ -9,6 +9,11 @@ import pytest
 import cli_location
 
 
+@pytest.fixture(autouse=True)
+def clear_manager_prefixes():
+    cli_location._manager_prefixes.clear()
+
+
 def _executable(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\n")
@@ -71,6 +76,17 @@ def test_package_manager_for_uses_resolved_paths_and_only_proven_prefixes(monkey
     assert cli_location.package_manager_for("claude-code", str(claude)) == "homebrew"
     assert cli_location.package_manager_for("codex", str(codex)) == "npm"
     assert cli_location.package_manager_for("codex", str(_executable(tmp_path / "other" / "codex"))) is None
+
+
+def test_npm_global_inside_the_brew_prefix_is_classified_as_npm(monkeypatch, tmp_path):
+    brew_prefix = tmp_path / "homebrew"
+    npm_root = brew_prefix / "lib" / "node_modules"
+    codex = _executable(npm_root / "@openai" / "codex" / "bin" / "codex")
+
+    monkeypatch.setattr(cli_location.shutil, "which", lambda name, **_kwargs: f"/{name}")
+    monkeypatch.setattr(cli_location, "_command_prefix", lambda command: npm_root if command[0] == "/npm" else brew_prefix)
+
+    assert cli_location.package_manager_for("codex", str(codex)) == "npm"
 
 
 def test_path_shadowed_binary_names_the_service_copy_to_remove(monkeypatch, tmp_path):

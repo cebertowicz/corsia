@@ -168,12 +168,36 @@ def record_set_up(model: LocalModel) -> None:
         staged.unlink(missing_ok=True)
 
 
+def _starter_installed(starter: LocalModel) -> bool:
+    """Whether CORSIA's own oMLX has the pre-record starter in its configured model directory."""
+    from llm.local_setup_ownership import own_omlx_settings_file
+
+    try:
+        raw = json.loads(own_omlx_settings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    model = raw.get("model") if isinstance(raw, dict) else None
+    model_dir = model.get("model_dir") if isinstance(model, dict) else None
+    return isinstance(model_dir, str) and bool(model_dir) and (Path(model_dir) / starter.repository).is_dir()
+
+
+def _backfill_starter() -> LocalModel | None:
+    """Write the one missing legacy record when CORSIA's own old oMLX still has its starter."""
+    from llm.local_profiles import OWN_OMLX_STARTER
+    from llm.local_setup_ownership import existing_install_is_foreign
+
+    if existing_install_is_foreign() or not _starter_installed(OWN_OMLX_STARTER):
+        return None
+    record_set_up(OWN_OMLX_STARTER)
+    return OWN_OMLX_STARTER
+
+
 def set_up_model() -> LocalModel | None:
-    """The model the last finished setup installed, else None."""
+    """The model the last finished setup installed, backfilling the one pre-record starter when present."""
     try:
         raw = json.loads(_record_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return None
+        return _backfill_starter()
     except (OSError, ValueError) as error:
         log.warning("local model record is unreadable; treating it as absent: %s", error)
         return None

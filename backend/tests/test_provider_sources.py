@@ -147,6 +147,43 @@ class TestSeedCodex:
         assert _sources(client)["claude-code"]["state"] == "needs_auth"
 
 
+def test_steady_source_read_uses_cached_manager_prefixes_and_one_management_record(
+        isolated_db, client, monkeypatch):
+    import cli_location
+    from llm import local_sources, own_omlx_management
+
+    _put("claude-code", "unverified")
+    _put("codex", "unverified")
+    cli_location._manager_prefixes.clear()
+    calls = {"subprocess": 0, "record": 0}
+
+    monkeypatch.setattr(cli_location, "service_binary", lambda vendor: f"/bin/{vendor}")
+    monkeypatch.setattr(cli_location.shutil, "which", lambda name, **_kwargs: f"/{name}")
+
+    def run(command, **_kwargs):
+        calls["subprocess"] += 1
+        output = "/npm-root" if command[0] == "/npm" else "/brew-root"
+        return subprocess.CompletedProcess(command, 0, output + "\n", "")
+
+    def read():
+        calls["record"] += 1
+        return None
+
+    monkeypatch.setattr(cli_location.subprocess, "run", run)
+    monkeypatch.setattr(own_omlx_management, "read", read)
+    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: True)
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership: {"source": "omlx", "state": "ready"})
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [
+        {"id": "local", "kind": "local", "status": "online"}])
+
+    _sources(client)  # Warm the successful manager-prefix cache.
+    assert calls == {"subprocess": 2, "record": 1}
+    calls.update(subprocess=0, record=0)
+    _sources(client)
+
+    assert calls == {"subprocess": 0, "record": 1}
+
+
 def _stream(*frames):
     return "".join(json.dumps({"type": "control_response", "response": f}) + "\n"
                    for f in frames).encode()

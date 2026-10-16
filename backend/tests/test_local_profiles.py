@@ -58,6 +58,49 @@ def test_loader_rejects_malformed_settings_files(tmp_path):
         local_profiles.load_settings(tmp_path / "absent.json")
 
 
+def test_missing_legacy_record_backfills_only_the_installed_starter(monkeypatch, tmp_path):
+    from llm import local_model
+
+    record = tmp_path / "state" / "local-model.json"
+    settings = tmp_path / "omlx" / "settings.json"
+    model_dir = tmp_path / "models"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"model": {"model_dir": str(model_dir)}}))
+    writes = []
+    original_record = local_model.record_set_up
+
+    def record_once(model):
+        writes.append(model)
+        original_record(model)
+
+    monkeypatch.setattr(local_model, "_record_path", lambda: record)
+    monkeypatch.setattr(local_model, "record_set_up", record_once)
+    monkeypatch.setattr("llm.local_setup_ownership.own_omlx_settings_file", lambda: settings)
+    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: False)
+
+    assert local_model.set_up_model() is None and not record.exists()
+    (model_dir / local_profiles.OWN_OMLX_STARTER.repository).mkdir(parents=True)
+    assert local_model.set_up_model() == local_profiles.OWN_OMLX_STARTER
+    assert local_model.set_up_model() == local_profiles.OWN_OMLX_STARTER
+    assert writes == [local_profiles.OWN_OMLX_STARTER]
+    assert json.loads(record.read_text()) == local_model.to_record(local_profiles.OWN_OMLX_STARTER)
+
+
+def test_local_setup_view_reads_ram_once_per_process(monkeypatch):
+    from llm import local_setup_gates, local_setup_prepare
+
+    reads = []
+    monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: reads.append(True) or 128 * GIB)
+    local_setup_gates.host_ram_bytes.cache_clear()
+    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: False)
+    monkeypatch.setattr("llm.local_model.set_up_model", lambda: None)
+    local_setup_prepare._prepare = local_setup_prepare._Prepare()
+
+    assert asyncio.run(local_setup_prepare.pick_view())["state"] == "not_checked"
+    assert asyncio.run(local_setup_prepare.pick_view())["state"] == "not_checked"
+    assert reads == [True]
+
+
 def test_download_and_settings_use_the_picked_model(monkeypatch):
     calls = []
 
