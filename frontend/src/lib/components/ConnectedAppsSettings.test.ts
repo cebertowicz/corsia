@@ -47,7 +47,7 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-copy strong')).toHaveLength(2));
 		expect(host.querySelector('.app-copy')?.classList.contains('waiting-copy')).toBe(true);
 		expect(host.querySelector('.app-copy .second.status')).toBeNull();
-		expect(host.querySelector('.app-copy .second')?.textContent).toContain('Connected · 2 actions');
+		expect(host.querySelector('.app-copy .second')?.textContent).toBe('Connected · 2 actions · All projects');
 	});
 
 	it('uses amber only for connected-app states needing attention', async () => {

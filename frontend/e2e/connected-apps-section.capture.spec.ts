@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { loginByUrl, openSettings } from './support/corsia';
 
-const outputDir = '/Users/jarvis/Corsia/projects/corsia/shared/integrations/2026-10-16-apps-section.assets';
+const outputDir = process.env.CORSIA_CAPTURE_DIR ?? 'test-results/connected-apps-section';
 const captureEnabled = process.env.CORSIA_CAPTURE_CONNECTED_APPS === '1';
 
 test.describe('Connected apps Settings section capture', () => {
@@ -44,13 +44,11 @@ test.describe('Connected apps Settings section capture', () => {
 				await (viewport > 768
 					? page.getByRole('button', { name: 'Connected apps' })
 					: page.getByRole('button', { name: 'Apps' })).click();
-				await expect(page.getByText('Connected · 2 actions')).toBeVisible();
+				await expect(page.getByText('Connected · 2 actions · All projects')).toBeVisible();
 				await expect(page.getByText('Waiting for your approval')).toBeVisible();
 				await page.screenshot({ path: join(outputDir, `connected-apps-after-approve-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
 
-				await (viewport > 768
-					? page.getByRole('button', { name: 'System' })
-					: page.getByRole('button', { name: 'System' })).click();
+				await page.getByRole('button', { name: 'System' }).click();
 				await expect(page.getByRole('heading', { name: 'Connected apps' })).toHaveCount(0);
 				await page.screenshot({ path: join(outputDir, `settings-system-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
 			}
