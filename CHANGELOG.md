@@ -3,7 +3,7 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
-## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, and steadier plans
+## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
 Released 2026-10-16.
 
@@ -27,14 +27,14 @@ Released 2026-10-16.
 - Returning to a document tab no longer lets an older restore disturb the tab you switched to, and open tabs return directly to their saved place without a loading flash.
 - Mobile document comments stay clear of save status and selection controls; save feedback stays quiet for fast saves and appears when needed; review headers remain compact on phones with an ask open.
 - Markdown links refresh when their source finishes parsing.
-- A document carries one open review request at a time, and a review request on a sub-step counts once in your chat list.
+- A document carries one open review request at a time, and a review request on a sub-step counts once in your chat list. Withdrawn, closed and replaced review requests leave your list and say the request has ended.
 
 ### Chat and Interface
 
 - The chat view is tidied: the sidebar, chat, plan and document panes share one style for each repeated element, with dated boxes and heavy borders removed and no information or action lost.
 - Project colours keep text readable on every coloured control, in light and dark themes.
 - On phones, the header clears the screen's safe areas and keeps its faded frosted blur while content scrolls underneath. In installed iOS 27 apps, the header and first sidebar row sit below the system's top-edge blur, and chat text no longer shows through the header title.
-- The decision drawer's footer no longer covers its options on phones.
+- The decision drawer's footer no longer covers its options on phones. A decision shows its reasoning on the option it recommends, and its labels match the rest of the chat view.
 - Plan decisions stay listed while the decision queue is still loading, and a decision row opens the decision it names.
 - Document row menus, collapse and expand, and keyboard access to row actions work reliably.
 
@@ -48,6 +48,13 @@ Released 2026-10-16.
 
 - Model switches can use another eligible account when the selected one has reached its limit, and the model picker preserves known usage limits and reset times when a fresh check is unavailable.
 - Providers can be turned off without losing their settings, and queued work resumes when they are turned back on. The model picker also aligns its account chooser, selected account, and current indicators.
+
+### Connected Apps and Google
+
+- MCP servers imported from your other AI tools arrive as connected apps waiting for your approval. Settings › Connected apps lets you approve, decline, reconnect or remove each one and choose which projects it works in.
+- Apps running on your Mac cannot read CORSIA's private state or stored keys.
+- Google sign-in is held by CORSIA itself and gives agents email and calendar tools. An agent sends an email or invite only from the exact draft open in its document, and only after your latest message.
+- The context sheet shows what each connected app costs in context.
 
 ### Measurement
 
