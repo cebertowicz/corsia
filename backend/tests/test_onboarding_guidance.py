@@ -172,6 +172,9 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
 
     assert offer.index("`state` is `running` or `downloading`") < offer.index("2. Ask once")
     assert "make no offer" in offer
+    # A succeeded flight's result outlives its connection (kept in memory until restart),
+    # so it only stops the offer while a local model is still connected.
+    assert "if none is, that result is old: carry on as if it were absent" in offer
     assert "never holds up a setup task" in running
     assert "at the end of each later setup task" in running
     assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
