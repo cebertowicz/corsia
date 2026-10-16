@@ -404,11 +404,24 @@ class TestAppPath:
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
-    def test_app_reference_orders_deferred_auth_and_local_failure_after_the_answer(self):
+    def test_app_reference_covers_reviewed_source_and_local_failure_edges(self):
+        from infra import system_package
         from onboarding import first_run_wake
 
         reference = first_run_wake.instructions("app")
-        assert "`needs_auth`, do not install: go straight" in reference
+        local_offer = system_package.system_resource_source(
+            "skills/conductor-bootstrap/references/local-model-offer.md",
+        ).read_text(encoding="utf-8")
+
+        assert "setup adds no models to it: don't make the offer" in local_offer
+        assert "download lands in the person's oMLX" not in local_offer
+        assert "When `harness_ready` is empty, omit the first sentence" in reference
+        assert "if you have a [Claude | ChatGPT] subscription" in reference
+        assert "Sign in to [Claude Code | Codex] in Settings › Accounts, then tell me when it's done." in reference
+        assert "If it shows the source is ready, carry on." in reference
+        assert "If it is still unsigned, once post" in reference
+        assert "already `failed` in these initial facts was shown by the screens: say nothing about it" in reference
+        assert "first time a later read shows it done or failed" in reference
         assert "handle that reply first, then post its `message` and the fix it names" in reference
 
     # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
