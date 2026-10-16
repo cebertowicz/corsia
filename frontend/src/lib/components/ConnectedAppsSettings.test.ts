@@ -35,6 +35,9 @@ describe('ConnectedAppsSettings', () => {
 		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_revision: 1 }) })));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
+		const connectedRow = host.querySelector('.app-row');
+		expect(connectedRow?.querySelector('.summary')?.getAttribute('aria-expanded')).toBe('false');
+		expect(connectedRow?.querySelector('[aria-hidden="true"]')?.textContent).toBe('›');
 	});
 
 	it('calls decline for an awaiting approval row', async () => {
