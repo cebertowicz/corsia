@@ -373,7 +373,7 @@ async def _retire(old: store.Grant, new: store.Grant) -> None:
 def _connect_in_background(app_id: str) -> None:
     async def connect() -> None:
         try:
-            from tools.mcp_runtime import apply_connected_app_runtime
+            from tools.connected_apps_runtime import apply_connected_app_runtime
 
             await apply_connected_app_runtime("sign_in", app_id)
         except Exception:

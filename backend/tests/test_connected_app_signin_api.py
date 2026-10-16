@@ -99,11 +99,14 @@ def test_the_metadata_setting_reaches_the_flow_only_when_set(api, monkeypatch): 
 @pytest.mark.parametrize("host,peer,forwarded", [
     ("corsia.example.test", "127.0.0.1", None),
     ("127.0.0.1", "192.168.1.20", None),
-    ("127.0.0.1", "127.0.0.1", "203.0.113.9"),
+    ("127.0.0.1", "127.0.0.1", ("X-Forwarded-For", "203.0.113.9")),
+    ("127.0.0.1", "127.0.0.1", ("Forwarded", "for=203.0.113.9")),
+    ("127.0.0.1", "127.0.0.1", ("X-Real-IP", "203.0.113.9")),
+    ("localhost", "127.0.0.1", ("Tailscale-User-Login", "someone@example.test")),
 ])
 def test_sign_in_is_offered_only_on_the_mac_corsia_runs_on(api, host, peer, forwarded):  # C-R8
     client, _, calls, app_id, _ = api
-    headers = {**AUTH, **({"X-Forwarded-For": forwarded} if forwarded else {})}
+    headers = {**AUTH, **(dict([forwarded]) if forwarded else {})}
     response = client(host, peer).post(f"/api/mcp/servers/{app_id}/sign-in", headers=headers)
     assert response.status_code == 409 and "Mac CORSIA runs on" in response.text and calls["start"] == []
     assert client(host, peer).get("/api/mcp/servers", headers=headers).json()["sign_in_here"] is False
@@ -251,7 +254,7 @@ def test_agents_are_told_to_ask_the_person_to_sign_in():  # C-R7
 def test_same_mac_check_unit():  # C-R8
     class Req:
         def __init__(self, host, peer, headers=()):
-            self.headers = {"host": host, **dict(headers)}
+            self.headers = {"host": host, **{name.lower(): value for name, value in headers}}
             self.client = type("C", (), {"host": peer})()
 
     assert routes.sign_in_here(Req("127.0.0.1:3001", "127.0.0.1"))
@@ -259,3 +262,4 @@ def test_same_mac_check_unit():  # C-R8
     assert routes.sign_in_here(Req("[::1]:3001", "::1"))
     assert not routes.sign_in_here(Req("localhost.evil.example:3001", "127.0.0.1"))
     assert not routes.sign_in_here(Req("127.0.0.1:3001", "10.0.0.5"))
+    assert not routes.sign_in_here(Req("127.0.0.1:3001", "127.0.0.1", [("X-Real-IP", "203.0.113.9")]))

@@ -165,7 +165,7 @@ def _spawn(coroutine) -> None:
 async def _report_lost(app_id: str) -> None:
     """Withdraw the server's tools and publish needs_sign_in outside the request that found out."""
     try:
-        from tools.mcp_runtime import apply_connected_app_runtime
+        from tools.connected_apps_runtime import apply_connected_app_runtime
 
         await apply_connected_app_runtime("sign_out", app_id)
     except Exception:

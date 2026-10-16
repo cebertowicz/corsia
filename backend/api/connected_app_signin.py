@@ -1,7 +1,6 @@
 """Sign in to, and out of, a hosted connected app. Person only: an agent is refused and recorded."""
 from __future__ import annotations
 
-import ipaddress
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -9,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from api.connected_app_access import person_only, refusal as _refusal
 from infra.auth import require_user, token_from_request
 from infra.db_async import run_in_db
+from infra.local_connection import is_direct_loopback
 
 signin_router = APIRouter()
 _LOOPBACK_NAMES = {"localhost", "127.0.0.1", "[::1]", "::1"}
@@ -22,15 +22,14 @@ def _db():
 
 
 def sign_in_here(request: Request) -> bool:
-    """Whether this browser is on the Mac running CORSIA, so the loopback callback can reach the backend."""
+    """Whether this browser is on the Mac running CORSIA, so the loopback callback can reach the backend.
+
+    Local trust is :func:`infra.local_connection.is_direct_loopback`; the Host check only adds that the
+    browser addressed CORSIA by a loopback name, which the provider's redirect back needs.
+    """
     host = request.headers.get("host") or ""
     name = host[: host.index("]") + 1] if host.startswith("[") else host.rsplit(":", 1)[0]
-    client = request.client.host if request.client else ""
-    try:
-        loopback_client = ipaddress.ip_address(client).is_loopback
-    except ValueError:
-        loopback_client = False
-    return loopback_client and name.lower() in _LOOPBACK_NAMES and not request.headers.get("x-forwarded-for")
+    return is_direct_loopback(request) and name.lower() in _LOOPBACK_NAMES
 
 
 def _person_only(user: dict, action: str, app_id: str) -> tuple[str, str]:
