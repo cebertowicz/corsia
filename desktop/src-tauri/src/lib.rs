@@ -20,7 +20,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{ipc::CapabilityBuilder, Manager};
 
 mod app_paths;
 mod classify;
@@ -112,6 +112,7 @@ const DRAG_INIT_SCRIPT: &str = r#"
 (function () {
   if (window.__corsia_drag_handler_installed) return;
   window.__corsia_drag_handler_installed = true;
+  window.__CORSIA_SHELL__ = window.__CORSIA_SHELL__ || { mode: 'local' };
 
   // Mark the document so CSS can apply Tauri-shell-only treatments
   // (e.g. left-pad chrome to clear macOS traffic lights). Apply on
@@ -611,6 +612,14 @@ async fn remote_pair(
         remote_config::forget_remote(&app_dir)?;
         return Ok(RemotePairResponse::Failure { ok: false, reason: "server".into(), app_version: None, host_version: None });
     }
+    let proxy_port = proxy.port;
+    app.add_capability(
+        CapabilityBuilder::new("remote-proxy-origin")
+            .remote(format!("http://127.0.0.1:{proxy_port}"))
+            .window("main")
+            .permission("allow-disconnect-remote")
+            .permission("allow-start-window-drag"),
+    ).map_err(|error| format!("could not grant remote proxy commands: {error}"))?;
     *remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")? = Some(proxy);
     if let Some(window) = app.get_webview_window("main") {
         window.eval(format!("window.location.replace('http://127.0.0.1:{}');", remote_config::load_remote(&app_dir)?.expect("saved remote").proxy_port)).map_err(|error| error.to_string())?;
@@ -623,11 +632,18 @@ fn disconnect_remote(
     app: tauri::AppHandle,
     service: tauri::State<'_, AppServiceState>,
     remote: tauri::State<'_, RemoteRuntime>,
+    webview: tauri::Webview,
 ) -> Result<(), String> {
+    let app_dir = default_app_dir(&app)?;
+    let saved = remote_config::load_remote(&app_dir)?.ok_or("no remote connection is saved")?;
+    let expected = format!("http://127.0.0.1:{}", saved.proxy_port);
+    let actual = webview.url().map_err(|error| format!("could not read calling origin: {error}"))?;
+    if actual.as_str().trim_end_matches('/') != expected {
+        return Err("disconnect_remote is allowed only from the saved proxy origin".into());
+    }
     if let Some(proxy) = remote.proxy.lock().map_err(|_| "remote proxy state is unavailable")?.take() {
         proxy.stop();
     }
-    let app_dir = default_app_dir(&app)?;
     remote_config::forget_remote(&app_dir)?;
     run_service_command("register")?;
     let startup = start_service(&app, &service)?;
