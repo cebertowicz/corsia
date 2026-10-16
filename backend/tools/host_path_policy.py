@@ -170,7 +170,7 @@ class ProtectedHostPathPolicy:
             candidate.parent in temporary_roots
             and candidate.suffix == ".sb"
             and candidate.name.startswith(
-                ("corsia-shell-envelope-", "corsia-controlled-git-")
+                ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
             )
         ):
             return (
@@ -248,10 +248,12 @@ class ProtectedHostPathPolicy:
         policy already words both outcomes, so reuse those exact messages
         rather than restating them.
         """
-        for path in denied_paths_in(text):
-            message = self.ordinary_denial(path, for_write=False)
-            if message is None:
-                message = self.denial(path, for_write=True)
+        return self.denial_guidance_for_paths(denied_paths_in(text))
+
+    def denial_guidance_for_paths(self, paths: Iterable[Path]) -> str | None:
+        """Name the first denied protected path from an already-parsed path list."""
+        for path in paths:
+            message = self.ordinary_denial(path, for_write=False) or self.denial(path, for_write=True)
             if message:
                 return f"{path} — {message}"
         return None

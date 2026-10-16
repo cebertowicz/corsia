@@ -328,7 +328,21 @@ STDIO_SERVER = textwrap.dedent('''
 
 
 @pytest.mark.asyncio
-async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store, tmp_path):
+async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store, tmp_path, monkeypatch):
+    # Secret resolution is unit-tested independently from the macOS Safehouse
+    # integration proof; production stdio launches fail closed without it.
+    from mcp import StdioServerParameters
+    from tools import mcp
+
+    profile = tmp_path / "unit-profile.sb"
+    profile.write_text("unit test", encoding="utf-8")
+    monkeypatch.setattr(
+        mcp,
+        "_safehouse_stdio_parameters",
+        lambda _name, command, args, env: (
+            StdioServerParameters(command=command, args=args, env=env or None), profile,
+        ),
+    )
     script = tmp_path / "server.py"
     script.write_text(STDIO_SERVER)
     config = {"command": sys.executable, "args": [str(script)],
