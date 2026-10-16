@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 TITLE_MAX_OUTPUT_TOKENS = 1024
+THREAD_TITLE_MAX_CHARS = 80
 TITLE_TIMEOUT_SECONDS = 60.0
 _TITLE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -47,7 +48,7 @@ def _clean_title(raw: str) -> str | None:
     reject_patterns = ["thinking process", "analyze the", "step 1", "let me", "i need to"]
     if any(p in title.lower() for p in reject_patterns):
         return None
-    return title[:80] if title else None
+    return title[:THREAD_TITLE_MAX_CHARS] if title else None
 
 
 def _title_object(raw: object) -> object:
