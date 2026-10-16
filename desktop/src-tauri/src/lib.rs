@@ -396,7 +396,7 @@ impl adoption::Lifecycle for SourceLifecycle {
 
     fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
         let backend = self.source.lifecycle_script.parent().and_then(Path::parent).ok_or("source lifecycle script has no checkout")?.join("backend");
-        let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.platform_paths import create_adoption_snapshot; print(create_adoption_snapshot(Path(sys.argv[2])))";
+        let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import create_adoption_snapshot; print(create_adoption_snapshot(Path(sys.argv[2])))";
         let output = Command::new(&self.source.python).args(["-c", program]).arg(backend).arg(state).output()
             .map_err(|error| format!("could not start the source state backup: {error}"))?;
         if !output.status.success() { return Err(format!("source state backup exited {}", output.status)); }
@@ -419,7 +419,7 @@ impl adoption::Lifecycle for SourceLifecycle {
 
     fn restore_backup(&mut self, state: &Path, snapshot: &Path) -> Result<(), String> {
         let backend = self.source.lifecycle_script.parent().and_then(Path::parent).ok_or("source lifecycle script has no checkout")?.join("backend");
-        let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.platform_paths import restore_adoption_snapshot; restore_adoption_snapshot(Path(sys.argv[2]), Path(sys.argv[3]))";
+        let program = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import restore_adoption_snapshot; restore_adoption_snapshot(Path(sys.argv[2]), Path(sys.argv[3]))";
         let status = Command::new(&self.source.python).args(["-c", program]).arg(backend).arg(state).arg(snapshot).status()
             .map_err(|error| format!("could not restore the source state backup: {error}"))?;
         status.success().then_some(()).ok_or_else(|| format!("source state restore exited {status}"))
