@@ -37,9 +37,15 @@ def _agent_next_step(
     if state == "working":
         return f'Load its tools with tools_load(server="{label}").'
     if state == "needs_token":
-        return f"{label} needs a key. Press Set key next to {label} in {place}. Please don't paste it here."
+        return (
+            f"{label} needs a key, but Connected apps has no way to set one. Ask the person to open {label} in "
+            f"{place}, press Remove, then ask me to bring it over again. Please don't paste it here."
+        )
     if state == "token_rejected":
-        return f"{label} didn't accept its key. Press Replace key next to {label} in {place}."
+        return (
+            f"{label} didn't accept its key, and Connected apps has no way to replace it. Ask the person to open "
+            f"{label} in {place}, press Remove, then ask me to bring it over again."
+        )
     if state == "needs_sign_in":
         return f"Ask the person to press Sign in next to {label} in {place}. Please don't try to sign in yourself."
     if state == "disconnected":

@@ -48,8 +48,10 @@ def runtime(monkeypatch):
     monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
     monkeypatch.setattr(mcp_runtime, "_app_tools", {})
     monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_configs", {})
     monkeypatch.setattr(mcp_runtime, "_app_states", {})
     monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    monkeypatch.setattr(mcp_runtime, "_deferred_reconnects", {})
     monkeypatch.setattr(state, "_agent", None)
     tools: list[_FakeTool] = []
     gate = {"hold": None}
@@ -194,6 +196,68 @@ def test_connected_app_reconnect_rate_limit_names_the_ten_second_wait(runtime):
 
     with pytest.raises(MCPReconnectRateLimitError, match="try again in 10 seconds"):
         asyncio.run(mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))
+
+
+def test_connect_restarts_a_running_app_when_its_stored_config_changed(runtime, monkeypatch):
+    mcp_runtime, tools, _ = runtime
+    versions = {"app-1": 1}
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            app_id = args[0]
+            return "GitHub", {"connected_app_id": app_id, "version": versions[app_id]}
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+
+    async def scenario():
+        first = await mcp_runtime.apply_connected_app_runtime("connect", "app-1")
+        assert first["state"] == "working"
+        versions["app-1"] = 2
+        refreshed = await mcp_runtime.apply_connected_app_runtime("connect", "app-1")
+        assert refreshed["state"] == "working"
+
+    asyncio.run(scenario())
+
+    assert [tool.name for tool in tools] == ["GitHub_1", "GitHub_2"]
+    assert not tools[0].session_open
+    assert tools[1].session_open
+
+
+def test_deferred_reconnect_coalesces_a_saved_write_and_reaches_the_current_state(runtime, monkeypatch):
+    mcp_runtime, tools, _ = runtime
+    now = [0.0]
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return "GitHub", {"connected_app_id": args[0]}
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    async def advance(delay: float) -> None:
+        now[0] += delay
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    monkeypatch.setattr(mcp_runtime.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(mcp_runtime.asyncio, "sleep", advance)
+
+    async def scenario():
+        mcp_runtime._reconnect_at["app-1"] = now[0]
+        await mcp_runtime.defer_connected_app_reconnect("app-1")
+        task = mcp_runtime._deferred_reconnects["app-1"]
+        await task
+
+    asyncio.run(scenario())
+
+    assert [tool.name for tool in tools] == ["GitHub_tool"]
+    assert mcp_runtime.connected_app_state("app-1")["state"] == "working"
 
 
 def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, monkeypatch):
