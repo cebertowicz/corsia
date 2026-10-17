@@ -109,28 +109,30 @@ def test_statement_uses_the_canonical_trial_body_shape():
     parsed = read_trial(raw)
     assert parsed
     assert parsed.statement == "One canonical statement."
-    assert parsed.statement_error is None
-    statement, error = trial_statement(parsed.body.rstrip("\n"))
-    assert statement == "One canonical statement."
-    assert error is None
-    statement, error = trial_statement(parsed.body.rstrip("\n") + "\nextra")
-    assert statement is None
-    assert error == "trial body differs from the canonical lesson shape"
+    assert trial_statement(parsed.body.rstrip("\n")) == "One canonical statement."
+    assert trial_statement(parsed.body.rstrip("\n") + "\nextra") == (
+        "# Trial lesson An unproven hypothesis under review, not a standing rule. "
+        "It grants no new permission. - One canonical statement. "
+        "Does not apply: Not for an unreviewed change. extra"
+    )
 
 
-def test_noncanonical_trial_body_is_visible_not_misreported_as_a_statement(db):
-    malformed = render_trial(
+def test_valid_hand_edited_trial_body_is_a_visible_statement(db):
+    hand_edited = render_trial(
         lesson_id=str(uuid.UUID(int=7)), owner="owner", name="lesson-7",
         description="Use before deciding.", text="Placeholder.",
         trial=Trial("hypothesis", "2026-10-01", state="watch"),
         source_refs=[{"kind": "message", "reference": "correction"}],
-    ).replace("# Trial lesson", "# Unrelated heading", 1)
-    record = source_record(malformed, "/authorized/skills/lesson-7/SKILL.md", with_statement=True)
-    assert record and record["statement_error"] == "trial body differs from the canonical lesson shape"
+    ).replace("# Trial lesson", "# Hand-edited lesson", 1)
+    record = source_record(hand_edited, "/authorized/skills/lesson-7/SKILL.md", with_statement=True)
+    assert record and record["statement"] == (
+        "# Hand-edited lesson An unproven hypothesis under review, not a standing rule. "
+        "It grants no new permission. - Placeholder."
+    )
     [row] = report(db, [record])["rows"]
     assert row["state"] == "watch"
-    assert "statement" not in row
-    assert row["statement_error"] == "trial body differs from the canonical lesson shape"
+    assert row["statement"] == record["statement"]
+    assert "statement_error" not in row
 
 
 @pytest.mark.asyncio

@@ -62,8 +62,7 @@ class TrialFile:
     description: str
     body: str
     behavioral_sha256: str
-    statement: str | None
-    statement_error: str | None
+    statement: str
 
 
 @dataclass(frozen=True)
@@ -119,30 +118,27 @@ def _trial_body(text: str, boundary: str | None) -> str:
     return body
 
 
-def trial_statement(body: str) -> tuple[str | None, str | None]:
-    """Return a canonical trial statement, or an explicit shape error.
+def trial_statement(body: str) -> str:
+    """Return a trial's one-line statement from its validated body.
 
-    A valid skill with lesson metadata may still have an arbitrary body. Its
-    list row must not mistake an unrelated bullet for the lesson hypothesis.
+    Canonical bodies expose their hypothesis directly. A lesson validator also
+    accepts hand-edited bodies, so their complete body is the visible statement
+    rather than a second, stricter validity check.
     """
     if body.startswith("\n"):
         body = body[1:]
     if not body.startswith(_TRIAL_BODY_PREFIX):
-        return None, "trial body differs from the canonical lesson shape"
+        return _one_line(body)
     remainder = body.removeprefix(_TRIAL_BODY_PREFIX)
     statement, separator, suffix = remainder.partition("\n")
     if not statement:
-        return None, "trial body differs from the canonical lesson shape"
+        return _one_line(body)
     if not separator or suffix == "":
-        return statement, None
+        return statement
     if not suffix.startswith(_TRIAL_BOUNDARY_PREFIX):
-        return None, "trial body differs from the canonical lesson shape"
-    boundary = suffix.removeprefix(_TRIAL_BOUNDARY_PREFIX)
-    if boundary.endswith("\n"):
-        boundary = boundary[:-1]
-    if not boundary or "\n" in boundary:
-        return None, "trial body differs from the canonical lesson shape"
-    return statement, None
+        return _one_line(body)
+    boundary = suffix.removeprefix(_TRIAL_BOUNDARY_PREFIX).removesuffix("\n")
+    return statement if boundary and "\n" not in boundary else _one_line(body)
 
 
 def render_trial(
@@ -179,11 +175,10 @@ def read_trial(text: str) -> TrialFile | None:
     lesson = parse_lesson(parsed.metadata) if parsed.ok else None
     if lesson is None or not parsed.name or not parsed.description:
         return None
-    statement, statement_error = trial_statement(parsed.body)
     return TrialFile(
         lesson=lesson, name=parsed.name, description=parsed.description, body=parsed.body,
-        behavioral_sha256=behavioral_sha256(parsed.description, parsed.body), statement=statement,
-        statement_error=statement_error,
+        behavioral_sha256=behavioral_sha256(parsed.description, parsed.body),
+        statement=trial_statement(parsed.body),
     )
 
 

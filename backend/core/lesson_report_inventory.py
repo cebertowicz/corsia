@@ -13,7 +13,6 @@ from core.skill_validation import validate_skill_text
 
 Identity = tuple[str, str, str]
 
-# The canonical trial body is parsed by core.lesson_files; this inventory only projects it.
 
 def source_record(text: str, path: str, *, with_statement: bool = False) -> dict[str, Any] | None:
     """Project one authorized current source using the canonical file validators.
@@ -35,10 +34,7 @@ def source_record(text: str, path: str, *, with_statement: bool = False) -> dict
             "source_refs": list(lesson.source_refs),
         }
         if with_statement:
-            if trial.statement is not None:
-                record["statement"] = trial.statement
-            elif trial.statement_error is not None:
-                record["statement_error"] = trial.statement_error
+            record["statement"] = trial.statement
         if "originating_subjects" in block:
             record["originating_subjects"] = list(lesson.originating_subjects)
         return record
