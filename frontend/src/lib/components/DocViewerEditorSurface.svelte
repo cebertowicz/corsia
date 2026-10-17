@@ -10,7 +10,7 @@
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
-	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null };
+	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean };
 
 	let {
 		docState,
@@ -100,7 +100,7 @@
 </div>
 
 {#if pendingSel && !commentSheetOpen}
-	<button class="sel-comment" out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+	<button class="sel-comment" class:above={pendingSel.above} out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
 		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!commentSheetOpen) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment
