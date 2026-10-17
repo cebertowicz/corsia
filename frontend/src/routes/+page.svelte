@@ -16,11 +16,9 @@
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
 	import { watchSubagentOpenRequests } from '$lib/subagentOpen';
 	import { openThread } from '$lib/stores/openThread';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { closeScopeSettings, workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
@@ -62,9 +60,10 @@
 		lastEmittedView = next;
 	});
 
+	$effect(() => { recordSettingsHomeThread(activeView, get(activeThreadId)); }); // every route out of Settings clears the thread it opened over
 	let lastSettingsOpenRequest = 0;
 	$effect(() => {
-		const request = $settingsOpenRequest;
+		const request = $settingsNavigation.openRequest;
 		if (request === lastSettingsOpenRequest) return;
 		lastSettingsOpenRequest = request;
 		openSettings();
@@ -103,7 +102,8 @@
 			// active. Any other navigation must not leak that target to a later open.
 			clearDocPickerTarget();
 		}
-		closeScopeSettings();
+		threadSettingsOpen.set(false);
+		recordSettingsHomeThread(view, get(activeThreadId)); // Settings keeps the thread it opened over, so a file opened there has a tab to land in.
 		if (!options.preserveActiveThread) activeThreadId.set(null);
 		activeView = view;
 		if (!options.preserveActiveThread) messages.set([]);
@@ -203,7 +203,7 @@
 	}
 
 	const paneConfig = $derived(
-		buildPaneConfig(activeView, $activeThread, $uiScope, $activeThreadId, $projectSettingsOpen || $workspaceSettingsOpen)
+		buildPaneConfig(activeView, $activeThread, $uiScope, $activeThreadId)
 	);
 
 	function pickProject(p: { id: string; name: string; accent_color?: string | null }) { enterProjectScope(p); resetSurface('activity'); }
@@ -246,14 +246,8 @@
 			threadSettingsOpen.set(true);
 			return;
 		}
-		if (target?.returnTo === 'project-settings') {
-			activeView = 'chat';
-			projectSettingsOpen.set(true);
-			return;
-		}
-		if (target?.returnTo === 'workspace-settings') {
-			activeView = 'activity';
-			workspaceSettingsOpen.set(true);
+		if (target?.returnTo === 'settings') {
+			requestSettingsSection(target.returnSection ?? 'context');
 			return;
 		}
 		activeView = 'activity';
@@ -266,8 +260,8 @@
 	$effect(() => {
 		const tab = $canvasCompact ? getActiveTab(activeWorkspace) : null;
 		syncCanvasHeader({
-			projectSettingsOpen: $projectSettingsOpen,
-			threadSettingsOpen: $threadSettingsOpen, workspaceSettingsOpen: $workspaceSettingsOpen,
+			threadSettingsOpen: $threadSettingsOpen,
+			settingsDrill: $settingsNavigation.drill,
 			compactArtifact: tab && $activeThreadId
 				? {
 					title: tab.title,
@@ -289,22 +283,24 @@
 			uiScopeName: $uiScope?.name ?? null,
 			activeThreadId: $activeThreadId, conductorThreadId,
 			threads: $threads,
-			closeProjectSettings: () => projectSettingsOpen.set(false),
 			closeThreadSettings,
 			closeSettings: () => closeSettingsBack((id) => selectThread(id, 'other'), openActivity),
 			closeDocuments: closeDocumentsView,
 		});
 	});
 
-	// Opening a document from the library or a settings takeover returns to the
-	// thread that now owns the tab, so the new tab is actually on screen.
-	let lastShowArtifactRequest = 0;
+	// Opening a document from the library or Settings returns to the thread that
+	// now owns the tab, so the new tab is actually on screen.
 	$effect(() => {
 		const request = $showArtifactThreadRequest;
-		if (request === lastShowArtifactRequest) return;
-		lastShowArtifactRequest = request;
+		if (!request) return;
+		showArtifactThreadRequest.set(null);
+		if (request.threadId !== get(activeThreadId)) {
+			void selectThread(request.threadId, 'other');
+			return;
+		}
 		contextAttachTarget.set(null);
-		closeScopeSettings();
+		threadSettingsOpen.set(false);
 		activeView = 'chat';
 		paneOpen.set(false);
 	});

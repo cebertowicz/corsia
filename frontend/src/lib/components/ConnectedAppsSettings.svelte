@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
@@ -22,6 +23,8 @@
 	let signInHere = $state(false);
 	let signedOut = $state<Set<string>>(new Set());
 	let confirmingOut = $state<string | null>(null);
+	/** The app whose approval just came back asking for a sign-in; its panel starts the sign-in once. */
+	let signInAfterApprove = $state<string | null>(null);
 	const isOpen = (app: ConnectedApp): boolean => openId === app.id || needsSignInAttention(app);
 
 	function stateLine(app: ConnectedApp): string {
@@ -77,7 +80,7 @@
 		errorId = app.id;
 		actionError = '';
 		try {
-			if (action === 'approve') replace(await approveConnectedApp(app));
+			if (action === 'approve') approved(await approveConnectedApp(app));
 			else if (action === 'decline') {
 				// Declining a new request deletes it, so the answer is `removed` and the row goes; a pending change on a working app comes back as that app.
 				const next = await declineConnectedApp(app.id);
@@ -91,10 +94,14 @@
 	}
 
 	function replace(next: ConnectedApp): void { apps = apps.map((app) => app.id === next.id ? { ...app, ...next } : app); }
+	function approved(next: ConnectedApp): void {
+		replace(next);
+		if (next.state === 'needs_sign_in') signInAfterApprove = next.id;
+	}
 	onMount(() => { void loadProjects(); void load(); });
 </script>
 
-<section class="connected-apps" data-settings-anchor="connected-apps" id="connected-apps">
+<section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
 	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div></div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
@@ -111,6 +118,7 @@
 						<strong title={app.name}>{app.name}</strong>
 						<span class="second status">{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}</span>
 						{#if app.folder}<span class="second">From Claude Code · {app.folder} folder</span>{/if}
+						{#if app.notice}<span class="second">{app.notice}</span>{/if}
 					</div>
 					<div class="waiting-actions">
 						{#if needsPlace(app)}
@@ -135,7 +143,7 @@
 						<div class="details">
 							{#if errorId === app.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 							<AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
-								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} />
+								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} autoStart={signInAfterApprove === app.id} onAutoStarted={() => signInAfterApprove = null} />
 							<div class="actions">
 								{#if app.state === 'expired'}
 									<!-- A request that ran out can't be placed, reconnected or approved; Dismiss runs Decline's cleanup (copy sheet). -->
@@ -156,7 +164,7 @@
 	{/if}
 </section>
 
-{#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { replace(app); whereApp = null; }} />{/if}
+{#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { if (whereApprove) approved(app); else replace(app); whereApp = null; }} />{/if}
 
 <style>
 	.connected-apps { width: 100%; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }
@@ -164,7 +172,7 @@
 	.heading p { margin: var(--space-2) 0 0; color: var(--text-secondary); line-height: 1.5; }
 	.rows { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
 	/* A request waiting on the person is a flat list row: status on the second line, one solid action, a text action. */
-	.waiting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-height: 38px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+	.waiting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-height: var(--list-row-min-height); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
 	.waiting-copy { min-width: 0; flex: 1 1 14rem; display: grid; gap: 2px; }
 	.waiting-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-regular); }
 	.second { color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); overflow-wrap: anywhere; }
@@ -173,7 +181,7 @@
 	.waiting-actions { display: flex; align-items: center; gap: var(--space-2); }
 	.waiting-row .error, .waiting-panel { flex-basis: 100%; margin: 0; }
 	/* Connected and waiting apps are one flat list; the chevron still discloses each connected app's details. */
-	.app-row { min-height: 38px; }
+	.app-row { min-height: var(--list-row-min-height); }
 	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
 	.app-copy { min-width: 0; display: grid; gap: var(--space-1); }
 	.app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }

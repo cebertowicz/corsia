@@ -53,7 +53,6 @@
 	description="This will permanently remove all messages. This cannot be undone."
 	confirmLabel="Delete"
 	destructive={true}
-	icon="delete"
 	onConfirm={onConfirmDeleteThread}
 	onCancel={onCancelDeleteThread}
 />

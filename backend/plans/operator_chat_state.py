@@ -28,9 +28,10 @@ def chat_state(
 ) -> str:
     """The chat list's one word for a thread: the plan header's lead, renamed.
 
-    A human decision or review, or a host-access request, is the user's move
-    and outranks a pause (pause contract rule 5): beside active
-    work the agent still moves, paused or alone it is blocked on the user.
+    A host-access request, or a human review in a live plan, is the user's move:
+    beside active work the agent still moves, alone it is blocked on the user.
+    A paused plan defers its own asks (``plan_defers_asks``); an access request
+    is not plan-owned, so it still outranks the pause.
     Otherwise ``operator_node_state.leading``, the header's one precedence,
     decides. ``counts`` is None with nothing open. ``stuck`` is the header's
     not-moving parts (``plans.not_moving.read``): a still plan never reads

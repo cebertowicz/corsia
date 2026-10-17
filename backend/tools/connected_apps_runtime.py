@@ -1,9 +1,11 @@
 """Route-facing lifecycle seam for stable-id connected apps."""
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
-RuntimeAction = Literal["connect", "reconnect", "remove", "sign_in", "sign_out"]
+RuntimeAction = Literal["connect", "restart", "reconnect", "remove", "sign_out"]
+log = logging.getLogger(__name__)
 
 
 async def apply_connected_app_runtime(action: RuntimeAction, app_id: str) -> dict[str, object]:
@@ -14,10 +16,16 @@ async def apply_connected_app_runtime(action: RuntimeAction, app_id: str) -> dic
 
 
 async def reconnect_after_saved_write(app_id: str) -> dict[str, object]:
-    """Reconnect a saved change now or schedule one canonical retry after the rate limit."""
-    from tools.mcp_runtime import MCPReconnectRateLimitError, defer_connected_app_reconnect
+    """Restart the app on a write a person just saved, so the change reaches it now or reads as failed.
+
+    An app that is no longer there or now waits for approval can't restart; that is logged with
+    its id and class, never a value, and its current runtime state is returned.
+    """
+    from connections.app_reach import AppNotFoundError, AppPendingApprovalError
+    from tools.mcp_runtime import connected_app_state
 
     try:
-        return await apply_connected_app_runtime("reconnect", app_id)
-    except MCPReconnectRateLimitError:
-        return await defer_connected_app_reconnect(app_id)
+        return await apply_connected_app_runtime("restart", app_id)
+    except (AppNotFoundError, AppPendingApprovalError) as error:
+        log.warning("saved change not applied: app_id=%s class=%s", app_id, type(error).__name__)
+        return connected_app_state(app_id)

@@ -80,4 +80,26 @@ describe('focusTrap', () => {
 		trap.destroy();
 		expect(document.activeElement).toBe(outside);
 	});
+
+	it('never calls focus on <body> when nothing was focused at mount', async () => {
+		// The trigger can already be unmounted when the trap mounts, leaving <body> as the
+		// previous element. In a real browser body.focus() blurs the control that holds focus.
+		(document.activeElement as HTMLElement).blur();
+		expect(document.activeElement).toBe(document.body);
+		const bodyFocus = vi.spyOn(document.body, 'focus');
+		const trap = focusTrap(node);
+		await tick();
+		trap.destroy();
+		expect(bodyFocus).not.toHaveBeenCalled();
+	});
+
+	it('leaves focus alone when a control outside the trap already took it', async () => {
+		const trap = focusTrap(node);
+		await tick();
+		const bar = document.createElement('button');
+		document.body.appendChild(bar);
+		bar.focus();
+		trap.destroy();
+		expect(document.activeElement).toBe(bar);
+	});
 });

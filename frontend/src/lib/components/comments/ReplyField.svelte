@@ -13,7 +13,7 @@
 
 	let input = $state<HTMLTextAreaElement>();
 	let appliedSelection: string | null = null;
-	export function focus() { input?.focus(); }
+	export function focus(options?: FocusOptions) { input?.focus(options); }
 
 	$effect(() => {
 		if (!input || !selection) return;

@@ -6,7 +6,6 @@ export type ProjectDetail = {
 	accent_color: string | null;
 	path: string | null;
 	projects_root: string;
-	context_files: string[];
 };
 
 export type AgentRow = {

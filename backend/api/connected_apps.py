@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, Query, Request
 
 from api.connected_app_access import audit_actor as _audit_actor, person_only, refusal as _refusal
-from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
+from api.connected_app_rows import _agent_next_step, app_reaches_project, local_app_notice as _local_app_notice, server_row
 from api.connected_app_errors import app_error as _app_error
 from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
@@ -18,17 +18,13 @@ from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 connected_apps_router = APIRouter()
 connected_apps_router.include_router(signin_router)
 log = logging.getLogger(__name__)
-LOCAL_APP_NOTICE = (
-    "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
-    "Connect only apps you trust."
-)
 BODY_SHAPE = (
     'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '
     '"key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]}; use "url" instead of "command" for a hosted app.'
 )
 
 
-async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], app_id: str) -> dict[str, object]:
+async def _run_app_runtime(action: Literal["connect", "restart", "reconnect", "remove"], app_id: str) -> dict[str, object]:
     """Send a persisted Connected Apps action to its app-id runtime seam."""
     from tools.connected_apps_runtime import apply_connected_app_runtime
     return await apply_connected_app_runtime(action, app_id)
@@ -126,10 +122,6 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     except Exception as error:
         raise _refusal(str(error)) from None
     return {**config, "key_refs": refs}
-
-
-def _local_app_notice(config: object) -> str | None:
-    return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
 
 
 # List projections are kept in connected_app_rows to preserve this route module's size budget.

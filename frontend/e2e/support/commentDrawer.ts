@@ -1,12 +1,9 @@
 import { expect, type Locator } from '@playwright/test';
 
-/**
- * A drawer thread keeps its reply field closed until its person asks for it (the thread's Reply action, or the
- * thread being selected). Returns the open field, pressing Reply first when it is still closed.
- */
+/** Returns the reply field that every writable open thread keeps visible. */
 export async function replyField(thread: Locator): Promise<Locator> {
 	const field = thread.getByPlaceholder('Reply…');
-	if (!(await field.isVisible())) await thread.getByRole('button', { name: 'Reply', exact: true }).click();
+	await expect(field).toBeVisible();
 	return field;
 }
 

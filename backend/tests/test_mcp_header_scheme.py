@@ -149,7 +149,7 @@ def test_a_sign_in_import_keeps_no_scheme_from_a_discarded_credential(tmp_path, 
         imported = mcp_import.import_selected(
             [{"source": "cursor", "name": "Hosted"}], db=db, home=tmp_path, actor="agent",
         )
-        assert imported["rows"][0]["state"] == "needs_sign_in"
+        assert imported["rows"][0]["state"] == "awaiting_approval"
         [app] = list_apps(db=db)
     finally:
         db.close()

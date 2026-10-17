@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 from infra.packed_rows import fetch_all
-from plans import aggregates, hierarchy, node_states
+from plans import aggregates, hierarchy, node_states, operator_display_state
 from plans.decision_fields import pick_of
 
 DECISION_TYPE = "plan-decision"
@@ -292,9 +292,16 @@ def awaiting_count(plan_ids, *, db) -> int:
     A decision is held by a node in work, and a node in work is never folded, so
     the read asks for the open rows alone (``idx_plan_nodes_open``) and costs the
     open work, not the plan's history.
+
+    A paused plan defers its asks until resume, so it contributes none; the
+    decision stays raised and answerable meanwhile.
     """
     rows = hierarchy.descendants(db, plan_ids)
-    return len(raised_decisions([row["id"] for row in rows], db=db, open_nodes=True))
+    live = [
+        row["id"] for row in rows
+        if not operator_display_state.plan_defers_asks(row["state"])
+    ]
+    return len(raised_decisions(live, db=db, open_nodes=True))
 
 
 def next_order_key(plan_id: str, *, db) -> int:

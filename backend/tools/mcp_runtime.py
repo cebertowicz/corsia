@@ -30,7 +30,6 @@ _app_servers: dict[str, str] = {}
 _app_configs: dict[str, tuple[str, dict[str, object]]] = {}
 _app_states: dict[str, dict[str, object]] = {}
 _reconnect_at: dict[str, float] = {}
-_deferred_reconnects: dict[str, asyncio.Task[dict[str, object]]] = {}
 
 
 class MCPReconnectRateLimitError(RuntimeError):
@@ -81,18 +80,31 @@ async def _await_sign_in(app_id: str) -> dict[str, object]:
 
 
 async def _remove_app_runtime(app_id: str) -> dict[str, object]:
-    """Cancel a deferred restart and discard one app's live state."""
-    deferred = _deferred_reconnects.pop(app_id, None)
-    if deferred is not None:
-        deferred.cancel()
+    """Discard one app's live state."""
     await _remove_connected_app(app_id)
     _app_states.pop(app_id, None)
     _reconnect_at.pop(app_id, None)
     return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
 
 
+def _admit_reconnect(app_id: str) -> None:
+    """Allow one unsaved forced restart of an app per ten seconds."""
+    now = time.monotonic()
+    if now - _reconnect_at.get(app_id, float("-inf")) < 10:
+        raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
+    _reconnect_at[app_id] = now
+
+
 async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, object]:
-    """Connect, reconnect or remove exactly one stable-id connected app."""
+    """Connect, restart, reconnect or remove exactly one stable-id connected app.
+
+    This is the one owner of an app's session. ``connect`` keeps a running session whose stored
+    config is unchanged (startup, approve, a person's add). ``restart`` replaces the session at
+    once and follows a write a person just committed: a saved config or key, or a completed
+    sign-in. ``reconnect`` is the same replacement asked for with nothing saved (the Reconnect
+    button or an agent), so it alone is limited to one per ten seconds. An app that is not
+    approved never loads a config here: ``runtime_app_config`` refuses a waiting or expired one.
+    """
     async with _lock:
         if action == "remove":
             return await _remove_app_runtime(app_id)
@@ -100,19 +112,14 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         if action == "sign_out":
             return await _await_sign_in(app_id)
-        if action == "reconnect":
-            now = time.monotonic()
-            if now - _reconnect_at.get(app_id, float("-inf")) < 10:
-                raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
-            _reconnect_at[app_id] = now
-            await _remove_connected_app(app_id)
         from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
 
-        name, config = await run_in_db(load_runtime_app_config, app_id)
-        if action == "sign_in":
-            # A completed sign-in replaces any earlier session at once; it is not a rate-limited reconnect.
+        if action == "reconnect":
+            _admit_reconnect(app_id)
+        if action in {"restart", "reconnect"}:
             await _remove_connected_app(app_id)
-        elif action != "reconnect" and app_id in _app_stacks:
+        name, config = await run_in_db(load_runtime_app_config, app_id)
+        if app_id in _app_stacks:
             if _app_configs.get(app_id) == (name, config):
                 return _app_states[app_id]
             await _remove_connected_app(app_id)
@@ -168,33 +175,6 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             }
             await _publish_app_state(app_id, result)
             return result
-
-
-async def _finish_deferred_reconnect(app_id: str) -> dict[str, object]:
-    """Wait out the current restart window, then apply the latest saved configuration once."""
-    try:
-        while True:
-            async with _lock:
-                retry_at = _reconnect_at.get(app_id)
-                if retry_at is None:
-                    return connected_app_state(app_id)
-                delay = max(0.0, 10 - (time.monotonic() - retry_at))
-            if delay:
-                await asyncio.sleep(delay)
-            try:
-                return await apply_connected_app_runtime("reconnect", app_id)
-            except MCPReconnectRateLimitError:
-                continue
-    finally:
-        _deferred_reconnects.pop(app_id, None)
-
-
-async def defer_connected_app_reconnect(app_id: str) -> dict[str, object]:
-    """Coalesce saved writes into one restart after the active reconnect window."""
-    existing = _deferred_reconnects.get(app_id)
-    if existing is None or existing.done():
-        _deferred_reconnects[app_id] = asyncio.create_task(_finish_deferred_reconnect(app_id))
-    return connected_app_state(app_id)
 
 
 async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
@@ -254,9 +234,6 @@ async def _close() -> None:
     _app_configs.clear()
     _app_states.clear()
     _reconnect_at.clear()
-    for deferred in _deferred_reconnects.values():
-        deferred.cancel()
-    _deferred_reconnects.clear()
     try:
         for app_stack in app_stacks:
             await app_stack.aclose()

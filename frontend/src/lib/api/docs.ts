@@ -176,7 +176,7 @@ export async function patchComment(commentId: string, fields: Partial<{ resolved
 	return data.comment;
 }
 
-export async function markCommentThreadViewed(artifactId: string, rootId: string, seenReplyId: string): Promise<{ root_id: string; reply_waiting: boolean }> {
+export async function markCommentThreadViewed(artifactId: string, rootId: string, seenReplyId: string): Promise<{ root_id: string; new_reply_ids: string[] }> {
 	return ok(await fetch(`/api/artifacts/${artifactId}/comments/${rootId}/viewed`, {
 		method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token) ?? ''}` },
 		body: JSON.stringify({ seen_reply_id: seenReplyId })

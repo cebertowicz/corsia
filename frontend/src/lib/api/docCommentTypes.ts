@@ -20,7 +20,7 @@ export interface ServerComment {
 	orphaned?: boolean;
 	created_at: string;
 	updated_at: string;
-	reply_waiting?: boolean;
+	new_reply_ids?: string[];
 	replies?: ServerComment[];
 	/** A region comment on an image (DCOL-FR13.3): fractions of the image; w = h = 0 is a point. */
 	region_x?: number | null;
