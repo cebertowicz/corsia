@@ -17,6 +17,8 @@ _PRESENCE_COLUMNS = {
 }
 # v64 adds the seen-state marks to the same table.
 _SEEN_COLUMNS = {"marked_read_at", "marked_unread_at"}
+# v126 adds the focus spans to both tables.
+_FOCUS_COLUMNS = {"focus_spans", "focus_since"}
 _VISIT_COLUMNS = {
     "id", "user_id", "surface", "thread_id", "project_id", "object_id",
     "entered_at", "exited_at", "seconds", "sessions", "exit_reason",
@@ -28,14 +30,14 @@ def _columns(db, table: str) -> set[str]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 125
+    assert SCHEMA_VERSION == 126
 
 
 def test_fresh_schema_creates_the_presence_tables():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert _columns(db, "thread_presence") == _PRESENCE_COLUMNS | _SEEN_COLUMNS
-        assert _columns(db, "presence_visits") == _VISIT_COLUMNS
+        assert _columns(db, "thread_presence") == _PRESENCE_COLUMNS | _SEEN_COLUMNS | _FOCUS_COLUMNS
+        assert _columns(db, "presence_visits") == _VISIT_COLUMNS | {"focus_spans"}
 
 
 def test_startup_migration_adds_the_tables_to_an_existing_database(tmp_path):

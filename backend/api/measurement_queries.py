@@ -15,6 +15,7 @@ from api.measurement_prepared import (  # noqa: F401 -- the prepared-table names
     PREPARED_ROOT_OUTCOMES, PREPARED_ROOTS, PREPARED_SCOPE, shared_prepare,
 )
 from api.measurement_presence import active_family_sql, presence_family_sql
+from api.presence_rollup import rollup_binds
 from api.measurement_decision_sql import ANY_OTHER, ANY_TOOK, IS_ANY
 from api.measurement_scope import query_params, scope_cte
 from api.measurement_token_sql import ROLLUP_TOKEN_SUM_SQL, CACHED_TOKEN_SQL
@@ -310,10 +311,13 @@ def query_family(db, family: str, params: dict[str, Any], *, grouping: str = "sc
         return _in_range(db.execute(sql, bound).fetchall())
     if family == "outcomes":
         sql = f"SELECT period,outcomes,first_try,rejections FROM {outcomes} ORDER BY period"
-    elif family == "presence":
-        sql = presence_family_sql(grain, scope_threads)
-    elif family == "active":
-        sql = active_family_sql(grain, scope_threads, outcomes)
+    elif family in ("presence", "active"):
+        bound.update(rollup_binds(db, bound))  # no binds, no rolled time: the spans alone answer
+        rolled = "focus_rollup_through" in bound
+        if family == "presence":
+            sql = presence_family_sql(grain, scope_threads, rolled=rolled)
+        else:
+            sql = active_family_sql(grain, scope_threads, outcomes, rolled=rolled)
     elif family == "decisions":
         sql = decision_family_sql(grain, scope_threads, outcomes)
     elif family == "tokens":

@@ -37,6 +37,7 @@ import weakref
 from datetime import datetime, timedelta
 from typing import Any
 
+from api import presence_rollup
 from core.measurement_scope import query_params
 from infra.database import get_db, write_transaction
 from infra.db_async import run_bulk, run_in_db
@@ -287,12 +288,20 @@ def refresh_step(db, now: datetime | None = None) -> bool:
     return all(write(db) for write in writes) and more
 
 
-def _plan_job() -> tuple[list[functools.partial], bool]:
+def _plan_with(plan) -> tuple[list[functools.partial], bool]:
     db = get_db()
     try:
-        return plan_step(db)
+        return plan(db)
     finally:
         db.close()
+
+
+def _plan_job() -> tuple[list[functools.partial], bool]:
+    return _plan_with(plan_step)
+
+
+def _plan_presence_job() -> tuple[list[functools.partial], bool]:
+    return _plan_with(presence_rollup.plan_step)
 
 
 def _write_job(write: functools.partial) -> bool:
@@ -308,13 +317,14 @@ _refreshing: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Task] 
 
 async def _refresh(read, write) -> None:
     try:
-        while True:
-            writes, more = await read(_plan_job)
-            for job in writes:
-                if not await write(_write_job, job):
-                    return  # the state moved after planning; the next Measurement request restarts
-            if not more:
-                return
+        for plan in (_plan_job, _plan_presence_job):  # the usage ledger, then the focus-attention spans
+            while True:
+                writes, more = await read(plan)
+                for job in writes:
+                    if not await write(_write_job, job):
+                        return  # the state moved after planning; the next Measurement request restarts
+                if not more:
+                    break
     except Exception:
         logger.exception("usage rollup refresh failed; Measurement reads stay raw past the rollup")
 
