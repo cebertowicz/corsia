@@ -745,8 +745,14 @@ interface Props {
 
 **Behavior:** Escape closes (when enabled), backdrop click closes (when
 enabled), inner click does NOT propagate to backdrop. Body has
-`overflow-y: auto`; modal max-height 86vh desktop / 92vh mobile. Fade
-backdrop 160ms, fly content (y: 8px) 200ms.
+`overflow-y: auto`; modal max-height 86vh on desktop, and on a phone only
+the room inside the safe-area padding, so the footer clears the home
+indicator. Fade backdrop 160ms, fly content (y: 8px) 200ms.
+
+**Header and footer have no dividers** (§0.2 rule 3); space separates them
+from the body. The footer right-aligns its actions: one solid `primary`
+`Button` for the commit, and every secondary (Cancel, Back, Close) a `ghost`
+`Button`, never an outlined or secondary-filled one.
 
 **Backdrop is light dim only** — `rgba(0, 0, 0, 0.28)` solid. The modal
 panel does the glass; the backdrop just de-emphasizes content. Liquid

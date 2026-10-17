@@ -498,7 +498,7 @@
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showMdModal = false}>Cancel</Button>
 			<span style="flex: 1"></span>
-			<Button variant="secondary" onclick={() => showMdModal = false}>Test</Button>
+			<Button variant="ghost" onclick={() => showMdModal = false}>Test</Button>
 			<Button variant="primary" onclick={() => showMdModal = false}>Save changes</Button>
 		{/snippet}
 	</Modal>

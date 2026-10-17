@@ -157,7 +157,6 @@
 	.head {
 		display: flex; align-items: center; gap: 12px;
 		padding: 18px 22px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.title {
 		font-size: var(--text-body); font-weight: 600; flex: 1;
@@ -169,9 +168,8 @@
 	.body { padding: 18px 22px; overflow-y: auto; flex: 1; }
 
 	.foot {
-		display: flex; align-items: center; gap: 8px;
+		display: flex; align-items: center; justify-content: flex-end; gap: 8px;
 		padding: 14px 22px;
-		border-top: 1px solid var(--border-subtle);
 	}
 
 	@media (max-width: 720px) {
@@ -180,7 +178,8 @@
 			padding-bottom: max(12px, env(safe-area-inset-bottom, 0px) + 4px);
 			padding-left: 12px; padding-right: 12px;
 		}
-		.modal { max-height: 92vh; max-height: 92dvh; }
+		/* Fill only the room inside the safe-area padding, so the footer clears the home indicator. */
+		.modal { max-height: 100%; }
 	}
 	@media (max-width: 480px) {
 		.bg {
