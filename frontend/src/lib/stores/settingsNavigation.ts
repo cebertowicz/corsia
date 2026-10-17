@@ -62,14 +62,7 @@ function change(patch: (current: SettingsNavigation) => Partial<SettingsNavigati
 /** The harness connection or cloud provider whose Providers card should open expanded and scroll into view. */
 export const providerCardRequest = writable<string | null>(null);
 
-/** Links already in saved messages name a section that has since moved. */
-const MOVED_SECTIONS: Record<string, { section: SettingsSection; anchor: string }> = {
-	'system#connected-apps': { section: 'connected-apps', anchor: 'connected-apps' },
-};
-
 export function requestSettingsSection(section: SettingsSection, anchor: string | null = null) {
-	const moved = MOVED_SECTIONS[`${section}#${anchor}`];
-	if (moved) ({ section, anchor } = moved);
 	change((s) => ({
 		section, anchor, fromProject: null,
 		project: section === 'projects' ? s.project : null,

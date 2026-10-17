@@ -156,5 +156,29 @@ describe('SettingsSkills', () => {
 			expect(rowButton('deploy')).toBeNull();
 			expect(host.textContent?.split(NOTE).length).toBe(2);
 		});
+
+		it('a failed lookup says so instead of claiming there is no thread, and Try again asks again', async () => {
+			const FAILED = "Couldn't find where to open these.";
+			const base = (globalThis.fetch as unknown as (input: RequestInfo | URL) => Promise<unknown>);
+			let conductorOk = false;
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+				const path = String(input);
+				if (path.startsWith('/api/corsia-agent')) return { ok: true, json: async () => ({ thread_id: 'corsia-thread' }) };
+				if (path.startsWith('/api/conductor')) {
+					return conductorOk ? { ok: true, json: async () => ({ thread_id: 'atlas-conductor' }) } : { ok: false, json: async () => ({}) };
+				}
+				return base(input);
+			}));
+			await mountLoaded();
+			await vi.waitFor(() => expect(host.textContent).toContain(FAILED));
+
+			expect(rowButton('deploy')).toBeNull();
+			expect(host.textContent).not.toContain(NOTE);
+
+			conductorOk = true;
+			Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === 'Try again')!.click();
+			await vi.waitFor(() => expect(rowButton('deploy')).toBeTruthy());
+			expect(host.textContent).not.toContain(FAILED);
+		});
 	});
 });

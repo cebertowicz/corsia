@@ -122,4 +122,24 @@ describe('SettingsContext', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Open a conversation to view this.'));
 		expect(row('AGENTS.md')!.querySelector('button')).toBeNull();
 	});
+
+	it('a failed lookup says so instead of claiming there is no thread, and Try again asks again', async () => {
+		let lookupOk = false;
+		const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+			if (!String(input).startsWith('/api/corsia-agent')) return { ok: true, json: async () => ({ projects: [] }) };
+			return lookupOk ? { ok: true, json: async () => ({ thread_id: 'corsia-thread' }) } : { ok: false, json: async () => ({}) };
+		});
+		vi.stubGlobal('fetch', fetchStub);
+		component = mount(SettingsContext, { target: host, props: {} });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't find where to open these."));
+		expect(host.textContent).not.toContain('Open a conversation to view this.');
+		expect(row('AGENTS.md')!.querySelector('button')).toBeNull();
+
+		lookupOk = true;
+		Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === 'Try again')!.click();
+		await vi.waitFor(() => expect(row('AGENTS.md')!.querySelector('button')).toBeTruthy());
+		expect(host.textContent).not.toContain("Couldn't find where to open these.");
+	});
 });

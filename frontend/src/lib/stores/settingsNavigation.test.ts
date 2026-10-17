@@ -69,16 +69,4 @@ describe('settings navigation transitions', () => {
 			expect(fallback).toHaveBeenCalledTimes(1);
 		});
 	});
-
-	describe('links already in saved messages', () => {
-		it('/settings/system#connected-apps opens Connected apps', () => {
-			requestSettingsSection('system', 'connected-apps');
-			expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', anchor: 'connected-apps' });
-		});
-
-		it('leaves other System anchors on System', () => {
-			requestSettingsSection('system', 'update');
-			expect(get(settingsNavigation)).toMatchObject({ section: 'system', anchor: 'update' });
-		});
-	});
 });

@@ -98,6 +98,9 @@
 		<p class="empty">No context files for all projects yet.</p>
 	{/each}
 	{#if files.some((file) => file.exists) && home.unavailable}<p class="empty">Open a conversation to view this.</p>{/if}
+	{#if files.some((file) => file.exists) && home.failed}
+		<p class="error" role="alert">Couldn't find where to open these. <Button size="sm" variant="ghost" onclick={home.retry}>Try again</Button></p>
+	{/if}
 	<div class="actions">
 		<Button size="sm" variant="ghost" disabled={busy} onclick={addExisting}>Add existing</Button>
 		<SettingsContextCreate label="New context file for all projects" {busy} onCreate={create} />
