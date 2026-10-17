@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 
 from core.device_pairing import DevicePairing
 from infra.config import STATE_ROOT, _read_prod_state_root
-from infra.devices_listener import DevicesListener, lan_addresses, remote_connect_name
+from infra.devices_listener import DevicesListener, lan_addresses
+from infra.devices_names import computer_name, local_hostname, remote_connect_name
 from infra.dns_sd import DNSServiceAnnouncement
 from infra.state.ws import schedule_devices_updated
 
@@ -41,12 +42,12 @@ class DevicesRuntime:
     async def enable(self, app) -> bool:
         if os.environ.get("CORSIA_DEVICES_DISABLE") == "1":
             await self.disable()
-            self.listener = DevicesListener(app, error=_DEVICES_DISABLED_ERROR)
+            self.listener = DevicesListener(app, error=_DEVICES_DISABLED_ERROR, reason="disabled")
             return False
         if self.listener is not None and self.listener.task is not None:
             return True
         self.pairing.enable()
-        self.listener = DevicesListener(app)
+        self.listener = DevicesListener(app, on_announcement_change=schedule_devices_updated)
         if not await self.listener.start():
             self.pairing.disable()
             return False
@@ -80,7 +81,10 @@ class DevicesRuntime:
             "enabled": self.enabled,
             "listening": listening,
             "announced_name": announcement.announced_name if announcement else None,
-            "local_hostname": self.remote_connect_name(),
+            # The host a joiner can type (studio.local), never the display name: that has spaces and does not resolve.
+            "local_hostname": local_hostname(),
+            # What the page shows while nothing is announced: the person's own name for this computer.
+            "computer_name": computer_name(),
             "lan_addresses": lan_addresses(include_link_local=listener_active),
             "code": self.pairing.status(include_code=include_code),
         }

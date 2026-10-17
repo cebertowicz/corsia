@@ -12,7 +12,7 @@ export type PairTarget =
 
 export type PairReason =
 	| 'wrong_code' | 'expired' | 'too_many_tries' | 'paused' | 'busy'
-	| 'network' | 'server' | 'incompatible' | 'too_old';
+	| 'network' | 'server' | 'incompatible' | 'too_old' | 'local';
 
 export type PairResult =
 	| { ok: true; name: string }
@@ -41,7 +41,7 @@ export async function remoteDiscovered(): Promise<DiscoveredResult> {
 	return { names: Array.isArray(result?.names) ? result.names : [], denied: result?.denied === true };
 }
 
-const REASONS: readonly PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old'];
+const REASONS: readonly PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local'];
 
 export async function remotePair(target: PairTarget, code: string): Promise<PairResult> {
 	try {
@@ -49,7 +49,9 @@ export async function remotePair(target: PairTarget, code: string): Promise<Pair
 		if (result?.ok === true) return { ok: true, name: result.name };
 		if (result && result.ok === false && REASONS.includes(result.reason)) return result;
 	} catch {
-		// The shell refused or is gone: say the server could not be reached, never a wrong code.
+		// The shell refused, is gone, or failed after the code was used up: this computer could not finish, which
+		// is neither a network failure nor a wrong code.
+		return { ok: false, reason: 'local' };
 	}
 	return { ok: false, reason: 'network' };
 }
@@ -101,6 +103,7 @@ export function unreachableLine(reason: PairReason, target: string, versions: { 
 		case 'server': return `${target} answered, but CORSIA isn’t running there.`;
 		case 'incompatible': return `This computer has CORSIA ${versions.app ?? 'a different version'} and ${target} has ${versions.host ?? 'another'}. Update the older one, then try again.`;
 		case 'too_old': return `${target} has an older CORSIA. Update it, then try again.`;
+		case 'local': return `CORSIA couldn’t finish connecting to ${target}. ${SETTINGS_PATH} on ${target} to get a new code and try again.`;
 		default: return null;
 	}
 }

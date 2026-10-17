@@ -15,7 +15,7 @@
 	import { widenForImageViewer } from '$lib/imageViewerPane';
 	import { restoreDocumentPlace, type RestoreDocumentPlaceOptions, type TextDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
-	import { docSaveDrafts, relocateDraftTarget } from '$lib/stores/docSaveQueue';
+	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
@@ -158,15 +158,6 @@
 			if (tab.kind !== 'document') continue;
 			const revision = drafts[tab.instanceId]?.savedRevision;
 			if (revision && revision !== tab.loadedRevision) markTabSaved(tid, tab.instanceId, revision);
-		}
-	});
-
-	// A relocated document keeps editing where it now lives.
-	$effect(() => {
-		for (const tab of workspace.tabs) {
-			if (tab.kind !== 'document') continue;
-			const draft = $docSaveDrafts[tab.instanceId];
-			if (draft && draft.target.path !== tab.path) relocateDraftTarget(draft.target, tab.path);
 		}
 	});
 

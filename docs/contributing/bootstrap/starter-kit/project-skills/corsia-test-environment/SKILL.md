@@ -1,9 +1,6 @@
 ---
 name: corsia-test-environment
 description: Use before any claim, inspection, status check, restart, deploy, or browser visit involving a running CORSIA instance (your serving install or a worktree test instance), and before installing dependencies or running any CORSIA backend, frontend, integration, QA, browser, E2E, reviewer, or full-suite test—resolve which runtime you are touching, select the supported Python/Node environment, isolate workspace/state/cache/ports, use the correct entry point, and distinguish source failures from environment or host-harness failures.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # CORSIA test environment

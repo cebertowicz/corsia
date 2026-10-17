@@ -139,7 +139,7 @@ rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$B
 (
   cd "$ROOT/frontend"
   npm ci
-  CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
+  CORSIA_APP_VERSION="$app_version" CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
 )
 install -m 0755 "$ROOT/desktop/scripts/corsia" "$BUNDLE_ROOT/bin/corsia"
 install -m 0755 "$ROOT/desktop/scripts/corsia-service" "$BUNDLE_ROOT/bin/corsia-service"

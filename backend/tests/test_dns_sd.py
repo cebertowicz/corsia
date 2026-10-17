@@ -180,3 +180,43 @@ def test_dns_sd_stop_clears_the_last_announced_name(monkeypatch):
     announcement.stop(library)
 
     assert announcement.announced_name is None
+
+
+def test_dns_sd_notifies_once_per_change_and_not_for_an_identical_repeat(monkeypatch):
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    _install_dns_seams(monkeypatch, library)
+    changes: list[tuple[str | None, str | None]] = []
+    announcement = dns_sd.DNSServiceAnnouncement(47901)
+    announcement.on_change = lambda: changes.append((announcement.announced_name, announcement.error))
+
+    assert announcement.start() is True
+    assert changes == []
+
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+    assert changes == [("Studio", None)]
+
+    library.callback(None, 0, 0, b"Studio (2)", None, None, None)
+    assert changes == [("Studio", None), ("Studio (2)", None)]
+
+    library.callback(None, 0, -65548, None, None, None, None)
+    library.callback(None, 0, -65548, None, None, None, None)
+    assert changes[2:] == [(None, "DNS-SD registration failed (-65548)")]
+
+
+def test_dns_sd_process_failure_notifies_when_it_clears_the_name(monkeypatch):
+    library = _DNSLibrary(
+        register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR],
+        process_results=[dns_sd._KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING],
+    )
+    _install_dns_seams(monkeypatch, library)
+    announcement = dns_sd.DNSServiceAnnouncement(47901)
+    assert announcement.start() is True
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+    library.register_results.append(dns_sd._KDNS_SERVICE_ERR_NO_ERROR)
+    changes: list[str | None] = []
+    announcement.on_change = lambda: changes.append(announcement.announced_name)
+
+    announcement._process(library)
+
+    assert changes == [None]

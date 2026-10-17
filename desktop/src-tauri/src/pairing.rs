@@ -1,15 +1,19 @@
-use std::{error::Error, time::Duration};
+use std::{
+    error::Error,
+    net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6},
+    time::Duration,
+};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
 use hkdf::Hkdf;
-use reqwest::{Client, StatusCode};
+use reqwest::{header::{HeaderMap, HeaderValue, HOST}, Client, ClientBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 use crate::{
-    classify::{classify_connect_error, classify_tls_against_plain_http, Unreachable},
+    classify::{classify_connect_error, classify_tls_against_plain_http, ConnectFailure},
     trust::{self, Trust},
 };
 
@@ -31,15 +35,34 @@ pub enum PairError {
     TooManyTries,
     Paused,
     Busy,
-    Unreachable(Unreachable),
+    Unreachable(ConnectFailure),
     TooOld,
+    /// The host presented a key other than the pinned one: not a network failure.
+    KeyChanged,
     Protocol(String),
+}
+
+impl PairError {
+    /// The connection failure behind this error, or `None` for a refusal of the code itself (wrong, expired, paused,
+    /// busy), which is about the pairing and not about reaching the host.
+    pub fn connect_failure(&self) -> Option<ConnectFailure> {
+        match self {
+            Self::Unreachable(failure) => Some(failure.clone()),
+            Self::TooOld => Some(ConnectFailure::TooOld),
+            Self::KeyChanged => Some(ConnectFailure::KeyChanged),
+            Self::Protocol(_) => Some(ConnectFailure::Server),
+            Self::WrongCode | Self::Expired | Self::TooManyTries | Self::Paused | Self::Busy => None,
+        }
+    }
 }
 
 impl From<reqwest::Error> for PairError {
     fn from(error: reqwest::Error) -> Self {
+        if trust::is_pin_mismatch(&error) {
+            return Self::KeyChanged;
+        }
         if error.is_timeout() {
-            return Self::Unreachable(Unreachable::Network);
+            return Self::Unreachable(ConnectFailure::Network);
         }
         if error.is_connect() {
             let message = error.to_string().to_ascii_lowercase();
@@ -65,7 +88,7 @@ impl From<reqwest::Error> for PairError {
             if message.contains("plain http") || message.contains("wrong version") {
                 return Self::Unreachable(classify_tls_against_plain_http());
             }
-            return Self::Unreachable(Unreachable::Network);
+            return Self::Unreachable(ConnectFailure::Network);
         }
         Self::Protocol(error.to_string())
     }
@@ -113,50 +136,205 @@ struct Exchange {
     spake: Spake2<Ed25519Group>,
 }
 
+/// A remote host as typed by a person or resolved by discovery: a DNS name, an
+/// IP literal, or an IPv6 literal carrying a zone (`fe80::1%en0`), with or
+/// without URL brackets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RemoteHost {
+    Name(String),
+    Ip(IpAddr),
+    /// A link-local IPv6 address, which is only reachable through its interface.
+    Scoped { address: Ipv6Addr, scope_id: u32 },
+}
+
+impl RemoteHost {
+    pub(crate) fn parse(host: &str) -> Result<Self, String> {
+        let host = host.trim();
+        let (inner, bracketed) = match host.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            Some(inner) => (inner, true),
+            None => (host, false),
+        };
+        if let Some((address, zone)) = inner.split_once('%') {
+            let address: Ipv6Addr = address.parse().map_err(|_| "remote host is not a valid IPv6 address".to_owned())?;
+            // A URL writes the zone separator as %25.
+            let zone = match zone.strip_prefix("25") {
+                Some(rest) if bracketed && !rest.is_empty() => rest,
+                _ => zone,
+            };
+            let scope_id = parse_scope(zone)?;
+            return Ok(if scope_id == 0 { Self::Ip(IpAddr::V6(address)) } else { Self::Scoped { address, scope_id } });
+        }
+        if let Ok(address) = inner.parse::<IpAddr>() {
+            return Ok(Self::Ip(address));
+        }
+        if inner.is_empty() || bracketed || inner.contains(':') {
+            return Err("remote host must be a hostname or IP address without a port".into());
+        }
+        Ok(Self::Name(inner.to_owned()))
+    }
+
+    /// `host:port` as it belongs in a URL or Host header: IPv6 is bracketed and
+    /// never carries its zone on the wire.
+    pub(crate) fn authority(&self, port: u16) -> String {
+        match self {
+            Self::Name(name) => format!("{name}:{port}"),
+            Self::Ip(IpAddr::V4(address)) => format!("{address}:{port}"),
+            Self::Ip(IpAddr::V6(address)) | Self::Scoped { address, .. } => format!("[{address}]:{port}"),
+        }
+    }
+
+    /// The socket address to dial, or `None` when a name must be looked up.
+    pub(crate) fn socket_addr(&self, port: u16) -> Option<SocketAddr> {
+        match self {
+            Self::Name(_) => None,
+            Self::Ip(address) => Some(SocketAddr::new(*address, port)),
+            Self::Scoped { address, scope_id } => Some(SocketAddr::V6(SocketAddrV6::new(*address, port, 0, *scope_id))),
+        }
+    }
+
+    /// The TLS server name: a name, or the address without its zone.
+    pub(crate) fn server_name(&self) -> Result<rustls::pki_types::ServerName<'static>, String> {
+        match self {
+            Self::Name(name) => rustls::pki_types::ServerName::try_from(name.clone()).map_err(|error| error.to_string()),
+            Self::Ip(address) => Ok(rustls::pki_types::ServerName::IpAddress((*address).into())),
+            Self::Scoped { address, .. } => Ok(rustls::pki_types::ServerName::IpAddress(IpAddr::V6(*address).into())),
+        }
+    }
+}
+
+fn parse_scope(zone: &str) -> Result<u32, String> {
+    if let Ok(index) = zone.parse::<u32>() {
+        return Ok(index);
+    }
+    #[cfg(unix)]
+    if let Ok(name) = std::ffi::CString::new(zone) {
+        let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        if index != 0 {
+            return Ok(index);
+        }
+    }
+    Err(format!("unknown network interface {zone:?}"))
+}
+
+/// Where a pairing or version request goes. reqwest's URL type cannot carry an
+/// IPv6 zone, so a link-local address is addressed by a placeholder name that
+/// the client resolves to the scoped socket address.
+#[derive(Clone, Debug)]
+pub(crate) struct Endpoint {
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    remote: RemoteHost,
+    #[cfg(test)]
+    redirect: Option<SocketAddr>,
+}
+
+const LINK_LOCAL_PLACEHOLDER: &str = "link-local.invalid";
+
+impl Endpoint {
+    pub(crate) fn new(host: &str, port: u16) -> Result<Self, PairError> {
+        let remote = RemoteHost::parse(host).map_err(PairError::Protocol)?;
+        Ok(Self {
+            host: host.to_owned(),
+            port,
+            remote,
+            #[cfg(test)]
+            redirect: None,
+        })
+    }
+
+    pub(crate) fn url(&self, path: &str) -> String {
+        match &self.remote {
+            RemoteHost::Scoped { .. } => format!("https://{LINK_LOCAL_PLACEHOLDER}:{}{path}", self.port),
+            remote => format!("https://{}{path}", remote.authority(self.port)),
+        }
+    }
+
+    /// Apply the dial and Host-header overrides a link-local address needs.
+    pub(crate) fn configure(&self, builder: ClientBuilder) -> Result<ClientBuilder, PairError> {
+        let RemoteHost::Scoped { .. } = &self.remote else {
+            return Ok(builder);
+        };
+        let dial = self.dial_address().expect("a scoped host has an address");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HOST,
+            HeaderValue::from_str(&self.remote.authority(self.port)).map_err(|error| PairError::Protocol(error.to_string()))?,
+        );
+        Ok(builder.resolve(LINK_LOCAL_PLACEHOLDER, dial).default_headers(headers))
+    }
+
+    #[cfg(not(test))]
+    fn dial_address(&self) -> Option<SocketAddr> {
+        self.remote.socket_addr(self.port)
+    }
+
+    #[cfg(test)]
+    fn dial_address(&self) -> Option<SocketAddr> {
+        self.redirect.or_else(|| self.remote.socket_addr(self.port))
+    }
+
+    /// Test seam: dial `address` instead of the link-local address, which a
+    /// test host cannot listen on. reqwest keeps the URL's port, not this one's.
+    #[cfg(test)]
+    pub(crate) fn redirected_to(mut self, address: SocketAddr) -> Self {
+        self.redirect = Some(address);
+        self
+    }
+}
+
 pub async fn pair(host: &str, port: u16, code: &str) -> Result<Paired, PairError> {
     if code.len() != 4 {
         return Err(PairError::WrongCode);
     }
-    let canonical_host = canonical_verified_host(host)?;
+    pair_endpoint(Endpoint::new(host, port)?, code).await
+}
+
+async fn pair_endpoint(endpoint: Endpoint, code: &str) -> Result<Paired, PairError> {
+    // An IPv6 literal has no certificate the platform verifier can trust, so
+    // it pairs through a captured pin directly.
+    let Some(canonical_host) = canonical_verified_host(&endpoint.host)? else {
+        return pair_pinned(&endpoint, code).await;
+    };
 
     // Prefer the platform verifier. A certificate that is not system-trusted
     // gets one capture attempt: PAKE then binds the captured SPKI before the
     // app records it as the pin. A network failure still fails when capture
     // attempts the same endpoint.
-    let system_client = client_for(Trust::System)?;
-    match start(&system_client, host, port, "verified", Some(&canonical_host), code).await {
+    let system_client = client_for(Trust::System, &endpoint)?;
+    match start(&system_client, &endpoint, "verified", Some(&canonical_host), code).await {
         Ok(exchange) => {
             finish_exchange(
                 system_client,
-                host,
-                port,
+                &endpoint,
                 Trust::System,
                 transcript_prefix("verified", canonical_host.as_bytes()),
                 exchange,
             )
             .await
         }
-        Err(PairError::Unreachable(_)) => pair_pinned(host, port, code).await,
+        Err(PairError::Unreachable(_)) => pair_pinned(&endpoint, code).await,
         Err(error) => Err(error),
     }
 }
 
-async fn pair_pinned(host: &str, port: u16, code: &str) -> Result<Paired, PairError> {
+async fn pair_pinned(endpoint: &Endpoint, code: &str) -> Result<Paired, PairError> {
     let capture = trust::CaptureVerifier::new().map_err(|error| PairError::Protocol(error.to_string()))?;
-    let client = Client::builder()
-        .use_preconfigured_tls(trust::capture_client_config(capture.clone()))
-        .https_only(true)
-        .timeout(Duration::from_secs(15))
+    let client = endpoint
+        .configure(
+            Client::builder()
+                .use_preconfigured_tls(trust::capture_client_config(capture.clone()))
+                .https_only(true)
+                .timeout(Duration::from_secs(15)),
+        )?
         .build()
         .map_err(|error| PairError::Protocol(error.to_string()))?;
-    let exchange = start(&client, host, port, "pinned", None, code).await?;
+    let exchange = start(&client, endpoint, "pinned", None, code).await?;
     let pin = capture
         .observed_spki()
         .map_err(|error| PairError::Protocol(error.to_string()))?;
     finish_exchange(
-        client_for(Trust::Pinned { spki_sha256: pin })?,
-        host,
-        port,
+        client_for(Trust::Pinned { spki_sha256: pin }, endpoint)?,
+        endpoint,
         Trust::Pinned { spki_sha256: pin },
         transcript_prefix("pinned", &pin),
         exchange,
@@ -164,20 +342,22 @@ async fn pair_pinned(host: &str, port: u16, code: &str) -> Result<Paired, PairEr
     .await
 }
 
-fn client_for(trust: Trust) -> Result<Client, PairError> {
+fn client_for(trust: Trust, endpoint: &Endpoint) -> Result<Client, PairError> {
     let tls = trust::client_config(&trust).map_err(|error| PairError::Protocol(error.to_string()))?;
-    Client::builder()
-        .use_preconfigured_tls(tls)
-        .https_only(true)
-        .timeout(Duration::from_secs(15))
+    endpoint
+        .configure(
+            Client::builder()
+                .use_preconfigured_tls(tls)
+                .https_only(true)
+                .timeout(Duration::from_secs(15)),
+        )?
         .build()
         .map_err(|error| PairError::Protocol(error.to_string()))
 }
 
 async fn start(
     client: &Client,
-    host: &str,
-    port: u16,
+    endpoint: &Endpoint,
     mode: &str,
     verified_host: Option<&str>,
     code: &str,
@@ -189,7 +369,7 @@ async fn start(
         msg_c: BASE64.encode(&msg_c),
     };
     let response = client
-        .post(endpoint(host, port, "/api/devices/pair/start"))
+        .post(endpoint.url("/api/devices/pair/start"))
         .json(&request)
         .send()
         .await?;
@@ -208,8 +388,7 @@ async fn start(
 
 async fn finish_exchange(
     client: Client,
-    host: &str,
-    port: u16,
+    endpoint: &Endpoint,
     trust: Trust,
     prefix: Vec<u8>,
     exchange: Exchange,
@@ -230,7 +409,7 @@ async fn finish_exchange(
     transcript.extend_from_slice(&msg_s);
     let confirm_c = confirmation(&client_key, &transcript);
     let response = client
-        .post(endpoint(host, port, "/api/devices/pair/finish"))
+        .post(endpoint.url("/api/devices/pair/finish"))
         .json(&FinishRequest {
             exchange_id: &exchange.start.exchange_id,
             confirm_c: BASE64.encode(confirm_c),
@@ -254,8 +433,8 @@ async fn finish_exchange(
     Ok(Paired {
         name: finish.name,
         trust,
-        host: host.to_owned(),
-        port,
+        host: endpoint.host.clone(),
+        port: endpoint.port,
     })
 }
 
@@ -272,12 +451,22 @@ fn pairing_password(code: &str) -> [u8; 32] {
     Sha256::digest([PAIRING_IDENTITY, b"\0", code.as_bytes()].concat()).into()
 }
 
-fn canonical_verified_host(host: &str) -> Result<String, PairError> {
-    let canonical = host.trim_end_matches('.').to_ascii_lowercase();
-    if canonical.is_empty() || canonical.contains(':') {
-        return Err(PairError::Protocol("verified pairing requires a hostname without a port".into()));
+/// The host bound into a verified pairing transcript, or `None` when the host cannot have a system-trusted
+/// certificate: an address, a `.local` or `.localhost` name, or a name without a dot. Those pair through the
+/// host's pin; letting them verify would let whoever answers for the address (DNS-SD is unauthenticated)
+/// pair as a relay with a certificate it owns.
+fn canonical_verified_host(host: &str) -> Result<Option<String>, PairError> {
+    match RemoteHost::parse(host.trim_end_matches('.')).map_err(PairError::Protocol)? {
+        RemoteHost::Name(name) => {
+            let name = name.to_ascii_lowercase();
+            Ok(can_hold_a_public_certificate(&name).then_some(name))
+        }
+        RemoteHost::Ip(_) | RemoteHost::Scoped { .. } => Ok(None),
     }
-    Ok(canonical)
+}
+
+fn can_hold_a_public_certificate(name: &str) -> bool {
+    name.contains('.') && !name.ends_with(".local") && !name.ends_with(".localhost")
 }
 
 fn transcript_prefix(mode: &str, binding: &[u8]) -> Vec<u8> {
@@ -288,10 +477,6 @@ fn transcript_prefix(mode: &str, binding: &[u8]) -> Vec<u8> {
     prefix.extend_from_slice(binding);
     prefix.push(0);
     prefix
-}
-
-fn endpoint(host: &str, port: u16, path: &str) -> String {
-    format!("https://{host}:{port}{path}")
 }
 
 async fn pair_status(response: reqwest::Response) -> PairError {
@@ -371,18 +556,31 @@ mod tests {
         config: Arc<rustls::ServerConfig>,
         pin: [u8; 32],
         requests: Arc<Mutex<Vec<String>>>,
+        hosts: Arc<Mutex<Vec<String>>>,
+        connections: usize,
     ) -> (u16, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let exchange = Arc::new(Mutex::new(None));
         let task = tokio::spawn(async move {
+            let mut served = Vec::new();
+            for _ in 0..connections {
             let (stream, _) = listener.accept().await.unwrap();
+            let config = Arc::clone(&config);
+            let exchange = Arc::clone(&exchange);
+            let requests = Arc::clone(&requests);
+            let hosts = Arc::clone(&hosts);
+            served.push(tokio::spawn(async move {
             let tls = tokio_rustls::TlsAcceptor::from(config).accept(stream).await.unwrap();
             let service = service_fn(move |request: Request<Incoming>| {
                 let exchange = Arc::clone(&exchange);
                 let requests = Arc::clone(&requests);
+                let hosts = Arc::clone(&hosts);
                 async move {
                     let path = request.uri().path().to_owned();
+                    if let Some(host) = request.headers().get("host") {
+                        hosts.lock().unwrap().push(host.to_str().unwrap().to_owned());
+                    }
                     let body = request.into_body().collect().await.unwrap().to_bytes();
                     let body_text = String::from_utf8(body.to_vec()).unwrap();
                     requests.lock().unwrap().push(body_text.clone());
@@ -420,6 +618,11 @@ mod tests {
                 .serve_connection(TokioIo::new(tls), service)
                 .await
                 .unwrap();
+            }));
+            }
+            for connection in served {
+                connection.await.unwrap();
+            }
         });
         (port, task)
     }
@@ -438,22 +641,95 @@ mod tests {
 
     #[test]
     fn verified_host_is_canonicalized_like_the_host() {
-        assert_eq!(canonical_verified_host("Studio.LOCAL.").unwrap(), "studio.local");
+        assert_eq!(canonical_verified_host("Studio.Example.COM.").unwrap(), Some("studio.example.com".to_owned()));
+    }
+
+    #[test]
+    fn addresses_and_local_names_are_never_verified_but_are_accepted() {
+        for host in ["::1", "[::1]", "fe80::1%4", "[fe80::1%254]", "2001:db8::7", "192.168.1.20", "203.0.113.9", "Studio.LOCAL.", "studio", "printer.localhost"] {
+            assert_eq!(canonical_verified_host(host).unwrap(), None, "{host}");
+        }
+        assert_eq!(canonical_verified_host("Studio.Tail1234.TS.net.").unwrap(), Some("studio.tail1234.ts.net".to_owned()));
+    }
+
+    #[test]
+    fn a_host_with_a_port_is_still_refused() {
+        for host in ["studio.local:47901", "", "[studio.local]"] {
+            assert!(matches!(canonical_verified_host(host), Err(PairError::Protocol(_))), "{host:?}");
+        }
+    }
+
+    #[test]
+    fn ipv6_authorities_are_bracketed_and_never_carry_the_zone() {
+        let scoped = RemoteHost::parse("fe80::1%4").unwrap();
+        assert_eq!(scoped, RemoteHost::Scoped { address: "fe80::1".parse().unwrap(), scope_id: 4 });
+        assert_eq!(scoped.authority(47901), "[fe80::1]:47901");
+        assert_eq!(
+            scoped.socket_addr(47901).unwrap().to_string(),
+            "[fe80::1%4]:47901"
+        );
+        assert_eq!(RemoteHost::parse("[fe80::1%254]").unwrap(), scoped, "URL form writes the zone as %25");
+        assert_eq!(RemoteHost::parse("::1").unwrap().authority(1), "[::1]:1");
+        assert_eq!(RemoteHost::parse("[::1]").unwrap().authority(1), "[::1]:1");
+        assert_eq!(RemoteHost::parse("studio.local").unwrap().authority(1), "studio.local:1");
+        assert_eq!(RemoteHost::parse("10.0.0.2").unwrap().authority(1), "10.0.0.2:1");
+        assert!(RemoteHost::parse("fe80::1%no-such-interface0").is_err());
+    }
+
+    #[test]
+    fn link_local_endpoints_use_a_placeholder_url_and_a_bracketed_host_header() {
+        let endpoint = Endpoint::new("fe80::1%4", 47901).unwrap();
+        assert_eq!(endpoint.url("/p"), "https://link-local.invalid:47901/p");
+        assert_eq!(Endpoint::new("::1", 47901).unwrap().url("/p"), "https://[::1]:47901/p");
+        assert_eq!(Endpoint::new("studio.local", 47901).unwrap().url("/p"), "https://studio.local:47901/p");
+    }
+
+    #[tokio::test]
+    async fn an_aaaa_only_link_local_answer_pairs_through_a_bracketed_host() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let hosts = Arc::new(Mutex::new(Vec::new()));
+        // The pinned capture takes one connection for pair/start and a second,
+        // pin-verified one for pair/finish.
+        let (port, server) = start_pairing_server(
+            identity.config,
+            identity.pin,
+            Arc::clone(&requests),
+            Arc::clone(&hosts),
+            2,
+        )
+        .await;
+        // What discovery returns for an AAAA-only host on interface index 4.
+        let host = "fe80::1%4";
+        let endpoint = Endpoint::new(host, port)
+            .unwrap()
+            .redirected_to(SocketAddr::from(([127, 0, 0, 1], port)));
+
+        let paired = pair_endpoint(endpoint, "K7QX").await.unwrap();
+
+        assert_eq!(paired.name, "Studio");
+        assert_eq!((paired.host.as_str(), paired.port), (host, port));
+        assert!(matches!(paired.trust, Trust::Pinned { spki_sha256 } if spki_sha256 == identity.pin));
+        server.await.unwrap();
+        assert_eq!(*hosts.lock().unwrap(), vec![format!("[fe80::1]:{port}"); 2]);
+        let first: serde_json::Value = serde_json::from_str(&requests.lock().unwrap()[0]).unwrap();
+        assert_eq!(first["mode"], "pinned");
+        assert!(first.get("host").is_none(), "an IPv6 literal is never bound as a verified host");
     }
 
     #[test]
     fn connect_failures_keep_the_r4_cause() {
         assert_eq!(
             PairError::Unreachable(classify_connect_error(&std::io::Error::from(std::io::ErrorKind::TimedOut))),
-            PairError::Unreachable(Unreachable::Network)
+            PairError::Unreachable(ConnectFailure::Network)
         );
         assert_eq!(
             PairError::Unreachable(classify_connect_error(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused))),
-            PairError::Unreachable(Unreachable::Server)
+            PairError::Unreachable(ConnectFailure::Server)
         );
         assert_eq!(
             PairError::Unreachable(classify_tls_against_plain_http()),
-            PairError::Unreachable(Unreachable::Server)
+            PairError::Unreachable(ConnectFailure::Server)
         );
     }
 
@@ -522,13 +798,20 @@ mod tests {
     async fn pairing_wire_bodies_never_carry_the_code_or_its_hash() {
         let identity = crate::test_tls::generated_self_signed_identity();
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let (port, server) = start_pairing_server(identity.config, identity.pin, Arc::clone(&requests)).await;
-        let client = client_for(Trust::Pinned { spki_sha256: identity.pin }).unwrap();
-        let exchange = start(&client, "127.0.0.1", port, "pinned", None, "K7QX").await.unwrap();
+        let (port, server) = start_pairing_server(
+            identity.config,
+            identity.pin,
+            Arc::clone(&requests),
+            Arc::new(Mutex::new(Vec::new())),
+            1,
+        )
+        .await;
+        let endpoint = Endpoint::new("127.0.0.1", port).unwrap();
+        let client = client_for(Trust::Pinned { spki_sha256: identity.pin }, &endpoint).unwrap();
+        let exchange = start(&client, &endpoint, "pinned", None, "K7QX").await.unwrap();
         let paired = finish_exchange(
             client,
-            "127.0.0.1",
-            port,
+            &endpoint,
             Trust::Pinned { spki_sha256: identity.pin },
             transcript_prefix("pinned", &identity.pin),
             exchange,
@@ -564,11 +847,11 @@ mod tests {
         let code = std::env::var("CORSIA_E2E_CODE").unwrap();
         assert_eq!(
             pair("127.0.0.1", main_port, "0000").await,
-            Err(PairError::Unreachable(Unreachable::Server))
+            Err(PairError::Unreachable(ConnectFailure::Server))
         );
         let paired = pair("127.0.0.1", port, &code).await.unwrap();
         assert_eq!(
-            crate::version_check::check("127.0.0.1", port, &paired.trust).await.unwrap(),
+            crate::version_check::check("127.0.0.1", port, &paired.trust, "0.4.1-dev.230").await.unwrap(),
             crate::version_check::Compat::Ok
         );
         let proxy = crate::proxy::start(
@@ -614,7 +897,7 @@ mod tests {
         let port = std::env::var("CORSIA_E2E_MAIN_PORT").unwrap().parse().unwrap();
         assert_eq!(
             pair("127.0.0.1", port, "0000").await,
-            Err(PairError::Unreachable(Unreachable::Server))
+            Err(PairError::Unreachable(ConnectFailure::Server))
         );
     }
 
@@ -624,7 +907,7 @@ mod tests {
         let port = std::env::var("CORSIA_E2E_PORT").unwrap().parse().unwrap();
         assert_eq!(
             pair("127.0.0.1", port, "0000").await,
-            Err(PairError::Unreachable(Unreachable::Server))
+            Err(PairError::Unreachable(ConnectFailure::Server))
         );
     }
 }

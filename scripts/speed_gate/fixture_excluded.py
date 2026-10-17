@@ -46,8 +46,8 @@ EXCLUDED: dict[str, str] = {
         "email_screens", "key_store_entries", "key_write_attempts", "lesson_placement_checks",
         "limit_observations", "managed_process_retirements", "plan_ask_deferrals",
         "plan_markdown_import_issues", "plan_markdown_imports",
-        "plan_status_dirty", "provider_availability", "vendor_account_billing_facts",
-        "vendor_account_billing_revisions")},
+        "plan_status_dirty", "provider_availability", "reviewer_gate_approval",
+        "vendor_account_billing_facts", "vendor_account_billing_revisions")},
 }
 
 #: table -> (rows the fixture ends up with, why that is below its census target). The build compares every

@@ -6,11 +6,13 @@ import hashlib
 import hmac
 import math
 import secrets
+import threading
 import time
 import unicodedata
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import wraps
 from typing import Literal
 
 
@@ -42,14 +44,28 @@ class _Exchange:
     transcript_prefix: bytes
 
 
+def _locked(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class DevicePairing:
     """Own the code, PAKE exchanges and rate limits for one backend process.
 
     No pairing secret is persisted. Replacing, expiring, consuming, or
     disabling a code invalidates every exchange created from it.
+
+    The event loop and a worker thread (``start_spake`` runs off the loop)
+    both reach this state, so every public method takes the one reentrant
+    lock that owns it.
     """
 
     def __init__(self, *, clock=time.monotonic, on_update: Callable[[], None] | None = None):
+        self._lock = threading.RLock()
         self._clock = clock
         self._on_update = on_update or (lambda: None)
         self._enabled = False
@@ -67,24 +83,28 @@ class DevicePairing:
     def enabled(self) -> bool:
         return self._enabled
 
+    @_locked
     def enable(self) -> None:
         self._enabled = True
 
+    @_locked
     def disable(self) -> None:
         self._enabled = False
         self._end_code()
         self._on_update()
 
+    @_locked
     def status(self, *, include_code: bool = False) -> dict:
         self._expire_if_needed()
         state = "paused" if self._paused else "active" if self._code else "none"
-        result = {"state": state, "expires_at": self._expires_at if state == "active" else None}
+        result = {"state": state}
         if self._expires_at is not None:
             result["expires_in_seconds"] = max(0, math.ceil(self._expires_at - self._clock()))
         if include_code and self._code is not None:
             result["value"] = self._code
         return result
 
+    @_locked
     def issue_code(self) -> str:
         if not self._enabled:
             raise PairingError("expired")
@@ -107,10 +127,18 @@ class DevicePairing:
         self._on_update()
         return self._code
 
+    @_locked
+    def reject_malformed(self) -> PairingError:
+        """Count a malformed pairing request as a failed try and return its error."""
+        self._record_failure()
+        return PairingError(self._rejection_reason())
+
+    @_locked
     def require_active(self) -> None:
         """Reject work while pairing is disabled, expired, or paused."""
         self._require_active()
 
+    @_locked
     def start(
         self,
         *,
@@ -144,6 +172,7 @@ class DevicePairing:
         self._issued_server_messages.add(msg_s)
         return exchange_id, msg_s
 
+    @_locked
     def start_spake(self) -> tuple[object, bytes, int]:
         """Create SPAKE2 state together with the active pairing-code generation."""
         self.require_active()
@@ -161,13 +190,20 @@ class DevicePairing:
             if exchange.expires_at > now
         }
 
+    @_locked
     def finish(self, *, exchange_id: str, confirm_c: bytes, name: str) -> tuple[bytes, str]:
         self._require_active()
         exchange = self._exchanges.pop(exchange_id, None)
         if exchange is None or exchange.generation != self._generation or exchange.expires_at <= self._clock():
             self._record_failure()
             raise PairingError("invalid_exchange")
-        key = exchange.spake.finish(exchange.msg_c)
+        try:
+            key = exchange.spake.finish(exchange.msg_c)
+        except Exception:
+            # The peer's bytes decide what the PAKE library raises (bad side
+            # byte, off-curve point, reflection); all of it is a failed try.
+            self._record_failure()
+            raise PairingError(self._rejection_reason()) from None
         client_key, server_key = _split_key(key)
         transcript = exchange.transcript_prefix + exchange.msg_c + exchange.msg_s
         expected = hmac.new(client_key, transcript, hashlib.sha256).digest()
@@ -222,6 +258,9 @@ class DevicePairing:
         elif self._wrong_tries >= MAX_WRONG_TRIES:
             self._end_code()
             self._on_update()
+
+    def _rejection_reason(self) -> Literal["invalid_exchange", "paused"]:
+        return "paused" if self._paused else "invalid_exchange"
 
     def _failure_reason(self) -> Literal["wrong_code", "too_many_tries", "paused"]:
         if self._paused:

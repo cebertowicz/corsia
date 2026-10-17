@@ -46,7 +46,7 @@ describe('ProvidersPolicyBlock', () => {
 
 		resolve({ ok: true, json: async () => ({ scope: 'workspace', providers: [] }) });
 		await vi.waitFor(() => expect(host.textContent).not.toContain('Loading providers…'));
-		expect(host.textContent).toContain('Providers');
+		expect(host.textContent).toContain('Accounts and rollover');
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});
 

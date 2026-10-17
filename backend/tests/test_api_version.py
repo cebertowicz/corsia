@@ -159,18 +159,74 @@ def test_clean_status_read_is_false_not_unknown(monkeypatch):
     assert api_version._is_dirty() is True
 
 
-def test_version_payload_carries_the_app_version_and_shell_protocol(monkeypatch):
+def test_version_payload_carries_the_bundle_stamp_and_this_backends_shell_protocol(monkeypatch):
     """The shell's compatibility check reads ``app``; the computer name is never on this public route."""
     import api.version as api_version
 
-    app = {"version": "0.4.1", "shell_protocol": 1}
-    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {"app": app})
+    stamped = {"version": "0.4.1-dev.219", "shell_protocol": 99}
+    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {"app": stamped})
     monkeypatch.setattr(api_version, "_current_head_info", lambda: _UNAVAILABLE_HEAD)
-    payload = api_version._version_payload()
-    assert payload["app"] == app
-    assert "name" not in payload["app"]
+    monkeypatch.setattr(api_version, "_git_read", lambda _args: pytest.fail("a stamped build never asks git"))
 
-    monkeypatch.setattr(api_version, "_read_frontend_build_info", api_version._placeholder_frontend_info)
-    placeholder = api_version._version_payload()["app"]
-    assert isinstance(placeholder["shell_protocol"], int)
-    assert placeholder["version"] == "unknown"
+    app = api_version._version_payload()["app"]
+
+    assert app == {"version": "0.4.1-dev.219", "shell_protocol": api_version.SHELL_PROTOCOL}
+    assert "name" not in app
+
+
+def test_app_bundle_without_a_stamp_reports_no_version_and_never_runs_git(monkeypatch, tmp_path):
+    import api.version as api_version
+
+    monkeypatch.setattr(api_version, "_APP_BUNDLE", tmp_path / "CORSIA.app")
+    monkeypatch.setattr(api_version, "_git_read", lambda _args: pytest.fail("an app bundle ran git"))
+
+    assert api_version._app_version({}) is None
+    assert api_version._app_version({"app": {"version": None}}) is None
+    assert api_version._app_version(api_version._placeholder_frontend_info()) is None
+
+
+def test_source_checkout_reports_the_release_tag_git_describes_without_its_v(monkeypatch):
+    import api.version as api_version
+
+    asked = []
+
+    def describe(args):
+        asked.append(args)
+        return "v0.4.1-230-g1a2b3c4"
+
+    monkeypatch.setattr(api_version, "_APP_BUNDLE", None)
+    monkeypatch.setattr(api_version, "_git_read", describe)
+
+    assert api_version._app_version(api_version._placeholder_frontend_info()) == "0.4.1-230-g1a2b3c4"
+    assert asked == [["describe", "--tags", "--match", "v[0-9]*"]]
+
+
+@pytest.mark.parametrize("failure", [None, ""])
+def test_source_checkout_reports_no_version_when_git_cannot_describe(monkeypatch, failure):
+    import api.version as api_version
+
+    monkeypatch.setattr(api_version, "_APP_BUNDLE", None)
+    monkeypatch.setattr(api_version, "_git_read", lambda _args: failure)
+
+    assert api_version._app_version({}) is None
+
+
+def test_source_checkout_prefers_a_stamp_over_git(monkeypatch):
+    import api.version as api_version
+
+    monkeypatch.setattr(api_version, "_APP_BUNDLE", None)
+    monkeypatch.setattr(api_version, "_git_read", lambda _args: pytest.fail("a stamped build never asks git"))
+
+    assert api_version._app_version({"app": {"version": "0.4.1-dev.230"}}) == "0.4.1-dev.230"
+
+
+def test_the_bundle_build_stamps_its_release_version_into_the_frontend_build_info():
+    """The shell's side of the comparison is `package_info().version`; this is the host's side of the same definition."""
+    repo = Path(__file__).resolve().parents[2]
+    bundle = (repo / "desktop/scripts/build-macos-bundle.sh").read_text()
+    generator = (repo / "frontend/scripts/generate-build-info.mjs").read_text()
+
+    build_line = next(line for line in bundle.splitlines() if "npm run build" in line)
+    assert 'CORSIA_APP_VERSION="$app_version"' in build_line
+    assert "version: process.env.CORSIA_APP_VERSION" in generator
+    assert "package.json" not in generator

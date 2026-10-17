@@ -31,7 +31,7 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		const inset = border();
 		animation = node.animate(
 			[{ height: `${from - inset}px` }, { height: `${to - inset}px` }],
-			{ duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+			{ duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' },
 		);
 		const done = () => {
 			animation = null;

@@ -7,11 +7,13 @@ resolution.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from core.lesson_trials import LESSON_KEY, lesson_errors
+from core.skill_sidecar import SIDECAR_FILE, parse_sidecar, pointer_errors, read_sidecar
 
 ALLOWED_HANDLER_KINDS = {
     "instruction",
@@ -51,6 +53,8 @@ class SkillValidation:
     metadata: dict[str, Any]
     body: str
     errors: list[str] = field(default_factory=list)
+    # The CORSIA data (handler, workflow), read from the sidecar or the legacy block.
+    corsia: dict[str, Any] | None = None
 
 
 def _text(value: Any) -> str | None:
@@ -84,12 +88,17 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
 
 
 def _validate_corsia(meta: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
     corsia = meta.get(FRONTMATTER_KEY)
     if corsia is None:
-        return errors
+        return []
     if not isinstance(corsia, dict):
         return ["corsia must be a mapping"]
+    return _validate_corsia_data(corsia)
+
+
+def _validate_corsia_data(corsia: dict[str, Any]) -> list[str]:
+    """Validate CORSIA data wherever it is filed: the legacy block or the sidecar."""
+    errors: list[str] = []
     handler = corsia.get("handler")
     if handler is not None:
         if not isinstance(handler, dict):
@@ -191,7 +200,52 @@ def _validate_workflow(corsia: dict[str, Any]) -> list[str]:
 
 
 def validate_skill_text(text: str) -> SkillValidation:
-    """Validate one ``SKILL.md`` body without touching the filesystem."""
+    """Validate one ``SKILL.md`` body alone: no filesystem, and no sidecar is consulted.
+
+    Use :func:`validate_skill_bundle` or :func:`validate_skill_file` for a skill that may
+    point at a ``corsia.yaml``.
+    """
+    return _validate(text, bundle=False)
+
+
+def validate_skill_bundle(skill_md: str, files: Mapping[str, str] | None) -> SkillValidation:
+    """Validate a ``SKILL.md`` with the supplied folder files; no filesystem access.
+
+    ``files`` maps folder-relative names to their text; only ``corsia.yaml`` is read.
+    """
+    return _validate(skill_md, bundle=True, sidecar=(files or {}).get(SIDECAR_FILE))
+
+
+def _sidecar_corsia(
+    meta: dict[str, Any], sidecar: str | None, problem: str | None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Resolve a skill's CORSIA data: the sidecar when pointed at, else the legacy block."""
+    block = meta.get(FRONTMATTER_KEY)
+    legacy = block if isinstance(block, dict) else None
+    declared, errors = pointer_errors(meta.get("metadata"))
+    if not declared:
+        return legacy, []
+    if errors:
+        return legacy, errors
+    if problem is not None:
+        return legacy, [problem]
+    if sidecar is None:
+        return legacy, [f"metadata.corsia-data names {SIDECAR_FILE}, which is not in the skill folder"]
+    data, errors = parse_sidecar(sidecar)
+    if data is None:
+        return legacy, errors
+    errors = _validate_corsia_data(data) + _validate_workflow(data)
+    if FRONTMATTER_KEY in meta and block != data:
+        errors.append(
+            f"a top-level {FRONTMATTER_KEY} block and a metadata.corsia-data pointer both "
+            f"declare CORSIA data, and they differ; keep only the {SIDECAR_FILE} data"
+        )
+    return data, errors
+
+
+def _validate(
+    text: str, *, bundle: bool, sidecar: str | None = None, problem: str | None = None,
+) -> SkillValidation:
     try:
         meta, body = parse_frontmatter(text)
     except Exception as exc:  # noqa: BLE001 - any parse failure is user-facing.
@@ -218,6 +272,10 @@ def validate_skill_text(text: str) -> SkillValidation:
         errors.extend(_validate_workflow(corsia))
         if LESSON_KEY in corsia:
             errors.extend(lesson_errors(corsia[LESSON_KEY], description, body))
+    data = corsia if isinstance(corsia, dict) else None
+    if bundle:
+        data, sidecar_errors = _sidecar_corsia(meta, sidecar, problem)
+        errors.extend(error for error in sidecar_errors if error not in errors)
     return SkillValidation(
         ok=not errors,
         name=name,
@@ -225,6 +283,7 @@ def validate_skill_text(text: str) -> SkillValidation:
         metadata=meta,
         body=body,
         errors=errors,
+        corsia=data,
     )
 
 
@@ -264,9 +323,14 @@ def is_skill_file(path: Path) -> bool:
 
 
 def validate_skill_file(path: Path) -> SkillValidation:
-    """Validate a ``SKILL.md`` file and report read/parse errors as validation errors."""
+    """Validate a skill folder's ``SKILL.md`` with the ``corsia.yaml`` beside it.
+
+    Read and parse errors are reported as validation errors.
+    """
     try:
-        return validate_skill_text(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        sidecar, problem = read_sidecar(path.parent)
+        return _validate(text, bundle=True, sidecar=sidecar, problem=problem)
     except OSError as exc:
         return SkillValidation(
             ok=False,

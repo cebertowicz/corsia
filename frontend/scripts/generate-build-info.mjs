@@ -7,14 +7,12 @@
 // is always fresh. Failure-tolerant: missing git → placeholder, never throws.
 
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = dirname(__dirname);
-const PACKAGE = JSON.parse(readFileSync(join(FRONTEND, 'package.json'), 'utf8'));
-const SHELL_PROTOCOL = 1;
 
 function git(args) {
 	return execSync(`git ${args}`, {
@@ -66,8 +64,8 @@ function capture() {
 		dirty,
 		build_iso: buildIso,
 		app: {
-			version: PACKAGE.version,
-			shell_protocol: SHELL_PROTOCOL,
+			// The release version, stamped by the app bundle build; a source checkout has none and the host reads git.
+			version: process.env.CORSIA_APP_VERSION || null,
 		},
 	};
 }

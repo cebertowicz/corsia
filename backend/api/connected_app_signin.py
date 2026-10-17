@@ -51,7 +51,7 @@ def _load(app_id: str) -> tuple[str, dict[str, Any], str]:
     except AppNotFoundError:
         raise _refusal("connected app not found", 404) from None
     config = app["config"]
-    if app["state"] == PENDING_STATE or not isinstance(config, dict) or not isinstance(config.get("url"), str):
+    if app["state"] in {PENDING_STATE, "expired"} or not isinstance(config, dict) or not isinstance(config.get("url"), str):
         raise _refusal("Only an approved app at a web address can be signed in to.")
     return app["name"], config, app["state"]
 

@@ -14,6 +14,15 @@ const ACCOUNTS = [
 		usage: { state: 'limited', usable: false, reason: 'five_hour_limit', resets_at: null, windows: [], checking: false, check: { error: 'offline' } } },
 ];
 
+// The Claude Code and Codex cards list the models the picker catalog offers that Settings also
+// holds (harnessMembership.ts settingsHarnessModelIds), so the picker catalog is served with them.
+const catalogRow = (row: { id: string; harness: string; display_name: string }) => ({
+	id: row.id, selector: row.id, litellm_model: row.id, name: row.display_name, display_name: row.display_name,
+	connection: row.harness, provider: row.harness, backend: row.harness === 'codex' ? 'codex' : 'cc',
+	status: 'ready', available: true, desc: '', size: '', speed: '',
+	capabilities: { context_window_max: 200000, supports_vision: true, supports_tools: true, supports_reasoning: false, reasoning_config: null },
+});
+
 const MODELS = [
 	{ id: 'codex/test', harness: 'codex', available: true, enabled: true, display_name: 'Codex test' },
 	{ id: 'claude-code/test', harness: 'claude-code', available: true, enabled: true, display_name: 'Claude test' },
@@ -22,6 +31,8 @@ const MODELS = [
 async function serveAccounts(page: Page, writes: { url: string; body: unknown }[]) {
 	const accounts = ACCOUNTS.map((account) => ({ ...account }));
 	await page.route('**/api/settings/models?**', (route) => route.fulfill({ json: { models: MODELS } }));
+	await page.route('**/api/models**', (route) => new URL(route.request().url()).pathname === '/api/models' && route.request().method() === 'GET'
+		? route.fulfill({ json: { models: MODELS.map(catalogRow), active_local_threads: 0 } }) : route.continue());
 	await page.route('**/api/vendor-accounts?**', (route) => route.fulfill({ json: { accounts } }));
 	await page.route('**/api/vendor-accounts/*/usage?**', async (route) => {
 		const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]);
@@ -59,7 +70,8 @@ test.describe('@surface:providers accounts live in settings modal', () => {
 			await expect(page.getByText('Work · work@example.test')).toBeVisible();
 			await expect(page.getByRole('button', { name: 'Spend past plan limit for Plus account 1' })).toHaveAttribute('aria-pressed', 'false');
 			await expect(page.getByRole('button', { name: 'Spend past plan limit for Work · work@example.test' })).toHaveAttribute('aria-pressed', 'true');
-			await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'));
+			// Wait out the finite animations; the online status dot pulses forever by design (the screenshot freezes it).
+			await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity));
 			await page.getByText('Work · work@example.test').scrollIntoViewIfNeeded();
 			await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true, animations: 'disabled' });
 			await page.getByRole('button', { name: 'Overview' }).click();

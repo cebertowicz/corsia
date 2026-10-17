@@ -9,7 +9,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-const REASONS: PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old'];
+const REASONS: PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local'];
 
 describe('shellInfo', () => {
 	it('is null in a browser or the phone app, where nothing injects it', () => {
@@ -41,10 +41,18 @@ describe('the shell commands', () => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ ok: false, reason, app_version: '1.4', host_version: '1.2' })) });
 		expect(await remotePair({ kind: 'address', host: 'studio.local' }, 'K7QX')).toEqual({ ok: false, reason, app_version: '1.4', host_version: '1.2' });
 	});
-	it('reports a shell that is missing or throws as the network, never as a wrong code', async () => {
-		expect(await remotePair({ kind: 'address', host: 'studio.local' }, 'K7QX')).toEqual({ ok: false, reason: 'network' });
+	it('reports a shell that is missing, refuses or fails after the code was used as a local failure, never the network or a wrong code', async () => {
+		expect(await remotePair({ kind: 'address', host: 'studio.local' }, 'K7QX')).toEqual({ ok: false, reason: 'local' });
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => { throw new Error('denied'); }) });
+		expect(await remotePair({ kind: 'address', host: 'studio.local' }, 'K7QX')).toEqual({ ok: false, reason: 'local' });
+	});
+	it('keeps the network reason for a real network failure the shell reports', async () => {
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ ok: false, reason: 'network' })) });
 		expect(await remotePair({ kind: 'address', host: 'studio.local' }, 'K7QX')).toEqual({ ok: false, reason: 'network' });
+	});
+	it('says the code was used and asks for a new one when this computer could not finish', () => {
+		expect(unreachableLine('local', 'Studio', {})).toBe(`CORSIA couldn’t finish connecting to Studio. ${SETTINGS_PATH} on Studio to get a new code and try again.`);
+		expect(refusesOnCodeScreen('local')).toBe(false);
 	});
 	it('reports an unknown reason as the network too', async () => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ ok: false, reason: 'surprise' })) });

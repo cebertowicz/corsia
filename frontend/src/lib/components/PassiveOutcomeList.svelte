@@ -1,6 +1,10 @@
 <script lang="ts">
 	import type { UpdateCard } from '$lib/api/threadUpdates';
 	import type { OperatorNode } from '$lib/api/plans';
+	import { readFoldedNode } from '$lib/api/plansFolded';
+	import { token } from '$lib/stores/auth';
+	import { get } from 'svelte/store';
+	import { untrack } from 'svelte';
 	import { focusPlanNode } from '$lib/planNodeFocus';
 	import { emitProductEvent } from '$lib/product_events';
 	import { planKeySet, planQuery } from '$lib/stores/planQuery.svelte';
@@ -45,9 +49,29 @@
 		return loading ? 'loading' : errored ? 'error' : null;
 	};
 
-	/** Retry the thread read and any child plan read that failed. */
+	// The thread read lists only open work, so a finished task is folded out of it: read that one node on demand.
+	type Folded = { status: 'loading' } | { status: 'error' } | { status: 'missing' } | { status: 'ready'; node: OperatorNode };
+	let folded = $state<Record<string, Folded>>({});
+
+	async function loadFolded(nodeId: string): Promise<void> {
+		folded[nodeId] = { status: 'loading' };
+		const bearer = get(token);
+		const plans = read.payload?.plans ?? [];
+		let result: Folded = { status: bearer ? 'missing' : 'error' };
+		for (const entry of bearer ? plans : []) {
+			const outcome = await readFoldedNode(bearer!, entry.plan.id, nodeId);
+			if (outcome.status === 'fresh') { result = { status: 'ready', node: outcome.payload }; break; }
+			if (outcome.status !== 'not-found') result = { status: 'error' };
+		}
+		folded[nodeId] = result;
+	}
+
+	/** Retry the thread read and any read that failed. */
 	function retryReads(): void {
 		read.retry();
+		for (const card of cards) {
+			if (card.node_id && folded[card.node_id]?.status === 'error') void loadFolded(card.node_id);
+		}
 		for (const step of childSteps) {
 			const key: OperatorKey = { kind: 'child', id: step.child!.thread_id };
 			const entry = children.state(key);
@@ -75,8 +99,24 @@
 		if (detail) return { state: 'detail' as const, detail, stepId: null };
 		const where = holder(card.node_id);
 		if (where === 'loading' || where === 'error') return { state: where };
-		return where ? { state: 'outside' as const, stepId: where.stepId } : { state: 'unplaced' as const };
+		if (where) return { state: 'outside' as const, stepId: where.stepId };
+		const found = folded[card.node_id];
+		if (!found || found.status === 'loading') return { state: 'loading' as const };
+		if (found.status === 'error') return { state: 'error' as const };
+		if (found.status === 'missing') return { state: 'unplaced' as const };
+		const foldedDetail = taskDetail(indexNodes([...planNodes, found.node]), card.node_id);
+		return foldedDetail ? { state: 'detail' as const, detail: foldedDetail, stepId: null } : { state: 'unplaced' as const };
 	}
+
+	// A task neither this read nor a nested plan holds is folded: fetch it once its row is open.
+	$effect(() => {
+		if (!readReady) return;
+		for (const card of cards) {
+			const nodeId = card.node_id;
+			if (!nodeId || !openCards.has(card.id) || byId.has(nodeId) || holder(nodeId) !== null || folded[nodeId]) continue;
+			untrack(() => { void loadFolded(nodeId); });
+		}
+	});
 
 	let toggleButton: HTMLButtonElement | undefined;
 	// A row that loses its button because no plan holds its task must not drop keyboard focus to the page.

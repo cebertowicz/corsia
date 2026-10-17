@@ -43,6 +43,29 @@ fn quit_if_unlocked(
     Ok(true)
 }
 
+/// Unregisters the local service for a person who is leaving it for another computer, unless an operation (a restart or
+/// an update) holds the lock that every quit path respects. A held lock is an error, never a silent unregister.
+fn unregister_unless_locked_with(
+    operation_state: impl FnOnce() -> Result<bool, String>,
+    unregister: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if quit_if_unlocked(operation_state, unregister)? {
+        Ok(())
+    } else {
+        Err(RETRY_LOCKED_ERROR.into())
+    }
+}
+
+pub(super) fn unregister_unless_locked(app: &tauri::AppHandle) -> Result<(), String> {
+    unregister_unless_locked_with(
+        || match app.try_state::<super::AppServiceState>() {
+            Some(service) => super::operation_is_active(service_port(app, &service)),
+            None => Ok(false),
+        },
+        super::unregister_service,
+    )
+}
+
 fn quit_and_mark_cleanup(
     attempted: &AtomicBool,
     operation_state: impl FnOnce() -> Result<bool, String>,
@@ -281,6 +304,22 @@ mod tests {
         let shell = include_str!("../../dist-shell/index.html");
         assert!(shell.contains("CORSIA couldn’t stop its background service."));
         assert!(shell.contains("invoke('retry_quit')"));
+    }
+
+    #[test]
+    fn leaving_for_another_computer_does_not_unregister_while_an_operation_holds_the_lock() {
+        let calls = RefCell::new(Vec::new());
+        let locked = unregister_unless_locked_with(
+            || Ok(true),
+            || {
+                calls.borrow_mut().push("unregister");
+                Ok(())
+            },
+        );
+        assert_eq!(locked, Err(RETRY_LOCKED_ERROR.to_string()));
+        assert!(calls.borrow().is_empty());
+        assert_eq!(unregister_unless_locked_with(|| Ok(false), || Ok(())), Ok(()));
+        assert_eq!(unregister_unless_locked_with(|| Err("no service".into()), || Ok(())), Ok(()));
     }
 
     #[test]

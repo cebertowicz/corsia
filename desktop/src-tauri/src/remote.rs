@@ -1,10 +1,4 @@
-use crate::remote_config::RemoteRecord;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Unreachable {
-    Network,
-    Server,
-}
+use crate::{classify::ConnectFailure, remote_config::RemoteRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaunchState {
@@ -12,10 +6,10 @@ pub enum LaunchState {
     Pairing,
     Connecting { name: String },
     Remote { name: String },
-    Unreachable { name: String, cause: Unreachable },
-    Incompatible { name: String, app: String, host: Option<String> },
-    TooOld { name: String },
-    KeyChanged { name: String },
+    /// The remote could not be opened; the shell draws the card for `failure` with its actions.
+    Failed { name: String, failure: ConnectFailure },
+    /// This computer's own service could not be brought back; the shell draws its failure card with the action.
+    ServiceFailed { reason: String },
     Disconnecting,
 }
 
@@ -50,24 +44,30 @@ impl RemoteConnection {
         self.state = LaunchState::Remote { name: name.into() };
     }
 
-    pub fn unreachable(&mut self, name: impl Into<String>, cause: Unreachable) {
-        self.state = LaunchState::Unreachable { name: name.into(), cause };
-    }
-
-    pub fn incompatible(&mut self, name: impl Into<String>, app: impl Into<String>, host: Option<String>) {
-        self.state = LaunchState::Incompatible { name: name.into(), app: app.into(), host };
-    }
-
-    pub fn too_old(&mut self, name: impl Into<String>) {
-        self.state = LaunchState::TooOld { name: name.into() };
-    }
-
-    pub fn key_changed(&mut self, name: impl Into<String>) {
-        self.state = LaunchState::KeyChanged { name: name.into() };
+    pub fn failed(&mut self, name: impl Into<String>, failure: ConnectFailure) {
+        self.state = LaunchState::Failed { name: name.into(), failure };
     }
 
     pub fn retry(&mut self, name: impl Into<String>) {
         self.state = LaunchState::Connecting { name: name.into() };
+    }
+
+    pub fn service_failed(&mut self, reason: impl Into<String>) {
+        self.state = LaunchState::ServiceFailed { reason: reason.into() };
+    }
+
+    /// A service that came up ends its failure; any other state is left as it is.
+    pub fn service_recovered(&mut self) {
+        if matches!(self.state, LaunchState::ServiceFailed { .. }) {
+            self.state = LaunchState::Local;
+        }
+    }
+
+    /// A pairing that did not connect returns to local; a failure recorded meanwhile stays.
+    pub fn end_pairing(&mut self) {
+        if self.state == LaunchState::Pairing {
+            self.state = LaunchState::Local;
+        }
     }
 
     pub fn begin_disconnect(&mut self) {
@@ -109,19 +109,36 @@ mod tests {
     #[test]
     fn launch_failures_keep_the_paired_name_and_recovery_transition() {
         let mut connection = RemoteConnection::launch(Some(&record()));
-        connection.unreachable("Studio", Unreachable::Network);
+        connection.failed("Studio", ConnectFailure::Network);
         assert_eq!(
             connection.state(),
-            &LaunchState::Unreachable { name: "Studio".into(), cause: Unreachable::Network }
+            &LaunchState::Failed { name: "Studio".into(), failure: ConnectFailure::Network }
         );
         connection.retry("Studio");
         assert_eq!(connection.state(), &LaunchState::Connecting { name: "Studio".into() });
-        connection.key_changed("Studio");
-        assert_eq!(connection.state(), &LaunchState::KeyChanged { name: "Studio".into() });
+        connection.failed("Studio", ConnectFailure::KeyChanged);
+        assert_eq!(connection.state(), &LaunchState::Failed { name: "Studio".into(), failure: ConnectFailure::KeyChanged });
         connection.connected("Studio");
         connection.begin_disconnect();
         assert_eq!(connection.state(), &LaunchState::Disconnecting);
         connection.local();
         assert_eq!(connection.state(), &LaunchState::Local);
+    }
+
+    #[test]
+    fn a_service_failure_survives_the_end_of_a_pairing_until_the_service_comes_back() {
+        let mut connection = RemoteConnection::default();
+        connection.begin_pairing();
+        connection.service_failed("did not start");
+        connection.end_pairing();
+        assert_eq!(connection.state(), &LaunchState::ServiceFailed { reason: "did not start".into() });
+        connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Local);
+        connection.begin_pairing();
+        connection.end_pairing();
+        assert_eq!(connection.state(), &LaunchState::Local);
+        connection.connected("Studio");
+        connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
     }
 }

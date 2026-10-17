@@ -5,14 +5,16 @@ import sqlite3
 import uuid
 
 from connections.app_lifecycle_support import (
-    _assert_name_available, _assert_selected_projects_exist, _config_json,
-    _ensure_app_key_entries, _expire_pending_proposal, _write_audit, _write_projects,
+    _assert_name_available, _assert_selected_projects_exist, _config_json, _delete_app_keys,
+    _ensure_app_key_entries, _expire_pending_proposal, _reaches_nothing,
+    _write_audit, _write_projects,
 )
 from connections.app_notices import append_app_notice
+from connections.app_source_folder import SOURCE_FOLDER_KEY, clean_folder_label
 from connections.app_reach import (
     AppNotFoundError, AppPendingApprovalError, AppProposalExpiredError,
     AppReachError, AppRevisionConflictError, PENDING_STATE, _proposal_expired,
-    _reach, _requesting_agent_name, get_app, key_entry_names, normalize_reach,
+    _reach, _requesting_agent_name, get_app, normalize_reach,
 )
 from infra.database import write_transaction
 from infra.time import utc_now_iso
@@ -29,7 +31,13 @@ def create_app(
     audit_actor: tuple[str, str] | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Create an app with opaque JSON config and explicit reach in one write."""
+    """Create an app with opaque JSON config and explicit reach in one write.
+
+    A new app is either a person's (``disconnected`` until its first connect) or a request
+    waiting for approval (:func:`create_pending_app`); no other path makes an app live.
+    """
+    if state not in {"disconnected", PENDING_STATE}:
+        raise AppReachError("a new app starts disconnected or waiting for approval")
     if not isinstance(name, str) or not name.strip():
         raise AppReachError("invalid app name")
     normalized = normalize_reach(reach)
@@ -118,16 +126,23 @@ def create_pending_app(
     actor_thread_id: str,
     app_id: str | None = None,
     asked_by_thread_id: str | None = None,
+    source_folder: str | None = None,
     audit_actor: tuple[str, str] | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Persist an agent's new app proposal without starting it."""
+    """Persist an agent's new app proposal without starting it.
+
+    ``source_folder`` is a display label (the imported folder's last segment); like the asking
+    thread it rides beside the config and never reaches the launch.
+    """
     if not isinstance(actor_thread_id, str) or not actor_thread_id:
         raise AppReachError("missing proposing thread")
     if asked_by_thread_id is not None:
         if not isinstance(asked_by_thread_id, str) or not asked_by_thread_id or not isinstance(config, dict):
             raise AppReachError("invalid asking thread")
         config = {**config, "asked_by_thread_id": asked_by_thread_id}
+    if (label := clean_folder_label(source_folder)) is not None and isinstance(config, dict):
+        config = {**config, SOURCE_FOLDER_KEY: label}
     return create_app(
         name,
         config,
@@ -229,25 +244,51 @@ def replace_config(
 
 
 def approve_proposal(
-    app_id: str, *, audit_actor: tuple[str, str] | None = None, db: sqlite3.Connection | None = None,
+    app_id: str,
+    *,
+    reach: object | None = None,
+    expected_revision: int | None = None,
+    audit_actor: tuple[str, str] | None = None,
+    db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Promote a pending config, unless its seven-day review window has elapsed."""
+    """Promote a pending config, unless its seven-day review window has elapsed.
+
+    A person's approval may carry the place the app works. The reach, its checks and the
+    approval land in one revision-checked transaction, and an app that reaches nothing is
+    refused before anything changes.
+    """
+    chosen = normalize_reach(reach) if reach is not None else None
     expired = False
     expired_agent_name: str | None = None
     with write_transaction(db, scope="connected_app_proposal_approve") as conn:
         app = conn.execute(
-            "SELECT revision,pending_config_json,state_since,pending_previous_state,pending_actor_thread_id "
+            "SELECT name,revision,pending_config_json,state_since,pending_previous_state,pending_actor_thread_id "
             "FROM connected_apps WHERE id=? AND state=?",
             (app_id, PENDING_STATE),
         ).fetchone()
         if app is None:
             raise AppPendingApprovalError("no connected app change is awaiting approval")
+        if expected_revision is not None and app["revision"] != expected_revision:
+            raise AppRevisionConflictError("connected app changed")
         if _proposal_expired(PENDING_STATE, app["state_since"]):
             expired_agent_name = _requesting_agent_name(app["pending_actor_thread_id"], db=conn)
             _expire_pending_proposal(conn, app_id, app)
             expired = True
         else:
-            current_reach = _reach(app_id, db=conn)
+            previous_reach = _reach(app_id, db=conn)
+            current_reach = chosen or previous_reach
+            if chosen is not None:
+                _assert_selected_projects_exist(chosen, db=conn)
+            if _reaches_nothing(current_reach, db=conn):
+                raise AppReachError("Choose where it works first, then approve it.")
+            _assert_name_available(app["name"], current_reach, app_id=app_id, db=conn)
+            if chosen is not None:
+                conn.execute("DELETE FROM connected_app_reach WHERE app_id=?", (app_id,))
+                _write_projects(app_id, chosen, db=conn)
+                conn.execute(
+                    "UPDATE connected_apps SET reach_mode=?,outside_projects=? WHERE id=?",
+                    (chosen.mode, int(chosen.outside_projects), app_id),
+                )
             now = utc_now_iso()
             next_revision = app["revision"] + 1
             config_json = app["pending_config_json"]
@@ -259,7 +300,7 @@ def approve_proposal(
             )
             _write_audit(
                 conn, actor=audit_actor, app_id=app_id, action="approve",
-                reach_from=current_reach, reach_to=current_reach,
+                reach_from=previous_reach, reach_to=current_reach,
             )
             approved = conn.execute(
                 "SELECT name,config_json FROM connected_apps WHERE id=?", (app_id,)
@@ -296,6 +337,7 @@ def decline_proposal(
         else:
             current_reach = _reach(app_id, db=conn)
             if app["pending_config_json"] is None:
+                _delete_app_keys(conn, app_id)
                 _write_audit(
                     conn, actor=audit_actor, app_id=app_id, action="decline",
                     reach_from=current_reach, reach_to=None,
@@ -335,21 +377,11 @@ def delete_app(
 ) -> dict[str, object]:
     """Delete an app; people remove its stable-id keys and agents deliberately retain them."""
     with write_transaction(db, scope="connected_app_delete") as conn:
-        app = conn.execute(
-            "SELECT config_json,pending_config_json FROM connected_apps WHERE id=?", (app_id,)
-        ).fetchone()
-        if app is None:
+        if conn.execute("SELECT 1 FROM connected_apps WHERE id=?", (app_id,)).fetchone() is None:
             raise AppNotFoundError("connected app not found")
         current_reach = _reach(app_id, db=conn)
         if remove_keys:
-            key_names = key_entry_names(app_id, json.loads(app["config_json"]))
-            if app["pending_config_json"] is not None:
-                key_names |= key_entry_names(app_id, json.loads(app["pending_config_json"]))
-            if key_names:
-                marks = ",".join("?" * len(key_names))
-                conn.execute(f"DELETE FROM key_store_entries WHERE name IN ({marks})", tuple(sorted(key_names)))
-                from infra.key_store_values import sweep_after_commit
-                sweep_after_commit(conn)
+            _delete_app_keys(conn, app_id)
         _write_audit(
             conn, actor=audit_actor, app_id=app_id, action="remove",
             reach_from=current_reach, reach_to=None,

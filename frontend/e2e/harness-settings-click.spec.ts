@@ -5,6 +5,15 @@ const harnessRows = [
 	...Array.from({ length: 5 }, (_, index) => ({ id: `claude-${index}`, harness: 'claude-code', available: true, enabled: true, display_name: `Claude ${index}` })),
 	...Array.from({ length: 7 }, (_, index) => ({ id: `codex-${index}`, harness: 'codex', available: true, enabled: true, display_name: `Codex ${index}` })),
 ];
+// The Claude Code and Codex cards list the models the picker catalog offers that Settings also
+// holds (harnessMembership.ts settingsHarnessModelIds), so the picker catalog is served with them.
+const catalogRow = (row: { id: string; harness: string; display_name: string }) => ({
+	id: row.id, selector: row.id, litellm_model: row.id, name: row.display_name, display_name: row.display_name,
+	connection: row.harness, provider: row.harness, backend: row.harness === 'codex' ? 'codex' : 'cc',
+	status: 'ready', available: true, desc: '', size: '', speed: '',
+	capabilities: { context_window_max: 200000, supports_vision: true, supports_tools: true, supports_reasoning: false, reasoning_config: null },
+});
+
 const accounts = [
 	...Array.from({ length: 3 }, (_, index) => ({ id: `claude-account-${index}`, provider: 'claude-code', name: `Claude ${index}`, is_default: index === 0, state: 'signed_in', revision: 1, identity: {}, label: { name: `Claude ${index}`, email: null, text: `Claude ${index}`, custom: null } })),
 	...Array.from({ length: 2 }, (_, index) => ({ id: `codex-account-${index}`, provider: 'codex', name: `Codex ${index}`, is_default: index === 0, state: 'signed_in', revision: 1, identity: {}, label: { name: `Codex ${index}`, email: null, text: `Codex ${index}`, custom: null } })),
@@ -62,6 +71,8 @@ const points: { name: PointName; at: (width: number, height: number) => { x: num
 ];
 
 async function mockProviders(page: Page) {
+	await page.route('**/api/models**', (route) => new URL(route.request().url()).pathname === '/api/models' && route.request().method() === 'GET'
+		? route.fulfill({ json: { models: harnessRows.map(catalogRow), active_local_threads: 0 } }) : route.continue());
 	await page.route('**/api/settings/models**', (route) => route.fulfill({ json: { models: harnessRows } }));
 	await page.route('**/api/vendor-accounts**', (route) => route.fulfill({ json: { accounts } }));
 	await page.route('**/api/settings/providers**', (route) => route.fulfill({ json: { providers } }));

@@ -12,6 +12,42 @@ pub enum Trust {
     System,
 }
 
+/// The remote presented a key other than the saved pin. It rides inside the TLS handshake error so a caller can
+/// tell a changed key from a network failure without reading error text; see `is_pin_mismatch`.
+#[derive(Debug)]
+pub struct PinMismatch;
+
+impl std::fmt::Display for PinMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("remote certificate SPKI does not match the saved pin")
+    }
+}
+
+impl std::error::Error for PinMismatch {}
+
+/// Whether this error, or anything in its source chain, is a pin mismatch. rustls errors have no source, and
+/// tokio-rustls wraps them in an `io::Error` whose payload is not its source, so both are looked into.
+pub fn is_pin_mismatch(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if error.is::<PinMismatch>() {
+            return true;
+        }
+        if let Some(Error::InvalidCertificate(rustls::CertificateError::Other(other))) = error.downcast_ref::<Error>() {
+            if other.0.is::<PinMismatch>() {
+                return true;
+            }
+        }
+        if let Some(inner) = error.downcast_ref::<std::io::Error>().and_then(std::io::Error::get_ref) {
+            if is_pin_mismatch(inner) {
+                return true;
+            }
+        }
+        current = error.source();
+    }
+    false
+}
+
 #[derive(Clone, Debug)]
 pub struct PinnedVerifier {
     expected: [u8; 32],
@@ -38,7 +74,7 @@ impl ServerCertVerifier for PinnedVerifier {
     ) -> Result<ServerCertVerified, Error> {
         let actual = spki_sha256(end_entity)?;
         if actual != self.expected {
-            return Err(Error::General("remote certificate SPKI does not match the saved pin".into()));
+            return Err(Error::InvalidCertificate(rustls::CertificateError::Other(rustls::OtherError(Arc::new(PinMismatch)))));
         }
         // A pin intentionally survives the self-signed certificate's validity period.
         Ok(ServerCertVerified::assertion())
@@ -208,6 +244,9 @@ mod tests {
         assert_ne!(host.pin, relay.pin, "two generated identities must have different keys");
         let verifier = PinnedVerifier::new(host.pin).expect("verifier builds");
         let refusal = verify_at(&verifier, &relay.certificate, 1_000_000).unwrap_err();
-        assert!(refusal.to_string().contains("does not match the saved pin"), "{refusal}");
+        assert!(is_pin_mismatch(&refusal), "{refusal}");
+        assert!(!is_pin_mismatch(&Error::General("remote certificate SPKI does not match the saved pin".into())), "only the typed signal counts, never text");
+        let wrapped = std::io::Error::new(std::io::ErrorKind::InvalidData, refusal);
+        assert!(is_pin_mismatch(&wrapped), "tokio-rustls carries the refusal inside an io::Error");
     }
 }

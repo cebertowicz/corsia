@@ -177,4 +177,32 @@ describe('a swipe interrupted by a detached touch target still ends', () => {
 			expect(mainEl.style.transition).toBe('');
 		});
 	}
+
+	// The phone card rounds its left edge only while it is moved aside (HomeShell.svelte),
+	// so a drag marks which drawer is moving and the end of the drag clears it.
+	it('marks a sidebar drag on main until the drag ends', () => {
+		expect(mainEl.dataset.drawerDrag).toBeUndefined();
+		touch('touchstart', 10, 100, child);
+		touch('touchmove', 150, 102, child);
+		expect(mainEl.dataset.drawerDrag).toBe('sidebar');
+
+		touch('touchend', 150, 102, child);
+		expect(mainEl.dataset.drawerDrag).toBeUndefined();
+	});
+
+	it('marks a pane drag from the right edge as a pane drag', () => {
+		touch('touchstart', 390, 100, child);
+		touch('touchmove', 250, 102, child);
+		expect(mainEl.dataset.drawerDrag).toBe('pane');
+
+		touch('touchend', 250, 102, child);
+		expect(mainEl.dataset.drawerDrag).toBeUndefined();
+	});
+
+	it('leaves main unmarked when a touch never becomes a drag', () => {
+		touch('touchstart', 10, 100, child);
+		touch('touchmove', 12, 140, child);
+		touch('touchend', 12, 140, child);
+		expect(mainEl.dataset.drawerDrag).toBeUndefined();
+	});
 });

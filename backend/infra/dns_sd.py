@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -30,6 +31,10 @@ class DNSServiceAnnouncement:
     port: int
     announced_name: str | None = None
     error: str | None = None
+    # Called when the registration changes announced_name or error after
+    # start() returned, e.g. once mDNSResponder finishes probing. It may run
+    # on any thread, so the owner passes a thread-safe scheduler.
+    on_change: Callable[[], None] | None = None
     _ref: ctypes.c_void_p | None = None
     _fd: int | None = None
     _callback: object | None = None
@@ -54,12 +59,14 @@ class DNSServiceAnnouncement:
         )
 
         def registered(_ref, _flags, error_code, name, _regtype, _domain, _context):
+            before = self._state()
             if error_code == _KDNS_SERVICE_ERR_NO_ERROR:
                 self.announced_name = name.decode("utf-8") if name else None
                 self.error = None
             else:
                 self.announced_name = None
                 self.error = f"DNS-SD registration failed ({error_code})"
+            self._notify_if_changed(before)
 
         self._callback = callback_type(registered)
         reference = ctypes.c_void_p()
@@ -95,6 +102,7 @@ class DNSServiceAnnouncement:
         result = process(self._ref)
         if result == _KDNS_SERVICE_ERR_NO_ERROR:
             return
+        before = self._state()
         self.announced_name = None
         self.stop(library)
         if result in {
@@ -103,8 +111,17 @@ class DNSServiceAnnouncement:
         } and not self._restarted:
             self._restarted = True
             self.start()
+            self._notify_if_changed(before)
             return
         self.error = f"DNS-SD process failed ({result})"
+        self._notify_if_changed(before)
+
+    def _state(self) -> tuple[str | None, str | None]:
+        return self.announced_name, self.error
+
+    def _notify_if_changed(self, before: tuple[str | None, str | None]) -> None:
+        if self.on_change is not None and self._state() != before:
+            self.on_change()
 
     def stop(self, library=None) -> None:
         self.announced_name = None

@@ -59,6 +59,10 @@ mod system {
     const DNS_SERVICE_PROTOCOL_IP_V4: u32 = 0x1;
     const DNS_SERVICE_PROTOCOL_IP_V6: u32 = 0x2;
 
+    /// How long an IPv6-only answer waits for an IPv4 one before it is used.
+    /// A host that has both normally answers both within milliseconds.
+    const IPV4_PREFERENCE_GRACE: Duration = Duration::from_millis(500);
+
     type BrowseCallback = unsafe extern "C" fn(
         DNSServiceRef,
         DNSServiceFlags,
@@ -252,8 +256,20 @@ mod system {
     /// Resolve a discovered service through both DNSServiceResolve and
     /// DNSServiceGetAddrInfo. The latter is necessary because saved DNS-SD
     /// locators must survive DHCP address changes.
+    ///
+    /// The returned host is an IPv4 address when the host answered one, else an
+    /// IPv6 address; a link-local IPv6 address keeps its interface as a zone
+    /// (`fe80::1%en0`), unbracketed.
     pub async fn resolve(instance: &str, timeout: Duration) -> Result<(String, u16), DiscoveryError> {
-        resolve_blocking(instance, timeout)
+        let instance = instance.to_owned();
+        off_runtime(move || resolve_blocking(&instance, timeout)).await?
+    }
+
+    /// Run a blocking system call on tokio's blocking pool, not a worker.
+    async fn off_runtime<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, DiscoveryError> {
+        tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|_| DiscoveryError::Service(-1))
     }
 
     fn resolve_blocking(instance: &str, timeout: Duration) -> Result<(String, u16), DiscoveryError> {
@@ -261,7 +277,7 @@ mod system {
         let deadline = Instant::now() + timeout;
         let (hostname, port) = resolve_service(&instance, deadline)?;
         let address = resolve_address(&hostname, deadline)?;
-        Ok((address.to_string(), port))
+        Ok((address, port))
     }
 
     struct ResolveContext {
@@ -327,14 +343,75 @@ mod system {
         })
     }
 
+    /// The addresses DNS-SD has answered for one host. IPv4 wins: an IPv6
+    /// answer is used only when no IPv4 answer has joined it within
+    /// `IPV4_PREFERENCE_GRACE` of the first IPv6 answer, or by the deadline.
+    #[derive(Default)]
+    struct AddressCandidates {
+        v4: Option<Ipv4Addr>,
+        v6: Option<(Ipv6Addr, u32)>,
+        v6_since: Option<Instant>,
+        error: Option<DiscoveryError>,
+    }
+
+    impl AddressCandidates {
+        fn add(&mut self, address: IpAddr, scope_id: u32, now: Instant) {
+            match address {
+                IpAddr::V4(address) => {
+                    self.v4.get_or_insert(address);
+                }
+                IpAddr::V6(address) => {
+                    if self.v6.is_none() {
+                        self.v6 = Some((address, scope_id));
+                        self.v6_since = Some(now);
+                    }
+                }
+            }
+        }
+
+        fn decide(&self, now: Instant, deadline_reached: bool) -> Option<Result<String, DiscoveryError>> {
+            if let Some(address) = self.v4 {
+                return Some(Ok(address.to_string()));
+            }
+            if let (Some((address, scope_id)), Some(since)) = (self.v6, self.v6_since) {
+                if deadline_reached || now >= since + IPV4_PREFERENCE_GRACE {
+                    return Some(Ok(format_ipv6(address, scope_id)));
+                }
+                return None;
+            }
+            self.error.map(Err)
+        }
+
+        /// When the wait for an IPv4 answer ends, if one is under way.
+        fn wake_at(&self) -> Option<Instant> {
+            self.v4.is_none().then(|| self.v6_since.map(|since| since + IPV4_PREFERENCE_GRACE)).flatten()
+        }
+    }
+
+    /// Text form of an IPv6 answer: a link-local address keeps its interface
+    /// as a zone, because it is unreachable without one.
+    fn format_ipv6(address: Ipv6Addr, scope_id: u32) -> String {
+        let link_local = address.segments()[0] & 0xffc0 == 0xfe80;
+        if !link_local || scope_id == 0 {
+            return address.to_string();
+        }
+        let mut name = [0 as c_char; libc::IF_NAMESIZE];
+        let found = unsafe { !libc::if_indextoname(scope_id, name.as_mut_ptr()).is_null() };
+        let zone = found
+            .then(|| unsafe { CStr::from_ptr(name.as_ptr()) }.to_str().ok().map(str::to_owned))
+            .flatten()
+            .unwrap_or_else(|| scope_id.to_string());
+        format!("{address}%{zone}")
+    }
+
     struct AddressContext {
-        result: Mutex<Option<Result<IpAddr, DiscoveryError>>>,
+        candidates: Mutex<AddressCandidates>,
     }
 
     unsafe extern "C" fn address_callback(
         _service_ref: DNSServiceRef,
-        _flags: DNSServiceFlags,
-        _interface_index: u32,
+        flags: DNSServiceFlags,
+        interface_index: u32,
         error: DNSServiceErrorType,
         _hostname: *const c_char,
         address: *const libc::sockaddr,
@@ -344,19 +421,28 @@ mod system {
         if context.is_null() {
             return;
         }
-        let result = if error != DNS_SERVICE_NO_ERROR {
-            Err(DiscoveryError::Service(error))
-        } else {
-            ip_from_sockaddr(address).ok_or(DiscoveryError::NoAddress)
-        };
         let context = &*(context as *const AddressContext);
-        *context.result.lock().expect("DNS-SD address mutex is not poisoned") = Some(result);
+        let mut candidates = context.candidates.lock().expect("DNS-SD address mutex is not poisoned");
+        if error != DNS_SERVICE_NO_ERROR {
+            candidates.error = Some(DiscoveryError::Service(error));
+        } else if flags & DNS_SERVICE_FLAGS_ADD != 0 {
+            match ip_from_sockaddr(address) {
+                Some(ip) => {
+                    let scope_id = match scope_id_from_sockaddr(address) {
+                        0 => interface_index,
+                        scope_id => scope_id,
+                    };
+                    candidates.add(ip, scope_id, Instant::now());
+                }
+                None => candidates.error = Some(DiscoveryError::NoAddress),
+            }
+        }
     }
 
-    fn resolve_address(hostname: &str, deadline: Instant) -> Result<IpAddr, DiscoveryError> {
+    fn resolve_address(hostname: &str, deadline: Instant) -> Result<String, DiscoveryError> {
         let hostname = CString::new(hostname).map_err(|_| DiscoveryError::NoAddress)?;
         let context = Box::into_raw(Box::new(AddressContext {
-            result: Mutex::new(None),
+            candidates: Mutex::new(AddressCandidates::default()),
         }));
         let mut service_ref = ptr::null_mut();
         let error = unsafe {
@@ -374,13 +460,25 @@ mod system {
             unsafe { drop(Box::from_raw(context)) };
             return Err(DiscoveryError::Service(error));
         }
-        wait_for_result(service_ref, context, deadline, |context| {
-            context
-                .result
-                .lock()
-                .expect("DNS-SD address mutex is not poisoned")
-                .take()
-        })
+        wait_for_events(
+            service_ref,
+            context,
+            deadline,
+            |context, now, deadline_reached| {
+                context
+                    .candidates
+                    .lock()
+                    .expect("DNS-SD address mutex is not poisoned")
+                    .decide(now, deadline_reached)
+            },
+            |context| {
+                context
+                    .candidates
+                    .lock()
+                    .expect("DNS-SD address mutex is not poisoned")
+                    .wake_at()
+            },
+        )
     }
 
     fn wait_for_result<T, R>(
@@ -389,27 +487,44 @@ mod system {
         deadline: Instant,
         mut result: impl FnMut(&T) -> Option<Result<R, DiscoveryError>>,
     ) -> Result<R, DiscoveryError> {
+        wait_for_events(service_ref, context, deadline, |context, _, _| result(context), |_| None)
+    }
+
+    /// Process DNS-SD events until `step` settles the operation. `step` also
+    /// runs at `wake_at` and once more when the deadline is reached, so it can
+    /// settle on elapsed time as well as on an event.
+    fn wait_for_events<T, R>(
+        service_ref: DNSServiceRef,
+        context: *mut T,
+        deadline: Instant,
+        mut step: impl FnMut(&T, Instant, bool) -> Option<Result<R, DiscoveryError>>,
+        wake_at: impl Fn(&T) -> Option<Instant>,
+    ) -> Result<R, DiscoveryError> {
         let socket = unsafe { DNSServiceRefSockFD(service_ref) };
         let outcome = if socket < 0 {
             Err(DiscoveryError::Service(socket))
         } else {
             loop {
-                if let Some(outcome) = result(unsafe { &*context }) {
+                let now = Instant::now();
+                let deadline_reached = now >= deadline;
+                if let Some(outcome) = step(unsafe { &*context }, now, deadline_reached) {
                     break outcome;
                 }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
+                if deadline_reached {
                     break Err(DiscoveryError::Timeout);
                 }
+                let wake = wake_at(unsafe { &*context }).map_or(deadline, |wake| wake.min(deadline));
+                let remaining = wake.saturating_duration_since(now);
                 let mut poll_fd = libc::pollfd {
                     fd: socket,
                     events: libc::POLLIN,
                     revents: 0,
                 };
-                let timeout_millis = remaining.as_millis().min(i32::MAX as u128) as i32;
+                // Round up so a sub-millisecond remainder does not spin.
+                let timeout_millis = remaining.as_micros().div_ceil(1000).min(i32::MAX as u128) as i32;
                 let ready = unsafe { libc::poll(&mut poll_fd, 1, timeout_millis) };
                 if ready == 0 {
-                    break Err(DiscoveryError::Timeout);
+                    continue;
                 }
                 if ready < 0 {
                     break Err(DiscoveryError::Service(-1));
@@ -433,6 +548,19 @@ mod system {
             names.insert(name.to_owned());
         } else {
             names.remove(name);
+        }
+    }
+
+    fn scope_id_from_sockaddr(address: *const libc::sockaddr) -> u32 {
+        if address.is_null() {
+            return 0;
+        }
+        unsafe {
+            if (*address).sa_family as libc::c_int == libc::AF_INET6 {
+                (*(address as *const libc::sockaddr_in6)).sin6_scope_id
+            } else {
+                0
+            }
         }
     }
 
@@ -491,6 +619,79 @@ mod system {
             );
         }
 
+        const LINK_LOCAL: Ipv6Addr = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        // An interface index no machine has, so the zone prints as a number.
+        const NO_SUCH_INTERFACE: u32 = 4_000_000;
+
+        #[test]
+        fn an_ipv4_answer_beats_an_earlier_ipv6_answer() {
+            let start = Instant::now();
+            let mut candidates = AddressCandidates::default();
+            candidates.add(IpAddr::V6(LINK_LOCAL), NO_SUCH_INTERFACE, start);
+            assert!(candidates.decide(start, false).is_none(), "waits for a possible IPv4 answer");
+            candidates.add(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)), 0, start + Duration::from_millis(20));
+            assert_eq!(
+                candidates.decide(start + Duration::from_millis(20), false),
+                Some(Ok("192.168.1.20".to_owned()))
+            );
+        }
+
+        #[test]
+        fn an_ipv6_only_answer_is_used_with_its_interface_after_the_grace() {
+            let start = Instant::now();
+            let mut candidates = AddressCandidates::default();
+            candidates.add(IpAddr::V6(LINK_LOCAL), NO_SUCH_INTERFACE, start);
+            assert_eq!(candidates.wake_at(), Some(start + IPV4_PREFERENCE_GRACE));
+            assert!(candidates.decide(start + IPV4_PREFERENCE_GRACE - Duration::from_millis(1), false).is_none());
+            assert_eq!(
+                candidates.decide(start + IPV4_PREFERENCE_GRACE, false),
+                Some(Ok("fe80::1%4000000".to_owned()))
+            );
+        }
+
+        #[test]
+        fn an_ipv6_only_answer_is_used_at_the_deadline_and_a_global_one_has_no_zone() {
+            let start = Instant::now();
+            let mut candidates = AddressCandidates::default();
+            candidates.add(IpAddr::V6("2001:db8::7".parse().unwrap()), NO_SUCH_INTERFACE, start);
+            assert_eq!(candidates.decide(start, true), Some(Ok("2001:db8::7".to_owned())));
+        }
+
+        #[test]
+        fn an_error_settles_only_when_no_address_arrived() {
+            let start = Instant::now();
+            let mut candidates = AddressCandidates::default();
+            candidates.error = Some(DiscoveryError::Service(-1));
+            assert_eq!(candidates.decide(start, false), Some(Err(DiscoveryError::Service(-1))));
+            candidates.add(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)), 0, start);
+            assert_eq!(candidates.decide(start, false), Some(Ok("10.0.0.2".to_owned())));
+        }
+
+        #[test]
+        fn ipv6_sockaddr_scope_is_read() {
+            let mut address: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
+            address.sin6_family = libc::AF_INET6 as _;
+            address.sin6_scope_id = 9;
+            let pointer = (&address as *const libc::sockaddr_in6).cast();
+            assert_eq!(scope_id_from_sockaddr(pointer), 9);
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn blocking_resolution_does_not_stall_the_runtime() {
+            let ticks = tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                Instant::now()
+            });
+            let started = Instant::now();
+            let blocked = off_runtime(|| {
+                thread::sleep(Duration::from_millis(300));
+                Instant::now()
+            });
+            let (tick, blocked) = tokio::join!(ticks, blocked);
+            assert!(tick.unwrap() < blocked.unwrap(), "the runtime kept running while resolution blocked");
+            assert!(started.elapsed() >= Duration::from_millis(300));
+        }
+
         #[test]
         #[ignore = "requires a disposable PR 1 host announcing _corsia._tcp; run CORSIA_MDNS_INSTANCE='Studio' cargo test discovery::system::tests::resolve_real_mdns_from_disposable_host -- --ignored --exact"]
         fn resolve_real_mdns_from_disposable_host() {
@@ -500,7 +701,7 @@ mod system {
             let instance = CString::new(instance).unwrap();
             let (hostname, port) = resolve_service(&instance, deadline).unwrap();
             let host = resolve_address(&hostname, deadline).unwrap();
-            assert!(!host.is_unspecified());
+            assert!(!host.is_empty());
             assert_ne!(port, 0);
         }
     }

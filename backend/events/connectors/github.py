@@ -134,6 +134,8 @@ def _classify(raw: dict[str, Any]) -> str:
         return "pr.synchronize"
     if action == "ready_for_review":
         return "pr.ready_for_review"
+    if action == "labeled":
+        return "pr.labeled"
     return "pr.opened"
 
 
@@ -196,6 +198,10 @@ MANIFEST = register(ConnectorManifest(
             event_class="actionable"),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
+            _PR_FILTERABLE, artifact_type=PR_TYPE,
+            artifact_integration=GITHUB_INTEGRATION, event_class="informational"),
+        "pr.labeled": EventTypeDecl(
+            "pr.labeled", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational"),
         "pr.merged": EventTypeDecl(

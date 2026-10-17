@@ -36,6 +36,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # An app bundle has no checkout: its backend and frontend are one signed build.
 _APP_BUNDLE = app_bundle_root()
 
+# The contract between the desktop shell and a host. This is the one definition;
+# the shell's own copy is checked against this line (version_check.rs).
+SHELL_PROTOCOL: int = 1
+
 
 def _git_read(args: list[str]) -> str | None:
     """Run a git command in the repo root, return stripped stdout, or None on failure.
@@ -108,7 +112,7 @@ def _placeholder_frontend_info() -> dict:
         "commit_subject": "(frontend not built)",
         "dirty": None,
         "build_iso": "",
-        "app": {"version": "unknown", "shell_protocol": 1},
+        "app": {"version": None},
     }
 
 
@@ -149,6 +153,22 @@ def _current_head_info() -> dict:
     }
 
 
+def _app_version(frontend: dict) -> str | None:
+    """The release version this host runs, or None when it cannot say.
+
+    An app bundle carries the version its build stamped into build-info.json (``CORSIA_APP_VERSION``). A source
+    checkout has no stamp, so it reports the nearest release tag git describes, without the leading ``v``.
+    """
+    build_app = frontend.get("app")
+    stamped = build_app.get("version") if isinstance(build_app, dict) else None
+    if isinstance(stamped, str) and stamped:
+        return stamped
+    if _APP_BUNDLE is not None:
+        return None
+    described = _git_read(["describe", "--tags", "--match", "v[0-9]*"])
+    return described.removeprefix("v") if described else None
+
+
 def _version_payload() -> dict:
     """Build the version payload; git and file reads block, so callers offload it.
 
@@ -160,9 +180,8 @@ def _version_payload() -> dict:
     backend["current_head"] = None if _APP_BUNDLE is not None else _current_head_info()
     backend["generation"] = os.environ.get("CORSIA_SERVICE_GENERATION")
     frontend = _read_frontend_build_info()
-    app = frontend.get("app")
-    if not isinstance(app, dict):
-        app = {"version": "unknown", "shell_protocol": 1}
+    # The protocol belongs to this backend's source, not to a build file that may be missing or stale.
+    app = {"version": _app_version(frontend), "shell_protocol": SHELL_PROTOCOL}
     return {
         "frontend": frontend,
         "backend": backend,

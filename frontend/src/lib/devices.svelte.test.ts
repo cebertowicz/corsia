@@ -7,7 +7,7 @@ import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 const api = (patch: Partial<DevicesApi> = {}): DevicesApi => ({
-	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local',
+	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac',
 	lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
 });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -22,7 +22,7 @@ describe('viewFromApi', () => {
 	});
 	it('reads on but not announced, and lists what to type with the port when it is not the default', () => {
 		const view = viewFromApi(api({ announced_name: null, listening: { port: 47902 }, lan_addresses: ['192.168.1.20', 'fd5c::1'] }), false);
-		expect(view).toMatchObject({ announced: false, hostName: 'studio' });
+		expect(view).toMatchObject({ announced: false, hostName: 'Studio Mac' });
 		expect(view.addresses).toEqual(['studio.local:47902', '192.168.1.20:47902', '[fd5c::1]:47902']);
 	});
 	it('reads an active code with its seconds left', () => {
@@ -32,7 +32,12 @@ describe('viewFromApi', () => {
 		expect(viewFromApi(api({ code: { state: 'paused' } }), false)).toMatchObject({ pairing: 'paused', code: null });
 	});
 	it('reads all ports taken: off, with a listener error', () => {
-		expect(viewFromApi(api({ enabled: false, listening: { error: 'No approved Devices port is available' }, announced_name: null }), false).listener).toBe('all-ports-taken');
+		expect(viewFromApi(api({ enabled: false, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' }, announced_name: null }), false).listener).toBe('all-ports-taken');
+	});
+	it('reads any other listening failure as unavailable, not as taken ports', () => {
+		for (const reason of ['credentials', 'bind', 'disabled', undefined]) {
+			expect(viewFromApi(api({ enabled: false, listening: { error: 'Permission denied', reason }, announced_name: null }), false).listener).toBe('unavailable');
+		}
 	});
 	it('is read-only when told so, and when an active code arrives without its characters (G11)', () => {
 		expect(viewFromApi(api(), true).readOnly).toBe(true);
@@ -94,7 +99,7 @@ describe('createDevices', () => {
 	it('goes back off with the ports line when every port is taken', async () => {
 		const devices = createDevices({ now: () => clock });
 		await devices.read();
-		responses.push(json(api({ enabled: false, announced_name: null, listening: { error: 'No approved Devices port is available' } })));
+		responses.push(json(api({ enabled: false, announced_name: null, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' } })));
 		await devices.setEnabled(true);
 		expect(devices.view).toMatchObject({ enabled: false, listener: 'all-ports-taken' });
 	});

@@ -96,8 +96,14 @@ def test_agent_state_guidance_uses_the_persons_connected_apps_words():
         ),
         "connecting": "Wait for the connection attempt to finish.",
         "working": 'Load its tools with tools_load(server="GitHub").',
-        "needs_token": "GitHub needs a key. Press Set key next to GitHub in Research's Connected apps. Please don't paste it here.",
-        "token_rejected": "GitHub didn't accept its key. Press Replace key next to GitHub in Research's Connected apps.",
+        "needs_token": (
+            "GitHub needs a key. Ask the person to open Settings › Keys, find the GitHub key card, and press Set. "
+            "Please don't paste it here."
+        ),
+        "token_rejected": (
+            "GitHub didn't accept its key. Ask the person to open Settings › Keys, find the GitHub key card, "
+            "and press Replace."
+        ),
         "disconnected": "GitHub lost its connection. Open GitHub in Research's Connected apps and press Reconnect.",
         "failed": (
             "Reconnect GitHub once. If it fails again, tell the person: GitHub couldn't connect: no response. "
@@ -141,7 +147,7 @@ def test_agent_proposal_needs_person_and_preserves_active_config(connected_apps_
 
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
-    accepted = client.post(f"/api/mcp/servers/{original['id']}/approve")
+    accepted = client.post(f"/api/mcp/servers/{original['id']}/approve", json={"expected_revision": 2})
     assert accepted.status_code == 200
     approved = get_app(original["id"], db=db)
     assert approved["config"]["command"] == "new"
@@ -290,6 +296,7 @@ def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client
 
 def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_client, monkeypatch) -> None:
     from api import connected_apps
+    import tools.connected_apps_runtime as connected_runtime
 
     client, _db, actor = connected_apps_client
     actions: list[tuple[str, str]] = []
@@ -297,7 +304,11 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     async def record(action: str, app_id: str) -> None:
         actions.append((action, app_id))
 
+    async def restart_after_saved_write(app_id: str) -> None:
+        await record("restart", app_id)
+
     monkeypatch.setattr(connected_apps, "_run_app_runtime", record)
+    monkeypatch.setattr(connected_runtime, "restart_after_saved_write", restart_after_saved_write)
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
     created = client.post(
@@ -316,7 +327,36 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     assert changed.status_code == 200
     removed = client.delete(f"/api/mcp/servers/{app_id}")
     assert removed.status_code == 200
-    assert actions == [("connect", app_id), ("reconnect", app_id), ("remove", app_id)]
+    assert actions == [("connect", app_id), ("restart", app_id), ("remove", app_id)]
+
+
+def test_human_edit_restarts_the_app_without_the_reconnect_limit(connected_apps_client, monkeypatch) -> None:
+    from api import connected_apps
+    import tools.connected_apps_runtime as connected_runtime
+
+    client, db, actor = connected_apps_client
+    actor.clear()
+    actor.update({"id": "user", "token_kind": "session"})
+    app = create_app(
+        "A", {"command": "old", "key_refs": []},
+        {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}, db=db,
+    )
+    actions: list[tuple[str, str]] = []
+
+    async def runtime(action: str, app_id: str) -> dict[str, object]:
+        actions.append((action, app_id))
+        return {"state": "working", "state_since": "now", "tool_count": 1, "failure_class": None}
+
+    monkeypatch.setattr(connected_runtime, "apply_connected_app_runtime", runtime)
+
+    response = client.patch(
+        f"/api/mcp/servers/{app['id']}",
+        json={"config": {"command": "new"}, "key_refs": [], "expected_revision": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert get_app(app["id"], db=db)["config"]["command"] == "new"
+    assert actions == [("restart", app["id"])]
 
 
 def test_reconnect_uses_the_app_runtime_and_returns_its_live_state(connected_apps_client, monkeypatch) -> None:
@@ -367,7 +407,7 @@ def test_expired_proposal_is_listed_and_cannot_be_approved(connected_apps_client
 
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
-    refused = client.post(f"/api/mcp/servers/{proposal['id']}/approve")
+    refused = client.post(f"/api/mcp/servers/{proposal['id']}/approve", json={"expected_revision": 1})
     assert refused.status_code == 409
     assert refused.json()["detail"] == "This request expired after seven days. Ask Planning to send it again."
     assert db.execute("SELECT 1 FROM connected_apps WHERE id=?", (proposal["id"],)).fetchone() is None

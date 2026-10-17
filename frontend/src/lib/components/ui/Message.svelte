@@ -24,7 +24,7 @@
 	.msg.err {
 		background: var(--red-bg);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
-		color: var(--red);
+		color: var(--red-text);
 	}
 	.msg.ok {
 		background: var(--green-bg);

@@ -77,7 +77,24 @@ export async function openSettings(page: Page) {
 		await expect(settingsButton).toBeVisible();
 	}
 	await settingsButton.click();
-	await expect(page.getByRole('button', { name: 'Providers' })).toBeVisible();
+	const providers = (page.viewportSize()?.width ?? 0) <= 768
+		? page.locator('.settings-view .mobile-root [data-settings-section="providers"] button.face')
+		: page.locator('.settings-view .desktop-nav [data-settings-section="providers"]');
+	await expect(providers).toBeVisible();
+}
+
+/** Opens a Settings section through the navigation that is visible at this width. */
+export async function openSettingsSection(page: Page, section: string) {
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		const root = page.locator('.settings-view .mobile-root');
+		if (!(await root.isVisible())) {
+			await page.locator('.shell-header .h-back').click();
+			await expect(root).toBeVisible();
+		}
+		await root.locator(`[data-settings-section]`).getByRole('button', { name: section, exact: true }).click();
+		return;
+	}
+	await page.locator('.settings-view .desktop-nav').getByRole('button', { name: section, exact: true }).click();
 }
 
 export async function saveEvidenceScreenshot(
@@ -245,9 +262,11 @@ export function assistantMessages(page: Page) {
 export function captureConsoleErrors(page: Page): string[] {
 	const errors: string[] = [];
 	page.on('console', (msg) => {
-		if (msg.type() === 'error') {
-			errors.push(msg.text());
-		}
+		if (msg.type() !== 'error') return;
+		// The disposable test token is not a human user, so the lease list (`require_human_user` in
+		// backend/api/host_access.py) answers 403 and HostAccessLeaseControl hides that failure; only the browser logs it.
+		if (msg.text().includes('403 (Forbidden)') && msg.location().url.includes('/api/host-access/leases')) return;
+		errors.push(msg.text());
 	});
 	page.on('pageerror', (err) => {
 		errors.push(`pageerror: ${err.message}`);

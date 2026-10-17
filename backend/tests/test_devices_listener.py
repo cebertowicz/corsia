@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import errno
 import logging
 import os
@@ -10,17 +11,17 @@ from types import SimpleNamespace
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
+from fastapi import FastAPI, WebSocket
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
-from infra import devices_listener
+from infra import devices_listener, devices_server
 from infra.devices_listener import (
     DevicesApp,
     DevicesListener,
     DevicesServer,
     ensure_host_key,
     lan_addresses,
-    local_hostname,
-    macos_computer_name,
-    remote_connect_name,
 )
 
 
@@ -107,70 +108,6 @@ def test_address_hints_include_only_listener_reachable_lan_addresses():
         "192.168.1.20",
         "fd00::20",
     ]
-
-
-def test_local_hostname_is_a_lowercase_mdns_name(monkeypatch):
-    monkeypatch.setattr(socket, "gethostname", lambda: "Studio.Local.")
-
-    assert local_hostname() == "studio.local"
-
-
-def test_macos_computer_name_decodes_a_cfstring_as_utf8(monkeypatch):
-    name = "Stúdió Mac"
-    copied_name = object()
-    released = []
-
-    def copy_name(store, encoding):
-        assert (store, encoding) == (None, None)
-        return copied_name
-
-    def string_length(value):
-        assert value is copied_name
-        return len(name)
-
-    def max_size(length, encoding):
-        assert (length, encoding) == (len(name), 0x08000100)
-        return len(name.encode("utf-8"))
-
-    def get_string(value, buffer, size, encoding):
-        assert (value, size, encoding) == (copied_name, len(name.encode("utf-8")) + 1, 0x08000100)
-        buffer.value = name.encode("utf-8")
-        return True
-
-    def release(value):
-        released.append(value)
-
-    system_configuration = SimpleNamespace(SCDynamicStoreCopyComputerName=copy_name)
-    core_foundation = SimpleNamespace(
-        CFStringGetLength=string_length,
-        CFStringGetMaximumSizeForEncoding=max_size,
-        CFStringGetCString=get_string,
-        CFRelease=release,
-    )
-    monkeypatch.setattr(devices_listener.sys, "platform", "darwin")
-    monkeypatch.setattr(
-        devices_listener,
-        "_load_macos_frameworks",
-        lambda: (system_configuration, core_foundation),
-    )
-
-    assert macos_computer_name() == name
-    assert released == [copied_name]
-
-
-def test_remote_connect_name_uses_announced_name_before_macos_name(monkeypatch):
-    monkeypatch.setattr(devices_listener, "macos_computer_name", lambda: "System name")
-    monkeypatch.setattr(devices_listener, "local_hostname", lambda: "fallback.local")
-
-    assert remote_connect_name(SimpleNamespace(announced_name="Announced name")) == "Announced name"
-    assert remote_connect_name(SimpleNamespace(announced_name=None)) == "System name"
-
-
-def test_remote_connect_name_falls_back_to_local_hostname(monkeypatch):
-    monkeypatch.setattr(devices_listener, "macos_computer_name", lambda: None)
-    monkeypatch.setattr(devices_listener, "local_hostname", lambda: "fallback.local")
-
-    assert remote_connect_name(None) == "fallback.local"
 
 
 class _FakeSocket:
@@ -273,7 +210,7 @@ async def test_listener_start_surfaces_a_prebind_error_without_starting_a_server
     listener = DevicesListener(app=object())
 
     assert await listener.start() is False
-    assert listener.listening == {"error": "Permission denied"}
+    assert listener.listening == {"error": "Permission denied", "reason": "bind"}
     assert listener.server is None
     assert listener.task is None
 
@@ -290,7 +227,7 @@ async def test_listener_start_contains_host_key_failure(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR, logger="infra.devices_listener"):
         assert await listener.start() is False
 
-    assert listener.listening == {"error": "Devices listener credentials unavailable"}
+    assert listener.listening == {"error": "Devices listener credentials unavailable", "reason": "credentials"}
     assert listener.server is None
     assert listener.task is None
     assert "unsafe key" in caplog.text
@@ -310,17 +247,308 @@ async def test_devices_app_authentication_uses_the_db_boundary(monkeypatch):
     assert calls == [(devices_listener.authenticate, ("token",))]
 
 
+def test_devices_server_override_is_pinned_to_the_verified_uvicorn_version():
+    assert devices_server.uvicorn.__version__ == devices_server._PINNED_UVICORN_VERSION, (
+        "DevicesServer._wait_tasks_to_complete overrides a private Uvicorn method and only "
+        f"runs on {devices_server._PINNED_UVICORN_VERSION}; Uvicorn is now "
+        f"{devices_server.uvicorn.__version__}. Re-verify the override against the new "
+        "release (SSE shutdown, transport abort, task join), then update _PINNED_UVICORN_VERSION."
+    )
+
+
+# A joining computer on the same network: the Devices listener refuses any other peer.
+_LAN_PEER = ("192.168.1.20", 50000)
+
+_SESSIONS = {
+    "person-session": {"id": "person", "name": "Person", "token_kind": "session"},
+    "agent-token": {"id": "agent", "name": "Agent", "token_kind": "agent"},
+}
+
+
+@pytest.fixture
+def token_users(monkeypatch):
+    async def fake_run_in_db(function, *args):
+        return _SESSIONS.get(args[0])
+
+    monkeypatch.setattr(devices_listener, "run_in_db", fake_run_in_db)
+
+
+def _stub_app():
+    stub = FastAPI()
+
+    @stub.get("/api/models")
+    async def models():
+        return {"models": []}
+
+    @stub.websocket("/ws")
+    async def socket(websocket: WebSocket):
+        await websocket.accept()
+        await websocket.send_json({"type": "accepted"})
+        await websocket.close()
+
+    return stub
+
+
+def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(token_users):
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
+
+    assert client.get("/api/models", params={"token": "person-session"}).status_code == 200
+    assert client.get(
+        "/api/models", headers={"Authorization": "Bearer person-session"},
+    ).status_code == 200
+
+
+def test_devices_app_requires_sign_in_without_a_token_or_with_a_machine_token(token_users):
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
+
+    for response in (
+        client.get("/api/models"),
+        client.get("/api/models", params={"token": "agent-token"}),
+        client.get("/api/models", params={"token": "unknown"}),
+    ):
+        assert response.status_code == 401
+        assert response.json() == {"reason": "sign_in_required"}
+
+
+def test_devices_app_websocket_handshake_token_must_be_a_person_session(token_users):
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
+
+    with client.websocket_connect("/ws?token=person-session") as person:
+        assert person.receive_json() == {"type": "accepted"}
+    with client.websocket_connect(
+        "/ws", headers={"Authorization": "Bearer person-session"},
+    ) as person:
+        assert person.receive_json() == {"type": "accepted"}
+    for presented in ("agent-token", "unknown"):
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect(f"/ws?token={presented}"):
+                pass
+        assert refused.value.code == 1008
+
+
+def test_devices_app_leaves_a_tokenless_websocket_to_its_first_frame_authentication(token_users):
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
+
+    with client.websocket_connect("/ws") as unauthenticated_yet:
+        assert unauthenticated_yet.receive_json() == {"type": "accepted"}
+
+
+class _FirstFrameSocket:
+    def __init__(self, listener: str | None, presented: str):
+        self.scope = {"corsia_listener": listener} if listener else {}
+        self._presented = presented
+        self.sent: list[dict] = []
+        self.closed: list[int | None] = []
+
+    async def receive_json(self):
+        return {"token": self._presented}
+
+    async def send_json(self, message):
+        self.sent.append(message)
+
+    async def close(self, code=None):
+        self.closed.append(code)
+
+
 @pytest.mark.asyncio
-async def test_devices_server_uses_uvicorn_default_wait_outside_049(monkeypatch):
+@pytest.mark.parametrize(
+    ("endpoint", "refusal"),
+    [("chat", {"type": "error", "message": "Invalid or expired session"}), ("pane", None)],
+)
+async def test_devices_listener_first_frame_accepts_only_a_person_session(
+    monkeypatch, endpoint, refusal,
+):
+    from ws import browser_stream, thread_control
+
+    monkeypatch.setattr(thread_control, "active_turns_for_owner", lambda _user_id: [])
+    for module in (thread_control, browser_stream):
+        monkeypatch.setattr(module, "authenticate", lambda presented: _SESSIONS.get(presented))
+
+    async def authenticate(socket):
+        if endpoint == "chat":
+            return await thread_control.authenticate_ws(socket)
+        return await browser_stream._authenticate_pane_stream(socket)
+
+    machine = _FirstFrameSocket("devices", "agent-token")
+    assert await authenticate(machine) is None
+    assert machine.sent == ([refusal] if refusal else [])
+    assert machine.closed == [None if refusal else 1008]
+
+    person = _FirstFrameSocket("devices", "person-session")
+    assert (await authenticate(person))["id"] == "person"
+    assert person.closed == []
+
+    # Off the Devices listener a machine token keeps working.
+    main_listener = _FirstFrameSocket(None, "agent-token")
+    assert (await authenticate(main_listener))["id"] == "agent"
+
+
+# The real /ws and pane-stream endpoints behind DevicesApp, driven over ASGI.
+_REFUSED_CHAT_FRAMES = [{"type": "error", "message": "Invalid or expired session"}]
+_SOCKET_PATHS = {
+    "chat": ("/ws", _REFUSED_CHAT_FRAMES, "auth_ok"),
+    "pane": ("/api/browser/thread-1/stream", [], "no_browser_yet"),
+}
+
+
+@pytest.fixture
+def devices_sockets(monkeypatch, token_users):
+    from host_access import browser_pane
+    from ws import browser_stream, thread_control, websocket_endpoint
+
+    async def pane_closed(_thread_id):
+        return False
+
+    monkeypatch.setattr(thread_control, "active_turns_for_owner", lambda _user_id: [])
+    for module in (thread_control, browser_stream):
+        monkeypatch.setattr(module, "authenticate", lambda presented: _SESSIONS.get(presented))
+    monkeypatch.setattr(browser_stream, "_user_owns_thread", lambda _thread_id, _user_id: True)
+    monkeypatch.setattr(browser_pane, "is_open", pane_closed)
+
+    stub = FastAPI()
+    stub.add_api_websocket_route("/ws", websocket_endpoint)
+    stub.add_api_websocket_route("/api/browser/{thread_id}/stream", browser_stream.browser_stream_endpoint)
+    return TestClient(DevicesApp(stub), client=_LAN_PEER)
+
+
+def _frames_until_close(socket) -> tuple[list, int]:
+    frames = []
+    try:
+        while True:
+            frames.append(socket.receive_json())
+    except WebSocketDisconnect as closed:
+        return frames, closed.code
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "pane"])
+@pytest.mark.parametrize("first_frame", [{"type": "subscribe_session", "thread_id": "t"}, {"token": ""}, [1, 2]])
+def test_devices_listener_closes_a_socket_whose_first_frame_is_not_an_auth_frame(
+    devices_sockets, endpoint, first_frame,
+):
+    path, refusal_frames, accepted = _SOCKET_PATHS[endpoint]
+
+    with devices_sockets.websocket_connect(path) as socket:
+        socket.send_json(first_frame)
+        frames, _code = _frames_until_close(socket)
+
+    # Nothing but the endpoint's own refusal (or nothing at all, for a frame it
+    # cannot even read) precedes the close: no auth_ok, no turn or pane state.
+    assert frames in ([], refusal_frames)
+    assert all(frame.get("type") != accepted for frame in frames)
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "pane"])
+def test_devices_listener_closes_a_machine_token_in_the_first_frame(devices_sockets, endpoint):
+    path, refusal_frames, accepted = _SOCKET_PATHS[endpoint]
+
+    with devices_sockets.websocket_connect(path) as socket:
+        socket.send_json({"token": "agent-token"})
+        frames, _code = _frames_until_close(socket)
+
+    assert frames == refusal_frames
+    assert all(frame.get("type") != accepted for frame in frames)
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "pane"])
+def test_devices_listener_accepts_a_person_session_in_the_first_frame(devices_sockets, endpoint):
+    path, _, accepted = _SOCKET_PATHS[endpoint]
+
+    with devices_sockets.websocket_connect(path) as socket:
+        socket.send_json({"token": "person-session"})
+        first = socket.receive_json()
+
+    assert accepted in (first.get("type"), first.get("state"))
+
+
+@pytest.mark.asyncio
+async def test_listener_start_hands_the_announcement_its_change_callback(monkeypatch):
+    class _Server:
+        def __init__(self, _config):
+            self.should_exit = False
+
+        async def serve(self, sockets):
+            return None
+
+    class _Socket:
+        def close(self):
+            pass
+
+    started = []
+    monkeypatch.setattr(devices_listener, "ensure_host_key", lambda: ("key", "cert"))
+    monkeypatch.setattr(devices_listener, "_prebind", lambda: (_Socket(), 47901, None))
+    monkeypatch.setattr(devices_listener, "DevicesServer", _Server)
+    monkeypatch.setattr(
+        devices_listener.DNSServiceAnnouncement, "start", lambda self: started.append(self) or True
+    )
     calls = []
+    listener = DevicesListener(app=object(), on_announcement_change=lambda: calls.append("changed"))
 
-    async def default_wait(self):
-        calls.append(self)
+    assert await listener.start() is True
+    started[0].on_change()
 
-    monkeypatch.setattr(devices_listener.uvicorn, "__version__", "0.50.0")
-    monkeypatch.setattr(devices_listener.uvicorn.Server, "_wait_tasks_to_complete", default_wait)
-    server = object.__new__(DevicesServer)
+    assert calls == ["changed"]
+    await listener.task
 
-    await server._wait_tasks_to_complete()
 
-    assert calls == [server]
+class _ClosableSocket:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _use_fake_server(monkeypatch, serve, sock):
+    class _Server:
+        def __init__(self, _config):
+            self.should_exit = False
+
+        async def serve(self, sockets):
+            await serve(self)
+
+    monkeypatch.setattr(devices_listener, "ensure_host_key", lambda: ("key", "cert"))
+    monkeypatch.setattr(devices_listener, "_prebind", lambda: (sock, 47901, None))
+    monkeypatch.setattr(devices_listener, "DevicesServer", _Server)
+    monkeypatch.setattr(devices_listener.DNSServiceAnnouncement, "start", lambda self: True)
+
+
+@pytest.mark.asyncio
+async def test_listener_stops_reporting_its_port_when_the_serve_task_fails_after_start(monkeypatch, caplog):
+    async def serve(_server):
+        raise RuntimeError("tls key would not load")
+
+    sock = _ClosableSocket()
+    _use_fake_server(monkeypatch, serve, sock)
+    changes = []
+    listener = DevicesListener(app=object(), on_announcement_change=lambda: changes.append("changed"))
+
+    with caplog.at_level(logging.ERROR, logger="infra.devices_listener"):
+        assert await listener.start() is True
+        assert listener.listening == {"port": 47901}
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert listener.listening == {"error": "Devices listener stopped serving", "reason": "serve"}
+    assert listener.port is None and listener.task is None and listener.server is None
+    assert sock.closed, "the pre-bound port was not released"
+    assert changes == ["changed"], "the page was not told"
+    assert "tls key would not load" in caplog.text
+    # A later start binds again instead of believing the dead task still serves.
+    assert await listener.start() is True
+
+
+@pytest.mark.asyncio
+async def test_listener_stop_is_not_reported_as_a_failure(monkeypatch):
+    async def serve(server):
+        while not server.should_exit:
+            await asyncio.sleep(0)
+
+    _use_fake_server(monkeypatch, serve, _ClosableSocket())
+    changes = []
+    listener = DevicesListener(app=object(), on_announcement_change=lambda: changes.append("changed"))
+
+    assert await listener.start() is True
+    await listener.stop()
+
+    assert listener.listening == {"error": None}
+    assert changes == []

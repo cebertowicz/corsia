@@ -27,7 +27,7 @@
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
-	let primaryButton = $state<HTMLButtonElement | null>(null);
+	let primaryButton = $state<HTMLButtonElement | undefined>();
 	let primaryLabelDuration = $state(0);
 	let previousPrimaryLabel: string | undefined;
 	let flipVersion = 0;
@@ -59,7 +59,7 @@
 		if (jobs.length === 0) shownJobs = [];
 	}
 
-	function readPrimaryLabelDuration(node: HTMLElement | null) {
+	function readPrimaryLabelDuration(node: HTMLElement | undefined) {
 		return node ? Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 : 0;
 	}
 

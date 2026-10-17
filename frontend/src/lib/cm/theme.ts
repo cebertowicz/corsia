@@ -75,6 +75,8 @@ export const docTheme = EditorView.theme({
 	// against the editor's height map and a click lands on the line underneath.
 	// The diagram widget's spacing is beside the shared .mermaid-diagram rule in app.css.
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
+	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
+	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
 	'.cm-md-table .table-wrap': { margin: '0' },
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },
@@ -97,6 +99,12 @@ export const docTheme = EditorView.theme({
 		backgroundColor: 'color-mix(in srgb, var(--amber) 26%, transparent)',
 		borderBottomColor: 'var(--amber)'
 	},
+	// A whole table or diagram: the same amber as an outline on the block, since a block has no text to underline.
+	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
+	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },
+	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
+	// A mark on a whole table cell: the same underline, as a cell's own bottom edge.
+	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { borderBottomWidth: 'medium' },
 	// Markers live in a rail the content padding reserves (--doc-rail: 24px for a fine pointer,
 	// 44px for a coarse or unknown one, decided by railWidth() and set by the rail and the viewer;
 	// the document header takes the same inset, and every CSS fallback is the unknown-pointer 44px). The rail is a

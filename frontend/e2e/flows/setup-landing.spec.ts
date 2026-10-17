@@ -46,13 +46,14 @@ test.describe('@surface:first-run setup landing', () => {
 			await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');
 			await page.locator('input[autocomplete="new-password"]').nth(1).fill('correct-password');
 			await page.getByRole('button', { name: 'Continue' }).click();
-			await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeVisible();
+			// SetupScreen.svelte: the model step is titled "Connect an AI".
+			await expect(page.getByRole('heading', { name: 'Connect an AI' })).toBeVisible();
 			const start = page.getByRole('button', { name: 'Start using CORSIA' });
 			await expect(start).toBeEnabled();
 			await start.click();
 
 			// Landing: the setup flow is gone and the real app shell is up with a usable composer.
-			await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toHaveCount(0);
+			await expect(page.getByRole('heading', { name: 'Connect an AI' })).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Start using CORSIA' })).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Get started' })).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });

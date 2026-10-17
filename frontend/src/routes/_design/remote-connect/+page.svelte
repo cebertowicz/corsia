@@ -23,7 +23,7 @@
 	const LONG = 'Alex’s Mac mini (2)';
 	const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 	const server = (patch: Record<string, unknown> = {}, name: string | null = 'Studio') => ({
-		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local',
+		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local', computer_name: name,
 		lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
 	});
 	const active = (seconds: number) => ({ state: 'active', value: 'K7QX', expires_in_seconds: seconds });

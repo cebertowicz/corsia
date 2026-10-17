@@ -122,7 +122,7 @@ def test_host_key_failure_leaves_runtime_alive_and_devices_closed(monkeypatch):
 
     assert started is False
     assert local_runtime.enabled is False
-    assert local_runtime.snapshot()["listening"] == {"error": "Devices listener credentials unavailable"}
+    assert local_runtime.snapshot()["listening"] == {"error": "Devices listener credentials unavailable", "reason": "credentials"}
     assert local_runtime.snapshot()["announced_name"] is None
 
 
@@ -146,7 +146,7 @@ def test_disabled_development_put_refuses_without_binding_or_announcing(monkeypa
     )
 
     assert response["enabled"] is False
-    assert response["listening"] == {"error": "Devices listener disabled"}
+    assert response["listening"] == {"error": "Devices listener disabled", "reason": "disabled"}
     assert response["announced_name"] is None
 
 
@@ -190,21 +190,29 @@ def test_repeated_enable_preserves_listener_and_announcement_then_disable_tears_
     assert disabled["listening"] == {"error": None}
 
 
-def test_devices_snapshot_uses_its_injected_name_resolver():
+def test_devices_snapshot_gives_a_typeable_host_and_leaves_the_display_name_to_the_resolver(monkeypatch):
+    import core.devices_runtime as devices_runtime
+
     announcements = []
     expected_announcement = SimpleNamespace(announced_name="Announced name")
     devices = DevicesRuntime(
-        name_resolver=lambda announcement: announcements.append(announcement) or "Canonical name"
+        name_resolver=lambda announcement: announcements.append(announcement) or "Studio Mac"
     )
     devices.listener = SimpleNamespace(
         listening={"port": 47901},
         announcement=expected_announcement,
         port=47901,
     )
+    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio-mac.local")
+    monkeypatch.setattr(devices_runtime, "computer_name", lambda: "Studio Mac")
 
     snapshot = devices.snapshot()
 
-    assert snapshot["local_hostname"] == "Canonical name"
+    # local_hostname is what the joiner types, so it is the .local host and never the display name (spaces, no DNS).
+    assert snapshot["local_hostname"] == "studio-mac.local"
+    # computer_name is the person's name for the machine, so the page's fallback never shows the mDNS host.
+    assert snapshot["computer_name"] == "Studio Mac"
+    assert devices.remote_connect_name() == "Studio Mac"
     assert announcements == [expected_announcement]
 
 
@@ -322,7 +330,7 @@ def test_devices_address_hints_are_authenticated_and_not_pre_auth(monkeypatch):
     import core.devices_runtime as devices_runtime
 
     runtime.pairing.disable()
-    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "studio.local")
+    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio.local")
     monkeypatch.setattr(
         devices_runtime,
         "lan_addresses",
@@ -355,6 +363,26 @@ def test_devices_address_hints_are_authenticated_and_not_pre_auth(monkeypatch):
     assert "lan_addresses" not in version.json()
 
 
+def test_the_desktop_shells_own_requests_pass_the_real_gate_in_the_format_it_sends(monkeypatch):
+    """The shell's version check and pairing calls carry no token (reqwest, JSON body); the gate must not need one."""
+    runtime.pairing.disable()
+    shell_headers = {"user-agent": "corsia-desktop", "accept": "*/*"}
+    lan = TestClient(DevicesApp(app), client=("192.168.1.20", 50000))
+    beyond = TestClient(DevicesApp(app), client=("8.8.8.8", 50000))
+
+    version = lan.get("/api/version", headers=shell_headers)
+    start = lan.post("/api/devices/pair/start", json={"mode": "pinned", "msg_c": "Y2xpZW50"}, headers=shell_headers)
+    finish = lan.post(
+        "/api/devices/pair/finish", json={"exchange_id": "none", "confirm_c": "Y29uZmlybQ=="}, headers=shell_headers,
+    )
+    refused = beyond.get("/api/version", headers=shell_headers)
+
+    assert version.status_code == 200
+    assert start.status_code == 409
+    assert finish.status_code not in {401, 403}
+    assert refused.status_code == 403
+
+
 def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     async def human_session(_scope):
         return True
@@ -383,17 +411,15 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     assert direct.json()["code"]["value"] == code
     assert forwarded.json()["code"] == {
         "state": "active",
-        "expires_at": forwarded.json()["code"]["expires_at"],
         "expires_in_seconds": forwarded.json()["code"]["expires_in_seconds"],
     }
     assert devices_listener.json()["code"] == {
         "state": "active",
-        "expires_at": devices_listener.json()["code"]["expires_at"],
         "expires_in_seconds": devices_listener.json()["code"]["expires_in_seconds"],
     }
 
 
-_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "lan_addresses", "code"}
+_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code"}
 _NAME_CONFLICT = -65548
 
 
@@ -466,13 +492,75 @@ def test_devices_status_omits_dns_sd_failure_cause(monkeypatch, failure):
     assert set(body) == _DOCUMENTED_DEVICES_KEYS
     assert body["listening"] == {"port": 47901}
     assert body["announced_name"] is None
-    assert body["code"] == {"state": "none", "expires_at": None}
+    assert body["code"] == {"state": "none"}
     assert "expires_in_seconds" not in body["code"]
     assert not {"cause", "error", "reason", "detail", "message"} & set(_response_keys(body))
     assert raw_error not in response.text
     assert "DNS-SD" not in response.text
     assert str(_NAME_CONFLICT) not in response.text
     assert str(dns_sd._KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING) not in response.text
+
+
+def test_devices_status_when_the_registration_callback_never_arrives(monkeypatch):
+    """A Mac whose network never lets mDNSResponder confirm the name: no hang, no error, a state to act on."""
+    import core.devices_runtime as devices_runtime
+
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    with pytest.MonkeyPatch.context() as dns_seams:
+        _install_dns_seams(dns_seams, library)
+        announcement = dns_sd.DNSServiceAnnouncement(47901)
+        assert announcement.start() is True
+    assert announcement.announced_name is None and announcement.error is None
+    listener = DevicesListener(app, port=47901, announcement=announcement)
+    runtime.pairing.disable()
+    runtime.pairing.enable()
+    monkeypatch.setattr(runtime, "listener", listener)
+    monkeypatch.setattr(devices_runtime, "lan_addresses", lambda *, include_link_local: ["192.168.1.20"])
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        devices_api.require_human_user,
+        lambda: {"id": "person", "token_kind": "session"},
+    )
+
+    response = TestClient(app, client=("127.0.0.1", 1234)).get("/api/devices")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["listening"] == {"port": 47901}
+    assert body["announced_name"] is None
+    assert body["lan_addresses"] == ["192.168.1.20"]
+    assert body["local_hostname"]
+
+
+def test_devices_status_reflects_the_name_announced_after_the_snapshot(monkeypatch):
+    """The callback lands after PUT returned: the change schedules devices_updated and GET shows the name."""
+    import core.devices_runtime as devices_runtime
+
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    updates: list[str] = []
+    with pytest.MonkeyPatch.context() as dns_seams:
+        _install_dns_seams(dns_seams, library)
+        announcement = dns_sd.DNSServiceAnnouncement(47901)
+        announcement.on_change = lambda: updates.append("devices_updated")
+        assert announcement.start() is True
+    listener = DevicesListener(app, port=47901, announcement=announcement)
+    runtime.pairing.disable()
+    runtime.pairing.enable()
+    monkeypatch.setattr(runtime, "listener", listener)
+    monkeypatch.setattr(devices_runtime, "lan_addresses", lambda *, include_link_local: ["192.168.1.20"])
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        devices_api.require_human_user,
+        lambda: {"id": "person", "token_kind": "session"},
+    )
+    client = TestClient(app, client=("127.0.0.1", 1234))
+
+    assert client.get("/api/devices").json()["announced_name"] is None
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+
+    assert updates == ["devices_updated"]
+    assert client.get("/api/devices").json()["announced_name"] == "Studio"
 
 
 def test_devices_management_routes_require_direct_main_loopback(monkeypatch):

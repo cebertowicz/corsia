@@ -164,7 +164,7 @@ def test_megabyte_distributed_prose_diff_finishes_under_one_second(tmp_path):
     assert elapsed < 1.0
 
 
-def test_megabyte_lane_write_holds_the_loop_under_100ms(tmp_path):
+def test_megabyte_lane_write_holds_the_loop_for_a_fraction_of_the_diff(tmp_path):
     # The share of the whole diff one loop callback holds, not absolute seconds:
     # a hosted runner running three shards at once is about 3x this Mac, so a
     # fixed bound sat on the line. A write that runs the diff in one callback

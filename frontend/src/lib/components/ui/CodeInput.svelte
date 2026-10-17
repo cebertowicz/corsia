@@ -91,7 +91,7 @@
 		box-shadow: var(--glass-rim), var(--shadow-chip); caret-color: var(--accent-line);
 		transition: border-color var(--dur-tight);
 	}
-	.box:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--glass-rim), var(--shadow-chip), 0 0 0 3px var(--accent-wash); }
+	.box:focus { border-color: var(--accent-line); box-shadow: var(--glass-rim), var(--shadow-chip); outline: 3px solid var(--accent-wash); outline-offset: 0; }
 	.box.invalid { border-color: var(--red-text); }
 	.box:disabled { opacity: 1; cursor: default; }
 	.box:read-only { caret-color: transparent; cursor: default; }

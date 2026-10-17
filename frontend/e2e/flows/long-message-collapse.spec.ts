@@ -7,6 +7,7 @@ import {
     waitForWsConnected,
 } from '../support/corsia';
 import { injectMessage } from '../support/mock';
+import { setFocusMode } from '../support/focusMode';
 
 const LONG_TEXT = Array.from(
     { length: 26 },
@@ -26,6 +27,11 @@ async function expectCollapsedThenExpand(row: Locator) {
 }
 
 test.describe('@flow:long-message-collapse @surface:chat long message readability', () => {
+    // Focus is on by default and groups these rows; this spec covers the ordinary row presentation.
+    test.afterEach(async ({ request }) => {
+        await setFocusMode(request, true);
+    });
+
     test(
         'injected long ordinary rows collapse and expand in chat',
         async ({ page, request }, testInfo) => {
@@ -33,6 +39,7 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
 
             const sessionTitle = `e2e long-message-collapse ${Date.now()}`;
             const sessionId = await createSession(request, sessionTitle);
+            await setFocusMode(request, false);
 
             await injectMessage(
                 request,
@@ -61,7 +68,8 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
                     role: 'system',
                     content: LONG_TEXT,
                     metadata: {
-                        type: 'event_chip',
+                        // SystemMessageRow.svelte renders EventChip for `activity_receipt` and `context_event`; `event_chip` is retired.
+                        type: 'activity_receipt',
                         event_type: 'webhook.github.pr_comment',
                         summary: LONG_TEXT,
                         url: 'https://github.com/o/r/pull/42#issuecomment-1',

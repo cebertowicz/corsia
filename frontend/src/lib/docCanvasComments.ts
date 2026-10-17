@@ -1,4 +1,4 @@
-import { rangeFor, type DocComment } from '$lib/stores/docComments';
+import { hasNewReplies, rangeFor, type DocComment } from '$lib/stores/docComments';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -16,6 +16,10 @@ export function canvasCommentRange(comment: DocComment, text: string): { from: n
 export function unplaced(comment: DocComment): boolean {
 	return (comment.placement === 'placing' || comment.placement === 'not_placed') && !comment.drawn;
 }
+
+/** Whether a just-posted comment may still get its first drawn mark: it exists, is not orphaned or refused placement, and is not drawn yet. */
+export const awaitsFirstMark = (comment: DocComment | undefined, drawn: boolean) =>
+	!!comment && !comment.orphaned && comment.placement !== 'not_placed' && !drawn;
 
 /** Build the editor's immutable target from the canonical comment range. */
 export function canvasCommentScrollTarget(comments: DocComment[], text: string, id: string, focus: boolean, origin: ScrollOrigin): CanvasScrollTarget | null {
@@ -52,7 +56,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: comment.replyWaiting, onMarkerFocus, suggestion }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasNewReplies(comment), onMarkerFocus, suggestion }];
 	});
 }
 

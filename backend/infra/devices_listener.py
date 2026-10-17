@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import ctypes
 import errno
 import ipaddress
 import logging
@@ -12,11 +10,11 @@ import os
 import secrets
 import socket
 import stat
-import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from urllib.parse import parse_qs
 
 import psutil
 import uvicorn
@@ -30,6 +28,7 @@ from infra.auth import authenticate, is_person_session, token_from_request
 from infra.config import STATE_ROOT
 from infra.db_async import run_in_db
 from infra.dns_sd import DNSServiceAnnouncement
+from infra.devices_server import DevicesServer
 
 
 DEFAULT_PORT = 47901
@@ -37,63 +36,9 @@ FALLBACK_PORTS = range(47902, 47911)
 _PRIVATE_V4_NETWORKS = tuple(
     ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
+_PEER_NETWORKS = (*_PRIVATE_V4_NETWORKS, ipaddress.ip_network("fc00::/7"))
 _EXCLUDED_INTERFACE_PREFIXES = ("lo", "utun", "tailscale", "tun", "tap", "ppp", "vpn", "bridge")
 logger = logging.getLogger(__name__)
-
-
-def local_hostname() -> str:
-    """Return the host's mDNS name without exposing interface state."""
-    hostname = socket.gethostname().rstrip(".").lower()
-    return hostname if hostname.endswith(".local") else f"{hostname}.local"
-
-
-def _load_macos_frameworks():
-    return (
-        ctypes.CDLL("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration"),
-        ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"),
-    )
-
-
-def macos_computer_name() -> str | None:
-    """Return macOS's user-configured computer name when it is available."""
-    if sys.platform != "darwin":
-        return None
-    try:
-        system_configuration, core_foundation = _load_macos_frameworks()
-        copy_name = system_configuration.SCDynamicStoreCopyComputerName
-        copy_name.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
-        copy_name.restype = ctypes.c_void_p
-        name = copy_name(None, None)
-        if not name:
-            return None
-        string_length = core_foundation.CFStringGetLength
-        string_length.argtypes = [ctypes.c_void_p]
-        string_length.restype = ctypes.c_long
-        max_size = core_foundation.CFStringGetMaximumSizeForEncoding
-        max_size.argtypes = [ctypes.c_long, ctypes.c_uint32]
-        max_size.restype = ctypes.c_long
-        get_string = core_foundation.CFStringGetCString
-        get_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
-        get_string.restype = ctypes.c_bool
-        release = core_foundation.CFRelease
-        release.argtypes = [ctypes.c_void_p]
-        release.restype = None
-        try:
-            buffer = ctypes.create_string_buffer(max_size(string_length(name), 0x08000100) + 1)
-            if get_string(name, buffer, len(buffer), 0x08000100):
-                return buffer.value.decode("utf-8")
-        finally:
-            release(name)
-    except (AttributeError, OSError, UnicodeDecodeError, ValueError):
-        return None
-    return None
-
-
-def remote_connect_name(announcement: DNSServiceAnnouncement | None) -> str:
-    """Resolve the one name presented by every remote-connect surface."""
-    if announcement is not None and announcement.announced_name:
-        return announcement.announced_name
-    return macos_computer_name() or local_hostname()
 
 
 def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str]:
@@ -124,37 +69,6 @@ def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str
     return [value for _, _, value in sorted(set(addresses))]
 
 
-class DevicesServer(uvicorn.Server):
-    """A Uvicorn server that never claims process signal handling."""
-
-    @contextlib.contextmanager
-    def capture_signals(self):
-        yield
-
-    async def _wait_tasks_to_complete(self) -> None:
-        if uvicorn.__version__ != "0.49.0":
-            await super()._wait_tasks_to_complete()
-            return
-        # Uvicorn 0.49.0 has already sent normal connection shutdown (including WS
-        # code 1012). Active SSE responses have no natural end, so disabling
-        # Devices must disconnect transports and join their ASGI requests.
-        # A streaming generator can be waiting for its next event rather than
-        # reading http.disconnect, so closing the socket alone cannot join it.
-        cast("DevicesApp", self.config.app).stopping = True
-        for connection in list(self.server_state.connections):
-            # TLS close() can wait beyond grace for a peer's close_notify;
-            # an explicit Devices stop must also release an unread SSE socket.
-            connection.transport.abort()
-        await asyncio.sleep(0)
-        requests = list(self.server_state.tasks)
-        for task in requests:
-            task.cancel()
-        await asyncio.gather(*requests, return_exceptions=True)
-        # These exact owners are now disconnected and joined. Uvicorn's
-        # generic waiter would additionally wait for a TLS peer's handshake;
-        # keep that external wait out of an explicit Devices stop.
-
-
 _PUBLIC_API_ROUTES = frozenset({
     ("GET", "/api/health"),
     ("GET", "/api/version"),
@@ -173,19 +87,51 @@ class DevicesApp:
         self.stopping = False
 
     @staticmethod
-    async def _has_human_session(scope) -> bool:
-        headers = dict(scope.get("headers", ()))
-        authorization = headers.get(b"authorization", b"").decode("latin-1")
-        token = token_from_request(None, authorization)
+    def _handshake_token(scope) -> tuple[str | None, bool]:
+        """The token the API routes read, and whether the request names more than one.
+
+        The gate and the routes disagree about which duplicate wins (Starlette keeps the last query value and the
+        first header), so a request with two is refused instead of guessed at.
+        """
+        query = parse_qs(scope.get("query_string", b"").decode("latin-1"), keep_blank_values=True).get("token", [])
+        headers = [value.decode("latin-1") for name, value in scope.get("headers", ()) if name == b"authorization"]
+        bearer = token_from_request(None, headers[0]) if headers else None
+        ambiguous = len(query) > 1 or len(headers) > 1 or bool(query and query[0] and bearer and query[0] != bearer)
+        return token_from_request(query[0] if query else None, headers[0] if headers else None), ambiguous
+
+    @classmethod
+    async def _has_human_session(cls, scope) -> bool:
+        token, ambiguous = cls._handshake_token(scope)
+        if ambiguous:
+            return False
         user = await run_in_db(authenticate, token)
         return user is not None and is_person_session(user)
+
+    @staticmethod
+    def _peer_is_on_this_network(scope) -> bool:
+        """Only the addresses `lan_addresses` advertises (and loopback) may reach this listener, whatever it is bound to."""
+        try:
+            peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
+        except (KeyError, TypeError, IndexError, ValueError):
+            return False
+        if peer.version == 6 and peer.ipv4_mapped is not None:
+            peer = peer.ipv4_mapped
+        return peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
 
     async def __call__(self, scope, receive, send):
         tagged = dict(scope)
         tagged["corsia_listener"] = "devices"
         path = tagged.get("path", "")
+        kind = tagged.get("type")
+        if kind in {"http", "websocket"} and not self._peer_is_on_this_network(tagged):
+            if kind == "http":
+                await JSONResponse({"reason": "not_on_this_network"}, status_code=403)(tagged, receive, send)
+            else:
+                await receive()  # websocket.connect
+                await send({"type": "websocket.close", "code": 1008})
+            return
         if (
-            tagged.get("type") == "http"
+            kind == "http"
             and (path == "/api" or path.startswith("/api/"))
             and (tagged.get("method"), path) not in _PUBLIC_API_ROUTES
             and not await self._has_human_session(tagged)
@@ -194,6 +140,16 @@ class DevicesApp:
                 tagged, receive, send,
             )
             return
+        # Browsers cannot set headers on a WebSocket, so the app authenticates
+        # in its first frame, where the endpoints accept a person session only
+        # on this listener. A token offered at the handshake is checked here,
+        # before the socket is accepted.
+        if kind == "websocket":
+            offered, ambiguous = self._handshake_token(tagged)
+            if (offered is not None or ambiguous) and not await self._has_human_session(tagged):
+                await receive()  # websocket.connect
+                await send({"type": "websocket.close", "code": 1008})
+                return
         try:
             await self._app(tagged, receive, send)
         except asyncio.CancelledError:
@@ -210,13 +166,20 @@ class DevicesListener:
     app: object
     server: DevicesServer | None = None
     task: asyncio.Task | None = None
+    sock: socket.socket | None = None
     port: int | None = None
     error: str | None = None
+    # Why it is not listening, in words the page can act on: ports_taken, credentials, bind, serve or disabled.
+    reason: str | None = None
     announcement: DNSServiceAnnouncement | None = None
+    # Told when the announced name or its error changes after start().
+    on_announcement_change: Callable[[], None] | None = None
 
     @property
     def listening(self) -> dict:
-        return {"port": self.port} if self.port is not None else {"error": self.error}
+        if self.port is not None:
+            return {"port": self.port}
+        return {"error": self.error, "reason": self.reason} if self.error else {"error": self.error}
 
     async def start(self) -> bool:
         if self.task is not None:
@@ -226,10 +189,12 @@ class DevicesListener:
         except Exception as exc:
             logger.error("Devices listener host credentials unavailable: %s", exc)
             self.error = "Devices listener credentials unavailable"
+            self.reason = "credentials"
             return False
         sock, port, error = _prebind()
         if sock is None:
             self.error = error
+            self.reason = "ports_taken" if error == _NO_PORT_ERROR else "bind"
             return False
         assert port is not None
         config = uvicorn.Config(
@@ -244,12 +209,31 @@ class DevicesListener:
             ssl_certfile=str(cert_path),
         )
         self.server = DevicesServer(config)
+        self.sock = sock
         self.task = asyncio.create_task(self.server.serve(sockets=[sock]))
+        self.task.add_done_callback(self._serve_ended)
         self.port = port
         self.error = None
+        self.reason = None
         self.announcement = DNSServiceAnnouncement(port)
+        self.announcement.on_change = self.on_announcement_change
         self.announcement.start()
         return True
+
+    def _serve_ended(self, task: asyncio.Task) -> None:
+        """Nothing awaits the serve task until stop(), so a failure (a TLS key that will not load, a crash) would
+        leave `listening` naming a port nobody serves. A requested stop and a cancelled loop are expected."""
+        if task is not self.task or task.cancelled() or (self.server is not None and self.server.should_exit):
+            return
+        logger.error("Devices listener stopped serving: %s", task.exception() or "the server exited")
+        if self.announcement is not None:
+            self.announcement.stop()
+        if self.sock is not None:
+            self.sock.close()
+        self.announcement = self.server = self.task = self.sock = self.port = None
+        self.error, self.reason = "Devices listener stopped serving", "serve"
+        if self.on_announcement_change is not None:
+            self.on_announcement_change()
 
     async def stop(self) -> None:
         if self.server is None or self.task is None:
@@ -263,7 +247,11 @@ class DevicesListener:
         finally:
             self.server = None
             self.task = None
+            self.sock = None
             self.port = None
+
+
+_NO_PORT_ERROR = "No approved Devices port is available"
 
 
 def _prebind() -> tuple[socket.socket | None, int | None, str | None]:
@@ -284,7 +272,7 @@ def _prebind() -> tuple[socket.socket | None, int | None, str | None]:
             if exc.errno == errno.EADDRINUSE:
                 continue
             return None, None, exc.strerror or str(exc)
-    return None, None, "No approved Devices port is available"
+    return None, None, _NO_PORT_ERROR
 
 
 def _key_paths(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:

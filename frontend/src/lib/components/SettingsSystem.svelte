@@ -3,6 +3,7 @@
 
 	import { readSystemVersion, restartSystem, waitForSystemRestart } from '$lib/stores/settingsSystemRestart';
 	import { logout } from '$lib/stores/auth';
+	import { toasts } from '$lib/stores/toast';
 	import { themeSetting, type ThemeSetting } from '$lib/stores/theme';
 	import { Button } from '$lib/components/ui';
 	import FocusModeSetting from './FocusModeSetting.svelte';
@@ -12,6 +13,7 @@
 	import SettingsDevices from './SettingsDevices.svelte';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 	import { connectOpen } from '$lib/stores/remoteConnect';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
 		{ v: 'light', l: 'Light' },
@@ -93,7 +95,10 @@
 			await logout();
 			await disconnectRemote();
 		} catch {
-			settingsError = 'CORSIA couldn’t disconnect from this computer. Try again.';
+			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
+			settingsError = message;
+			// Signing out comes first, so this page may already be replaced by sign-in; a toast outlives it.
+			toasts.show(message, 'error', 8000);
 		} finally {
 			accountConfirm = null;
 			accountInProgress = false;
@@ -130,13 +135,13 @@
 
 <HostAccessReviewSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card" data-settings-anchor="update">
+<div class="settings-card" data-settings-anchor="update" use:settingsAnchor={'update'}>
 	<h3>Updates</h3>
 	<p class="card-desc">Keep CORSIA current.</p>
 	<div class="service-grid"><SettingsUpdate /></div>
 </div>
 
-<div class="settings-card" data-settings-anchor="restart">
+<div class="settings-card" data-settings-anchor="restart" use:settingsAnchor={'restart'}>
 	<h3>Services</h3>
 	<p class="card-desc">Restart drains and bounces the current build.</p>
 
@@ -263,7 +268,7 @@
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 	.confirm-text { font-size: var(--text-subhead); color: var(--text-secondary); }
-	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; order: -1; }
+	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: calc(var(--space-1) / 2); order: -1; }
 	.service-row:has(.confirm-block) { flex-wrap: wrap; }
 	.status-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
 	.status-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-subhead); }

@@ -11,13 +11,14 @@ vi.mock('$lib/stores/auth', async () => {
 import SettingsSystem from './SettingsSystem.svelte';
 import { connectOpen } from '$lib/stores/remoteConnect';
 import { coreSettings } from '$lib/stores/settings';
+import { toasts } from '$lib/stores/toast';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let invoke: ReturnType<typeof vi.fn>;
 const flat = (text: string | null | undefined) => (text ?? '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
 const button = (label: string) => Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === label);
-const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', lan_addresses: ['192.168.1.20'], code: { state: 'none' } };
+const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac', lan_addresses: ['192.168.1.20'], code: { state: 'none' } };
 
 async function show() {
 	component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
@@ -58,6 +59,18 @@ describe('Settings › System with a shell', () => {
 		button('Disconnect')?.click();
 		await settle();
 		expect(order).toEqual(['logout', 'disconnect_remote']);
+	});
+	it('says so in a toast when the computer could not be forgotten, since sign-out already replaced this page', async () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
+		invoke = vi.fn(async (command: string) => { order.push(command); if (command === 'disconnect_remote') throw new Error('not forgotten'); });
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		const toast = vi.spyOn(toasts, 'show');
+		await show();
+		button('Disconnect')?.click(); flushSync();
+		button('Disconnect')?.click();
+		await settle();
+		expect(order).toEqual(['logout', 'disconnect_remote']);
+		expect(toast).toHaveBeenCalledWith('CORSIA couldn’t disconnect from this computer. Sign in and try again.', 'error', 8000);
 	});
 	it('Cancel leaves everything as it was', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
