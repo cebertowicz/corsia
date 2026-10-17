@@ -53,7 +53,12 @@ def publish_absence_reply(
     head_sha: str,
     pr_number: int,
 ) -> bool:
-    """Post a truthful absence reply, then resolve its review thread if mapped."""
+    """Post a truthful absence reply, then resolve its review thread if mapped.
+
+    Returns whether the reply is on the PR. A failed resolve is logged and
+    emitted, and the thread stays open, so the next run retries only the
+    resolve; it does not make the declared reply missing.
+    """
     action = comment.get(THREAD_ACTION_KEY)
     if not isinstance(action, ReviewThreadAction):
         return post_resolve_reply(comment, repo, head_sha)
@@ -63,7 +68,7 @@ def publish_absence_reply(
         return False
     resolved = set_review_thread_resolved(action.thread_id, resolved=True)
     _emit_lifecycle(pr_number, head_sha, action.thread_id, "resolve", resolved)
-    return resolved
+    return True
 
 
 def _emit_lifecycle(

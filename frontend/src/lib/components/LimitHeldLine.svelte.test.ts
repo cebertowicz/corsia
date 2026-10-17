@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import LimitHeldLine from './LimitHeldLine.svelte';
 import type { Model } from '$lib/stores/models';
 import { withAccountTurn } from '$lib/stores/modelFixtures';
-import { providerCardRequest, settingsActiveSection, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const VENDORS = [['codex', 'codex/gpt-5-codex'], ['claude-code', 'claude-code/sonnet']] as const;
 
@@ -42,11 +42,11 @@ describe('LimitHeldLine', () => {
 		document.querySelectorAll('button')[0].click();
 		expect(onSwitchModel).toHaveBeenCalledOnce();
 
-		const opens = get(settingsOpenRequest);
+		const opens = get(settingsNavigation).openRequest;
 		document.querySelectorAll('button')[1].click();
 		expect(get(providerCardRequest)).toBe(connection);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsOpenRequest)).toBe(opens + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).openRequest).toBe(opens + 1);
 	});
 
 	it.each(VENDORS)('on %s, a vendor limit offers only the picker', (connection, id) => {

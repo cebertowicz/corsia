@@ -146,9 +146,9 @@
 	}
 	.menu-item:focus-visible { background: var(--bg-hover); }
 	.menu-item:disabled { opacity: 0.6; cursor: default; }
-	.menu-item.danger { color: var(--red); }
+	.menu-item.danger { color: var(--red-text); }
 	.note { margin: 0; padding: 2px 10px 4px; color: var(--text-secondary); font-size: var(--text-caption); }
-	.menu-error { margin: 0; padding: 6px 10px; color: var(--red); font-size: var(--text-caption); }
+	.menu-error { margin: 0; padding: 6px 10px; color: var(--red-text); font-size: var(--text-caption); }
 	@media (max-width: 768px) {
 		/* On a phone the menu may be a row's only action surface: every item keeps the HIG touch floor. */
 		.menu-item { min-height: 44px; padding-block: var(--space-3); }

@@ -6,10 +6,7 @@
 
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneDragging } from '$lib/stores/paneOpen';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
-	import { settingsActiveSection } from '$lib/stores/settingsNavigation';
 	import { createMainDrawerController } from '$lib/mainDrawerController';
 	import { get } from 'svelte/store';
 	import {
@@ -23,9 +20,7 @@
 	import Sidebar from './Sidebar.svelte';
 	import Header from './Header.svelte';
 	import StatusBanners from './StatusBanners.svelte';
-	import ProjectSettingsView from './ProjectSettingsView.svelte';
 	import ThreadSettingsView from './ThreadSettingsView.svelte';
-	import WorkspaceSettingsView from './WorkspaceSettingsView.svelte';
 	import ChatPanel from './ChatPanel.svelte';
 	import ChatArtifactSplit from './ChatArtifactSplit.svelte';
 	import SettingsView from './SettingsView.svelte';
@@ -158,26 +153,6 @@
 		openDocumentsForSkills();
 	}
 
-	function openDocumentsFromProjectSettings() {
-		projectSettingsOpen.set(false);
-		openDocumentsForContextAttach();
-	}
-
-	function openSkillDocumentsFromProjectSettings() {
-		projectSettingsOpen.set(false);
-		openDocumentsForSkills();
-	}
-
-	function openDocumentsFromWorkspaceSettings() {
-		workspaceSettingsOpen.set(false);
-		openDocumentsForContextAttach();
-	}
-
-	function openSkillDocumentsFromWorkspaceSettings() {
-		workspaceSettingsOpen.set(false);
-		openDocumentsForSkills();
-	}
-
 	async function openActivityChild(
 		parentThreadId: string,
 		nodeId: string | null,
@@ -270,18 +245,7 @@
 	>
 		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} />
 		<StatusBanners />
-		{#if $projectSettingsOpen}
-			<ProjectSettingsView
-				onBrowseContextFiles={openDocumentsFromProjectSettings}
-				onBrowseSkills={openSkillDocumentsFromProjectSettings}
-				onOpenProviders={() => { onOpenSettings(); settingsActiveSection.set('providers'); }}
-			/>
-		{:else if $workspaceSettingsOpen}
-			<WorkspaceSettingsView
-				onBrowseContextFiles={openDocumentsFromWorkspaceSettings}
-				onBrowseSkills={openSkillDocumentsFromWorkspaceSettings}
-			/>
-		{:else if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
+		{#if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
 			<ThreadSettingsView
 				conductor={conductorThreadId != null && $activeThreadId === conductorThreadId}
 				onBrowseContextFiles={openDocumentsFromThreadSettings}
@@ -308,7 +272,12 @@
 				onArtifactHeaderInset={(width) => (artifactHeaderInset = width)}
 			/>
 		{:else if activeView === 'settings'}
-			<SettingsView onClose={onCloseSettings} {systemStatus} />
+			<SettingsView
+				onClose={onCloseSettings}
+				{systemStatus}
+				onBrowseContextFiles={openDocumentsForContextAttach}
+				onBrowseSkills={openDocumentsForSkills}
+			/>
 		{:else if activeView === 'measurement'}
 			<div class="measurement-scroller"><MeasurementPage onClose={onCloseMeasurement} /></div>
 		{:else if activeView === 'documents'}
@@ -373,6 +342,7 @@
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 	@media (max-width: 768px) {
 		.app { bottom: auto; height: 100vh; }
+		@media (display-mode: standalone) { .app { height: 100dvh; } }
 		.main {
 			transform: translateX(0);
 			transition: transform var(--dur-spring) var(--ease-entrance);

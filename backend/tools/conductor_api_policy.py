@@ -53,6 +53,8 @@ OFF_LIMITS_ROWS = (
      "dismissing the person's security alert would hide it from them; reading it stays open"),
     ("B15", "POST", r"^/api/mcp/servers/[^/]+/(?:approve|decline)$",
      "only the signed-in person may approve or decline a connected-app proposal"),
+    ("B16", ".*", r"^/api/mcp/servers/[^/]+/(?:sign-in|sign-out)$",
+     "only the signed-in person may start, cancel or read a sign-in to a connected app, or sign out of it"),
 )
 OFF_LIMITS = tuple((method, path) for _, method, path, _ in OFF_LIMITS_ROWS)
 

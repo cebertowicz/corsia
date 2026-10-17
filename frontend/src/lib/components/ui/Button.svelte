@@ -78,7 +78,7 @@
 	}
 
 	.btn.md { height: 32px; padding: 0 13px; font-size: var(--text-subhead); }
-	.btn.sm { height: 28px; padding: 0 10px; font-size: var(--text-footnote); }
+	.btn.sm { height: 28px; padding: 0 var(--button-pad-x-sm); font-size: var(--text-footnote); }
 
 	.btn.secondary {
 		background: var(--bg-secondary);
@@ -105,11 +105,12 @@
 	.btn.danger {
 		background: var(--red-bg);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
-		color: var(--red);
+		color: var(--red-text);
 	}
 	.btn.danger:hover:not(:disabled) {
 		background: color-mix(in srgb, var(--red) 18%, transparent);
 		border-color: var(--red);
+		color: var(--red-text);
 	}
 
 	.btn.ghost {

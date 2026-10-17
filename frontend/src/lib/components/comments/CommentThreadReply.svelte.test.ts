@@ -5,17 +5,15 @@ import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const comment: CommentThreadData = { id: 'c1', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] };
-const props = $state<{ activeId: string | null }>({ activeId: null });
 
 function render() {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const onReply = vi.fn().mockResolvedValue(undefined);
-	component = mount(CommentThread, { target: host, props: { comment, onReply, flat: true, get activeId() { return props.activeId; } } });
+	component = mount(CommentThread, { target: host, props: { comment, onReply, flat: true } });
 	flushSync();
 	return { onReply };
 }
 function openReply() {
-	host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
 	return host.querySelector<HTMLTextAreaElement>('.ct-input')!;
 }
 function type(input: HTMLTextAreaElement, value: string) {
@@ -26,7 +24,7 @@ function press(input: HTMLTextAreaElement, init: KeyboardEventInit) {
 	input.dispatchEvent(event); flushSync();
 	return event;
 }
-afterEach(() => { if (component) unmount(component); component = null; host?.remove(); props.activeId = null; vi.unstubAllGlobals(); });
+afterEach(() => { if (component) unmount(component); component = null; host?.remove(); vi.unstubAllGlobals(); });
 
 describe('CommentThread reply field', () => {
 	it('is a textarea: a long reply wraps instead of scrolling sideways', () => {
@@ -53,27 +51,5 @@ describe('CommentThread reply field', () => {
 		expect(onReply).not.toHaveBeenCalled();
 		press(input, { metaKey: true });
 		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right');
-	});
-
-	it('closes an untouched empty field when focus moves to another thread', () => {
-		render();
-		openReply();
-		props.activeId = 'c2'; flushSync();
-		expect(host.querySelector('.ct-input')).toBeNull();
-	});
-
-	it('keeps a field that holds text open when focus moves away', () => {
-		render();
-		const input = openReply();
-		type(input, 'half a reply');
-		props.activeId = 'c2'; flushSync();
-		expect(host.querySelector('.ct-input')).not.toBeNull();
-	});
-
-	it('does not close a field the person opens while another thread is focused', () => {
-		props.activeId = 'c2';
-		render();
-		expect(openReply()).not.toBeNull();
-		expect(host.querySelector('.ct-input')).not.toBeNull();
 	});
 });

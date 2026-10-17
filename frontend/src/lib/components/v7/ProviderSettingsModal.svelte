@@ -7,9 +7,7 @@
 	} from '$lib/stores/providers';
 	import { removeNetworkServer, testNetworkServer } from '$lib/stores/networkServers';
 	import { hostGroups, loadHostGroups, type HostProvider } from '$lib/stores/providersV7';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
-	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { Button, Field, Message, Modal } from '$lib/components/ui';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import CostPanel from './CostPanel.svelte';
@@ -82,11 +80,9 @@
 
 	function clearMessages() { actionError = ''; actionMessage = ''; }
 
-	function openWorkspaceSettings() {
-		threadSettingsOpen.set(false);
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(true);
+	function openAccountOrder() {
 		onClose();
+		requestSettingsSection('providers', 'workspace-provider-policy');
 	}
 
 	async function handleTest() {
@@ -240,7 +236,7 @@
 
 	{#if activeTab === 'accounts' && provider.type === 'harness'}
 		<AccountsBlock {provider} />
-		<p class="policy-pointer">Rollover and account order are set in <button class="policy-link" onclick={openWorkspaceSettings}>Workspace settings</button>.</p>
+		<p class="policy-pointer">Rollover and account order are set in <button class="policy-link" onclick={openAccountOrder}>Accounts and rollover</button>.</p>
 	{:else if activeTab === 'overview'}
 		<ProviderStatusCard {provider} />
 
@@ -302,7 +298,6 @@
 	description={removeDescription}
 	confirmLabel="Remove"
 	destructive
-	icon="delete"
 	onConfirm={handleDelete}
 	onCancel={() => (confirmingRemove = false)}
 />

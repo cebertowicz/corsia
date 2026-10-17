@@ -15,7 +15,8 @@ import {
 	userMessages,
 	waitForWsConnected,
 } from '../support/corsia';
-import { focusSetting } from '../support/focusOutcomeProof';
+import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { readMockCallCount, releaseMockGate, seedMockResponses, seedPressuredHistory } from '../support/mock';
 
 const CHECKPOINT_REPLY = {
@@ -44,29 +45,24 @@ async function openPressuredSession(
 	page: Page,
 	request: APIRequestContext,
 	titlePrefix: string,
-): Promise<number> {
+): Promise<{ contextWindow: number; userMessageCount: number }> {
 	const sessionTitle = `${titlePrefix} ${Date.now()}`;
 	const sessionId = await createSession(request, sessionTitle);
-	const contextWindow = await seedPressuredHistory(request, sessionId, TEST_TOKEN);
+	const pressureFixture = await seedPressuredHistory(request, sessionId, TEST_TOKEN);
 
 	await page.goto('/?token=' + TEST_TOKEN);
-	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	}
-	await page.locator('.thread-item').filter({ hasText: sessionTitle }).click({ timeout: 10_000 });
+	await focusSetting(page, false);
+	await openOutcomeThread(page, sessionTitle);
 	await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
 	await waitForWsConnected(page);
-	await expect(userMessages(page)).toHaveCount(6, { timeout: 10_000 });
-	return contextWindow;
+	await expect(userMessages(page)).toHaveCount(pressureFixture.userMessageCount, { timeout: 10_000 });
+	return pressureFixture;
 }
 
 test.describe('@flow:chat @surface:chat chat send/receive', () => {
 	// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-	let focusTurnedOff = false;
-	test.afterEach(async ({ page }) => {
-		if (!focusTurnedOff) return;
-		focusTurnedOff = false;
-		await focusSetting(page, true);
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
 	});
 
 	test('typed message sends, assistant responds, both render in order', async ({ page, request }, testInfo) => {
@@ -83,7 +79,6 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
 		// Focus is on by default since #565 and hides finished work; this spec reads the raw transcript.
 		await focusSetting(page, false);
-		focusTurnedOff = true;
 
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -124,10 +119,11 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 	test('input-bar Stop ends a held Native turn and leaves the task reusable', async ({ page, request }) => {
 		const sessionTitle = `e2e input-bar stop ${Date.now()}`;
 		const completionGate = `input-bar-stop-${Date.now()}`;
-		await createSession(request, sessionTitle);
+		const sessionId = await createSession(request, sessionTitle);
 
 		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
 		await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
+		await focusSetting(page, false);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
@@ -152,7 +148,18 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		await expect(page.locator('.toast.toast--success')).toContainText('Turn stopped');
 		await expect(stopButton).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
-		await expect(lastUserMessage(page).locator('.delivery-status')).toHaveText('Cancelled by you');
+		// Stop ends the Turn, not an input whose write the provider already accepted: that row is left
+		// unchanged (backend/tests/test_ownerless_stop.py test_ownerless_postwrite_stop_reaches_exact_terminal);
+		// only unfenced input is cancelled and a fenced write with no outcome is ambiguous
+		// (same file, test_ownerless_stop_settles_input_from_its_write_evidence). Accepted input has no delivery caption.
+		await expect(lastUserMessage(page).locator('.delivery-status')).toHaveCount(0);
+		const stoppedMessages = await request.get(`/api/threads/${sessionId}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
+		expect(stoppedMessages.ok()).toBeTruthy();
+		const stoppedInput = (await stoppedMessages.json()).messages.find((row: { role: string }) => row.role === 'user');
+		expect(stoppedInput).toMatchObject({
+			content: 'Hold this turn until I stop it.', delivery_state: 'delivered',
+			write_outcome: 'accepted', delivery_error: null,
+		});
 		await expect(page.getByText('STOPPED_REPLY_MUST_NOT_RENDER')).toHaveCount(0);
 		await expect(page.locator('.toast.toast--error')).toHaveCount(0);
 
@@ -164,7 +171,7 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 
 	test('repairable pressured send checkpoints once and delivers the accepted head', async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
-		await openPressuredSession(page, request, 'e2e repairable pressured-send');
+		const pressureFixture = await openPressuredSession(page, request, 'e2e repairable pressured-send');
 		await seedMockResponses(request, [
 			CHECKPOINT_REPLY,
 			{ content: 'PRESSURED_HEAD_DELIVERED', finish_reason: 'stop' },
@@ -174,9 +181,9 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		await sendChatMessage(page, prompt);
 
 		await expect(lastUserMessage(page)).toContainText(prompt, { timeout: 20_000 });
-		await expect(userMessages(page)).toHaveCount(7, { timeout: 20_000 });
+		await expect(userMessages(page)).toHaveCount(pressureFixture.userMessageCount + 1, { timeout: 20_000 });
 		await expect(lastAssistantMessage(page)).toContainText('PRESSURED_HEAD_DELIVERED', { timeout: 30_000 });
-		await expect(page.getByRole('region', { name: 'Messages waiting for the current step' })).toHaveCount(0);
+		await expect(page.getByText(/Not delivered:/)).toHaveCount(0);
 		await expect(page.getByText(/context (?:checkpoint failed|preflight blocked)/i)).toHaveCount(0);
 		await expect(page.locator('.toast.toast--error')).toHaveCount(0);
 		expect(await readMockCallCount(request)).toBe(2);
@@ -193,15 +200,20 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		]);
 
 		await sendChatMessage(page, 'new '.repeat(3_000));
-		await expect(page.getByText('Checkpointing…')).toBeVisible({ timeout: 20_000 });
+		// The checkpoint indicator is the sidebar row's chip (SidebarThreadRow.test.ts: "checkpointing").
+		await expect(page.locator('.thread-cutover')).toHaveText('checkpointing', { timeout: 20_000 });
 
 		await page.locator('button.model-chip').click();
-		const modelChoice = page.getByRole('button', { name: /Mock Pressure Model/ });
+		// Choosing the thread's own model is a no-op (InputBarModelSheet.svelte chooseModel), so pick the
+		// other seeded model (backend/e2e_mock.py seed_mock_catalog). While a Turn is active the backend does
+		// not refuse it: switch_model freezes the FIFO cut and resolves it at the next natural wake
+		// (backend/thread/model.py), answering 202 pending, which the sheet marks "Switching…"
+		// (account-switch-mid-turn.spec.ts asserts the same marker).
+		const modelChoice = page.locator('button.model-list-item', { hasText: 'Mock Test Model' });
 		await expect(modelChoice).toBeEnabled();
 		await modelChoice.click();
-		await expect(page.locator('.toast.toast--error')).toContainText(
-			'model switch blocked by active Turn',
-		);
+		await expect(modelChoice.locator('.switch-marker')).toHaveText('Switching…');
+		await expect(page.locator('.toast.toast--error')).toHaveCount(0);
 
 		await releaseMockGate(request, 'hold-checkpoint');
 		await expect(lastAssistantMessage(page)).toContainText(
@@ -215,9 +227,9 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		);
 	});
 
-	test('irreparable pressured send retains the accepted head without a retry loop', async ({ page, request }, testInfo) => {
+	test('irreparable pressured send settles the accepted head as failed without a retry loop', async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
-		const contextWindow = await openPressuredSession(
+		const pressureFixture = await openPressuredSession(
 			page,
 			request,
 			'e2e irreparable pressured-send',
@@ -226,22 +238,29 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 
 		// The shared estimator uses ~3 chars/token. Make the accepted head exceed
 		// the target window by itself so no checkpoint tail can make it fit.
-		const promptRepeats = Math.floor((contextWindow * 3) / 'new '.length) + 1;
+		const promptRepeats = Math.floor((pressureFixture.contextWindow * 3) / 'new '.length) + 1;
 		const prompt = 'new '.repeat(promptRepeats);
 		await sendChatMessage(page, prompt);
 
-		const pendingRegion = page.getByRole('region', { name: 'Messages waiting for the current step' });
-		const blockedReason = page.getByText(/context preflight blocked: final destination payload cannot fit/i);
-		await expect(pendingRegion.locator('.message.user')).toHaveCount(1, { timeout: 30_000 });
-		await expect(pendingRegion).toContainText(prompt, { timeout: 30_000 });
-		await expect(userMessages(page)).toHaveCount(7, { timeout: 30_000 });
-		await expect(blockedReason).toHaveCount(1, { timeout: 30_000 });
-		expect(await readMockCallCount(request)).toBe(1);
+		// An unfittable send is a visible failure, not a hold (R16): the exact input stays in the
+		// transcript as failed/proved_no_write with its reason (backend/tests/contract/matrix_input_recovery.py,
+		// _assert_checkpoint_failure), shown as "Not delivered: <reason>" (frontend/src/lib/messageDelivery.ts).
+		const failedInput = lastUserMessage(page);
+		const failureCaption = failedInput.locator('.delivery-status');
+		await expect(userMessages(page)).toHaveCount(pressureFixture.userMessageCount + 1, { timeout: 30_000 });
+		await expect(failedInput).toContainText(prompt, { timeout: 30_000 });
+		await expect(failureCaption).toContainText(
+			/Not delivered: .*minimum provider continuation exceeds the context window/i,
+			{ timeout: 30_000 },
+		);
+		// proved_no_write means the preflight refused before any provider call, so the mock saw none.
+		expect(await readMockCallCount(request)).toBe(0);
 
+		// Nothing retries on its own: the failed row and the provider call count stay put.
 		await page.waitForTimeout(1_500);
-		await expect(pendingRegion.locator('.message.user')).toHaveCount(1);
-		await expect(blockedReason).toHaveCount(1);
-		expect(await readMockCallCount(request)).toBe(1);
-		await saveEvidenceScreenshot(page, testInfo, 'irreparable-pressured-send-retained');
+		await expect(userMessages(page)).toHaveCount(pressureFixture.userMessageCount + 1);
+		await expect(failureCaption).toHaveCount(1);
+		expect(await readMockCallCount(request)).toBe(0);
+		await saveEvidenceScreenshot(page, testInfo, 'irreparable-pressured-send-failed');
 	});
 });

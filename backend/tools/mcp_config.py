@@ -86,6 +86,15 @@ def protect_transport_logs(auth: BearerFileAuth | httpx.Auth | None) -> None:
             logging.getLogger(name).addFilter(_log_filter)
 
 
+def url_origin(url: str) -> tuple[str, str, int] | None:
+    """``url``'s scheme, host and port, defaults filled in; None without a scheme or host. Every MCP origin check uses it."""
+    parsed = urlsplit(url)
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    return (scheme, parsed.hostname.lower(), parsed.port or (443 if scheme == "https" else 80))
+
+
 def timeout_seconds(config: dict, field: str, default: float) -> float:
     """Reject unbounded, nonnumeric or excessive timeout configuration."""
     value = config.get(field, default)

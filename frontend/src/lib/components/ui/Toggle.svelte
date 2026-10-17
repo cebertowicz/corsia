@@ -32,7 +32,8 @@
 		--knob: 12px;
 		width: var(--w); height: var(--h);
 		background: var(--bg-tertiary);
-		border: 1px solid var(--border);
+		/* An off switch reads as a control, not a faint field: a darker outline. */
+		border: 1px solid var(--text-tertiary);
 		border-radius: var(--radius-pill);
 		position: relative;
 		cursor: pointer;

@@ -29,7 +29,7 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           base_ref: ${{ github.base_ref }}
-          patterns: '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$|^\.github/actions/relevance/action\.yml$'
+          patterns: '(^|/).+\.(py|ts|svelte|css)$|^quality/(file-size-limits|design-token-ratchet)\.json$|^scripts/design_token_(ratchet|scan)\.py$|^\.github/workflows/code-health\.yml$|^\.github/actions/relevance/action\.yml$'
 
   file-sizes:
     needs: relevance
@@ -91,3 +91,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
+
+      - name: No frontend style grows past its design-token baseline
+        run: python scripts/design_token_ratchet.py

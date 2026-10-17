@@ -56,7 +56,7 @@ export function contextSourceActionLabel(source: ContextSourceLike): string {
 	if (target === 'project-settings') return 'Open Project settings';
 	if (target === 'thread-settings') return 'Open Thread settings';
 	if (target === 'providers') return 'Open Providers';
-	if (target === 'workspace-settings') return 'Open Workspace settings';
+	if (target === 'workspace-settings') return 'Open Context settings';
 	if (target === 'system') return 'Open System';
 	if (target === 'document') return 'Open Document';
 	if (target === 'runtime-details') return 'Open details';
@@ -68,7 +68,7 @@ export function contextSourceOwnerLabel(source: ContextSourceLike): string {
 	if (target === 'project-settings') return 'Project settings';
 	if (target === 'thread-settings') return 'Thread settings';
 	if (target === 'providers') return 'Providers';
-	if (target === 'workspace-settings') return 'Workspace settings';
+	if (target === 'workspace-settings') return 'Context settings';
 	if (target === 'system') return 'System context';
 	if (target === 'document') return 'Document';
 	if (target === 'runtime-details') return 'Runtime context';
