@@ -165,7 +165,7 @@
 	.heading p { margin: var(--space-2) 0 0; color: var(--text-secondary); line-height: 1.5; }
 	.rows { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
 	/* A request waiting on the person is a flat list row: status on the second line, one solid action, a text action. */
-	.waiting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-height: 38px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+	.waiting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-height: var(--list-row-min-height); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
 	.waiting-copy { min-width: 0; flex: 1 1 14rem; display: grid; gap: 2px; }
 	.waiting-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-regular); }
 	.second { color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); overflow-wrap: anywhere; }
@@ -174,7 +174,7 @@
 	.waiting-actions { display: flex; align-items: center; gap: var(--space-2); }
 	.waiting-row .error, .waiting-panel { flex-basis: 100%; margin: 0; }
 	/* Connected and waiting apps are one flat list; the chevron still discloses each connected app's details. */
-	.app-row { min-height: 38px; }
+	.app-row { min-height: var(--list-row-min-height); }
 	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
 	.app-copy { min-width: 0; display: grid; gap: var(--space-1); }
 	.app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
