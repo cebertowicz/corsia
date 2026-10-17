@@ -239,6 +239,14 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return dict(parsed), text[body_start:]
 
 
+def declares_sidecar(skill_md: str) -> bool:
+    """True when the frontmatter declares a ``corsia.yaml`` pointer; unreadable text declares none."""
+    try:
+        return pointer_errors(parse_frontmatter(skill_md)[0].get("metadata"))[0]
+    except Exception:  # noqa: BLE001 - validation reports an unparseable frontmatter.
+        return False
+
+
 def is_skill_file(path: Path) -> bool:
     """True when ``path`` is a standard ``skills/<skill>/SKILL.md`` file."""
     parts = path.parts

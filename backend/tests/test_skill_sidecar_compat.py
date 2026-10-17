@@ -117,10 +117,13 @@ def test_packaged_decision_brief_version_covers_its_recorded_sidecar():
     )
 
 
-def _fake_system(monkeypatch, tmp_path, *, sidecar: bool, mismatched: bool = False):
+def _fake_system(
+    monkeypatch, tmp_path, *, sidecar: bool, mismatched: bool = False, pointer: bool | None = None,
+):
     package = tmp_path / "package"
     (package / "skills" / "flow").mkdir(parents=True)
-    (package / "skills/flow/SKILL.md").write_text(THREAD_SKILL if sidecar else "skill", encoding="utf-8")
+    skill_md = THREAD_SKILL if (sidecar if pointer is None else pointer) else "skill"
+    (package / "skills/flow/SKILL.md").write_text(skill_md, encoding="utf-8")
     files = [SimpleNamespace(path="skills/flow/SKILL.md", sha256="aaa")]
     if sidecar:
         (package / "skills/flow/corsia.yaml").write_text("workflow: {}", encoding="utf-8")
@@ -146,6 +149,12 @@ def test_system_version_covers_the_sidecar_digest(monkeypatch, tmp_path):
     version = _workflow_version(SimpleNamespace(name="flow", scope="system"))
 
     assert version == "system:skills/flow/SKILL.md:v9:aaa+bbb"
+
+
+def test_system_version_ignores_a_listed_sidecar_the_skill_does_not_point_at(monkeypatch, tmp_path):
+    _fake_system(monkeypatch, tmp_path, sidecar=True, pointer=False)
+
+    assert _workflow_version(SimpleNamespace(name="flow", scope="system")) == "system:skills/flow/SKILL.md:v9:aaa"
 
 
 def test_system_version_is_unavailable_when_the_sidecar_drifts_from_the_manifest(monkeypatch, tmp_path):
@@ -174,3 +183,13 @@ def test_editable_version_covers_the_sidecar_commit(monkeypatch, tmp_path):
     assert _workflow_version(skill) == "c1+c2·dirty"
     _fake_git(monkeypatch, {"SKILL.md": "c1"})
     assert _workflow_version(skill) is None
+
+
+def test_editable_version_ignores_a_stray_sidecar_nothing_points_at(monkeypatch, tmp_path):
+    path = _skills_root(tmp_path, "plain", "---\nname: plain\ndescription: Plain.\n---\n", "workflow: {}") / "skills/plain/SKILL.md"
+    skill = SimpleNamespace(name="plain", scope="thread", path=path)
+
+    _fake_git(monkeypatch, {"SKILL.md": "c1", "corsia.yaml": "c2"})
+    assert _workflow_version(skill) == "c1"
+    _fake_git(monkeypatch, {"SKILL.md": "c1"})
+    assert _workflow_version(skill) == "c1"
