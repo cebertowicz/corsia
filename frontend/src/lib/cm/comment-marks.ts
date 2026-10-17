@@ -76,12 +76,25 @@ export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 const QUOTE_MARGIN = 8;
 const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
 
+// Where a target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
+const boxAt = (current: EditorView, target: number, widget: ReturnType<typeof widgetTarget>): Box | null => widget ? widget.box(current) : current.coordsAtPos(Math.min(target, current.state.doc.length));
+
+/**
+ * Whether a sheet or keyboard movement has just covered the text at `from`: the reader had it in view before, inside `before` (the
+ * band as of the last movement), and the band now leaves it out. Text the reader had scrolled out of view is not covered by a movement.
+ * Returns the band now, which is the next movement's `before`.
+ */
+export function coveredByMove(view: EditorView, from: number, before: Box | null): { band: Box; covered: boolean } {
+	const { band } = visibleRegion(view);
+	const target = Math.min(from, view.state.doc.length), box = boxAt(view, target, widgetTarget(view, target));
+	return { band, covered: !!before && within(box, before) && !within(box, band) };
+}
+
 export function scrollToRange(view: EditorView, from: number, _to: number, origin: ScrollOrigin = 'navigation') {
 	const target = Math.min(from, view.state.doc.length);
 	const widget = widgetTarget(view, target);
 	const quote = origin === 'quote-tap';
-	// Where the target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
-	const boxOf = (current: EditorView): Box | null => widget ? widget.box(current) : current.coordsAtPos(Math.min(target, current.state.doc.length));
+	const boxOf = (current: EditorView) => boxAt(current, target, widget);
 	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
 	// whole replaced block, which centres on the block's middle. Anything else, and a widget not drawn yet, goes to CodeMirror.

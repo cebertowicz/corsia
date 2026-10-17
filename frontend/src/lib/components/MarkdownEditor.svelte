@@ -14,7 +14,7 @@
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
-	import { commentMarks, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
@@ -169,6 +169,21 @@
 	export function tableLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
 		return view ? tableCommentLabel(view.state, from, to, quote) : undefined;
 	}
+
+	/**
+	 * Whether the draft's text at `from` needs revealing now the sheet that overlays this editor came up (always) or moved (only when
+	 * it covered text the reader had in view); a reader's own scroll away from the draft is never undone.
+	 */
+	let bandBefore: { top: number; bottom: number } | null = null;
+	export function draftCovered(from: number, opening: boolean): boolean {
+		if (!view) return opening;
+		const { band, covered } = coveredByMove(view, from, opening ? null : bandBefore);
+		bandBefore = band;
+		return opening || covered;
+	}
+
+	/** The document a label is read from: a new one with every edit, so a cached label knows when its table may have changed. */
+	export function tableLabelStamp(): unknown { return view?.state.doc; }
 
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
 	function focusWidgetComments(ids: string[], opener: HTMLElement) {

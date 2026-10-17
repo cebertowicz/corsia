@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clickedOpener, footerFocusHome, onSheetMoved, openerFocus, presence } from './docCommentDrawer';
 
-afterEach(() => document.body.replaceChildren());
+afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 /** A drawer with a heading to rest on and a footer holding Send now. */
 function drawer() {
@@ -124,15 +124,23 @@ describe('presence', () => {
 });
 
 describe('onSheetMoved', () => {
-	it('asks once the sheet is up, and again when it resizes or the visual viewport moves, one frame later', async () => {
+	it('asks to open once the sheet is up, then to move when it resizes or the visual viewport moves, one frame later', async () => {
+		const viewport = new EventTarget();
+		vi.stubGlobal('visualViewport', viewport);
 		const panel = document.createElement('div'), reveal = vi.fn();
 		const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 		const stop = onSheetMoved(panel, reveal);
 		await frame(); await frame();
-		expect(reveal).toHaveBeenCalledTimes(1);
-		stop();
+		expect(reveal.mock.calls).toEqual([[true]]);
+		viewport.dispatchEvent(new Event('resize'));
 		await frame(); await frame();
-		expect(reveal).toHaveBeenCalledTimes(1);
+		viewport.dispatchEvent(new Event('scroll'));
+		await frame(); await frame();
+		expect(reveal.mock.calls).toEqual([[true], [false], [false]]);
+		stop();
+		viewport.dispatchEvent(new Event('resize'));
+		await frame(); await frame();
+		expect(reveal).toHaveBeenCalledTimes(3);
 	});
 
 	it('watches nothing without a sheet or something to call', async () => {

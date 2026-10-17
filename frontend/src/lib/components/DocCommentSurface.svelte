@@ -75,7 +75,7 @@
 		/** The sheet controller's modal presence, including its closing scrim. */
 		onSheetModalChange?: (open: boolean) => void;
 		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
-		onRevealDraft?: () => void;
+		onRevealDraft?: (opening: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => tableLabel);

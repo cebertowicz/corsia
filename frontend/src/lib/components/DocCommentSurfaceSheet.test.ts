@@ -58,14 +58,16 @@ afterEach(() => {
 });
 
 describe('the phone composer sheet over a commented cell', () => {
-	it('asks the editor to keep the draft in view once the sheet is up, and again when the keyboard moves it', async () => {
+	it('asks the editor to keep the draft in view once the sheet is up, and tells it when the keyboard moves it', async () => {
 		const viewport = new EventTarget();
 		vi.stubGlobal('visualViewport', viewport);
 		const { onRevealDraft } = openSheet({ kind: 'draft' });
 		expect(document.querySelector('.drawer-panel')).not.toBeNull();
 		await vi.waitFor(() => expect(onRevealDraft).toHaveBeenCalledTimes(1));
+		expect(onRevealDraft).toHaveBeenLastCalledWith(true);
 		viewport.dispatchEvent(new Event('resize'));
 		await vi.waitFor(() => expect(onRevealDraft).toHaveBeenCalledTimes(2));
+		expect(onRevealDraft).toHaveBeenLastCalledWith(false);
 	});
 
 	it('does nothing where the composer is not a sheet', async () => {

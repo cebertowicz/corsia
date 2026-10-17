@@ -122,8 +122,8 @@
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
-	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it.
-	const revealDraft = () => { const { draft } = draftController; if (draft) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
+	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
+	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	function focusComment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) {
 		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
 		scroll.toComment(id, false, 'navigation');
@@ -366,7 +366,7 @@
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}
-		tableLabel={(from, to, quote) => editorSurface?.tableLabel(from, to, quote)}
+		tableLabel={{ read: (from, to, quote) => editorSurface?.tableLabel(from, to, quote), stamp: () => editorSurface?.tableLabelStamp() }}
 		focusedId={shownFocus}
 		draft={draftController.draft}
 		draftReason={draftController.reason}

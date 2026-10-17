@@ -71,6 +71,8 @@
 	let editor = $state<MarkdownEditor>();
 	/** The label a comment on a table's text gets, read from the editor's own syntax tree; undefined while the editor is not up. */
 	export function tableLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.tableLabel(from, to, quote); }
+	export function tableLabelStamp() { return editor?.tableLabelStamp(); }
+	export function draftCovered(from: number, opening: boolean) { return editor?.draftCovered(from, opening); }
 
 	// The button follows the selection's end but never leaves the visible document column.
 	const EDGE = 8;

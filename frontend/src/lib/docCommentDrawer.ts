@@ -83,15 +83,16 @@ export function presence(report: (shown: boolean) => void) {
 }
 
 /**
- * Calls `reveal` once a sheet has come up and again whenever it moves or changes size (the keyboard rising or falling under
- * a followKeyboard sheet, its content settling), in the next frame so the layout it reads is current. Returns the stop; with no
- * sheet or nothing to call, there is nothing to watch.
+ * Calls `reveal(true)` once a sheet has come up and `reveal(false)` whenever it then moves or changes size (the keyboard rising or
+ * falling under a followKeyboard sheet, its content settling), in the next frame so the layout it reads is current. The caller decides
+ * what a movement needs: it must not undo a scroll the reader chose. Returns the stop; with no sheet or nothing to call, there is
+ * nothing to watch.
  */
-export function onSheetMoved(panel: HTMLElement | null, reveal?: () => void): () => void {
+export function onSheetMoved(panel: HTMLElement | null, reveal?: (opening: boolean) => void): () => void {
 	if (!panel || !reveal) return () => {};
 	const viewport = panel.ownerDocument.defaultView?.visualViewport;
-	let frame = 0;
-	const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(reveal); };
+	let frame = 0, opening = true;
+	const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { reveal(opening); opening = false; }); };
 	const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule);
 	observer?.observe(panel);
 	viewport?.addEventListener('resize', schedule);
