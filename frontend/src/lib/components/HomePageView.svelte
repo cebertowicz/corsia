@@ -97,7 +97,9 @@
 		if (setupChecked) return;
 		setupChecked = true;
 		void fetchSetupProgress(get(token)).then((progress) => {
-			if (progress && !progress.setup_completed) { setupResume = true; setupMode = 'flow'; }
+			if (progress && progress.setup_completed) return;
+			// An unreadable record is not a finished setup: open it as a resume, which says so and offers Try again.
+			setupResume = true; setupMode = 'flow';
 		});
 	});
 

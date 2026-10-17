@@ -263,7 +263,7 @@
 	});
 
 	const harnessSources = $derived(sources.filter(isHarness));
-	const showLocalRow = $derived(page === 'models' && (!resume || localPick.wanted) && Boolean(local));
+	const showLocalRow = $derived(page === 'models' && Boolean(local));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows: AiRow[] = harnessSources.map((source) => {
 			const row = connectFlow.row(source);
@@ -321,7 +321,7 @@
 	async function resumeSetup() {
 		statusError = ''; page = 'checking';
 		const progress = await fetchSetupProgress(get(token));
-		if (!progress) { statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.'; page = 'error'; return; }
+		if (!progress) { statusError = 'CORSIA couldn’t check your setup. Try again.'; page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
 		status = (progress.status ?? {}) as SetupStatus;
 		folder = status.work_folder || folder;

@@ -78,24 +78,14 @@ describe('SetupScreen resume', () => {
 		expect(requests).not.toContain('GET /api/setup/status');
 	});
 
-	it('keeps a recorded local-AI opt-out on every reload', async () => {
-		progress = { ...progress!, local_ai: false };
-		for (const _reload of [1, 2]) {
+	it('shows the same sources after a reload as the first pass, whatever local-AI choice was recorded', async () => {
+		for (const local_ai of [true, false, null]) {
+			progress = { ...progress!, local_ai };
 			await reload();
 			expect(host.textContent).toContain('Connect an AI');
-			expect(rowNames()).not.toContain('This computer');
+			expect(rowNames()).toContain('This computer');
 			expect(rowNames()).toContain('Codex');
 		}
-	});
-
-	it('follows the facts it re-reads, not a stored default, when no choice was recorded', async () => {
-		progress = { ...progress!, status: { local_eligible: false, free_disk_gb: 4 } };
-		await reload();
-		expect(rowNames()).not.toContain('This computer');
-
-		progress = { ...progress!, status: { local_eligible: true, free_disk_gb: 200 } };
-		await reload();
-		expect(rowNames()).toContain('This computer');
 	});
 
 	it('reopens the oMLX question where it was left', async () => {
