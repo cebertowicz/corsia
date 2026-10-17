@@ -5,6 +5,7 @@ paths, authorize owner-wide history, or interpret free-text review dispositions.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.lesson_files import raw_sha256, read_capture, read_trial
@@ -13,9 +14,30 @@ from core.skill_validation import validate_skill_text
 
 Identity = tuple[str, str, str]
 
+STATEMENT_WORDS = 40
+_BULLET = re.compile(r"^\s*[-*]\s+(.*\S)")
 
-def source_record(text: str, path: str) -> dict[str, Any] | None:
-    """Project one authorized current source using the canonical file validators."""
+
+def first_bullet_statement(body: str) -> str | None:
+    """The body's first bullet as one line of at most ``STATEMENT_WORDS`` words, or None."""
+    words: list[str] = []
+    for line in body.splitlines():
+        match = _BULLET.match(line)
+        if words and (match or not line.startswith((" ", "\t"))):
+            break
+        if match or words:
+            words += (match.group(1) if match else line).split()
+    if not words:
+        return None
+    return " ".join(words) if len(words) <= STATEMENT_WORDS else " ".join(words[:STATEMENT_WORDS]) + "..."
+
+
+def source_record(text: str, path: str, *, with_statement: bool = False) -> dict[str, Any] | None:
+    """Project one authorized current source using the canonical file validators.
+
+    ``with_statement`` adds the trial's one-line statement for list rows; recorded
+    reads keep their original shape.
+    """
     trial = read_trial(text)
     if trial:
         lesson = trial.lesson
@@ -29,6 +51,8 @@ def source_record(text: str, path: str) -> dict[str, Any] | None:
             "path": path, "raw_sha256": raw_sha256(text.encode()),
             "source_refs": list(lesson.source_refs),
         }
+        if with_statement:
+            record["statement"] = first_bullet_statement(trial.body)
         if "originating_subjects" in block:
             record["originating_subjects"] = list(lesson.originating_subjects)
         return record
