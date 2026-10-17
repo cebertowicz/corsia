@@ -261,6 +261,8 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
     key_is_set = False
 
     async def load(fn, *args):
+        if fn.__name__ == "load_awaits_sign_in":
+            return False
         if fn.__name__ == "load_runtime_app_config":
             return "codex", {
                 **app["config"], "secret_headers": ["Authorization"], "connected_app_id": args[0],

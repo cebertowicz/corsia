@@ -311,6 +311,21 @@ def load_missing_app_key_refs(app_id: str) -> list[str]:
         db.close()
 
 
+def load_awaits_sign_in(app_id: str) -> bool:
+    """Whether an imported needs-sign-in app has no person's sign-in yet (A-R16: no network call until then)."""
+    from infra.database import get_db
+    from tools.mcp_oauth_store import entry_name
+
+    db = get_db()
+    try:
+        row = db.execute("SELECT state FROM connected_apps WHERE id=?", (app_id,)).fetchone()
+        return row is not None and row["state"] == "needs_sign_in" and db.execute(
+            "SELECT 1 FROM key_store_entries WHERE name=? AND value_ref IS NOT NULL", (entry_name(app_id),)
+        ).fetchone() is None
+    finally:
+        db.close()
+
+
 def load_runtime_app_ids() -> list[str]:
     """Load all startup app ids in one DB job."""
     from infra.database import get_db

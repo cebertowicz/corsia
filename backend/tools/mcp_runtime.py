@@ -100,14 +100,17 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         if action == "sign_out":
             return await _await_sign_in(app_id)
+        from connections.app_reach import load_awaits_sign_in, load_missing_app_key_refs, load_runtime_app_config
+
+        if action != "sign_in" and await run_in_db(load_awaits_sign_in, app_id):
+            # Only a person's completed sign-in starts an imported app that needs one.
+            return await _await_sign_in(app_id)
         if action == "reconnect":
             now = time.monotonic()
             if now - _reconnect_at.get(app_id, float("-inf")) < 10:
                 raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
             _reconnect_at[app_id] = now
             await _remove_connected_app(app_id)
-        from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
-
         name, config = await run_in_db(load_runtime_app_config, app_id)
         if action == "sign_in":
             # A completed sign-in replaces any earlier session at once; it is not a rate-limited reconnect.
