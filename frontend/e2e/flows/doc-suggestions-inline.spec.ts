@@ -103,19 +103,19 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveCount(0);
 
 			await openComments(page, drawer);
-			// A phone's list is a modal sheet over the document (its scrim and grabber included): an insert under it cannot be pressed until the list closes.
+			// The list is a modal sheet over the document column (its scrim and grabber included) in both layouts here, since
+			// neither canvas reaches 900 px (RSR-7): an insert under it cannot be pressed until the list closes.
 			const covered = await insert(page, fine).evaluate((element) => {
 				const rect = element.getBoundingClientRect();
 				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-adaptive-drawer]');
 			});
-			if (covered) return;
-			await insert(page, fine).click();
-			await expect(drawer).toBeVisible();
-			await expect(drawer.locator(`[data-comment-id="${fine}"] .ct.focused`)).toBeInViewport();
-			await expect(drawer.locator(`[data-comment-id="${loose}"] .ct.focused`)).toHaveCount(0);
-			await insert(page, loose).click();
-			await expect(drawer.locator(`[data-comment-id="${loose}"] .ct.focused`)).toBeInViewport();
-			await expect(drawer.locator(`[data-comment-id="${fine}"] .ct.focused`)).toHaveCount(0);
+			expect(covered, 'the insert is under the list sheet and its scrim').toBe(true);
+			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(drawer).toHaveCount(0);
+			if (project === 'chromium-mobile') await insert(page, fine).tap(); else await insert(page, fine).click();
+			await expect(card('Loosen the second line.')).toBeVisible();
+			await expect(card('Loosen the second line.')).toHaveClass(/\bfocused\b/);
+			await expect(card('Tighten the first line.')).toHaveCount(0);
 		});
 
 		test(`@flow:document-suggestions accepting applies the change and rejecting leaves the file, and both clear the inline marks at ${width}`, async ({ page, request }) => {
@@ -179,6 +179,45 @@ for (const [width, height, project] of layouts) {
 			// Only that suggestion: the other keeps its marks.
 			await expect(strike(page, fine)).toHaveText('is fine');
 			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			await expect(row(loose)).toContainText('Tighten the first line.');
+		});
+
+		test(`@flow:document-suggestions deleting the first character of a quote drops that suggestion's inline marks and keeps its card at ${width}`, async ({ page, request }) => {
+			const { drawer, editor, ids: [loose, fine], row } = await openSuggestionDocument(page, request, PROSE, [
+				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
+				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
+			]);
+			// This canvas is narrower than 900 px, so the list is a modal sheet over the document column (RSR-7): the sheet is
+			// closed before the document is touched, and the card is still listed when it opens again.
+			await openComments(page, drawer);
+			await expect(strike(page, loose)).toHaveText('is loose');
+			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(drawer).toHaveCount(0);
+			// A caret reaching the quote opens its card as a modal sheet too, and every caret move inside the quote opens it again,
+			// so the card closes first and the editor, which keeps its caret at the quote's start, takes the edit: deleting the
+			// quote's first character.
+			// The click lands at the line's end, clear of the margin markers on its left, and Home returns the caret to its start.
+			const line = editor.locator('.cm-line', { hasText: 'The first line is loose.' });
+			await line.click({ position: { x: (await line.boundingBox())!.width - 4, y: 5 } });
+			await page.keyboard.press('Home');
+			const card = page.getByRole('dialog');
+			for (let step = 0; step < 18 && !(await card.isVisible()); step += 1) await page.keyboard.press('ArrowRight');
+			await expect(card).toBeVisible();
+			await page.keyboard.press('Escape');
+			await expect(card).toHaveCount(0);
+			await expect(editor).toBeFocused();
+			await page.keyboard.press('Delete');
+			await expect(editor).not.toContainText('The first line is loose.');
+			await expect(editor).toContainText('The first line s loose.');
+			await expect(strike(page, loose)).toHaveCount(0);
+			await expect(insert(page, loose)).toHaveCount(0);
+			// Only that suggestion: the other keeps its marks.
+			await expect(strike(page, fine)).toHaveText('is fine');
+			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			// The edit moved the caret within the quote, which opens a sheet again on a phone: close it, then list the comments.
+			await page.keyboard.press('Escape');
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await openComments(page, drawer);
 			await expect(row(loose)).toContainText('Tighten the first line.');
 		});
 

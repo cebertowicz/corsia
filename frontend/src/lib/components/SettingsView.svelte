@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import { loadProviders } from '$lib/stores/providers';
 	import ProviderManager from './ProviderManager.svelte';
 	import ProvidersPolicyBlock from './ProvidersPolicyBlock.svelte';
@@ -21,7 +20,6 @@
 		closeSettingsProject,
 		consumeSettingsOpenRequest,
 		returnToProjectPage,
-		retrySettingsAnchor,
 		selectSettingsSection,
 		setSettingsDrill,
 		settingsNavigation,
@@ -72,11 +70,6 @@
 	$effect(() => {
 		void openRequest;
 		if (consumeSettingsOpenRequest()) mobileOpen = true;
-	});
-	// The section mounts while the phone still hides its content, so an anchor can only scroll once the flush that
-	// shows it has been applied.
-	$effect(() => {
-		if (mobileOpen) void tick().then(retrySettingsAnchor);
 	});
 
 	function select(id: SettingsSection) {
@@ -129,6 +122,9 @@
 	</nav>
 
 	<div class="settings-content" class:mobile-section={mobileOpen} use:toastAnchorSurface>
+		<!-- A phone hides this content until a section is open, so the section mounts only then: an anchored element
+			 consumes its request at mount, and a mount in hidden content has no box to scroll to. -->
+		{#if !$isMobile || mobileOpen}
 		<div class="section-host">
 			{#if section === 'providers'}
 				<div class="inset"><ProviderManager /></div>
@@ -155,6 +151,7 @@
 				<div class="inset"><SettingsDebug /></div>
 			{/if}
 		</div>
+		{/if}
 	</div>
 
 	<div class="mobile-root" class:hidden={mobileOpen}>
