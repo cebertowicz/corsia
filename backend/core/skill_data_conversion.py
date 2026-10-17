@@ -143,8 +143,10 @@ def rewrite_skill_data(text: str, sidecar: str | None = None) -> Conversion:
     ``sidecar`` is the ``corsia.yaml`` text already beside the skill, if any.
     """
     span = frontmatter_span(text) if FRONTMATTER_KEY in text else None
+    if span is None:
+        return Conversion(text)
     try:
-        meta = parse_frontmatter(text)[0] if span else {}
+        meta = parse_frontmatter(text)[0]
     except Exception:  # noqa: BLE001 - validation reports an unparseable frontmatter.
         return Conversion(text)
     block = meta.get(FRONTMATTER_KEY)
