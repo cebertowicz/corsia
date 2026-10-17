@@ -15,7 +15,6 @@ function render() {
 	return { onReply };
 }
 function openReply() {
-	host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
 	return host.querySelector<HTMLTextAreaElement>('.ct-input')!;
 }
 function type(input: HTMLTextAreaElement, value: string) {
@@ -55,11 +54,10 @@ describe('CommentThread reply field', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right');
 	});
 
-	it('closes an untouched empty field when focus moves to another thread', () => {
+	it('keeps an empty reply field visible when focus moves to another thread', () => {
 		render();
-		openReply();
 		props.activeId = 'c2'; flushSync();
-		expect(host.querySelector('.ct-input')).toBeNull();
+		expect(host.querySelector('.ct-input')).not.toBeNull();
 	});
 
 	it('keeps a field that holds text open when focus moves away', () => {

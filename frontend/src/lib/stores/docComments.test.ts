@@ -11,7 +11,7 @@ vi.mock('$lib/api/docs', () => ({
 
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, loadComments, flushPositions, remapComments,
+	docComments, commentLoads, fromServer, loadComments, flushPositions, remapComments,
 } from './docComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
 
@@ -138,6 +138,20 @@ describe('image region comments', () => {
 		await moveRegion('image', 'pin', { x: 0.5, y: 0.5, w: 0, h: 0 });
 		expect(mocks.patchComment).toHaveBeenCalledWith('pin', { region: { x: 0.5, y: 0.5, w: 0, h: 0 } });
 		expect(get(docComments).image[0]).toMatchObject({ region: { x: 0.5, y: 0.5, w: 0, h: 0 }, regionNumber: 4, regionStale: false, text: 'Too dark' });
+	});
+});
+
+describe('comment-thread view projection', () => {
+	it('carries the server-named new reply ids and reply timestamps for new-reply presentation', () => {
+		const comment = fromServer({
+			id: 'root', artifact_id: 'artifact', parent_id: null, author: 'Steve', author_kind: 'user', body: 'Root', anchor_text: 'quote', from_off: 0, to_off: 5,
+			review: 0, resolved: 0, acked: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z', reply_waiting: true,
+			new_reply_ids: ['new'], replies: [{
+				id: 'new', artifact_id: 'artifact', parent_id: 'root', author: 'Agent', author_kind: 'agent', body: 'Reply', anchor_text: null, from_off: null, to_off: null,
+				review: 0, resolved: 0, acked: 0, created_at: '2026-10-16T17:02:00Z', updated_at: '2026-10-16T17:02:00Z',
+			}],
+		});
+		expect(comment).toMatchObject({ newReplyIds: ['new'], replies: [{ id: 'new', createdAt: '2026-10-16T17:02:00Z' }] });
 	});
 });
 
