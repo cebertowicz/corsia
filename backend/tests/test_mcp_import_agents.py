@@ -196,16 +196,18 @@ def test_imports_every_transport_through_the_shared_path(tmp_path):
     assert "headers" not in legacy
 
 
-def test_remote_apps_that_need_sign_in_are_imported_in_that_state(tmp_path):
+def test_remote_apps_that_need_sign_in_are_imported_awaiting_approval(tmp_path):
     _write(tmp_path / ".openclaw/openclaw.json", OPENCLAW_CONFIG)
     _write(tmp_path / ".hermes/config.yaml", HERMES_CONFIG)
 
     for source in ("openclaw", "hermes"):
+        db = _db()
         result = mcp_import.import_selected(
-            [{"source": source, "name": "signin"}], db=_db(), home=tmp_path, actor="agent",
+            [{"source": source, "name": "signin"}], db=db, home=tmp_path, actor="agent",
         )
 
-        assert [(row["name"], row.get("state")) for row in result["rows"]] == [("signin", "needs_sign_in")]
+        assert [(row["name"], row.get("state")) for row in result["rows"]] == [("signin", "awaiting_approval")]
+        assert get_app(result["rows"][0]["id"], db=db)["state"] == "awaiting_approval"
 
 
 def test_hermes_env_references_keep_only_the_variable_name(tmp_path):
