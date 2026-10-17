@@ -20,7 +20,7 @@
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
 	import { widgetComments } from '$lib/cm/widget-comments';
-	import { tableCommentLabel } from '$lib/cm/widget-cells';
+	import { widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
@@ -100,7 +100,7 @@
 			from: r.from, to: r.to, text,
 			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
 			anchor: composerAnchor(v, r.from, r.to),
-			label: () => tableCommentLabel(state, r.from, r.to, text) ?? undefined,
+			label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
 		});
 	}
 
@@ -166,8 +166,8 @@
 	}
 
 	/** The label a comment on a table's text gets, read from this editor's own syntax tree; undefined while the editor is not up. */
-	export function tableLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
-		return view ? tableCommentLabel(view.state, from, to, quote) : undefined;
+	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
+		return view ? widgetCommentLabel(view.state, from, to, quote) : undefined;
 	}
 
 	/**
@@ -183,7 +183,7 @@
 	}
 
 	/** The document a label is read from: a new one with every edit, so a cached label knows when its table may have changed. */
-	export function tableLabelStamp(): unknown { return view?.state.doc; }
+	export function widgetLabelStamp(): unknown { return view?.state.doc; }
 
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
 	function focusWidgetComments(ids: string[], opener: HTMLElement) {

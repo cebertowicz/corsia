@@ -1,6 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import { plainQuote } from '$lib/plainQuote';
-import { tableAt } from './widget-blocks';
+import { diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
@@ -53,12 +53,14 @@ export function tableCellLabel(src: string, cell: CellSpan, quote: string): stri
 }
 
 /**
- * The one label for a comment on a table's text, shared by the composer and the card: derived from the source offsets
- * and the syntax-tree table they sit in (the editor's own tree), never persisted. Null for anything outside a table, and for a range that
- * runs past one, so prose or code that contains a pipe, or a selection that merely includes a table, keeps its ordinary quote.
+ * The one label for a comment on a table's or diagram's text, shared by the composer and the card: derived from the source offsets
+ * and the syntax-tree table or diagram they sit in (the editor's own tree), never persisted. A diagram is labelled only for the whole block.
+ * Null for anything outside a table, and for a range that runs past one, so prose or code that contains a pipe, or a selection that
+ * merely includes a table, keeps its ordinary quote.
  */
-export function tableCommentLabel(state: EditorState, from: number | undefined, to: number | undefined, quote: string): string | null {
+export function widgetCommentLabel(state: EditorState, from: number | undefined, to: number | undefined, quote: string): string | null {
 	if (from === undefined || to === undefined || from < 0 || to < from || to > state.doc.length) return null;
+	if (diagramAt(state, from, to)) return 'The whole diagram';
 	const table = tableAt(state, from, to);
 	if (!table) return null;
 	if (from < table.from || to > table.to) return null;

@@ -3,7 +3,7 @@ import type { SelectionLabel } from '$lib/stores/commentDraft';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
-import { occurrences, snappedTableRows, tableCells, tableCommentLabel, type CellSpan } from './widget-cells';
+import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { addCommentId, commentIdsAt, paintTable, unpaint, type Mark } from './widget-paint';
 
 /**
@@ -46,7 +46,7 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 	const place = { top, left: end.right, above: true, inWidget: true as const };
 	const { state } = view;
 	if (el.matches(DIAGRAM)) {
-		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: () => 'The whole diagram', anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
+		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: () => widgetCommentLabel(state, block.from, block.to, '') ?? undefined, anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
 	}
 	const src = view.state.sliceDoc(block.from, block.to);
 	const covered = tableCells(src).map((span) => ({ span, cell: cellElement(el, span) }))
@@ -73,7 +73,7 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 	// The label comes from the one shared function, from the same offsets and quote the card is later given.
 	const whole = (start: { span: CellSpan; cell: HTMLTableCellElement } = first, end: { span: CellSpan; cell: HTMLTableCellElement } = last, items: Array<{ cell: HTMLTableCellElement }> = covered): WidgetSelection => {
 		const from = block.from + start.span.from, to = block.from + end.span.to, text = src.slice(start.span.from, end.span.to);
-		return { from, to, text, ...place, label: () => tableCommentLabel(state, from, to, text) ?? undefined, anchor: () => rows(items) };
+		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: () => rows(items) };
 	};
 	const snapped = snappedTableRows(src, covered.map(({ span }) => span));
 	if (snapped && snapped.rows > 1) {
@@ -92,7 +92,7 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 	const inSource = occurrences(src.slice(span.from, span.to), picked);
 	if (inSource.length === occurrences(rendered, picked).length && inSource[index] !== undefined) {
 		const from = block.from + span.from + inSource[index];
-		return { from, to: from + picked.length, text: picked, ...place, label: () => tableCommentLabel(state, from, from + picked.length, picked) ?? undefined, anchor: rows as () => DOMRect | null };
+		return { from, to: from + picked.length, text: picked, ...place, label: () => widgetCommentLabel(state, from, from + picked.length, picked) ?? undefined, anchor: rows as () => DOMRect | null };
 	}
 	return whole();
 }

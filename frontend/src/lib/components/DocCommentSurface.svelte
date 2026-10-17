@@ -17,7 +17,7 @@
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
 	import { clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
 	import { trackOverlaySheet } from '$lib/cm/visible-region';
-	import { createCellLabels, type TableLabelReader } from '$lib/docCommentLabels';
+	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
@@ -29,7 +29,7 @@
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, tableLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -37,7 +37,7 @@
 		narrow: boolean;
 		comments: DocComment[];
 		/** Reads a table comment's label from the editor's own syntax tree. */
-		tableLabel?: TableLabelReader;
+		widgetLabel?: WidgetLabelReader;
 		focusedId: string | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
 		draft: { text: string; body?: string; label?: string } | null;
@@ -78,7 +78,7 @@
 		onRevealDraft?: (opening: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
-	const cellLabel = createCellLabels(() => tableLabel);
+	const cellLabel = createCellLabels(() => widgetLabel);
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
 	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
 	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;

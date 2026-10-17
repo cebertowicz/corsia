@@ -46,6 +46,22 @@ export function tableAt(state: EditorState, from: number, to: number): { from: n
 	return found;
 }
 
+/**
+ * The source of the diagram whose block the range covers whole, from the editor's own syntax tree and the diagram identity the
+ * renderer draws from (`isMermaidFence`). Text inside it, or a range that merely takes it in, is not the whole diagram.
+ */
+export function diagramAt(state: EditorState, from: number, to: number): { from: number; to: number } | null {
+	let found: { from: number; to: number } | null = null;
+	(ensureSyntaxTree(state, Math.min(to, state.doc.length), 100) ?? syntaxTree(state)).iterate({ from, to, enter: (node) => {
+		if (found) return false;
+		if (node.name !== 'FencedCode') return;
+		if (isMermaidFence(node, state.doc)) found = blockSource(state.doc, node);
+		return false;
+	} });
+	const block = found as { from: number; to: number } | null;
+	return block && from === block.from && to === block.to ? block : null;
+}
+
 /** A block widget's source range: a table's own length, a fenced block's whole fence. */
 export function blockRange(view: EditorView, el: HTMLElement): { from: number; to: number } | null {
 	let from: number;

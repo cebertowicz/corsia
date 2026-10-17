@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
-import { createCellLabels, type TableLabelReader } from './docCommentLabels';
-import { tableCommentLabel } from './cm/widget-cells';
+import { createCellLabels, type WidgetLabelReader } from './docCommentLabels';
+import { widgetCommentLabel } from './cm/widget-cells';
 
 const comment = { id: 'a', from: 10, to: 14, anchor: 'Dana', orphaned: false };
-type Read = TableLabelReader['read'];
-const reading = (read: Read, stamp: () => unknown = () => 0): TableLabelReader => ({ read, stamp });
+type Read = WidgetLabelReader['read'];
+const reading = (read: Read, stamp: () => unknown = () => 0): WidgetLabelReader => ({ read, stamp });
 
 describe('createCellLabels', () => {
 	it("reads a comment's label once however often the list renders", () => {
@@ -29,7 +29,7 @@ describe('createCellLabels', () => {
 	});
 
 	it('does not remember an answer given before the editor was up', () => {
-		let reader: TableLabelReader | undefined;
+		let reader: WidgetLabelReader | undefined;
 		const label = createCellLabels(() => reader);
 		expect(label(comment)).toBeNull();
 		reader = reading(() => undefined);
@@ -81,12 +81,12 @@ describe('createCellLabels', () => {
 	it("follows its table: a whole-table comment stops saying so once a row is added below it", () => {
 		const table = '| Name | Status |\n|---|---|\n| Dana | Open |';
 		let state = EditorState.create({ doc: table, extensions: [markdown({ extensions: GFM })] });
-		const label = createCellLabels(() => reading((from, to, quote) => tableCommentLabel(state, from, to, quote), () => state.doc));
+		const label = createCellLabels(() => reading((from, to, quote) => widgetCommentLabel(state, from, to, quote), () => state.doc));
 		const whole = { id: 'w', from: 0, to: table.length, anchor: table, orphaned: false };
 		expect(label(whole)).toBe('The whole table');
 		// The row is added after the comment's range, so none of its own offsets move.
 		state = state.update({ changes: { from: table.length, insert: '\n| Eli | Done |' } }).state;
 		expect(label(whole)).not.toBe('The whole table');
-		expect(label(whole)).toBe(tableCommentLabel(state, whole.from, whole.to, whole.anchor));
+		expect(label(whole)).toBe(widgetCommentLabel(state, whole.from, whole.to, whole.anchor));
 	});
 });

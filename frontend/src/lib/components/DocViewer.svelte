@@ -366,7 +366,7 @@
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}
-		tableLabel={{ read: (from, to, quote) => editorSurface?.tableLabel(from, to, quote), stamp: () => editorSurface?.tableLabelStamp() }}
+		widgetLabel={{ read: (from, to, quote) => editorSurface?.widgetLabel(from, to, quote), stamp: () => editorSurface?.widgetLabelStamp() }}
 		focusedId={shownFocus}
 		draft={draftController.draft}
 		draftReason={draftController.reason}

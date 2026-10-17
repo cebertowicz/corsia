@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
-import { snappedTableRows, tableCellLabel, tableCells, tableCommentLabel } from './widget-cells';
+import { snappedTableRows, tableCellLabel, tableCells, widgetCommentLabel } from './widget-cells';
 import { touchMovedBeyond } from './widget-comments';
 
 const TABLE = `| Name | Status | Note |
@@ -18,7 +18,7 @@ const cell = (row: number, col: number) => {
 
 // The editor's own parser setup (`MarkdownEditor.svelte`), the state a label is read from.
 const documentState = (text: string) => EditorState.create({ doc: text, extensions: [markdown({ extensions: GFM })] });
-const label = (text: string, from: number, to: number, quote: string) => tableCommentLabel(documentState(text), from, to, quote);
+const label = (text: string, from: number, to: number, quote: string) => widgetCommentLabel(documentState(text), from, to, quote);
 const at = (text: string, part: string) => { const from = text.indexOf(part); return [from, from + part.length] as const; };
 
 describe('touchMovedBeyond', () => {
@@ -64,7 +64,24 @@ describe('tableCellLabel', () => {
 	});
 });
 
-describe('tableCommentLabel reads the table the widget draws', () => {
+describe('widgetCommentLabel names a whole diagram', () => {
+	const fence = '```mermaid\ngraph TD\n  A --> B\n\n  B --> C\n```';
+	const text = `Intro\n\n${fence}\n\nAfter`;
+	const [from, to] = at(text, fence);
+
+	it('gives a comment on the whole mermaid block the composer label, not its raw source', () => {
+		expect(label(text, from, to, fence)).toBe('The whole diagram');
+	});
+
+	it('keeps the plain quote for text inside it, other code fences, and a range that merely takes it in', () => {
+		expect(label(text, ...at(text, 'A --> B'), 'A --> B')).toBeNull();
+		const code = '```js\nlet a = 1;\n```';
+		expect(label(code, 0, code.length, code)).toBeNull();
+		expect(label(text, 0, to + 5, text.slice(0, to + 5))).toBeNull();
+	});
+});
+
+describe('widgetCommentLabel reads the table the widget draws', () => {
 	it('gives a pipe in inline code in prose its plain quote', () => {
 		const text = 'Run `cat x | grep y` now';
 		expect(label(text, ...at(text, 'now'), 'now')).toBeNull();
