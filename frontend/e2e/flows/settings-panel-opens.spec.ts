@@ -1,6 +1,6 @@
 
 import { expect, test } from '@playwright/test';
-import { captureConsoleErrors, loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot } from '../support/corsia';
+import { captureConsoleErrors, loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_SESSION_TOKEN } from '../support/corsia';
 
 test.describe('@flow:settings @surface:settings settings panel opens', () => {
 	test('System settings has no retired Core Agent controls or legacy summary requests', async ({ page }, testInfo) => {
@@ -25,7 +25,13 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 
 	test('opens to providers, navigates through sections, raises zero console errors', async ({ page }, testInfo) => {
 		const consoleErrors = captureConsoleErrors(page);
-		await loginByUrl(page);
+		// Host-access settings change only for a signed-in person (api/system.py require_human_user),
+		// so this flow signs in with the disposable person session, not the machine token.
+		await page.goto(`/?token=${TEST_SESSION_TOKEN}`);
+		await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
+		if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await page.getByRole('button', { name: 'New chat' }).first().click();
+		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
 		await openSettings(page);
 		await openSettingsSection(page, 'Providers');
 		await expect(page.getByRole('heading', { name: 'Accounts and rollover', exact: true })).toBeVisible();
@@ -61,6 +67,7 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 				body: JSON.stringify({
 					branch: 'dev', current_sha: 'aaaaaaa', remote_sha: 'bbbbbbb',
 					commits_behind: 3, available: true, checked_at: 1, error: null,
+					current_version: '1.0.0', target_version: '1.1.0',
 				}),
 			});
 		});
@@ -92,15 +99,14 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 			: page.locator('.settings-view .desktop-nav [data-settings-section="providers"]');
 		await expect(providers).toBeVisible();
 		await openSettingsSection(page, 'System');
-		await expect(page.getByText('3 commits behind on dev')).toBeVisible();
+		// SettingsUpdate.svelte: the Updates card names the version on offer; Update now is the one action.
+		await expect(page.getByText('1.1.0 available')).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'settings-system-update-available');
 
-		// Update is the button that pulls; Restart stays a plain bounce.
-		await page.getByRole('button', { name: 'Update', exact: true }).click();
-		await expect(page.getByText('Update + restart?')).toBeVisible();
-		await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+		// Update now is the button that pulls (no confirm step); Restart stays a plain bounce.
+		await page.getByRole('button', { name: 'Update now', exact: true }).click();
 
-		await expect(page.getByText('Python dependency check failed.')).toBeVisible();
+		await expect(page.getByText('Python dependency check failed.').first()).toBeVisible();
 		expect(restartRequest).toContain('mode=update');
 	});
 
@@ -144,7 +150,7 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 		await openSettings(page);
 		await openSettingsSection(page, 'System');
 
-		await expect(page.getByRole('button', { name: 'Update', exact: true })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Update now', exact: true })).toHaveCount(0);
 
 		await page.getByRole('button', { name: 'Restart', exact: true }).click();
 		await expect(page.getByText('Drain + restart?')).toBeVisible();
