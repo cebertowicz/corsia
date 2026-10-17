@@ -17,6 +17,7 @@ from plans import (
     hierarchy,
     node_states,
     not_moving,
+    operator_display_state,
     operator_nodes,
     operator_owners,
     operator_plan_display,
@@ -160,29 +161,34 @@ def counted_plan_ids(plan_ids, *, actor: PlanActor, db) -> set[str]:
     worker's step shows it under) is unarchived and has an owner Activity shows,
     so the user's queue and Activity's count agree on an archived project. The
     walk has no depth cap, like ``hierarchy.descendants``; UNION ends a malformed
-    cycle, and a cycle of shown plans has no top, so it stays excluded. Two
+    cycle, and a cycle of shown plans has no top, so it stays excluded. A paused
+    plan counts nothing (``plan_defers_asks``); the walk's start rows already
+    carry each plan's state, so that costs no extra read. Two
     set-wise reads for the walk plus the owner index, whatever the plan count.
     """
     wanted = list(dict.fromkeys(str(plan_id) for plan_id in plan_ids))
     top_of: dict[str, str] = {}
+    paused: set[str] = set()
     for start in range(0, len(wanted), hierarchy._ID_CHUNK):
         chunk = wanted[start:start + hierarchy._ID_CHUNK]
         marks = ",".join("?" for _ in chunk)
         for row in db.execute(
-            f"""WITH RECURSIVE up(start_id, id, parent_id, shown) AS (
+            f"""WITH RECURSIVE up(start_id, id, parent_id, shown, start_state) AS (
                   SELECT p.id, p.id, p.parent_plan_id,
-                         {hierarchy.shown_under_step_sql('p')}
+                         {hierarchy.shown_under_step_sql('p')}, p.state
                     FROM plans p WHERE p.id IN ({marks})
                   UNION
                   SELECT up.start_id, p.id, p.parent_plan_id,
-                         {hierarchy.shown_under_step_sql('p')}
+                         {hierarchy.shown_under_step_sql('p')}, up.start_state
                     FROM plans p JOIN up ON p.id = up.parent_id
                    WHERE up.shown
                 )
-                SELECT start_id, id FROM up WHERE NOT shown""",
+                SELECT start_id, id, start_state FROM up WHERE NOT shown""",
             chunk,
         ).fetchall():
             top_of[str(row["start_id"])] = str(row["id"])
+            if operator_display_state.plan_defers_asks(str(row["start_state"])):
+                paused.add(str(row["start_id"]))
     tops: list = []
     top_ids = sorted(set(top_of.values()))
     for start in range(0, len(top_ids), hierarchy._ID_CHUNK):
@@ -193,7 +199,10 @@ def counted_plan_ids(plan_ids, *, actor: PlanActor, db) -> set[str]:
             chunk,
         ).fetchall())
     owners = _shown_owners(tops, actor, db=db)
-    return {plan_id for plan_id, top_id in top_of.items() if top_id in owners}
+    return {
+        plan_id for plan_id, top_id in top_of.items()
+        if top_id in owners and plan_id not in paused
+    }
 
 
 def _owned_rows(plan_rows: list, owners: dict[str, dict]) -> list:
@@ -332,6 +341,7 @@ def _scope(kind: str, owner_id: str, label: str, actor: PlanActor, *, db) -> dic
         str(item["artifact_id"])
         for item in decision_facts
         if item["answerable"] and str(item["plan_id"]) in eligible_tree
+        and not operator_display_state.plan_defers_asks(plan_index[str(item["plan_id"])]["state"])
     })
     target = {"kind": kind, "id": owner_id, "label": label}
     revision_source = {
