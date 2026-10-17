@@ -103,10 +103,10 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveCount(0);
 
 			await openComments(page, drawer);
-			// A phone's list is a sheet over the document: an insert under it cannot be pressed until the list closes.
+			// A phone's list is a modal sheet over the document (its scrim and grabber included): an insert under it cannot be pressed until the list closes.
 			const covered = await insert(page, fine).evaluate((element) => {
 				const rect = element.getBoundingClientRect();
-				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-doc-comments-drawer]');
+				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-adaptive-drawer]');
 			});
 			if (covered) return;
 			await insert(page, fine).click();
@@ -166,18 +166,37 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
-			// The list drawer is nonmodal: a caret landing in commented text keeps it open and the editor focused.
+			// This canvas is narrower than 900 px, so the list is a modal sheet over the document column (RSR-7): the sheet is
+			// closed before the document is touched, and the card is still listed when it opens again.
 			await openComments(page, drawer);
 			await expect(strike(page, loose)).toHaveText('is loose');
-			// The middle of the struck quote, not either edge, so the typed character lands inside it.
-			await strike(page, loose).click();
-			await page.keyboard.type('x');
+			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(drawer).toHaveCount(0);
+			// A caret reaching the quote opens its card as a modal sheet too, and every caret move inside the quote opens it again,
+			// so the card closes first and the editor, which keeps its caret at the quote's start, takes the edit: deleting the
+			// quote's first character.
+			// The click lands at the line's end, clear of the margin markers on its left, and Home returns the caret to its start.
+			const line = editor.locator('.cm-line', { hasText: 'The first line is loose.' });
+			await line.click({ position: { x: (await line.boundingBox())!.width - 4, y: 5 } });
+			await page.keyboard.press('Home');
+			const card = page.getByRole('dialog');
+			for (let step = 0; step < 18 && !(await card.isVisible()); step += 1) await page.keyboard.press('ArrowRight');
+			await expect(card).toBeVisible();
+			await page.keyboard.press('Escape');
+			await expect(card).toHaveCount(0);
+			await expect(editor).toBeFocused();
+			await page.keyboard.press('Delete');
 			await expect(editor).not.toContainText('The first line is loose.');
+			await expect(editor).toContainText('The first line s loose.');
 			await expect(strike(page, loose)).toHaveCount(0);
 			await expect(insert(page, loose)).toHaveCount(0);
 			// Only that suggestion: the other keeps its marks.
 			await expect(strike(page, fine)).toHaveText('is fine');
 			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			// The edit moved the caret within the quote, which opens a sheet again on a phone: close it, then list the comments.
+			await page.keyboard.press('Escape');
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await openComments(page, drawer);
 			await expect(row(loose)).toContainText('Tighten the first line.');
 		});
 
