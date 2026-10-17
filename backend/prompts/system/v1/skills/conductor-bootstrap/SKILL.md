@@ -1,9 +1,6 @@
 ---
 name: conductor-bootstrap
 description: Use when starting a new project in CORSIA, choosing between a project and a workspace-level agent, standing up or revising a project's coordination model or agent roster, onboarding a conductor or a new install's first run, or opening CORSIA on a phone or another computer at any time. Covers the interview, charter, coordination model, shared structure, smallest team, first-turn verification and private-network remote access. Not for other routine conductor work in an already-configured project.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Conductor bootstrap

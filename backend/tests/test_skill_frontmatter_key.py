@@ -68,6 +68,8 @@ def test_another_tools_metadata_is_left_alone_even_under_the_same_field_names() 
 
 
 def test_every_skill_file_files_its_block_under_the_key_the_reader_reads() -> None:
+    # Goes red once the last tracked block is gone (the starter-kit copies still carry them):
+    # whichever change removes it rewrites this test to check sidecars instead.
     tracked = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "-z", "*SKILL.md"],
         capture_output=True, check=True,

@@ -1,9 +1,6 @@
 ---
 name: engineering-standards
 description: Use when diagnosing, debugging, writing, reviewing, or refactoring code or runtime behavior — trace conceptual forks and root causes, establish intent before calling behavior a defect, and prevent default engineering failures.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Engineering standards
