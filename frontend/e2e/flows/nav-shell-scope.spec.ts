@@ -43,7 +43,7 @@ test.describe('@flow:nav-shell @surface:navigation v2 shell — project scope + 
 		await projRow.click();
 		await expect(page.locator('.palette')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Back to workspace' })).toBeVisible({ timeout: 10_000 });
-		// A project's Activity carries no right pane; the scope reads in the header and the Activity heading.
+		// A project's Activity carries no right pane; the project's name shows in the main column beside the Activity heading.
 		await expect(page.getByRole('heading', { name: 'Activity', level: 1 })).toBeVisible();
 		await expect(page.locator('main').first()).toContainText(projName);
 
@@ -102,7 +102,7 @@ test.describe('@flow:nav-shell @surface:navigation v2 shell — project scope + 
 		await page.keyboard.press('Enter');
 		await expect(page.locator('.palette')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Back to workspace' })).toBeVisible({ timeout: 10_000 });
-		// A project's Activity carries no right pane; the scope reads in the header and the Activity heading.
+		// A project's Activity carries no right pane; the project's name shows in the main column beside the Activity heading.
 		await expect(page.getByRole('heading', { name: 'Activity', level: 1 })).toBeVisible();
 		await expect(page.locator('main').first()).toContainText(projName);
 	});

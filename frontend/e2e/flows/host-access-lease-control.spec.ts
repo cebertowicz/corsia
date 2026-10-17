@@ -446,6 +446,9 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 		const activeDialogBox = await settledBox(activeDialog);
 		expect(activeDialogBox).toBeTruthy();
+		expect(activeDialogBox!.x).toBeGreaterThanOrEqual(0);
+		expect(activeDialogBox!.x + activeDialogBox!.width).toBeLessThanOrEqual(viewport!.width);
+		expect(activeDialogBox!.y + activeDialogBox!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');
