@@ -286,6 +286,9 @@ mod tests {
         let shell = include_str!("../../dist-shell/index.html");
         assert!(shell.contains("CORSIA couldn’t stop its background service."));
         assert!(shell.contains("invoke('retry_quit')"));
+        // Closing the window only hides it, so Quit must ask the app to quit.
+        assert!(shell.contains("invoke?.('quit_app')"));
+        assert!(!shell.contains("getCurrentWindow"));
     }
 
     #[test]

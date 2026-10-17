@@ -94,7 +94,7 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
 enum ServiceStartup {
     Ready { url: String },
     RequiresApproval,
-    ExistingInstall { install_dir: String, workspace: String },
+    ExistingInstall { workspace: String },
     /// An earlier adoption's undo could not finish; the window offers the recovery the backend chose.
     AdoptionFailed { failure: adoption::AdoptionError },
 }
@@ -620,7 +620,6 @@ fn start_service(
     }
     if let first_run::FirstRun::Adoptable { source } = &first_run {
         return Ok(ServiceStartup::ExistingInstall {
-            install_dir: source.config.parent().unwrap_or(&source.state).display().to_string(),
             workspace: source.workspace.display().to_string(),
         });
     }
@@ -810,6 +809,13 @@ fn start_existing_again_blocking(app: &tauri::AppHandle) -> Result<(), adoption:
     let started = adoption::start_again(&plan, &mut lifecycle);
     service.adoption_in_progress.store(false, Ordering::Release);
     started
+}
+
+/// "Quit": the window's close button only hides it, so the shell's Quit asks
+/// the app to quit, which stops the background service first.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    lifecycle::request_quit(&app);
 }
 
 /// "Reopen CORSIA": relaunch so the adoption journal finishes its undo on launch.
@@ -1051,6 +1057,7 @@ pub fn run() {
             adopt_existing_install,
             start_existing_again,
             reopen_app,
+            quit_app,
             check_service_started,
             adoption_waiting_count,
             choose_work_folder,
@@ -1138,11 +1145,10 @@ pub fn run() {
                             let _ = window.eval("window.__corsiaShowBackgroundApproval?.();");
                         }
                     }
-                    Ok(ServiceStartup::ExistingInstall { install_dir, workspace }) => {
+                    Ok(ServiceStartup::ExistingInstall { workspace }) => {
                         if let Some(window) = app_handle.get_webview_window("main") {
-                            let install_dir = serde_json::to_string(&install_dir).unwrap_or_default();
                             let workspace = serde_json::to_string(&workspace).unwrap_or_default();
-                            let _ = window.eval(format!("window.__corsiaShowExistingInstall?.({install_dir}, {workspace});"));
+                            let _ = window.eval(format!("window.__corsiaShowExistingInstall?.({workspace});"));
                         }
                     }
                     Ok(ServiceStartup::AdoptionFailed { failure }) => {

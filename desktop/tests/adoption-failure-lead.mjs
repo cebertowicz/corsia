@@ -137,7 +137,7 @@ async function open(theme, failure, script = {}) {
 		} } };
 	}, [failure, script]);
 	await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
-	await page.evaluate(() => window.__corsiaShowExistingInstall('/i', '~/work'));
+	await page.evaluate(() => window.__corsiaShowExistingInstall('~/work'));
 	await page.click('#retry');
 	await page.waitForFunction(() => document.getElementById('status').textContent.includes('switch'));
 	return page;
@@ -227,6 +227,17 @@ for (const theme of ['light', 'dark']) {
 		if (hash && (await page.evaluate(() => window.location.hash)) !== hash) fail(`${theme} ${name}: did not continue to the service`);
 		if (after) compare(`${theme} ${name}`, await read(page), after);
 		if (failed === before) console.log(`ok   ${theme} ${name}`);
+		await page.close();
+	}
+	// Quit asks the app to quit; closing the window would only hide it.
+	{
+		const page = await open(theme, refused(keys));
+		const before = failed;
+		await page.click('#quit');
+		await page.waitForTimeout(150);
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_waiting_count', 'adopt_existing_install'].includes(command));
+		if (JSON.stringify(made) !== JSON.stringify(['quit_app'])) fail(`${theme} quit: ran ${JSON.stringify(made)}, expected ["quit_app"]`);
+		if (failed === before) console.log(`ok   ${theme} quit`);
 		await page.close();
 	}
 }

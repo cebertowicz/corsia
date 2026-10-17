@@ -218,7 +218,7 @@
 			const quit = document.getElementById('quit');
 			const ADOPTION_COPY = {
 				questionTitle: 'Use the CORSIA already on this computer?',
-				questionLine: (_installDir, workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It waits for running work to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
+				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It waits for running work to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
 
 				waitingTitle: 'Waiting for running work to finish…',
 				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
@@ -264,12 +264,12 @@
 				quit.hidden = true;
 			}
 
-			function showExistingInstall(installDir, workDir) {
+			function showExistingInstall(workDir) {
 				clearInterval(approvalPoll);
 				adoptionPrompt = true;
 				adoptionRecovery = null;
 				status.textContent = ADOPTION_COPY.questionTitle;
-				line.textContent = ADOPTION_COPY.questionLine(installDir, workDir);
+				line.textContent = ADOPTION_COPY.questionLine(workDir);
 				line.hidden = false;
 				note.hidden = true;
 				details.hidden = true;
@@ -427,7 +427,7 @@
 					if (startup.state === 'ready') {
 						continueToService(startup);
 					} else if (startup.state === 'existing_install') {
-						showExistingInstall(startup.install_dir, startup.workspace);
+						showExistingInstall(startup.workspace);
 					} else if (startup.state === 'adoption_failed') {
 						await showAdoptionFailure(startup.failure);
 					} else {
@@ -485,7 +485,7 @@
 			window.__corsiaShowAdoptionFailure = showAdoptionFailure;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
-			quit.addEventListener('click', () => window.__TAURI__?.window?.getCurrentWindow?.().close());
+			quit.addEventListener('click', () => invoke?.('quit_app'));
 			retry.addEventListener('click', retryFailure);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);

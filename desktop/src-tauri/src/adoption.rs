@@ -73,20 +73,13 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
     };
+    let recorded = bootstrap_roots(&home.join(".corsia/config.json"));
     let workspace = text("CORSIA_WORKSPACE")
-        .or_else(|| {
-            fs::read_to_string(home.join(".corsia/config.json"))
-                .ok()
-                .and_then(|raw| {
-                    serde_json::from_str::<serde_json::Value>(&raw)
-                        .ok()?
-                        .get("workspace")?
-                        .as_str()
-                        .map(PathBuf::from)
-                })
-        })
+        .or_else(|| recorded.as_ref().map(|(workspace, _)| workspace.clone()))
         .ok_or("source service plist has no workspace")?;
-    let state = text("CORSIA_STATE_DIR").unwrap_or_else(|| workspace.join(".corsia"));
+    let state = text("CORSIA_STATE_DIR")
+        .or_else(|| recorded.map(|(_, state)| state))
+        .ok_or("source service plist has no state directory")?;
     let port = environment
         .get("BACKEND_PORT")
         .and_then(plist::Value::as_string)
@@ -111,6 +104,25 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
         workspace,
         port,
     })
+}
+
+/// The roots the source install's bootstrap config records: a v2 file names
+/// both, an older one names only the workspace and keeps its state in
+/// `<workspace>/.corsia`.
+fn bootstrap_roots(config: &Path) -> Option<(PathBuf, PathBuf)> {
+    let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(config).ok()?).ok()?;
+    match value.get("workspace")? {
+        serde_json::Value::String(workspace) => {
+            let workspace = PathBuf::from(workspace);
+            let state = workspace.join(".corsia");
+            Some((workspace, state))
+        }
+        serde_json::Value::Object(workspace) => Some((
+            PathBuf::from(workspace.get("root")?.as_str()?),
+            PathBuf::from(value.get("state_root")?.as_str()?),
+        )),
+        _ => None,
+    }
 }
 
 impl Plan {
@@ -588,11 +600,8 @@ pub fn adopt(
     if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
         return rollback(plan, lifecycle, error, None);
     }
-    if plan.source.config.exists() {
-        if let Err(error) = move_to(&plan.source.config, &plan.adopted_dir().join("config.json")) {
-            return rollback(plan, lifecycle, error, None);
-        }
-    }
+    // The bootstrap config stays in place: it holds the workspace's identity
+    // (name and id) and setup choices, which the app's backend reads from it.
     if plan.source.env_file.exists() {
         let names = skipped_env_names(&plan.source.env_file)?;
         if let Err(error) = move_to(
@@ -630,10 +639,6 @@ fn restore_files(plan: &Plan) -> Result<(), String> {
     let old_plist = plan.adopted_dir().join(PLIST);
     if old_plist.exists() {
         move_to(&old_plist, &plan.source.plist)?;
-    }
-    let old_config = plan.adopted_dir().join("config.json");
-    if old_config.exists() {
-        move_to(&old_config, &plan.source.config)?;
     }
     let old_env = plan.adopted_dir().join("service.env");
     if old_env.exists() {
@@ -1036,6 +1041,12 @@ mod tests {
         );
         assert!(plan.source.state.join("corsia.db").exists());
         assert!(plan.adopted_dir().join(PLIST).exists());
+        assert_eq!(
+            fs::read_to_string(&plan.source.config).unwrap(),
+            "{}",
+            "the bootstrap config keeps the workspace identity and stays put"
+        );
+        assert!(!plan.adopted_dir().join("config.json").exists());
         assert_eq!(
             fake.events,
             [
@@ -1685,6 +1696,50 @@ mod tests {
         assert_eq!(source.state, PathBuf::from("/state"));
         assert_eq!(source.port, 47_895);
         assert_eq!(source.plist_provider_key_names, ["OPENAI_API_KEY"]);
+    }
+
+    fn plist_without_roots(port: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>/source/backend</string><key>ProgramArguments</key><array><string>/source/.venv/bin/python</string></array><key>EnvironmentVariables</key><dict><key>BACKEND_PORT</key><string>{port}</string></dict></dict></plist>"#
+        )
+    }
+
+    #[test]
+    fn roots_missing_from_the_plist_come_from_the_config_that_records_them() {
+        let home = tempfile::Builder::new()
+            .prefix("corsia-adoption-roots-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        let plist = home
+            .path()
+            .join("Library/LaunchAgents/com.corsia.prod.plist");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::create_dir_all(home.path().join(".corsia")).unwrap();
+        fs::write(&plist, plist_without_roots("47895")).unwrap();
+        let config = home.path().join(".corsia/config.json");
+
+        // A v2 config names both roots, so the state is the recorded one.
+        fs::write(
+            &config,
+            r#"{"version":2,"workspace":{"id":"w","name":"n","root":"/work"},"state_root":"/state"}"#,
+        )
+        .unwrap();
+        let source = source_from_plist(home.path(), &plist).unwrap();
+        assert_eq!(
+            (source.workspace, source.state),
+            (PathBuf::from("/work"), PathBuf::from("/state"))
+        );
+
+        // An older config names only the workspace; its state is beside it.
+        fs::write(&config, r#"{"workspace":"/work"}"#).unwrap();
+        let source = source_from_plist(home.path(), &plist).unwrap();
+        assert_eq!(source.state, PathBuf::from("/work/.corsia"));
+
+        // Nothing records the roots: the install is refused, not guessed.
+        fs::write(&config, "{}").unwrap();
+        assert!(source_from_plist(home.path(), &plist)
+            .unwrap_err()
+            .contains("no workspace"));
     }
 
     // ---- Recovery: one test per cause, each driving the real action against fakes ----
