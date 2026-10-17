@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from pathlib import Path
 
 from core import corrections_classifier
-from core.corrections_asset_files import asset_root
+from core.corrections_asset_files import asset_root, version_number
 from core.onnx_asset import AssetError, AssetManifest, load_pinned_manifest
-
-_VERSION_LABEL = re.compile(r"v([0-9]+)")
 
 
 class AssetSelectionError(AssetError):
@@ -25,14 +22,6 @@ class AssetSelectionError(AssetError):
     ) -> None:
         super().__init__(message, reader=reader)
         self.versions = versions
-
-
-def version_number(label: str) -> int:
-    """Order a pinned version label; only ``v<number>`` is accepted."""
-    match = _VERSION_LABEL.fullmatch(label)
-    if match is None:
-        raise AssetError(f"classifier version {label!r} is not of the form v<number>")
-    return int(match.group(1))
 
 
 def candidate_roots() -> list[Path]:
