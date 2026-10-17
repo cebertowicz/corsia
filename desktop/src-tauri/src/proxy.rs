@@ -4,7 +4,7 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
     time::Duration,
 };
 
@@ -87,6 +87,7 @@ pub async fn start_with_resolver(
         trust,
         local_port: port,
         on_key_changed: Arc::new(on_key_changed),
+        key_changed: AtomicBool::new(false),
         resolver,
         resolved: Mutex::new(ResolveCache::default()),
     });
@@ -118,6 +119,8 @@ struct ProxyState {
     trust: Trust,
     local_port: u16,
     on_key_changed: Arc<dyn Fn() + Send + Sync>,
+    /// Set when the host presents a key other than the pinned one; from then on nothing is forwarded.
+    key_changed: AtomicBool,
     resolver: Resolver,
     resolved: Mutex<ResolveCache>,
 }
@@ -246,16 +249,24 @@ fn is_upgrade_request<B>(request: &Request<B>) -> bool {
             .is_some_and(|value| value.split(',').any(|token| token.trim().eq_ignore_ascii_case("upgrade")))
 }
 
+const KEY_CHANGED_MESSAGE: &str = "the host's key changed, so nothing is forwarded to it";
+
 async fn forward_trusted(
     mut request: Request<Incoming>,
     state: Arc<ProxyState>,
 ) -> Result<Response<ProxyBody>, String> {
+    if state.key_changed.load(Ordering::SeqCst) {
+        return Err(KEY_CHANGED_MESSAGE.to_owned());
+    }
     let (target, remote, stream) = connect(&state).await?;
     let config = trust::client_config(&state.trust).map_err(|error| error.to_string())?;
     let name = remote.server_name()?;
     let tls = TlsConnector::from(Arc::new(config)).connect(name, stream).await.map_err(|error| {
         if matches!(state.trust, Trust::Pinned { .. }) && trust::is_pin_mismatch(&error) {
-            (state.on_key_changed)();
+            // Fail closed: the first mismatch ends forwarding, and the owner hears of it once.
+            if !state.key_changed.swap(true, Ordering::SeqCst) {
+                (state.on_key_changed)();
+            }
         }
         error.to_string()
     })?;
@@ -534,6 +545,34 @@ mod tests {
         assert!(changed.load(Ordering::SeqCst));
         proxy.stop();
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn after_a_pin_mismatch_the_proxy_forwards_nothing_and_reports_the_change_once() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let (port, server) = start_tls_server(identity.config, |_| async {
+            Ok(Response::new(test_body("unreachable")))
+        })
+        .await;
+        let mut wrong_pin = identity.pin;
+        wrong_pin[0] ^= 1;
+        let reports = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&reports);
+        let proxy = proxy_for(port, wrong_pin, move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+        })
+        .await;
+        let url = format!("http://127.0.0.1:{}/api/health", proxy.port);
+
+        assert_eq!(reqwest::get(&url).await.unwrap().status(), StatusCode::BAD_GATEWAY);
+        server.await.unwrap();
+        // The host is gone now, so a second dial would fail with a connection error; the refusal names the key.
+        let second = reqwest::get(&url).await.unwrap();
+
+        assert_eq!(second.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(second.text().await.unwrap(), KEY_CHANGED_MESSAGE);
+        assert_eq!(reports.load(Ordering::SeqCst), 1);
+        proxy.stop();
     }
 
     /// A TLS server that answers every connection until it is aborted.

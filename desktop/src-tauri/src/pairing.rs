@@ -851,7 +851,7 @@ mod tests {
         );
         let paired = pair("127.0.0.1", port, &code).await.unwrap();
         assert_eq!(
-            crate::version_check::check("127.0.0.1", port, &paired.trust).await.unwrap(),
+            crate::version_check::check("127.0.0.1", port, &paired.trust, "0.4.1-dev.230").await.unwrap(),
             crate::version_check::Compat::Ok
         );
         let proxy = crate::proxy::start(

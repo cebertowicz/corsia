@@ -112,7 +112,7 @@ def _placeholder_frontend_info() -> dict:
         "commit_subject": "(frontend not built)",
         "dirty": None,
         "build_iso": "",
-        "app": {"version": "unknown"},
+        "app": {"version": None},
     }
 
 
@@ -153,6 +153,22 @@ def _current_head_info() -> dict:
     }
 
 
+def _app_version(frontend: dict) -> str | None:
+    """The release version this host runs, or None when it cannot say.
+
+    An app bundle carries the version its build stamped into build-info.json (``CORSIA_APP_VERSION``). A source
+    checkout has no stamp, so it reports the nearest release tag git describes, without the leading ``v``.
+    """
+    build_app = frontend.get("app")
+    stamped = build_app.get("version") if isinstance(build_app, dict) else None
+    if isinstance(stamped, str) and stamped:
+        return stamped
+    if _APP_BUNDLE is not None:
+        return None
+    described = _git_read(["describe", "--tags", "--match", "v[0-9]*"])
+    return described.removeprefix("v") if described else None
+
+
 def _version_payload() -> dict:
     """Build the version payload; git and file reads block, so callers offload it.
 
@@ -164,10 +180,8 @@ def _version_payload() -> dict:
     backend["current_head"] = None if _APP_BUNDLE is not None else _current_head_info()
     backend["generation"] = os.environ.get("CORSIA_SERVICE_GENERATION")
     frontend = _read_frontend_build_info()
-    build_app = frontend.get("app")
-    version = build_app.get("version") if isinstance(build_app, dict) else None
     # The protocol belongs to this backend's source, not to a build file that may be missing or stale.
-    app = {"version": version if isinstance(version, str) else "unknown", "shell_protocol": SHELL_PROTOCOL}
+    app = {"version": _app_version(frontend), "shell_protocol": SHELL_PROTOCOL}
     return {
         "frontend": frontend,
         "backend": backend,

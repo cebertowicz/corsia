@@ -12,7 +12,8 @@ if TYPE_CHECKING:
     from infra.devices_listener import DevicesApp
 
 # The one Uvicorn release whose private ``_wait_tasks_to_complete`` the
-# override below was written against; any other version uses Uvicorn's own.
+# override below was written against. The pin test fails on any other version,
+# so a drifted install is caught by the suite, not by a second shutdown path.
 _PINNED_UVICORN_VERSION = "0.49.0"
 
 
@@ -24,9 +25,6 @@ class DevicesServer(uvicorn.Server):
         yield
 
     async def _wait_tasks_to_complete(self) -> None:
-        if uvicorn.__version__ != _PINNED_UVICORN_VERSION:
-            await super()._wait_tasks_to_complete()
-            return
         # Uvicorn has already sent normal connection shutdown (including WS
         # code 1012). Active SSE responses have no natural end, so disabling
         # Devices must disconnect transports and join their ASGI requests.

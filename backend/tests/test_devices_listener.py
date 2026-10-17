@@ -15,16 +15,13 @@ from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from infra import devices_listener
+from infra import devices_listener, devices_server
 from infra.devices_listener import (
     DevicesApp,
     DevicesListener,
     DevicesServer,
     ensure_host_key,
     lan_addresses,
-    local_hostname,
-    macos_computer_name,
-    remote_connect_name,
 )
 
 
@@ -111,70 +108,6 @@ def test_address_hints_include_only_listener_reachable_lan_addresses():
         "192.168.1.20",
         "fd00::20",
     ]
-
-
-def test_local_hostname_is_a_lowercase_mdns_name(monkeypatch):
-    monkeypatch.setattr(socket, "gethostname", lambda: "Studio.Local.")
-
-    assert local_hostname() == "studio.local"
-
-
-def test_macos_computer_name_decodes_a_cfstring_as_utf8(monkeypatch):
-    name = "Stúdió Mac"
-    copied_name = object()
-    released = []
-
-    def copy_name(store, encoding):
-        assert (store, encoding) == (None, None)
-        return copied_name
-
-    def string_length(value):
-        assert value is copied_name
-        return len(name)
-
-    def max_size(length, encoding):
-        assert (length, encoding) == (len(name), 0x08000100)
-        return len(name.encode("utf-8"))
-
-    def get_string(value, buffer, size, encoding):
-        assert (value, size, encoding) == (copied_name, len(name.encode("utf-8")) + 1, 0x08000100)
-        buffer.value = name.encode("utf-8")
-        return True
-
-    def release(value):
-        released.append(value)
-
-    system_configuration = SimpleNamespace(SCDynamicStoreCopyComputerName=copy_name)
-    core_foundation = SimpleNamespace(
-        CFStringGetLength=string_length,
-        CFStringGetMaximumSizeForEncoding=max_size,
-        CFStringGetCString=get_string,
-        CFRelease=release,
-    )
-    monkeypatch.setattr(devices_listener.sys, "platform", "darwin")
-    monkeypatch.setattr(
-        devices_listener,
-        "_load_macos_frameworks",
-        lambda: (system_configuration, core_foundation),
-    )
-
-    assert macos_computer_name() == name
-    assert released == [copied_name]
-
-
-def test_remote_connect_name_uses_announced_name_before_macos_name(monkeypatch):
-    monkeypatch.setattr(devices_listener, "macos_computer_name", lambda: "System name")
-    monkeypatch.setattr(devices_listener, "local_hostname", lambda: "fallback.local")
-
-    assert remote_connect_name(SimpleNamespace(announced_name="Announced name")) == "Announced name"
-    assert remote_connect_name(SimpleNamespace(announced_name=None)) == "System name"
-
-
-def test_remote_connect_name_falls_back_to_local_hostname(monkeypatch):
-    monkeypatch.setattr(devices_listener, "macos_computer_name", lambda: None)
-    monkeypatch.setattr(devices_listener, "local_hostname", lambda: "fallback.local")
-
-    assert remote_connect_name(None) == "fallback.local"
 
 
 class _FakeSocket:
@@ -314,30 +247,17 @@ async def test_devices_app_authentication_uses_the_db_boundary(monkeypatch):
     assert calls == [(devices_listener.authenticate, ("token",))]
 
 
-@pytest.mark.asyncio
-async def test_devices_server_uses_uvicorn_default_wait_outside_049(monkeypatch):
-    calls = []
-
-    async def default_wait(self):
-        calls.append(self)
-
-    monkeypatch.setattr(devices_listener.uvicorn, "__version__", "0.50.0")
-    monkeypatch.setattr(devices_listener.uvicorn.Server, "_wait_tasks_to_complete", default_wait)
-    server = object.__new__(DevicesServer)
-
-    await server._wait_tasks_to_complete()
-
-    assert calls == [server]
-
-
 def test_devices_server_override_is_pinned_to_the_verified_uvicorn_version():
-    assert devices_listener.uvicorn.__version__ == devices_listener._PINNED_UVICORN_VERSION, (
+    assert devices_server.uvicorn.__version__ == devices_server._PINNED_UVICORN_VERSION, (
         "DevicesServer._wait_tasks_to_complete overrides a private Uvicorn method and only "
-        f"runs on {devices_listener._PINNED_UVICORN_VERSION}; Uvicorn is now "
-        f"{devices_listener.uvicorn.__version__}. Re-verify the override against the new "
+        f"runs on {devices_server._PINNED_UVICORN_VERSION}; Uvicorn is now "
+        f"{devices_server.uvicorn.__version__}. Re-verify the override against the new "
         "release (SSE shutdown, transport abort, task join), then update _PINNED_UVICORN_VERSION."
     )
 
+
+# A joining computer on the same network: the Devices listener refuses any other peer.
+_LAN_PEER = ("192.168.1.20", 50000)
 
 _SESSIONS = {
     "person-session": {"id": "person", "name": "Person", "token_kind": "session"},
@@ -370,7 +290,7 @@ def _stub_app():
 
 
 def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(token_users):
-    client = TestClient(DevicesApp(_stub_app()))
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
 
     assert client.get("/api/models", params={"token": "person-session"}).status_code == 200
     assert client.get(
@@ -379,7 +299,7 @@ def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(tok
 
 
 def test_devices_app_requires_sign_in_without_a_token_or_with_a_machine_token(token_users):
-    client = TestClient(DevicesApp(_stub_app()))
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
 
     for response in (
         client.get("/api/models"),
@@ -390,25 +310,8 @@ def test_devices_app_requires_sign_in_without_a_token_or_with_a_machine_token(to
         assert response.json() == {"reason": "sign_in_required"}
 
 
-@pytest.mark.asyncio
-async def test_devices_app_query_token_wins_over_the_authorization_header(monkeypatch):
-    calls = []
-
-    async def fake_run_in_db(function, *args):
-        calls.append(args)
-        return {"token_kind": "session"}
-
-    monkeypatch.setattr(devices_listener, "run_in_db", fake_run_in_db)
-
-    assert await DevicesApp._has_human_session({
-        "headers": [(b"authorization", b"Bearer header-token")],
-        "query_string": b"token=query-token",
-    })
-    assert calls == [("query-token",)]
-
-
 def test_devices_app_websocket_handshake_token_must_be_a_person_session(token_users):
-    client = TestClient(DevicesApp(_stub_app()))
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
 
     with client.websocket_connect("/ws?token=person-session") as person:
         assert person.receive_json() == {"type": "accepted"}
@@ -424,7 +327,7 @@ def test_devices_app_websocket_handshake_token_must_be_a_person_session(token_us
 
 
 def test_devices_app_leaves_a_tokenless_websocket_to_its_first_frame_authentication(token_users):
-    client = TestClient(DevicesApp(_stub_app()))
+    client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
 
     with client.websocket_connect("/ws") as unauthenticated_yet:
         assert unauthenticated_yet.receive_json() == {"type": "accepted"}
@@ -505,7 +408,7 @@ def devices_sockets(monkeypatch, token_users):
     stub = FastAPI()
     stub.add_api_websocket_route("/ws", websocket_endpoint)
     stub.add_api_websocket_route("/api/browser/{thread_id}/stream", browser_stream.browser_stream_endpoint)
-    return TestClient(DevicesApp(stub))
+    return TestClient(DevicesApp(stub), client=_LAN_PEER)
 
 
 def _frames_until_close(socket) -> tuple[list, int]:

@@ -7,7 +7,7 @@ import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 const api = (patch: Partial<DevicesApi> = {}): DevicesApi => ({
-	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local',
+	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac',
 	lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
 });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -22,7 +22,7 @@ describe('viewFromApi', () => {
 	});
 	it('reads on but not announced, and lists what to type with the port when it is not the default', () => {
 		const view = viewFromApi(api({ announced_name: null, listening: { port: 47902 }, lan_addresses: ['192.168.1.20', 'fd5c::1'] }), false);
-		expect(view).toMatchObject({ announced: false, hostName: 'studio' });
+		expect(view).toMatchObject({ announced: false, hostName: 'Studio Mac' });
 		expect(view.addresses).toEqual(['studio.local:47902', '192.168.1.20:47902', '[fd5c::1]:47902']);
 	});
 	it('reads an active code with its seconds left', () => {

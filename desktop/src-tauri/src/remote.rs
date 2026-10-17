@@ -8,6 +8,8 @@ pub enum LaunchState {
     Remote { name: String },
     /// The remote could not be opened; the shell draws the card for `failure` with its actions.
     Failed { name: String, failure: ConnectFailure },
+    /// This computer's own service could not be brought back; the shell draws its failure card with the action.
+    ServiceFailed { reason: String },
     Disconnecting,
 }
 
@@ -48,6 +50,24 @@ impl RemoteConnection {
 
     pub fn retry(&mut self, name: impl Into<String>) {
         self.state = LaunchState::Connecting { name: name.into() };
+    }
+
+    pub fn service_failed(&mut self, reason: impl Into<String>) {
+        self.state = LaunchState::ServiceFailed { reason: reason.into() };
+    }
+
+    /// A service that came up ends its failure; any other state is left as it is.
+    pub fn service_recovered(&mut self) {
+        if matches!(self.state, LaunchState::ServiceFailed { .. }) {
+            self.state = LaunchState::Local;
+        }
+    }
+
+    /// A pairing that did not connect returns to local; a failure recorded meanwhile stays.
+    pub fn end_pairing(&mut self) {
+        if self.state == LaunchState::Pairing {
+            self.state = LaunchState::Local;
+        }
     }
 
     pub fn begin_disconnect(&mut self) {
@@ -103,5 +123,22 @@ mod tests {
         assert_eq!(connection.state(), &LaunchState::Disconnecting);
         connection.local();
         assert_eq!(connection.state(), &LaunchState::Local);
+    }
+
+    #[test]
+    fn a_service_failure_survives_the_end_of_a_pairing_until_the_service_comes_back() {
+        let mut connection = RemoteConnection::default();
+        connection.begin_pairing();
+        connection.service_failed("did not start");
+        connection.end_pairing();
+        assert_eq!(connection.state(), &LaunchState::ServiceFailed { reason: "did not start".into() });
+        connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Local);
+        connection.begin_pairing();
+        connection.end_pairing();
+        assert_eq!(connection.state(), &LaunchState::Local);
+        connection.connected("Studio");
+        connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
     }
 }

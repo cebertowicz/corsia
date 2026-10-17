@@ -18,7 +18,7 @@ let component: ReturnType<typeof mount> | null = null;
 let invoke: ReturnType<typeof vi.fn>;
 const flat = (text: string | null | undefined) => (text ?? '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
 const button = (label: string) => Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === label);
-const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', lan_addresses: ['192.168.1.20'], code: { state: 'none' } };
+const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac', lan_addresses: ['192.168.1.20'], code: { state: 'none' } };
 
 async function show() {
 	component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });

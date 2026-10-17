@@ -204,11 +204,14 @@ def test_devices_snapshot_gives_a_typeable_host_and_leaves_the_display_name_to_t
         port=47901,
     )
     monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio-mac.local")
+    monkeypatch.setattr(devices_runtime, "computer_name", lambda: "Studio Mac")
 
     snapshot = devices.snapshot()
 
     # local_hostname is what the joiner types, so it is the .local host and never the display name (spaces, no DNS).
     assert snapshot["local_hostname"] == "studio-mac.local"
+    # computer_name is the person's name for the machine, so the page's fallback never shows the mDNS host.
+    assert snapshot["computer_name"] == "Studio Mac"
     assert devices.remote_connect_name() == "Studio Mac"
     assert announcements == [expected_announcement]
 
@@ -360,6 +363,26 @@ def test_devices_address_hints_are_authenticated_and_not_pre_auth(monkeypatch):
     assert "lan_addresses" not in version.json()
 
 
+def test_the_desktop_shells_own_requests_pass_the_real_gate_in_the_format_it_sends(monkeypatch):
+    """The shell's version check and pairing calls carry no token (reqwest, JSON body); the gate must not need one."""
+    runtime.pairing.disable()
+    shell_headers = {"user-agent": "corsia-desktop", "accept": "*/*"}
+    lan = TestClient(DevicesApp(app), client=("192.168.1.20", 50000))
+    beyond = TestClient(DevicesApp(app), client=("8.8.8.8", 50000))
+
+    version = lan.get("/api/version", headers=shell_headers)
+    start = lan.post("/api/devices/pair/start", json={"mode": "pinned", "msg_c": "Y2xpZW50"}, headers=shell_headers)
+    finish = lan.post(
+        "/api/devices/pair/finish", json={"exchange_id": "none", "confirm_c": "Y29uZmlybQ=="}, headers=shell_headers,
+    )
+    refused = beyond.get("/api/version", headers=shell_headers)
+
+    assert version.status_code == 200
+    assert start.status_code == 409
+    assert finish.status_code not in {401, 403}
+    assert refused.status_code == 403
+
+
 def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     async def human_session(_scope):
         return True
@@ -396,7 +419,7 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     }
 
 
-_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "lan_addresses", "code"}
+_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code"}
 _NAME_CONFLICT = -65548
 
 

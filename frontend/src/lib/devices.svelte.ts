@@ -13,6 +13,8 @@ export type DevicesApi = {
 	listening: { port?: number; error?: string | null; reason?: string | null };
 	announced_name: string | null;
 	local_hostname: string;
+	/** The person's own name for the host computer (macOS ComputerName), shown while nothing is announced. */
+	computer_name: string;
 	lan_addresses: string[];
 	code: { state: 'none' | 'active' | 'paused'; expires_in_seconds?: number | null; value?: string };
 };
@@ -37,9 +39,9 @@ export const EMPTY_VIEW: DevicesView = {
 	listener: 'ok', pairing: 'idle', code: null, endsInSeconds: null, addresses: [],
 };
 
-/** The host's name as a person knows it: the announced one, else the machine's name without `.local`. */
+/** The host's name as a person knows it: the announced one, else the computer's own name (never the typed `.local` host). */
 function nameOf(api: DevicesApi): string {
-	return api.announced_name || api.local_hostname.replace(/\.local$/i, '');
+	return api.announced_name || api.computer_name.replace(/\.local$/i, '');
 }
 
 /** Only a taken port is fixed by restarting the computer; any other failure to listen gets its own line. */

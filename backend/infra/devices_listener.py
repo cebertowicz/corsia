@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import errno
 import ipaddress
 import logging
@@ -11,7 +10,6 @@ import os
 import secrets
 import socket
 import stat
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -30,7 +28,7 @@ from infra.auth import authenticate, is_person_session, token_from_request
 from infra.config import STATE_ROOT
 from infra.db_async import run_in_db
 from infra.dns_sd import DNSServiceAnnouncement
-from infra.devices_server import _PINNED_UVICORN_VERSION, DevicesServer
+from infra.devices_server import DevicesServer
 
 
 DEFAULT_PORT = 47901
@@ -38,63 +36,9 @@ FALLBACK_PORTS = range(47902, 47911)
 _PRIVATE_V4_NETWORKS = tuple(
     ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
+_PEER_NETWORKS = (*_PRIVATE_V4_NETWORKS, ipaddress.ip_network("fc00::/7"))
 _EXCLUDED_INTERFACE_PREFIXES = ("lo", "utun", "tailscale", "tun", "tap", "ppp", "vpn", "bridge")
 logger = logging.getLogger(__name__)
-
-
-def local_hostname() -> str:
-    """Return the host's mDNS name without exposing interface state."""
-    hostname = socket.gethostname().rstrip(".").lower()
-    return hostname if hostname.endswith(".local") else f"{hostname}.local"
-
-
-def _load_macos_frameworks():
-    return (
-        ctypes.CDLL("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration"),
-        ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"),
-    )
-
-
-def macos_computer_name() -> str | None:
-    """Return macOS's user-configured computer name when it is available."""
-    if sys.platform != "darwin":
-        return None
-    try:
-        system_configuration, core_foundation = _load_macos_frameworks()
-        copy_name = system_configuration.SCDynamicStoreCopyComputerName
-        copy_name.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
-        copy_name.restype = ctypes.c_void_p
-        name = copy_name(None, None)
-        if not name:
-            return None
-        string_length = core_foundation.CFStringGetLength
-        string_length.argtypes = [ctypes.c_void_p]
-        string_length.restype = ctypes.c_long
-        max_size = core_foundation.CFStringGetMaximumSizeForEncoding
-        max_size.argtypes = [ctypes.c_long, ctypes.c_uint32]
-        max_size.restype = ctypes.c_long
-        get_string = core_foundation.CFStringGetCString
-        get_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
-        get_string.restype = ctypes.c_bool
-        release = core_foundation.CFRelease
-        release.argtypes = [ctypes.c_void_p]
-        release.restype = None
-        try:
-            buffer = ctypes.create_string_buffer(max_size(string_length(name), 0x08000100) + 1)
-            if get_string(name, buffer, len(buffer), 0x08000100):
-                return buffer.value.decode("utf-8")
-        finally:
-            release(name)
-    except (AttributeError, OSError, UnicodeDecodeError, ValueError):
-        return None
-    return None
-
-
-def remote_connect_name(announcement: DNSServiceAnnouncement | None) -> str:
-    """Resolve the one name presented by every remote-connect surface."""
-    if announcement is not None and announcement.announced_name:
-        return announcement.announced_name
-    return macos_computer_name() or local_hostname()
 
 
 def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str]:
@@ -143,25 +87,51 @@ class DevicesApp:
         self.stopping = False
 
     @staticmethod
-    def _handshake_token(scope) -> str | None:
-        """Read the token the way the API routes do: ``?token=`` wins over Bearer."""
-        headers = dict(scope.get("headers", ()))
-        authorization = headers.get(b"authorization", b"").decode("latin-1")
-        query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
-        query_token = (query.get("token") or [None])[0]
-        return token_from_request(query_token, authorization)
+    def _handshake_token(scope) -> tuple[str | None, bool]:
+        """The token the API routes read, and whether the request names more than one.
+
+        The gate and the routes disagree about which duplicate wins (Starlette keeps the last query value and the
+        first header), so a request with two is refused instead of guessed at.
+        """
+        query = parse_qs(scope.get("query_string", b"").decode("latin-1"), keep_blank_values=True).get("token", [])
+        headers = [value.decode("latin-1") for name, value in scope.get("headers", ()) if name == b"authorization"]
+        bearer = token_from_request(None, headers[0]) if headers else None
+        ambiguous = len(query) > 1 or len(headers) > 1 or bool(query and query[0] and bearer and query[0] != bearer)
+        return token_from_request(query[0] if query else None, headers[0] if headers else None), ambiguous
 
     @classmethod
     async def _has_human_session(cls, scope) -> bool:
-        user = await run_in_db(authenticate, cls._handshake_token(scope))
+        token, ambiguous = cls._handshake_token(scope)
+        if ambiguous:
+            return False
+        user = await run_in_db(authenticate, token)
         return user is not None and is_person_session(user)
+
+    @staticmethod
+    def _peer_is_on_this_network(scope) -> bool:
+        """Only the addresses `lan_addresses` advertises (and loopback) may reach this listener, whatever it is bound to."""
+        try:
+            peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
+        except (KeyError, TypeError, IndexError, ValueError):
+            return False
+        if peer.version == 6 and peer.ipv4_mapped is not None:
+            peer = peer.ipv4_mapped
+        return peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
 
     async def __call__(self, scope, receive, send):
         tagged = dict(scope)
         tagged["corsia_listener"] = "devices"
         path = tagged.get("path", "")
+        kind = tagged.get("type")
+        if kind in {"http", "websocket"} and not self._peer_is_on_this_network(tagged):
+            if kind == "http":
+                await JSONResponse({"reason": "not_on_this_network"}, status_code=403)(tagged, receive, send)
+            else:
+                await receive()  # websocket.connect
+                await send({"type": "websocket.close", "code": 1008})
+            return
         if (
-            tagged.get("type") == "http"
+            kind == "http"
             and (path == "/api" or path.startswith("/api/"))
             and (tagged.get("method"), path) not in _PUBLIC_API_ROUTES
             and not await self._has_human_session(tagged)
@@ -174,14 +144,12 @@ class DevicesApp:
         # in its first frame, where the endpoints accept a person session only
         # on this listener. A token offered at the handshake is checked here,
         # before the socket is accepted.
-        if (
-            tagged.get("type") == "websocket"
-            and self._handshake_token(tagged) is not None
-            and not await self._has_human_session(tagged)
-        ):
-            await receive()  # websocket.connect
-            await send({"type": "websocket.close", "code": 1008})
-            return
+        if kind == "websocket":
+            offered, ambiguous = self._handshake_token(tagged)
+            if (offered is not None or ambiguous) and not await self._has_human_session(tagged):
+                await receive()  # websocket.connect
+                await send({"type": "websocket.close", "code": 1008})
+                return
         try:
             await self._app(tagged, receive, send)
         except asyncio.CancelledError:
