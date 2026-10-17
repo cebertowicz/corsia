@@ -303,7 +303,7 @@ def test_effective_workflows_read_the_corsia_block(tmp_path, monkeypatch):
     current = SkillRow(
         name="current", description="current", scope="workspace", scope_id="workspace",
         path=path, body_path=path, metadata={"corsia": {"workflow": {"steps": steps}}},
-        status="included",
+        status="included", corsia={"workflow": {"steps": steps}},
     )
     monkeypatch.setattr(
         workflow_task_fields, "resolve_effective_skills",
@@ -521,6 +521,7 @@ async def test_registered_plan_tools_record_system_workflow_version(isolated_db,
         name="task-discipline", description="System workflow", scope="system",
         scope_id="v1", path=skill, body_path=skill,
         metadata={"corsia": {"workflow": {"steps": []}}}, status="included",
+        corsia={"workflow": {"steps": []}},
     )
     monkeypatch.setattr(
         workflow_task_fields, "resolve_effective_skills",

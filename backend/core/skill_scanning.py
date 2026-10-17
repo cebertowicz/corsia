@@ -46,6 +46,7 @@ def scan_scope(
                     metadata=validation.metadata,
                     status="included",
                     role=role,
+                    corsia=validation.corsia,
                 )
             )
         else:
@@ -61,6 +62,7 @@ def scan_scope(
                     status="error",
                     errors=validation.errors,
                     role=role,
+                    corsia=validation.corsia,
                 )
             )
     return rows
@@ -111,6 +113,7 @@ def mark_duplicate_scope_errors(rows: list[SkillRow]) -> list[SkillRow]:
                     f"scope: {row.name}"
                 ],
                 role=row.role,
+                corsia=row.corsia,
             )
         )
     return marked
@@ -151,6 +154,7 @@ def omitted_row(row: SkillRow, reason: str, overrides: str | None = None) -> Ski
         errors=[reason],
         overrides=overrides,
         role=row.role,
+        corsia=row.corsia,
     )
 
 
