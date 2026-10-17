@@ -2,6 +2,7 @@
 	import { coreSettings, updateSettings } from '$lib/stores/settings';
 	import { pickerModels, workspaceModels } from '$lib/stores/models';
 	import { StatePill, Toggle } from '$lib/components/ui';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	let { onError }: { onError: (message: string) => void } = $props();
 	let autoApprovalSaving = $state(false);
@@ -42,7 +43,7 @@
 	}
 </script>
 
-<div class="settings-card" data-settings-anchor="host-access-review">
+<div class="settings-card" data-settings-anchor="host-access-review" use:settingsAnchor={'host-access-review'}>
 	<div class="card-title-row">
 		<h3>Host Access Review</h3>
 		<StatePill state={reviewerPill.state} label={reviewerPill.label} size="sm" />

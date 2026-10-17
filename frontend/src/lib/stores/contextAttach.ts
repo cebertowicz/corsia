@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import type { SettingsSection } from './settingsNavigation';
 
 export type ContextAttachTarget = {
 	scope: 'workspace' | 'project' | 'thread';
@@ -6,7 +7,9 @@ export type ContextAttachTarget = {
 	threadId?: string | null;
 	targetLabel?: string | null;
 	existingFiles?: string[];
-	returnTo?: 'workspace-settings' | 'project-settings' | 'thread-settings' | null;
+	returnTo?: 'settings' | 'thread-settings' | null;
+	/** With returnTo 'settings': the section the pick started from. */
+	returnSection?: SettingsSection | null;
 };
 
 export const contextAttachTarget = writable<ContextAttachTarget | null>(null);
