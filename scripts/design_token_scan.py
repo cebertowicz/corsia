@@ -155,7 +155,9 @@ def _property_violations(
         value_start = match.start("value")
         lowered = name.lower()
         if lowered in {"box-shadow", "boxshadow"}:
-            if not _SHADOW_TOKENS.fullmatch(value.strip().strip("'\"")):
+            shadow = value.strip().strip("'\"")
+            # `none` removes a shadow; it is not a raw shadow value.
+            if shadow.lower() != "none" and not _SHADOW_TOKENS.fullmatch(shadow):
                 _append(violations, "raw_shadows", text, base + match.start())
             continue
         if lowered.startswith("border") and "radius" not in lowered:

@@ -1037,7 +1037,7 @@
       "raw_colors": 9,
       "raw_px": 34,
       "heavy_borders": 0,
-      "raw_shadows": 2,
+      "raw_shadows": 1,
       "row_menu_buttons": 1
     },
     "frontend/src/lib/components/HomeOverlays.svelte": {
@@ -1065,7 +1065,7 @@
       "raw_colors": 0,
       "raw_px": 3,
       "heavy_borders": 0,
-      "raw_shadows": 1,
+      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/HostAccessActiveLeaseDrawer.svelte": {
@@ -1513,7 +1513,7 @@
       "raw_colors": 0,
       "raw_px": 2,
       "heavy_borders": 0,
-      "raw_shadows": 1,
+      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/SendRefChip.svelte": {
@@ -1917,9 +1917,9 @@
     },
     "frontend/src/lib/components/comments/CommentThread.svelte": {
       "raw_colors": 0,
-      "raw_px": 33,
+      "raw_px": 27,
       "heavy_borders": 0,
-      "raw_shadows": 2,
+      "raw_shadows": 1,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/comments/CommentsPill.svelte": {
