@@ -39,7 +39,7 @@ const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const KNOWN_SCHEMA_VERSION: u32 = 124;
+const KNOWN_SCHEMA_VERSION: u32 = 125;
 /// The launchd label of the app's own service (its plist is `ai.corsia.service.plist`).
 const APP_SERVICE_LABEL: &str = "ai.corsia.service";
 
