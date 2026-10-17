@@ -29,7 +29,7 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
-		effectiveDraftTarget, existingDraft, seedDraft,
+		withDraftArtifactId, existingDraft, seedDraft,
 		enrichDraftTarget, setDraftText, flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
@@ -243,7 +243,7 @@
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
 			// These fields describe the mounted target, not its predecessor.
-			loadedArtifactId = effectiveDraftTarget(d).artifactId;
+			loadedArtifactId = withDraftArtifactId(d).artifactId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
 			readonly = opened.unsaved;
 			confirming = opened.confirming;
