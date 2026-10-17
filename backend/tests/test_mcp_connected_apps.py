@@ -304,11 +304,11 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     async def record(action: str, app_id: str) -> None:
         actions.append((action, app_id))
 
-    async def reconnect_after_saved_write(app_id: str) -> None:
-        await record("reconnect", app_id)
+    async def restart_after_saved_write(app_id: str) -> None:
+        await record("restart", app_id)
 
     monkeypatch.setattr(connected_apps, "_run_app_runtime", record)
-    monkeypatch.setattr(connected_runtime, "reconnect_after_saved_write", reconnect_after_saved_write)
+    monkeypatch.setattr(connected_runtime, "restart_after_saved_write", restart_after_saved_write)
     actor.clear()
     actor.update({"id": "user", "token_kind": "session"})
     created = client.post(
@@ -327,7 +327,7 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     assert changed.status_code == 200
     removed = client.delete(f"/api/mcp/servers/{app_id}")
     assert removed.status_code == 200
-    assert actions == [("connect", app_id), ("reconnect", app_id), ("remove", app_id)]
+    assert actions == [("connect", app_id), ("restart", app_id), ("remove", app_id)]
 
 
 def test_human_edit_restarts_the_app_without_the_reconnect_limit(connected_apps_client, monkeypatch) -> None:

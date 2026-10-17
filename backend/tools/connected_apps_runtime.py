@@ -15,7 +15,7 @@ async def apply_connected_app_runtime(action: RuntimeAction, app_id: str) -> dic
     return await apply(action, app_id)
 
 
-async def reconnect_after_saved_write(app_id: str) -> dict[str, object]:
+async def restart_after_saved_write(app_id: str) -> dict[str, object]:
     """Restart the app on a write a person just saved, so the change reaches it now or reads as failed.
 
     An app that is no longer there or now waits for approval can't restart; that is logged with
