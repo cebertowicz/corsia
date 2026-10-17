@@ -87,6 +87,9 @@ def _settle_queued(
         (next_seq + len(rows), thread_id),
     )
     ids = tuple(message_id for message_id, _revision in rows)
+    from infra.passive_changes import reoffer_unwritten_notes
+
+    reoffer_unwritten_notes(connection, ids)
     if state == "failed":
         from infra.failed_wake_surface import record_failed_wakes
 

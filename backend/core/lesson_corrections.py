@@ -13,6 +13,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from core.correction_notes import noted_subjects
 from core.corrections_recording import CORRECTION_EVENT, is_owner_authored_message
 from core.placement_proposal import names_in, shares_run
 
@@ -42,7 +43,11 @@ def merge_subjects(*groups: Iterable[object]) -> tuple[str, ...]:
 
 
 def current_owner_subjects(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
-    """Return every owner-authored input consumed by this thread's live turn."""
+    """Return every owner-authored input consumed by this thread's live turn.
+
+    A correction note in the turn's inputs names its correction too, so a lesson
+    placed while triaging an earlier turn's correction joins that correction.
+    """
     rows = db.execute(
         """
         SELECT id, role, content, metadata
@@ -58,7 +63,8 @@ def current_owner_subjects(db: sqlite3.Connection, thread_id: str) -> tuple[str,
     return merge_subjects(
         [f"{SUBJECT_PREFIX}{row['id']}" for row in rows if is_owner_authored_message(
             role=row["role"], content=row["content"], metadata=row["metadata"],
-        )]
+        )],
+        *(noted_subjects(row["metadata"]) for row in rows if row["role"] == "system"),
     )
 
 

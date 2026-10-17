@@ -111,7 +111,7 @@ def settle_checkpoint_refusal(
         # release it, and admission holds it (the slice 2a surface).
         _release(db, rows)
         return ()
-    from infra.input_writes import sequence_attempt
+    from infra.input_sequencing import sequence_attempt
 
     # Deterministic for this history, window and model: no install, cap change
     # or transfer is coming, so waiting would be waiting forever.
