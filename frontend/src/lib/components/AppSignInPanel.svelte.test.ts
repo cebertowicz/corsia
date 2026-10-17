@@ -184,7 +184,7 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain("Sign-in didn't finish"));
-		const summary = host.querySelector('button.summary') as HTMLButtonElement;
+		const summary = host.querySelector('button.face.open') as HTMLButtonElement;
 		expect(summary.getAttribute('aria-expanded')).toBe(expanded);
 		expect(Boolean(button('Sign in'))).toBe(!signedIn);
 		if (signedIn) {
@@ -208,7 +208,7 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Signed in as steve@acme.example'));
-		(host.querySelector('button.summary') as HTMLButtonElement).click();
+		(host.querySelector('button.face.open') as HTMLButtonElement).click();
 		flushSync();
 		const labels = [...host.querySelectorAll('.actions button')].map((b) => b.textContent?.trim());
 		expect(labels).toEqual(['Where it works…', 'Reconnect', 'Sign out', 'Remove']);

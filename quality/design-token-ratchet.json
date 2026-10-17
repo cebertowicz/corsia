@@ -867,7 +867,7 @@
     },
     "frontend/src/lib/components/ConnectedAppsSettings.svelte": {
       "raw_colors": 0,
-      "raw_px": 2,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0

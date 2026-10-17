@@ -9,6 +9,7 @@
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE, signInStateLine } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
+	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
 
 	let apps = $state<ConnectedApp[]>([]);
@@ -42,6 +43,12 @@
 			case 'failed': return `Couldn't connect: ${failureLine(app.failure_class)}`;
 			default: return app.state;
 		}
+	}
+
+	/** A failure takes the failed colour, a state waiting on the person the attention colour; a working app stays quiet. */
+	function tone(app: ConnectedApp): 'quiet' | 'failed' | 'attention' {
+		if (app.state === 'failed' || (app.sign_in?.status === 'failed' && !app.sign_in.signed_in)) return 'failed';
+		return app.state === 'working' ? 'quiet' : 'attention';
 	}
 
 	function failureLine(failure: string | null | undefined): string {
@@ -101,8 +108,11 @@
 	onMount(() => { void loadProjects(); void load(); });
 </script>
 
+{#snippet secondLine(app: ConnectedApp)}{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}{#if app.folder}<span class="line">From Claude Code · {app.folder} folder</span>{/if}{/snippet}
+
 <section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
-	<div class="heading"><div><h2>Connected apps</h2><p>Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>{#if anyFirstSignIn(apps)}<p>{SIGN_IN_LEDE}</p>{/if}</div></div>
+	<p class="lede">Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>
+	{#if anyFirstSignIn(apps)}<p class="lede">{SIGN_IN_LEDE}</p>{/if}
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
@@ -113,32 +123,29 @@
 		<div class="rows">
 			{#each apps as app (app.id)}
 				{#if app.state === 'awaiting_approval'}
-				<article class="waiting-row">
-					<div class="waiting-copy">
-						<strong title={app.name}>{app.name}</strong>
-						<span class="second status">{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}</span>
-						{#if app.folder}<span class="second">From Claude Code · {app.folder} folder</span>{/if}
-						{#if app.notice}<span class="second">{app.notice}</span>{/if}
-					</div>
-					<div class="waiting-actions">
-						{#if needsPlace(app)}
-							<Button variant="primary" size="sm" onclick={() => { whereApprove = true; whereApp = app; }}>Choose where it works…</Button>
-						{:else}
-							<Button variant="primary" size="sm" loading={actionId === app.id} onclick={() => run(app, 'approve')}>Approve</Button>
-						{/if}
-						<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'decline')}>Decline</Button>
-					</div>
+				<div class="item">
+					<SettingsRow name={app.name} subTone={tone(app)} stackActions>
+						{#snippet sub()}{@render secondLine(app)}{#if app.notice}<span class="line">{app.notice}</span>{/if}{/snippet}
+						{#snippet actions()}
+							{#if needsPlace(app)}
+								<Button variant="primary" size="sm" onclick={() => { whereApprove = true; whereApp = app; }}>Choose where it works…</Button>
+							{:else}
+								<Button variant="primary" size="sm" loading={actionId === app.id} onclick={() => run(app, 'approve')}>Approve</Button>
+							{/if}
+							<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'decline')}>Decline</Button>
+						{/snippet}
+					</SettingsRow>
 					{#if errorId === app.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 					{#if hasSignInToShow(app)}
-						<div class="waiting-panel"><AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
+						<div class="details"><AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
 							onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} /></div>
 					{/if}
-				</article>
+				</div>
 				{:else}
-				<article class:open={isOpen(app)} class="app-row">
-					<button class="summary press-tint" aria-expanded={isOpen(app)} onclick={() => openId = openId === app.id ? null : app.id}>
-						<span class="app-copy waiting-copy"><strong title={app.name}>{app.name}</strong><span class="second" class:status={app.state !== 'working'}>{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}</span></span><span aria-hidden="true">›</span>
-					</button>
+				<div class="item">
+					<SettingsRow name={app.name} subTone={tone(app)} chevron expanded={isOpen(app)} onOpen={() => openId = openId === app.id ? null : app.id}>
+						{#snippet sub()}{@render secondLine(app)}{/snippet}
+					</SettingsRow>
 					{#if isOpen(app)}
 						<div class="details">
 							{#if errorId === app.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
@@ -147,17 +154,17 @@
 							<div class="actions">
 								{#if app.state === 'expired'}
 									<!-- A request that ran out can't be placed, reconnected or approved; Dismiss runs Decline's cleanup (copy sheet). -->
-									<Button loading={actionId === app.id} onclick={() => run(app, 'decline')}>Dismiss</Button>
+									<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'decline')}>Dismiss</Button>
 								{:else}
-									<Button onclick={() => { whereApprove = false; whereApp = app; }}>Where it works…</Button>
-									<Button loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>
-									{#if app.sign_in?.signed_in && confirmingOut !== app.id}<Button onclick={() => confirmingOut = app.id}>Sign out</Button>{/if}
-									<Button variant="danger" loading={actionId === app.id} onclick={() => run(app, 'remove')}>Remove</Button>
+									<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereApp = app; }}>Where it works…</Button>
+									<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>
+									{#if app.sign_in?.signed_in && confirmingOut !== app.id}<Button variant="ghost" size="sm" onclick={() => confirmingOut = app.id}>Sign out</Button>{/if}
+									<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'remove')}>Remove</Button></span>
 								{/if}
 							</div>
 						</div>
 					{/if}
-				</article>
+				</div>
 				{/if}
 			{/each}
 		</div>
@@ -167,28 +174,18 @@
 {#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { if (whereApprove) approved(app); else replace(app); whereApp = null; }} />{/if}
 
 <style>
-	.connected-apps { width: 100%; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }
-	.heading h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
-	.heading p { margin: var(--space-2) 0 0; color: var(--text-secondary); line-height: 1.5; }
-	.rows { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
-	/* A request waiting on the person is a flat list row: status on the second line, one solid action, a text action. */
-	.waiting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-height: var(--list-row-min-height); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
-	.waiting-copy { min-width: 0; flex: 1 1 14rem; display: grid; gap: 2px; }
-	.waiting-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-regular); }
-	.second { color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); overflow-wrap: anywhere; }
-	.second.status { color: var(--amber-text); }
-	.second.status .place { color: var(--text-tertiary); }
-	.waiting-actions { display: flex; align-items: center; gap: var(--space-2); }
-	.waiting-row .error, .waiting-panel { flex-basis: 100%; margin: 0; }
-	/* Connected and waiting apps are one flat list; the chevron still discloses each connected app's details. */
-	.app-row { min-height: var(--list-row-min-height); }
-	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
-	.app-copy { min-width: 0; display: grid; gap: var(--space-1); }
-	.app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-	.state { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.details { padding: var(--space-2) 0 var(--space-2) var(--space-3); }
-	.actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
-	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
-	.state { margin: var(--space-5) 0; display: grid; gap: var(--space-3); }
-	@media (max-width: 768px) { .connected-apps { margin-top: var(--space-5); } }
+	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
+	/* The ledes and the empty, loading and error states are one body size, inset to the edge the page title and rows use. */
+	.lede, .state { margin: 0 0 var(--space-2); padding: 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
+	.state { margin-top: var(--space-5); display: grid; gap: var(--space-3); justify-items: start; }
+	.state p { margin: 0; }
+	.rows { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-4); }
+	/* The second line is two-toned: the row's state takes its status colour, the place stays quiet. */
+	.place, .line { color: var(--text-tertiary); }
+	.line { display: block; }
+	.details { padding: var(--space-1) var(--space-2) var(--space-3); }
+	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
+	/* Remove is a text action in the danger tone. */
+	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
+	.error { color: var(--red); margin: 0 0 var(--space-2); padding: 0 var(--space-2); font-size: var(--text-footnote); }
 </style>
