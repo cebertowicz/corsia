@@ -3,6 +3,7 @@ import {
 	chatComposer, createSession, lastAssistantMessage, saveEvidenceScreenshot,
 	TEST_TOKEN, watchSessionSubscriptions,
 } from '../support/corsia';
+import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 async function setContextCap(request: APIRequestContext, contextWindow: number): Promise<void> {
@@ -22,10 +23,8 @@ test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and exp
 	const subscriptions = watchSessionSubscriptions(page);
 	await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
 	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
-	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	}
-	await page.locator('.thread-item').filter({ hasText: title }).click();
+	await focusSetting(page, false);
+	await openOutcomeThread(page, title);
 	await expect(chatComposer(page)).toBeVisible();
 	await subscriptions.waitForSubscribed(threadId);
 	await seedMockResponses(request, [{ content: 'CAPACITY_RECOVERED', finish_reason: 'stop' }]);
@@ -58,5 +57,6 @@ test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and exp
 		await saveEvidenceScreenshot(page, testInfo, 'checkpoint-capacity-recovered');
 	} finally {
 		await setContextCap(request, 128_000);
+		await focusSetting(page, true);
 	}
 });
