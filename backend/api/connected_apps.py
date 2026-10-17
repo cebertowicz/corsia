@@ -120,6 +120,9 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
         raise _refusal("Credential values are refused. Declare only the key names in key_refs; the person sets values in Settings > Keys.")
     try:
         oauth_settings(config)
+        from tools.mcp_secrets import header_schemes
+
+        header_schemes({**config, "secret_headers": [ref["name"] for ref in refs if ref["kind"] == "header"]})
     except Exception as error:
         raise _refusal(str(error)) from None
     return {**config, "key_refs": refs}
