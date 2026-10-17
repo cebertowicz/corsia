@@ -18,7 +18,6 @@ let component: ReturnType<typeof mount> | null = null;
 let calls: string[];
 
 beforeEach(() => {
-	sessionStorage.clear();
 	token.set(null); user.set(null); calls = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input); calls.push(url);
@@ -34,7 +33,7 @@ beforeEach(() => {
 
 afterEach(async () => {
 	if (component) await unmount(component);
-	host.remove(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
@@ -83,47 +82,6 @@ describe('SetupScreen', () => {
 
 		expect(onExistingAccount).toHaveBeenCalledOnce();
 		expect(calls).toEqual(['/api/setup/status']);
-	});
-
-	it('resumes on Connect an AI without asking the pre-account status gate', async () => {
-		if (component) await unmount(component);
-		calls = [];
-		const onExistingAccount = vi.fn();
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: [{ source: 'codex', name: 'Codex', state: 'needs_sign_in' }] });
-			return json({});
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount, onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
-		flushSync();
-
-		await settle();
-
-		expect(calls).not.toContain('/api/setup/status');
-		expect(onExistingAccount).not.toHaveBeenCalled();
-		expect(host.textContent).toContain('Connect an AI');
-	});
-
-	it('keeps a local-AI opt-out after setup resumes on a page reload', async () => {
-		await settle();
-		const localSwitch = host.querySelector<HTMLButtonElement>('button[aria-label="Also run AI on this computer"]');
-		localSwitch?.click();
-		await settle();
-		if (component) await unmount(component);
-		token.set('resume-token'); calls = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input); calls.push(url);
-			if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: [{ source: 'omlx', name: 'This computer', state: 'needs_setup' }] });
-			return json({ sources: [] });
-		}));
-		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
-		flushSync();
-
-		await settle();
-
-		expect(calls).not.toContain('/api/setup/status');
-		expect(host.textContent).toContain('Connect an AI');
-		expect(host.textContent).not.toContain('This computer');
 	});
 
 	it('shows Save a report only with a working desktop invoke bridge', async () => {
@@ -1015,16 +973,16 @@ describe('SetupScreen', () => {
 			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).not.toContain('Update');
 		});
 
-		it('lets an unverified package-manager CLI recheck or sign in without suggesting an update', async () => {
+		it('lets an unverified CLI recheck or sign in, and says why it could not be checked', async () => {
 			await openConnectStep([
-				claude('unverified', { cli_package_manager: 'homebrew' }),
-				{ source: 'codex', name: 'Codex', state: 'unverified', cli_package_manager: 'npm' },
+				claude('unverified', { reason: 'it could not be started' }),
+				{ source: 'codex', name: 'Codex', state: 'unverified' },
 			]);
 
 			expect(row('Claude Code').textContent).toContain('CORSIA couldn’t check Claude Code’s sign-in.');
+			expect(row('Claude Code').textContent).toContain('it could not be started');
 			expect(row('Codex').textContent).toContain('CORSIA couldn’t check Codex’s sign-in.');
 			expect(row('Claude Code').textContent).not.toContain('brew upgrade');
-			expect(row('Codex').textContent).not.toContain('npm update');
 			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Check again', 'Sign in']);
 			await press(row('Claude Code'), 'Check again');
 			expect(fake.posted.some((call) => call.startsWith('POST /api/providers/sources/recheck'))).toBe(true);

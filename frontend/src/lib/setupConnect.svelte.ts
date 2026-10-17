@@ -159,6 +159,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			return {
 				meta: lines(`CORSIA couldn’t check ${copy.cli}’s sign-in.`),
 				error: true,
+				detail: source.reason ?? undefined,
 				action: { label: 'Check again', run: () => void deps.refreshSources() },
 				more: [{ label: 'Sign in', run: () => void beginSignIn(source) }],
 			};
