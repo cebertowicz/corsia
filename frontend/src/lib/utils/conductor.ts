@@ -42,11 +42,6 @@ export function firstRunLanding(
 	return lookup.kind === 'target' && lookup.firstRunPending ? lookup.target.thread_id : null;
 }
 
-/** A first run still pending with no model chosen: the person's setup stopped before the AI step. */
-export function setupIncomplete(lookup: CoordinationLookup): boolean {
-	return lookup.kind === 'target' && lookup.firstRunPending && !lookup.target.model;
-}
-
 let firstRunLanded = false;
 
 /** Open the CORSIA agent once per page load when `firstRunLanding` says so. */

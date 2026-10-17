@@ -23,7 +23,7 @@
 	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
-	import { fetchScopeTarget, landOnFirstRun, setupIncomplete, type CoordinationLookup } from '$lib/utils/conductor';
+	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
 	import type ChatPanel from '$lib/components/ChatPanel.svelte';
 	import HomePageView from '$lib/components/HomePageView.svelte';
 	import { docLens, selectedDocId } from '$lib/stores/documentsSurface';
@@ -480,7 +480,7 @@
 
 
 <HomePageView
-	isAuthenticated={$isAuthenticated} setupIncomplete={setupIncomplete(conductorLookup)} {activeView} bind:sidebarOpen bind:chatPanelRef
+	isAuthenticated={$isAuthenticated} {activeView} bind:sidebarOpen bind:chatPanelRef
 	{conductorThreadId} {conductorKnownAbsent} {systemStatus} {isDraggingOver} {paneConfig}
 	bind:lightboxUrl bind:lightboxOpen
 	{deleteConfirmId}

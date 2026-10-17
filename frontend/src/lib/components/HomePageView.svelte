@@ -11,7 +11,6 @@
 
 	let {
 		isAuthenticated,
-		setupIncomplete = false,
 		activeView,
 		sidebarOpen = $bindable(false),
 		chatPanelRef = $bindable<ChatPanel | undefined>(undefined),
@@ -48,7 +47,6 @@
 		onCancelDeleteThread,
 	}: {
 		isAuthenticated: boolean;
-		setupIncomplete?: boolean;
 		activeView: View;
 		sidebarOpen: boolean;
 		chatPanelRef: ChatPanel | undefined;
@@ -87,13 +85,6 @@
 
 	const easeOutQuint = cubicOut;
 	let setupMode = $state<'login' | 'flow'>('login');
-	let setupResumed = $state(false);
-	$effect(() => {
-		if (setupIncomplete && !setupResumed) {
-			setupResumed = true;
-			setupMode = 'flow';
-		}
-	});
 
 	function reduceMotion() {
 		return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -120,7 +111,6 @@
 {#if setupMode === 'flow'}
 	<div class="auth-gate" out:authGateExit>
 		<SetupScreen
-			resume={setupIncomplete}
 			onExistingAccount={() => setupMode = 'login'}
 			onAccountCreated={() => setupMode = 'flow'}
 			onFinished={() => setupMode = 'login'}
