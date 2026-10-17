@@ -329,7 +329,7 @@ impl SourceLifecycle {
         query
     }
 
-    fn drain_request(&self, method: &str, endpoint: &str, token: &str, operation_id: Option<&str>, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    fn drain_send(&self, method: &str, endpoint: &str, token: &str, operation_id: Option<&str>, body: Option<serde_json::Value>) -> Result<(u16, Vec<u8>), String> {
         let path = format!("/api/system/drain{endpoint}?{}", Self::drain_query(token, operation_id));
         let payload = body.map(|value| value.to_string()).unwrap_or_default();
         let mut stream = TcpStream::connect(("127.0.0.1", self.source.port)).map_err(|error| format!("could not reach the source backend drain API: {error}"))?;
@@ -341,8 +341,24 @@ impl SourceLifecycle {
         let split = response.windows(4).position(|part| part == b"\r\n\r\n").ok_or("drain response was malformed")?;
         let head = std::str::from_utf8(&response[..split]).map_err(|_| "drain response headers were not UTF-8")?;
         let status = head.split_whitespace().nth(1).ok_or("drain response had no HTTP status")?.parse::<u16>().map_err(|_| "drain response had an invalid HTTP status")?;
+        Ok((status, response[split + 4..].to_vec()))
+    }
+
+    /// One drain call. The credential lives an hour and a drain wait is not
+    /// capped, so a 401 mints a fresh one and sends the same call again once.
+    fn drain_response(&mut self, method: &str, endpoint: &str, operation_id: Option<&str>, body: Option<serde_json::Value>) -> Result<(u16, Vec<u8>), String> {
+        let credential = self.service_token()?;
+        let (status, reply) = self.drain_send(method, endpoint, &credential, operation_id, body.clone())?;
+        if status != 401 { return Ok((status, reply)); }
+        self.token = None;
+        let credential = self.service_token()?;
+        self.drain_send(method, endpoint, &credential, operation_id, body)
+    }
+
+    fn drain_request(&mut self, method: &str, endpoint: &str, operation_id: Option<&str>, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+        let (status, body) = self.drain_response(method, endpoint, operation_id, body)?;
         if status != 200 { return Err(format!("source drain API returned HTTP {status}")); }
-        serde_json::from_slice(&response[split + 4..]).map_err(|error| format!("drain response was not JSON: {error}"))
+        serde_json::from_slice(&body).map_err(|error| format!("drain response was not JSON: {error}"))
     }
 
     fn operation_id() -> String {
@@ -366,30 +382,26 @@ impl adoption::Lifecycle for SourceLifecycle {
     }
 
     fn begin_drain(&mut self, operation_id: &str) -> Result<adoption::DrainStatus, String> {
-        let token = self.service_token()?;
-        let value = self.drain_request("POST", "", &token, None, Some(serde_json::json!({"reason": "packaged-app adoption", "operation_id": operation_id})))?;
+        let value = self.drain_request("POST", "", None, Some(serde_json::json!({"reason": "packaged-app adoption", "operation_id": operation_id})))?;
         Self::parse_drain(value, operation_id)
     }
 
     fn drain_status(&mut self, operation_id: &str) -> Result<adoption::DrainStatus, String> {
-        let token = self.service_token()?;
-        let exact = self.drain_request("GET", "", &token, Some(operation_id), None)?;
+        let exact = self.drain_request("GET", "", Some(operation_id), None)?;
         if exact.get("operation_id").and_then(serde_json::Value::as_str) != Some(operation_id) || exact.get("status").and_then(serde_json::Value::as_str) != Some("in_flight") { return Err("drain operation ended or changed before completion".into()); }
-        let value = self.drain_request("GET", "", &token, None, None)?;
+        let value = self.drain_request("GET", "", None, None)?;
         let status = Self::parse_drain(value, operation_id)?;
         if let Some(waiting) = &self.waiting { waiting.store(status.active_processes.min(u32::MAX as usize - 1) as u32 + 1, Ordering::Release); }
         Ok(status)
     }
 
     fn cancel_drain(&mut self, operation_id: &str) -> Result<(), String> {
-        let token = self.service_token()?;
-        let value = self.drain_request("DELETE", "", &token, Some(operation_id), None)?;
+        let value = self.drain_request("DELETE", "", Some(operation_id), None)?;
         if value.get("operation_id").and_then(serde_json::Value::as_str) == Some(operation_id) && value.get("active").and_then(serde_json::Value::as_bool) == Some(false) { Ok(()) } else { Err("source drain cancellation did not confirm the exact operation".into()) }
     }
 
     fn complete_drain(&mut self, operation_id: &str) -> Result<(), String> {
-        let token = self.service_token()?;
-        let value = self.drain_request("POST", "/ready", &token, None, Some(serde_json::json!({"operation_id": operation_id})))?;
+        let value = self.drain_request("POST", "/ready", None, Some(serde_json::json!({"operation_id": operation_id})))?;
         if value.get("operation_id").and_then(serde_json::Value::as_str) == Some(operation_id) && value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) { Ok(()) } else { Err("source drain did not confirm readiness for the exact operation".into()) }
     }
 
@@ -401,17 +413,18 @@ impl adoption::Lifecycle for SourceLifecycle {
         release_proof::prove_released(pid, self.source.port, &self.source.python, &self.source.state.join("corsia.db"))
     }
 
-    fn check_ready(&mut self, state: &Path, key_names: &std::collections::BTreeSet<String>) -> Result<(), String> {
-        let backend = self.backend_dir()?;
+    fn check_ready(&mut self, state: &Path, key_names: &std::collections::BTreeSet<String>) -> Result<(), adoption::ReadyError> {
+        let failed = adoption::ReadyError::Failed;
+        let backend = self.backend_dir().map_err(failed)?;
         let program = "import sys; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import preflight_main; sys.exit(preflight_main(sys.argv[2:]))";
         let output = Command::new(&self.source.python).args(["-c", program]).arg(&backend).arg(state).args(key_names)
             .current_dir(&backend).output()
-            .map_err(|error| format!("could not check the existing install: {error}"))?;
+            .map_err(|error| failed(format!("could not check the existing install: {error}")))?;
         match output.status.code() {
-            Some(0) => self.service_token().map(|_| ()),
+            Some(0) => self.service_token().map(|_| ()).map_err(failed),
             // Exit 3 carries a refusal written to be shown: names and byte counts only.
-            Some(3) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-            _ => Err(format!("could not check the existing install: exited {}", output.status)),
+            Some(3) => Err(adoption::ReadyError::Refused(String::from_utf8_lossy(&output.stderr).trim().to_string())),
+            _ => Err(failed(format!("could not check the existing install: exited {}", output.status))),
         }
     }
 
@@ -450,13 +463,34 @@ impl adoption::Lifecycle for SourceLifecycle {
 
     fn start_old(&mut self) -> Result<(), String> {
         let since = SystemTime::now();
+        self.ensure_old_running()?;
+        release_proof::replaced_since(&format!("gui/{}/com.corsia.prod", unsafe { libc::geteuid() }), since)
+    }
+
+    // `corsia service start` is a no-op for a loaded job, so this also holds when the source never stopped.
+    fn ensure_old_running(&mut self) -> Result<(), String> {
         self.lifecycle_command("start")?;
         let deadline = Instant::now() + HEALTH_TIMEOUT;
         while !probe_health(self.source.port) {
-            if Instant::now() >= deadline { return Err("the source service did not answer after it was restarted".into()); }
+            if Instant::now() >= deadline { return Err("the source service did not answer after it was started".into()); }
             thread::sleep(HEALTH_POLL_INTERVAL);
         }
-        release_proof::replaced_since(&format!("gui/{}/com.corsia.prod", unsafe { libc::geteuid() }), since)
+        Ok(())
+    }
+
+    fn release_hold(&mut self, operation_id: &str) -> Result<(), String> {
+        let (status, body) = self.drain_response("GET", "", Some(operation_id), None)?;
+        match status {
+            // The source never heard of it, or a restart already settled it.
+            404 => Ok(()),
+            200 => {
+                let ended = serde_json::from_slice::<serde_json::Value>(&body).ok()
+                    .and_then(|value| value.get("status").and_then(serde_json::Value::as_str).map(|status| status != "in_flight"))
+                    .ok_or("source drain status was not readable")?;
+                if ended { Ok(()) } else { adoption::Lifecycle::cancel_drain(self, operation_id) }
+            }
+            other => Err(format!("source drain API returned HTTP {other}")),
+        }
     }
 }
 
@@ -512,7 +546,8 @@ fn should_relaunch(launched: &str, installed: Option<&str>, healthy: impl FnOnce
     installed.is_some_and(|installed| installed != launched) && healthy()
 }
 
-fn relaunch(app: &tauri::AppHandle, bundle: &Path) {
+/// Whether the replacement opened, so this app is exiting.
+fn relaunch(app: &tauri::AppHandle, bundle: &Path) -> bool {
     let service = app.state::<AppServiceState>();
     // The service now belongs to the new app: this exit must never unregister it.
     let cleanup_was_pending = !service.exit_cleanup_attempted.swap(true, Ordering::AcqRel);
@@ -520,12 +555,14 @@ fn relaunch(app: &tauri::AppHandle, bundle: &Path) {
         Ok(status) if status.success() => {
             service.quitting.store(true, Ordering::Relaxed);
             app.exit(0);
+            true
         }
         outcome => {
             log::error!("could not reopen the updated CORSIA app: {outcome:?}");
             if cleanup_was_pending {
                 service.exit_cleanup_attempted.store(false, Ordering::Release);
             }
+            false
         }
     }
 }
@@ -543,7 +580,7 @@ fn watch_for_swapped_app(app: tauri::AppHandle) {
         let service = app.state::<AppServiceState>();
         let port = lifecycle::service_port(&app, &service);
         if should_relaunch(&launched, installed.as_deref(), || probe_health(port)) {
-            relaunch(&app, &bundle);
+            let _ = relaunch(&app, &bundle);
             return;
         }
     });
@@ -560,8 +597,9 @@ fn start_service(
     let app_dir = default_app_dir(app)?;
     if let Some(interrupted) = adoption::interrupted_plan(&app_dir)? {
         let mut lifecycle = SourceLifecycle { source: interrupted.source.clone(), token: None, waiting: None };
-        return adoption::recover(&interrupted, &mut lifecycle)
-            .and_then(|()| Err("the interrupted adoption was recovered; reopen CORSIA to use the restored install".into()));
+        // The undo finishes before anything else, then launch goes on as if
+        // nothing had been tried: the restored install is offered for adoption again.
+        adoption::recover(&interrupted, &mut lifecycle).map_err(|error| error.message)?;
     }
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
@@ -732,8 +770,46 @@ fn adopt_existing_install(
     let adopted = adoption::adopt(&plan, &mut lifecycle, KNOWN_SCHEMA_VERSION, &service.adoption_cancel_requested);
     service.adoption_in_progress.store(false, Ordering::Release);
     adopted?;
-    *service.app_dir.lock().map_err(|_| "service state is unavailable")? = Some(app_dir.clone());
-    wait_for_service(port, &app_dir)?;
+    // Adoption is done: from here a failure is the app's own service still coming up, never the old install.
+    let switched = |message: &str| adoption::AdoptionError::switched(message);
+    *service.app_dir.lock().map_err(|_| switched("service state is unavailable"))? = Some(app_dir.clone());
+    wait_for_service(port, &app_dir).map_err(|error| switched(&error))?;
+    Ok(ServiceStartup::Ready { url: service_url(port) })
+}
+
+/// "Start it again": with every file where it was, start the existing install
+/// if it is stopped and release its exact hold. Never repeats the adoption.
+#[tauri::command]
+fn start_existing_again(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<(), adoption::AdoptionError> {
+    let app_dir = default_app_dir(&app)?;
+    let Some(plan) = adoption::interrupted_plan(&app_dir)? else { return Ok(()) };
+    let mut lifecycle = SourceLifecycle { source: plan.source.clone(), token: None, waiting: None };
+    service.adoption_in_progress.store(true, Ordering::Release);
+    let started = adoption::start_again(&plan, &mut lifecycle);
+    service.adoption_in_progress.store(false, Ordering::Release);
+    started
+}
+
+/// "Reopen CORSIA": relaunch so the adoption journal finishes its undo on launch.
+#[tauri::command]
+fn reopen_app(app: tauri::AppHandle) -> Result<(), String> {
+    let failed = || "CORSIA couldn’t reopen itself.".to_string();
+    let bundle = update_stage::running_bundle().map_err(|_| failed())?;
+    if relaunch(&app, &bundle) { Ok(()) } else { Err(failed()) }
+}
+
+/// "Check again": the app's service is registered; wait for it to answer.
+#[tauri::command]
+fn check_service_started(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<ServiceStartup, adoption::AdoptionError> {
+    let app_dir = default_app_dir(&app).map_err(adoption::AdoptionError::switched)?;
+    let port = lifecycle::service_port(&app, &service);
+    wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
     Ok(ServiceStartup::Ready { url: service_url(port) })
 }
 
@@ -953,6 +1029,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_local_service,
             adopt_existing_install,
+            start_existing_again,
+            reopen_app,
+            check_service_started,
             adoption_waiting_count,
             choose_work_folder,
             configure_work_folder,
@@ -1091,6 +1170,22 @@ mod tests {
     use super::*;
     use base64::Engine;
     use std::fs;
+
+    #[test]
+    fn known_schema_version_matches_the_backend_schema_version() {
+        // Adoption refuses a database newer than the app knows; a stale copy
+        // would refuse good installs or admit ones the app cannot open.
+        let source = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../backend/infra/schema.py"),
+        )
+        .expect("read backend/infra/schema.py");
+        let declared: u32 = source
+            .lines()
+            .find_map(|line| line.strip_prefix("SCHEMA_VERSION = "))
+            .and_then(|value| value.trim().parse().ok())
+            .expect("SCHEMA_VERSION in backend/infra/schema.py");
+        assert_eq!(KNOWN_SCHEMA_VERSION, declared);
+    }
 
     #[test]
     fn local_requests_name_the_port_the_backend_guard_requires() {
@@ -1288,4 +1383,119 @@ mod tests {
         assert_eq!(bundle_generation(temp.path()), None);
     }
 
+    /// Serves one scripted reply per request and returns the request lines it saw.
+    fn source_backend(replies: Vec<&'static str>) -> (u16, std::thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for reply in replies {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 2048];
+                let read = stream.read(&mut request).unwrap();
+                let text = String::from_utf8_lossy(&request[..read]).into_owned();
+                seen.push(text.lines().next().unwrap_or_default().to_owned());
+                stream.write_all(reply.as_bytes()).unwrap();
+            }
+            seen
+        });
+        (port, server)
+    }
+
+    fn source_on(port: u16) -> SourceLifecycle {
+        let nowhere = PathBuf::from("/private/tmp/corsia-no-such-source");
+        SourceLifecycle {
+            source: adoption::SourceInstall {
+                plist: nowhere.join("p.plist"),
+                config: nowhere.join("config.json"),
+                state: nowhere.join("state"),
+                workspace: nowhere.join("work"),
+                port,
+                lifecycle_script: nowhere.join("scripts/corsia"),
+                python: nowhere.join("python"),
+                env_file: nowhere.join(".env"),
+                plist_provider_key_names: vec![],
+                legacy_v1: false,
+            },
+            waiting: None,
+            token: Some("service-credential".into()),
+        }
+    }
+
+    #[test]
+    fn an_expired_credential_is_replaced_and_the_same_drain_call_sent_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let checkout = temp.path();
+        fs::create_dir_all(checkout.join("backend")).unwrap();
+        fs::create_dir_all(checkout.join("scripts")).unwrap();
+        let python = checkout.join("python");
+        fs::write(&python, "#!/bin/sh\necho fresh-service-credential\n").unwrap();
+        fs::set_permissions(&python, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let (port, server) = source_backend(vec![
+            "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"operation_id\":\"op-1\",\"active\":false}",
+        ]);
+        let mut source = source_on(port);
+        source.source.python = python;
+        source.source.lifecycle_script = checkout.join("scripts/corsia");
+        source.token = Some("expired-service-credential".into());
+
+        use adoption::Lifecycle;
+        assert_eq!(source.cancel_drain("op-1"), Ok(()));
+        let seen = server.join().unwrap();
+        assert!(seen[0].starts_with("DELETE ") && seen[0].contains("expired-service-credential"));
+        assert!(seen[1].starts_with("DELETE ") && seen[1].contains("fresh-service-credential"));
+        assert!(seen[1].contains("operation_id=op-1"));
+        assert_eq!(source.token.as_deref(), Some("fresh-service-credential"));
+    }
+
+    #[test]
+    fn releasing_a_hold_reads_its_status_first_and_treats_an_ended_one_as_released() {
+        use adoption::Lifecycle;
+        // The source never heard of it (a restart settled it, or the request never landed).
+        let (port, server) = source_backend(vec!["HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n{}"]);
+        assert_eq!(source_on(port).release_hold("op-1"), Ok(()));
+        let seen = server.join().unwrap();
+        assert_eq!(seen.len(), 1, "an ended hold is never cancelled again");
+        assert!(seen[0].starts_with("GET /api/system/drain?") && seen[0].contains("operation_id=op-1"));
+
+        // Already cancelled: terminal means released, and no second cancel is sent.
+        let (port, server) = source_backend(vec![
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"operation_id\":\"op-1\",\"status\":\"cancelled\"}",
+        ]);
+        assert_eq!(source_on(port).release_hold("op-1"), Ok(()));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn releasing_a_live_hold_cancels_exactly_that_operation() {
+        use adoption::Lifecycle;
+        let (port, server) = source_backend(vec![
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"operation_id\":\"op-1\",\"status\":\"in_flight\"}",
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"ok\":true,\"active\":false,\"operation_id\":\"op-1\"}",
+        ]);
+        assert_eq!(source_on(port).release_hold("op-1"), Ok(()));
+        let seen = server.join().unwrap();
+        assert!(seen[0].starts_with("GET /api/system/drain?"));
+        assert!(seen[1].starts_with("DELETE /api/system/drain?") && seen[1].contains("operation_id=op-1"));
+
+        // A cancel the source refuses stays unreleased, so the person is not told it worked.
+        let (port, server) = source_backend(vec![
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"operation_id\":\"op-1\",\"status\":\"in_flight\"}",
+            "HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n{}",
+        ]);
+        assert!(source_on(port).release_hold("op-1").is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_source_that_cannot_be_reached_leaves_the_hold_unreleased() {
+        use adoption::Lifecycle;
+        let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        assert!(source_on(port).release_hold("op-1").is_err());
+    }
 }

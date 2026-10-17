@@ -43,7 +43,9 @@ def stored_key_names(state_root: Path) -> set[str]:
             rows = connection.execute(
                 "SELECT name, value_ref FROM key_store_entries WHERE value_ref IS NOT NULL"
             ).fetchall()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as error:
+        if "no such table" not in str(error):
+            raise AdoptionRefused("The key store could not be read.") from None
         return set()  # no key store table yet: nothing is stored
     try:
         values = json.loads((state_root / "keys" / "values.json").read_bytes())

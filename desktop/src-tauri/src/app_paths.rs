@@ -29,7 +29,19 @@ fn state_dir_with_override(app_dir: &Path, state_override: Option<OsString>) -> 
     state_override
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
+        .or_else(|| recorded_state_dir(app_dir))
         .unwrap_or_else(|| app_dir.join(STATE_DIRECTORY))
+}
+
+/// The state root `service.json` records, as the backend reads it: an adopted
+/// install keeps its data where it was, so the recorded folder, not the
+/// `state` child, is the root. A missing, damaged or relative record is
+/// ignored.
+fn recorded_state_dir(app_dir: &Path) -> Option<PathBuf> {
+    let bytes = fs::read(app_dir.join("service.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let recorded = value.get("state_dir")?.as_str()?;
+    recorded.starts_with('/').then(|| PathBuf::from(recorded))
 }
 
 /// The operational state root for an app folder.
@@ -107,6 +119,32 @@ mod tests {
             state_dir_with_override(app_dir, Some(OsString::new())),
             app_dir.join("state")
         );
+    }
+
+    #[test]
+    fn recorded_state_dir_wins_over_the_default_but_not_the_override() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path();
+        assert_eq!(state_dir_with_override(app_dir, None), app_dir.join("state"));
+
+        fs::write(
+            app_dir.join("service.json"),
+            br#"{"state_dir": "/tmp/adopted-state", "port": 3001}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            state_dir_with_override(app_dir, None),
+            PathBuf::from("/tmp/adopted-state")
+        );
+        assert_eq!(
+            state_dir_with_override(app_dir, Some("/tmp/exact".into())),
+            PathBuf::from("/tmp/exact")
+        );
+
+        for damaged in [&b"{not json"[..], br#"{"state_dir": "relative"}"#, br#"{"state_dir": 3}"#] {
+            fs::write(app_dir.join("service.json"), damaged).unwrap();
+            assert_eq!(state_dir_with_override(app_dir, None), app_dir.join("state"));
+        }
     }
 
     #[test]

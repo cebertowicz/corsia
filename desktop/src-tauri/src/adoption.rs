@@ -146,7 +146,8 @@ pub trait Lifecycle {
     /// Ask the source backend whether adoption can finish: every expected
     /// provider key is stored (names compared, nothing else read) and the disk
     /// holds the backup plus a reserve. Runs before anything is drained.
-    fn check_ready(&mut self, state: &Path, key_names: &BTreeSet<String>) -> Result<(), String>;
+    fn check_ready(&mut self, state: &Path, key_names: &BTreeSet<String>)
+        -> Result<(), ReadyError>;
     /// The id the drain will carry, so a failed start can still cancel it.
     fn new_operation_id(&mut self) -> String;
     /// Start the drain operation with that id. It has not released the
@@ -172,6 +173,12 @@ pub trait Lifecycle {
     /// Restore the snapshot before the source service is restarted.
     fn restore_backup(&mut self, state: &Path, snapshot: &Path) -> Result<(), String>;
     fn start_old(&mut self) -> Result<(), String>;
+    /// Make sure the source service is running and answering, starting it only
+    /// when it is not loaded. Safe to repeat, and safe when it never stopped.
+    fn ensure_old_running(&mut self) -> Result<(), String>;
+    /// Release the source's hold for this exact operation. Safe to repeat: Ok
+    /// when the operation is cancelled, already ended, or unknown to the source.
+    fn release_hold(&mut self, operation_id: &str) -> Result<(), String>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,12 +191,16 @@ pub struct DrainStatus {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 enum Step {
+    /// The drain id is recorded and the source may be holding new work.
+    Draining,
     Stopped,
     BackedUp,
     MetadataMoved,
     ServiceWritten,
     NewStarted,
     Registered,
+    /// Every file is back where it was; only the source start is left.
+    Reverted,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -197,6 +208,31 @@ struct Journal {
     step: Step,
     source: SourceInstall,
     snapshot: Option<PathBuf>,
+    /// The exact drain operation, so a later launch can still release it.
+    #[serde(default)]
+    drain_id: Option<String>,
+}
+
+fn read_journal(plan: &Plan) -> Result<Option<Journal>, String> {
+    let raw = match fs::read_to_string(journal_path(plan)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(io(error)),
+    };
+    serde_json::from_str(&raw)
+        .map(Some)
+        .map_err(|error| format!("adoption journal is unreadable: {error}"))
+}
+
+fn clear_journal(plan: &Plan) -> Result<(), String> {
+    match fs::remove_file(journal_path(plan)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(io(error)),
+    }
+    File::open(plan.adopted_dir())
+        .and_then(|folder| folder.sync_all())
+        .map_err(io)
 }
 
 fn journal_path(plan: &Plan) -> PathBuf {
@@ -232,11 +268,29 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
         .map_err(io)
 }
 
+/// Records the drain id before the drain is requested, so no failure after the
+/// request can lose the one thing needed to release the source's hold.
+fn begin_journal(plan: &Plan, drain_id: &str) -> Result<(), String> {
+    write_journal_with(plan, Step::Draining, None, Some(drain_id.to_owned()))
+}
+
+/// Moves the journal to `step`, keeping the drain id it already holds.
 fn write_journal(plan: &Plan, step: Step, snapshot: Option<&Path>) -> Result<(), String> {
+    let drain_id = read_journal(plan)?.and_then(|journal| journal.drain_id);
+    write_journal_with(plan, step, snapshot, drain_id)
+}
+
+fn write_journal_with(
+    plan: &Plan,
+    step: Step,
+    snapshot: Option<&Path>,
+    drain_id: Option<String>,
+) -> Result<(), String> {
     let journal = Journal {
         step,
         source: plan.source.clone(),
         snapshot: snapshot.map(Path::to_path_buf),
+        drain_id,
     };
     write_atomically(
         &journal_path(plan),
@@ -311,21 +365,63 @@ pub enum Outcome {
     Restored,
     /// Not known to be running, or still holding new work.
     Unconfirmed,
+    /// Adoption finished and the app's service is registered, but it has not
+    /// answered yet. The existing install is gone on purpose.
+    Switched,
+}
+
+/// The one action the app can run to put an unconfirmed install back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Recovery {
+    /// Every file is where it was: start the service if it is stopped and
+    /// release its hold. Safe to repeat.
+    StartAgain,
+    /// Files may be part-way between homes. Relaunching runs the journal's
+    /// undo before anything else starts.
+    Reopen,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AdoptionError {
     pub message: String,
     pub outcome: Outcome,
+    /// Set only with `Outcome::Unconfirmed`.
+    pub recovery: Option<Recovery>,
+    /// The message is a whole sentence written for the person, with what to do
+    /// next: the window shows it as the line. Otherwise it is detail for the log.
+    pub advice: bool,
 }
 
 impl AdoptionError {
     pub fn untouched(message: impl Into<String>) -> Self {
-        Self::with(message, Outcome::Untouched)
+        Self::with(message, Outcome::Untouched, None, false)
+    }
+
+    /// An untouched refusal whose message tells the person what to do.
+    pub fn refusal(message: impl Into<String>) -> Self {
+        Self::with(message, Outcome::Untouched, None, true)
     }
 
     pub fn restored(message: impl Into<String>) -> Self {
-        Self::with(message, Outcome::Restored)
+        Self::with(message, Outcome::Restored, None, false)
+    }
+
+    pub fn switched(message: impl Into<String>) -> Self {
+        Self::with(message, Outcome::Switched, None, false)
+    }
+
+    pub fn start_again(message: impl Into<String>) -> Self {
+        Self::with(
+            message,
+            Outcome::Unconfirmed,
+            Some(Recovery::StartAgain),
+            false,
+        )
+    }
+
+    pub fn reopen(message: impl Into<String>) -> Self {
+        Self::with(message, Outcome::Unconfirmed, Some(Recovery::Reopen), false)
     }
 
     #[cfg(test)]
@@ -333,19 +429,27 @@ impl AdoptionError {
         &self.message
     }
 
-    fn with(message: impl Into<String>, outcome: Outcome) -> Self {
+    fn with(
+        message: impl Into<String>,
+        outcome: Outcome,
+        recovery: Option<Recovery>,
+        advice: bool,
+    ) -> Self {
         Self {
             message: message.into(),
             outcome,
+            recovery,
+            advice,
         }
     }
 }
 
-/// A plain error claims nothing: the window says it could not confirm the old
-/// install, the one reading that is never false.
+/// A plain error claims nothing about the old install, and the one recovery
+/// that is right whatever the journal holds is a relaunch: with no journal it
+/// simply starts, with one it finishes the undo first.
 impl From<String> for AdoptionError {
     fn from(message: String) -> Self {
-        Self::with(message, Outcome::Unconfirmed)
+        Self::reopen(message)
     }
 }
 
@@ -355,17 +459,39 @@ impl From<&str> for AdoptionError {
     }
 }
 
+/// Why the source install could not be declared ready to switch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReadyError {
+    /// A whole sentence for the person, with what to do next.
+    Refused(String),
+    /// Anything else that went wrong while checking: detail for the log.
+    Failed(String),
+}
+
+/// Forget a journal whose work is finished. A leftover one is harmless: the
+/// next launch recovers from it by repeating steps that are safe to repeat.
+fn forget_journal(plan: &Plan) {
+    if let Err(error) = clear_journal(plan) {
+        log::warn!("adoption journal could not be cleared: {error}");
+    }
+}
+
 /// Ends the held drain after `cause`. The old install is untouched only when
 /// the source confirms the exact operation is cancelled; its restart hold
-/// never expires, so an unconfirmed cancel may leave it holding every new turn.
+/// never expires, so an unconfirmed cancel may leave it holding every new
+/// turn. The journal keeps the id until the cancel is confirmed.
 fn abandon_drain(
+    plan: &Plan,
     lifecycle: &mut impl Lifecycle,
     operation_id: &str,
     cause: String,
 ) -> AdoptionError {
     match lifecycle.cancel_drain(operation_id) {
-        Ok(()) => AdoptionError::untouched(cause),
-        Err(error) => AdoptionError::from(format!(
+        Ok(()) => {
+            forget_journal(plan);
+            AdoptionError::untouched(cause)
+        }
+        Err(error) => AdoptionError::start_again(format!(
             "{cause}; the hold on new work could not be released: {error}"
         )),
     }
@@ -390,18 +516,26 @@ pub fn adopt(
     // do, so it is shown as written.
     lifecycle
         .check_ready(&plan.source.state, &key_names)
-        .map_err(AdoptionError::untouched)?;
+        .map_err(|error| match error {
+            ReadyError::Refused(message) => AdoptionError::refusal(message),
+            ReadyError::Failed(message) => AdoptionError::untouched(message),
+        })?;
     // From the drain request on, the source may hold new work until the exact
-    // operation is cancelled, so every failure before the bootout cancels it.
+    // operation is cancelled, so the id is journaled first and every failure
+    // before the bootout cancels it.
     let operation_id = lifecycle.new_operation_id();
+    begin_journal(plan, &operation_id).map_err(|error| {
+        AdoptionError::untouched(format!("could not record the switch-over: {error}"))
+    })?;
     let started = match lifecycle.begin_drain(&operation_id) {
         Ok(started) => started,
-        Err(error) => return Err(abandon_drain(lifecycle, &operation_id, error)),
+        Err(error) => return Err(abandon_drain(plan, lifecycle, &operation_id, error)),
     };
     let mut status = started;
     loop {
         if cancel_requested.load(Ordering::Acquire) {
             return Err(abandon_drain(
+                plan,
                 lifecycle,
                 &operation_id,
                 "adoption cancelled; the source service is still running".into(),
@@ -409,6 +543,7 @@ pub fn adopt(
         }
         if status.operation_id != operation_id || !status.active {
             return Err(abandon_drain(
+                plan,
                 lifecycle,
                 &operation_id,
                 "adoption drain changed before completion; the source service is still running"
@@ -421,21 +556,32 @@ pub fn adopt(
         thread::sleep(Duration::from_millis(250));
         status = match lifecycle.drain_status(&operation_id) {
             Ok(status) => status,
-            Err(error) => return Err(abandon_drain(lifecycle, &operation_id, error)),
+            Err(error) => return Err(abandon_drain(plan, lifecycle, &operation_id, error)),
         };
     }
     if let Err(error) = lifecycle.complete_drain(&operation_id) {
-        return Err(abandon_drain(lifecycle, &operation_id, error));
+        return Err(abandon_drain(plan, lifecycle, &operation_id, error));
     }
     if let Err(error) = lifecycle.bootout_old() {
-        return Err(match lifecycle.start_old() {
-            Ok(()) => AdoptionError::restored(format!("{error}; the source service was restarted")),
-            Err(restart_error) => AdoptionError::from(format!(
-                "{error}; the source service could not be restarted: {restart_error}"
-            )),
-        });
+        // A failed bootout may have left the source running and still holding
+        // new work, so it is made sure of rather than restarted, and its exact
+        // hold is released.
+        return Err(
+            match lifecycle
+                .ensure_old_running()
+                .and_then(|()| lifecycle.release_hold(&operation_id))
+            {
+                Ok(()) => {
+                    forget_journal(plan);
+                    AdoptionError::restored(format!("{error}; the source service was restarted"))
+                }
+                Err(restart_error) => AdoptionError::start_again(format!(
+                    "{error}; the source service could not be brought back: {restart_error}"
+                )),
+            },
+        );
     }
-    write_journal(plan, Step::Stopped, None)?;
+    write_journal(plan, Step::Stopped, None).map_err(AdoptionError::start_again)?;
     let snapshot = match lifecycle.backup(&plan.source.state) {
         Ok(snapshot) => snapshot,
         Err(error) => return rollback(plan, lifecycle, error, None),
@@ -519,30 +665,80 @@ pub fn interrupted_plan(app_dir: &Path) -> Result<Option<Plan>, String> {
     }
 }
 
-pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), String> {
-    let journal = fs::read_to_string(journal_path(plan)).map_err(io)?;
-    let journal: Journal = serde_json::from_str(&journal)
-        .map_err(|error| format!("adoption journal is unreadable: {error}"))?;
-    if journal.step == Step::Registered {
+/// Undo an interrupted or failed adoption from its journal, before first-run
+/// selection. Every step is safe to repeat. A possible app start is always
+/// stopped and restored before the source service starts.
+pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), AdoptionError> {
+    let Some(journal) = read_journal(plan)? else {
         return Ok(());
-    }
-    let snapshot = if journal.step >= Step::ServiceWritten {
-        Some(
-            journal
-                .snapshot
-                .as_deref()
-                .ok_or("interrupted adoption has no backup snapshot")?,
-        )
-    } else {
-        None
     };
-    rollback(
-        plan,
-        lifecycle,
-        "recovering interrupted adoption".into(),
-        snapshot,
-    )
-    .map_err(|error| error.message)
+    match journal.step {
+        Step::Registered => Ok(()),
+        // Nothing was moved: bring the source back and release its hold.
+        Step::Draining | Step::Reverted => {
+            resume_source(plan, lifecycle, journal.drain_id.as_deref())
+        }
+        step => {
+            let snapshot = if step >= Step::ServiceWritten {
+                Some(
+                    journal
+                        .snapshot
+                        .as_deref()
+                        .ok_or("interrupted adoption has no backup snapshot")?,
+                )
+            } else {
+                None
+            };
+            match rollback(
+                plan,
+                lifecycle,
+                "recovering interrupted adoption".into(),
+                snapshot,
+            ) {
+                Err(error) if error.outcome == Outcome::Restored => Ok(()),
+                other => other,
+            }
+        }
+    }
+}
+
+/// The "Start it again" action: only for a journal whose files are all where
+/// they were. Anything further along needs the whole undo, which is `recover`.
+pub fn start_again(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), AdoptionError> {
+    let Some(journal) = read_journal(plan)? else {
+        return Ok(());
+    };
+    match journal.step {
+        Step::Registered => Ok(()),
+        Step::Draining | Step::Reverted => {
+            resume_source(plan, lifecycle, journal.drain_id.as_deref())
+        }
+        _ => Err(AdoptionError::reopen(
+            "the existing install's files are part-way between homes",
+        )),
+    }
+}
+
+/// With every file where it was, the source only needs to be running and
+/// released. It works whether the source is stopped, or never stopped at all.
+fn resume_source(
+    plan: &Plan,
+    lifecycle: &mut impl Lifecycle,
+    drain_id: Option<&str>,
+) -> Result<(), AdoptionError> {
+    lifecycle.ensure_old_running().map_err(|error| {
+        AdoptionError::start_again(format!(
+            "the existing install could not be started: {error}"
+        ))
+    })?;
+    if let Some(operation_id) = drain_id {
+        lifecycle.release_hold(operation_id).map_err(|error| {
+            AdoptionError::start_again(format!(
+                "the hold on new work could not be released: {error}"
+            ))
+        })?;
+    }
+    clear_journal(plan).map_err(AdoptionError::start_again)
 }
 
 fn rollback(
@@ -551,8 +747,8 @@ fn rollback(
     cause: String,
     snapshot: Option<&Path>,
 ) -> Result<(), AdoptionError> {
-    // Any `?` below leaves the old install stopped on purpose or by failure,
-    // which converts to Outcome::Unconfirmed.
+    // Any `?` before the journal says Reverted may leave files part-way
+    // between homes, which converts to Recovery::Reopen.
     if let Some(snapshot) = snapshot {
         lifecycle
             .stop_new(&plan.source.state, plan.source.port)
@@ -561,9 +757,14 @@ fn rollback(
             .map_err(|error| format!("{cause}; backup could not be restored, so the old install was not restarted: {error}"))?;
     }
     restore_files(plan)?;
-    lifecycle
-        .start_old()
-        .map_err(|error| format!("{cause}; old install could not be restored: {error}"))?;
+    write_journal(plan, Step::Reverted, None)?;
+    // From here every file is back, so starting the source again is safe to repeat.
+    lifecycle.start_old().map_err(|error| {
+        AdoptionError::start_again(format!(
+            "{cause}; old install could not be restored: {error}"
+        ))
+    })?;
+    forget_journal(plan);
     Err(AdoptionError::restored(format!(
         "{cause}; the old install was restored"
     )))
@@ -594,6 +795,7 @@ mod tests {
         also_fail: Option<&'static str>,
         statuses: VecDeque<DrainStatus>,
         real_state: bool,
+        released: Vec<String>,
     }
     impl Fake {
         fn fails(&self, step: &str) -> bool {
@@ -625,10 +827,18 @@ mod tests {
         }
     }
     impl Lifecycle for Fake {
-        fn check_ready(&mut self, _: &Path, key_names: &BTreeSet<String>) -> Result<(), String> {
+        fn check_ready(
+            &mut self,
+            _: &Path,
+            key_names: &BTreeSet<String>,
+        ) -> Result<(), ReadyError> {
             self.ready_asked.push(key_names.clone());
             if self.fail == Some("check_ready") {
-                Err("OPENAI_API_KEY is not stored in CORSIA.".into())
+                Err(ReadyError::Refused(
+                    "OPENAI_API_KEY is not stored in CORSIA.".into(),
+                ))
+            } else if self.fail == Some("check_ready_failed") {
+                Err(ReadyError::Failed("could not check".into()))
             } else {
                 Ok(())
             }
@@ -722,6 +932,21 @@ mod tests {
             }
             Ok(())
         }
+        fn ensure_old_running(&mut self) -> Result<(), String> {
+            self.events.push("ensure_old_running");
+            if self.fails("ensure_old_running") {
+                return Err("old start failed".into());
+            }
+            Ok(())
+        }
+        fn release_hold(&mut self, operation_id: &str) -> Result<(), String> {
+            self.events.push("release_hold");
+            self.released.push(operation_id.to_owned());
+            if self.fails("release_hold") {
+                return Err("release failed".into());
+            }
+            Ok(())
+        }
     }
 
     fn fake(fail: Option<&'static str>) -> Fake {
@@ -732,6 +957,7 @@ mod tests {
             also_fail: None,
             statuses: VecDeque::new(),
             real_state: false,
+            released: vec![],
         }
     }
     fn uncancelled() -> AtomicBool {
@@ -880,9 +1106,13 @@ mod tests {
         )
         .unwrap();
         let mut fake = fake(None);
-        assert!(recover(&plan, &mut fake).unwrap_err().contains("restored"));
+        recover(&plan, &mut fake).unwrap();
         assert_eq!(fake.events, ["stop_new", "restore_backup", "start_old"]);
         assert!(plan.source.plist.exists());
+        assert!(
+            interrupted_plan(&plan.app_dir).unwrap().is_none(),
+            "a finished undo leaves no journal to repeat"
+        );
     }
 
     #[test]
@@ -905,9 +1135,7 @@ mod tests {
             .unwrap()
             .expect("the valid journal is still found");
         let mut fake = fake(None);
-        assert!(recover(&interrupted, &mut fake)
-            .unwrap_err()
-            .contains("restored"));
+        recover(&interrupted, &mut fake).unwrap();
         assert_eq!(fake.events, ["stop_new", "restore_backup", "start_old"]);
         assert!(plan.source.plist.exists());
     }
@@ -941,7 +1169,13 @@ mod tests {
             .contains("restarted"));
         assert_eq!(
             fake.events,
-            ["begin_drain", "complete_drain", "bootout_old", "start_old"]
+            [
+                "begin_drain",
+                "complete_drain",
+                "bootout_old",
+                "ensure_old_running",
+                "release_hold"
+            ]
         );
     }
 
@@ -980,9 +1214,10 @@ mod tests {
             Some(&plan.source.state.join("backups/fake-adoption")),
         )
         .unwrap();
-        assert!(recover(&plan, &mut fake)
-            .unwrap_err()
-            .contains("could not be stopped"));
+        let error = recover(&plan, &mut fake).unwrap_err();
+        assert!(error.message().contains("could not be stopped"));
+        // Files are part-way between homes: only the journal-driven undo is safe.
+        assert_eq!(error.recovery, Some(Recovery::Reopen));
         assert_eq!(fake.events, ["stop_new"]);
     }
 
@@ -1007,10 +1242,7 @@ mod tests {
             )
             .unwrap();
             let mut fake = fake(None);
-            assert!(
-                recover(&plan, &mut fake).unwrap_err().contains("restored"),
-                "{step:?}"
-            );
+            recover(&plan, &mut fake).unwrap();
             let expected: &[&str] = if step >= Step::ServiceWritten {
                 &["stop_new", "restore_backup", "start_old"]
             } else {
@@ -1275,7 +1507,7 @@ mod tests {
         }
         // It was stopped and could not be brought back, or was deliberately left stopped.
         assert_eq!(
-            outcome_of(Some("bootout_old"), Some("start_old"), false),
+            outcome_of(Some("bootout_old"), Some("ensure_old_running"), false),
             Outcome::Unconfirmed
         );
         assert_eq!(
@@ -1298,18 +1530,23 @@ mod tests {
         let json = serde_json::to_value(AdoptionError::untouched("x")).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "message": "x", "outcome": "untouched" })
+            serde_json::json!({ "message": "x", "outcome": "untouched", "recovery": null, "advice": false })
         );
+        let json = serde_json::to_value(AdoptionError::refusal("x")).unwrap();
+        assert_eq!(json["advice"], true);
         let json = serde_json::to_value(AdoptionError::restored("y")).unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({ "message": "y", "outcome": "restored" })
-        );
-        // A plain error claims nothing.
+        assert_eq!(json["outcome"], "restored");
+        let json = serde_json::to_value(AdoptionError::switched("s")).unwrap();
+        assert_eq!(json["outcome"], "switched");
+        assert_eq!(json["recovery"], serde_json::Value::Null);
+        let json = serde_json::to_value(AdoptionError::start_again("a")).unwrap();
+        assert_eq!(json["outcome"], "unconfirmed");
+        assert_eq!(json["recovery"], "start_again");
+        // A plain error claims nothing and offers the one recovery that is always safe.
         let json = serde_json::to_value(AdoptionError::from("z".to_string())).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "message": "z", "outcome": "unconfirmed" })
+            serde_json::json!({ "message": "z", "outcome": "unconfirmed", "recovery": "reopen", "advice": false })
         );
     }
 
@@ -1350,5 +1587,201 @@ mod tests {
         assert_eq!(source.state, PathBuf::from("/state"));
         assert_eq!(source.port, 47_895);
         assert_eq!(source.plist_provider_key_names, ["OPENAI_API_KEY"]);
+    }
+
+    // ---- Recovery: one test per cause, each driving the real action against fakes ----
+
+    fn journal_step(plan: &Plan) -> Option<Step> {
+        read_journal(plan).unwrap().map(|journal| journal.step)
+    }
+
+    #[test]
+    fn cause_1_a_hold_that_could_not_be_released_is_released_by_start_again() {
+        let (_home, plan, mut stuck) = scenario(Some("begin_drain"), Some("cancel_drain"), false);
+        let error = adopt(&plan, &mut stuck, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Unconfirmed);
+        assert_eq!(error.recovery, Some(Recovery::StartAgain));
+        // The reboot line is shown only where the plist is on disk, so a reboot restarts the source.
+        assert!(plan.source.plist.exists());
+        // The exact id survives in the journal, not only in memory.
+        let journal = read_journal(&plan).unwrap().unwrap();
+        assert_eq!(
+            (journal.step, journal.drain_id.as_deref()),
+            (Step::Draining, Some("a"))
+        );
+
+        let mut working = fake(None);
+        start_again(&plan, &mut working).unwrap();
+        assert_eq!(working.events, ["ensure_old_running", "release_hold"]);
+        assert_eq!(working.released, ["a"]);
+        assert_eq!(
+            journal_step(&plan),
+            None,
+            "done: nothing left to repeat on launch"
+        );
+    }
+
+    #[test]
+    fn cause_1_quitting_before_start_again_still_releases_that_hold_on_the_next_launch() {
+        let (_home, plan, mut stuck) = scenario(Some("drain_status"), Some("cancel_drain"), true);
+        adopt(&plan, &mut stuck, 1, &uncancelled()).unwrap_err();
+
+        // A new launch knows only the journal.
+        let interrupted = interrupted_plan(&plan.app_dir)
+            .unwrap()
+            .expect("the held drain is found on launch");
+        let mut launch = fake(None);
+        recover(&interrupted, &mut launch).unwrap();
+        assert_eq!(launch.released, ["a"]);
+        assert_eq!(launch.events, ["ensure_old_running", "release_hold"]);
+        assert!(
+            !launch.events.contains(&"stop_new"),
+            "the app's service is never touched"
+        );
+        assert!(interrupted_plan(&plan.app_dir).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_hold_that_will_not_release_stays_unconfirmed_and_keeps_its_journal() {
+        let (_home, plan, mut stuck) = scenario(Some("begin_drain"), Some("cancel_drain"), false);
+        adopt(&plan, &mut stuck, 1, &uncancelled()).unwrap_err();
+        let mut still_stuck = fake(Some("release_hold"));
+        let error = start_again(&plan, &mut still_stuck).unwrap_err();
+        assert_eq!(error.recovery, Some(Recovery::StartAgain));
+        assert_eq!(journal_step(&plan), Some(Step::Draining));
+    }
+
+    #[test]
+    fn cause_2_a_source_that_would_not_start_after_the_undo_is_started_again() {
+        // The undo put every file back, then the source would not start.
+        let (_home, plan, mut broken) = scenario(Some("start_new"), Some("start_old"), false);
+        let error = adopt(&plan, &mut broken, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.recovery, Some(Recovery::StartAgain));
+        assert!(plan.source.plist.exists() && plan.source.config.exists());
+        assert!(!plan.app_dir.join("service.json").exists());
+        assert_eq!(journal_step(&plan), Some(Step::Reverted));
+
+        let mut working = fake(None);
+        start_again(&plan, &mut working).unwrap();
+        assert_eq!(working.events, ["ensure_old_running", "release_hold"]);
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn cause_2_a_failed_bootout_that_could_not_bring_the_source_back_is_started_again() {
+        let (_home, plan, mut broken) =
+            scenario(Some("bootout_old"), Some("ensure_old_running"), false);
+        let error = adopt(&plan, &mut broken, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.recovery, Some(Recovery::StartAgain));
+        assert_eq!(journal_step(&plan), Some(Step::Draining));
+        assert!(plan.source.plist.exists());
+
+        let mut working = fake(None);
+        start_again(&plan, &mut working).unwrap();
+        assert_eq!(working.released, ["a"]);
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn a_source_that_never_stopped_is_released_not_restarted_after_a_failed_bootout() {
+        let (_home, plan, mut fake) = scenario(Some("bootout_old"), None, false);
+        let error = adopt(&plan, &mut fake, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Restored);
+        assert_eq!(fake.released, ["a"], "the exact hold is released");
+        assert!(
+            !fake.events.contains(&"start_old"),
+            "no replacement proof is demanded of a survivor"
+        );
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn cause_3a_a_stalled_undo_is_finished_through_the_journal_after_reopening() {
+        // The app's service started, then could not be stopped: the plist is still moved aside.
+        let (_home, plan, mut stalled) = scenario(Some("start_new"), Some("stop_new"), false);
+        let error = adopt(&plan, &mut stalled, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Unconfirmed);
+        assert_eq!(error.recovery, Some(Recovery::Reopen));
+        assert!(
+            !plan.source.plist.exists(),
+            "the plist is still moved aside"
+        );
+
+        // "Start it again" must refuse to run over files that are part-way between homes.
+        let mut refused = fake(None);
+        assert_eq!(
+            start_again(&plan, &mut refused).unwrap_err().recovery,
+            Some(Recovery::Reopen)
+        );
+        assert!(refused.events.is_empty());
+
+        // The reopened app knows only the journal, and it finishes the whole undo first.
+        let interrupted = interrupted_plan(&plan.app_dir)
+            .unwrap()
+            .expect("the journal survives the quit");
+        let mut launch = fake(None);
+        launch.real_state = true;
+        recover(&interrupted, &mut launch).unwrap();
+        assert_eq!(launch.events, ["stop_new", "restore_backup", "start_old"]);
+        assert!(plan.source.plist.exists() && plan.source.config.exists());
+        assert!(!plan.app_dir.join("service.json").exists());
+        assert!(interrupted_plan(&plan.app_dir).unwrap().is_none());
+    }
+
+    #[test]
+    fn cause_3a_an_unclassified_error_offers_the_relaunch_that_is_always_safe() {
+        // A rollback step that fails before the files are back is not one the code classifies.
+        let (_home, plan, mut broken) = scenario(Some("start_new"), Some("restore_backup"), false);
+        let error = adopt(&plan, &mut broken, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.recovery, Some(Recovery::Reopen));
+        assert_eq!(AdoptionError::from("x").recovery, Some(Recovery::Reopen));
+    }
+
+    #[test]
+    fn an_undo_that_already_put_every_file_back_is_not_repeated_on_launch() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        write_journal(&plan, Step::Reverted, None).unwrap();
+        let mut launch = fake(None);
+        recover(&plan, &mut launch).unwrap();
+        assert_eq!(launch.events, ["ensure_old_running"]);
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn a_confirmed_cancel_leaves_no_journal_behind() {
+        let (_home, plan, mut fake) = scenario(Some("begin_drain"), None, false);
+        let error = adopt(&plan, &mut fake, 1, &uncancelled()).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Untouched);
+        assert_eq!(journal_step(&plan), None);
+        assert!(interrupted_plan(&plan.app_dir).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_restore_leaves_no_journal_to_repeat_on_launch() {
+        let (_home, plan, mut fake) = scenario(Some("start_new"), None, false);
+        assert_eq!(
+            adopt(&plan, &mut fake, 1, &uncancelled())
+                .unwrap_err()
+                .outcome,
+            Outcome::Restored
+        );
+        assert!(interrupted_plan(&plan.app_dir).unwrap().is_none());
+    }
+
+    #[test]
+    fn only_a_refusal_written_for_the_person_is_shown_as_the_line() {
+        let (_home, plan, mut refused) = scenario(Some("check_ready"), None, false);
+        let error = adopt(&plan, &mut refused, 1, &uncancelled()).unwrap_err();
+        assert!(error.advice && error.outcome == Outcome::Untouched);
+        let (_home, plan, mut broken) = scenario(Some("check_ready_failed"), None, false);
+        let error = adopt(&plan, &mut broken, 1, &uncancelled()).unwrap_err();
+        assert!(!error.advice && error.outcome == Outcome::Untouched);
+        let (_home, plan, mut broken) = scenario(Some("begin_drain"), None, false);
+        assert!(
+            !adopt(&plan, &mut broken, 1, &uncancelled())
+                .unwrap_err()
+                .advice
+        );
     }
 }

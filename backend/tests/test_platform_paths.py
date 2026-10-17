@@ -177,6 +177,19 @@ def test_adoption_preflight_names_the_stored_keys_it_misses_in_the_single_values
     assert "stored-openai-value" not in message
 
 
+def test_adoption_preflight_refuses_a_key_store_it_cannot_read_instead_of_calling_it_empty(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = tmp_path / "state"
+    state.mkdir()
+    connection = sqlite3.connect(state / "corsia.db")
+    connection.execute("CREATE TABLE key_store_entries (name TEXT)")  # no value_ref column
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(snapshots.AdoptionRefused):
+        snapshots.stored_key_names(state)
+
+
 def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, monkeypatch):
     snapshots = importlib.import_module("infra.adoption_snapshot")
     state = _adoptable_state(
