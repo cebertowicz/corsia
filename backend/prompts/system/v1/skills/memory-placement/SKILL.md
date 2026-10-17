@@ -44,7 +44,7 @@ Apply the core causal-lesson check. Preserve incident evidence in the reference,
 
 ## 4. Triage a correction
 
-When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply.
+When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply. A note usually arrives a turn after the correction itself: if you already fixed and triaged that correction, do nothing more, and never place its lesson twice.
 
 **Tier.** Set one. You may raise a proposed tier, never lower a Serious one.
 - **Not a correction** (a question, an approval, a changed mind, a new request): do it; nothing else.
