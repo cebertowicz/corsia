@@ -222,7 +222,10 @@
 
 				waitingTitle: 'Waiting for running work to finish…',
 				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
+				waitingRestartTitle: 'Your existing CORSIA is restarting. This app will continue when it’s back.',
 				backingUpTitle: 'Backing up your data…',
+				// Shown while a Quit waits for the switch to be undone: the app closes only once the existing install runs again.
+				quitPending: 'CORSIA will close once your existing CORSIA is running again as before.',
 
 				failureTitle: 'CORSIA couldn’t switch over',
 				// Four outcomes, from the backend rather than the reason text: never stopped, stopped
@@ -238,6 +241,12 @@
 				recoveries: {
 					start_again: { line: 'Choose Start it again.', button: 'Start it again', working: 'Starting your existing CORSIA…', note: 'If that doesn’t work, restart this computer.' },
 					reopen: { line: 'Choose Reopen CORSIA to put it back.', button: 'Reopen CORSIA', working: 'Reopening CORSIA…', note: '' },
+					// A start or restart that did not work: the only honest next step is to look again.
+					try_again: { line: 'Choose Try again.', button: 'Try again', working: 'Starting CORSIA…', note: '' },
+					// Refusals that are a whole line, each with the one action that fixes its cause. The line is the
+					// backend's message as written, so these carry only the button.
+					start_it: { button: 'Start it', working: 'Starting your existing CORSIA…', note: '' },
+					restart_it: { button: 'Restart it', working: 'Restarting your existing CORSIA…', note: '' },
 				},
 				switched: { title: 'CORSIA switched over and is still starting.', button: 'Check again' },
 			};
@@ -289,12 +298,17 @@
 			function showAdoptionProgress(progress) {
 				if (!progress) return;
 				line.hidden = true;
+				// A Quit that is waiting on the switch says so, for the two phases it waits through.
+				note.textContent = progress.quit_pending === true ? ADOPTION_COPY.quitPending : '';
+				note.hidden = !note.textContent;
 				if (progress.phase === 'waiting') {
 					status.textContent = ADOPTION_COPY.waitingTitle;
 					if (Number.isInteger(progress.running) && progress.running > 0) {
 						line.textContent = ADOPTION_COPY.waitingCount(progress.running);
 						line.hidden = false;
 					}
+				} else if (progress.phase === 'waiting_restart') {
+					status.textContent = ADOPTION_COPY.waitingRestartTitle;
 				} else if (progress.phase === 'backing_up') {
 					status.textContent = ADOPTION_COPY.backingUpTitle;
 				} else if (progress.phase === 'starting') {
@@ -312,7 +326,9 @@
 				const detail = typeof reason === 'string' && reason ? reason : 'CORSIA couldn’t switch over.';
 				const outcome = given.outcome;
 				const settled = outcome === 'untouched' || outcome === 'restored';
-				const kind = settled ? null : outcome === 'switched' ? 'check' : given.recovery === 'start_again' ? 'start_again' : 'reopen';
+				// A refusal that names an action the app can run (start it, restart it) offers that action.
+				const offered = outcome === 'untouched' && (given.recovery === 'start_it' || given.recovery === 'restart_it');
+				const kind = offered ? given.recovery : settled ? null : outcome === 'switched' ? 'check' : given.recovery === 'start_again' || given.recovery === 'try_again' ? given.recovery : 'reopen';
 				quitFailure = false;
 				adoptionPrompt = false;
 				adoptionRecovery = kind ? { kind, failure: { message: detail, outcome, recovery: given.recovery } } : null;
@@ -325,7 +341,8 @@
 				} else {
 					status.textContent = ADOPTION_COPY.failureTitle;
 					const lead = settled ? ADOPTION_COPY.failureLead[outcome] : `${ADOPTION_COPY.mayNotBeRunning} ${recovery.line}`;
-					line.textContent = given.advice === true && settled ? `${lead} ${detail}` : lead;
+					// A standalone line is the whole line: a lead about the existing install would contradict it.
+					line.textContent = given.standalone === true ? detail : given.advice === true && settled ? `${lead} ${detail}` : lead;
 					line.hidden = false;
 					note.textContent = recovery?.note ?? '';
 					note.hidden = !note.textContent;
@@ -354,6 +371,11 @@
 						await showAdoptionFailure({ message: failure.message, outcome: 'restored' });
 					} else if (kind === 'reopen') {
 						await invoke('reopen_app');
+					} else if (kind === 'start_it' || kind === 'restart_it') {
+						await invoke(kind === 'start_it' ? 'start_source_install' : 'restart_source_install');
+						await runAdoption();
+					} else if (kind === 'try_again') {
+						await runAdoption();
 					} else {
 						const startup = await invoke('check_service_started');
 						if (startup.state === 'ready') continueToService(startup);
@@ -442,6 +464,8 @@
 					await showFailure();
 					return;
 				}
+				// A relaunch may be waiting for the stop an earlier run left draining; the window shows it.
+				const stopFollowing = followProgress();
 				try {
 					const startup = await invoke('start_local_service');
 					if (startup.state === 'ready') {
@@ -455,34 +479,46 @@
 					}
 				} catch (error) {
 					await showFailure(error);
+				} finally {
+					stopFollowing();
+				}
+			}
+
+			// Shows the backend's phase once a second until the returned function is called.
+			function followProgress() {
+				let polling = true;
+				const progressPoll = setInterval(async () => {
+					try {
+						const progress = await invoke('adoption_progress');
+						// A reading that lands after the result is on screen must not replace it.
+						if (polling) showAdoptionProgress(progress);
+					} catch { /* the next reading replaces this one */ }
+				}, 1000);
+				return () => {
+					polling = false;
+					clearInterval(progressPoll);
+				};
+			}
+
+			// Takes over the existing install. Every outcome, a refusal included, lands on the failure screen.
+			async function runAdoption() {
+				showStarting();
+				status.textContent = ADOPTION_COPY.waitingTitle;
+				const stopFollowing = followProgress();
+				try {
+					const startup = await invoke('adopt_existing_install');
+					if (startup.state === 'ready') continueToService(startup);
+					else await showAdoptionFailure('CORSIA couldn’t switch over.');
+				} catch (error) {
+					await showAdoptionFailure(error);
+				} finally {
+					stopFollowing();
 				}
 			}
 
 			async function retryFailure() {
 				if (adoptionRecovery) return runRecovery(adoptionRecovery);
-				if (adoptionPrompt) {
-					showStarting();
-					status.textContent = ADOPTION_COPY.waitingTitle;
-					let polling = true;
-					const progressPoll = setInterval(async () => {
-						try {
-							const progress = await invoke('adoption_progress');
-							// A reading that lands after the result is on screen must not replace it.
-							if (polling) showAdoptionProgress(progress);
-						} catch { /* the next reading replaces this one */ }
-					}, 1000);
-					try {
-						const startup = await invoke('adopt_existing_install');
-						if (startup.state === 'ready') continueToService(startup);
-						else await showAdoptionFailure('CORSIA couldn’t switch over.');
-					} catch (error) {
-						await showAdoptionFailure(error);
-					} finally {
-						polling = false;
-						clearInterval(progressPoll);
-					}
-					return;
-				}
+				if (adoptionPrompt) return runAdoption();
 				if (!quitFailure) return start();
 				retry.disabled = true;
 				status.textContent = 'Stopping CORSIA…';

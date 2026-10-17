@@ -45,10 +45,20 @@ const reboot = 'If that doesn’t work, restart this computer.';
 const holdText = 'status failed; the hold on new work could not be released: cancel failed';
 const stalledText = 'recovering interrupted adoption; app service could not be stopped: new stop failed';
 const startingText = 'CORSIA did not answer within 30 seconds. See the service log.';
+const notRunningLine = 'Your existing CORSIA isn’t running. Start it, and this app will take it over.';
+const stuckLine = 'Your existing CORSIA is stuck restarting.';
+const wrongFolderLine = 'Your existing CORSIA is running from ~/old/corsia, but its settings name ~/new/corsia. Nothing was changed.';
+const restartingTitle = 'Your existing CORSIA is restarting. This app will continue when it’s back.';
+const quitPendingNote = 'CORSIA will close once your existing CORSIA is running again as before.';
+const failedStart = '`corsia start` exited 1';
+const failedStartLine = 'Your existing CORSIA may not be running. Choose Try again.';
 
 const refused = (message) => ({ message, outcome: 'untouched', recovery: null, advice: true });
 const unconfirmed = (message, recovery) => ({ message, outcome: 'unconfirmed', recovery, advice: false });
 const settled = (message, outcome) => ({ message, outcome, recovery: null, advice: false });
+// A refusal that is the whole line, with the action that fixes its cause (or none).
+const standalone = (message, recovery) => ({ message, outcome: 'untouched', recovery, advice: true, standalone: true });
+const ready = { state: 'ready', url: '/index.html#started' };
 
 // `line` null means the line is hidden; `note` null means the secondary line is hidden; `details`
 // null means Details is hidden.
@@ -64,6 +74,11 @@ const cases = [
 	// A plain error claims nothing about the existing install, so it offers the relaunch that is always safe.
 	{ name: 'plain-string', failure: 'could not restart', title, line: reopenLine, note: null, details: 'could not restart', button: 'Reopen CORSIA' },
 	{ name: '3f-still-starting', failure: settled(startingText, 'switched'), title: 'CORSIA switched over and is still starting.', line: null, note: null, details: startingText, button: 'Check again' },
+	// Whole-line refusals: no lead about the existing install, no Details, one action or none.
+	{ name: '4a-not-running', failure: standalone(notRunningLine, 'start_it'), title, line: notRunningLine, note: null, details: null, button: 'Start it' },
+	{ name: '4b-stuck-restarting', failure: standalone(stuckLine, 'restart_it'), title, line: stuckLine, note: null, details: null, button: 'Restart it' },
+	{ name: '4c-wrong-folder', failure: standalone(wrongFolderLine, null), title, line: wrongFolderLine, note: null, details: null, button: 'Try again' },
+	{ name: '4d-failed-start', failure: unconfirmed(failedStart, 'try_again'), title, line: failedStartLine, note: null, details: failedStart, button: 'Try again' },
 ];
 
 // Each recovery button runs its own command; a script says what each command does.
@@ -96,6 +111,42 @@ const actions = [
 		calls: ['adopt_existing_install', 'reopen_app'],
 		after: { title, line: reopenLine, note: null, details: 'CORSIA couldn’t reopen itself.', button: 'Reopen CORSIA' },
 	},
+	// Start it and Restart it run the existing install's own command, then ask to take it over again.
+	{
+		name: 'start-it-then-adopts',
+		failure: standalone(notRunningLine, 'start_it'),
+		script: { start_source_install: 'ok', adopt_existing_install: [standalone(notRunningLine, 'start_it'), ready] },
+		calls: ['adopt_existing_install', 'start_source_install', 'adopt_existing_install'],
+		hash: '#started',
+	},
+	{
+		name: 'start-it-fails',
+		failure: standalone(notRunningLine, 'start_it'),
+		script: { start_source_install: unconfirmed(failedStart, 'try_again') },
+		calls: ['adopt_existing_install', 'start_source_install'],
+		after: { title, line: failedStartLine, note: null, details: failedStart, button: 'Try again' },
+	},
+	{
+		name: 'try-again-after-a-failed-start-asks-to-take-it-over-again',
+		failure: unconfirmed(failedStart, 'try_again'),
+		script: { adopt_existing_install: [unconfirmed(failedStart, 'try_again'), ready] },
+		calls: ['adopt_existing_install', 'adopt_existing_install'],
+		hash: '#started',
+	},
+	{
+		name: 'restart-it-then-adopts',
+		failure: standalone(stuckLine, 'restart_it'),
+		script: { restart_source_install: 'ok', adopt_existing_install: [standalone(stuckLine, 'restart_it'), ready] },
+		calls: ['adopt_existing_install', 'restart_source_install', 'adopt_existing_install'],
+		hash: '#started',
+	},
+	{
+		name: 'restart-it-fails',
+		failure: standalone(stuckLine, 'restart_it'),
+		script: { restart_source_install: unconfirmed('`corsia restart` exited 1', 'try_again') },
+		calls: ['adopt_existing_install', 'restart_source_install'],
+		after: { title, line: failedStartLine, note: null, details: '`corsia restart` exited 1', button: 'Try again' },
+	},
 	{
 		name: 'check-again-succeeds',
 		failure: settled(startingText, 'switched'),
@@ -126,8 +177,13 @@ async function open(theme, failure, script = {}) {
 			window.__calls.push(command);
 			if (command === 'get_service_log_path') return '/x/service.log';
 			if (command === 'adoption_progress') return null;
-			if (command === 'adopt_existing_install') throw thrown;
-			if (command in scripted) {
+			if (command === 'adopt_existing_install') {
+				// A script may give successive results; the last one repeats.
+				const next = Array.isArray(scripted.adopt_existing_install) ? (scripted.adopt_existing_install.length > 1 ? scripted.adopt_existing_install.shift() : scripted.adopt_existing_install[0]) : thrown;
+				if (next && next.state) return next;
+				throw next;
+			}
+			if (command !== 'adopt_existing_install' && command in scripted) {
 				const result = scripted[command];
 				if (result === 'ok') return undefined;
 				if (result && result.state) return result;
@@ -231,12 +287,16 @@ for (const theme of ['light', 'dark']) {
 	}
 	// While the source install drains, the window shows the backend's phase. The count is display
 	// only: one that is missing, zero or unreadable shows the title alone, never "0 tasks".
-	for (const { name, progress, title: expectedTitle, line: expectedLine } of [
+	for (const { name, progress, title: expectedTitle, line: expectedLine, note: expectedNote = null } of [
 		{ name: 'progress-waiting-count', progress: { phase: 'waiting', running: 3 }, title: 'Waiting for running work to finish…', line: '3 tasks still running' },
 		{ name: 'progress-waiting-one', progress: { phase: 'waiting', running: 1 }, title: 'Waiting for running work to finish…', line: '1 task still running' },
 		{ name: 'progress-waiting-unread', progress: { phase: 'waiting', running: null }, title: 'Waiting for running work to finish…', line: null },
 		{ name: 'progress-waiting-zero', progress: { phase: 'waiting', running: 0 }, title: 'Waiting for running work to finish…', line: null },
 		{ name: 'progress-backing-up', progress: { phase: 'backing_up', running: null }, title: 'Backing up your data…', line: null },
+		{ name: 'progress-waiting-restart', progress: { phase: 'waiting_restart', quit_pending: false }, title: restartingTitle, line: null },
+		// A Quit that is waiting on the switch says when the app will close.
+		{ name: 'progress-quit-pending-waiting', progress: { phase: 'waiting', running: 2, quit_pending: true }, title: 'Waiting for running work to finish…', line: '2 tasks still running', note: quitPendingNote },
+		{ name: 'progress-quit-pending-backing-up', progress: { phase: 'backing_up', quit_pending: true }, title: 'Backing up your data…', line: null, note: quitPendingNote },
 		{ name: 'progress-starting', progress: { phase: 'starting', running: null }, title: 'Starting CORSIA…', line: null },
 		{ name: 'progress-starting-existing', progress: { phase: 'starting_existing', running: null }, title: 'Starting your existing CORSIA…', line: null },
 	]) {
@@ -259,7 +319,7 @@ for (const theme of ['light', 'dark']) {
 		await page.waitForTimeout(100);
 		const before = failed;
 		const shown = await read(page);
-		compare(`${theme} ${name}`, shown, { title: expectedTitle, line: expectedLine, note: null, details: null, button: null });
+		compare(`${theme} ${name}`, shown, { title: expectedTitle, line: expectedLine, note: expectedNote, details: null, button: null });
 		if (/\b0 tasks?\b/.test(shown.body)) fail(`${theme} ${name}: shows a zero count`);
 		if (failed === before) console.log(`ok   ${theme} ${name}`);
 		await page.close();

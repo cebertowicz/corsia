@@ -11,6 +11,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,26 @@ const JOURNAL: &str = "adoption.json";
 /// The launchd label of the source install's service.
 pub const SOURCE_LABEL: &str = "com.corsia.prod";
 const PLIST: &str = "com.corsia.prod.plist";
+/// A restart that has not finished after this long is reported, not waited on forever.
+const RESTART_POLL: Duration = Duration::from_secs(2);
+const RESTART_WAIT: Duration = Duration::from_secs(300);
+const ORPHAN_POLL: Duration = Duration::from_secs(1);
+
+// The person-facing lines for a source install that cannot be taken over yet, as the
+// owner worded them. Each is a whole line with its own next step.
+pub const NOT_RUNNING: &str =
+    "Your existing CORSIA isn’t running. Start it, and this app will take it over.";
+const STUCK_RESTARTING: &str = "Your existing CORSIA is stuck restarting.";
+
+/// The loaded job runs from one folder and its settings name another. No restart
+/// fixes this: the checkout's own script refuses unless the installed definition names it.
+pub fn wrong_folder_line(running: Option<&str>, checkout: &str) -> String {
+    format!(
+        "Your existing CORSIA is running from {}, but its settings name {checkout}. \
+         Nothing was changed.",
+        running.unwrap_or("an unknown folder")
+    )
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SourceInstall {
@@ -156,6 +177,8 @@ pub enum Phase {
     Waiting {
         running: Option<u32>,
     },
+    /// The source install is partway through restarting itself; nothing has been asked of it.
+    WaitingRestart,
     BackingUp,
     /// The app's own service is starting.
     Starting,
@@ -177,13 +200,34 @@ pub trait Lifecycle {
         state: &Path,
         variable_names: &BTreeSet<String>,
     ) -> Result<(), ReadyError>;
+    /// Whether the source install is partway through restarting itself, from a
+    /// read-only look. `None` when that could not be read.
+    fn restart_in_flight(&mut self, _state: &Path) -> Option<bool> {
+        Some(false)
+    }
+    /// How often to look, and how long to wait in all, for a restart to finish.
+    fn restart_wait(&self) -> (Duration, Duration) {
+        (RESTART_POLL, RESTART_WAIT)
+    }
     /// `<checkout>/scripts/corsia stop`, which holds new work and drains the
     /// running work for up to `CORSIA_DRAIN_MAX_WAIT`, then proof from the
     /// service's own view that it is down: launchd no longer lists the job and
     /// the backend port does not answer. While it runs, `progress` receives a
     /// read-only count of running turns about once a second, `None` when the
     /// count could not be read.
-    fn stop_old(&mut self, progress: &mut dyn FnMut(Option<u32>)) -> Result<(), String>;
+    fn stop_old(
+        &mut self,
+        progress: &mut dyn FnMut(Option<u32>),
+        spawned: &mut dyn FnMut(StopProcess),
+    ) -> Result<(), String>;
+    /// Whether this `corsia stop` process, left by an earlier run of the app, is still draining.
+    fn stop_is_running(&mut self, _stop: &StopProcess) -> bool {
+        false
+    }
+    /// How often to look at a stop left draining.
+    fn orphan_poll(&self) -> Duration {
+        ORPHAN_POLL
+    }
     /// Proof, right before the app's service starts, that the source job is
     /// still gone and its port still free. Someone may have started it again.
     fn old_is_down(&mut self) -> Result<(), String>;
@@ -214,11 +258,24 @@ enum Step {
     Reverted,
 }
 
+/// The `corsia stop` process an adoption started: its pid and the start time
+/// that pid had then, so a reused pid is never mistaken for it. Force Quit kills
+/// only the app, and the stop keeps draining on its own, so a relaunch has to
+/// wait for it before it starts the source again. It is never killed: a killed
+/// stop leaves the source's hold set for good.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct StopProcess {
+    pub pid: u32,
+    pub started: String,
+}
+
 #[derive(Deserialize, Serialize)]
 struct Journal {
     step: Step,
     source: SourceInstall,
     snapshot: Option<PathBuf>,
+    #[serde(default)]
+    stop: Option<StopProcess>,
 }
 
 fn read_journal(plan: &Plan) -> Result<Option<Journal>, String> {
@@ -277,10 +334,25 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 fn write_journal(plan: &Plan, step: Step, snapshot: Option<&Path>) -> Result<(), String> {
+    write_journal_with(plan, step, snapshot, None)
+}
+
+/// The Stopping step again, now naming the stop process that is draining.
+fn write_stopping(plan: &Plan, stop: &StopProcess) -> Result<(), String> {
+    write_journal_with(plan, Step::Stopping, None, Some(stop.clone()))
+}
+
+fn write_journal_with(
+    plan: &Plan,
+    step: Step,
+    snapshot: Option<&Path>,
+    stop: Option<StopProcess>,
+) -> Result<(), String> {
     let journal = Journal {
         step,
         source: plan.source.clone(),
         snapshot: snapshot.map(Path::to_path_buf),
+        stop,
     };
     write_atomically(
         &journal_path(plan),
@@ -361,6 +433,12 @@ pub enum Recovery {
     /// Files may be part-way between homes. Relaunching runs the journal's
     /// undo before anything else starts.
     Reopen,
+    /// Nothing was stopped, but the existing install is not running: start it, then take it over.
+    StartIt,
+    /// It has been stuck restarting: restart it, then look again.
+    RestartIt,
+    /// Starting or restarting it did not work: the only honest next step is to look again.
+    TryAgain,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -372,6 +450,9 @@ pub struct AdoptionError {
     /// The message is a whole sentence written for the person, with what to do
     /// next: the window shows it as the line. Otherwise it is detail for the log.
     pub advice: bool,
+    /// The message is the whole line: no lead about the existing install is put before it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub standalone: bool,
 }
 
 impl AdoptionError {
@@ -382,6 +463,23 @@ impl AdoptionError {
     /// An untouched refusal whose message tells the person what to do.
     pub fn refusal(message: impl Into<String>) -> Self {
         Self::with(message, Outcome::Untouched, None, true)
+    }
+
+    /// A refusal that is a whole line, with the one action that fixes its cause.
+    pub fn standalone(message: impl Into<String>, recovery: Option<Recovery>) -> Self {
+        let mut error = Self::with(message, Outcome::Untouched, recovery, true);
+        error.standalone = true;
+        error
+    }
+
+    /// Starting or restarting the existing install did not work.
+    pub fn could_not_start(message: impl Into<String>) -> Self {
+        Self::with(
+            message,
+            Outcome::Unconfirmed,
+            Some(Recovery::TryAgain),
+            false,
+        )
     }
 
     pub fn restored(message: impl Into<String>) -> Self {
@@ -421,6 +519,7 @@ impl AdoptionError {
             outcome,
             recovery,
             advice,
+            standalone: false,
         }
     }
 }
@@ -447,6 +546,16 @@ pub enum ReadyError {
     Refused(String),
     /// Anything else that went wrong while checking: detail for the log.
     Failed(String),
+    /// The job is not loaded.
+    NotRunning,
+    /// The job runs from `running` (unknown when launchd printed none), but its
+    /// settings name `checkout`. Both are for display.
+    WrongFolder {
+        running: Option<String>,
+        checkout: String,
+    },
+    /// A self-restart is in flight: wait for it, then look again.
+    Restarting,
 }
 
 /// Forget a journal whose work is finished. A leftover one is harmless: the
@@ -465,9 +574,91 @@ fn requested(cancel: &AtomicBool) -> bool {
 /// (it queues and is delivered after the switch) and drains what is running
 /// for up to `CORSIA_DRAIN_MAX_WAIT`; the count shown meanwhile is for the
 /// window only and never decides anything.
-fn stop_source(lifecycle: &mut impl Lifecycle, phase: &mut dyn FnMut(Phase)) -> Result<(), String> {
+fn stop_source(
+    plan: &Plan,
+    lifecycle: &mut impl Lifecycle,
+    phase: &mut dyn FnMut(Phase),
+) -> Result<(), String> {
     phase(Phase::Waiting { running: None });
-    lifecycle.stop_old(&mut |running| phase(Phase::Waiting { running }))
+    lifecycle.stop_old(
+        &mut |running| phase(Phase::Waiting { running }),
+        &mut |stop| {
+            // Without the record a relaunch cannot know a stop is still draining, so
+            // this is said loudly, but the adoption itself goes on.
+            if let Err(error) = write_stopping(plan, &stop) {
+                log::warn!("the stop process could not be recorded: {error}");
+            }
+        },
+    )
+}
+
+/// A relaunch after Force Quit: the `corsia stop` the last run started may still
+/// be draining. Until it exits the source install is not down yet and starting it
+/// would do nothing, so wait (the Waiting phase) and only then undo. Never kill it.
+fn await_orphaned_stop(
+    journal: &Journal,
+    lifecycle: &mut impl Lifecycle,
+    phase: &mut dyn FnMut(Phase),
+) {
+    let Some(stop) = &journal.stop else { return };
+    while lifecycle.stop_is_running(stop) {
+        phase(Phase::Waiting { running: None });
+        std::thread::sleep(lifecycle.orphan_poll());
+    }
+}
+
+/// Ask until the source install can be taken over. A restart in flight is waited
+/// for (a read-only look every poll, up to the wait), because it settles by
+/// itself; every other cause is a refusal, worded for the person, that changes
+/// nothing. Quit ends the wait without touching anything.
+fn wait_until_ready(
+    plan: &Plan,
+    lifecycle: &mut impl Lifecycle,
+    variable_names: &BTreeSet<String>,
+    cancel: &AtomicBool,
+    phase: &mut dyn FnMut(Phase),
+) -> Result<(), AdoptionError> {
+    let (poll, total) = lifecycle.restart_wait();
+    let deadline = Instant::now() + total;
+    loop {
+        match lifecycle.check_ready(&plan.source.state, variable_names) {
+            Ok(()) => return Ok(()),
+            Err(ReadyError::Refused(message)) => return Err(AdoptionError::refusal(message)),
+            Err(ReadyError::Failed(message)) => return Err(AdoptionError::untouched(message)),
+            Err(ReadyError::NotRunning) => {
+                return Err(AdoptionError::standalone(
+                    NOT_RUNNING,
+                    Some(Recovery::StartIt),
+                ))
+            }
+            Err(ReadyError::WrongFolder { running, checkout }) => {
+                return Err(AdoptionError::standalone(
+                    wrong_folder_line(running.as_deref(), &checkout),
+                    None,
+                ))
+            }
+            Err(ReadyError::Restarting) => loop {
+                if requested(cancel) {
+                    return Err(AdoptionError::untouched(
+                        "adoption cancelled; the source service is still running",
+                    ));
+                }
+                if Instant::now() >= deadline {
+                    return Err(AdoptionError::standalone(
+                        STUCK_RESTARTING,
+                        Some(Recovery::RestartIt),
+                    ));
+                }
+                phase(Phase::WaitingRestart);
+                std::thread::sleep(poll);
+                // Anything but a restart still in flight sends the question back
+                // to the full check, which says what is wrong if something is.
+                if lifecycle.restart_in_flight(&plan.source.state) != Some(true) {
+                    break;
+                }
+            },
+        }
+    }
 }
 
 /// Applies the durable adoption order. The source state root is never renamed:
@@ -489,12 +680,7 @@ pub fn adopt(
     let variable_names = plan.variable_names().map_err(AdoptionError::untouched)?;
     // The backend's refusal is a whole sentence that tells the person what to
     // do, so it is shown as written.
-    lifecycle
-        .check_ready(&plan.source.state, &variable_names)
-        .map_err(|error| match error {
-            ReadyError::Refused(message) => AdoptionError::refusal(message),
-            ReadyError::Failed(message) => AdoptionError::untouched(message),
-        })?;
+    wait_until_ready(plan, lifecycle, &variable_names, cancel, phase)?;
     if requested(cancel) {
         return Err(AdoptionError::untouched(
             "adoption cancelled; the source service is still running",
@@ -503,7 +689,7 @@ pub fn adopt(
     // From the stop request on the source may be down, so the journal says so
     // first and every failure after it ends in the old install's start.
     write_journal(plan, Step::Stopping, None).map_err(AdoptionError::untouched)?;
-    if let Err(error) = stop_source(lifecycle, phase) {
+    if let Err(error) = stop_source(plan, lifecycle, phase) {
         return rollback(plan, lifecycle, phase, error, None);
     }
     if requested(cancel) {
@@ -598,10 +784,21 @@ pub fn interrupted_plan(app_dir: &Path) -> Result<Option<Plan>, String> {
 /// Undo an interrupted or failed adoption from its journal, before first-run
 /// selection. Every step is safe to repeat. A possible app start is always
 /// stopped and restored before the source service starts.
+#[cfg(test)]
 pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), AdoptionError> {
+    recover_showing(plan, lifecycle, &mut |_| {})
+}
+
+/// `recover`, telling the window what it is waiting for.
+pub fn recover_showing(
+    plan: &Plan,
+    lifecycle: &mut impl Lifecycle,
+    phase: &mut dyn FnMut(Phase),
+) -> Result<(), AdoptionError> {
     let Some(journal) = read_journal(plan)? else {
         return Ok(());
     };
+    await_orphaned_stop(&journal, lifecycle, phase);
     match journal.step {
         Step::Registered => Ok(()),
         // Nothing was moved: only the source start is left.
@@ -637,19 +834,25 @@ pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), Adopti
 pub fn recover_on_launch<L: Lifecycle>(
     app_dir: &Path,
     lifecycle_for: impl FnOnce(&Plan) -> L,
+    phase: &mut dyn FnMut(Phase),
 ) -> Result<Option<AdoptionError>, String> {
     let Some(interrupted) = interrupted_plan(app_dir)? else {
         return Ok(None);
     };
-    Ok(recover(&interrupted, &mut lifecycle_for(&interrupted)).err())
+    Ok(recover_showing(&interrupted, &mut lifecycle_for(&interrupted), phase).err())
 }
 
 /// The "Start it again" action: only for a journal whose files are all where
 /// they were. Anything further along needs the whole undo, which is `recover`.
-pub fn start_again(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), AdoptionError> {
+pub fn start_again(
+    plan: &Plan,
+    lifecycle: &mut impl Lifecycle,
+    phase: &mut dyn FnMut(Phase),
+) -> Result<(), AdoptionError> {
     let Some(journal) = read_journal(plan)? else {
         return Ok(());
     };
+    await_orphaned_stop(&journal, lifecycle, phase);
     match journal.step {
         Step::Registered => Ok(()),
         Step::Stopping | Step::Reverted => start_source(plan, lifecycle),
@@ -735,6 +938,20 @@ mod tests {
         start_old_saw: Vec<(bool, bool)>,
         /// The counts the window is told about while the stop drains.
         counts: Vec<Option<u32>>,
+        /// What `check_ready` answers, one per ask, before it answers by `fail`.
+        ready_script: Vec<ReadyError>,
+        /// What each read-only look for a restart in flight finds, in order.
+        restart_looks: Vec<Option<bool>>,
+        restart_forever: bool,
+        restart_total: Duration,
+        /// The `corsia stop` process the fake reports as soon as it exists.
+        stop_process: Option<StopProcess>,
+        /// The journal's recorded stop, read while the fake stop was draining.
+        journal_in_stop: Option<Option<StopProcess>>,
+        plan: Plan,
+        /// A stop left by an earlier run keeps draining for this many looks.
+        stop_alive_for: u32,
+        stop_looks: u32,
     }
     impl Fake {
         fn fails(&self, step: &str) -> bool {
@@ -778,7 +995,9 @@ mod tests {
             variable_names: &BTreeSet<String>,
         ) -> Result<(), ReadyError> {
             self.ready_asked.push(variable_names.clone());
-            if self.fail == Some("check_ready") {
+            if !self.ready_script.is_empty() {
+                Err(self.ready_script.remove(0))
+            } else if self.fail == Some("check_ready") {
                 Err(ReadyError::Refused(
                     "OPENAI_API_KEY is not stored in CORSIA.".into(),
                 ))
@@ -788,11 +1007,42 @@ mod tests {
                 Ok(())
             }
         }
-        fn stop_old(&mut self, progress: &mut dyn FnMut(Option<u32>)) -> Result<(), String> {
+        fn restart_in_flight(&mut self, _: &Path) -> Option<bool> {
+            if self.restart_forever {
+                Some(true)
+            } else if self.restart_looks.is_empty() {
+                Some(false)
+            } else {
+                self.restart_looks.remove(0)
+            }
+        }
+        fn restart_wait(&self) -> (Duration, Duration) {
+            (Duration::from_millis(1), self.restart_total)
+        }
+        fn stop_old(
+            &mut self,
+            progress: &mut dyn FnMut(Option<u32>),
+            spawned: &mut dyn FnMut(StopProcess),
+        ) -> Result<(), String> {
             for count in self.counts.clone() {
                 progress(count);
             }
+            if let Some(process) = self.stop_process.clone() {
+                spawned(process);
+                self.journal_in_stop = Some(
+                    read_journal(&self.plan)
+                        .unwrap()
+                        .and_then(|journal| journal.stop),
+                );
+            }
             self.step("stop_old", "stop failed")
+        }
+        fn stop_is_running(&mut self, _: &StopProcess) -> bool {
+            self.stop_looks += 1;
+            self.stop_looks <= self.stop_alive_for
+        }
+        fn orphan_poll(&self) -> Duration {
+            Duration::from_millis(1)
         }
         fn old_is_down(&mut self) -> Result<(), String> {
             self.step("old_is_down", "source is running again")
@@ -840,6 +1090,15 @@ mod tests {
             plist: plan.source.plist.clone(),
             start_old_saw: vec![],
             counts: vec![],
+            ready_script: vec![],
+            restart_looks: vec![],
+            restart_forever: false,
+            restart_total: Duration::from_secs(5),
+            stop_process: None,
+            journal_in_stop: None,
+            plan: plan.clone(),
+            stop_alive_for: 0,
+            stop_looks: 0,
         }
     }
 
@@ -1182,9 +1441,11 @@ mod tests {
     fn a_finished_switch_is_not_undone_on_launch() {
         let (_home, plan) = plan(false);
         interrupted_at(&plan, Step::Registered);
-        let untouched = recover_on_launch(&plan.app_dir, |_| -> Fake {
-            panic!("a registered switch has nothing to undo")
-        });
+        let untouched = recover_on_launch(
+            &plan.app_dir,
+            |_| -> Fake { panic!("a registered switch has nothing to undo") },
+            &mut |_| {},
+        );
         assert_eq!(untouched, Ok(None));
     }
 
@@ -1194,7 +1455,7 @@ mod tests {
         interrupted_at(&plan, Step::ServiceWritten);
         // The old install's files are back but it will not start: the cause picks the button.
         let fake = fake_for(&plan, Some("start_old"));
-        let failure = recover_on_launch(&plan.app_dir, move |_| fake)
+        let failure = recover_on_launch(&plan.app_dir, move |_| fake, &mut |_| {})
             .unwrap()
             .expect("the undo could not finish");
         assert_eq!(failure.outcome, Outcome::Unconfirmed);
@@ -1213,7 +1474,7 @@ mod tests {
         let (_home, plan) = plan(false);
         interrupted_at(&plan, Step::ServiceWritten);
         let fake = fake_for(&plan, Some("stop_new"));
-        let failure = recover_on_launch(&plan.app_dir, move |_| fake)
+        let failure = recover_on_launch(&plan.app_dir, move |_| fake, &mut |_| {})
             .unwrap()
             .expect("the undo could not finish");
         assert_eq!(failure.outcome, Outcome::Unconfirmed);
@@ -1223,7 +1484,11 @@ mod tests {
     #[test]
     fn launch_without_an_interrupted_adoption_has_nothing_to_undo() {
         let (_home, plan) = plan(false);
-        let untouched = recover_on_launch(&plan.app_dir, |_| -> Fake { panic!("nothing to undo") });
+        let untouched = recover_on_launch(
+            &plan.app_dir,
+            |_| -> Fake { panic!("nothing to undo") },
+            &mut |_| {},
+        );
         assert_eq!(untouched, Ok(None));
     }
 
@@ -1239,7 +1504,7 @@ mod tests {
         assert_eq!(journal_step(&plan), Some(Step::Reverted));
 
         let mut working = fake_for(&plan, None);
-        start_again(&plan, &mut working).unwrap();
+        start_again(&plan, &mut working, &mut |_| {}).unwrap();
         assert_eq!(working.events, ["start_old"]);
         assert_eq!(journal_step(&plan), None);
     }
@@ -1264,7 +1529,7 @@ mod tests {
         let (_home, plan) = plan(false);
         interrupted_at(&plan, Step::Reverted);
         let mut still_broken = fake_for(&plan, Some("start_old"));
-        let error = start_again(&plan, &mut still_broken).unwrap_err();
+        let error = start_again(&plan, &mut still_broken, &mut |_| {}).unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
         assert_eq!(journal_step(&plan), Some(Step::Reverted));
     }
@@ -1274,7 +1539,7 @@ mod tests {
         let (_home, plan) = plan(false);
         interrupted_at(&plan, Step::MetadataMoved);
         let mut fake = fake_for(&plan, None);
-        let error = start_again(&plan, &mut fake).unwrap_err();
+        let error = start_again(&plan, &mut fake, &mut |_| {}).unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::Reopen));
         assert!(fake.events.is_empty());
     }
@@ -1456,6 +1721,7 @@ mod tests {
     #[test]
     fn phases_reach_the_window_as_names_not_as_text() {
         for (phase, name) in [
+            (Phase::WaitingRestart, "waiting_restart"),
             (Phase::BackingUp, "backing_up"),
             (Phase::Starting, "starting"),
             (Phase::StartingExisting, "starting_existing"),
@@ -1590,6 +1856,210 @@ mod tests {
             serde_json::to_value(Phase::Waiting { running: None }).unwrap(),
             serde_json::json!({ "phase": "waiting", "running": null })
         );
+    }
+
+    fn error_json(error: &AdoptionError) -> serde_json::Value {
+        serde_json::to_value(error).unwrap()
+    }
+
+    #[test]
+    fn an_existing_install_that_is_not_running_offers_to_start_it_and_changes_nothing() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::NotRunning];
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Your existing CORSIA isn’t running. Start it, and this app will take it over."
+        );
+        assert_eq!(error.outcome, Outcome::Untouched);
+        assert_eq!(error.recovery, Some(Recovery::StartIt));
+        assert!(error.standalone);
+        assert!(fake.events.is_empty());
+        assert_eq!(journal_step(&plan), None);
+        let shown = error_json(&error);
+        assert_eq!(shown["standalone"], true);
+        assert_eq!(shown["recovery"], "start_it");
+    }
+
+    #[test]
+    fn a_failed_start_or_restart_is_unconfirmed_with_try_again() {
+        let error = AdoptionError::could_not_start("`corsia start` exited 1");
+        assert_eq!(error.outcome, Outcome::Unconfirmed);
+        assert_eq!(error.recovery, Some(Recovery::TryAgain));
+        assert!(!error.standalone);
+        assert!(error_json(&error).get("standalone").is_none());
+    }
+
+    #[test]
+    fn a_job_running_from_another_folder_names_both_folders_and_offers_no_button() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::WrongFolder {
+            running: Some("~/old/corsia".into()),
+            checkout: "~/new/corsia".into(),
+        }];
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Your existing CORSIA is running from ~/old/corsia, but its settings name ~/new/corsia. Nothing was changed."
+        );
+        assert_eq!(error.recovery, None);
+        assert!(error.standalone);
+        assert!(fake.events.is_empty());
+
+        fake.ready_script = vec![ReadyError::WrongFolder {
+            running: None,
+            checkout: "~/new/corsia".into(),
+        }];
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert!(error.message().contains("running from an unknown folder"));
+    }
+
+    #[test]
+    fn a_restart_in_flight_is_waited_for_and_adoption_then_goes_on() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::Restarting];
+        fake.restart_looks = vec![Some(true), Some(true), Some(false)];
+        let (result, phases) = adopt_quietly(&plan, &mut fake);
+        result.unwrap();
+        assert_eq!(
+            phases,
+            [
+                Phase::WaitingRestart,
+                Phase::WaitingRestart,
+                Phase::WaitingRestart,
+                Phase::Waiting { running: None },
+                Phase::BackingUp,
+                Phase::Starting
+            ]
+        );
+        assert_eq!(
+            fake.ready_asked.len(),
+            2,
+            "the full check runs again once the restart settled"
+        );
+        assert_eq!(
+            fake.events,
+            ["stop_old", "backup", "old_is_down", "start_new"]
+        );
+    }
+
+    #[test]
+    fn a_restart_look_that_cannot_be_read_goes_back_to_the_full_check() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::Restarting];
+        fake.restart_looks = vec![None];
+        adopt_quietly(&plan, &mut fake).0.unwrap();
+        assert_eq!(fake.ready_asked.len(), 2);
+    }
+
+    #[test]
+    fn a_restart_that_never_settles_is_stuck_and_offers_to_restart_it() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::Restarting];
+        fake.restart_forever = true;
+        fake.restart_total = Duration::from_millis(30);
+        let (result, phases) = adopt_quietly(&plan, &mut fake);
+        let error = result.unwrap_err();
+        assert_eq!(error.message(), "Your existing CORSIA is stuck restarting.");
+        assert_eq!(error.outcome, Outcome::Untouched);
+        assert_eq!(error.recovery, Some(Recovery::RestartIt));
+        assert!(error.standalone);
+        assert!(phases.iter().all(|phase| *phase == Phase::WaitingRestart));
+        assert!(fake.events.is_empty());
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn quit_ends_the_wait_for_a_restart_without_touching_anything() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::Restarting];
+        fake.restart_forever = true;
+        let error = adopt(&plan, &mut fake, 1, &AtomicBool::new(true), &mut |_| {}).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Untouched);
+        assert!(!error.standalone);
+        assert!(fake.events.is_empty());
+    }
+
+    fn a_stop() -> StopProcess {
+        StopProcess {
+            pid: 4242,
+            started: "Sat Oct 17 05:50:00 2026".into(),
+        }
+    }
+
+    #[test]
+    fn the_journal_names_the_stop_process_while_it_drains() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.stop_process = Some(a_stop());
+        adopt_quietly(&plan, &mut fake).0.unwrap();
+        assert_eq!(fake.journal_in_stop, Some(Some(a_stop())));
+    }
+
+    #[test]
+    fn a_relaunch_waits_for_a_stop_still_draining_before_it_starts_the_old_install() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        write_journal(&plan, Step::Stopping, None).unwrap();
+        write_stopping(&plan, &a_stop()).unwrap();
+        let mut fake = fake_for(&plan, None);
+        fake.stop_alive_for = 3;
+        let mut phases = vec![];
+        recover_showing(&plan, &mut fake, &mut |phase| phases.push(phase)).unwrap();
+        assert_eq!(phases, [Phase::Waiting { running: None }; 3]);
+        assert_eq!(
+            fake.stop_looks, 4,
+            "it looks again until the process is gone"
+        );
+        assert_eq!(
+            fake.events,
+            ["start_old"],
+            "the stop is waited for, never killed or repeated"
+        );
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn a_journal_without_a_recorded_stop_starts_the_old_install_at_once() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        write_journal(&plan, Step::Stopping, None).unwrap();
+        let mut fake = fake_for(&plan, None);
+        fake.stop_alive_for = 99;
+        recover(&plan, &mut fake).unwrap();
+        assert_eq!(fake.stop_looks, 0);
+        assert_eq!(fake.events, ["start_old"]);
+    }
+
+    #[test]
+    fn start_again_also_waits_for_a_stop_left_draining() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        write_stopping(&plan, &a_stop()).unwrap();
+        let mut fake = fake_for(&plan, None);
+        fake.stop_alive_for = 2;
+        let mut phases = vec![];
+        start_again(&plan, &mut fake, &mut |phase| phases.push(phase)).unwrap();
+        assert_eq!(phases.len(), 2);
+        assert_eq!(fake.events, ["start_old"]);
+    }
+
+    #[test]
+    fn a_journal_from_before_the_stop_was_recorded_still_reads() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        write_journal(&plan, Step::Stopping, None).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(journal_path(&plan)).unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("stop");
+        fs::write(journal_path(&plan), serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(read_journal(&plan).unwrap().unwrap().stop, None);
     }
 
     #[test]

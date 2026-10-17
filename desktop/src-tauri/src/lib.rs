@@ -422,7 +422,10 @@ fn start_service(
     let resources = bundled_resource_dir(app).unwrap_or_default();
     let make_lifecycle =
         |plan: &adoption::Plan| SourceLifecycle::new(plan.source.clone(), Bundled::in_resources(&resources));
-    if let Some(failure) = adoption::recover_on_launch(&app_dir, make_lifecycle)? {
+    let recovered =
+        adoption::recover_on_launch(&app_dir, make_lifecycle, &mut |phase| set_adoption_phase(service, Some(phase)))?;
+    set_adoption_phase(service, None);
+    if let Some(failure) = recovered {
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
@@ -566,10 +569,44 @@ fn configure_work_folder(
     Ok(())
 }
 
+/// What adoption is doing now and whether a Quit is waiting on it.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+struct AdoptionProgress {
+    #[serde(flatten)]
+    phase: adoption::Phase,
+    /// A Quit was asked for and will be carried out once the existing install
+    /// is running again as before, which is only ever true while the stop is
+    /// still draining or the backup is being made.
+    quit_pending: bool,
+}
+
+impl AdoptionProgress {
+    fn new(phase: adoption::Phase, quit_asked: bool) -> Self {
+        Self {
+            phase,
+            quit_pending: quit_asked
+                && matches!(
+                    phase,
+                    adoption::Phase::Waiting { .. } | adoption::Phase::BackingUp
+                ),
+        }
+    }
+}
+
+fn set_adoption_phase(service: &AppServiceState, phase: Option<adoption::Phase>) {
+    if let Ok(mut shown) = service.adoption_phase.lock() {
+        *shown = phase;
+    }
+}
+
 /// What adoption is doing now: the window picks the line from the phase, never from text.
 #[tauri::command]
-fn adoption_progress(service: tauri::State<'_, AppServiceState>) -> Option<adoption::Phase> {
-    service.adoption_phase.lock().ok().and_then(|phase| *phase)
+fn adoption_progress(service: tauri::State<'_, AppServiceState>) -> Option<AdoptionProgress> {
+    let phase = service.adoption_phase.lock().ok().and_then(|phase| *phase)?;
+    Some(AdoptionProgress::new(
+        phase,
+        service.adoption_cancel_requested.load(Ordering::Acquire),
+    ))
 }
 
 /// Run a long, blocking step off the main thread, so the window keeps handling
@@ -625,16 +662,10 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
         &mut lifecycle,
         KNOWN_SCHEMA_VERSION,
         &service.adoption_cancel_requested,
-        &mut |phase| {
-            if let Ok(mut shown) = service.adoption_phase.lock() {
-                *shown = Some(phase);
-            }
-        },
+        &mut |phase| set_adoption_phase(&service, Some(phase)),
     );
     service.adoption_in_progress.store(false, Ordering::Release);
-    if let Ok(mut shown) = service.adoption_phase.lock() {
-        *shown = None;
-    }
+    set_adoption_phase(&service, None);
     // Quit during adoption was asked to wait for a step boundary; the old
     // install is back (or the switch is made), so the app can now quit.
     let quit_asked = service.adoption_cancel_requested.load(Ordering::Acquire);
@@ -663,9 +694,48 @@ fn start_existing_again_blocking(app: &tauri::AppHandle) -> Result<(), adoption:
     let resources = bundled_resource_dir(app).map_err(adoption::AdoptionError::reopen)?;
     let mut lifecycle = SourceLifecycle::new(plan.source.clone(), Bundled::in_resources(&resources));
     service.adoption_in_progress.store(true, Ordering::Release);
-    let started = adoption::start_again(&plan, &mut lifecycle);
+    let started = adoption::start_again(&plan, &mut lifecycle, &mut |phase| {
+        set_adoption_phase(&service, Some(phase))
+    });
     service.adoption_in_progress.store(false, Ordering::Release);
+    set_adoption_phase(&service, None);
     started
+}
+
+/// The lifecycle of the source install this app would adopt, for the two
+/// actions that bring it back to a state adoption can take over.
+fn existing_install_lifecycle(app: &tauri::AppHandle) -> Result<SourceLifecycle, adoption::AdoptionError> {
+    let untouched = adoption::AdoptionError::untouched;
+    let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
+    let app_dir = default_app_dir(app).map_err(untouched)?;
+    let first_run::FirstRun::Adoptable { source } = first_run::plan(&home, &app_dir).map_err(untouched)? else {
+        return Err(untouched("there is no source install ready to adopt".to_string()));
+    };
+    let resources = bundled_resource_dir(app).map_err(untouched)?;
+    Ok(SourceLifecycle::new(source, Bundled::in_resources(&resources)))
+}
+
+/// "Start it": run the existing install's own `corsia start` and wait for it
+/// to answer. The window then asks to take it over again; nothing is adopted here.
+#[tauri::command]
+async fn start_source_install(app: tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
+    off_main_thread(move || {
+        let mut lifecycle = existing_install_lifecycle(&app)?;
+        adoption::Lifecycle::start_old(&mut lifecycle).map_err(adoption::AdoptionError::could_not_start)
+    })
+    .await
+}
+
+/// "Restart it": the existing install's own `corsia restart`, for one that
+/// has been stuck restarting. Again nothing is adopted here.
+#[tauri::command]
+async fn restart_source_install(app: tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
+    off_main_thread(move || {
+        existing_install_lifecycle(&app)?
+            .restart_existing()
+            .map_err(adoption::AdoptionError::could_not_start)
+    })
+    .await
 }
 
 /// "Quit": the window's close button only hides it, so the shell's Quit asks
@@ -917,6 +987,8 @@ pub fn run() {
             start_local_service,
             adopt_existing_install,
             start_existing_again,
+            start_source_install,
+            restart_source_install,
             reopen_app,
             quit_app,
             check_service_started,
@@ -1078,6 +1150,25 @@ mod tests {
             .and_then(|value| value.trim().parse().ok())
             .expect("SCHEMA_VERSION in backend/infra/schema.py");
         assert_eq!(KNOWN_SCHEMA_VERSION, declared);
+    }
+
+    #[test]
+    fn a_waiting_quit_is_reported_only_while_the_stop_or_the_backup_runs() {
+        use adoption::Phase::*;
+        for (phase, quit_asked, pending) in [
+            (Waiting { running: Some(2) }, true, true),
+            (Waiting { running: None }, false, false),
+            (BackingUp, true, true),
+            (WaitingRestart, true, false),
+            (Starting, true, false),
+            (StartingExisting, true, false),
+        ] {
+            assert_eq!(AdoptionProgress::new(phase, quit_asked).quit_pending, pending, "{phase:?}");
+        }
+        assert_eq!(
+            serde_json::to_value(AdoptionProgress::new(Waiting { running: Some(2) }, true)).unwrap(),
+            serde_json::json!({ "phase": "waiting", "running": 2, "quit_pending": true })
+        );
     }
 
     #[test]

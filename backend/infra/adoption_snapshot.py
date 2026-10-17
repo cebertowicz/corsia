@@ -19,10 +19,17 @@ from infra.ignored_environment import IGNORED_VARIABLES
 #: Exit status of :func:`preflight_main` when adoption is refused with a message
 #: that is safe to show; any other failure is not forwarded.
 REFUSED = 3
+#: Exit status when the source is partway through restarting itself: the app waits
+#: for that to settle instead of showing a refusal.
+RESTARTING = 4
 
 
 class AdoptionRefused(Exception):
     """Adoption cannot start. The text names keys and byte counts, never a value."""
+
+
+class AdoptionRestarting(AdoptionRefused):
+    """The source install is restarting itself; asking again once it settles may succeed."""
 
 
 def _copy_entry(source: Path, destination: Path) -> None:
@@ -96,7 +103,7 @@ def stored_key_names(state_root: Path) -> set[str]:
     return {name for name, ref in rows if isinstance(values.get(ref), str) and values[ref]}
 
 
-def _restart_in_flight(state_root: Path) -> bool:
+def restart_in_flight(state_root: Path) -> bool:
     """Whether the source install is partway through restarting itself (a read-only look)."""
     database = Path(state_root) / "corsia.db"
     try:
@@ -128,8 +135,8 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
             "These provider keys aren’t stored in CORSIA yet: "
             f"{', '.join(missing)}. Add them in CORSIA › Settings › Keys, then choose Try again."
         )
-    if _restart_in_flight(state_root):
-        raise AdoptionRefused(
+    if restart_in_flight(state_root):
+        raise AdoptionRestarting(
             "Your existing CORSIA is restarting itself. Wait a minute, then choose Try again."
         )
     needed = _snapshot_size(state_root)
@@ -153,9 +160,12 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
 
 
 def preflight_main(arguments: list[str]) -> int:
-    """Entry for the app: ``[state_root, *key_variable_names]``. Exit 0 ready, 3 refused."""
+    """Entry for the app: ``[state_root, *key_variable_names]``. Exit 0 ready, 3 refused, 4 restarting."""
     try:
         check_adoption_preflight(Path(arguments[0]), arguments[1:])
+    except AdoptionRestarting as restarting:
+        print(restarting, file=sys.stderr)
+        return RESTARTING
     except AdoptionRefused as refusal:
         print(refusal, file=sys.stderr)
         return REFUSED

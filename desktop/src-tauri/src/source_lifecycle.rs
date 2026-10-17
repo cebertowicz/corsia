@@ -13,7 +13,7 @@ use std::{
 };
 
 use crate::{
-    adoption::{self, ReadyError},
+    adoption::{self, ReadyError, StopProcess},
     probe_health, release_proof, run_service_command, unregister_service, wait_for_service,
     APP_SERVICE_LABEL, HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT,
 };
@@ -29,6 +29,7 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 /// Read only, over `mode=ro` and never immutable: the database is live.
 const COUNT_PROGRAM: &str = "import sqlite3, sys; from pathlib import Path; c = sqlite3.connect(Path(sys.argv[1]).as_uri() + '?mode=ro', uri=True, timeout=1); print(c.execute(\"SELECT COUNT(*) FROM active_turns WHERE status='running'\").fetchone()[0])";
 const PREFLIGHT_PROGRAM: &str = "import sys; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import preflight_main; sys.exit(preflight_main(sys.argv[2:]))";
+const RESTART_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import restart_in_flight; sys.exit(0 if restart_in_flight(Path(sys.argv[2])) else 1)";
 const SNAPSHOT_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import create_adoption_snapshot; print(create_adoption_snapshot(Path(sys.argv[2])))";
 const RESTORE_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import restore_adoption_snapshot; restore_adoption_snapshot(Path(sys.argv[2]), Path(sys.argv[3]))";
 
@@ -170,6 +171,54 @@ impl SourceLifecycle {
         String::from_utf8_lossy(&output.stdout).trim().parse().ok()
     }
 
+    /// A path as the person sees it: the home folder written `~`.
+    fn shown(&self, path: &Path) -> String {
+        let home = self
+            .env
+            .iter()
+            .find(|(name, _)| *name == "HOME")
+            .map(|(_, value)| PathBuf::from(value));
+        match home.and_then(|home| path.strip_prefix(&home).ok().map(Path::to_path_buf)) {
+            Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+            Some(rest) => format!("~/{}", rest.display()),
+            None => path.display().to_string(),
+        }
+    }
+
+    /// The checkout a backend folder belongs to (`<checkout>/backend`).
+    fn checkout_of<'a>(&self, backend: &'a Path) -> &'a Path {
+        match (backend.file_name(), backend.parent()) {
+            (Some(name), Some(parent)) if name == "backend" => parent,
+            _ => backend,
+        }
+    }
+
+    /// `<checkout>/scripts/corsia restart`, then the source answers again. The
+    /// source's own script decides what a restart means; this only proves it.
+    pub fn restart_existing(&mut self) -> Result<(), String> {
+        let status = self
+            .cli("restart")
+            .status()
+            .map_err(|error| format!("could not restart the existing install: {error}"))?;
+        if !status.success() {
+            return Err(format!("`corsia restart` exited {status}"));
+        }
+        self.wait_for_source()
+    }
+
+    fn wait_for_source(&self) -> Result<(), String> {
+        let deadline = Instant::now() + HEALTH_TIMEOUT;
+        loop {
+            if self.loaded_job()?.is_some() && probe_health(self.source.port) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err("the existing install did not answer after it was started".into());
+            }
+            thread::sleep(HEALTH_POLL_INTERVAL);
+        }
+    }
+
     fn start_cli(&self) -> Result<(), String> {
         let status = self
             .cli("start")
@@ -180,6 +229,23 @@ impl SourceLifecycle {
             .then_some(())
             .ok_or_else(|| format!("`corsia start` exited {status}"))
     }
+}
+
+/// When the kernel says a process started, as `seconds.microseconds`; `None`
+/// when no such process exists. A pid alone can be reused, the pair cannot.
+fn process_started(pid: u32) -> Option<String> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            std::ptr::addr_of_mut!(info).cast(),
+            size,
+        )
+    };
+    (written == size).then(|| format!("{}.{:06}", info.pbi_start_tvsec, info.pbi_start_tvusec))
 }
 
 /// The `working directory = ` line of `launchctl print`.
@@ -198,22 +264,16 @@ impl adoption::Lifecycle for SourceLifecycle {
         let printed = self
             .loaded_job()
             .map_err(ReadyError::Failed)?
-            .ok_or_else(|| {
-                ReadyError::Refused(
-                    "Your existing CORSIA isn’t running, so this app can’t take it over yet. \
-                 Start it, then choose Try again."
-                        .into(),
-                )
-            })?;
-        // The checkout that would stop it must be the one the loaded job runs from.
-        if printed_working_directory(&printed)
-            .is_some_and(|directory| Path::new(directory) != self.source.working_directory)
-        {
-            return Err(ReadyError::Refused(
-                "Your existing CORSIA is running from a different folder than its settings name, \
-                 so this app can’t take it over. Nothing was changed."
-                    .into(),
-            ));
+            .ok_or(ReadyError::NotRunning)?;
+        // The checkout that would stop it must be the one the loaded job runs
+        // from. A print without the line cannot prove it, so it is refused the same way.
+        let running = printed_working_directory(&printed);
+        if running.map(Path::new) != Some(self.source.working_directory.as_path()) {
+            return Err(ReadyError::WrongFolder {
+                running: running
+                    .map(|directory| self.shown(self.checkout_of(Path::new(directory)))),
+                checkout: self.shown(self.checkout_of(&self.source.working_directory)),
+            });
         }
         let output = self
             .python(PREFLIGHT_PROGRAM)
@@ -226,6 +286,8 @@ impl adoption::Lifecycle for SourceLifecycle {
             })?;
         match output.status.code() {
             Some(0) => Ok(()),
+            // Exit 4: the source is partway through restarting itself.
+            Some(4) => Err(ReadyError::Restarting),
             // Exit 3 carries a refusal written to be shown: names and byte counts only.
             Some(3) => Err(ReadyError::Refused(
                 String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -237,11 +299,40 @@ impl adoption::Lifecycle for SourceLifecycle {
         }
     }
 
-    fn stop_old(&mut self, progress: &mut dyn FnMut(Option<u32>)) -> Result<(), String> {
+    fn restart_in_flight(&mut self, state: &Path) -> Option<bool> {
+        let output = self
+            .python(RESTART_PROGRAM)
+            .arg(&self.bundled.backend)
+            .arg(state)
+            .output()
+            .inspect_err(|error| log::warn!("could not look for a restart: {error}"))
+            .ok()?;
+        match output.status.code() {
+            Some(0) => Some(true),
+            Some(1) => Some(false),
+            _ => {
+                log::warn!("could not look for a restart: exited {}", output.status);
+                None
+            }
+        }
+    }
+
+    fn stop_old(
+        &mut self,
+        progress: &mut dyn FnMut(Option<u32>),
+        spawned: &mut dyn FnMut(StopProcess),
+    ) -> Result<(), String> {
         let mut child = self
             .cli("stop")
             .spawn()
             .map_err(|error| format!("could not stop the existing install: {error}"))?;
+        // Recorded as soon as it exists, so a Force Quit leaves the journal naming it.
+        if let Some(started) = process_started(child.id()) {
+            spawned(StopProcess {
+                pid: child.id(),
+                started,
+            });
+        }
         let mut counted = None::<Instant>;
         let status = loop {
             if let Some(status) = child.try_wait().map_err(|error| {
@@ -271,6 +362,10 @@ impl adoption::Lifecycle for SourceLifecycle {
         } else {
             Err(format!("the existing install did not stop: {last}"))
         }
+    }
+
+    fn stop_is_running(&mut self, stop: &StopProcess) -> bool {
+        process_started(stop.pid).as_deref() == Some(stop.started.as_str())
     }
 
     fn old_is_down(&mut self) -> Result<(), String> {
@@ -334,16 +429,7 @@ impl adoption::Lifecycle for SourceLifecycle {
     /// the backend answering.
     fn start_old(&mut self) -> Result<(), String> {
         self.start_cli()?;
-        let deadline = Instant::now() + HEALTH_TIMEOUT;
-        loop {
-            if self.loaded_job()?.is_some() && probe_health(self.source.port) {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err("the existing install did not answer after it was started".into());
-            }
-            thread::sleep(HEALTH_POLL_INTERVAL);
-        }
+        self.wait_for_source()
     }
 }
 
@@ -454,7 +540,7 @@ mod tests {
             "env | grep -v '^\\(PWD\\|SHLVL\\|_\\|OLDPWD\\)=' | sort > \"$HOME/start.env\"; touch LOADED",
             "exit 0",
         );
-        home.lifecycle.stop_old(&mut quiet).unwrap();
+        home.lifecycle.stop_old(&mut quiet, &mut |_| {}).unwrap();
         let base = home.root.path().canonicalize().unwrap();
         let expected = format!(
             "CORSIA_DRAIN_MAX_WAIT=1800\nHOME={}\nPATH=/usr/bin:/bin\n",
@@ -477,7 +563,10 @@ mod tests {
     fn a_stop_is_judged_by_its_exit_status_and_launchd_never_by_its_output() {
         // Exit 0 and a loud message, but the job is still loaded.
         let mut home = home("echo 'stopped OK'", "exit 0", "exit 0");
-        let error = home.lifecycle.stop_old(&mut quiet).unwrap_err();
+        let error = home
+            .lifecycle
+            .stop_old(&mut quiet, &mut |_| {})
+            .unwrap_err();
         assert!(error.contains("did not stop"), "{error}");
         assert!(error.contains("launchd still lists"), "{error}");
         // A failing exit status is a failure whatever it printed.
@@ -488,7 +577,7 @@ mod tests {
         );
         assert!(home
             .lifecycle
-            .stop_old(&mut quiet)
+            .stop_old(&mut quiet, &mut |_| {})
             .unwrap_err()
             .contains("exited"));
     }
@@ -497,7 +586,10 @@ mod tests {
     fn a_stop_that_leaves_the_port_answering_is_not_a_stop() {
         let mut home = home("rm -f LOADED", "exit 0", "exit 0");
         let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port)).unwrap();
-        let error = home.lifecycle.stop_old(&mut quiet).unwrap_err();
+        let error = home
+            .lifecycle
+            .stop_old(&mut quiet, &mut |_| {})
+            .unwrap_err();
         assert!(error.contains("still accepts connections"), "{error}");
     }
 
@@ -509,7 +601,7 @@ mod tests {
         let mut home = home(drains, "exit 0", "echo x >> COUNTS; echo 2");
         let mut seen = vec![];
         home.lifecycle
-            .stop_old(&mut |count| seen.push(count))
+            .stop_old(&mut |count| seen.push(count), &mut |_| {})
             .unwrap();
         assert!(seen.len() >= 3, "{seen:?}");
         assert!(seen.iter().all(|count| *count == Some(2)), "{seen:?}");
@@ -522,7 +614,7 @@ mod tests {
         let mut seen = vec![];
         broken
             .lifecycle
-            .stop_old(&mut |count| seen.push(count))
+            .stop_old(&mut |count| seen.push(count), &mut |_| {})
             .unwrap();
         assert!(!seen.is_empty());
         assert!(
@@ -539,29 +631,58 @@ mod tests {
     }
 
     #[test]
-    fn a_job_that_is_not_loaded_is_refused_before_anything_is_asked() {
+    fn a_job_that_is_not_loaded_is_not_running_before_anything_is_asked() {
         let mut home = home("exit 0", "exit 0", "exit 0");
         fs::remove_file(home.root.path().join("loaded")).unwrap();
-        let Err(ReadyError::Refused(reason)) = home
-            .lifecycle
-            .check_ready(Path::new("/state"), &BTreeSet::new())
-        else {
-            panic!("an install that is not running is refused with words for the person");
-        };
-        assert!(reason.contains("isn’t running"), "{reason}");
+        assert_eq!(
+            home.lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::NotRunning)
+        );
     }
 
     #[test]
-    fn a_job_running_from_another_folder_is_refused() {
+    fn a_job_running_from_another_folder_names_both_folders() {
         let mut home = home("exit 0", "exit 0", "exit 0");
-        home.lifecycle.source.working_directory = PathBuf::from("/somewhere/else/backend");
-        let Err(ReadyError::Refused(reason)) = home
+        let base = home.root.path().to_path_buf();
+        home.lifecycle.source.working_directory = base.join("elsewhere/backend");
+        // The fake launchctl prints `<base>/checkout/backend`.
+        assert_eq!(
+            home.lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::WrongFolder {
+                running: Some("~/checkout".into()),
+                checkout: "~/elsewhere".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_print_without_a_working_directory_is_refused_as_a_different_folder() {
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        let base = home.root.path().to_path_buf();
+        script(
+            &base.join("launchctl"),
+            &format!(
+                "[ -e '{}' ] || exit 113\necho 'state = running'",
+                base.join("loaded").display()
+            ),
+        );
+        let Err(ReadyError::WrongFolder { running, .. }) = home
             .lifecycle
             .check_ready(Path::new("/state"), &BTreeSet::new())
         else {
-            panic!("a checkout that is not the loaded job's is refused");
+            panic!("a print that cannot prove the folder fails closed");
         };
-        assert!(reason.contains("different folder"), "{reason}");
+        assert_eq!(running, None);
+    }
+
+    #[test]
+    fn folders_are_shown_with_the_home_folder_as_a_tilde() {
+        let home = home("exit 0", "exit 0", "exit 0");
+        let base = home.root.path();
+        assert_eq!(home.lifecycle.shown(&base.join("a/b")), "~/a/b");
+        assert_eq!(home.lifecycle.shown(Path::new("/opt/x")), "/opt/x");
     }
 
     #[test]
@@ -579,6 +700,78 @@ mod tests {
             ))
         );
         assert!(matches!(ready("exit 1"), Err(ReadyError::Failed(_))));
+        assert_eq!(ready("exit 4"), Err(ReadyError::Restarting));
+    }
+
+    #[test]
+    fn a_restart_in_flight_is_read_from_the_backend_and_an_unreadable_answer_is_unknown() {
+        let look = |python: &str| {
+            let mut home = home("exit 0", "exit 0", python);
+            home.lifecycle.restart_in_flight(Path::new("/state"))
+        };
+        assert_eq!(look("exit 0"), Some(true));
+        assert_eq!(look("exit 1"), Some(false));
+        assert_eq!(look("exit 7"), None);
+    }
+
+    #[test]
+    fn the_restart_program_asks_the_backends_own_read_only_look() {
+        assert!(RESTART_PROGRAM.contains("restart_in_flight"));
+    }
+
+    #[test]
+    fn restart_runs_the_checkouts_script_with_the_basics_and_proves_the_source_answers() {
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        let base = home.root.path().canonicalize().unwrap();
+        script(
+            &base.join("checkout/scripts/corsia"),
+            "env | grep -v '^\\(PWD\\|SHLVL\\|_\\|OLDPWD\\)=' | sort > \"$HOME/$1.env\"; touch \"$HOME/loaded\"",
+        );
+        serve_health(home.lifecycle.source.port);
+        home.lifecycle.restart_existing().unwrap();
+        assert_eq!(
+            fs::read_to_string(base.join("restart.env")).unwrap(),
+            format!(
+                "CORSIA_DRAIN_MAX_WAIT=1800\nHOME={}\nPATH=/usr/bin:/bin\n",
+                home.root.path().display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_failed_restart_is_a_failure() {
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        let base = home.root.path().to_path_buf();
+        script(&base.join("checkout/scripts/corsia"), "exit 5");
+        assert!(home
+            .lifecycle
+            .restart_existing()
+            .unwrap_err()
+            .contains("exited"));
+    }
+
+    #[test]
+    fn the_stop_process_is_reported_as_soon_as_it_exists_and_is_known_while_it_lives() {
+        let mut home = home("sleep 1; rm -f LOADED", "exit 0", "exit 0");
+        let mut recorded = vec![];
+        home.lifecycle
+            .stop_old(&mut |_| {}, &mut |process| recorded.push(process))
+            .unwrap();
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        let process = recorded.remove(0);
+        // The stop returned, so it no longer runs; the pair was real while it did.
+        assert!(!home.lifecycle.stop_is_running(&process));
+        let this = StopProcess {
+            pid: std::process::id(),
+            started: process_started(std::process::id()).unwrap(),
+        };
+        assert!(home.lifecycle.stop_is_running(&this));
+        // A reused pid has a different start time and is not the stop.
+        let reused = StopProcess {
+            started: "0.000000".into(),
+            ..this
+        };
+        assert!(!home.lifecycle.stop_is_running(&reused));
     }
 
     #[test]

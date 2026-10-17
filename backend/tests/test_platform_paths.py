@@ -238,10 +238,11 @@ def test_adoption_preflight_refuses_while_the_source_is_restarting_itself(tmp_pa
     monkeypatch.setattr(snapshots, "backup_room", lambda database: (0, 1 << 60))
     _restart_request(state, "in_flight")
 
-    assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
+    assert snapshots.preflight_main([str(state)]) == snapshots.RESTARTING == 4
     assert capsys.readouterr().err.strip() == (
         "Your existing CORSIA is restarting itself. Wait a minute, then choose Try again."
     )
+    assert snapshots.restart_in_flight(state) is True
     # The look is read-only: the request is still there for the source to settle.
     with sqlite3.connect(state / "corsia.db") as connection:
         assert connection.execute("select status from self_restart_requests").fetchall() == [("in_flight",)]
