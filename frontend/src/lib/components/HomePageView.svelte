@@ -4,6 +4,7 @@
 	import { get } from 'svelte/store';
 	import LoginScreen from './LoginScreen.svelte';
 	import SetupScreen from './SetupScreen.svelte';
+	import { connectOpen } from '$lib/stores/remoteConnect';
 	import HomeShell from './HomeShell.svelte';
 	import HomeOverlays from './HomeOverlays.svelte';
 	import type ChatPanel from './ChatPanel.svelte';
@@ -132,6 +133,10 @@
 			onAccountCreated={() => setupMode = 'flow'}
 			onFinished={() => { setupMode = 'login'; setupResume = false; }}
 		/>
+	</div>
+{:else if $connectOpen}
+	<div class="auth-gate" out:authGateExit>
+		<SetupScreen startConnect onLeaveConnect={() => connectOpen.set(false)} onExistingAccount={() => connectOpen.set(false)} onAccountCreated={() => {}} onFinished={() => connectOpen.set(false)} />
 	</div>
 {:else if !isAuthenticated}
 	<div class="auth-gate" out:authGateExit>

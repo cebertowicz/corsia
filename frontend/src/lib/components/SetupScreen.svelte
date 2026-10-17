@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
 	import { Button, Field, Message } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
@@ -18,15 +18,22 @@
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
+	import SetupConnect from './SetupConnect.svelte';
+	import SetupConnectBack from './SetupConnectBack.svelte';
+	import { createSetupRemote } from '$lib/setupRemote.svelte';
+	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
 	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
-	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; resume?: boolean; }
-	const { onExistingAccount, onAccountCreated, onFinished, resume = false }: Props = $props();
-	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
+	/** `startConnect` opens on Connect to another computer (from Settings › System), skipping the checks; Back then calls `onLeaveConnect`. `resume` picks up a setup whose account already exists, from the backend's record. */
+	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
+	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
+	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error' | 'connect';
 	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
 	const classifier = createSetupClassifier();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: (strict) => refreshSources(strict) });
-	let page = $state<Page>('checking');
+	const remote = createSetupRemote();
+	const canConnect = shellInfo() !== null; // only the desktop app can pair with another computer
+	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	let status = $state<SetupStatus>({});
 	const localPick = createSetupLocalPick();
 	let statusError = $state('');
@@ -55,7 +62,7 @@
 	let apiKey = $state('');
 	let savingKey = $state(false);
 
-	const steps = $derived<SetupStep[]>([
+	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
@@ -78,6 +85,7 @@
 	const modelSize = $derived(localPick.pick?.model ? `${localPick.pick.model.download_size_gb} GB` : local?.download_size || 'a local model');
 	const downloadModelLabel = $derived(localPick.pick?.model?.name || 'The local model');
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
+	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
 	type SetupPrimary = { label: string; disabled?: boolean; loading?: boolean; note?: string };
 	type SetupView = { title: string; lede?: string; primary?: SetupPrimary; onPrimary?: () => void; mark?: boolean };
 	const shellView = $derived.by((): SetupView => {
@@ -88,6 +96,7 @@
 				if (status.apple_silicon === false) return { title: 'CORSIA needs Apple silicon', lede: 'This version of CORSIA runs on Macs with Apple silicon.' };
 				if (status.macos_supported === false) return { title: 'Update macOS to continue', lede: 'Update to macOS 15 or later, then open CORSIA again.' };
 				return { title: 'Move CORSIA to Applications', lede: 'Move CORSIA to Applications, then open it again so updates work.' };
+			case 'connect': return remote.view;
 			case 'welcome':
 				return { title: 'Welcome to CORSIA', lede: 'Your own AI team, on this computer. It remembers your projects, works with the tools and models you already use, and shows you results, not transcripts.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
 			case 'account':
@@ -179,14 +188,6 @@
 		finally { localSetupBusy = false; existingOmlxConsent = false; page = returnToModels ? 'models' : 'account'; }
 	}
 
-	async function applyFolderBeforeAccount() {
-		if (!folderChanged) return;
-		const invoke = (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
-		if (!invoke) return;
-		await invoke('configure_work_folder', { path: folder });
-		folderChanged = false;
-	}
-
 	function validateConfirmation() {
 		confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : '';
 	}
@@ -196,7 +197,7 @@
 		if (!name.trim() || !username.trim() || usernameError || password.length < 8 || confirmationError || accountBusy) return;
 		accountBusy = true; accountError = '';
 		try {
-			await applyFolderBeforeAccount();
+			if (folderChanged) { await applyWorkFolder(folder); folderChanged = false; }
 		} catch {
 			accountError = 'CORSIA couldn’t prepare this work folder. Choose another folder or try again.';
 			accountBusy = false;
@@ -336,8 +337,10 @@
 		if (page === 'models' && get(token)) void recordSetupProgress({ step: existingOmlxConsent ? 'local-consent' : 'models' }, get(token));
 	});
 
+	$effect(() => (page === 'connect' ? remote.start() : undefined));
 	onMount(() => {
-		if (resume) void resumeSetup();
+		if (startConnect) { /* Connect opened from Settings: no checks to run */ }
+		else if (resume) void resumeSetup();
 		else void readStatus();
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
@@ -349,16 +352,22 @@
 	});
 </script>
 
-<SetupShell {steps} {jobs} page={page} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
+<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : page} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
 	{#snippet secondary()}
-		{#if page === 'hard-stop'}
+		{#if page === 'connect'}
+			<SetupConnectBack onclick={() => (remote.stage === 'code' ? remote.toChoose() : leaveConnect())} />
+		{:else if page === 'welcome' && canConnect}
+			<Button variant="chip" onclick={() => { remote.reset(); page = 'connect'; }}>Connect to CORSIA on another computer</Button>
+		{:else if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error' && setupReportInvoke()}
 			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
 		{/if}
 	{/snippet}
 
-	{#if page === 'welcome'}
+	{#if page === 'connect'}
+		<SetupConnect {remote} />
+	{:else if page === 'welcome'}
 		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
 			onWantedChange={(next) => { localPick.change(next, Boolean(status.existing_omlx)); void recordSetupProgress({ local_ai: next }, get(token)); }} onRecheck={readStatus} onRetry={() => void localPick.start()}
 			ownOmlx={Boolean(status.existing_omlx)} manage={manageOwnOmlx} onManageChange={(next) => (manageOwnOmlx = next)} />
