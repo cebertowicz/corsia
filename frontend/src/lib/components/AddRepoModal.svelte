@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from './ui/Modal.svelte';
+	import Button from './ui/Button.svelte';
 	import Toggle from './ui/Toggle.svelte';
 
 	let {
@@ -109,10 +110,10 @@
 		</div>
 
 		{#snippet foot()}
-			<button class="btn ghost push" onclick={onCancel} disabled={busy}>Cancel</button>
-			<button class="btn primary" onclick={onSubmit} disabled={!canSubmit}>
+			<Button variant="ghost" onclick={onCancel} disabled={busy}>Cancel</Button>
+			<Button variant="primary" onclick={onSubmit} disabled={!canSubmit}>
 				{busy ? 'Adding…' : mode === 'link' ? 'Link repository' : 'Create repository'}
-			</button>
+			</Button>
 		{/snippet}
 	</Modal>
 {/if}
@@ -137,10 +138,8 @@
 	.note { font-size: var(--text-footnote); color: var(--text-tertiary); margin: 0; }
 	.err { font-size: var(--text-subhead); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); border-radius: var(--radius-sm); padding: 8px 10px; }
 	.btn { font: inherit; font-size: var(--text-subhead); font-weight: 500; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent; }
-	.btn.push { margin-left: auto; }
 	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
 	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent-fill); color: var(--accent-on-fill); }
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.mono { font-family: var(--font-mono, monospace); }
 	@media (max-width: 640px) { .add-settings { grid-template-columns: 1fr; } .pathrow { flex-direction: column; } .pathrow .btn { align-self: flex-start; } }
