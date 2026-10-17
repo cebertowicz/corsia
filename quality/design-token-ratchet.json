@@ -685,7 +685,7 @@
     },
     "frontend/src/lib/components/AddRepoModal.svelte": {
       "raw_colors": 1,
-      "raw_px": 19,
+      "raw_px": 17,
       "heavy_borders": 0,
       "raw_shadows": 1,
       "row_menu_buttons": 0
@@ -720,7 +720,7 @@
     },
     "frontend/src/lib/components/ArtifactPane.svelte": {
       "raw_colors": 0,
-      "raw_px": 25,
+      "raw_px": 22,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -765,20 +765,6 @@
       "raw_px": 8,
       "heavy_borders": 0,
       "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/components/AttentionCard.svelte": {
-      "raw_colors": 0,
-      "raw_px": 15,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/components/AttentionCardActions.svelte": {
-      "raw_colors": 1,
-      "raw_px": 11,
-      "heavy_borders": 0,
-      "raw_shadows": 1,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/AttentionRollup.svelte": {
@@ -874,7 +860,7 @@
     },
     "frontend/src/lib/components/ConfirmDialog.svelte": {
       "raw_colors": 0,
-      "raw_px": 3,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -909,7 +895,7 @@
     },
     "frontend/src/lib/components/CreateProjectModal.svelte": {
       "raw_colors": 0,
-      "raw_px": 9,
+      "raw_px": 7,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1518,7 +1504,7 @@
     },
     "frontend/src/lib/components/RepoRow.svelte": {
       "raw_colors": 0,
-      "raw_px": 7,
+      "raw_px": 6,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1615,7 +1601,7 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/SetupShell.svelte": {
-      "raw_colors": 14,
+      "raw_colors": 0,
       "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
@@ -1854,7 +1840,7 @@
     },
     "frontend/src/lib/components/activity/ActivityView.svelte": {
       "raw_colors": 0,
-      "raw_px": 11,
+      "raw_px": 13,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2575,7 +2561,7 @@
     },
     "frontend/src/lib/components/ui/PathPicker.svelte": {
       "raw_colors": 0,
-      "raw_px": 14,
+      "raw_px": 12,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
