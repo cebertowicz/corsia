@@ -42,7 +42,7 @@ def client(isolated_db, tmp_path, monkeypatch):
     seed_account(OWNER_USER, SECOND_SESSION, kind="session")
     app = FastAPI()
     app.include_router(keys_api.router)
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test")
 
 
 def _auth(token: str = OWNER_SESSION_TOKEN) -> dict:
@@ -101,7 +101,10 @@ async def test_mcp_key_write_reconnects_only_its_stable_app(client, monkeypatch)
             db.close()
 
     app, key_name = await run_in_db(setup_app)
-    assert (await run_in_db(key_store.entry_metadata, key_name))["name"] == key_name
+    entry = await run_in_db(key_store.entry_metadata, key_name)
+    assert entry["name"] == key_name
+    assert entry["label"] == "GitHub key"
+    assert entry["is_set"] is False
     calls = []
 
     async def reconnect(action: str, app_id: str) -> dict[str, object]:
@@ -126,6 +129,49 @@ async def test_mcp_key_write_reconnects_only_its_stable_app(client, monkeypatch)
             db.close()
 
     assert VALUE not in await run_in_db(persisted_config_text)
+
+
+@pytest.mark.asyncio
+async def test_mcp_key_write_saves_when_reconnect_is_rate_limited(client, monkeypatch):
+    from connections.app_lifecycle import create_app
+    from infra.database import get_db
+    from infra.db_async import run_in_db
+    from tools.mcp_secrets import entry_name
+    from tools import mcp_runtime
+    from tools.mcp_runtime import MCPReconnectRateLimitError
+    import tools.connected_apps_runtime as connected_runtime
+
+    def setup_app() -> tuple[dict[str, object], str]:
+        db = get_db()
+        try:
+            app = create_app(
+                "GitHub", {"command": "github", "key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]},
+                {"mode": "all", "project_ids": [], "outside_projects": False}, db=db,
+            )
+            return app, entry_name(app["id"], "secret_env", "GITHUB_TOKEN")
+        finally:
+            db.close()
+
+    app, key_name = await run_in_db(setup_app)
+    deferred = []
+
+    async def rate_limited(action: str, app_id: str) -> dict[str, object]:
+        raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
+
+    async def defer(app_id: str) -> dict[str, object]:
+        deferred.append(app_id)
+        return {"state": "working", "state_since": "later", "tool_count": 1, "failure_class": None}
+
+    monkeypatch.setattr(connected_runtime, "apply_connected_app_runtime", rate_limited)
+    monkeypatch.setattr(mcp_runtime, "defer_connected_app_reconnect", defer, raising=False)
+
+    response = await client.put(
+        f"/api/keys/{key_name}/value", headers=_auth(), json={"value": VALUE, "password": TEST_PASSWORD},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["key"]["is_set"] is True
+    assert deferred == [app["id"]]
 
 
 @pytest.mark.asyncio

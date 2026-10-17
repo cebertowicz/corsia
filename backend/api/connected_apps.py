@@ -34,7 +34,6 @@ async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], ap
     return await apply_connected_app_runtime(action, app_id)
 
 
-
 def _agent_thread(user: dict, db) -> tuple[str, dict]:
     """Resolve an agent's scope from its server-provided current thread only."""
     thread_id = user.get("thread_id")
@@ -256,7 +255,8 @@ async def update_server(app_id: str, body: dict[str, Any], user: dict = Depends(
     except Exception as exc:
         raise _app_error(exc) from None
     if human:
-        await _run_app_runtime("reconnect", app_id)
+        from tools.connected_apps_runtime import reconnect_after_saved_write
+        await reconnect_after_saved_write(app_id)
     return result
 
 
