@@ -132,7 +132,7 @@ def test_replays_and_checkpoint_tail_preserve_the_stamped_note(deleg_db, viewed_
     admission = _admit(deleg_db, "replay", {KEY: {
         "artifact_id": artifact_id, "heading_anchor": 3, "heading_line": SCOPE_LINE,
     }})
-    from infra.input_writes import sequence_attempt
+    from infra.input_sequencing import sequence_attempt
 
     sequence_attempt(deleg_db, [_row(deleg_db, "replay")], state="delivered", outcome="accepted", error=None)
     deleg_db.commit()
