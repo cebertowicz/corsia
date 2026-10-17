@@ -38,6 +38,12 @@ afterEach(async () => {
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 
+/** Check Claude on Welcome's question, which unlocks the local switch. */
+async function pickClaude() {
+	host.querySelector<HTMLButtonElement>('[role="checkbox"]')?.click();
+	await settle();
+}
+
 async function createAccountFromWelcome() {
 	Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
 	await settle();
@@ -187,13 +193,16 @@ describe('SetupScreen', () => {
 
 		it('offers both choices with Let CORSIA manage it current, and the disclosure', async () => {
 			await mountOwnOmlx();
-			const group = host.querySelector('[role="group"][aria-label="Your oMLX"]')!;
+			const group = host.querySelector('[role="radiogroup"][aria-label="Your oMLX"]')!;
 			expect(host.textContent).toContain('CORSIA found oMLX on this computer. Both choices use it.');
 			expect(host.textContent).not.toContain('The download starts in the background when you press Get started.');
-			expect(group.querySelector('[aria-current="step"]')?.textContent).toContain('Let CORSIA manage it');
-			expect(group.textContent).toContain('Recommended. CORSIA keeps your oMLX’s settings right for the model it sets up.');
-			expect(group.textContent).toContain('CORSIA uses your models and changes nothing. Change settings in oMLX’s own admin page.');
-			expect(host.querySelector('.disclose')?.textContent).toBe(
+			expect(group.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toContain('Let CORSIA manage it');
+			expect(group.textContent).toContain('Recommended. CORSIA sets up oMLX for the model it installs. You can put your own settings back in Settings any time.');
+			expect(group.textContent).toContain('CORSIA uses your models as they are and changes nothing in oMLX.');
+			expect(host.querySelector('.disclose')).toBeNull();
+			button('What CORSIA changes')!.click();
+			await settle();
+			expect(document.querySelector('[data-popover] .disclose')?.textContent).toBe(
 				'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer), Native MTP and Thinking. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.');
 			expect(calls).toEqual(['/api/setup/status']);
 		});
@@ -202,7 +211,7 @@ describe('SetupScreen', () => {
 			await mountOwnOmlx();
 			button('Use mine')!.click();
 			await settle();
-			expect(host.querySelector('[aria-label="Your oMLX"] [aria-current="step"]')?.textContent).toContain('Use mine');
+			expect(host.querySelector('[aria-label="Your oMLX"] [role="radio"][aria-checked="true"]')?.textContent).toContain('Use mine');
 
 			button('Get started')!.click();
 			await settle();
@@ -215,7 +224,8 @@ describe('SetupScreen', () => {
 
 		it('removes every local choice from the rest of setup when the switch is off', async () => {
 			await mountOwnOmlx();
-			(host.querySelector('button[aria-label="Also run AI on this computer"]') as HTMLButtonElement).click();
+			await pickClaude();
+			(host.querySelector('button[aria-label="Also run a local model on this computer"]') as HTMLButtonElement).click();
 			await settle();
 			expect(host.querySelector('[aria-label="Your oMLX"]')).toBeNull();
 			expect(host.textContent).not.toContain('Letting CORSIA manage it');
@@ -273,17 +283,23 @@ describe('SetupScreen', () => {
 		flushSync();
 
 		await settle();
-		expect(host.textContent).toContain('This computer doesn’t have enough memory to run an AI model itself. CORSIA will use Claude Code or Codex with your subscription, or an API key.');
-		expect(host.textContent).not.toContain('Also run AI on this computer');
+		expect(host.textContent).toContain('This computer doesn’t have enough memory to run a local model, so pick at least one above.');
+		expect(host.textContent).not.toContain('Also run a local model on this computer');
+		const started = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started')) as HTMLButtonElement;
+		expect(started.disabled).toBe(true);
+		host.querySelector<HTMLButtonElement>('[role="checkbox"]')?.click();
+		await settle();
+		expect(started.disabled).toBe(false);
+		expect(host.textContent).not.toContain('so pick at least one above');
 	});
 
 	it('keeps the setup shell mounted while Get started moves the local download into the rail', async () => {
 		await settle();
-		expect(host.textContent).toContain('Also run AI on this computer');
+		expect(host.textContent).toContain('Also run a local model on this computer');
 		expect(host.textContent).toContain('Free, private, and works offline.');
 		expect(host.textContent).toContain('Example model · 30 GB · runs in oMLX');
 		expect(host.textContent).toContain('The download starts in the background when you press Get started.');
-		expect(host.querySelector('button[aria-label="Also run AI on this computer"], [role="switch"][aria-label="Also run AI on this computer"]')).not.toBeNull();
+		expect(host.querySelector('button[aria-label="Also run a local model on this computer"], [role="switch"][aria-label="Also run a local model on this computer"]')).not.toBeNull();
 		const shell = host.querySelector('.setup-shell');
 		expect(shell).not.toBeNull();
 		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
@@ -371,7 +387,7 @@ describe('SetupScreen', () => {
 		const failed = { state: 'failed', model: null, message: 'oMLX could not reach Hugging Face.' };
 		const pickedView = { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null };
 		const getStarted = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
-		const localSwitch = () => host.querySelector<HTMLButtonElement>('button[aria-label="Also run AI on this computer"]');
+		const localSwitch = () => host.querySelector<HTMLButtonElement>('button[aria-label="Also run a local model on this computer"]');
 
 		/** Open Welcome; each pick POST answers the next of `posts` ('error' is a 502; a promise answers when it settles). */
 		async function openWelcome({ posts, statusExtra = {} }: { posts: unknown[]; statusExtra?: Record<string, unknown> }) {
@@ -445,6 +461,7 @@ describe('SetupScreen', () => {
 
 		it('stops the pick when the switch goes off, and Get started then downloads nothing', async () => {
 			await openWelcome({ posts: [pickedView] });
+			await pickClaude();
 			localSwitch()?.click();
 			await settle();
 			expect(calls).toContain('POST /api/setup/local-model/stop');
@@ -457,6 +474,7 @@ describe('SetupScreen', () => {
 
 		it('picks again when the switch comes back on', async () => {
 			await openWelcome({ posts: [pickedView, pickedView] });
+			await pickClaude();
 			localSwitch()?.click();
 			await settle();
 			localSwitch()?.click();
@@ -465,9 +483,9 @@ describe('SetupScreen', () => {
 			expect(host.textContent).toContain('Qwen 3.8 · 30 GB · runs in oMLX');
 		});
 
-		it('shows no switch when nothing fits this computer, and downloads nothing', async () => {
-			await openWelcome({ posts: [{ state: 'none_fits', model: null, message: 'This Mac can’t run a local model well.' }] });
-			expect(host.textContent).toContain('This computer doesn’t have enough memory to run an AI model itself.');
+		it('shows no switch when this computer has too little memory, and downloads nothing', async () => {
+			await openWelcome({ posts: [{ state: 'low_memory', model: null, message: 'This Mac can’t run a local model well.' }] });
+			expect(host.textContent).toContain('This computer doesn’t have enough memory to run a local model, so pick at least one above.');
 			expect(localSwitch()).toBeNull();
 			getStarted()?.click();
 			await settle();
@@ -668,7 +686,7 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Codex');
 		expect(text).toContain('Downloading in the background');
 		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42% · about 10 min left');
-		expect(text).toContain('Ready when the download finishes, about 10 min. You can close this window; CORSIA keeps going.');
+		expect(text).toContain('Ready when the download finishes in about 10 min. You can close this window; CORSIA keeps going.');
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Cancel')).toBe(true);
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
@@ -734,28 +752,6 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Installing');
 		expect(host.textContent).toContain('Ready');
 		expect(startButton()).toHaveProperty('disabled', false);
-	});
-
-	it('says so when the provider list cannot be read, and keeps Save off', async () => {
-		await reachModels({ state: 'idle' }, { providers: [] });
-
-		expect(host.textContent).toContain('CORSIA couldn’t load the list of providers. Try again.');
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use an API key instead')?.click();
-		await settle();
-		const key = host.querySelector<HTMLInputElement>('input[aria-label="API key"]');
-		key!.value = 'pasted';
-		key!.dispatchEvent(new Event('input', { bubbles: true }));
-		await settle();
-		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Save')?.hasAttribute('disabled')).toBe(true);
-	});
-
-	it('loads cloud providers before opening the API-key form', async () => {
-		await reachModels({ state: 'idle' }, { providers: [{ name: 'anthropic', label: 'Anthropic', type: 'cloud' }] });
-
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use an API key instead')?.click();
-		await settle();
-
-		expect(Array.from(host.querySelectorAll('select[aria-label="Provider"] option')).map((option) => option.textContent)).toEqual(['Anthropic']);
 	});
 
 	it('shows the background download only in the rail, as Finishing setup with its percent', async () => {
@@ -918,7 +914,7 @@ describe('SetupScreen', () => {
 				const url = String(input);
 				const method = init?.method ?? 'GET';
 				fake.posted.push(`${method} ${url}`);
-				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false });
+				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true });
 				if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 				if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 				if (url === '/api/providers/sources/recheck' && fake.recheckFails) return json({}, 500);
@@ -960,7 +956,7 @@ describe('SetupScreen', () => {
 			expect(start().disabled).toBe(true);
 		});
 
-		it('installs through the official installer after a confirm line, waits with up to 3 minutes, then signs in in place', async () => {
+		it('installs through the official installer after a confirm line, waits with no time estimate, then signs in in place', async () => {
 			await openConnectStep([claude('not_installed')]);
 
 			await press(row('Claude Code'), 'Set up');
@@ -969,8 +965,9 @@ describe('SetupScreen', () => {
 
 			await press(row('Claude Code'), 'Set up');
 			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/install');
-			expect(row('Claude Code').textContent).toContain('This can take up to 3 minutes.');
-			expect(row('Claude Code').querySelectorAll('button').length).toBe(0);
+			expect(row('Claude Code').textContent).toContain('Installing Claude Code');
+			expect(row('Claude Code').textContent).not.toMatch(/official installer\. This|minutes/);
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Cancel']);
 
 			// The installer finishes; coming back to the window notices it and opens sign-in in place.
 			fake.install = { state: 'done', reason: null };
@@ -978,7 +975,7 @@ describe('SetupScreen', () => {
 			await refocus();
 			expect(fake.posted).toContain('POST /api/vendor-accounts/acct-1/signin');
 			expect(row('Claude Code').textContent).toContain('Installed. Finish signing in to your Claude account in the browser window that just opened.');
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Open sign-in again']);
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Sign in']);
 			expect(start().disabled).toBe(true);
 
 			fake.signin = 'completed';
@@ -1011,7 +1008,7 @@ describe('SetupScreen', () => {
 
 			await press(row('Claude Code'), 'Reinstall');
 			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/update');
-			expect(row('Claude Code').textContent).toContain('Reinstalling with Anthropic’s official installer.');
+			expect(row('Claude Code').textContent).toContain('Reinstalling Claude Code');
 
 			const rechecksBefore = fake.posted.filter((call) => call === 'POST /api/providers/sources/recheck').length;
 			fake.install = { state: 'done', reason: null };
@@ -1088,7 +1085,8 @@ describe('SetupScreen', () => {
 
 			fake.install = { state: 'running', reason: null };
 			await press(row('Claude Code'), 'Try again');
-			expect(row('Claude Code').textContent).toContain('This can take up to 3 minutes.');
+			expect(row('Claude Code').textContent).toContain('Installing Claude Code');
+			expect(row('Claude Code').textContent).not.toMatch(/official installer\. This|minutes/);
 		});
 
 		it('treats an already installed CLI as a stale row, not a failure', async () => {

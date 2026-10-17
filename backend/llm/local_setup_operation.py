@@ -31,14 +31,15 @@ class Operation:
     context_window: int
     kind: str
     task_id: str | None = None
+    name: str | None = None
 
     @classmethod
     def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None) -> Operation:
-        return cls(model.repository, model.download_size_bytes, model.context_window, kind, task_id)
+        return cls(model.repository, model.download_size_bytes, model.context_window, kind, task_id, model.name)
 
     @property
     def model(self) -> LocalModel:
-        return LocalModel(self.repository, self.download_size_bytes, self.context_window)
+        return LocalModel(self.repository, self.download_size_bytes, self.context_window, self.name)
 
 
 def _state_root() -> Path:

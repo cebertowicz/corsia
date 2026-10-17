@@ -3,13 +3,15 @@
 		checked: boolean;
 		onchange: (next: boolean) => void;
 		ariaLabel?: string;
+		/** The id of the text that says why the switch is locked or what it does; read after its name. */
+		describedBy?: string;
 		disabled?: boolean;
 		/** The choice holds and cannot change right now (a start in progress): full colour, no dimming, no tap. */
 		locked?: boolean;
 		size?: 'sm' | 'md';
 	}
 
-	const { checked, onchange, ariaLabel, disabled = false, locked = false, size = 'md' }: Props = $props();
+	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, size = 'md' }: Props = $props();
 
 	function handle() {
 		if (disabled || locked) return;
@@ -26,6 +28,7 @@
 	{disabled}
 	aria-pressed={checked}
 	aria-label={ariaLabel}
+	aria-describedby={describedBy}
 	onclick={handle}
 ></button>
 

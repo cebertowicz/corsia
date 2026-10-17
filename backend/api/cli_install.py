@@ -6,11 +6,13 @@ import asyncio
 import logging
 import os
 import re
+import signal
 import subprocess
 import tempfile
+import threading
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,6 +36,7 @@ INSTALL_URLS = {
 _ENV_PASSTHROUGH = ("HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL")
 _DOWNLOAD_TIMEOUT_SECONDS = 30
 _INSTALL_TIMEOUT_SECONDS = 180
+_CANCEL_GRACE_SECONDS = 3
 _MAX_SCRIPT_BYTES = 1_000_000
 _MAX_LOG_CHARS = 2_000
 _SECRET_VALUE = re.compile(
@@ -59,6 +62,13 @@ class InstallJob:
     reason: str | None = None
     path_shadowed_by: str | None = None
     task: asyncio.Task | None = None
+    # Cancel: the installer runs in its own process group so the whole tree can be stopped. `lock` orders
+    # a cancel request against the launch, so a cancel never lands between the check and the Popen.
+    process: subprocess.Popen[bytes] | None = None
+    cancel_requested: bool = False
+    cancelled: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    settled: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 _jobs: dict[str, InstallJob] = {}
@@ -123,25 +133,66 @@ def _failure_reason(vendor: str, result: subprocess.CompletedProcess[bytes]) -> 
     return INSTALLER_STOPPED
 
 
-def _run_installer(vendor: str) -> str | None:
-    """Run one downloaded installer and return a safe failure reason, if any."""
+def _stop_group(process: subprocess.Popen[bytes]) -> None:
+    """Stop an installer and everything it started: SIGTERM to its group, SIGKILL if it outlasts a short grace."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=_CANCEL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _request_cancel(job: InstallJob) -> None:
+    """Ask a running job to stop. A job that has not launched yet never will; one that has is stopped."""
+    with job.lock:
+        job.cancel_requested = True
+        process = job.process
+    if process is not None and process.poll() is None:
+        _stop_group(process)
+
+
+def _run_installer(vendor: str, job: InstallJob) -> str | None:
+    """Run one downloaded installer and return a safe failure reason, if any.
+
+    A stop the person asked for settles as `job.cancelled`, never as a failure. An installer that
+    finished successfully counts as done even when a cancel arrived at the same moment.
+    """
     try:
         script = _download_script(vendor)
     except InstallerFailure as failure:
-        return str(failure)
+        job.cancelled = job.cancel_requested
+        return None if job.cancelled else str(failure)
     try:
+        with job.lock:
+            if job.cancel_requested:
+                job.cancelled = True
+                return None
+            try:
+                process = subprocess.Popen(
+                    ["bash", str(script)], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=_installer_env(), start_new_session=True,
+                )
+            except OSError:
+                return INSTALLER_STOPPED
+            job.process = process
         try:
-            result = subprocess.run(
-                ["bash", str(script)], stdin=subprocess.DEVNULL, capture_output=True,
-                env=_installer_env(), timeout=_INSTALL_TIMEOUT_SECONDS, check=False,
-            )
+            stdout, stderr = process.communicate(timeout=_INSTALL_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
+            _stop_group(process)
+            process.communicate()
             return TIMED_OUT
-        except OSError:
-            return INSTALLER_STOPPED
-        if result.returncode:
-            return _failure_reason(vendor, result)
-        return None
+        if not process.returncode:
+            return None
+        if job.cancel_requested:
+            job.cancelled = True
+            return None
+        return _failure_reason(vendor, subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr))
     finally:
         script.unlink(missing_ok=True)
 
@@ -149,12 +200,13 @@ def _run_installer(vendor: str) -> str | None:
 async def _complete_job(vendor: str, job: InstallJob) -> None:
     """Settle an installer job, refresh sources once, and notify live model consumers."""
     try:
-        job.reason = await asyncio.to_thread(_run_installer, vendor)
+        job.reason = await asyncio.to_thread(_run_installer, vendor, job)
     except Exception:
         log.exception("CLI installer for %s stopped unexpectedly", vendor)
         job.reason = INSTALLER_STOPPED
-    job.state = "failed" if job.reason else "done"
-    if not job.reason:
+    job.state = "cancelled" if job.cancelled else "failed" if job.reason else "done"
+    job.settled.set()
+    if job.state == "done":
         try:
             job.path_shadowed_by = await asyncio.to_thread(path_shadowed_binary, vendor)
         except Exception:
@@ -174,8 +226,27 @@ def _valid_vendor(vendor: str) -> None:
 
 @router.get("/{vendor}/install")
 async def get_install(vendor: str, _user: dict = Depends(require_user)) -> dict[str, str | None]:
-    """Return exactly idle, running, done, or failed state for one CLI installer."""
+    """Return exactly idle, running, done, failed, or cancelled state for one CLI installer."""
     _valid_vendor(vendor)
+    return _status(vendor)
+
+
+@router.delete("/{vendor}/install")
+async def cancel_install(vendor: str, _user: dict = Depends(require_user)) -> dict[str, str | None]:
+    """Stop a running CLI installer and return the state it settled in.
+
+    Idle, done, failed and cancelled jobs are left alone. A cancel that races the installer's
+    completion returns whichever single state the job actually settled in.
+    """
+    _valid_vendor(vendor)
+    job = _jobs.get(vendor)
+    if job is None or job.state != "running":
+        return _status(vendor)
+    await asyncio.to_thread(_request_cancel, job)
+    try:
+        await asyncio.wait_for(job.settled.wait(), timeout=_CANCEL_GRACE_SECONDS + 5)
+    except TimeoutError:
+        log.warning("CLI installer for %s did not settle after a cancel request", vendor)
     return _status(vendor)
 
 
