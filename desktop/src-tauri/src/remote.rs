@@ -1,10 +1,4 @@
-use crate::remote_config::RemoteRecord;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Unreachable {
-    Network,
-    Server,
-}
+use crate::{classify::ConnectFailure, remote_config::RemoteRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaunchState {
@@ -12,10 +6,8 @@ pub enum LaunchState {
     Pairing,
     Connecting { name: String },
     Remote { name: String },
-    Unreachable { name: String, cause: Unreachable },
-    Incompatible { name: String, app: String, host: Option<String> },
-    TooOld { name: String },
-    KeyChanged { name: String },
+    /// The remote could not be opened; the shell draws the card for `failure` with its actions.
+    Failed { name: String, failure: ConnectFailure },
     Disconnecting,
 }
 
@@ -50,20 +42,8 @@ impl RemoteConnection {
         self.state = LaunchState::Remote { name: name.into() };
     }
 
-    pub fn unreachable(&mut self, name: impl Into<String>, cause: Unreachable) {
-        self.state = LaunchState::Unreachable { name: name.into(), cause };
-    }
-
-    pub fn incompatible(&mut self, name: impl Into<String>, app: impl Into<String>, host: Option<String>) {
-        self.state = LaunchState::Incompatible { name: name.into(), app: app.into(), host };
-    }
-
-    pub fn too_old(&mut self, name: impl Into<String>) {
-        self.state = LaunchState::TooOld { name: name.into() };
-    }
-
-    pub fn key_changed(&mut self, name: impl Into<String>) {
-        self.state = LaunchState::KeyChanged { name: name.into() };
+    pub fn failed(&mut self, name: impl Into<String>, failure: ConnectFailure) {
+        self.state = LaunchState::Failed { name: name.into(), failure };
     }
 
     pub fn retry(&mut self, name: impl Into<String>) {
@@ -109,15 +89,15 @@ mod tests {
     #[test]
     fn launch_failures_keep_the_paired_name_and_recovery_transition() {
         let mut connection = RemoteConnection::launch(Some(&record()));
-        connection.unreachable("Studio", Unreachable::Network);
+        connection.failed("Studio", ConnectFailure::Network);
         assert_eq!(
             connection.state(),
-            &LaunchState::Unreachable { name: "Studio".into(), cause: Unreachable::Network }
+            &LaunchState::Failed { name: "Studio".into(), failure: ConnectFailure::Network }
         );
         connection.retry("Studio");
         assert_eq!(connection.state(), &LaunchState::Connecting { name: "Studio".into() });
-        connection.key_changed("Studio");
-        assert_eq!(connection.state(), &LaunchState::KeyChanged { name: "Studio".into() });
+        connection.failed("Studio", ConnectFailure::KeyChanged);
+        assert_eq!(connection.state(), &LaunchState::Failed { name: "Studio".into(), failure: ConnectFailure::KeyChanged });
         connection.connected("Studio");
         connection.begin_disconnect();
         assert_eq!(connection.state(), &LaunchState::Disconnecting);

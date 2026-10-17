@@ -190,21 +190,26 @@ def test_repeated_enable_preserves_listener_and_announcement_then_disable_tears_
     assert disabled["listening"] == {"error": None}
 
 
-def test_devices_snapshot_uses_its_injected_name_resolver():
+def test_devices_snapshot_gives_a_typeable_host_and_leaves_the_display_name_to_the_resolver(monkeypatch):
+    import core.devices_runtime as devices_runtime
+
     announcements = []
     expected_announcement = SimpleNamespace(announced_name="Announced name")
     devices = DevicesRuntime(
-        name_resolver=lambda announcement: announcements.append(announcement) or "Canonical name"
+        name_resolver=lambda announcement: announcements.append(announcement) or "Studio Mac"
     )
     devices.listener = SimpleNamespace(
         listening={"port": 47901},
         announcement=expected_announcement,
         port=47901,
     )
+    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio-mac.local")
 
     snapshot = devices.snapshot()
 
-    assert snapshot["local_hostname"] == "Canonical name"
+    # local_hostname is what the joiner types, so it is the .local host and never the display name (spaces, no DNS).
+    assert snapshot["local_hostname"] == "studio-mac.local"
+    assert devices.remote_connect_name() == "Studio Mac"
     assert announcements == [expected_announcement]
 
 
@@ -322,7 +327,7 @@ def test_devices_address_hints_are_authenticated_and_not_pre_auth(monkeypatch):
     import core.devices_runtime as devices_runtime
 
     runtime.pairing.disable()
-    monkeypatch.setattr(runtime, "_name_resolver", lambda _announcement: "studio.local")
+    monkeypatch.setattr(devices_runtime, "local_hostname", lambda: "studio.local")
     monkeypatch.setattr(
         devices_runtime,
         "lan_addresses",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import errno
 import logging
 import os
@@ -584,3 +585,67 @@ async def test_listener_start_hands_the_announcement_its_change_callback(monkeyp
 
     assert calls == ["changed"]
     await listener.task
+
+
+class _ClosableSocket:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _use_fake_server(monkeypatch, serve, sock):
+    class _Server:
+        def __init__(self, _config):
+            self.should_exit = False
+
+        async def serve(self, sockets):
+            await serve(self)
+
+    monkeypatch.setattr(devices_listener, "ensure_host_key", lambda: ("key", "cert"))
+    monkeypatch.setattr(devices_listener, "_prebind", lambda: (sock, 47901, None))
+    monkeypatch.setattr(devices_listener, "DevicesServer", _Server)
+    monkeypatch.setattr(devices_listener.DNSServiceAnnouncement, "start", lambda self: True)
+
+
+@pytest.mark.asyncio
+async def test_listener_stops_reporting_its_port_when_the_serve_task_fails_after_start(monkeypatch, caplog):
+    async def serve(_server):
+        raise RuntimeError("tls key would not load")
+
+    sock = _ClosableSocket()
+    _use_fake_server(monkeypatch, serve, sock)
+    changes = []
+    listener = DevicesListener(app=object(), on_announcement_change=lambda: changes.append("changed"))
+
+    with caplog.at_level(logging.ERROR, logger="infra.devices_listener"):
+        assert await listener.start() is True
+        assert listener.listening == {"port": 47901}
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    assert listener.listening == {"error": "Devices listener stopped serving", "reason": "serve"}
+    assert listener.port is None and listener.task is None and listener.server is None
+    assert sock.closed, "the pre-bound port was not released"
+    assert changes == ["changed"], "the page was not told"
+    assert "tls key would not load" in caplog.text
+    # A later start binds again instead of believing the dead task still serves.
+    assert await listener.start() is True
+
+
+@pytest.mark.asyncio
+async def test_listener_stop_is_not_reported_as_a_failure(monkeypatch):
+    async def serve(server):
+        while not server.should_exit:
+            await asyncio.sleep(0)
+
+    _use_fake_server(monkeypatch, serve, _ClosableSocket())
+    changes = []
+    listener = DevicesListener(app=object(), on_announcement_change=lambda: changes.append("changed"))
+
+    assert await listener.start() is True
+    await listener.stop()
+
+    assert listener.listening == {"error": None}
+    assert changes == []

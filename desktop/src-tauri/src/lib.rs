@@ -573,11 +573,20 @@ fn remote_shell_context(connection: &remote::RemoteConnection) -> serde_json::Va
 fn remote_startup_state(state: &remote::LaunchState) -> Option<serde_json::Value> {
     match state {
         remote::LaunchState::Connecting { name } => Some(serde_json::json!({ "kind": "connecting", "name": name })),
-        remote::LaunchState::Unreachable { name, cause } => Some(serde_json::json!({ "kind": "unreachable", "name": name, "cause": match cause { remote::Unreachable::Network => "network", remote::Unreachable::Server => "server" } })),
-        remote::LaunchState::Incompatible { name, app, host } => Some(serde_json::json!({ "kind": "incompatible", "name": name, "app": app, "host": host })),
-        remote::LaunchState::TooOld { name } => Some(serde_json::json!({ "kind": "too_old", "name": name })),
-        remote::LaunchState::KeyChanged { name } => Some(serde_json::json!({ "kind": "key_changed", "name": name })),
+        remote::LaunchState::Failed { name, failure } => Some(failure_shell_state(name, failure)),
         _ => None,
+    }
+}
+
+/// The one mapping from a failure to the card the startup shell draws. Network, server and local share the
+/// `unreachable` card and differ in its line; the others have a card of their own.
+fn failure_shell_state(name: &str, failure: &classify::ConnectFailure) -> serde_json::Value {
+    use classify::ConnectFailure;
+    match failure {
+        ConnectFailure::Network | ConnectFailure::Server | ConnectFailure::Local => serde_json::json!({ "kind": "unreachable", "name": name, "cause": failure.reason() }),
+        ConnectFailure::KeyChanged => serde_json::json!({ "kind": "key_changed", "name": name }),
+        ConnectFailure::Incompatible { app, host } => serde_json::json!({ "kind": "incompatible", "name": name, "app": app, "host": host }),
+        ConnectFailure::TooOld => serde_json::json!({ "kind": "too_old", "name": name }),
     }
 }
 
@@ -638,43 +647,87 @@ fn forget_remote_or_log(app_dir: &Path) {
     }
 }
 
-fn unreachable_cause(cause: classify::Unreachable) -> remote::Unreachable {
-    match cause {
-        classify::Unreachable::Network => remote::Unreachable::Network,
-        classify::Unreachable::Server => remote::Unreachable::Server,
+/// A failure on this computer (app folder, saved config, capability, window, local service). The shell has a card for
+/// it of its own; the cause is logged for the person who has to fix it.
+fn local_failure(step: &str, error: impl std::fmt::Display) -> classify::ConnectFailure {
+    log::error!("could not connect the remote ({step}): {error}");
+    classify::ConnectFailure::Local
+}
+
+fn proxy_failure(error: proxy::ProxyError) -> classify::ConnectFailure {
+    match error {
+        proxy::ProxyError::Unreachable(failure) => failure,
+        other => local_failure("proxy", format!("{other:?}")),
     }
 }
 
-/// Why a launch could not enter its saved remote. Each one is a card the shell draws with its actions.
-enum LaunchFailure {
-    KeyChanged,
-    Unreachable(remote::Unreachable),
-    Incompatible { app: String, host: Option<String> },
-    TooOld,
+/// Brings this computer's own service back after a connect failed past the point that stopped it. When it cannot,
+/// the window is left on a page whose service is gone, so the startup shell takes over with a card and its action.
+fn restore_local_service(app: &tauri::AppHandle) {
+    let service = app.state::<AppServiceState>();
+    let restored = run_service_command("register").and_then(|()| start_service(app, &service).map(drop));
+    if let Err(error) = restored {
+        log::error!("could not bring the local service back after a failed connect: {error}");
+        show_shell_failure(app, &service, &error);
+    }
 }
 
-impl LaunchFailure {
-    /// A failure on this computer (config, capability, window): the shell has no card of its own for it, so it
-    /// takes the card whose actions fit, and the cause is logged for the person who has to fix it.
-    fn local(step: &str, error: impl std::fmt::Display) -> Self {
-        log::error!("could not connect the saved remote ({step}): {error}");
-        Self::Unreachable(remote::Unreachable::Server)
+/// The shell operations that enter a remote, for pairing and for every launch that connects a saved one. The two
+/// differ only in what rolls back: pairing forgets the remote it just saved and brings the local service back, while a
+/// launch keeps the saved pairing (Try again needs it) and the local service stays stopped as it was.
+struct RemoteEntry<'a, R: tauri::Runtime, U, S> {
+    app: &'a tauri::AppHandle<R>,
+    app_dir: &'a Path,
+    record: remote_config::RemoteRecord,
+    forget_on_rollback: bool,
+    unregister: U,
+    restore: S,
+}
+
+impl<R: tauri::Runtime, U, S> RemoteEntry<'_, R, U, S> {
+    /// Writes the remote with the port its proxy actually took.
+    fn save(&self, proxy_port: u16) -> Result<(), classify::ConnectFailure> {
+        let record = remote_config::RemoteRecord { proxy_port, ..self.record.clone() };
+        remote_config::save_remote(self.app_dir, record).map_err(|error| local_failure("save", error))
+    }
+}
+
+impl<R: tauri::Runtime, U: FnMut() -> Result<(), String>, S: FnMut()> remote_lifecycle::EnterRemote for RemoteEntry<'_, R, U, S> {
+    type Proxy = proxy::ProxyHandle;
+    type Error = classify::ConnectFailure;
+
+    fn save_remote(&mut self, proxy: &proxy::ProxyHandle) -> Result<(), classify::ConnectFailure> {
+        self.save(proxy.port)
     }
 
-    fn record(self, connection: &mut remote::RemoteConnection, name: &str) {
-        match self {
-            Self::KeyChanged => connection.key_changed(name),
-            Self::Unreachable(cause) => connection.unreachable(name, cause),
-            Self::Incompatible { app, host } => connection.incompatible(name, app, host),
-            Self::TooOld => connection.too_old(name),
+    fn grant_origin(&mut self, proxy: &proxy::ProxyHandle) -> Result<(), classify::ConnectFailure> {
+        grant_remote_proxy_origin(self.app, proxy.port).map_err(|error| local_failure("grant", error))
+    }
+
+    fn unregister_service(&mut self) -> Result<(), classify::ConnectFailure> {
+        (self.unregister)().map_err(|error| local_failure("service", error))
+    }
+
+    fn show(&mut self, proxy: &proxy::ProxyHandle) -> Result<(), classify::ConnectFailure> {
+        let name = self.record.name.clone();
+        update_remote_state(self.app, |connection| connection.connected(name.clone()))
+            .and_then(|()| navigate_to_remote(self.app, &name, proxy.port))
+            .map_err(|error| local_failure("show", error))
+    }
+
+    fn stop_proxy(&mut self, proxy: proxy::ProxyHandle) {
+        proxy.stop();
+    }
+
+    fn forget_remote(&mut self) {
+        if self.forget_on_rollback {
+            forget_remote_or_log(self.app_dir);
         }
     }
-}
 
-/// Writes the saved remote back with the port its proxy actually took.
-fn save_launch_record(app_dir: &Path, saved: &remote_config::RemoteRecord, proxy_port: u16) -> Result<(), LaunchFailure> {
-    let record = remote_config::RemoteRecord { proxy_port, ..saved.clone() };
-    remote_config::save_remote(app_dir, record).map_err(|error| LaunchFailure::local("save", error))
+    fn restore_service(&mut self) {
+        (self.restore)();
+    }
 }
 
 /// Connects the saved remote at launch and on Try again. Whatever goes wrong ends in a failure state with actions,
@@ -683,58 +736,37 @@ async fn connect_saved_remote<R: tauri::Runtime>(app: tauri::AppHandle<R>, saved
     let name = saved.name.clone();
     report_remote_state(&app, |connection| connection.retry(name.clone()));
     if let Err(failure) = enter_saved_remote(&app, saved).await {
-        report_remote_state(&app, |connection| failure.record(connection, &name));
+        report_remote_state(&app, |connection| connection.failed(name.clone(), failure));
     }
 }
 
-async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: remote_config::RemoteRecord) -> Result<(), LaunchFailure> {
+async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: remote_config::RemoteRecord) -> Result<(), classify::ConnectFailure> {
+    use classify::ConnectFailure;
     let name = saved.name.clone();
     // A retry can find the last attempt's proxy still up (a key change leaves it running); it owns the saved port.
     replace_proxy(&app.state::<RemoteRuntime>(), None);
-    let app_dir = default_app_dir(app).map_err(|error| LaunchFailure::local("app folder", error))?;
-    let trust = trust::Trust::try_from(&saved.trust).map_err(|_| LaunchFailure::KeyChanged)?;
+    let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
+    let trust = trust::Trust::try_from(&saved.trust).map_err(|_| ConnectFailure::KeyChanged)?;
     let (host, port) = match &saved.locator {
         remote_config::Locator::Address { host, port } => (host.clone(), *port),
-        remote_config::Locator::DnsSd { instance } => discovery::resolve(instance, Duration::from_secs(15))
-            .await
-            .map_err(|_| LaunchFailure::Unreachable(remote::Unreachable::Network))?,
+        remote_config::Locator::DnsSd { instance } => discovery::resolve(instance, Duration::from_secs(15)).await.map_err(|_| ConnectFailure::Network)?,
     };
     match version_check::check(&host, port, &trust).await {
         Ok(version_check::Compat::Ok) => {}
-        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Err(LaunchFailure::Incompatible { app: app_version, host }),
-        Ok(version_check::Compat::TooOld) => return Err(LaunchFailure::TooOld),
-        Err(pairing::PairError::KeyChanged) => return Err(LaunchFailure::KeyChanged),
-        Err(pairing::PairError::Unreachable(cause)) => return Err(LaunchFailure::Unreachable(unreachable_cause(cause))),
-        Err(_) => return Err(LaunchFailure::Unreachable(remote::Unreachable::Server)),
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Err(ConnectFailure::Incompatible { app: app_version, host }),
+        Ok(version_check::Compat::TooOld) => return Err(ConnectFailure::TooOld),
+        Err(error) => return Err(error.connect_failure().unwrap_or(ConnectFailure::Server)),
     }
     let key_app = app.clone();
     let key_name = name.clone();
-    let proxy = remote_lifecycle::enter_remote(
-        || async {
-            proxy::start(saved.locator.clone(), trust, saved.proxy_port, move || {
-                report_remote_state(&key_app, |connection| connection.key_changed(key_name.clone()));
-            })
-            .await
-            .map_err(|error| match error {
-                proxy::ProxyError::Unreachable(cause) => LaunchFailure::Unreachable(unreachable_cause(cause)),
-                other => LaunchFailure::local("proxy", format!("{other:?}")),
-            })
-        },
-        |proxy: &proxy::ProxyHandle| save_launch_record(&app_dir, &saved, proxy.port),
-        |proxy| grant_remote_proxy_origin(app, proxy.port).map_err(|error| LaunchFailure::local("grant", error)),
-        || Ok(()),
-        |proxy| proxy.stop(),
-        || {},
-    )
-    .await?;
-    let proxy_port = proxy.port;
+    let started = proxy::start(saved.locator.clone(), trust, saved.proxy_port, move || {
+        report_remote_state(&key_app, |connection| connection.failed(key_name.clone(), ConnectFailure::KeyChanged));
+    })
+    .await
+    .map_err(proxy_failure)?;
+    let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
+    let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
     replace_proxy(&app.state::<RemoteRuntime>(), Some(proxy));
-    if let Err(error) = update_remote_state(app, |connection| connection.connected(name.clone()))
-        .and_then(|()| navigate_to_remote(app, &name, proxy_port))
-    {
-        replace_proxy(&app.state::<RemoteRuntime>(), None);
-        return Err(LaunchFailure::local("show", error));
-    }
     Ok(())
 }
 
@@ -790,8 +822,16 @@ fn remote_discovered(remote: tauri::State<'_, RemoteRuntime>) -> Result<RemoteNa
     Ok(RemoteNames { names: browser.as_ref().expect("browser created").names(), denied: false })
 }
 
+fn failure_response(failure: classify::ConnectFailure) -> RemotePairResponse {
+    let (app_version, host_version) = match &failure {
+        classify::ConnectFailure::Incompatible { app, host } => (Some(app.clone()), host.clone()),
+        _ => (None, None),
+    };
+    RemotePairResponse::Failure { ok: false, reason: failure.reason().into(), app_version, host_version }
+}
+
 fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
-    use classify::Unreachable;
+    use classify::ConnectFailure;
     use pairing::PairError;
     let reason = match error {
         PairError::WrongCode => "wrong_code",
@@ -799,33 +839,20 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
         PairError::TooManyTries => "too_many_tries",
         PairError::Paused => "paused",
         PairError::Busy => "busy",
-        PairError::Unreachable(Unreachable::Network) => "network",
-        PairError::Unreachable(Unreachable::Server) => "server",
-        PairError::TooOld => "too_old",
         // The host's key moved under a pairing that just trusted it. CORSIA is running there, so the server line would
         // be false; the local line is true and names the fix (a new code).
-        PairError::KeyChanged => "local",
-        PairError::Protocol(_) => "server",
+        PairError::KeyChanged => ConnectFailure::Local.reason(),
+        other => return failure_response(other.connect_failure().unwrap_or(ConnectFailure::Local)),
     };
     RemotePairResponse::Failure { ok: false, reason: reason.into(), app_version: None, host_version: None }
 }
 
-/// Why entering remote mode failed after the remote paired.
-enum PairFailure {
-    /// The shell could not set the connection up (save, grant, proxy).
-    Local(String),
-    /// The local service would not unregister.
-    Service,
-}
-
-/// Both end on the page's `local` reason: pairing already used up the code, this computer could not finish, and the
-/// page says so instead of calling the call a network failure. The cause is logged for the person who has to fix it.
-fn pair_failure_response(failure: PairFailure) -> RemotePairResponse {
-    match failure {
-        PairFailure::Local(error) => log::error!("could not finish connecting the remote: {error}"),
-        PairFailure::Service => log::error!("could not finish connecting the remote: the local service did not unregister"),
+/// Pairing leaves the shell in `Pairing` while it works. Anything but a connected remote ends back on `Local`, so a
+/// failed pairing never leaves the recorded state behind the real one.
+fn leave_pairing_unless_connected<R: tauri::Runtime>(app: &tauri::AppHandle<R>, outcome: &Result<RemotePairResponse, String>) {
+    if !matches!(outcome, Ok(RemotePairResponse::Success { .. })) {
+        report_remote_state(app, |connection| connection.local());
     }
-    RemotePairResponse::Failure { ok: false, reason: "local".into(), app_version: None, host_version: None }
 }
 
 #[tauri::command]
@@ -834,8 +861,15 @@ async fn remote_pair(
     app: tauri::AppHandle,
     remote: tauri::State<'_, RemoteRuntime>,
 ) -> Result<RemotePairResponse, String> {
-    update_remote_state(&app, |connection| connection.begin_pairing())?;
-    let app_dir = default_app_dir(&app)?;
+    let outcome = pair_remote(request, &app, &remote).await;
+    leave_pairing_unless_connected(&app, &outcome);
+    outcome
+}
+
+async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote: &RemoteRuntime) -> Result<RemotePairResponse, String> {
+    use classify::ConnectFailure;
+    update_remote_state(app, |connection| connection.begin_pairing())?;
+    let app_dir = default_app_dir(app)?;
     let locator = match request.target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
         RemoteTarget::Address { host, port } => remote_config::Locator::Address { host, port: port.unwrap_or(47_901) },
@@ -844,7 +878,7 @@ async fn remote_pair(
         remote_config::Locator::Address { host, port } => (host.clone(), *port),
         remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
             Ok(address) => address,
-            Err(_) => return Ok(RemotePairResponse::Failure { ok: false, reason: "network".into(), app_version: None, host_version: None }),
+            Err(_) => return Ok(failure_response(ConnectFailure::Network)),
         },
     };
     let paired = match pairing::pair(&host, port, &request.code).await {
@@ -853,35 +887,30 @@ async fn remote_pair(
     };
     match version_check::check(&paired.host, paired.port, &paired.trust).await {
         Ok(version_check::Compat::Ok) => {}
-        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(RemotePairResponse::Failure { ok: false, reason: "incompatible".into(), app_version: Some(app_version), host_version: host }),
-        Ok(version_check::Compat::TooOld) => return Ok(RemotePairResponse::Failure { ok: false, reason: "too_old".into(), app_version: None, host_version: None }),
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(failure_response(ConnectFailure::Incompatible { app: app_version, host })),
+        Ok(version_check::Compat::TooOld) => return Ok(failure_response(ConnectFailure::TooOld)),
         Err(error) => return Ok(remote_pair_error(error)),
     }
-    let entered = remote_lifecycle::enter_remote(
-        || async {
-            proxy::start(locator.clone(), paired.trust.clone(), 0, || {})
-                .await
-                .map_err(|error| PairFailure::Local(format!("could not start remote proxy: {error:?}")))
-        },
-        |proxy: &proxy::ProxyHandle| {
-            let record = remote_config::RemoteRecord { locator: locator.clone(), trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: proxy.port };
-            remote_config::save_remote(&app_dir, record).map_err(PairFailure::Local)
-        },
-        |proxy| grant_remote_proxy_origin(&app, proxy.port).map_err(PairFailure::Local),
-        || lifecycle::unregister_unless_locked(&app).map_err(|_| PairFailure::Service),
-        |proxy| proxy.stop(),
-        || forget_remote_or_log(&app_dir),
-    )
-    .await;
-    let proxy = match entered {
-        Ok(proxy) => proxy,
-        Err(failure) => return Ok(pair_failure_response(failure)),
+    let started = match proxy::start(locator.clone(), paired.trust.clone(), 0, || {}).await {
+        Ok(started) => started,
+        Err(error) => return Ok(failure_response(proxy_failure(error))),
     };
-    let proxy_port = proxy.port;
-    replace_proxy(&remote, Some(proxy));
-    update_remote_state(&app, |connection| connection.connected(paired.name.clone()))?;
-    navigate_to_remote(&app, &paired.name, proxy_port)?;
-    Ok(RemotePairResponse::Success { ok: true, name: paired.name })
+    let record = remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: 0 };
+    let mut entry = RemoteEntry {
+        app,
+        app_dir: &app_dir,
+        record,
+        forget_on_rollback: true,
+        unregister: || lifecycle::unregister_unless_locked(app),
+        restore: || restore_local_service(app),
+    };
+    match remote_lifecycle::enter_remote(&mut entry, started) {
+        Ok(proxy) => {
+            replace_proxy(remote, Some(proxy));
+            Ok(RemotePairResponse::Success { ok: true, name: paired.name })
+        }
+        Err(failure) => Ok(failure_response(failure)),
+    }
 }
 
 fn saved_proxy_origin_allows(remote: Option<&remote_config::RemoteRecord>, actual: &str) -> bool {
@@ -892,6 +921,33 @@ fn saved_proxy_origin_allows(remote: Option<&remote_config::RemoteRecord>, actua
 /// (Set up this computer instead, Pair again) have to be able to forget the saved remote.
 fn is_shell_origin(actual: &str) -> bool {
     tauri::Url::parse(actual).is_ok_and(|url| url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+}
+
+/// What a disconnect removes from the webview so the host's session token does not outlive the pairing: the remote
+/// page's own token when the call comes from that page, or all of the webview's stored data when it comes from the
+/// startup shell, which cannot reach the proxy origin's storage any other way. The second also signs the person out of
+/// this computer's own CORSIA page, who is about to set it up again.
+#[derive(Debug, PartialEq, Eq)]
+enum RemoteSessionClear {
+    ProxyToken,
+    AllBrowsingData,
+}
+
+const CLEAR_REMOTE_TOKEN_SCRIPT: &str = "try { localStorage.removeItem('corsia_token'); } catch (_) {}";
+
+fn remote_session_clear(calling_origin: &str) -> RemoteSessionClear {
+    if is_shell_origin(calling_origin) { RemoteSessionClear::AllBrowsingData } else { RemoteSessionClear::ProxyToken }
+}
+
+fn clear_remote_session<R: tauri::Runtime>(app: &tauri::AppHandle<R>, clear: &RemoteSessionClear) {
+    let Some(window) = app.get_webview_window("main") else { return };
+    let cleared = match clear {
+        RemoteSessionClear::ProxyToken => window.eval(CLEAR_REMOTE_TOKEN_SCRIPT),
+        RemoteSessionClear::AllBrowsingData => window.clear_all_browsing_data(),
+    };
+    if let Err(error) = cleared {
+        log::error!("could not clear the remote session from the window: {error}");
+    }
 }
 
 /// Puts the startup shell back in front of the person with a failure card that carries its action. Used when the
@@ -932,6 +988,7 @@ fn disconnect_remote(
     let outcome = remote_lifecycle::disconnect(
         || remote_config::forget_remote(&app_dir),
         || {
+            clear_remote_session(&app, &remote_session_clear(actual.as_str()));
             replace_proxy(&remote, None);
             report_remote_state(&app, |connection| connection.begin_disconnect());
         },
@@ -1470,7 +1527,7 @@ mod tests {
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
         connection.connected("Studio");
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio" }));
-        connection.unreachable("Studio", remote::Unreachable::Network);
+        connection.failed("Studio", classify::ConnectFailure::Network);
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
     }
 
@@ -1640,7 +1697,7 @@ mod tests {
             remote_config::RemoteTrust::Pinned { spki_sha256: "not base64".into() },
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert_eq!(launch_state(&app), remote::LaunchState::KeyChanged { name: "Studio".into() });
+        assert_eq!(launch_state(&app), remote::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
     }
 
     #[test]
@@ -1665,17 +1722,15 @@ mod tests {
             remote_config::RemoteTrust::from(&trust::Trust::Pinned { spki_sha256: changed_pin }),
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert_eq!(launch_state(&app), remote::LaunchState::KeyChanged { name: "Studio".into() });
+        assert_eq!(launch_state(&app), remote::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
     }
 
     #[test]
     fn a_pair_that_failed_after_the_code_was_used_reports_the_local_reason() {
-        for failure in [PairFailure::Local("could not save".into()), PairFailure::Service] {
-            let RemotePairResponse::Failure { ok, reason, .. } = pair_failure_response(failure) else { panic!("a failure response") };
-            assert!(!ok);
-            assert_eq!(reason, "local");
-        }
+        let RemotePairResponse::Failure { ok, reason, .. } = failure_response(classify::ConnectFailure::Local) else { panic!("a failure response") };
+        assert!(!ok);
+        assert_eq!(reason, "local");
     }
 
     #[test]
@@ -1694,12 +1749,12 @@ mod tests {
             remote_config::RemoteTrust::System,
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert!(matches!(launch_state(&app), remote::LaunchState::Unreachable { .. }), "{:?}", launch_state(&app));
+        assert!(matches!(launch_state(&app), remote::LaunchState::Failed { failure: classify::ConnectFailure::Network | classify::ConnectFailure::Server, .. }), "{:?}", launch_state(&app));
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
     }
 
     #[test]
-    fn a_launch_that_cannot_save_the_remote_fails_to_the_unreachable_card_instead_of_returning_silently() {
+    fn a_launch_that_cannot_save_the_remote_fails_to_the_local_card_not_to_a_claim_about_the_other_computer() {
         let folder = tempfile::tempdir().unwrap();
         let blocker = folder.path().join("not-a-folder");
         fs::write(&blocker, b"").unwrap();
@@ -1707,33 +1762,96 @@ mod tests {
             remote_config::Locator::Address { host: "192.168.1.20".into(), port: 47901 },
             remote_config::RemoteTrust::System,
         );
-        let failure = save_launch_record(&blocker.join("CORSIA"), &saved, 47912).err().expect("the save must fail");
+        let app = launch_app();
+        let app_dir = blocker.join("CORSIA");
+        let entry = RemoteEntry { app: app.handle(), app_dir: &app_dir, record: saved.clone(), forget_on_rollback: false, unregister: || Ok::<(), String>(()), restore: || {} };
+        let failure = entry.save(47912).err().expect("the save must fail");
+        assert_eq!(failure, classify::ConnectFailure::Local);
         let mut connection = remote::RemoteConnection::launch(Some(&saved));
-        failure.record(&mut connection, "Studio");
-        assert_eq!(connection.state(), &remote::LaunchState::Unreachable { name: "Studio".into(), cause: remote::Unreachable::Server });
-        assert!(remote_startup_state(connection.state()).is_some());
+        connection.failed("Studio", failure);
+        assert_eq!(remote_startup_state(connection.state()), Some(serde_json::json!({ "kind": "unreachable", "name": "Studio", "cause": "local" })));
     }
 
     #[test]
     fn every_launch_failure_is_a_state_the_shell_draws_with_actions() {
+        use classify::ConnectFailure;
         let saved = saved_studio(
             remote_config::Locator::Address { host: "192.168.1.20".into(), port: 47901 },
             remote_config::RemoteTrust::System,
         );
         let failures = [
-            LaunchFailure::KeyChanged,
-            LaunchFailure::Unreachable(remote::Unreachable::Network),
-            LaunchFailure::Unreachable(remote::Unreachable::Server),
-            LaunchFailure::Incompatible { app: "0.4.1".into(), host: Some("0.3.0".into()) },
-            LaunchFailure::TooOld,
-            LaunchFailure::local("test", "failure on this computer"),
+            ConnectFailure::KeyChanged,
+            ConnectFailure::Network,
+            ConnectFailure::Server,
+            ConnectFailure::Incompatible { app: "0.4.1".into(), host: Some("0.3.0".into()) },
+            ConnectFailure::TooOld,
+            ConnectFailure::Local,
         ];
         for failure in failures {
             let mut connection = remote::RemoteConnection::launch(Some(&saved));
-            failure.record(&mut connection, "Studio");
+            connection.failed("Studio", failure);
             let drawn = remote_startup_state(connection.state()).expect("a launch failure the shell cannot draw");
             assert_ne!(drawn["kind"], "connecting");
         }
+    }
+
+    /// A pairing whose window cannot be shown: the connect is rolled back on this computer, not left half-entered.
+    #[test]
+    fn a_pairing_that_cannot_show_the_remote_rolls_back_the_proxy_the_saved_remote_and_the_service() {
+        use remote_lifecycle::EnterRemote;
+        let app = tauri::test::mock_builder().build(generated_context()).unwrap();
+        app.manage(RemoteRuntime::default());
+        let folder = tempfile::tempdir().unwrap();
+        let record = saved_studio(remote_config::Locator::Address { host: "127.0.0.1".into(), port: 1 }, remote_config::RemoteTrust::System);
+        let (unregistered, restored) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+        let proxy = tauri::async_runtime::block_on(proxy::start(record.locator.clone(), trust::Trust::System, 0, || {})).expect("a proxy");
+        let mut entry = RemoteEntry {
+            app: app.handle(),
+            app_dir: folder.path(),
+            record,
+            forget_on_rollback: true,
+            unregister: || { unregistered.set(unregistered.get() + 1); Ok(()) },
+            restore: || restored.set(restored.get() + 1),
+        };
+        // The mock app has no "main" window, so navigating to the remote fails after the service was unregistered.
+        let failure = remote_lifecycle::enter_remote(&mut entry, proxy).err().expect("the window is gone");
+        assert_eq!(failure, classify::ConnectFailure::Local);
+        assert_eq!(unregistered.get(), 1);
+        assert_eq!(restored.get(), 1, "the local service was not brought back");
+        assert_eq!(remote_config::load_remote(folder.path()), Ok(None), "the remote stayed saved");
+        // A launch keeps its saved pairing: the same rollback must not forget it.
+        let kept = saved_studio(remote_config::Locator::Address { host: "127.0.0.1".into(), port: 1 }, remote_config::RemoteTrust::System);
+        let mut launch = RemoteEntry { app: app.handle(), app_dir: folder.path(), record: kept.clone(), forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
+        launch.save(47911).unwrap();
+        launch.forget_remote();
+        assert_eq!(remote_config::load_remote(folder.path()), Ok(Some(kept)));
+    }
+
+    #[test]
+    fn a_pairing_that_did_not_connect_leaves_the_pairing_state() {
+        let app = launch_app();
+        let outcomes: [Result<RemotePairResponse, String>; 3] = [
+            Ok(failure_response(classify::ConnectFailure::Local)),
+            Ok(remote_pair_error(pairing::PairError::WrongCode)),
+            Err("the CORSIA window is unavailable".into()),
+        ];
+        for outcome in outcomes {
+            update_remote_state(app.handle(), |connection| connection.begin_pairing()).unwrap();
+            leave_pairing_unless_connected(app.handle(), &outcome);
+            assert_eq!(launch_state(&app), remote::LaunchState::Local);
+        }
+        update_remote_state(app.handle(), |connection| connection.connected("Studio")).unwrap();
+        leave_pairing_unless_connected(app.handle(), &Ok(RemotePairResponse::Success { ok: true, name: "Studio".into() }));
+        assert_eq!(launch_state(&app), remote::LaunchState::Remote { name: "Studio".into() });
+    }
+
+    #[test]
+    fn a_disconnect_clears_the_remote_session_from_wherever_it_was_called() {
+        assert_eq!(remote_session_clear("http://127.0.0.1:47911/"), RemoteSessionClear::ProxyToken);
+        assert_eq!(remote_session_clear("tauri://localhost"), RemoteSessionClear::AllBrowsingData);
+        assert_eq!(CLEAR_REMOTE_TOKEN_SCRIPT, "try { localStorage.removeItem('corsia_token'); } catch (_) {}");
+        // The page stores its session under the same key (frontend/src/lib/stores/auth.ts).
+        assert!(include_str!("../../../frontend/src/lib/stores/auth.ts").contains("localStorage.setItem('corsia_token'"));
     }
 
     #[test]

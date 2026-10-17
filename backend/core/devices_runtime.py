@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from core.device_pairing import DevicePairing
 from infra.config import STATE_ROOT, _read_prod_state_root
-from infra.devices_listener import DevicesListener, lan_addresses, remote_connect_name
+from infra.devices_listener import DevicesListener, lan_addresses, local_hostname, remote_connect_name
 from infra.dns_sd import DNSServiceAnnouncement
 from infra.state.ws import schedule_devices_updated
 
@@ -80,7 +80,8 @@ class DevicesRuntime:
             "enabled": self.enabled,
             "listening": listening,
             "announced_name": announcement.announced_name if announcement else None,
-            "local_hostname": self.remote_connect_name(),
+            # The host a joiner can type (studio.local), never the display name: that has spaces and does not resolve.
+            "local_hostname": local_hostname(),
             "lan_addresses": lan_addresses(include_link_local=listener_active),
             "code": self.pairing.status(include_code=include_code),
         }

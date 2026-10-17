@@ -12,6 +12,7 @@ const states = [
 	[{ kind: 'connecting', name: 'Studio' }, { status: 'Connecting to Studio…', spinner: true, retry: null, setUpLocal: false }],
 	[{ kind: 'unreachable', name: 'Studio', cause: 'network' }, { status: 'Can’t open Studio', line: 'Check your network', retry: 'Try again', setUpLocal: true }],
 	[{ kind: 'unreachable', name: 'Studio', cause: 'server' }, { status: 'Can’t open Studio', line: 'Open CORSIA › Settings › System', retry: 'Try again', setUpLocal: true }],
+	[{ kind: 'unreachable', name: 'Studio', cause: 'local' }, { status: 'Can’t open Studio', line: 'couldn’t finish opening Studio. Try again. If it keeps failing, quit and reopen CORSIA', retry: 'Try again', setUpLocal: true }],
 	[{ kind: 'incompatible', name: 'Studio', app: '0.4.1', host: '0.3.0' }, { status: 'Can’t open Studio', line: 'CORSIA 0.4.1 and Studio has 0.3.0', retry: 'Try again', setUpLocal: true }],
 	[{ kind: 'too_old', name: 'Studio' }, { status: 'Can’t open Studio', line: 'Studio has an older CORSIA', retry: 'Try again', setUpLocal: true }],
 	[{ kind: 'key_changed', name: 'Studio' }, { status: 'Studio has changed', line: 'isn’t the computer this app paired with', retry: 'Pair again', setUpLocal: true }],
@@ -90,6 +91,10 @@ try {
 		if (setUp.status !== 'Keep CORSIA running') throw new Error(`${kind}: Set up this computer instead did not continue to local setup (${setUp.status})`);
 		clicks += 2;
 	}
+	// The local card's Try again retries this computer's own connect like the other cards, and never says the other computer is not listening.
+	const localCard = await press({ kind: 'unreachable', name: 'Studio', cause: 'local' }, '#retry');
+	expectCalls('local: primary button', localCard, ['retry_saved_remote']);
+	clicks += 1;
 	// A failed set-up stays on a card with an action that tries it again, never a dead end.
 	const failedSetUp = await press({ kind: 'unreachable', name: 'Studio', cause: 'network' }, '#set-up-local', { disconnect_remote: { reject: 'The service could not start.' } });
 	if (failedSetUp.status !== 'CORSIA couldn’t start' || failedSetUp.retry !== 'Try again') throw new Error(`failed set-up: ${failedSetUp.status} / ${failedSetUp.retry}`);

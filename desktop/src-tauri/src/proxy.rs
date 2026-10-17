@@ -31,7 +31,7 @@ type SharedResolve = Shared<Pin<Box<dyn Future<Output = Result<Target, ProxyErro
 pub enum ProxyError {
     Bind(String),
     Resolve(String),
-    Unreachable(crate::classify::Unreachable),
+    Unreachable(crate::classify::ConnectFailure),
     Transport(String),
 }
 
@@ -179,8 +179,8 @@ async fn resolve_target(state: &ProxyState, stale: Option<&Target>) -> Result<Ta
 fn describe(error: ProxyError) -> String {
     match error {
         ProxyError::Resolve(message) => message,
-        ProxyError::Unreachable(crate::classify::Unreachable::Network) => "remote host is unreachable on the network".into(),
-        ProxyError::Unreachable(crate::classify::Unreachable::Server) => "remote CORSIA server is unavailable".into(),
+        ProxyError::Unreachable(crate::classify::ConnectFailure::Network) => "remote host is unreachable on the network".into(),
+        ProxyError::Unreachable(crate::classify::ConnectFailure::Server) => "remote CORSIA server is unavailable".into(),
         other => format!("{other:?}"),
     }
 }
@@ -287,7 +287,7 @@ async fn default_resolve(locator: Locator) -> Result<(String, u16), ProxyError> 
         Locator::DnsSd { instance } => crate::discovery::resolve(&instance, Duration::from_secs(5))
             .await
             .map_err(|error| match error {
-                crate::discovery::DiscoveryError::Timeout => ProxyError::Unreachable(crate::classify::Unreachable::Network),
+                crate::discovery::DiscoveryError::Timeout => ProxyError::Unreachable(crate::classify::ConnectFailure::Network),
                 other => ProxyError::Resolve(format!("DNS-SD resolution failed: {other}")),
             }),
     }

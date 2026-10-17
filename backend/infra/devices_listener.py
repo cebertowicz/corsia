@@ -198,9 +198,10 @@ class DevicesListener:
     app: object
     server: DevicesServer | None = None
     task: asyncio.Task | None = None
+    sock: socket.socket | None = None
     port: int | None = None
     error: str | None = None
-    # Why it is not listening, in words the page can act on: ports_taken, credentials, bind or disabled.
+    # Why it is not listening, in words the page can act on: ports_taken, credentials, bind, serve or disabled.
     reason: str | None = None
     announcement: DNSServiceAnnouncement | None = None
     # Told when the announced name or its error changes after start().
@@ -240,7 +241,9 @@ class DevicesListener:
             ssl_certfile=str(cert_path),
         )
         self.server = DevicesServer(config)
+        self.sock = sock
         self.task = asyncio.create_task(self.server.serve(sockets=[sock]))
+        self.task.add_done_callback(self._serve_ended)
         self.port = port
         self.error = None
         self.reason = None
@@ -248,6 +251,21 @@ class DevicesListener:
         self.announcement.on_change = self.on_announcement_change
         self.announcement.start()
         return True
+
+    def _serve_ended(self, task: asyncio.Task) -> None:
+        """Nothing awaits the serve task until stop(), so a failure (a TLS key that will not load, a crash) would
+        leave `listening` naming a port nobody serves. A requested stop and a cancelled loop are expected."""
+        if task is not self.task or task.cancelled() or (self.server is not None and self.server.should_exit):
+            return
+        logger.error("Devices listener stopped serving: %s", task.exception() or "the server exited")
+        if self.announcement is not None:
+            self.announcement.stop()
+        if self.sock is not None:
+            self.sock.close()
+        self.announcement = self.server = self.task = self.sock = self.port = None
+        self.error, self.reason = "Devices listener stopped serving", "serve"
+        if self.on_announcement_change is not None:
+            self.on_announcement_change()
 
     async def stop(self) -> None:
         if self.server is None or self.task is None:
@@ -261,6 +279,7 @@ class DevicesListener:
         finally:
             self.server = None
             self.task = None
+            self.sock = None
             self.port = None
 
 

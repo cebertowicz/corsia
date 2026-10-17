@@ -1,48 +1,57 @@
-use std::future::Future;
+/// The shell operations that enter remote mode. They are real operations in production and fakes in unit tests, and
+/// pairing and every launch that connects a saved remote implement the same trait, so there is one order and one
+/// rollback.
+pub trait EnterRemote {
+    type Proxy;
+    type Error;
+    fn save_remote(&mut self, proxy: &Self::Proxy) -> Result<(), Self::Error>;
+    fn grant_origin(&mut self, proxy: &Self::Proxy) -> Result<(), Self::Error>;
+    fn unregister_service(&mut self) -> Result<(), Self::Error>;
+    /// Puts the remote in front of the person: records the connected state and navigates the window.
+    fn show(&mut self, proxy: &Self::Proxy) -> Result<(), Self::Error>;
+    fn stop_proxy(&mut self, proxy: Self::Proxy);
+    fn forget_remote(&mut self);
+    /// Brings the local service back after `unregister_service` ran.
+    fn restore_service(&mut self);
+}
 
-/// Enters remote mode: the one definition of the order, used by pairing and by
-/// every launch that connects a saved remote.
+/// Enters remote mode with an already started proxy: the one definition of the order and of the rollback, used by
+/// pairing and by every launch that connects a saved remote.
 ///
-/// The order is proxy, save, grant, unregister, and each step is chosen so a
-/// failure never strands state:
+/// The order is save, grant, unregister, show, and each step is chosen so a failure never strands state:
 ///
-/// 1. The proxy starts first because the saved record names its port; it only
-///    listens, and nothing can reach it until a capability names its origin.
-/// 2. The remote is saved before its origin is granted any command, so no
-///    capability (which cannot be revoked) ever exists for a remote the next
-///    launch would not know about.
-/// 3. The local service is unregistered last, only once the remote is saved
-///    and its proxy is up, so a person is never left with neither a local
-///    service nor a reachable remote. A failure at this step, or at the grant,
-///    stops the proxy and forgets the remote that this call saved, and the
-///    local service is untouched.
+/// 1. The remote is saved before its origin is granted any command, so no capability (which cannot be revoked) ever
+///    exists for a remote the next launch would not know about.
+/// 2. The local service is unregistered only once the remote is saved and its proxy is up, so a person is never left
+///    with neither a local service nor a reachable remote.
+/// 3. The window is shown last. A failure there comes after the local service was unregistered, so it is rolled
+///    back like every other failure.
 ///
-/// Each closure is a real shell operation in production and a fake in unit
-/// tests. A launch that reconnects an already saved remote passes no-ops for
-/// `unregister_service` (done when the remote was first entered) and
-/// `forget_remote` (a saved pairing outlives a transient failure).
-pub async fn enter_remote<E, P, Fut>(
-    start_proxy: impl FnOnce() -> Fut,
-    save_remote: impl FnOnce(&P) -> Result<(), E>,
-    grant_origin: impl FnOnce(&P) -> Result<(), E>,
-    unregister_service: impl FnOnce() -> Result<(), E>,
-    stop_proxy: impl FnOnce(P),
-    forget_remote: impl FnOnce(),
-) -> Result<P, E>
-where
-    Fut: Future<Output = Result<P, E>>,
-{
-    let proxy = start_proxy().await?;
-    if let Err(error) = save_remote(&proxy) {
-        stop_proxy(proxy);
-        return Err(error);
+/// A failure at any step runs the whole rollback: the proxy stops, the remote this call saved is forgotten, and the
+/// local service comes back if the call had reached the step that stops it. A launch that reconnects an already
+/// saved remote implements `forget_remote` and `restore_service` as no-ops: the saved pairing outlives a transient
+/// failure (Try again needs it) and the local service was stopped when the remote was first entered.
+pub fn enter_remote<E: EnterRemote>(entry: &mut E, proxy: E::Proxy) -> Result<E::Proxy, E::Error> {
+    let mut service_touched = false;
+    match run_steps(entry, &proxy, &mut service_touched) {
+        Ok(()) => Ok(proxy),
+        Err(error) => {
+            entry.stop_proxy(proxy);
+            entry.forget_remote();
+            if service_touched {
+                entry.restore_service();
+            }
+            Err(error)
+        }
     }
-    if let Err(error) = grant_origin(&proxy).and_then(|()| unregister_service()) {
-        stop_proxy(proxy);
-        forget_remote();
-        return Err(error);
-    }
-    Ok(proxy)
+}
+
+fn run_steps<E: EnterRemote>(entry: &mut E, proxy: &E::Proxy, service_touched: &mut bool) -> Result<(), E::Error> {
+    entry.save_remote(proxy)?;
+    entry.grant_origin(proxy)?;
+    *service_touched = true;
+    entry.unregister_service()?;
+    entry.show(proxy)
 }
 
 /// Where a failed disconnect stopped, so the caller knows whether the person is
@@ -83,69 +92,74 @@ mod tests {
         events.borrow_mut().push(name);
     }
 
-    /// Runs `enter_remote` with fakes that record their order and fail at `failing_step`.
+    /// Records each step and fails at `failing_step`.
+    struct Fake {
+        events: Events,
+        failing_step: Option<&'static str>,
+    }
+
+    impl Fake {
+        fn step(&mut self, name: &'static str) -> Result<(), &'static str> {
+            log(&self.events, name);
+            if self.failing_step == Some(name) { Err(name) } else { Ok(()) }
+        }
+    }
+
+    impl EnterRemote for Fake {
+        type Proxy = &'static str;
+        type Error = &'static str;
+        fn save_remote(&mut self, _: &&'static str) -> Result<(), &'static str> { self.step("save") }
+        fn grant_origin(&mut self, _: &&'static str) -> Result<(), &'static str> { self.step("grant") }
+        fn unregister_service(&mut self) -> Result<(), &'static str> { self.step("unregister") }
+        fn show(&mut self, _: &&'static str) -> Result<(), &'static str> { self.step("show") }
+        fn stop_proxy(&mut self, _: &'static str) { log(&self.events, "stop_proxy") }
+        fn forget_remote(&mut self) { log(&self.events, "forget") }
+        fn restore_service(&mut self) { log(&self.events, "restore_service") }
+    }
+
     fn enter(failing_step: Option<&'static str>) -> (Result<&'static str, &'static str>, Vec<&'static str>) {
         let events: Events = Rc::default();
-        let step = |name: &'static str| {
-            let events = events.clone();
-            move || -> Result<(), &'static str> {
-                log(&events, name);
-                if failing_step == Some(name) { Err(name) } else { Ok(()) }
-            }
-        };
-        let start = step("proxy");
-        let save = step("save");
-        let grant = step("grant");
-        let unregister = step("unregister");
-        let result = block_on(enter_remote(
-            move || async move { start().map(|()| "proxy-handle") },
-            |_: &&str| save(),
-            |_: &&str| grant(),
-            unregister,
-            { let events = events.clone(); move |_| log(&events, "stop_proxy") },
-            { let events = events.clone(); move || log(&events, "forget") },
-        ));
+        let mut fake = Fake { events: events.clone(), failing_step };
+        let result = enter_remote(&mut fake, "proxy-handle");
         let recorded = events.borrow().clone();
         (result, recorded)
     }
 
-    fn block_on<T>(future: impl Future<Output = T>) -> T {
-        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(future)
-    }
-
     #[test]
-    fn remote_success_starts_proxy_saves_grants_then_unregisters() {
+    fn remote_success_saves_grants_unregisters_then_shows() {
         let (result, events) = enter(None);
         assert_eq!(result, Ok("proxy-handle"));
-        assert_eq!(events, ["proxy", "save", "grant", "unregister"]);
+        assert_eq!(events, ["save", "grant", "unregister", "show"]);
     }
 
     #[test]
-    fn proxy_failure_changes_nothing() {
-        let (result, events) = enter(Some("proxy"));
-        assert_eq!(result, Err("proxy"));
-        assert_eq!(events, ["proxy"]);
-    }
-
-    #[test]
-    fn save_failure_stops_the_proxy_before_any_origin_is_granted() {
+    fn save_failure_rolls_back_before_any_origin_is_granted_and_leaves_the_service_alone() {
         let (result, events) = enter(Some("save"));
         assert_eq!(result, Err("save"));
-        assert_eq!(events, ["proxy", "save", "stop_proxy"]);
+        assert_eq!(events, ["save", "stop_proxy", "forget"]);
     }
 
     #[test]
-    fn grant_failure_stops_the_proxy_and_forgets_without_touching_the_local_service() {
+    fn grant_failure_leaves_the_local_service_alone() {
         let (result, events) = enter(Some("grant"));
         assert_eq!(result, Err("grant"));
-        assert_eq!(events, ["proxy", "save", "grant", "stop_proxy", "forget"]);
+        assert_eq!(events, ["save", "grant", "stop_proxy", "forget"]);
+    }
+
+    // A skipped step strands a running proxy, a saved remote nobody can use, or a stopped local service, so each
+    // one has to appear after every failure that comes once the service was touched.
+    #[test]
+    fn unregister_failure_stops_the_proxy_forgets_the_remote_and_restores_the_service() {
+        let (result, events) = enter(Some("unregister"));
+        assert_eq!(result, Err("unregister"));
+        assert_eq!(events, ["save", "grant", "unregister", "stop_proxy", "forget", "restore_service"]);
     }
 
     #[test]
-    fn unregister_failure_stops_proxy_and_forgets_remote_for_pairing_recovery() {
-        let (result, events) = enter(Some("unregister"));
-        assert_eq!(result, Err("unregister"));
-        assert_eq!(events, ["proxy", "save", "grant", "unregister", "stop_proxy", "forget"]);
+    fn a_failure_to_show_the_remote_runs_the_whole_rollback() {
+        let (result, events) = enter(Some("show"));
+        assert_eq!(result, Err("show"));
+        assert_eq!(events, ["save", "grant", "unregister", "show", "stop_proxy", "forget", "restore_service"]);
     }
 
     fn leave(failing_step: Option<&'static str>) -> (Result<&'static str, DisconnectError<&'static str>>, Vec<&'static str>) {

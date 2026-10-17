@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 use crate::{
-    classify::{classify_connect_error, classify_tls_against_plain_http, Unreachable},
+    classify::{classify_connect_error, classify_tls_against_plain_http, ConnectFailure},
     trust::{self, Trust},
 };
 
@@ -35,11 +35,25 @@ pub enum PairError {
     TooManyTries,
     Paused,
     Busy,
-    Unreachable(Unreachable),
+    Unreachable(ConnectFailure),
     TooOld,
     /// The host presented a key other than the pinned one: not a network failure.
     KeyChanged,
     Protocol(String),
+}
+
+impl PairError {
+    /// The connection failure behind this error, or `None` for a refusal of the code itself (wrong, expired, paused,
+    /// busy), which is about the pairing and not about reaching the host.
+    pub fn connect_failure(&self) -> Option<ConnectFailure> {
+        match self {
+            Self::Unreachable(failure) => Some(failure.clone()),
+            Self::TooOld => Some(ConnectFailure::TooOld),
+            Self::KeyChanged => Some(ConnectFailure::KeyChanged),
+            Self::Protocol(_) => Some(ConnectFailure::Server),
+            Self::WrongCode | Self::Expired | Self::TooManyTries | Self::Paused | Self::Busy => None,
+        }
+    }
 }
 
 impl From<reqwest::Error> for PairError {
@@ -48,7 +62,7 @@ impl From<reqwest::Error> for PairError {
             return Self::KeyChanged;
         }
         if error.is_timeout() {
-            return Self::Unreachable(Unreachable::Network);
+            return Self::Unreachable(ConnectFailure::Network);
         }
         if error.is_connect() {
             let message = error.to_string().to_ascii_lowercase();
@@ -74,7 +88,7 @@ impl From<reqwest::Error> for PairError {
             if message.contains("plain http") || message.contains("wrong version") {
                 return Self::Unreachable(classify_tls_against_plain_http());
             }
-            return Self::Unreachable(Unreachable::Network);
+            return Self::Unreachable(ConnectFailure::Network);
         }
         Self::Protocol(error.to_string())
     }
@@ -707,15 +721,15 @@ mod tests {
     fn connect_failures_keep_the_r4_cause() {
         assert_eq!(
             PairError::Unreachable(classify_connect_error(&std::io::Error::from(std::io::ErrorKind::TimedOut))),
-            PairError::Unreachable(Unreachable::Network)
+            PairError::Unreachable(ConnectFailure::Network)
         );
         assert_eq!(
             PairError::Unreachable(classify_connect_error(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused))),
-            PairError::Unreachable(Unreachable::Server)
+            PairError::Unreachable(ConnectFailure::Server)
         );
         assert_eq!(
             PairError::Unreachable(classify_tls_against_plain_http()),
-            PairError::Unreachable(Unreachable::Server)
+            PairError::Unreachable(ConnectFailure::Server)
         );
     }
 
@@ -833,7 +847,7 @@ mod tests {
         let code = std::env::var("CORSIA_E2E_CODE").unwrap();
         assert_eq!(
             pair("127.0.0.1", main_port, "0000").await,
-            Err(PairError::Unreachable(Unreachable::Server))
+            Err(PairError::Unreachable(ConnectFailure::Server))
         );
         let paired = pair("127.0.0.1", port, &code).await.unwrap();
         assert_eq!(
@@ -883,7 +897,7 @@ mod tests {
         let port = std::env::var("CORSIA_E2E_MAIN_PORT").unwrap().parse().unwrap();
         assert_eq!(
             pair("127.0.0.1", port, "0000").await,
-            Err(PairError::Unreachable(Unreachable::Server))
+            Err(PairError::Unreachable(ConnectFailure::Server))
         );
     }
 
@@ -893,7 +907,7 @@ mod tests {
         let port = std::env::var("CORSIA_E2E_PORT").unwrap().parse().unwrap();
         assert_eq!(
             pair("127.0.0.1", port, "0000").await,
-            Err(PairError::Unreachable(Unreachable::Server))
+            Err(PairError::Unreachable(ConnectFailure::Server))
         );
     }
 }

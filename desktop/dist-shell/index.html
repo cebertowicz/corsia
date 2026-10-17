@@ -356,7 +356,10 @@
 				}
 				status.textContent = state.kind === 'key_changed' ? `${state.name} has changed` : `Can’t open ${state.name}`;
 				if (state.kind === 'unreachable') {
-					line.textContent = state.cause === 'server' ? 'CORSIA is not listening there. Open CORSIA › Settings › System on that computer.' : 'This computer can’t reach it right now. Check your network, then try again.';
+					line.textContent = {
+						server: 'CORSIA is not listening there. Open CORSIA › Settings › System on that computer.',
+						local: `This computer couldn’t finish opening ${state.name}. Try again. If it keeps failing, quit and reopen CORSIA, or set up this computer instead.`
+					}[state.cause] ?? 'This computer can’t reach it right now. Check your network, then try again.';
 				} else if (state.kind === 'incompatible') {
 					line.textContent = state.host ? `This computer has CORSIA ${state.app} and ${state.name} has ${state.host}. Update the older one, then try again.` : `${state.name} has an older CORSIA. Update it, then try again.`;
 				} else if (state.kind === 'key_changed') {
