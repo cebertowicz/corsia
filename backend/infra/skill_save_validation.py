@@ -1,4 +1,4 @@
-"""Validation and actionable refusals for CORSIA-owned SKILL.md saves."""
+"""Validation and actionable refusals for CORSIA-owned SKILL.md and corsia.yaml saves."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 #: The guidance-save outcome and reason for a write refused before any effect.
 REFUSED, INVALID_SKILL_REASON = "refused", "invalid-skill"
 
-_INVALID_SKILL_EXISTING = "Error: SKILL.md not saved — it would not load as a skill. The file is unchanged."
-_INVALID_SKILL_NEW = "Error: SKILL.md not saved — it would not load as a skill. Nothing was written."
+_INVALID_SKILL_EXISTING = "Error: {name} not saved — it would not load as a skill. The file is unchanged."
+_INVALID_SKILL_NEW = "Error: {name} not saved — it would not load as a skill. Nothing was written."
 
 
 @dataclass(frozen=True)
@@ -34,28 +34,60 @@ def refused_save(writes: dict[Path, bytes]) -> SaveResult | None:
 
 
 def invalid_skill_write(writes: dict[Path, bytes]) -> SkillSaveRefusal | None:
-    """Return the first invalid skill write, leaving non-skill data untouched."""
-    from core.skill_validation import is_skill_file, validate_skill_text
+    """Return the first invalid skill write, leaving non-skill data untouched.
 
-    for path, data in writes.items():
-        if not is_skill_file(path):
+    A write to ``SKILL.md`` or its ``corsia.yaml`` validates the whole skill folder:
+    the written file together with its partner, from this save or else from disk.
+    """
+    from core.skill_sidecar import SIDECAR_FILE
+    from core.skill_validation import is_skill_file
+
+    checked: set[Path] = set()
+    for path in writes:
+        sidecar_write = path.name == SIDECAR_FILE and is_skill_file(path.with_name("SKILL.md"))
+        if not (is_skill_file(path) or sidecar_write) or path.parent in checked:
             continue
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            errors = (f"SKILL.md must be UTF-8 text: {exc}",)
-        else:
-            validation = validate_skill_text(text)
-            if validation.ok:
-                continue
-            errors = tuple(validation.errors)
-        return SkillSaveRefusal(errors=errors, line=invalid_skill_line(path, errors))
+        checked.add(path.parent)
+        errors = _folder_errors(path.parent, writes)
+        if errors:
+            return SkillSaveRefusal(errors=errors, line=invalid_skill_line(path, errors))
     return None
+
+
+def _folder_errors(folder: Path, writes: dict[Path, bytes]) -> tuple[str, ...]:
+    """Validate one skill folder as it would stand after these writes."""
+    from core.skill_sidecar import SIDECAR_FILE, read_sidecar
+    from core.skill_validation import validate_skill_bundle
+
+    skill_path, sidecar_path = folder / "SKILL.md", folder / SIDECAR_FILE
+    if skill_path in writes:
+        text, errors = _decoded(writes[skill_path], "SKILL.md")
+    elif skill_path.is_file():
+        text, errors = _decoded(skill_path.read_bytes(), "SKILL.md")
+    else:
+        return ()  # A sidecar with no SKILL.md yet: the SKILL.md save validates both.
+    problem = None
+    if sidecar_path in writes:
+        sidecar, sidecar_errors = _decoded(writes[sidecar_path], SIDECAR_FILE)
+        errors += sidecar_errors
+    else:
+        sidecar, problem = read_sidecar(folder)
+    if errors:
+        return errors
+    files = None if sidecar is None else {SIDECAR_FILE: sidecar}
+    return tuple(validate_skill_bundle(text, files, sidecar_problem=problem).errors)
+
+
+def _decoded(data: bytes, name: str) -> tuple[str, tuple[str, ...]]:
+    try:
+        return data.decode("utf-8"), ()
+    except UnicodeDecodeError as exc:
+        return "", (f"{name} must be UTF-8 text: {exc}",)
 
 
 def invalid_skill_line(path: Path, errors: tuple[str, ...]) -> str:
     """Render an actionable refusal without guessing an unknown repair."""
-    lead = _INVALID_SKILL_EXISTING if path.exists() else _INVALID_SKILL_NEW
+    lead = (_INVALID_SKILL_EXISTING if path.exists() else _INVALID_SKILL_NEW).format(name=path.name)
     lines = [lead, str(path), *(f"- {error}" for error in errors)]
     fix = skill_fix(errors)
     if fix:

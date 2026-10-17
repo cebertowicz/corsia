@@ -1,9 +1,6 @@
 ---
 name: github
 description: Use when working with GitHub from any thread — opening or updating a pull request, reading PR/CI/review status, merging, commenting on PRs or issues, or any repo operation. Load before creating a PR so its events route back to you.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # GitHub (via the `gh` CLI)

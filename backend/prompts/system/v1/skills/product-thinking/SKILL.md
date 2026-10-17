@@ -1,9 +1,6 @@
 ---
 name: product-thinking
 description: Use before building, proposing, scoping, designing, or approving any feature, product, service, or process change (including an imperative "build X" or "add X"), any requirements document, and when a user reports a pain point — run the product chain and hand off via skill `decision-brief`. Not for executing an already-specified change.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Product thinking
