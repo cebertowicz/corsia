@@ -25,9 +25,9 @@ afterEach(() => {
 });
 
 describe('CommentComposer', () => {
-	it('grows to content and then scrolls at the field cap', async () => {
+	it('autosize stops at whatever max-height the field carries and then scrolls', async () => {
 		const textarea = render();
-		// The cap is the shared text field's CSS max-height (not applied in jsdom); stand it in inline.
+		// jsdom applies no stylesheet, so this proves the autosize cap logic against an inline 150px, not the real text-field.css cap.
 		textarea.style.maxHeight = '150px';
 		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 240 });
 		textarea.value = 'A long comment';

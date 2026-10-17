@@ -26,18 +26,39 @@
 	transition: border-color var(--dur-tight);
 }
 
+/* A touch screen gets the 44px target on every consumer. */
+@media (pointer: coarse) {
+	.text-field,
+	.field.chip .c :is(input, select, textarea),
+	.field.nested .c :is(input, select, textarea) {
+		min-height: var(--touch-target);
+	}
+}
+
 /* A multi-line field grows from one line to about six, then scrolls (the autosize action sets the height). */
 textarea.text-field,
 .field.chip .c textarea,
 .field.nested .c textarea {
 	height: auto;
+	--tf-pad-y: var(--space-1);
 	min-height: var(--space-7);
-	max-height: calc(6lh + var(--space-2) + 0.125rem);
-	padding: var(--space-1) var(--space-4);
+	max-height: calc(6lh + 2 * var(--tf-pad-y) + 0.125rem);
+	padding: var(--tf-pad-y) var(--space-4);
 	line-height: var(--lh-snug);
 	resize: none;
 	overflow-y: auto;
 	transition: border-color var(--dur-tight), height var(--dur-tight) var(--ease-snap);
+}
+
+/* On touch the one-line height is the touch target: the padding centres the line, so the cap stays six lines. */
+@media (pointer: coarse) {
+	textarea.text-field,
+	.field.chip .c textarea,
+	.field.nested .c textarea {
+		--tf-pad-y: calc((var(--touch-target) - 1lh - 0.125rem) / 2);
+		height: auto;
+		min-height: var(--touch-target);
+	}
 }
 
 /* On a pane: the composer chip's glass fill. Inside a card or sheet there is none (glass-in-glass, shadow-in-card). */

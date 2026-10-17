@@ -30,6 +30,7 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-7: 32px;
+  --touch-target: 44px;
   --space-8: 48px;
 
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);
