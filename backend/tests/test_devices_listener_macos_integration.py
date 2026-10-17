@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import subprocess
 
 import pytest
 
@@ -45,14 +46,30 @@ def _reserve_adjacent_port_pair() -> tuple[socket.socket, int, int]:
     raise AssertionError("could not reserve an adjacent disposable TCP port pair")
 
 
-async def _wait_for_registration(listener, timeout: float = 5) -> None:
-    """Wait for DNSServiceProcessResult to invoke the real registration callback."""
+def _interface_summary() -> str:
+    """One line per network interface, so a timeout names what the runner offered."""
+    result = subprocess.run(["ifconfig", "-a"], capture_output=True, text=True, timeout=10)
+    return "; ".join(line for line in result.stdout.splitlines() if line and not line[0].isspace())
+
+
+async def _wait_for_registration(listener, timeout: float = 30) -> None:
+    """Wait for DNSServiceProcessResult to invoke the real registration callback.
+
+    The callback arrives once mDNSResponder has probed the name on an interface.
+    A hosted CI runner did not deliver it within five seconds although a
+    desktop does in about one, so the bound is generous: the test proves the OS
+    delivers the callback, not how fast, and a timeout names the interfaces.
+    """
     announcement = listener.announcement
     assert announcement is not None
-    deadline = asyncio.get_running_loop().time() + timeout
+    started = asyncio.get_running_loop().time()
     while announcement.announced_name is None and announcement.error is None:
-        if asyncio.get_running_loop().time() >= deadline:
-            raise AssertionError("DNS-SD registration callback did not arrive within five seconds")
+        elapsed = asyncio.get_running_loop().time() - started
+        if elapsed >= timeout:
+            raise AssertionError(
+                f"DNS-SD registration callback did not arrive within {timeout:.0f} seconds; "
+                f"interfaces: {_interface_summary()}"
+            )
         await asyncio.sleep(0.05)
 
 

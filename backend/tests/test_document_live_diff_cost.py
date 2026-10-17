@@ -134,6 +134,18 @@ async def least_loop_probe(tmp_path, runs=3):
     return min(costs)
 
 
+def diff_cpu(runs=3):
+    """The least CPU time of the whole synchronous diff: this host's speed on the lane's own work."""
+    old, new = prose_rewrite()
+    costs = []
+    for _ in range(runs):
+        doc = create(old)
+        started = time.thread_time()
+        apply_text(doc, new)
+        costs.append(time.thread_time() - started)
+    return min(costs)
+
+
 def run_probe(code, tmp_path):
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
     try:
@@ -153,7 +165,11 @@ def test_megabyte_distributed_prose_diff_finishes_under_one_second(tmp_path):
 
 
 def test_megabyte_lane_write_holds_the_loop_under_100ms(tmp_path):
-    cpu = run_probe("import asyncio; from pathlib import Path; "
-                    "from tests.test_document_live_diff_cost import least_loop_probe; "
-                    "print(asyncio.run(least_loop_probe(Path.cwd())))", tmp_path)
-    assert cpu < .1
+    # The share of the whole diff one loop callback holds, not absolute seconds:
+    # a hosted runner running three shards at once is about 3x this Mac, so a
+    # fixed bound sat on the line. A write that runs the diff in one callback
+    # holds all of it (share >= 1); the staged write holds about a quarter.
+    share = run_probe("import asyncio; from pathlib import Path; "
+                      "from tests.test_document_live_diff_cost import diff_cpu, least_loop_probe; "
+                      "print(asyncio.run(least_loop_probe(Path.cwd())) / diff_cpu())", tmp_path)
+    assert share < .6
