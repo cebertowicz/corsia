@@ -39,7 +39,7 @@ def sender_can_approve(repo: str, login: str | None) -> bool:
 
 
 def remove_review_label(repo: str, pr_number: int) -> bool:
-    """Remove the review label so a later approval fires a fresh ``labeled`` event.
+    """Consume the review label so adding it again fires a fresh ``labeled`` event.
 
     A label that is already absent counts as removed.
     """
@@ -56,41 +56,3 @@ def remove_review_label(repo: str, pr_number: int) -> bool:
         )
         return False
     return True
-
-
-def waiting_run_ids(repo: str, head_sha: str) -> list[int] | None:
-    """Ids of the workflow runs GitHub holds for approval at one head; None on failure."""
-    result = _gh(
-        [
-            "api",
-            f"repos/{repo}/actions/runs?head_sha={head_sha}&status=action_required&per_page=100",
-            "--jq", ".workflow_runs[].id",
-        ],
-        f"list waiting runs for {repo}@{head_sha[:8]}",
-    )
-    if result is None or result.returncode != 0:
-        if result is not None:
-            log.warning("fork hold: listing waiting runs exited %d: %s", result.returncode, (result.stderr or "")[:200])
-        return None
-    return [int(line) for line in result.stdout.split() if line.isdigit()]
-
-
-def approve_waiting_runs(repo: str, head_sha: str) -> tuple[int, int] | None:
-    """Approve every workflow run held at this head; (approved, failed), or None if unlistable."""
-    run_ids = waiting_run_ids(repo, head_sha)
-    if run_ids is None:
-        return None
-    approved = 0
-    for run_id in run_ids:
-        result = _gh(
-            ["api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/approve"],
-            f"approve run {run_id}",
-        )
-        if result is not None and result.returncode == 0:
-            approved += 1
-        elif result is not None:
-            log.warning(
-                "fork hold: approving run %d exited %d: %s",
-                run_id, result.returncode, (result.stderr or "")[:200],
-            )
-    return approved, len(run_ids) - approved

@@ -24,6 +24,12 @@ def test_the_review_label_maps_to_a_gate_event() -> None:
     assert map_github_event("pull_request", _labeled(LABEL_REVIEW)) == "webhook.github.pr_labeled"
 
 
+def test_removing_the_label_is_not_an_event() -> None:
+    from events.github_mapper import map_github_event
+
+    assert map_github_event("pull_request", {**_labeled(LABEL_REVIEW), "action": "unlabeled"}) is None
+
+
 def test_any_other_label_stays_unmapped() -> None:
     from events.github_mapper import map_github_event
 
@@ -53,7 +59,7 @@ def test_ingress_runs_the_label_gate_leg_off_the_loop() -> None:
         return None
 
     with patch("events.ingress.route_leg", fake_route), \
-         patch("events.connectors.github_reviewer_fork_hold.reconcile_label") as approve:
+         patch("events.connectors.github_reviewer_fork_hold.approve_labeled_head") as approve:
         result = asyncio.run(handle_event("webhook.github.pr_labeled", _labeled(LABEL_REVIEW)))
 
     assert result["reviewer_gate"] == "evaluated"
@@ -62,38 +68,6 @@ def test_ingress_runs_the_label_gate_leg_off_the_loop() -> None:
 
 def _gh_result(stdout: str = "", returncode: int = 0, stderr: str = ""):
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
-
-
-def test_every_waiting_run_at_the_head_is_approved() -> None:
-    from reviewer import gh_fork_hold
-
-    calls: list[list[str]] = []
-
-    def run(args, **_kwargs):
-        calls.append(args)
-        return _gh_result("11\n12\n") if args[1].startswith("repos/o/r/actions/runs?") else _gh_result()
-
-    with patch("reviewer.gh_fork_hold.run_gh", run):
-        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") == (2, 0)
-
-    assert calls[0][1] == "repos/o/r/actions/runs?head_sha=abc123&status=action_required&per_page=100"
-    assert calls[1:] == [
-        ["api", "-X", "POST", "repos/o/r/actions/runs/11/approve"],
-        ["api", "-X", "POST", "repos/o/r/actions/runs/12/approve"],
-    ]
-
-
-def test_an_unlistable_or_unapprovable_run_is_reported_not_invented() -> None:
-    from reviewer import gh_fork_hold
-
-    with patch("reviewer.gh_fork_hold.run_gh", return_value=_gh_result(returncode=1, stderr="boom")):
-        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") is None
-
-    def run(args, **_kwargs):
-        return _gh_result("11\n") if "actions/runs?" in args[1] else _gh_result(returncode=403)
-
-    with patch("reviewer.gh_fork_hold.run_gh", run):
-        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") == (0, 1)
 
 
 def test_only_a_login_with_write_access_can_approve() -> None:
@@ -112,7 +86,7 @@ def test_only_a_login_with_write_access_can_approve() -> None:
     run.assert_not_called()
 
 
-def test_removing_an_absent_label_counts_as_removed() -> None:
+def test_consuming_an_absent_label_counts_as_removed() -> None:
     from reviewer import gh_fork_hold
 
     with patch("reviewer.gh_fork_hold.run_gh", return_value=_gh_result(returncode=1, stderr="HTTP 404")) as run:

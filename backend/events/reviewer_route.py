@@ -22,18 +22,9 @@ GATE_TRIGGER_EVENTS = frozenset({
 
 
 def run_review(internal_event: str, payload: dict[str, Any]) -> None:
-    """Handle reviewer push events without arming a review; hold a fork head for approval."""
+    """Handle reviewer push events without arming a review."""
     if internal_event not in REVIEWER_EVENTS:
         return
-
-    from events.connectors.github_reviewer_fork_hold import reconcile_push
-
-    pr = payload.get("pull_request") or {}
-    pr_number = pr.get("number")
-    head_sha = (pr.get("head") or {}).get("sha", "")
-    repo = (payload.get("repository") or {}).get("full_name", "")
-    # A fork head waits whoever pushed it, so this runs before the bot guard.
-    reconcile_push(repo, pr_number, head_sha, internal_event, payload)
 
     if guard.is_bot_or_self_authored(payload):
         author = payload.get("sender") or {}
@@ -53,6 +44,9 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
         )
         return
 
+    pr = payload.get("pull_request") or {}
+    pr_number = pr.get("number")
+    head_sha = (pr.get("head") or {}).get("sha", "")
     logger.debug(
         "reviewer-route: push event {} PR #{} sha={} — gate evaluates on green CI or ready transition",
         internal_event,
@@ -177,8 +171,8 @@ def _check_label_event(
 ) -> bool:
     """Treat the review label as a request to approve the head named in the payload.
 
-    The label is only the trigger: the fork hold approves the pull request's
-    current head, and only for a sender with write access.
+    The label is only the trigger: the fork hold approves the head the label
+    was added on, and only for a sender with write access.
     """
     from reviewer.reviewer_categories import LABEL_REVIEW
 
@@ -188,22 +182,42 @@ def _check_label_event(
     pr_number = pr.get("number")
     missing_fields = _missing_identity(repo, pr_number, head_sha)
     if missing_fields:
-        _report_invalid_ready_event(
-            repo, pr_number, head_sha, payload.get("action"), missing_fields,
-        )
+        _report_invalid_label_event(repo, pr_number, head_sha, missing_fields)
         return False
     if (payload.get("label") or {}).get("name") != LABEL_REVIEW:
         return True
 
-    from events.connectors.github_reviewer_fork_hold import payload_is_fork, reconcile_label
+    from events.connectors.github_reviewer_fork_hold import approve_labeled_head, payload_is_fork
 
     if not payload_is_fork(payload):
         return True
-    reconcile_label(
+    approve_labeled_head(
         repo, pr_number, head_sha, (payload.get("sender") or {}).get("login"),
         internal_event, loop,
     )
     return True
+
+
+def _report_invalid_label_event(
+    repo: str,
+    pr_number: Any,
+    head_sha: Any,
+    missing_fields: list[str],
+) -> None:
+    """Emit a diagnostic for a review-label event with incomplete identity."""
+    logger.warning(
+        "reviewer-route: review label event unusable missing_fields={}", missing_fields,
+    )
+    emit_product_event(
+        "reviewer_gate",
+        "label_event_invalid",
+        properties={
+            "repo": repo or None,
+            "pr_number": pr_number,
+            "head_sha": head_sha[:8] if isinstance(head_sha, str) else None,
+            "missing_fields": missing_fields,
+        },
+    )
 
 
 def _report_invalid_ready_event(

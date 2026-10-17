@@ -62,14 +62,6 @@ def record_approval(pr_key: str, head_sha: str) -> None:
         )
 
 
-def clear_approval(pr_key: str) -> None:
-    """Forget the approved head, as when a fork pull request gets a new push."""
-    from infra.database import write_transaction
-
-    with write_transaction(None, scope="clear_review_approval") as conn:
-        conn.execute("DELETE FROM reviewer_gate_approval WHERE pr_key = ?", (pr_key,))
-
-
 def pr_key(repo: str, pr_number: int) -> str:
     """Build the canonical repository and pull-request key for gate state."""
     return f"{repo}#{pr_number}"

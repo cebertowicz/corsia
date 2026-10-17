@@ -148,6 +148,8 @@ def on_check_suite_completed(
             "reviewer-gate: PR #{} sha={} — check_suite conclusion={!r}, not green",
             pr_number, head_sha[:8], conclusion,
         )
+        if conclusion == "action_required":
+            github_reviewer_fork_hold.hold_runs_awaiting_approval(repo, pr_number, head_sha)
         return
 
     _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop)
