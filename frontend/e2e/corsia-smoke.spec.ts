@@ -30,7 +30,8 @@ test.describe('@surface:auth @surface:chat @surface:navigation CORSIA shell', ()
 		await loginByUrl(page);
 		await openSettings(page);
 
-		await expect(page.getByRole('button', { name: 'Measurement' })).toBeVisible();
+		// Settings sections are Providers, System, Keys and Debug (SettingsView.svelte); Measurement is a sidebar rail link.
+		await expect(page.getByRole('button', { name: 'Providers' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'System' })).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'settings-providers');
 	});

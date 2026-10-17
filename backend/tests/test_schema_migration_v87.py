@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
-from doceditor.feedback_state import annotate_reply_waiting_threads, reply_waiting_ids
+from doceditor.feedback_state import annotate_thread_attention, reply_waiting_ids
 from infra.migration_86_to_87_doc_comment_thread_views import migrate_86_to_87
 
 _V86 = """
@@ -56,8 +56,8 @@ def test_v87_carries_each_document_stamp_to_its_threads_and_drops_the_old_table(
         ).fetchone() is None
         assert reply_waiting_ids(db, 'ui') == before == {'doc-1', 'doc-2'}
         threads = [{'id': 'root-a'}, {'id': 'root-b'}]
-        annotate_reply_waiting_threads(db, 'ui', 'doc-1', threads)
-        assert [t['reply_waiting'] for t in threads] == [False, True]
+        annotate_thread_attention(db, 'ui', 'doc-1', threads)
+        assert [t['new_reply_ids'] for t in threads] == [[], ['b-new']]
 
 
 def test_v87_is_idempotent_without_the_old_table():

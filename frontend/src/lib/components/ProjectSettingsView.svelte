@@ -2,22 +2,23 @@
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { uiScope, exitScope } from '$lib/stores/uiScope';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
+	import { closeSettingsProject, openSectionFromProject, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { updateProject, archiveProject, restoreProject } from '$lib/stores/projects';
 	import { projectColor } from '$lib/utils/projectColors';
 	import { toasts } from '$lib/stores/toast';
 	import { plainResponseError } from '$lib/plainError';
+	import { Button } from '$lib/components/ui';
 	import AccentPicker from './ui/AccentPicker.svelte';
 	import ProjectRootPicker from './ProjectRootPicker.svelte';
 	import ProjectRepos from './ProjectRepos.svelte';
 	import ProvidersPolicyBlock from './ProvidersPolicyBlock.svelte';
-	import SkillScopePanel from './SkillScopePanel.svelte';
-	let { onBrowseContextFiles, onBrowseSkills, onOpenProviders }: {
-		onBrowseContextFiles?: () => void;
-		onBrowseSkills?: () => void;
-		onOpenProviders?: () => void;
-	} = $props();
+	import SettingsGroup from './SettingsGroup.svelte';
+	import SettingsRow from './SettingsRow.svelte';
 	import type { ProjectDetail, AgentRow } from '$lib/api/projectSettingsTypes';
+
+	// Settings › Projects › <name>: what this project can use, then what only it has.
+	let { projectId }: { projectId: string } = $props();
+
 	let project = $state<ProjectDetail | null>(null);
 	let loading = $state(true);
 	let name = $state('');
@@ -26,13 +27,17 @@
 	let agentsLoading = $state(false);
 	let agentsError = $state('');
 	let agentRows = $state<AgentRow[]>([]);
+	let rootPickerOpen = $state(false);
+
+	// Only the project the person is in drives the shell's scope name and accent.
+	const isCurrentScope = $derived(!!project && $uiScope?.id === project.id);
 
 	let loadedFor = '';
 	$effect(() => {
-		const id = $uiScope?.id ?? '';
+		const id = projectId;
 		if (id && id !== loadedFor) {
 			loadedFor = id;
-			load(id);
+			void load(id);
 		}
 	});
 
@@ -41,7 +46,7 @@
 		if (!t) { loading = false; return; }
 		loading = true;
 		try {
-			const res = await fetch(`/api/projects/${id}?token=${t}`);
+			const res = await fetch(`/api/projects/${encodeURIComponent(id)}?token=${encodeURIComponent(t)}`);
 			if (!res.ok) throw new Error(`Couldn't load project (${res.status})`);
 			const d = await res.json();
 			project = {
@@ -52,13 +57,10 @@
 				accent_color: d.accent_color ?? null,
 				path: d.path ?? null,
 				projects_root: typeof d.projects_root === 'string' ? d.projects_root : '',
-				context_files: Array.isArray(d.context_files)
-					? d.context_files.map(String)
-					: [],
 			};
 			name = project.name;
 			description = project.description;
-			loadAgents(t, id);
+			void loadAgents(t, id);
 		} catch (e) {
 			toasts.show(e instanceof Error ? e.message : 'Could not load project', 'error');
 		} finally {
@@ -85,9 +87,7 @@
 		const t = get(token);
 		if (!t || !project) return;
 		try {
-			const res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, {
-				method: 'DELETE',
-			});
+			const res = await fetch(`/api/agents/${threadId}?token=${encodeURIComponent(t)}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not remove that. Try again.'));
 			await loadAgents(t, project.id);
 			toasts.show('Project Agent removed', 'success');
@@ -95,8 +95,6 @@
 			agentsError = e instanceof Error ? e.message : 'Could not remove project Agent';
 		}
 	}
-
-	function close() { projectSettingsOpen.set(false); }
 
 	async function saveName() {
 		if (!project) return;
@@ -106,7 +104,7 @@
 		try {
 			await updateProject(project.id, { name: next });
 			project.name = next;
-			uiScope.update((s) => (s ? { ...s, name: next } : s));
+			if (isCurrentScope) uiScope.update((s) => (s ? { ...s, name: next } : s));
 			toasts.show('Saved', 'success');
 		} catch (e) {
 			toasts.show(e instanceof Error ? e.message : "Couldn't rename project", 'error');
@@ -127,55 +125,46 @@
 		}
 	}
 
+	function paintScope(colour: string) {
+		if (isCurrentScope) uiScope.update((s) => (s ? { ...s, color: colour } : s));
+	}
+
 	async function setAccent(c: string | null) {
 		if (!project || project.accent_color === c) return;
 		const prev = project.accent_color;
-		const resolved = c ?? projectColor(project.id);
 		project.accent_color = c;
-		uiScope.update((s) => (s ? { ...s, color: resolved } : s));
+		paintScope(c ?? projectColor(project.id));
 		try {
 			await updateProject(project.id, { accent_color: c });
 		} catch (e) {
 			project.accent_color = prev;
-			uiScope.update((s) => (s ? { ...s, color: prev ?? projectColor(project!.id) } : s));
+			paintScope(prev ?? projectColor(project.id));
 			toasts.show(e instanceof Error ? e.message : "Couldn't set accent", 'error');
 		}
-	}
-
-	function previewAccent(c: string) {
-		uiScope.update((s) => (s ? { ...s, color: c } : s));
 	}
 
 	$effect(() => {
 		return () => {
 			if (!project) return;
-			const ground = project.accent_color ?? projectColor(project.id);
-			uiScope.update((s) => (s ? { ...s, color: ground } : s));
+			paintScope(project.accent_color ?? projectColor(project.id));
 		};
 	});
-
-	const bootFiles = $derived(project?.context_files ?? []);
-	let rootPickerOpen = $state(false);
-	let newBootloaderPath = $state('');
 
 	function displayName(path: string | null | undefined): string {
 		if (!path) return '';
 		const clean = path.replace(/\\/g, '/').replace(/\/$/, '');
-		const parts = clean.split('/').filter(Boolean);
-		return parts.at(-1) ?? path;
-	}
-
-	function agentScopeLabel(value: string): string {
-		const trimmed = value.trim();
-		if (!trimmed) return '';
-		if (trimmed.includes('/')) return displayName(trimmed);
-		return trimmed;
+		return clean.split('/').filter(Boolean).at(-1) ?? path;
 	}
 
 	function agentScopes(agent: AgentRow): string[] {
 		return [...(agent.responsibility_paths ?? []), ...(agent.responsibility_domains ?? [])]
-			.map(agentScopeLabel)
-			.filter(Boolean);
+			.map((value) => value.trim())
+			.filter(Boolean)
+			.map((value) => (value.includes('/') ? displayName(value) : value));
+	}
+
+	function agentLine(agent: AgentRow): string {
+		return [agent.responsibility, ...agentScopes(agent)].filter(Boolean).join(' · ');
 	}
 
 	async function patchProjectRoot(absPath: string) {
@@ -183,7 +172,7 @@
 		const t = get(token);
 		if (!t) return;
 		try {
-			const res = await fetch(`/api/projects/${project.id}?token=${t}`, {
+			const res = await fetch(`/api/projects/${project.id}?token=${encodeURIComponent(t)}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ path: absPath }),
@@ -197,39 +186,14 @@
 		}
 	}
 
-	async function createBootloaderFile() {
-		if (!project || !newBootloaderPath.trim()) return;
-		const t = get(token);
-		if (!t) return;
-		try {
-			const res = await fetch('/api/context/bootloader/file', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t}` },
-				body: JSON.stringify({
-					scope: 'project',
-					project_id: project.id,
-					path: newBootloaderPath.trim(),
-					content: `# ${newBootloaderPath.trim()}\n`,
-				}),
-			});
-			if (!res.ok) throw new Error(await plainResponseError(res, 'Could not create that. Try again.'));
-			const body = await res.json();
-			project.context_files = Array.isArray(body.files) ? body.files : bootFiles;
-			newBootloaderPath = '';
-			toasts.show('Created', 'success');
-		} catch (e) {
-			toasts.show(e instanceof Error ? e.message : "Couldn't create bootloader file", 'error');
-		}
-	}
-
 	async function archive() {
 		if (!project || busy) return;
 		busy = true;
 		try {
 			await archiveProject(project.id);
 			toasts.show(`Archived ${project.name}`, 'success');
-			exitScope();
-			close();
+			if (isCurrentScope) exitScope();
+			closeSettingsProject();
 		} catch (e) {
 			toasts.show(e instanceof Error ? e.message : "Couldn't archive project", 'error');
 		} finally {
@@ -250,16 +214,24 @@
 			busy = false;
 		}
 	}
+
+	function openUse(section: 'skills' | 'context') {
+		if (project) openSectionFromProject(section, { id: project.id, name: project.name }, `${section}-${project.id}`);
+	}
 </script>
 
-<div class="ps-scroll">
-	<div class="ps">
-	{#if loading && !project}
-		<div class="ps-loading">Loading…</div>
-	{:else if project}
-		<section class="sec">
-			<div class="sec-cap">Identity</div>
+{#if loading && !project}
+	<p class="note">Loading…</p>
+{:else if project}
+	<div class="project-page">
+		<h2 class="page-title">{project.name}</h2>
 
+		<SettingsGroup label="What this project can use">
+			<SettingsRow name="Skills" sub="For all projects, and for this one" chevron onOpen={() => openUse('skills')} />
+			<SettingsRow name="Context" sub="For all projects, and for this one" chevron onOpen={() => openUse('context')} />
+		</SettingsGroup>
+
+		<SettingsGroup label="Identity">
 			<label class="fld">
 				<span>Name</span>
 				<input
@@ -269,262 +241,88 @@
 					onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
 				/>
 			</label>
-
 			<label class="fld">
 				<span>Description</span>
-				<textarea
-					rows="2"
-					bind:value={description}
-					onblur={saveDescription}
-					placeholder="Short description — shown in the projects list…"
-				></textarea>
+				<textarea rows="2" bind:value={description} onblur={saveDescription} placeholder="Short description, shown in the projects list"></textarea>
 			</label>
-
 			<div class="fld">
 				<span>Accent</span>
-				<AccentPicker value={project.accent_color} onPick={setAccent} onPreview={previewAccent} />
+				<AccentPicker value={project.accent_color} onPick={setAccent} onPreview={paintScope} />
 			</div>
-		</section>
+		</SettingsGroup>
 
-		<section class="sec">
-			<div class="sec-cap">Scope and roots</div>
-			<div class="row scope-row">
-				<div class="row-text">
-					<span class="row-title">Project boundary</span>
-					<span class="row-sub">Threads here share project context and project Agents.</span>
-				</div>
-			</div>
-			<div class="row scope-row">
-				<div class="row-text">
-					<span class="row-title">{project.path ? 'Working root' : 'Working root missing'}</span>
-					<span class="row-sub scope-path">{project.path ? displayName(project.path) : 'No directory selected'}</span>
-				</div>
-				<button class="btn repair-root" onclick={() => (rootPickerOpen = true)}>
-					{project.path ? 'Change root' : 'Repair root'}
-				</button>
-			</div>
-		</section>
+		<SettingsGroup label="Folder" hint="Conversations here share this project's context and Agents.">
+			<SettingsRow
+				name={project.path ? 'Working folder' : 'Working folder missing'}
+				sub={project.path ? displayName(project.path) : 'No folder selected'}
+				subTone={project.path ? 'quiet' : 'failed'}
+			>
+				{#snippet actions()}
+					<Button size="sm" variant="ghost" onclick={() => (rootPickerOpen = true)}>{project?.path ? 'Change' : 'Choose folder'}</Button>
+				{/snippet}
+			</SettingsRow>
+		</SettingsGroup>
 
-		<ProvidersPolicyBlock projectId={project.id} onSignIn={onOpenProviders} />
+		<div class="group-gap policy">
+			<ProvidersPolicyBlock projectId={project.id} onSignIn={() => requestSettingsSection('providers')} />
+		</div>
 
-		<section class="sec">
-			<div class="sec-cap">Project context</div>
-			<p class="sec-hint">Markdown files in context/ are loaded for every conversation in this project.</p>
-			{#if bootFiles.length === 0}
-				<div class="sec-hint">No project context files.</div>
-			{/if}
-			{#each bootFiles as f (f)}
-				<div class="row boot">
-					<svg class="boot-ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-					<span class="row-title">{displayName(f)}</span>
-				</div>
-			{/each}
-			<details class="advanced-create">
-				<summary>Create new context file</summary>
-				<div class="boot-create-row">
-					<input
-						bind:value={newBootloaderPath}
-						placeholder="File name (.md)"
-						aria-label="New project context file"
-						onkeydown={(e) => { if (e.key === 'Enter') void createBootloaderFile(); }}
-					/>
-					<button class="add create-bootloader-file" disabled={!newBootloaderPath.trim()} onclick={createBootloaderFile}>Create</button>
-				</div>
-			</details>
-		</section>
-
-		<section class="sec">
-			<div class="sec-cap">Project skills</div>
-			<p class="sec-hint">Skills available to every thread in this project unless a thread overrides them.</p>
-			<SkillScopePanel
-				scope="project"
-				projectId={project.id}
-				scopeLabel={`Project: ${project.name}`}
-				inheritanceHint="Inherited by threads in this project. Thread skills with the same name override these."
-				onBrowseSkills={onBrowseSkills}
-				onOpenSkill={close}
-			/>
-		</section>
-
-		<section class="sec">
-			<div class="sec-cap">Project Agents</div>
-			<p class="sec-hint">Threads with clear responsibility for a project area.</p>
+		<SettingsGroup label="Agents" hint="Threads that own one area of this project.">
 			{#if agentsLoading}
-				<div class="sec-hint">Loading project Agents...</div>
+				<p class="note">Loading project Agents…</p>
 			{:else if agentsError}
-				<div class="sec-hint">{agentsError}</div>
-			{:else if agentRows.length === 0}
-				<div class="sec-hint">No project Agents yet.</div>
+				<p class="note failed">{agentsError}</p>
 			{:else}
 				{#each agentRows as agent (agent.thread_id)}
-					<div class="row agent-row">
-						<div class="row-text">
-							<span class="row-title">{agent.display_name}</span>
-							<span class="row-sub">{agent.responsibility}</span>
-							{#if agent.responsibility_paths?.length || agent.responsibility_domains?.length}
-								<div class="scope-chips">
-									{#each agentScopes(agent) as scope}
-										<span>{scope}</span>
-									{/each}
-								</div>
-							{/if}
-						</div>
-						<button
-							class="iconbtn"
-							title="Remove project Agent"
-							aria-label="Remove project Agent {agent.display_name}"
-							onclick={() => demoteAgent(agent.thread_id)}
-						>✕</button>
-					</div>
+					<SettingsRow
+						name={agent.display_name}
+						sub={agentLine(agent)}
+						menuItems={[{ id: 'remove', label: 'Remove as project Agent', danger: true }]}
+						onMenuSelect={() => demoteAgent(agent.thread_id)}
+					/>
+				{:else}
+					<p class="note">No project Agents yet.</p>
 				{/each}
 			{/if}
-		</section>
+		</SettingsGroup>
 
-		<ProjectRepos projectId={project.id} />
+		<div class="group-gap"><ProjectRepos projectId={project.id} /></div>
 
-		<section class="sec lifecycle">
-			<div class="sec-cap">Lifecycle</div>
+		<SettingsGroup label="Archive">
 			{#if project.status === 'archived'}
-				<div class="row">
-					<div class="row-text">
-						<span class="row-title">This project is archived</span>
-						<span class="row-sub">Hidden from the rail. Restore it to make it active again.</span>
-					</div>
-					<button class="btn" onclick={restore} disabled={busy}>Restore</button>
-				</div>
+				<SettingsRow name="This project is archived" sub="Hidden from the rail. Restore it to make it active again.">
+					{#snippet actions()}<Button size="sm" variant="ghost" onclick={restore} disabled={busy}>Restore</Button>{/snippet}
+				</SettingsRow>
 			{:else}
-				<div class="row">
-					<div class="row-text">
-						<span class="row-title">Archive project</span>
-						<span class="row-sub">Hide it from the rail and switchers. Nothing is deleted — restore any time from ⌘K.</span>
-					</div>
-					<button class="btn warn" onclick={archive} disabled={busy}>Archive</button>
-				</div>
+				<SettingsRow name="Archive project" sub="Hides it from the rail and switchers. Nothing is deleted; restore it any time from ⌘K.">
+					{#snippet actions()}<Button size="sm" variant="ghost" onclick={archive} disabled={busy}>Archive</Button>{/snippet}
+				</SettingsRow>
 			{/if}
-		</section>
-	{/if}
+		</SettingsGroup>
 	</div>
-</div>
+{/if}
 
 {#if rootPickerOpen && project}
-	<ProjectRootPicker
-		projectsRoot={project.projects_root}
-		onSelect={patchProjectRoot}
-		onClose={() => (rootPickerOpen = false)}
-	/>
+	<ProjectRootPicker projectsRoot={project.projects_root} onSelect={patchProjectRoot} onClose={() => (rootPickerOpen = false)} />
 {/if}
 
 <style>
-	.ps-scroll {
-		flex: 1; min-height: 0; overflow-y: auto;
-		padding-top: var(--header-bottom);
-	}
-	.ps {
-		width: 100%; max-width: 600px; margin: 0 auto;
-		display: flex; flex-direction: column; gap: 12px;
-		padding: 16px 20px 40px; text-align: left;
-	}
-	.ps-loading { padding: 32px; text-align: center; color: var(--text-tertiary); font-size: var(--text-subhead); }
-
-	.sec {
-		border: 1px solid var(--border-subtle); border-radius: var(--lg-card-radius);
-		background: var(--bg-secondary); padding: 16px 18px;
-		display: flex; flex-direction: column; gap: 11px;
-	}
-	.sec-cap {
-		font-size: var(--text-caption); font-weight: 700; text-transform: uppercase;
-		letter-spacing: 0.1em; color: var(--text-tertiary);
-	}
-
-	.fld { display: flex; flex-direction: column; gap: 6px; }
+	.project-page { display: flex; flex-direction: column; }
+	/* This page title owns the first gap; its first group should match the other titled Settings pages. */
+	.project-page :global(.settings-group:first-of-type) { margin-top: var(--space-1); }
+	.group-gap { margin-top: var(--space-6); }
+	/* The policy block draws edge to edge; inset it to the page's row edge. */
+	/* Keep the project policy's padded content inside the Settings column on a phone. */
+	.policy { box-sizing: border-box; padding: 0 var(--space-2); }
+	.note { margin: 0; padding: 0 var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
+	.note.failed { color: var(--red-text); }
+	.fld { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); }
 	.fld > span:first-child { font-size: var(--text-footnote); color: var(--text-secondary); }
 	.fld input, .fld textarea {
-		font: inherit; font-size: var(--text-subhead); padding: 9px 11px;
+		font: inherit; font-size: var(--text-subhead);
+		padding: var(--space-2) var(--space-3);
 		border-radius: var(--radius-sm); border: 1px solid var(--border);
 		background: var(--bg-primary); color: var(--text-primary); resize: vertical;
 	}
 	.fld input:focus, .fld textarea:focus { outline: none; border-color: var(--accent); }
-
-	.row { display: flex; align-items: center; gap: 14px; }
-	.scope-row { align-items: flex-start; }
-	.scope-path {
-		max-width: 100%;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.row.boot { gap: 11px; padding: 2px 0; }
-	.row.boot .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.boot-ico { color: var(--text-tertiary); flex-shrink: 0; }
-	.sec-hint { font-size: var(--text-footnote); color: var(--text-tertiary); margin: 0; }
-
-	.iconbtn {
-		background: none; border: none; cursor: pointer; color: var(--text-tertiary);
-		font-size: var(--text-footnote); padding: 3px 6px; border-radius: var(--radius-xs); flex-shrink: 0; line-height: 1;
-	}
-	.iconbtn:hover { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
-
-	.add {
-		align-self: flex-start; background: none; border: 1px dashed var(--border);
-		border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary);
-		font-size: var(--text-subhead); padding: 6px 12px; font-family: inherit;
-	}
-	.add:hover { color: var(--accent-text); border-color: var(--accent); }
-	.add:disabled { opacity: 0.45; cursor: not-allowed; }
-	.boot-create-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 8px;
-		margin-top: 8px;
-	}
-	.boot-create-row input {
-		min-width: 0;
-		font: inherit;
-		font-size: var(--text-subhead);
-		padding: 7px 10px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--border);
-		background: var(--bg-primary);
-		color: var(--text-primary);
-	}
-	.row-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-	.row-title { font-size: var(--text-subhead); color: var(--text-primary); }
-	.row-sub { font-size: var(--text-footnote); color: var(--text-tertiary); }
-	.agent-row { align-items: flex-start; }
-	.scope-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 5px;
-		margin-top: 4px;
-	}
-	.scope-chips span {
-		max-width: 180px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		border: 1px solid var(--border-subtle);
-		border-radius: var(--radius-xs);
-		color: var(--text-secondary);
-		font-size: var(--text-caption);
-		padding: 2px 7px;
-	}
-	.advanced-create {
-		border-top: 1px solid var(--border-subtle);
-		padding-top: 8px;
-	}
-	.advanced-create summary {
-		cursor: pointer;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-	}
-	.btn {
-		font: inherit; font-size: var(--text-subhead); font-weight: 500;
-		padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer;
-		background: none; border: 1px solid var(--border); color: var(--text-secondary);
-		flex-shrink: 0;
-	}
-	.btn:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
-	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-	.btn.warn { color: var(--amber, #d97706); border-color: color-mix(in srgb, var(--amber, #d97706) 45%, transparent); }
-	.btn.warn:hover:not(:disabled) { background: color-mix(in srgb, var(--amber, #d97706) 10%, transparent); color: var(--amber, #d97706); }
 </style>

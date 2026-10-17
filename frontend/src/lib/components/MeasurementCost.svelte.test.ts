@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import MeasurementCost from './MeasurementCost.svelte';
 import { decodeMeasurementCost, type CostState, type CostPeriod, type CostWindowFigures, type MeasurementCost as CostData, type WorkspaceSubscriptionContext } from '$lib/stores/measurementCost';
-import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest } from '$lib/stores/settingsNavigation';
+import { settingsNavigation } from '$lib/stores/settingsNavigation';
 
 let component: Record<string, unknown> | null = null;
 let host: HTMLElement | undefined;
@@ -106,11 +106,11 @@ describe('MeasurementCost', () => {
 		expect(text(markup)).not.toContain('Billing history');
 		expect(text(markup)).not.toContain("Overage isn't recorded");
 		expect(markup.querySelectorAll('.billing-link')).toHaveLength(1);
-		const before = get(settingsOpenRequest);
+		const before = get(settingsNavigation).openRequest;
 		(markup.querySelector('.billing-link') as HTMLButtonElement).click(); flushSync();
-		expect(get(settingsOpenRequest)).toBe(before + 1);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsAnchorRequest)).toBe('account-billing');
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).anchor).toBe('account-billing');
 	});
 	it('qualifies the subscription total by the accounts without a price, and never reads $0 for none', () => {
 		const some = text(showActual({ workspace_subscription: workspace({ subscription_dollars: 20, subscription_unrecorded_accounts: 2, subscription_coverage: 'partial' }) }));
@@ -259,11 +259,11 @@ describe('MeasurementCost', () => {
 		expect(text(one)).toContain('No charge was recorded for 4 pay-per-token usage records. 1 of them is on an External endpoint with no billing set.');
 		const link = [...one.querySelectorAll<HTMLButtonElement>('.billing-link')].find((button) => button.textContent === 'Set billing for External endpoints');
 		expect(link).toBeDefined();
-		const opened = get(settingsOpenRequest);
+		const opened = get(settingsNavigation).openRequest;
 		link!.click();
-		expect(get(settingsOpenRequest)).toBe(opened + 1);
-		expect(get(settingsActiveSection)).toBe('providers');
-		expect(get(settingsAnchorRequest)).toBeNull();
+		expect(get(settingsNavigation).openRequest).toBe(opened + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).anchor).toBeNull();
 		unmount(component!); host?.remove();
 		const many = text(showActual({ complete: false, unknown_charge_records: 4, external_unset_records: 3 }));
 		expect(many).toContain('3 of them are on External endpoints with no billing set.');

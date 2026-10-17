@@ -33,7 +33,8 @@ jobs:
   e2e:
     name: Playwright UI-E2E (mock)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # One serial suite (playwright workers: 1, fullyParallel: false, because the mock backend is shared). Measured on run 39011776573: 491 of 1062 tests in 90 min (about 9 s per passing test), so the full suite needs about 3 h.
+    timeout-minutes: 240
 
     strategy:
       fail-fast: false
@@ -86,6 +87,23 @@ jobs:
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps chromium
+
+      # browser-pane drives the real native agent-browser, which the backend resolves from PATH
+      # (backend/host_access/browser_cli.py). Same pinned install as browser-native.yml.
+      - name: Install native agent-browser
+        run: |
+          set -e
+          npm install --prefix "$RUNNER_TEMP/browser-cli" --no-audit --no-fund agent-browser@0.31.2
+          native_bin="$RUNNER_TEMP/browser-cli/node_modules/agent-browser/bin/agent-browser-linux-x64"
+          test -x "$native_bin"
+          "$native_bin" --version
+          chrome_bin="$(command -v google-chrome)"
+          test -x "$chrome_bin"
+          "$chrome_bin" --version
+          mkdir -p "$RUNNER_TEMP/browser-bin"
+          ln -s "$native_bin" "$RUNNER_TEMP/browser-bin/agent-browser"
+          echo "$RUNNER_TEMP/browser-bin" >> "$GITHUB_PATH"
+          echo "AGENT_BROWSER_EXECUTABLE_PATH=$chrome_bin" >> "$GITHUB_ENV"
 
       - name: Run UI-E2E (mock mode via scripts/e2e-local)
         env:

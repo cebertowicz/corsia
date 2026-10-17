@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { get } from 'svelte/store';
 	import Modal from './Modal.svelte';
+	import Button from './Button.svelte';
 	import { token } from '$lib/stores/auth';
 	import { plainResponseError } from '$lib/plainError';
 
@@ -93,11 +94,11 @@
 	</div>
 
 	{#snippet foot()}
-		<button class="btn ghost push" onclick={onClose}>Cancel</button>
+		<Button variant="ghost" onclick={onClose}>Cancel</Button>
 		{#if mode === 'dir'}
-			<button class="btn primary" disabled={!selectable} onclick={() => { if (cwd) { onSelect(cwd); onClose(); } }}>
+			<Button variant="primary" disabled={!selectable} onclick={() => { if (cwd) { onSelect(cwd); onClose(); } }}>
 				Choose this folder
-			</button>
+			</Button>
 		{/if}
 	{/snippet}
 </Modal>
@@ -130,21 +131,10 @@
 
 	.empty { padding: 18px 6px; text-align: center; color: var(--text-tertiary); font-size: var(--text-subhead); }
 	.err {
-		font-size: var(--text-subhead); color: var(--red);
+		font-size: var(--text-subhead); color: var(--red-text);
 		background: color-mix(in srgb, var(--red) 8%, transparent);
 		border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
 		border-radius: var(--radius-sm); padding: 8px 10px;
 	}
-
-	.btn {
-		font: inherit; font-size: var(--text-subhead); font-weight: 500;
-		padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
-		border: 1px solid transparent;
-	}
-	.btn.push { margin-left: auto; }
-	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
-	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent-fill); color: var(--accent-on-fill); }
-	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 </style>

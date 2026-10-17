@@ -12,6 +12,7 @@
 	import SettingsDevices from './SettingsDevices.svelte';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 	import { connectOpen } from '$lib/stores/remoteConnect';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
 		{ v: 'light', l: 'Light' },
@@ -130,13 +131,13 @@
 
 <HostAccessReviewSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card" data-settings-anchor="update">
+<div class="settings-card" data-settings-anchor="update" use:settingsAnchor={'update'}>
 	<h3>Updates</h3>
 	<p class="card-desc">Keep CORSIA current.</p>
 	<div class="service-grid"><SettingsUpdate /></div>
 </div>
 
-<div class="settings-card" data-settings-anchor="restart">
+<div class="settings-card" data-settings-anchor="restart" use:settingsAnchor={'restart'}>
 	<h3>Services</h3>
 	<p class="card-desc">Restart drains and bounces the current build.</p>
 

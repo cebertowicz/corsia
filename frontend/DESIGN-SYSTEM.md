@@ -64,8 +64,9 @@ first needs it, from what that screen gets approved with.
 | Role | Treatment | Drawn by |
 |---|---|---|
 | Pane header | Height `--header-height`. Title `--text-body`, `--fw-semibold`, `--text-primary`. 12px side inset. No bottom line. The chat header is the one glass header over scrolling content: `--header-gradient-top` into `--glass-thin`, `--glass-blur`, `--glass-rim`. | `Header.svelte` `.shell-header`, `.h-title` |
+| Page title | Top of a full-page view's content column (Settings sections). `--text-title2`, `--fw-semibold`, `--text-primary`, the row's `--space-2` side inset, `--space-5` below. Hidden on a phone, where the app header names the page. | `SettingsView.svelte` `.page-title` |
 | Section label | `--text-footnote`, `--fw-semibold`, `--text-tertiary`, sentence case. No fill, border or rule. | `Pane.svelte` cap label; `SidebarThreadList.svelte` group label |
-| List row | Flat on the pane surface: no border or fill at rest. Min height 38px. Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row |
+| List row | Flat on the pane surface: no border or fill at rest. Min height `--list-row-min-height` (38px). Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row; `SettingsRow.svelte` |
 | Second line | `--text-caption`, `--text-tertiary`. When the line states a status, it takes that status's text colour (Needs you `--amber-text`). | `SidebarThreadRow.svelte` update line; `PlanRowFace.svelte` subline |
 | Trailing detail and row action | `--text-caption`, `--text-tertiary`. An action is text that turns `--text-primary` on hover, with no button chrome at rest. | `PlanHeadControls.svelte`, `PlanChildControls.svelte`, `AttentionDock.svelte` Answer |
 | Status | A dot or coloured text, never a filled badge. Needs you: `--amber` mark, `--amber-text` text. Working: `--status-in-progress`. Done: `--green`. Failed: `--red`. | `PlanRowFace.svelte`, `SidebarThreadRow.svelte` |
@@ -75,7 +76,7 @@ first needs it, from what that screen gets approved with.
 | Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
 | Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
 | Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
-| Project mark | A 9px dot in the project's colour with an 8% `--text-primary` ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
+| Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
 | Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
 | Time | Formatted only by `lib/time.ts` (`relLabel` for recency, `formatMoment` for plan times). Never formatted inside a component. | `time.ts` |
 | Spacing | `--space-*` tokens. A raw px value is allowed only where this table names one. | `app-tokens.css` |
@@ -175,9 +176,10 @@ project scope every role is derived from the project's colour
 | `--green-bg` | | `rgba(52,211,153,0.08)` | `#f0fdf4` *(solid!)* | Light-mode value is solid hex, not rgba — known wart, do not "fix" without a sweep. |
 | `--green-border` | | `rgba(52,211,153,0.25)` | `rgba(34,197,94,0.3)` | |
 | `--green-text` | | `#34d399` | `#16a34a` | Use this for green-on-green-bg text. |
-| `--red` | Destructive / error | `#f87171` | `#f87171` | |
+| `--red` | Destructive / error | `#f87171` | `#f87171` | `--red` is for fills, borders and icons; red text uses `--red-text`. |
 | `--red-bg` | | `rgba(248,113,113,0.08)` | `#fef2f2` *(solid)* | |
 | `--red-bg-hover` | | `rgba(248,113,113,0.14)` | `#fee2e2` *(solid)* | |
+| `--red-text` | Red text | `var(--red)` | `#b91c1c` | Readable on `--red-bg` and the plain surface in both themes. |
 
 **Anti-patterns:**
 - ❌ Reaching for `--blue` directly, or `--purple` for the accent. Use the
@@ -750,8 +752,19 @@ interface Props {
 
 **Behavior:** Escape closes (when enabled), backdrop click closes (when
 enabled), inner click does NOT propagate to backdrop. Body has
-`overflow-y: auto`; modal max-height 86vh desktop / 92vh mobile. Fade
-backdrop 160ms, fly content (y: 8px) 200ms.
+`overflow-y: auto`; modal max-height 86vh on desktop, and on a phone only
+the room inside the safe-area padding, so the footer clears the home
+indicator. Fade backdrop 160ms, fly content (y: 8px) 200ms.
+
+**Header and footer have no dividers** (§0.2 rule 3); space separates them
+from the body. The footer puts every action together at the trailing edge, by
+proximity: a choice pair sits side by side where every other modal puts its
+commit, so the eye finds the commit in the same place each time. One solid
+`primary` `Button` (or `danger` for a destructive commit) is the commit, and
+every secondary (Cancel, Back, Close) is a `ghost` `Button`, never an
+outlined or secondary-filled one. No `flex: 1` spacer pins Cancel to the
+left, in `foot` or in a body action row. A destructive confirm carries no
+icon tile: its title says what happens.
 
 **Backdrop is light dim only** — `rgba(0, 0, 0, 0.28)` solid. The modal
 panel does the glass; the backdrop just de-emphasizes content. Liquid
@@ -790,7 +803,7 @@ interface Props {
   prominent action on a page or modal foot.
 - `secondary` — neutral default (`--bg-secondary` + `--border` +
   `--text-secondary`). Hovers to violet tint.
-- `danger` — red tint. Destructive or override-with-caution.
+- `danger` — red tint, `--red-text` label (readable on the tint in both themes). Destructive or override-with-caution.
 - `ghost` — transparent, low-attention. Hovers to `--bg-tertiary`.
 
 **Loading state** shows a 12px circular spinner inside the button and

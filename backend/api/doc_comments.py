@@ -75,7 +75,7 @@ async def list_comments(artifact_id: str, token: str):
             path = artifact["path"] if artifact else None
             comments, anchors_checked = anchored_threads(artifact_id, path, db)
             image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
-            feedback_state.annotate_reply_waiting_threads(db, user["id"], artifact_id, comments)
+            feedback_state.annotate_thread_attention(db, user["id"], artifact_id, comments)
             feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
             return comments, anchors_checked, feedback
         finally:

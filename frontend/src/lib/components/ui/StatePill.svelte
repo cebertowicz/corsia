@@ -66,7 +66,7 @@
 	}
 	.pill.error {
 		background: var(--red-bg);
-		color: var(--red);
+		color: var(--red-text);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
 	}
 	.pill.available {
