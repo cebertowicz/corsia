@@ -11,7 +11,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,6 @@ pub const SOURCE_LABEL: &str = "com.corsia.prod";
 const PLIST: &str = "com.corsia.prod.plist";
 /// A restart that has not finished after this long is reported, not waited on forever.
 const RESTART_POLL: Duration = Duration::from_secs(2);
-const RESTART_WAIT: Duration = Duration::from_secs(300);
 const ORPHAN_POLL: Duration = Duration::from_secs(1);
 
 // The person-facing lines for a source install that cannot be taken over yet, as the
@@ -200,14 +199,14 @@ pub trait Lifecycle {
         state: &Path,
         variable_names: &BTreeSet<String>,
     ) -> Result<(), ReadyError>;
-    /// Whether the source install is partway through restarting itself, from a
-    /// read-only look. `None` when that could not be read.
-    fn restart_in_flight(&mut self, _state: &Path) -> Option<bool> {
-        Some(false)
+    /// A read-only look at the source's self-restart requests. What counts as
+    /// stuck comes from the request's own age, never from how long this app has waited.
+    fn look_for_restart(&mut self, _state: &Path) -> RestartLook {
+        RestartLook::Settled
     }
-    /// How often to look, and how long to wait in all, for a restart to finish.
-    fn restart_wait(&self) -> (Duration, Duration) {
-        (RESTART_POLL, RESTART_WAIT)
+    /// How often to look while a restart is in flight.
+    fn restart_poll(&self) -> Duration {
+        RESTART_POLL
     }
     /// `<checkout>/scripts/corsia stop`, which holds new work and drains the
     /// running work for up to `CORSIA_DRAIN_MAX_WAIT`, then proof from the
@@ -558,6 +557,20 @@ pub enum ReadyError {
     Restarting,
 }
 
+/// What a read-only look at the source's restart requests found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestartLook {
+    /// No request is in flight.
+    Settled,
+    /// One began recently enough that it may still be draining: wait for it.
+    Young,
+    /// One is older than the longest drain plus a teardown margin: nothing is
+    /// protecting running work any more, so restarting it is safe.
+    Stuck,
+    /// The look could not be read.
+    Unknown,
+}
+
 /// Forget a journal whose work is finished. A leftover one is harmless: the
 /// next launch recovers from it by repeating steps that are safe to repeat.
 fn forget_journal(plan: &Plan) {
@@ -618,8 +631,7 @@ fn wait_until_ready(
     cancel: &AtomicBool,
     phase: &mut dyn FnMut(Phase),
 ) -> Result<(), AdoptionError> {
-    let (poll, total) = lifecycle.restart_wait();
-    let deadline = Instant::now() + total;
+    let poll = lifecycle.restart_poll();
     loop {
         match lifecycle.check_ready(&plan.source.state, variable_names) {
             Ok(()) => return Ok(()),
@@ -643,18 +655,26 @@ fn wait_until_ready(
                         "adoption cancelled; the source service is still running",
                     ));
                 }
-                if Instant::now() >= deadline {
-                    return Err(AdoptionError::standalone(
-                        STUCK_RESTARTING,
-                        Some(Recovery::RestartIt),
-                    ));
-                }
-                phase(Phase::WaitingRestart);
-                std::thread::sleep(poll);
-                // Anything but a restart still in flight sends the question back
-                // to the full check, which says what is wrong if something is.
-                if lifecycle.restart_in_flight(&plan.source.state) != Some(true) {
-                    break;
+                // The request's own age decides, so a restart that is draining as
+                // long as it is allowed to is never bounced, however long this waits.
+                match lifecycle.look_for_restart(&plan.source.state) {
+                    RestartLook::Stuck => {
+                        return Err(AdoptionError::standalone(
+                            STUCK_RESTARTING,
+                            Some(Recovery::RestartIt),
+                        ))
+                    }
+                    RestartLook::Young => {
+                        phase(Phase::WaitingRestart);
+                        std::thread::sleep(poll);
+                    }
+                    // Anything else sends the question back to the full check,
+                    // which says what is wrong if something is.
+                    RestartLook::Unknown => {
+                        std::thread::sleep(poll);
+                        break;
+                    }
+                    RestartLook::Settled => break,
                 }
             },
         }
@@ -941,9 +961,8 @@ mod tests {
         /// What `check_ready` answers, one per ask, before it answers by `fail`.
         ready_script: Vec<ReadyError>,
         /// What each read-only look for a restart in flight finds, in order.
-        restart_looks: Vec<Option<bool>>,
-        restart_forever: bool,
-        restart_total: Duration,
+        restart_looks: Vec<RestartLook>,
+        restart_forever: Option<RestartLook>,
         /// The `corsia stop` process the fake reports as soon as it exists.
         stop_process: Option<StopProcess>,
         /// The journal's recorded stop, read while the fake stop was draining.
@@ -1007,17 +1026,17 @@ mod tests {
                 Ok(())
             }
         }
-        fn restart_in_flight(&mut self, _: &Path) -> Option<bool> {
-            if self.restart_forever {
-                Some(true)
+        fn look_for_restart(&mut self, _: &Path) -> RestartLook {
+            if let Some(look) = self.restart_forever {
+                look
             } else if self.restart_looks.is_empty() {
-                Some(false)
+                RestartLook::Settled
             } else {
                 self.restart_looks.remove(0)
             }
         }
-        fn restart_wait(&self) -> (Duration, Duration) {
-            (Duration::from_millis(1), self.restart_total)
+        fn restart_poll(&self) -> Duration {
+            Duration::from_millis(1)
         }
         fn stop_old(
             &mut self,
@@ -1092,8 +1111,7 @@ mod tests {
             counts: vec![],
             ready_script: vec![],
             restart_looks: vec![],
-            restart_forever: false,
-            restart_total: Duration::from_secs(5),
+            restart_forever: None,
             stop_process: None,
             journal_in_stop: None,
             plan: plan.clone(),
@@ -1921,13 +1939,12 @@ mod tests {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, None);
         fake.ready_script = vec![ReadyError::Restarting];
-        fake.restart_looks = vec![Some(true), Some(true), Some(false)];
+        fake.restart_looks = vec![RestartLook::Young, RestartLook::Young, RestartLook::Settled];
         let (result, phases) = adopt_quietly(&plan, &mut fake);
         result.unwrap();
         assert_eq!(
             phases,
             [
-                Phase::WaitingRestart,
                 Phase::WaitingRestart,
                 Phase::WaitingRestart,
                 Phase::Waiting { running: None },
@@ -1951,27 +1968,54 @@ mod tests {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, None);
         fake.ready_script = vec![ReadyError::Restarting];
-        fake.restart_looks = vec![None];
+        fake.restart_looks = vec![RestartLook::Unknown];
         adopt_quietly(&plan, &mut fake).0.unwrap();
         assert_eq!(fake.ready_asked.len(), 2);
     }
 
     #[test]
-    fn a_restart_that_never_settles_is_stuck_and_offers_to_restart_it() {
+    fn a_request_older_than_the_longest_drain_is_stuck_at_once_and_offers_to_restart_it() {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, None);
         fake.ready_script = vec![ReadyError::Restarting];
-        fake.restart_forever = true;
-        fake.restart_total = Duration::from_millis(30);
+        fake.restart_looks = vec![RestartLook::Stuck];
         let (result, phases) = adopt_quietly(&plan, &mut fake);
         let error = result.unwrap_err();
         assert_eq!(error.message(), "Your existing CORSIA is stuck restarting.");
         assert_eq!(error.outcome, Outcome::Untouched);
         assert_eq!(error.recovery, Some(Recovery::RestartIt));
         assert!(error.standalone);
-        assert!(phases.iter().all(|phase| *phase == Phase::WaitingRestart));
+        assert!(phases.is_empty(), "an old request is not waited for first");
         assert!(fake.events.is_empty());
         assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn a_request_that_ages_out_while_waiting_becomes_stuck() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::Restarting];
+        fake.restart_looks = vec![RestartLook::Young, RestartLook::Stuck];
+        let (result, phases) = adopt_quietly(&plan, &mut fake);
+        assert_eq!(result.unwrap_err().recovery, Some(Recovery::RestartIt));
+        assert_eq!(phases, [Phase::WaitingRestart]);
+    }
+
+    #[test]
+    fn a_young_request_is_waited_for_however_long_it_takes_and_never_bounced() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::Restarting];
+        fake.restart_looks = [vec![RestartLook::Young; 200], vec![RestartLook::Settled]].concat();
+        let (result, phases) = adopt_quietly(&plan, &mut fake);
+        result.unwrap();
+        assert_eq!(
+            phases
+                .iter()
+                .filter(|phase| **phase == Phase::WaitingRestart)
+                .count(),
+            200
+        );
     }
 
     #[test]
@@ -1979,7 +2023,7 @@ mod tests {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, None);
         fake.ready_script = vec![ReadyError::Restarting];
-        fake.restart_forever = true;
+        fake.restart_forever = Some(RestartLook::Young);
         let error = adopt(&plan, &mut fake, 1, &AtomicBool::new(true), &mut |_| {}).unwrap_err();
         assert_eq!(error.outcome, Outcome::Untouched);
         assert!(!error.standalone);

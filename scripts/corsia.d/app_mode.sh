@@ -9,9 +9,11 @@
 #
 #   checkout root  Contents/Resources, the script's parent as for a checkout
 #   python         the bundled interpreter, with Resources/bin/corsia's PYTHONPATH
-#   config source  service.json in the app folder (workspace, port); never a
-#                  .env or the machine bootstrap a source install reads
-#   state root     the backend's default_state_root() for this bundle
+#   config source  service.json in the app folder (workspace, port, and a
+#                  state_dir when it names one); never a .env or the machine
+#                  bootstrap a source install reads
+#   state root     service.json's state_dir when present, else the backend's
+#                  default_state_root() for this bundle
 #   version        CFBundleShortVersionString+CFBundleVersion, the generation
 #                  the launcher gives the service
 #   service verbs  the bundle's launchd job; Update stages and swaps the app

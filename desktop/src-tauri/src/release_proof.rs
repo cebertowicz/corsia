@@ -185,8 +185,15 @@ mod tests {
 
     #[test]
     fn a_bound_port_does_not_refuse_and_a_closed_one_does() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
+        // A port below the kernel's ephemeral range, so another test binding port 0 cannot be
+        // handed this number between the drop and the check.
+        let (listener, port) = (39_000..40_000)
+            .find_map(|port| {
+                TcpListener::bind(("127.0.0.1", port))
+                    .ok()
+                    .map(|l| (l, port))
+            })
+            .expect("a free test port");
         assert!(!port_refuses(port));
         drop(listener);
         assert!(port_refuses(port));

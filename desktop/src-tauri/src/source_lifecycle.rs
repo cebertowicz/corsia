@@ -13,13 +13,16 @@ use std::{
 };
 
 use crate::{
-    adoption::{self, ReadyError, StopProcess},
+    adoption::{self, ReadyError, RestartLook, StopProcess},
     probe_health, release_proof, run_service_command, unregister_service, wait_for_service,
     APP_SERVICE_LABEL, HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT,
 };
 
 /// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
-const DRAIN_MAX_WAIT: &str = "1800";
+const DRAIN_MAX_WAIT_SECONDS: u64 = 1800;
+/// A self-restart request is stuck only once it is older than the longest drain
+/// plus a margin for the teardown and boot after it.
+const STUCK_AFTER: Duration = Duration::from_secs(DRAIN_MAX_WAIT_SECONDS + 300);
 /// The variables of the app's own environment the CLI is given.
 const INHERITED: [&str; 5] = ["HOME", "PATH", "USER", "LANG", "TMPDIR"];
 const COUNT_INTERVAL: Duration = Duration::from_secs(1);
@@ -29,7 +32,7 @@ const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 /// Read only, over `mode=ro` and never immutable: the database is live.
 const COUNT_PROGRAM: &str = "import sqlite3, sys; from pathlib import Path; c = sqlite3.connect(Path(sys.argv[1]).as_uri() + '?mode=ro', uri=True, timeout=1); print(c.execute(\"SELECT COUNT(*) FROM active_turns WHERE status='running'\").fetchone()[0])";
 const PREFLIGHT_PROGRAM: &str = "import sys; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import preflight_main; sys.exit(preflight_main(sys.argv[2:]))";
-const RESTART_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import restart_in_flight; sys.exit(0 if restart_in_flight(Path(sys.argv[2])) else 1)";
+const RESTART_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import restart_in_flight_age; age = restart_in_flight_age(Path(sys.argv[2])); print('none' if age is None else age)";
 const SNAPSHOT_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import create_adoption_snapshot; print(create_adoption_snapshot(Path(sys.argv[2])))";
 const RESTORE_PROGRAM: &str = "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); from infra.adoption_snapshot import restore_adoption_snapshot; restore_adoption_snapshot(Path(sys.argv[2]), Path(sys.argv[3]))";
 
@@ -90,7 +93,7 @@ impl SourceLifecycle {
             .arg(verb)
             .env_clear()
             .envs(self.env.iter().map(|(name, value)| (name, value)))
-            .env("CORSIA_DRAIN_MAX_WAIT", DRAIN_MAX_WAIT)
+            .env("CORSIA_DRAIN_MAX_WAIT", DRAIN_MAX_WAIT_SECONDS.to_string())
             .current_dir(
                 self.source
                     .cli
@@ -231,6 +234,22 @@ impl SourceLifecycle {
     }
 }
 
+/// The backend's answer to the restart look: `none`, or the age in seconds of
+/// the youngest in-flight request.
+fn classify_restart(answer: &str) -> RestartLook {
+    if answer == "none" {
+        return RestartLook::Settled;
+    }
+    match answer.parse::<f64>() {
+        Ok(age) if age.is_finite() && age > STUCK_AFTER.as_secs_f64() => RestartLook::Stuck,
+        Ok(age) if age.is_finite() => RestartLook::Young,
+        _ => {
+            log::warn!("could not read the age of a restart request");
+            RestartLook::Unknown
+        }
+    }
+}
+
 /// When the kernel says a process started, as `seconds.microseconds`; `None`
 /// when no such process exists. A pid alone can be reused, the pair cannot.
 fn process_started(pid: u32) -> Option<String> {
@@ -299,22 +318,24 @@ impl adoption::Lifecycle for SourceLifecycle {
         }
     }
 
-    fn restart_in_flight(&mut self, state: &Path) -> Option<bool> {
-        let output = self
+    fn look_for_restart(&mut self, state: &Path) -> RestartLook {
+        let output = match self
             .python(RESTART_PROGRAM)
             .arg(&self.bundled.backend)
             .arg(state)
             .output()
-            .inspect_err(|error| log::warn!("could not look for a restart: {error}"))
-            .ok()?;
-        match output.status.code() {
-            Some(0) => Some(true),
-            Some(1) => Some(false),
-            _ => {
+        {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
                 log::warn!("could not look for a restart: exited {}", output.status);
-                None
+                return RestartLook::Unknown;
             }
-        }
+            Err(error) => {
+                log::warn!("could not look for a restart: {error}");
+                return RestartLook::Unknown;
+            }
+        };
+        classify_restart(String::from_utf8_lossy(&output.stdout).trim())
     }
 
     fn stop_old(
@@ -327,11 +348,14 @@ impl adoption::Lifecycle for SourceLifecycle {
             .spawn()
             .map_err(|error| format!("could not stop the existing install: {error}"))?;
         // Recorded as soon as it exists, so a Force Quit leaves the journal naming it.
-        if let Some(started) = process_started(child.id()) {
-            spawned(StopProcess {
+        match process_started(child.id()) {
+            Some(started) => spawned(StopProcess {
                 pid: child.id(),
                 started,
-            });
+            }),
+            None => {
+                log::warn!("the stop process's start time could not be read, so it is not recorded")
+            }
         }
         let mut counted = None::<Instant>;
         let status = loop {
@@ -457,12 +481,17 @@ mod tests {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
+    /// A port that is free now, from below the range the kernel hands out for `bind(0)`, so
+    /// no other test that binds port 0 can be given the same number while this one waits to use it.
     fn free_port() -> u16 {
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
+        static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(41_000);
+        loop {
+            let port = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            assert!(port < 49_000, "ran out of test ports");
+            if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                return port;
+            }
+        }
     }
 
     /// `loaded` exists while the fake job is loaded; the CLI creates and removes it.
@@ -704,14 +733,27 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_in_flight_is_read_from_the_backend_and_an_unreadable_answer_is_unknown() {
+    fn a_restart_request_is_judged_by_its_own_age_and_an_unreadable_answer_is_unknown() {
         let look = |python: &str| {
             let mut home = home("exit 0", "exit 0", python);
-            home.lifecycle.restart_in_flight(Path::new("/state"))
+            home.lifecycle.look_for_restart(Path::new("/state"))
         };
-        assert_eq!(look("exit 0"), Some(true));
-        assert_eq!(look("exit 1"), Some(false));
-        assert_eq!(look("exit 7"), None);
+        assert_eq!(look("echo none"), RestartLook::Settled);
+        assert_eq!(look("echo 12.5"), RestartLook::Young);
+        assert_eq!(look("echo 0.0"), RestartLook::Young);
+        assert_eq!(look("exit 7"), RestartLook::Unknown);
+        assert_eq!(look("echo garbage"), RestartLook::Unknown);
+        assert_eq!(look("echo nan"), RestartLook::Unknown);
+    }
+
+    #[test]
+    fn a_request_is_stuck_only_past_the_longest_drain_and_the_teardown_margin() {
+        assert_eq!(STUCK_AFTER.as_secs(), 2100, "1800 s of drain plus 300 s");
+        assert_eq!(classify_restart("1799.0"), RestartLook::Young);
+        assert_eq!(classify_restart("2099.9"), RestartLook::Young);
+        assert_eq!(classify_restart("2100.0"), RestartLook::Young);
+        assert_eq!(classify_restart("2100.1"), RestartLook::Stuck);
+        assert_eq!(classify_restart("86400"), RestartLook::Stuck);
     }
 
     #[test]

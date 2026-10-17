@@ -248,6 +248,36 @@ def test_adoption_preflight_refuses_while_the_source_is_restarting_itself(tmp_pa
         assert connection.execute("select status from self_restart_requests").fetchall() == [("in_flight",)]
 
 
+def test_the_age_of_an_in_flight_restart_comes_from_its_youngest_row(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    assert snapshots.restart_in_flight_age(state) is None  # no table at all
+    ago = lambda seconds: (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()  # noqa: E731
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute(
+            "create table self_restart_requests "
+            "(id text primary key, status text not null default 'in_flight', requested_at text not null)"
+        )
+        connection.execute("insert into self_restart_requests values ('settled', 'completed', ?)", (ago(5),))
+        assert snapshots.restart_in_flight_age(state) is None
+        connection.execute("insert into self_restart_requests values ('old', 'in_flight', ?)", (ago(2400),))
+    assert 2399 < snapshots.restart_in_flight_age(state) < 2410
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute("insert into self_restart_requests values ('young', 'in_flight', ?)", (ago(30),))
+        # A time without a zone is read as UTC, as the backend does.
+        connection.execute(
+            "insert into self_restart_requests values ('naive', 'in_flight', ?)",
+            ((datetime.now(UTC) - timedelta(seconds=90)).replace(tzinfo=None).isoformat(),),
+        )
+    assert 29 < snapshots.restart_in_flight_age(state) < 40, "the youngest row decides"
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute("insert into self_restart_requests values ('odd', 'in_flight', 'now')")
+    assert snapshots.restart_in_flight_age(state) == 0.0, "an unreadable time is never called stuck"
+    assert snapshots.restart_in_flight(state) is True
+
+
 def test_adoption_preflight_ignores_a_settled_restart_and_a_missing_table(tmp_path, monkeypatch):
     snapshots = importlib.import_module("infra.adoption_snapshot")
     state = _adoptable_state(tmp_path, {})
