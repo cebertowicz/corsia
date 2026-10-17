@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from core.skill_validation import FRONTMATTER_KEY
+from core.skill_sidecar import SIDECAR_FILE
 from core.skills_registry import resolve_effective_skills
 from infra import config
 from infra.database import get_db
@@ -64,8 +64,7 @@ def effective_workflows(actor, db) -> dict[str, Workflow]:
     )
     workflows: dict[str, Workflow] = {}
     for skill in resolution.included:
-        corsia = skill.metadata.get(FRONTMATTER_KEY)
-        workflow = corsia.get("workflow") if isinstance(corsia, dict) else None
+        workflow = skill.corsia.get("workflow") if isinstance(skill.corsia, dict) else None
         steps = workflow.get("steps") if isinstance(workflow, dict) else None
         if not isinstance(steps, list):
             continue
@@ -237,34 +236,51 @@ def _workflow_version(skill) -> str | None:
 def _editable_workflow_version(path) -> str | None:
     """Return the last Git commit for one editable skill, marking local edits.
 
-    Any Git fault records null (never a clean SHA), through the guidance runner.
+    A skill with a ``corsia.yaml`` sidecar carries both files' versions, so a step edit
+    changes it. Any Git fault records null (never a clean SHA), through the guidance
+    runner.
     """
 
     repo, _why = workspace_repository(Path(config.WORKSPACE))
     if repo is None:
         return None
+    sidecar = Path(path).parent / SIDECAR_FILE
     try:
-        return file_version(repo, Path(path))
+        version = file_version(repo, Path(path))
+        if version is None or not sidecar.is_file():
+            return version
+        sidecar_version = file_version(repo, sidecar)
     except (GitFault, ValueError):
         return None
+    return None if sidecar_version is None else f"{version}+{sidecar_version}"
 
 
 def _system_workflow_version(skill) -> str | None:
-    """Return the System source id plus manifest-recorded raw file digest."""
+    """Return the System source id plus manifest-recorded raw file digest.
+
+    A System skill with a ``corsia.yaml`` sidecar appends the sidecar's manifest digest.
+    """
 
     from core.system_tier import system_tier_manifest
 
     relative = f"skills/{skill.name}/SKILL.md"
+    sidecar = f"skills/{skill.name}/{SIDECAR_FILE}"
     if not (system_package_dir() / relative).is_file():
         return None
     try:
         manifest = system_tier_manifest()
     except (OSError, ValueError):
         return None
-    entry = next((item for item in manifest.files if item.path == relative), None)
-    if entry is None or any(item.path == relative for item in manifest.mismatches):
-        return None
-    return f"system:{relative}:{manifest.version}:{entry.sha256}"
+    wanted = [relative]
+    if (system_package_dir() / sidecar).exists():
+        wanted.append(sidecar)
+    digests = []
+    for item_path in wanted:
+        entry = next((item for item in manifest.files if item.path == item_path), None)
+        if entry is None or any(item.path == item_path for item in manifest.mismatches):
+            return None
+        digests.append(entry.sha256)
+    return f"system:{relative}:{manifest.version}:{'+'.join(digests)}"
 
 
 def _append_notice(result: dict, notice: str) -> None:

@@ -7,11 +7,32 @@
   ],
   "permissions": [
     "core:default",
+    "allow-adopt-existing-install",
+    "allow-adoption-progress",
+    "allow-check-service-started",
+    "allow-choose-work-folder",
+    "allow-configure-work-folder",
+    "allow-disconnect-remote",
+    "allow-get-service-log-path",
+    "allow-open-login-items",
+    "allow-quit-app",
+    "allow-remote-discovered",
+    "allow-remote-pair",
+    "allow-reopen-app",
+    "allow-restart-source-install",
+    "allow-retry-quit",
+    "allow-retry-saved-remote",
+    "allow-save-setup-report",
+    "allow-start-existing-again",
+    "allow-start-local-service",
+    "allow-start-source-install",
+    "allow-start-window-drag",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "http://*" },
-        { "url": "https://*" }
+        { "url": "https://*" },
+        { "url": "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork" }
       ]
     }
   ]

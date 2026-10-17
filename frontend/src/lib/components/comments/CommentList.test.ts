@@ -22,3 +22,24 @@ it('holds document order through focus changes inside a card and updates after l
 	const outside = document.createElement('button'); host.appendChild(outside); outside.focus(); flushSync();
 	expect(ids()).toEqual(['b', 'a']);
 });
+
+it('shows a card quote as plain text, for a placed comment and for one whose text changed', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, anchor: string, orphaned = false) => ({ id, anchor, orphaned, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
+	component = createClassComponent({ target: host, component: CommentList, props: { documentOrder: true, comments: [comment('a', '**Bravo**'), comment('b', 'See [the spec](/spec)', true)], cellLabel: (item: { id: string }) => item.id === 'a' ? '“Bravo” · Delta, Status' : null } });
+	flushSync();
+	const jumps = [...host.querySelectorAll('[data-comment-jump]')].map((button) => button.textContent?.trim());
+	expect(jumps).toContain('“Bravo” · Delta, Status');
+	expect(jumps.some((text) => text?.includes('Text changed: “See the spec”'))).toBe(true);
+	expect(host.textContent).not.toContain('**');
+});
+
+it('names a comment on a diagram or table by its label in the jump button, not by its raw source', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const fence = '```mermaid\ngraph TD\n  A --> B\n```';
+	const comment = (id: string, anchor: string) => ({ id, anchor, orphaned: false, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
+	component = createClassComponent({ target: host, component: CommentList, props: { documentOrder: true, comments: [comment('d', fence), comment('p', 'plain words')], cellLabel: (item: { id: string }) => item.id === 'd' ? 'The whole diagram' : null } });
+	flushSync();
+	const jumps = [...host.querySelectorAll('[data-comment-jump]')].map((button) => button.getAttribute('aria-label'));
+	expect(jumps).toEqual(['Go to text: The whole diagram', 'Go to text: plain words']);
+});

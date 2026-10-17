@@ -4,13 +4,15 @@
 		onchange: (next: boolean) => void;
 		ariaLabel?: string;
 		disabled?: boolean;
+		/** The choice holds and cannot change right now (a start in progress): full colour, no dimming, no tap. */
+		locked?: boolean;
 		size?: 'sm' | 'md';
 	}
 
-	const { checked, onchange, ariaLabel, disabled = false, size = 'md' }: Props = $props();
+	const { checked, onchange, ariaLabel, disabled = false, locked = false, size = 'md' }: Props = $props();
 
 	function handle() {
-		if (disabled) return;
+		if (disabled || locked) return;
 		onchange(!checked);
 	}
 </script>
@@ -19,6 +21,8 @@
 	type="button"
 	class="tg {size}"
 	class:on={checked}
+	class:locked
+	aria-disabled={locked || undefined}
 	{disabled}
 	aria-pressed={checked}
 	aria-label={ariaLabel}
@@ -67,6 +71,7 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
+	.tg.locked { cursor: default; }
 	.tg:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 2px;

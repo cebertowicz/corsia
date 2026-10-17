@@ -196,7 +196,14 @@ mod tests {
             .expect("a free test port");
         assert!(!port_refuses(port));
         drop(listener);
-        assert!(port_refuses(port));
+        // A child another test is spawning right now may hold a copy of the listening socket until it
+        // execs, so the port stops answering a moment after the drop rather than at it.
+        let mut looks = 0;
+        while !port_refuses(port) {
+            looks += 1;
+            assert!(looks < 50, "the port still answers after its listener was dropped");
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     #[test]

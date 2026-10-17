@@ -5,9 +5,13 @@ import { TEST_TOKEN } from '../support/corsia';
 // mocked (a disposable backend has no Claude/Codex account to limit); auth, threads and the
 // picker itself are the real app against the disposable backend. As /api/models ships it, a
 // harness row's account decision rides on its `runs_on` entry, and what an account has left is
-// the vendor-accounts record. A ready account's figures render in the `.group-subtitle` under
-// the group name (tapping it opens the breakdown); a group nobody can pick from says so in its
-// `.group-status` head; a row its selected account blocks carries a red `.row-note`.
+// the vendor-accounts record. An account-backed group (a harness row with `runs_on`) keeps every
+// model row visible and heads them with `.picker-account-header`: its `.usage` carries the
+// account's figures (a button when tapping it opens the `.picker-account-usage` breakdown) or, when
+// nobody can pick from it, says so in words; this is intended (InputBarModelSheet.svelte: account-
+// backed rows stay visible, the account list opens on demand). A local server head is static and a
+// network group without accounts keeps the collapsible `.model-group-head`. A row its selected
+// account blocks carries a red `.row-note`.
 
 // The disposable account's API credential rides on the query string, as in the other flows.
 const authed = (path: string) => `${path}?${['to', 'ken'].join('')}=${TEST_TOKEN}`;
@@ -124,7 +128,7 @@ async function openThreadPicker(page: Page, title: string) {
 async function expectNothingTruncated(page: Page) {
 	const clipped = await page.evaluate(() => {
 		const out: string[] = [];
-		for (const el of document.querySelectorAll<HTMLElement>('.model-sheet .group-name, .model-sheet .group-status, .model-sheet .group-subtitle, .model-sheet .model-list-name, .model-sheet .row-note, .model-sheet .group-usage div')) {
+		for (const el of document.querySelectorAll<HTMLElement>('.model-sheet .group-name, .model-sheet .group-status, .model-sheet .picker-account-title, .model-sheet .picker-account-header .usage, .model-sheet .model-list-name, .model-sheet .row-note, .model-sheet .picker-account-usage div')) {
 			if (el.scrollWidth > el.clientWidth + 1) out.push(el.textContent ?? '');
 		}
 		const sheet = document.querySelector('.model-sheet')!.getBoundingClientRect();
@@ -143,38 +147,32 @@ async function shoot(page: Page, name: string, testInfo: { project: { name: stri
 }
 
 const head = (page: Page, name: string) => page.locator(`section[aria-label="${name}"] .model-group-head`);
-/** A ready group's figures line under its name; it replaces the old in-head `.group-status`. */
-const sub = (page: Page, name: string) => page.locator(`section[aria-label="${name}"] .group-subtitle`);
+/** An account-backed group's figures (or its words when nobody can pick from it), in its account header. */
+const figures = (page: Page, name: string) => page.locator(`section[aria-label="${name}"] .picker-account-header .usage`);
+const groupRows = (page: Page, name: string) => page.locator(`section[aria-label="${name}"] .model-list-item`);
 
 test.describe('model picker grouped by account', () => {
-	test('ready: every account is open with a count and a meter, and a tap collapses one', async ({ page }, testInfo) => {
+	test('ready: each account lists its models with its figures, a tap on the figures opens the breakdown', async ({ page }, testInfo) => {
 		await serve(page, [...claude(), ...codex(), ...local()], [ccAcct, cxAcct]);
 		await openNewChatPicker(page);
-		for (const name of ['This Mac', 'Claude Code', 'Codex']) await expect(head(page, name)).toHaveAttribute('aria-expanded', 'true');
+		await expect(head(page, 'This Mac')).not.toHaveAttribute('aria-expanded', /.*/); // a local server head is static
 		await expect(head(page, 'This Mac').locator('.group-status')).toHaveCount(0);
-		await expect(sub(page, 'Claude Code')).toContainText('5h 58% left · wk 29% left');
-		await expect(sub(page, 'Codex')).toHaveText('wk 29% left');
-		await expect(head(page, 'Codex').locator('.group-count')).toHaveAttribute('aria-label', '2 models');
+		await expect(figures(page, 'Claude Code')).toContainText('5h 58% left · wk 29% left');
+		await expect(figures(page, 'Codex')).toHaveText('wk 29% left');
+		await expect(groupRows(page, 'Codex')).toHaveCount(2);
 		await expect(page.locator('.model-list-item')).toHaveCount(6);
 		await expect(page.locator('.row-note', { hasText: /^limited · back / })).toHaveCount(1); // the Opus row's own limit
-		await expect(page.locator('.model-sheet')).not.toContainText('Claude Code ·');
+		await expect(page.locator('.model-list-name', { hasText: '·' })).toHaveCount(0); // a row carries its model name, not the provider prefix
 		await expectNothingTruncated(page);
 		await shoot(page, 'ready-all-open', testInfo);
-		await page.locator('section[aria-label="Claude Code"] button.group-subtitle').click();
-		await expect(page.locator('section[aria-label="Claude Code"] .group-usage div')).toHaveCount(2);
+		await figures(page, 'Claude Code').click();
+		await expect(page.locator('section[aria-label="Claude Code"] .picker-account-usage div')).toHaveCount(2);
 		await expectNothingTruncated(page);
 		await shoot(page, 'ready-usage-breakdown', testInfo);
-		await head(page, 'Claude Code').click();
-		await expect(head(page, 'Claude Code')).toHaveAttribute('aria-expanded', 'false');
-		await expect(page.locator('.model-list-item')).toHaveCount(4);
-		await shoot(page, 'ready-claude-collapsed', testInfo);
-		await head(page, 'Claude Code').click();
-		await expect(page.locator('.model-list-item')).toHaveCount(6);
-		// Cross-provider consistency: harness and local groups share one DOM shape and the same capability icons.
+		// Cross-provider consistency: harness and local groups share one row shape and the same capability icons.
 		const shape = await page.evaluate(() => {
 			const name = (el: Element) => (el.getAttribute('class') ?? '').split(' ')[0];
 			return [...document.querySelectorAll('.model-sheet .model-group')].map((group) => ({
-				head: [...group.querySelector('.model-group-head')!.children].map(name).filter((part) => part !== 'group-status'),
 				rows: [...group.querySelectorAll('.model-list-item')].map((row) => ({
 					parts: [...row.children].map(name).filter((part) => part !== 'row-note' && part !== 'check-glyph'),
 					caps: [...row.querySelectorAll('.model-caps [aria-label]')].map((icon) => icon.getAttribute('aria-label')),
@@ -183,7 +181,6 @@ test.describe('model picker grouped by account', () => {
 		});
 		expect(shape).toHaveLength(3);
 		for (const group of shape) {
-			expect(group.head).toEqual(shape[0].head);
 			for (const row of group.rows) {
 				expect(row.caps).toEqual(['Reasoning', 'Vision', 'Tools']);
 				expect(row.parts).toEqual(shape[0].rows[1].parts);
@@ -191,21 +188,16 @@ test.describe('model picker grouped by account', () => {
 		}
 	});
 
-	test('limited: the account starts as one collapsed line with its reset, and expands to disabled models', async ({ page }, testInfo) => {
+	test('limited: the account says so with its reset and its models stay listed, disabled', async ({ page }, testInfo) => {
 		await serve(page, [...claudeLimited(), ...codex(), ...local()], [ccLockedOut, cxAcct]);
 		await openNewChatPicker(page);
 		const limited = page.locator('section[data-state="limited"]');
 		await expect(limited).toHaveCount(1);
-		await expect(limited.locator('.group-status')).toHaveText(/^limited · back /);
-		await expect(limited.locator('.model-group-head')).toHaveAttribute('aria-expanded', 'false');
-		await expect(limited.locator('.model-list-item')).toHaveCount(0);
-		await expectNothingTruncated(page);
-		await shoot(page, 'limited', testInfo);
-		await limited.locator('.model-group-head').click();
+		await expect(limited.locator('.picker-account-header .usage')).toHaveText(/^limited · back /);
 		await expect(limited.locator('.model-list-item')).toHaveCount(2);
 		for (const item of await limited.locator('.model-list-item').all()) await expect(item).toBeDisabled();
 		await expectNothingTruncated(page);
-		await shoot(page, 'limited-expanded', testInfo);
+		await shoot(page, 'limited', testInfo);
 	});
 
 	test('limited, thread bound to the account: its model stays current and disabled', async ({ page, request }, testInfo) => {
@@ -215,12 +207,12 @@ test.describe('model picker grouped by account', () => {
 		const threadId = (await created.json()).thread_id as string;
 		await serve(page, [...claudeLimited(), ...codex(), ...local()], [ccLockedOut, cxAcct]);
 		await openThreadPicker(page, title);
-		const bound = page.locator('section[data-state="limited"] .model-list-item');
-		await expect(bound).toHaveCount(1);
+		const limited = page.locator('section[data-state="limited"]');
+		const bound = limited.locator('.model-list-item', { hasText: 'Opus 5.5' });
 		await expect(bound).toBeDisabled();
-		await expect(bound).toContainText('Opus 5.5');
 		await expect(bound.getByRole('img', { name: 'Current' })).toBeVisible();
-		await expect(page.locator('section[data-state="limited"] .group-status')).toHaveText(/^limited · back /);
+		await expect(limited.locator('.model-list-item', { hasText: 'Sonnet 5.5' }).getByRole('img', { name: 'Current' })).toHaveCount(0);
+		await expect(limited.locator('.picker-account-header .usage')).toHaveText(/^limited · back /);
 		await expectNothingTruncated(page);
 		await shoot(page, 'limited-thread-bound', testInfo);
 		const listed = await (await request.get(authed('/api/threads'))).json();
@@ -228,12 +220,15 @@ test.describe('model picker grouped by account', () => {
 		expect(rows.find((thread) => thread.id === threadId)?.model).toBe('claude-code/opus');
 	});
 
-	test('signed out: one line, no models', async ({ page }, testInfo) => {
-		await serve(page, [...claudeSignedOut(), ...codex(), ...local()], [ccAcct, cxAcct]);
+	test('signed out: the account says so, offers Sign in, and its models are disabled', async ({ page }, testInfo) => {
+		const ccSignedOutAccount = { ...ccAcct, state: 'signed_out', usage: { checking: false, check: null, state: 'unknown', usable: true, windows: [] } };
+		await serve(page, [...claudeSignedOut(), ...codex(), ...local()], [ccSignedOutAccount, cxAcct]);
 		await openNewChatPicker(page);
 		const signedOut = page.locator('section[data-state="signed_out"]');
-		await expect(signedOut.locator('.group-status')).toHaveText('signed out');
-		await expect(signedOut.locator('.model-list-item')).toHaveCount(0);
+		await expect(signedOut.locator('.picker-account-header .usage')).toHaveText('signed out');
+		await expect(signedOut.getByRole('button', { name: 'Sign in' })).toBeVisible();
+		await expect(signedOut.locator('.model-list-item')).toHaveCount(2);
+		for (const item of await signedOut.locator('.model-list-item').all()) await expect(item).toBeDisabled();
 		await expectNothingTruncated(page);
 		await shoot(page, 'signed-out', testInfo);
 	});
@@ -246,7 +241,7 @@ test.describe('model picker grouped by account', () => {
 		];
 		await serve(page, [...stale, ...codex(), ...local()], [ccStale, cxAcct]);
 		await openNewChatPicker(page);
-		await expect(sub(page, 'Claude Code')).toHaveText('usage unknown');
+		await expect(figures(page, 'Claude Code')).toHaveText('usage unknown');
 		await expect(page.locator('.model-sheet')).not.toContainText('88%');
 		await expectNothingTruncated(page);
 		await shoot(page, 'stale-usage', testInfo);
@@ -283,25 +278,26 @@ test.describe('model picker grouped by account', () => {
 			...local(),
 		], [ccLevels, cxLevels]);
 		await openNewChatPicker(page);
-		const segs = (name: string) => page.locator(`section[aria-label="${name}"] .group-subtitle > span:not([aria-hidden])`);
+		// A figure is every odd child of `.usage`; the even ones are the ' · ' separators.
+		const segs = (name: string) => figures(page, name).locator('> span:nth-child(odd)');
 		await expect(segs('Claude Code')).toHaveText(['5h 58% left', 'wk 8% left']);
-		await expect(segs('Claude Code').nth(0)).not.toHaveClass(/usage-(amber|red)/);
-		await expect(segs('Claude Code').nth(1)).toHaveClass(/usage-red/);
+		await expect(segs('Claude Code').nth(0)).not.toHaveClass(/\b(amber|red)\b/);
+		await expect(segs('Claude Code').nth(1)).toHaveClass(/\bred\b/);
 		await expect(segs('Codex')).toHaveText(['wk 20% left']);
-		await expect(segs('Codex').nth(0)).toHaveClass(/usage-amber/);
+		await expect(segs('Codex').nth(0)).toHaveClass(/\bamber\b/);
 		await expect(page.locator('section[data-state="limited"] .group-status > span')).toHaveClass(/usage-red/);
 		await expect(head(page, 'This Mac').locator('.group-status')).toHaveCount(0);
-		await expect(sub(page, 'Claude Code')).toHaveAttribute('aria-label', '5-hour: 58% left, weekly: 8% left');
-		await expect(sub(page, 'Codex')).toHaveAttribute('aria-label', 'weekly: 20% left');
+		await expect(figures(page, 'Claude Code')).toHaveAttribute('aria-label', '5-hour: 58% left, weekly: 8% left');
+		await expect(figures(page, 'Codex')).toHaveAttribute('aria-label', 'weekly: 20% left');
 		const opusNote = page.locator('.row-note', { hasText: /^limited · back / });
 		await expect(opusNote).toHaveClass(/usage-red/);
 		await expectNothingTruncated(page);
 		await shoot(page, 'usage-levels', testInfo);
-		for (const name of ['Claude Code', 'Codex']) await page.locator(`section[aria-label="${name}"] button.group-subtitle`).click();
-		await expect(page.locator('.group-usage div')).toHaveCount(3);
-		await expect(page.locator('section[aria-label="Claude Code"] .group-usage div').nth(0)).toHaveText(/^5h · 58% left · 42% used · resets /);
-		await expect(page.locator('section[aria-label="Claude Code"] .group-usage div').nth(1)).toHaveText(/^wk · 8% left · 92% used · resets /);
-		await expect(page.locator('section[aria-label="Codex"] .group-usage div').nth(0)).toHaveText(/^wk · 20% left · 80% used · resets /);
+		for (const name of ['Claude Code', 'Codex']) await figures(page, name).click();
+		await expect(page.locator('.picker-account-usage div')).toHaveCount(3);
+		await expect(page.locator('section[aria-label="Claude Code"] .picker-account-usage div').nth(0)).toHaveText(/^5h · 58% left · 42% used · resets /);
+		await expect(page.locator('section[aria-label="Claude Code"] .picker-account-usage div').nth(1)).toHaveText(/^wk · 8% left · 92% used · resets /);
+		await expect(page.locator('section[aria-label="Codex"] .picker-account-usage div').nth(0)).toHaveText(/^wk · 20% left · 80% used · resets /);
 		await expectNothingTruncated(page);
 		await shoot(page, 'usage-levels-breakdown', testInfo);
 
@@ -331,7 +327,7 @@ test.describe('model picker grouped by account', () => {
 				};
 				const out: Record<string, { color: string; background: string; ratio: number }> = {};
 				const probes: Array<[string, string]> = [
-					['amber', '.usage-amber'], ['red', '.group-status .usage-red'], ['red row note', '.row-note.usage-red'],
+					['amber', '.picker-account-header .usage .amber'], ['red', '.picker-account-header .usage .red'], ['red row note', '.row-note.usage-red'],
 					['red limited header', 'section[data-state="limited"] .group-status .usage-red'],
 				];
 				for (const [label, selector] of probes) {
@@ -348,25 +344,32 @@ test.describe('model picker grouped by account', () => {
 		}
 	});
 
-	test('mixed fixture: ready Claude Code, limited Codex, ready External and local; Codex collapsed then expanded', async ({ page }, testInfo) => {
+	test('mixed fixture: ready Claude Code, limited Codex, ready External and local; External collapsed then expanded', async ({ page }, testInfo) => {
 		const external = [{
 			id: 'ext-0', selector: 'external@ns/qwen', litellm_model: 'external@ns/qwen', name: 'Qwen 3.8 Flash', display_name: 'Qwen 3.8 Flash',
 			connection: 'external', provider: 'external', backend: 'network', server_name: 'External',
 			desc: '', size: '', speed: '', status: 'ready', capabilities: CAPS,
 		}];
-		const codexLimited = codex({ status: 'unavailable', status_reason: 'usage_limited', resets_at: in3d, usage: limitedUsage(WEEKLY) });
-		await serve(page, [...claude({}), ...codexLimited, ...external, ...local()], [ccAcct, cxAcct]);
+		// The account is the one that is limited, so the account and its rows agree.
+		const cxLimited = account('acct-cx', 'codex', limitedUsage(WEEKLY));
+		const codexLimited = [
+			harnessRow('codex', 'sol', 'GPT-5.6 Sol', cxLimited, { status: 'unavailable', status_reason: 'usage_limited', resets_at: in3d }),
+			harnessRow('codex', 'terra', 'GPT-5.6 Terra', cxLimited, { status: 'unavailable', status_reason: 'usage_limited', resets_at: in3d }),
+		];
+		await serve(page, [...claude({}), ...codexLimited, ...external, ...local()], [ccAcct, cxLimited]);
 		await openNewChatPicker(page);
-		await expect(head(page, 'Claude Code')).toHaveAttribute('aria-expanded', 'true');
 		await expect(head(page, 'External')).toHaveAttribute('aria-expanded', 'true');
-		await expect(head(page, 'This Mac')).toHaveAttribute('aria-expanded', 'true');
-		await expect(head(page, 'Codex')).toHaveAttribute('aria-expanded', 'false');
-		await expect(page.locator('.model-list-item')).toHaveCount(5);
-		await shoot(page, 'mixed-codex-collapsed', testInfo);
-		await head(page, 'Codex').click();
+		await expect(figures(page, 'Codex')).toHaveText(/^limited · back /);
+		await expect(groupRows(page, 'Codex')).toHaveCount(2);
 		await expect(page.locator('.model-list-item')).toHaveCount(7);
 		await expect(page.locator('section[aria-label="Codex"] .model-list-item:not(:disabled)')).toHaveCount(0);
+		await shoot(page, 'mixed-open', testInfo);
+		await head(page, 'External').click();
+		await expect(head(page, 'External')).toHaveAttribute('aria-expanded', 'false');
+		await expect(page.locator('.model-list-item')).toHaveCount(6);
+		await shoot(page, 'mixed-external-collapsed', testInfo);
+		await head(page, 'External').click();
+		await expect(page.locator('.model-list-item')).toHaveCount(7);
 		await expectNothingTruncated(page);
-		await shoot(page, 'mixed-codex-expanded', testInfo);
 	});
 });

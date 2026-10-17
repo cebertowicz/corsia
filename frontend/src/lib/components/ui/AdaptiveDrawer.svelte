@@ -33,6 +33,7 @@
 		open = true,
 		onClosed = () => {},
 		covered = false,
+		panel = $bindable(null),
 	}: {
 		ariaLabel: string;
 		/**
@@ -80,6 +81,8 @@
 		 * underneath, its place kept, but out of sight and reach, with no scrim over what covers it, until uncovered.
 		 */
 		covered?: boolean;
+		/** The sheet's own element, for a caller that has to measure where it rests. */
+		panel?: HTMLElement | null;
 	} = $props();
 
 	let box = $state<ColumnBox | null>(null);
@@ -87,7 +90,6 @@
 		if (!within) { box = null; return; }
 		return trackColumnBox(within, (next) => { box = next; });
 	});
-	let panel = $state<HTMLElement | null>(null);
 	const drag = createSheetDrag({
 		detent: () => detent,
 		height: () => panel?.clientHeight ?? 480,

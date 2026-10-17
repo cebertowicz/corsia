@@ -31,6 +31,7 @@ from api.vendor_accounts import router as vendor_accounts_router
 from api.discovered_models import router as discovered_models_router
 from api.network_servers import router as network_servers_router
 from api.version import router as version_router
+from api.devices import router as devices_router
 from api.webhooks import router as webhooks_router
 from api.cc_attach import router as cc_attach_router
 from api.conductor import router as conductor_router
@@ -77,6 +78,7 @@ __all__ = [
     "discovered_models_router",
     "network_servers_router",
     "version_router",
+    "devices_router",
     "webhooks_router",
     "cc_attach_router",
     "conductor_router",

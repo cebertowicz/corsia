@@ -375,7 +375,7 @@ def _connect_in_background(app_id: str) -> None:
         try:
             from tools.connected_apps_runtime import apply_connected_app_runtime
 
-            await apply_connected_app_runtime("sign_in", app_id)
+            await apply_connected_app_runtime("restart", app_id)
         except Exception:
             logger.warning("connecting app {} after sign-in failed", app_id)
 

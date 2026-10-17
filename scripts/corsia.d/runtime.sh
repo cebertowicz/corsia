@@ -648,7 +648,7 @@ start_backend() {
     cd "$BACKEND_DIR"
     env -u CORSIA_RESTART_BACKEND_PORT -u CORSIA_RESTART_OPERATION_ID \
         -u CORSIA_TEST_MODE -u CORSIA_ALLOW_HOME_WORKSPACE_IN_CI \
-        BACKEND_PORT="$BACKEND_PORT" \
+        CORSIA_DEVICES_DISABLE=1 BACKEND_PORT="$BACKEND_PORT" \
         nohup "$PYTHON" -m uvicorn main:app --host "$bind" --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
 }
 

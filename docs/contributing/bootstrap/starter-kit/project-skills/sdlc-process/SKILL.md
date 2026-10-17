@@ -1,9 +1,6 @@
 ---
 name: sdlc-process
 description: Use for PR-bearing code work from product intent through UX/IA and engineering — author-time scope gates, existing-surface reuse, worktree discipline, first-pass proof, review, and merge follow-through.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # SDLC process

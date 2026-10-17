@@ -235,6 +235,8 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
             400,
             "Core Agent model settings have been removed. Choose a model for each thread.",
         )
+    if "devices" in body:
+        raise HTTPException(400, "Devices must be changed through /api/devices")
 
     if _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body) or "live_bulletins" in body:
         require_human_user(user)

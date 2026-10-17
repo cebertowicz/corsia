@@ -49,7 +49,8 @@ for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 			expect(stored).toEqual(proof.fixture.times.filter((_, i) => i !== 6));
 			await page.keyboard.press('Tab');
 			await assertPassiveGeometry(page);
-			const node = page.locator('.passive-outcomes button.node').first();
+			// PassiveOutcomeList.svelte: a node row is a `button.row` that expands in place; its detail has Open in plan.
+			const node = page.locator('.passive-outcomes button.row').first();
 			await node.focus();
 			expect(await node.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid');
 			const disclosure = page.locator('.passive-toggle').first(); await disclosure.focus();
@@ -83,6 +84,8 @@ for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 			await expectObservedNoUpdate(request, main);
 			await page.locator('.passive-toggle').first().click();
 			await node.focus(); await page.keyboard.press('Enter');
+			await expect(node).toHaveAttribute('aria-expanded', 'true');
+			await page.getByRole('button', { name: 'Open in plan' }).first().click();
 			await expect(page.getByText('Renamed after outcome', { exact: true })).toBeVisible();
 			await saveEvidenceScreenshot(page, info, `outcomes-${width}-${theme}-node-navigation`, { fullPage: false });
 			await page.goto('/_design/focus-outcomes');
