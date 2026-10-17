@@ -220,12 +220,7 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
             copied["headers"] = headers
     if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
         copied["needs_token"] = True
-        header_env = config.get("env_http_headers")
-        if isinstance(header_env, dict):
-            copied["secret_headers"] = [
-                name for name, value in header_env.items()
-                if isinstance(name, str) and name and isinstance(value, str) and value
-            ]
+        mcp_secrets.declare_codex_keys(config, copied)
     for source_key, target_key in (("connect_timeout", "connect_timeout"),
                                    ("startup_timeout_sec", "connect_timeout"),
                                    ("tool_timeout", "tool_timeout"),
@@ -302,9 +297,11 @@ def _sign_in_config(app_id: str, source: str, config: dict[str, Any]) -> dict[st
     copied = _copyable_config(source, config)
     copied.pop("needs_token", None)
     copied.pop("secret_headers", None)
+    copied.pop(mcp_secrets.HEADER_SCHEMES, None)
     clean, _discarded = mcp_secrets.split_secrets(app_id, copied, headers=True)
     clean.pop("secret_env", None)
     clean.pop("secret_headers", None)
+    clean.pop(mcp_secrets.HEADER_SCHEMES, None)
     return {**clean, "key_refs": []}
 
 
