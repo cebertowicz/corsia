@@ -23,8 +23,8 @@ pointer. A block beside a pointer at a sidecar with identical data (an interrupt
 conversion) is finished by removing the block. A flow-style ``metadata``, a ``corsia.yaml``
 holding different data, a symlink, or frontmatter the line rewrite cannot place is logged
 and left unchanged, and validation reports the skill. Remove this module in the release
-after the one that first ships it (owner: Tech Debt); an install that skips that release
-still gets the validation error, never a silent drop.
+after the one that first ships it (owner: Context & Memory); an install that skips that
+release still gets the validation error, never a silent drop.
 """
 
 from __future__ import annotations
