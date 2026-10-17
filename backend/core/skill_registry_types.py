@@ -26,6 +26,8 @@ class SkillRow:
     errors: list[str] = field(default_factory=list)
     overrides: str | None = None
     role: RoleName | None = None
+    # CORSIA data (handler, workflow) from the sidecar or legacy block; see SkillValidation.
+    corsia: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the API-safe dictionary projection for this skill row."""
