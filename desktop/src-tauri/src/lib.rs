@@ -868,7 +868,7 @@ async fn remote_pair(
             remote_config::save_remote(&app_dir, record).map_err(PairFailure::Local)
         },
         |proxy| grant_remote_proxy_origin(&app, proxy.port).map_err(PairFailure::Local),
-        || unregister_service().map_err(|_| PairFailure::Service),
+        || lifecycle::unregister_unless_locked(&app).map_err(|_| PairFailure::Service),
         |proxy| proxy.stop(),
         || forget_remote_or_log(&app_dir),
     )

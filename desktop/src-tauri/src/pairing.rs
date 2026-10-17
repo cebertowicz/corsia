@@ -437,14 +437,22 @@ fn pairing_password(code: &str) -> [u8; 32] {
     Sha256::digest([PAIRING_IDENTITY, b"\0", code.as_bytes()].concat()).into()
 }
 
-/// The host bound into a verified pairing transcript, or `None` for an IPv6
-/// literal, which has no system-trusted certificate and so is never verified.
+/// The host bound into a verified pairing transcript, or `None` when the host cannot have a system-trusted
+/// certificate: an address, a `.local` or `.localhost` name, or a name without a dot. Those pair through the
+/// host's pin; letting them verify would let whoever answers for the address (DNS-SD is unauthenticated)
+/// pair as a relay with a certificate it owns.
 fn canonical_verified_host(host: &str) -> Result<Option<String>, PairError> {
     match RemoteHost::parse(host.trim_end_matches('.')).map_err(PairError::Protocol)? {
-        RemoteHost::Name(name) => Ok(Some(name.to_ascii_lowercase())),
-        RemoteHost::Ip(IpAddr::V4(address)) => Ok(Some(address.to_string())),
-        RemoteHost::Ip(IpAddr::V6(_)) | RemoteHost::Scoped { .. } => Ok(None),
+        RemoteHost::Name(name) => {
+            let name = name.to_ascii_lowercase();
+            Ok(can_hold_a_public_certificate(&name).then_some(name))
+        }
+        RemoteHost::Ip(_) | RemoteHost::Scoped { .. } => Ok(None),
     }
+}
+
+fn can_hold_a_public_certificate(name: &str) -> bool {
+    name.contains('.') && !name.ends_with(".local") && !name.ends_with(".localhost")
 }
 
 fn transcript_prefix(mode: &str, binding: &[u8]) -> Vec<u8> {
@@ -619,15 +627,15 @@ mod tests {
 
     #[test]
     fn verified_host_is_canonicalized_like_the_host() {
-        assert_eq!(canonical_verified_host("Studio.LOCAL.").unwrap(), Some("studio.local".to_owned()));
+        assert_eq!(canonical_verified_host("Studio.Example.COM.").unwrap(), Some("studio.example.com".to_owned()));
     }
 
     #[test]
-    fn ipv6_literals_are_never_verified_but_are_accepted() {
-        for host in ["::1", "[::1]", "fe80::1%4", "[fe80::1%254]", "2001:db8::7"] {
+    fn addresses_and_local_names_are_never_verified_but_are_accepted() {
+        for host in ["::1", "[::1]", "fe80::1%4", "[fe80::1%254]", "2001:db8::7", "192.168.1.20", "203.0.113.9", "Studio.LOCAL.", "studio", "printer.localhost"] {
             assert_eq!(canonical_verified_host(host).unwrap(), None, "{host}");
         }
-        assert_eq!(canonical_verified_host("192.168.1.20").unwrap(), Some("192.168.1.20".to_owned()));
+        assert_eq!(canonical_verified_host("Studio.Tail1234.TS.net.").unwrap(), Some("studio.tail1234.ts.net".to_owned()));
     }
 
     #[test]
