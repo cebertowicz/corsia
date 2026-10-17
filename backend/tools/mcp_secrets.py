@@ -156,10 +156,11 @@ def check_references(config: dict) -> None:
 def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[dict, dict[str, str]]:
     """``config`` with credential values lifted out, and those values by entry name.
 
-    Pure: nothing is stored. Existing references are kept. A lifted header value
-    of the form ``<scheme> <token>`` yields the token, and its scheme goes to
-    ``key_header_schemes``; any other value with a space is left for the store to
-    refuse. A credential-named
+    Pure: nothing is stored. Existing references are kept. A lifted
+    ``Authorization`` value of the form ``<scheme> <token>`` yields the token,
+    and its scheme goes to ``key_header_schemes``; only that header's first word
+    is a scheme by definition, so any other value with a space is left for the
+    store to refuse. A credential-named
     value that is blank or not a string stays where it is for the config's own
     validation to judge. Import callers pass ``headers=True`` so Authorization,
     Cookie and other credential-named headers become managed references.
@@ -180,7 +181,7 @@ def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[
                 and not (source == "headers" and var.lower() in REFUSED_HEADERS)
             )
             if movable:
-                if source == "headers":
+                if source == "headers" and var.lower() == "authorization":
                     scheme, value = split_scheme(value)
                     if scheme is not None:
                         schemes[var] = scheme

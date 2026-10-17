@@ -176,6 +176,15 @@ def test_a_value_that_is_not_scheme_and_token_is_lifted_whole_for_the_store_to_r
     assert list(lifted.values()) == ["Bearer a b"]
 
 
+def test_only_authorization_has_a_scheme_split_off_other_keys_are_lifted_whole():
+    clean, lifted = mcp_secrets.split_secrets(
+        "app", {"headers": {"X-Api-Key": "part one"}}, headers=True,
+    )
+
+    assert list(lifted.values()) == ["part one"]
+    assert mcp_secrets.HEADER_SCHEMES not in clean and "part" not in json.dumps(clean)
+
+
 @pytest.mark.parametrize("schemes", [
     [{"header": "Authorization", "scheme": "Bearer abc"}],
     [{"header": "Authorization", "scheme": "Be\r\narer"}],
