@@ -218,22 +218,6 @@
 
 <style>
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
-	/*
-	 * Setup keeps its own blue until its coherence pass (#863) moves it to the app accent. Each role has its own shade
-	 * because one hex cannot be a fill, ink on that fill, text and a hairline at AA in both themes.
-	 */
-	.setup-shell {
-		--accent-fill: #3aa9d0; --accent-on-fill: #04121a; --accent-text: #2e9cc4; --accent-line: #2e9cc4;
-		--accent-wash: color-mix(in srgb, #2e9cc4 10%, transparent);
-		--accent: #2e9cc4; --accent-hover: #3aa9d0;
-	}
-	:global([data-theme='light']) .setup-shell {
-		--accent-fill: #00769e; --accent-on-fill: #ffffff; --accent-text: #006d92; --accent-line: #00769e;
-		--accent-wash: color-mix(in srgb, #00769e 10%, transparent);
-		--accent: #00769e; --accent-hover: #006d92;
-	}
-	/* An on toggle is a fill: its track, border and focus ring all take the fill shade. */
-	.setup-shell :global(.tg) { --accent: var(--accent-fill); --accent-hover: var(--accent-fill); }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }

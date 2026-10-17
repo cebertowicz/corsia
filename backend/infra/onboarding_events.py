@@ -28,7 +28,7 @@ FIRST_RUN_SUMMARY = (
 OUTCOME_OPERATIONS = frozenset({"mark_done", "accept"})
 TASK_START = "Getting started"
 TASK_PROVIDERS = "Additional provider setup"
-TASK_PROJECT = "Set up your first agent or project"
+TASK_PROJECT = "Set up your first project"
 TASK_GITHUB = "Set up GitHub"
 TASK_WEB_SEARCH = "Connect web search"
 TASK_CONFIG = "Configuration checks"
@@ -63,8 +63,7 @@ FIRST_RUN_SETUP_TASKS = (
     ),
     (
         TASK_PROJECT,
-        "the first agent shows its first result or the project's conductor reports back, "
-        "or the user chose not now",
+        "the project's conductor reports back, or the user chose not now",
     ),
 )
 

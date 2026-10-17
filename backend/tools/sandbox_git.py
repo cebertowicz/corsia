@@ -2,7 +2,27 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
+
+
+def _is_plain_file(path: Path) -> bool:
+    """True for a regular file that is not a symlink (one ``lstat``)."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def sandbox_literal(path: Path) -> str:
+    """Escape ``path`` for a Safehouse profile rule exactly as given, no resolve.
+
+    Precondition: a root ``list_repo_worktrees`` returned in this request, or
+    ``<root>/.git`` after ``verified_worktree_marker`` proved it a non-symlink
+    regular file. Any other path must be resolved first (``_sandbox_path``).
+    """
+    return str(path).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def verified_worktree_marker(
@@ -10,7 +30,7 @@ def verified_worktree_marker(
 ) -> tuple[Path, Path] | None:
     """Prove ``worktree`` is linked to ``repo`` through reciprocal Git markers."""
     marker = worktree / ".git"
-    if marker.is_symlink() or not marker.is_file():
+    if not _is_plain_file(marker):
         return None
     try:
         prefix, raw_gitdir = marker.read_text(encoding="utf-8").strip().split(":", 1)
@@ -27,7 +47,7 @@ def verified_worktree_marker(
     except ValueError:
         return None
     reciprocal = resolved_gitdir / "gitdir"
-    if reciprocal.is_symlink() or not reciprocal.is_file():
+    if not _is_plain_file(reciprocal):
         return None
     try:
         reciprocal_marker = Path(
@@ -37,6 +57,9 @@ def verified_worktree_marker(
         return None
     if not reciprocal_marker.is_absolute():
         reciprocal_marker = reciprocal.parent / reciprocal_marker
-    if reciprocal_marker.resolve(strict=False) != marker.resolve(strict=False):
+    # ``marker`` was just proved a non-symlink file, so it resolves to the
+    # resolved worktree plus ``.git``; resolve the worktree only once.
+    resolved_worktree = worktree.resolve(strict=False)
+    if reciprocal_marker.resolve(strict=False) != resolved_worktree / ".git":
         return None
-    return worktree.resolve(strict=False), resolved_gitdir
+    return resolved_worktree, resolved_gitdir

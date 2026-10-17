@@ -130,18 +130,6 @@
       "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
     },
     {
-      "bytes": 4519,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/assets/gws-env.sh",
-      "sha256": "29b9f56a09d6ed5bdb416c1299adefce41e05ab4f4b30275ebd5c749abdb8701"
-    },
-    {
-      "bytes": 7707,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/assets/gws-reply-guard.py",
-      "sha256": "70daaac27a3bfded05fab13a8f86d30f55d8e9c0f28afdea741dcd432da7776f"
-    },
-    {
       "bytes": 19107,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
@@ -166,22 +154,16 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 2388,
-      "kind": "skill",
-      "path": "skills/conductor-bootstrap/references/first-agent.md",
-      "sha256": "cfa50ed3c63ec71dfb14df031270e4f1ce9fa9356ee34a1430e56c39fa77f051"
-    },
-    {
-      "bytes": 11099,
+      "bytes": 11169,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "35ce6301cabcf31861c665cf40d286063d68fe7e11a78776596ba08924eec543"
+      "sha256": "c4d0d63645db6146368f55da5415e7a1e19159c2eab432615594a6968bfd4270"
     },
     {
-      "bytes": 17589,
+      "bytes": 17594,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "87b1b4d55fda75aa8d7db89bf4a20ba6822e61bd2106d6786f142988e277aff8"
+      "sha256": "7d5e7448f89867b1b8a51aae0a142e88e8f1f3cec63679f0254783ac9f8ecf3e"
     },
     {
       "bytes": 851,
@@ -202,10 +184,10 @@
       "sha256": "30c746accd265006079ab9f1194a4c47b37569db8c6fa9b776c51182a9f7e304"
     },
     {
-      "bytes": 5762,
+      "bytes": 5753,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/project-import.md",
-      "sha256": "e2159300193d13a17d74049e4c584d8277fda56193ba8cca09e55c190bd28426"
+      "sha256": "8b6f2c7ae15ae1c60d688880d0aa079fa1b83356ecca9e642d4645d2a5bf8aaa"
     },
     {
       "bytes": 9864,
@@ -274,16 +256,16 @@
       "sha256": "5a737798876019404b7802a8aebf33d712658bb21e1df33ce00a325f558bc175"
     },
     {
-      "bytes": 4556,
+      "bytes": 4542,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "6ca95bae4ae0a6e9413bb79b3e9810fff8f98b8285319bf309cb578a6d384ebb"
+      "sha256": "5a685a30ee4bbb4153706911bb4967e517c2c4850217580fed2d21af288fb94f"
     },
     {
-      "bytes": 5925,
+      "bytes": 8961,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "8988ff538d7eb171b973f7afbb217d536dac87fa62c3c2e41370fdbfad66e4db"
+      "sha256": "724adbd8d9a703f63541b3c50ed63eb902556ef72fdba910874cb42a6e5d29d1"
     },
     {
       "bytes": 2671,

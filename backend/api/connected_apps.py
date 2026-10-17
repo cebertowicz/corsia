@@ -4,13 +4,18 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from api.connected_app_access import audit_actor as _audit_actor, person_only, refusal as _refusal
 from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
+from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
+from tools.mcp_oauth_listener import oauth_settings
+from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 
 connected_apps_router = APIRouter()
+connected_apps_router.include_router(signin_router)
 log = logging.getLogger(__name__)
 LOCAL_APP_NOTICE = (
     "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
@@ -20,21 +25,6 @@ BODY_SHAPE = (
     'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '
     '"key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]}; use "url" instead of "command" for a hosted app.'
 )
-
-
-def _refusal(detail: str, status: int = 422) -> HTTPException:
-    """Return a connected-app validation error with an explicit safe agent remedy."""
-    headers = {"X-Corsia-Agent-Remedy": detail} if status == 403 else None
-    return HTTPException(status, detail, headers=headers)
-
-
-def _audit_actor(user: dict) -> tuple[str, str]:
-    """Return a durable, value-free actor identity for connected-app audit rows."""
-    if is_person_session(user):
-        actor = user.get("id")
-        return "person", actor if isinstance(actor, str) and actor else "unknown"
-    actor = user.get("thread_id") or user.get("id")
-    return "agent", actor if isinstance(actor, str) and actor else "unknown"
 
 
 def _app_error(exc: Exception) -> HTTPException:
@@ -81,6 +71,16 @@ def _agent_thread(user: dict, db) -> tuple[str, dict]:
     if scope["user_id"] != user.get("id"):
         raise _refusal("The agent thread does not belong to this caller.", 403)
     return thread_id, scope
+
+
+def _reaching_thread(user: dict, app_id: str) -> str:
+    """The agent's thread, or a refusal when its project can't reach ``app_id``."""
+    from connections.app_reach import app_reaches_thread
+
+    thread_id, _scope = _agent_thread(user, _db())
+    if not app_reaches_thread(app_id, thread_id, db=_db()):
+        raise _refusal("This connected app is not available to your project; ask the person in Connected apps.", 403)
+    return thread_id
 
 
 def _agent_reach(thread_id: str, scope: dict, *, db) -> dict[str, object]:
@@ -137,6 +137,10 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     refs = _key_refs(body.get("key_refs"))
     if contains_forbidden_fields(config) or contains_forbidden_fields(refs):
         raise _refusal("Credential values are refused. Declare only the key names in key_refs; the person sets values in Settings > Keys.")
+    try:
+        oauth_settings(config)
+    except Exception as error:
+        raise _refusal(str(error)) from None
     return {**config, "key_refs": refs}
 
 
@@ -148,6 +152,7 @@ def _local_app_notice(config: object) -> str | None:
 
 @connected_apps_router.get("/servers")
 async def list_servers(
+    request: Request,
     project: str | None = Query(None),
     place: str | None = Query(None),
     user: dict = Depends(require_user),
@@ -174,10 +179,10 @@ async def list_servers(
             if project is not None:
                 if not project_exists(project, db=db):
                     raise _refusal("project not found", 404)
-                return [server_row(app, on_here=app_reaches_project(app, project), full=True, db=db) for app in apps]
+                return [server_row(app, on_here=app_reaches_project(app, project), full=True, db=db, person=True) for app in apps]
             if place == "workspace":
-                return [server_row(app, on_here=True, full=True, db=db) for app in apps if app["reach"]["mode"] == "all"]
-            return [server_row(app, on_here=True, full=True, db=db) for app in apps]
+                return [server_row(app, on_here=True, full=True, db=db, person=True) for app in apps if app["reach"]["mode"] == "all"]
+            return [server_row(app, on_here=True, full=True, db=db, person=True) for app in apps]
         thread_id, _scope = _agent_thread(user, db)
         return [
             server_row(app, on_here=reachable, full=reachable, db=db)
@@ -185,7 +190,7 @@ async def list_servers(
             for reachable in (app_reaches_thread(app["id"], thread_id, db=db),)
         ]
 
-    return {"servers": await run_in_db(read)}
+    return {"servers": await run_in_db(read), "sign_in_here": sign_in_here(request)}
 
 
 def _db():
@@ -258,10 +263,7 @@ async def update_server(app_id: str, body: dict[str, Any], user: dict = Depends(
                 app_id, config, expected_revision=revision, audit_actor=_audit_actor(user), db=_db()
             )
         from connections.app_lifecycle import propose_config
-        from connections.app_reach import app_reaches_thread
-        thread_id, _scope = _agent_thread(user, _db())
-        if not app_reaches_thread(app_id, thread_id, db=_db()):
-            raise _refusal("This connected app is not available to your project; ask the person in Connected apps.", 403)
+        thread_id = _reaching_thread(user, app_id)
         return propose_config(
             app_id, config, actor_thread_id=thread_id, expected_revision=revision,
             audit_actor=_audit_actor(user), db=_db(),
@@ -296,19 +298,13 @@ async def update_server_reach(app_id: str, body: dict[str, Any], user: dict = De
     return result
 
 
-def _human_decision(user: dict, action: str, app_id: str) -> None:
-    if is_person_session(user):
-        return
-    from connections.app_lifecycle_support import record_refusal
-
-    record_refusal(app_id, f"refused_{action}", actor=_audit_actor(user), db=_db())
-    raise _refusal("Only the signed-in person can approve or decline an app; open Connected apps.", 403)
+_DECIDE_ONLY = "Only the signed-in person can approve or decline an app; open Connected apps."
 
 
 @connected_apps_router.post("/servers/{app_id}/approve")
 async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Approve an inert proposal; connection/reload is deliberately not part of this route."""
-    _human_decision(user, "approve", app_id)
+    person_only(user, "approve", app_id, copy=_DECIDE_ONLY, db=_db())
     try:
         from connections.app_lifecycle import approve_proposal
         result = await run_in_db(
@@ -324,7 +320,7 @@ async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dic
 @connected_apps_router.post("/servers/{app_id}/decline")
 async def decline_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Decline an inert proposal and retain an earlier approved config if there was one."""
-    _human_decision(user, "decline", app_id)
+    person_only(user, "decline", app_id, copy=_DECIDE_ONLY, db=_db())
     try:
         from connections.app_lifecycle import decline_proposal
         result = await run_in_db(
@@ -337,21 +333,19 @@ async def decline_server(app_id: str, user: dict = Depends(require_user)) -> dic
 
 @connected_apps_router.delete("/servers/{app_id}")
 async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """Remove config; a person's delete also removes only this app's stable-id keys."""
-    human = is_person_session(user)
+    """Remove config and its sign-in in one write, then revoke it; a person's delete also removes only this app's keys."""
+    if not (human := is_person_session(user)):
+        await run_in_db(_reaching_thread, user, app_id)
+    actor = _audit_actor(user)
 
-    def delete() -> dict[str, object]:
+    def delete():
+        from functools import partial
         from connections.app_lifecycle import delete_app
-        from connections.app_reach import app_reaches_thread
 
-        if not human:
-            thread_id, _scope = _agent_thread(user, _db())
-            if not app_reaches_thread(app_id, thread_id, db=_db()):
-                raise _refusal("This connected app is not available to your project; ask the person in Connected apps.", 403)
-        return delete_app(app_id, remove_keys=human, audit_actor=_audit_actor(user), db=_db())
+        return delete_with_sign_in(app_id, partial(delete_app, app_id, remove_keys=human, audit_actor=actor), _db())
 
     try:
-        result = await run_in_db(delete)
+        result = await remove_app(app_id, lambda: run_in_db(delete), actor=actor)
     except Exception as exc:
         raise _app_error(exc) from None
     try:
@@ -366,17 +360,12 @@ async def delete_server(app_id: str, user: dict = Depends(require_user)) -> dict
 async def reconnect_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Reconnect exactly one reachable app, bounded to one restart per ten seconds."""
     def authorize() -> None:
-        from connections.app_reach import app_reaches_thread, get_app
+        from connections.app_reach import get_app
 
         if is_person_session(user):
             get_app(app_id, db=_db())
             return
-        thread_id, _scope = _agent_thread(user, _db())
-        if not app_reaches_thread(app_id, thread_id, db=_db()):
-            raise _refusal(
-                "This connected app is not available to your project; ask the person in Connected apps.",
-                403,
-            )
+        _reaching_thread(user, app_id)
 
     try:
         await run_in_db(authorize)
