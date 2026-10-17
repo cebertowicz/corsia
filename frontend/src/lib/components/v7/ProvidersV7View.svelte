@@ -12,7 +12,7 @@
 	} from '$lib/stores/providersV7';
 	import { providers, loadProviders, updateProvider } from '$lib/stores/providers';
 	import { loadNetworkServers, setNetworkServerEnabled } from '$lib/stores/networkServers';
-	import { Message } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import { loadModels } from '$lib/stores/models';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
@@ -117,17 +117,12 @@
 </script>
 
 <header class="page-head">
-	<h2>Providers</h2>
-	<button type="button" class="add-btn" onclick={() => showAdd = true}>
-		<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-			<path d="M12 5v14M5 12h14"/>
-		</svg>
-		Add provider
-	</button>
+	<h2 class="page-title">Providers</h2>
+	<Button variant="ghost" size="sm" onclick={() => showAdd = true}>Add provider</Button>
 </header>
 
-{#if toggleError}<Message variant="err">{toggleError}</Message>{/if}
-{#if $harnessInventoryError}<Message variant="err">{$harnessInventoryError}</Message>{/if}
+{#if toggleError}<p class="error" role="alert">{toggleError}</p>{/if}
+{#if $harnessInventoryError}<p class="error" role="alert">{$harnessInventoryError}</p>{/if}
 
 {#if $hostGroupsLoading && groups.length === 0}
 	<p class="loading">Loading providers…</p>
@@ -135,12 +130,7 @@
 	<div class="empty">
 		<div class="empty-title">No providers configured</div>
 		<div class="empty-hint">Add a local engine or a cloud API key to get started.</div>
-		<button type="button" class="add-btn primary" onclick={() => showAdd = true}>
-			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-				<path d="M12 5v14M5 12h14"/>
-			</svg>
-			Add your first provider
-		</button>
+		<Button onclick={() => showAdd = true}>Add your first provider</Button>
 	</div>
 {:else}
 	{#each groups as group (group.key)}
@@ -183,57 +173,26 @@
 {/if}
 
 <style>
+	/* The page title as on every Settings page, with the page's one action at the content edge. */
 	.page-head {
 		display: flex; align-items: center; justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 18px;
+		gap: var(--space-4);
+		margin-bottom: var(--space-5);
 	}
-	.page-head h2 {
-		font-size: var(--text-title2); font-weight: 600; letter-spacing: -0.015em;
-		color: var(--text-primary);
-		margin: 0;
-	}
+	.page-head h2.page-title { margin: 0; }
 
-	.add-btn {
-		display: inline-flex; align-items: center; gap: 6px;
-		height: 32px; padding: 0 13px;
-		color: var(--text-secondary); font-size: var(--text-subhead); font-weight: 500;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
-	}
-	.add-btn:hover {
-		color: var(--accent-text);
-		border-color: var(--accent-line);
-		background: var(--accent-wash);
-	}
-	.add-btn.primary {
-		background: var(--accent-wash);
-		border-color: var(--accent-line);
-		color: var(--accent-text);
-		margin-top: 12px;
-	}
+	.error { margin: 0 0 var(--space-4); padding: 0 var(--space-2); font-size: var(--text-footnote); color: var(--red-text); }
 
 	.loading {
+		margin: 0; padding: 0 var(--space-2);
 		font-size: var(--text-subhead);
-		color: var(--text-muted);
-		padding: 12px 0;
+		color: var(--text-tertiary);
 	}
 
 	.empty {
-		display: flex; flex-direction: column; align-items: center; gap: 10px;
-		padding: 32px 24px;
-		color: var(--text-tertiary); font-size: var(--text-subhead);
+		display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+		padding: var(--space-8) var(--space-6);
 	}
-	.empty-title { font-size: var(--text-subhead); color: var(--text-secondary); font-weight: 500; }
-	.empty-hint { font-size: var(--text-footnote); color: var(--text-tertiary); }
-
-	@media (max-width: 480px) {
-		.page-head { margin-bottom: 14px; }
-		.page-head h2 { font-size: var(--text-title2); }
-		.add-btn { height: 30px; padding: 0 11px; font-size: var(--text-footnote); }
-	}
+	.empty-title { font-size: var(--text-subhead); color: var(--text-secondary); }
+	.empty-hint { margin-bottom: var(--space-2); font-size: var(--text-caption); color: var(--text-tertiary); }
 </style>
