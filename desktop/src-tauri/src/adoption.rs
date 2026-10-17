@@ -48,6 +48,10 @@ pub struct SourceInstall {
     pub port: u16,
     /// The plist's `WorkingDirectory`: where the loaded job runs from.
     pub working_directory: PathBuf,
+    /// The plist's `CORSIA_SERVICE_GENERATION`: what `launchctl print` echoes for the job
+    /// bootstrapped from this plist.
+    #[serde(default)]
+    pub generation: Option<String>,
     /// The checkout's `scripts/corsia`: the only thing that stops or starts the source service.
     pub cli: PathBuf,
     pub env_file: PathBuf,
@@ -110,6 +114,8 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
     }
     Ok(SourceInstall {
         plist: plist_path.to_path_buf(),
+        generation: text("CORSIA_SERVICE_GENERATION")
+            .map(|value| value.to_string_lossy().into_owned()),
         cli,
         working_directory,
         env_file: home.join(".corsia/.env"),
@@ -1161,6 +1167,7 @@ mod tests {
                     workspace: source.join("workspace"),
                     port: 47_895,
                     working_directory: source.join("backend"),
+                    generation: None,
                     cli: source.join("scripts/corsia"),
                     env_file,
                     plist_variable_names: vec![],

@@ -267,7 +267,14 @@ fn process_started(pid: u32) -> Option<String> {
     (written == size).then(|| format!("{}.{:06}", info.pbi_start_tvsec, info.pbi_start_tvusec))
 }
 
-/// The `working directory = ` line of `launchctl print`.
+/// The `CORSIA_SERVICE_GENERATION => <value>` line of `launchctl print`.
+fn printed_generation(printed: &str) -> Option<&str> {
+    printed
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("CORSIA_SERVICE_GENERATION => "))
+}
+
+/// The `working directory = ` line of `launchctl print`, used only to name the folder in the refusal.
 fn printed_working_directory(printed: &str) -> Option<&str> {
     printed
         .lines()
@@ -284,10 +291,21 @@ impl adoption::Lifecycle for SourceLifecycle {
             .loaded_job()
             .map_err(ReadyError::Failed)?
             .ok_or(ReadyError::NotRunning)?;
-        // The checkout that would stop it must be the one the loaded job runs
-        // from. A print without the line cannot prove it, so it is refused the same way.
+        // The checkout that would stop it must be the one the loaded job was bootstrapped
+        // from. The plist's generation must be the one the loaded job reports; a plist that
+        // carries one and a print that lacks it cannot prove it, so it is refused the same
+        // way. A plist with no generation falls back to the printed working directory, and a
+        // print without that line is refused too.
         let running = printed_working_directory(&printed);
-        if running.map(Path::new) != Some(self.source.working_directory.as_path()) {
+        let proven = match (
+            self.source.generation.as_deref(),
+            printed_generation(&printed),
+        ) {
+            (Some(expected), Some(loaded)) => expected == loaded,
+            (Some(_), None) => false,
+            (None, _) => running.map(Path::new) == Some(self.source.working_directory.as_path()),
+        };
+        if !proven {
             return Err(ReadyError::WrongFolder {
                 running: running
                     .map(|directory| self.shown(self.checkout_of(Path::new(directory)))),
@@ -517,7 +535,7 @@ mod tests {
         script(
             &base.join("launchctl"),
             &format!(
-                "[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'",
+                "[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'",
                 loaded = loaded.display(),
                 wd = base.join("checkout/backend").display()
             ),
@@ -534,6 +552,7 @@ mod tests {
             port: free_port(),
             cli: base.join("checkout/scripts/corsia"),
             working_directory: base.join("checkout/backend"),
+            generation: Some("gen-1".into()),
             env_file: base.join(".env"),
             plist_variable_names: vec![],
         };
@@ -675,7 +694,75 @@ mod tests {
         let mut home = home("exit 0", "exit 0", "exit 0");
         let base = home.root.path().to_path_buf();
         home.lifecycle.source.working_directory = base.join("elsewhere/backend");
-        // The fake launchctl prints `<base>/checkout/backend`.
+        home.lifecycle.source.generation = Some("gen-elsewhere".into());
+        // The fake launchctl prints `<base>/checkout/backend` and generation `gen-1`.
+        assert_eq!(
+            home.lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::WrongFolder {
+                running: Some("~/checkout".into()),
+                checkout: "~/elsewhere".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_print_without_a_working_directory_line_is_adopted_when_the_generation_matches() {
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        let base = home.root.path().to_path_buf();
+        script(
+            &base.join("launchctl"),
+            &format!(
+                "[ -e '{}' ] || exit 113\necho 'CORSIA_SERVICE_GENERATION => gen-1'",
+                base.join("loaded").display()
+            ),
+        );
+        let answer = home
+            .lifecycle
+            .check_ready(Path::new("/state"), &BTreeSet::new());
+        assert!(
+            !matches!(answer, Err(ReadyError::WrongFolder { .. })),
+            "a matching generation proves the folder: {answer:?}"
+        );
+    }
+
+    #[test]
+    fn a_generation_that_differs_or_is_missing_from_the_print_is_refused_as_a_different_folder() {
+        for printed in [
+            "echo 'CORSIA_SERVICE_GENERATION => gen-2'",
+            "echo 'state = running'",
+        ] {
+            let mut home = home("exit 0", "exit 0", "exit 0");
+            let base = home.root.path().to_path_buf();
+            script(
+                &base.join("launchctl"),
+                &format!(
+                    "[ -e '{}' ] || exit 113\n{printed}",
+                    base.join("loaded").display()
+                ),
+            );
+            assert!(matches!(
+                home.lifecycle
+                    .check_ready(Path::new("/state"), &BTreeSet::new()),
+                Err(ReadyError::WrongFolder { running: None, .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn a_plist_without_a_generation_is_judged_by_the_printed_working_directory() {
+        // The fake launchctl prints `<base>/checkout/backend` and generation `gen-1`.
+        let mut home = home("exit 0", "exit 0", "exit 0");
+        home.lifecycle.source.generation = None;
+        let same = home
+            .lifecycle
+            .check_ready(Path::new("/state"), &BTreeSet::new());
+        assert!(
+            !matches!(same, Err(ReadyError::WrongFolder { .. })),
+            "the same folder is adopted without a generation: {same:?}"
+        );
+        let base = home.root.path().to_path_buf();
+        home.lifecycle.source.working_directory = base.join("elsewhere/backend");
         assert_eq!(
             home.lifecycle
                 .check_ready(Path::new("/state"), &BTreeSet::new()),
@@ -758,7 +845,7 @@ mod tests {
 
     #[test]
     fn the_restart_program_asks_the_backends_own_read_only_look() {
-        assert!(RESTART_PROGRAM.contains("restart_in_flight"));
+        assert!(RESTART_PROGRAM.contains("restart_in_flight_age"));
     }
 
     #[test]
