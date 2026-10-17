@@ -232,8 +232,10 @@
 				// and restored, not known to be running (also what a plain string means), or switched
 				// over and still starting. The reason text only ever goes under Details, except a
 				// refusal written for the person, which tells them what to do and is the line.
+				// "Still running" is said only when the backend proved the install loaded.
 				failureLead: {
-					untouched: 'Nothing was changed. Your existing CORSIA is still running.',
+					untouched: 'Nothing was changed.',
+					untouchedRunning: 'Nothing was changed. Your existing CORSIA is still running.',
 					restored: 'Your existing CORSIA is running again, as it was.',
 				},
 				mayNotBeRunning: 'Your existing CORSIA may not be running.',
@@ -340,7 +342,7 @@
 					note.hidden = true;
 				} else {
 					status.textContent = ADOPTION_COPY.failureTitle;
-					const lead = settled ? ADOPTION_COPY.failureLead[outcome] : `${ADOPTION_COPY.mayNotBeRunning} ${recovery.line}`;
+					const lead = settled ? ADOPTION_COPY.failureLead[outcome === 'untouched' && given.running === true ? 'untouchedRunning' : outcome] : `${ADOPTION_COPY.mayNotBeRunning} ${recovery.line}`;
 					// A standalone line is the whole line: a lead about the existing install would contradict it.
 					line.textContent = given.standalone === true ? detail : given.advice === true && settled ? `${lead} ${detail}` : lead;
 					line.hidden = false;

@@ -248,34 +248,112 @@ def test_adoption_preflight_refuses_while_the_source_is_restarting_itself(tmp_pa
         assert connection.execute("select status from self_restart_requests").fetchall() == [("in_flight",)]
 
 
-def test_the_age_of_an_in_flight_restart_comes_from_its_youngest_row(tmp_path):
+def _ago(seconds: float) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
+
+
+def _requests_table(state: Path) -> None:
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute(
+            "create table self_restart_requests "
+            "(id text primary key, status text not null default 'in_flight', requested_at text not null, phase text)"
+        )
+
+
+def _add_request(state: Path, name: str, status: str, requested_at: str, phase: str | None = None) -> None:
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute("insert into self_restart_requests values (?, ?, ?, ?)", (name, status, requested_at, phase))
+
+
+def test_the_age_of_an_in_flight_restart_comes_from_its_youngest_active_row(tmp_path):
     from datetime import UTC, datetime, timedelta
 
     snapshots = importlib.import_module("infra.adoption_snapshot")
     state = _adoptable_state(tmp_path, {})
     assert snapshots.restart_in_flight_age(state) is None  # no table at all
-    ago = lambda seconds: (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()  # noqa: E731
+    _requests_table(state)
+    _add_request(state, "settled", "completed", _ago(5), "restarting")
+    assert snapshots.restart_in_flight_age(state) is None
+    _add_request(state, "old", "in_flight", _ago(2400), "draining")
+    assert 2399 < snapshots.restart_in_flight_age(state) < 2410, "an operational hold never expires"
+    _add_request(state, "young", "in_flight", _ago(30), "holding")
+    # A time without a zone is read as UTC, as the backend does.
+    naive = (datetime.now(UTC) - timedelta(seconds=90)).replace(tzinfo=None).isoformat()
+    _add_request(state, "naive", "in_flight", naive, "holding")
+    assert 29 < snapshots.restart_in_flight_age(state) < 40, "the youngest row decides"
+    _add_request(state, "odd", "in_flight", "now", "holding")
+    assert snapshots.restart_in_flight_age(state) == 0.0, "an unreadable time is never called stuck"
+    assert snapshots.restart_in_flight(state) is True
+
+
+def test_a_request_the_backend_does_not_count_as_in_flight_is_not_one_here_either(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    _requests_table(state)
+    # Legacy phaseless row past its 600 s guard, and a row in a phase that is not a hold.
+    _add_request(state, "legacy", "in_flight", _ago(601))
+    _add_request(state, "idle", "in_flight", _ago(5), "complete")
+    assert snapshots.restart_in_flight_age(state) is None
+    # A phaseless row inside the guard still counts.
+    _add_request(state, "fresh", "in_flight", _ago(20))
+    assert 19 < snapshots.restart_in_flight_age(state) < 30
+
+
+def test_a_legacy_table_without_a_phase_column_follows_the_same_rule(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
     with sqlite3.connect(state / "corsia.db") as connection:
         connection.execute(
             "create table self_restart_requests "
             "(id text primary key, status text not null default 'in_flight', requested_at text not null)"
         )
-        connection.execute("insert into self_restart_requests values ('settled', 'completed', ?)", (ago(5),))
-        assert snapshots.restart_in_flight_age(state) is None
-        connection.execute("insert into self_restart_requests values ('old', 'in_flight', ?)", (ago(2400),))
-    assert 2399 < snapshots.restart_in_flight_age(state) < 2410
+        connection.execute("insert into self_restart_requests values ('old', 'in_flight', ?)", (_ago(2400),))
+    assert snapshots.restart_in_flight_age(state) is None
     with sqlite3.connect(state / "corsia.db") as connection:
-        connection.execute("insert into self_restart_requests values ('young', 'in_flight', ?)", (ago(30),))
-        # A time without a zone is read as UTC, as the backend does.
-        connection.execute(
-            "insert into self_restart_requests values ('naive', 'in_flight', ?)",
-            ((datetime.now(UTC) - timedelta(seconds=90)).replace(tzinfo=None).isoformat(),),
-        )
-    assert 29 < snapshots.restart_in_flight_age(state) < 40, "the youngest row decides"
-    with sqlite3.connect(state / "corsia.db") as connection:
-        connection.execute("insert into self_restart_requests values ('odd', 'in_flight', 'now')")
-    assert snapshots.restart_in_flight_age(state) == 0.0, "an unreadable time is never called stuck"
-    assert snapshots.restart_in_flight(state) is True
+        connection.execute("insert into self_restart_requests values ('new', 'in_flight', ?)", (_ago(40),))
+    assert 39 < snapshots.restart_in_flight_age(state) < 50
+
+
+def test_the_app_and_the_backend_agree_on_what_is_in_flight(tmp_path):
+    """The one rule, over every phase and a range of ages, against the backend's own reader."""
+    from automation import self_restart
+
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    phases = [None, "", "holding", "steering", "draining", "ready", "restarting", "resuming", "complete", "weird"]
+    for number, (phase, age) in enumerate((p, a) for p in phases for a in (5, 599, 601, 5000)):
+        state = tmp_path / f"state{number}"
+        state.mkdir()
+        _requests_table(state)
+        _add_request(state, "r", "in_flight", _ago(age), phase)
+        connection = sqlite3.connect(state / "corsia.db")
+        connection.row_factory = sqlite3.Row
+        try:
+            backend = self_restart.in_flight_request(db=connection) is not None
+        finally:
+            connection.close()
+        assert (snapshots.restart_in_flight_age(state) is not None) == backend, (phase, age)
+
+
+def test_the_restart_rule_imports_nothing_that_resolves_a_workspace():
+    """The app's preflight runs in a bare interpreter: no infra module may load with the rule."""
+    import subprocess
+    import sys
+
+    backend = Path(__file__).resolve().parents[1]
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import automation.restart_rule; "
+        "print([m for m in sys.modules if m == 'infra' or m.startswith('infra.')])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code, str(backend)],
+        env={"PATH": os.environ.get("PATH", "")},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]"
 
 
 def test_adoption_preflight_ignores_a_settled_restart_and_a_missing_table(tmp_path, monkeypatch):

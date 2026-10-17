@@ -38,6 +38,7 @@ const title = 'CORSIA couldn’t switch over';
 const keys = 'These provider keys aren’t stored in CORSIA yet: OPENAI_API_KEY. Add them in CORSIA › Settings › Keys, then choose Try again.';
 const space = 'The backup needs 4.2 GB free and this disk has 1.1 GB. Free up space, then choose Try again.';
 const untouched = 'Nothing was changed. Your existing CORSIA is still running.';
+const nothingChanged = 'Nothing was changed.';
 const restored = 'Your existing CORSIA is running again, as it was.';
 const startAgainLine = 'Your existing CORSIA may not be running. Choose Start it again.';
 const reopenLine = 'Your existing CORSIA may not be running. Choose Reopen CORSIA to put it back.';
@@ -53,7 +54,8 @@ const quitPendingNote = 'CORSIA will close once your existing CORSIA is running 
 const failedStart = '`corsia start` exited 1';
 const failedStartLine = 'Your existing CORSIA may not be running. Choose Try again.';
 
-const refused = (message) => ({ message, outcome: 'untouched', recovery: null, advice: true });
+// A backend refusal comes after the install was proven loaded, so it carries `running`.
+const refused = (message) => ({ message, outcome: 'untouched', recovery: null, advice: true, running: true });
 const unconfirmed = (message, recovery) => ({ message, outcome: 'unconfirmed', recovery, advice: false });
 const settled = (message, outcome) => ({ message, outcome, recovery: null, advice: false });
 // A refusal that is the whole line, with the action that fixes its cause (or none).
@@ -65,7 +67,9 @@ const ready = { state: 'ready', url: '/index.html#started' };
 const cases = [
 	{ name: '3b-refused-keys', failure: refused(keys), title, line: `${untouched} ${keys}`, note: null, details: null, button: 'Try again' },
 	{ name: '3c-refused-space', failure: refused(space), title, line: `${untouched} ${space}`, note: null, details: null, button: 'Try again' },
-	{ name: 'untouched-technical', failure: settled('source drain API returned HTTP 500', 'untouched'), title, line: untouched, note: null, details: 'source drain API returned HTTP 500', button: 'Try again' },
+	// Nothing proved the install loaded: the lead claims only that nothing was changed.
+	{ name: 'untouched-technical', failure: settled('source drain API returned HTTP 500', 'untouched'), title, line: nothingChanged, note: null, details: 'source drain API returned HTTP 500', button: 'Try again' },
+	{ name: 'untouched-running-technical', failure: { ...settled('could not write the journal', 'untouched'), running: true }, title, line: untouched, note: null, details: 'could not write the journal', button: 'Try again' },
 	{ name: 'after-stop', failure: settled('the new service did not become ready; the old install was restored', 'restored'), title, line: restored, note: null, details: 'the new service did not become ready; the old install was restored', button: 'Try again' },
 	// The same reason text with each outcome: only the outcome decides the line.
 	{ name: 'same-text-restored', failure: settled(space, 'restored'), title, line: restored, note: null, details: space, button: 'Try again' },

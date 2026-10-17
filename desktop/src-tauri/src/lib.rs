@@ -196,23 +196,15 @@ fn port_for_startup(first_run: &first_run::FirstRun, recorded: Option<u16>) -> R
 /// The one request line the shell sends to its own service. The Host header
 /// carries the port: the backend's loopback guard refuses a Host without the
 /// port it is bound to.
-fn local_request(port: u16, method: &str, path: &str, body: Option<&str>) -> String {
-    let headers = body
-        .map(|body| format!("Content-Type: application/json\r\nContent-Length: {}\r\n", body.len()))
-        .unwrap_or_default();
-    format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{headers}Connection: close\r\n\r\n{}",
-        body.unwrap_or_default()
-    )
+fn local_get_request(port: u16, path: &str) -> String {
+    format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
 }
 
-/// Send one request to a service on this computer and read the whole reply.
+/// Send one GET to a service on this computer and read the whole reply.
 /// The error names the step that failed, for callers that report it.
 fn local_exchange(
     port: u16,
-    method: &str,
     path: &str,
-    body: Option<&str>,
     connect_timeout: Duration,
     io_timeout: Duration,
 ) -> Result<Vec<u8>, String> {
@@ -222,7 +214,7 @@ fn local_exchange(
     stream
         .set_read_timeout(Some(io_timeout))
         .and_then(|_| stream.set_write_timeout(Some(io_timeout)))
-        .and_then(|_| stream.write_all(local_request(port, method, path, body).as_bytes()))
+        .and_then(|_| stream.write_all(local_get_request(port, path).as_bytes()))
         .map_err(|error| format!("could not send the request: {error}"))?;
     let mut response = Vec::new();
     stream
@@ -233,7 +225,7 @@ fn local_exchange(
 
 fn local_get(port: u16, path: &str) -> Result<String, String> {
     let unavailable = || "the CORSIA service is unavailable".to_string();
-    local_exchange(port, "GET", path, None, Duration::from_millis(250), Duration::from_millis(500))
+    local_exchange(port, path, Duration::from_millis(250), Duration::from_millis(500))
         .map_err(|_| unavailable())
         .and_then(|response| String::from_utf8(response).map_err(|_| unavailable()))
 }

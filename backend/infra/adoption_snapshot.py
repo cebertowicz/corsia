@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from automation.restart_rule import parse, row_is_active
 from infra.database_migrations import backup_room
 from infra.ignored_environment import IGNORED_VARIABLES
 
@@ -106,33 +107,30 @@ def stored_key_names(state_root: Path) -> set[str]:
 def restart_in_flight_age(state_root: Path) -> float | None:
     """Seconds since the youngest in-flight restart request began, or ``None`` when there is none.
 
-    A read-only look. The youngest row decides, because any young row may be a live drain; a row
-    whose time cannot be read counts as just begun, so it is waited for and never bounced.
+    A read-only look. Which rows count as in flight is the backend's own rule
+    (``automation.restart_rule``), so the app never reports a restart the source itself would
+    not. The youngest such row decides, because any young row may be a live drain; a row whose
+    time cannot be read counts as just begun, so it is waited for and never bounced.
     """
     database = Path(state_root) / "corsia.db"
     try:
         with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                "SELECT requested_at FROM self_restart_requests WHERE status = 'in_flight'"
+                "SELECT * FROM self_restart_requests WHERE status = 'in_flight'"
             ).fetchall()
     except sqlite3.OperationalError as error:
         if "no such table" not in str(error):
             raise AdoptionRefused("The restart state could not be read.") from None
         return None  # an install that never restarted itself has no such table
-    if not rows:
-        return None
     now = datetime.now(UTC)
     ages = []
-    for (requested_at,) in rows:
-        try:
-            began = datetime.fromisoformat(requested_at)
-        except (TypeError, ValueError):
-            ages.append(0.0)
+    for row in rows:
+        if not row_is_active(row, now=now):
             continue
-        if began.tzinfo is None:
-            began = began.replace(tzinfo=UTC)
-        ages.append(max(0.0, (now - began).total_seconds()))
-    return min(ages)
+        began = parse(row["requested_at"])
+        ages.append(0.0 if began is None else max(0.0, (now - began).total_seconds()))
+    return min(ages) if ages else None
 
 
 def restart_in_flight(state_root: Path) -> bool:

@@ -20,7 +20,8 @@ const JOURNAL: &str = "adoption.json";
 /// The launchd label of the source install's service.
 pub const SOURCE_LABEL: &str = "com.corsia.prod";
 const PLIST: &str = "com.corsia.prod.plist";
-/// A restart that has not finished after this long is reported, not waited on forever.
+/// How often a restart in flight is looked at again. How long to wait is the request's own age
+/// (see `RestartLook`), never a limit of the app's.
 const RESTART_POLL: Duration = Duration::from_secs(2);
 const ORPHAN_POLL: Duration = Duration::from_secs(1);
 
@@ -29,6 +30,12 @@ const ORPHAN_POLL: Duration = Duration::from_secs(1);
 pub const NOT_RUNNING: &str =
     "Your existing CORSIA isn’t running. Start it, and this app will take it over.";
 const STUCK_RESTARTING: &str = "Your existing CORSIA is stuck restarting.";
+/// The loaded job is the saved settings' own folder but an older copy of them. The checkout's
+/// script refuses to stop or restart it, so only launchd reloading the plist (a restart of the
+/// computer) recovers it, and no button is offered.
+const OLDER_SETTINGS: &str =
+    "Your existing CORSIA is running older settings than the ones saved for it. \
+     Restart this computer, and this app will take it over.";
 
 /// The loaded job runs from one folder and its settings name another. No restart
 /// fixes this: the checkout's own script refuses unless the installed definition names it.
@@ -223,7 +230,7 @@ pub trait Lifecycle {
     fn stop_old(
         &mut self,
         progress: &mut dyn FnMut(Option<u32>),
-        spawned: &mut dyn FnMut(StopProcess),
+        spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
     ) -> Result<(), String>;
     /// Whether this `corsia stop` process, left by an earlier run of the app, is still draining.
     fn stop_is_running(&mut self, _stop: &StopProcess) -> bool {
@@ -450,7 +457,8 @@ pub enum Recovery {
 pub struct AdoptionError {
     pub message: String,
     pub outcome: Outcome,
-    /// Set only with `Outcome::Unconfirmed`.
+    /// The action the window offers: with `Outcome::Unconfirmed` the one that puts the install
+    /// back, or with a standalone `Outcome::Untouched` line the one that fixes what the line says.
     pub recovery: Option<Recovery>,
     /// The message is a whole sentence written for the person, with what to do
     /// next: the window shows it as the line. Otherwise it is detail for the log.
@@ -458,6 +466,11 @@ pub struct AdoptionError {
     /// The message is the whole line: no lead about the existing install is put before it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub standalone: bool,
+    /// With `Outcome::Untouched`: the existing install was just proven loaded from this
+    /// checkout, so the window may say it is still running. Without it the window says only
+    /// that nothing was changed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub running: bool,
 }
 
 impl AdoptionError {
@@ -467,7 +480,13 @@ impl AdoptionError {
 
     /// An untouched refusal whose message tells the person what to do.
     pub fn refusal(message: impl Into<String>) -> Self {
-        Self::with(message, Outcome::Untouched, None, true)
+        Self::with(message, Outcome::Untouched, None, true).confirmed_running()
+    }
+
+    /// Marks an untouched failure that came after the install was proven loaded.
+    pub fn confirmed_running(mut self) -> Self {
+        self.running = true;
+        self
     }
 
     /// A refusal that is a whole line, with the one action that fixes its cause.
@@ -525,6 +544,7 @@ impl AdoptionError {
             recovery,
             advice,
             standalone: false,
+            running: false,
         }
     }
 }
@@ -559,6 +579,9 @@ pub enum ReadyError {
         running: Option<String>,
         checkout: String,
     },
+    /// The loaded job runs from the folder its settings name, but was loaded from an older
+    /// generation of them (the plist was rewritten without a reload).
+    OlderSettings,
     /// A self-restart is in flight: wait for it, then look again.
     Restarting,
 }
@@ -599,15 +622,11 @@ fn stop_source(
     phase: &mut dyn FnMut(Phase),
 ) -> Result<(), String> {
     phase(Phase::Waiting { running: None });
+    // Without the record a relaunch cannot know a stop is still draining, so a stop that
+    // cannot be recorded is let to finish and then undone (see `stop_old`).
     lifecycle.stop_old(
         &mut |running| phase(Phase::Waiting { running }),
-        &mut |stop| {
-            // Without the record a relaunch cannot know a stop is still draining, so
-            // this is said loudly, but the adoption itself goes on.
-            if let Err(error) = write_stopping(plan, &stop) {
-                log::warn!("the stop process could not be recorded: {error}");
-            }
-        },
+        &mut |stop| write_stopping(plan, &stop),
     )
 }
 
@@ -654,6 +673,9 @@ fn wait_until_ready(
                     wrong_folder_line(running.as_deref(), &checkout),
                     None,
                 ))
+            }
+            Err(ReadyError::OlderSettings) => {
+                return Err(AdoptionError::standalone(OLDER_SETTINGS, None))
             }
             Err(ReadyError::Restarting) => loop {
                 if requested(cancel) {
@@ -710,11 +732,13 @@ pub fn adopt(
     if requested(cancel) {
         return Err(AdoptionError::untouched(
             "adoption cancelled; the source service is still running",
-        ));
+        )
+        .confirmed_running());
     }
     // From the stop request on the source may be down, so the journal says so
     // first and every failure after it ends in the old install's start.
-    write_journal(plan, Step::Stopping, None).map_err(AdoptionError::untouched)?;
+    write_journal(plan, Step::Stopping, None)
+        .map_err(|error| AdoptionError::untouched(error).confirmed_running())?;
     if let Err(error) = stop_source(plan, lifecycle, phase) {
         return rollback(plan, lifecycle, phase, error, None);
     }
@@ -1047,13 +1071,13 @@ mod tests {
         fn stop_old(
             &mut self,
             progress: &mut dyn FnMut(Option<u32>),
-            spawned: &mut dyn FnMut(StopProcess),
+            spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
         ) -> Result<(), String> {
             for count in self.counts.clone() {
                 progress(count);
             }
             if let Some(process) = self.stop_process.clone() {
-                spawned(process);
+                spawned(process)?;
                 self.journal_in_stop = Some(
                     read_journal(&self.plan)
                         .unwrap()
@@ -1371,6 +1395,8 @@ mod tests {
         let cancel = AtomicBool::new(true);
         let error = adopt(&plan, &mut fake, 1, &cancel, &mut |_| {}).unwrap_err();
         assert_eq!(error.outcome, Outcome::Untouched);
+        // The install was proven loaded just before the Quit was seen, so the line may say so.
+        assert!(error.running);
         assert!(
             fake.events.is_empty(),
             "nothing is asked of the old install"
@@ -1644,6 +1670,8 @@ mod tests {
         assert_eq!(error.message(), "OPENAI_API_KEY is not stored in CORSIA.");
         assert_eq!(error.outcome, Outcome::Untouched);
         assert!(error.advice);
+        // The backend answered, so the install is known to be loaded from this checkout.
+        assert!(error.running);
         assert!(!error.message().contains("never-log-this"));
         assert!(fake.events.is_empty());
     }
@@ -1655,6 +1683,8 @@ mod tests {
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert_eq!(error.outcome, Outcome::Untouched);
         assert!(!error.advice);
+        // Nothing proved it loaded, so the line says only that nothing was changed.
+        assert!(!error.running);
         assert!(fake.events.is_empty());
     }
 
@@ -1682,6 +1712,7 @@ mod tests {
         let mut fake = fake_for(&plan, None);
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert_eq!(error.outcome, Outcome::Untouched);
+        assert!(!error.running);
         assert!(error.message().contains("newer"));
         assert!(fake.events.is_empty());
     }
@@ -1727,6 +1758,7 @@ mod tests {
         );
         let json = serde_json::to_value(AdoptionError::refusal("x")).unwrap();
         assert_eq!(json["advice"], true);
+        assert_eq!(json["running"], true);
         let json = serde_json::to_value(AdoptionError::restored("y")).unwrap();
         assert_eq!(json["outcome"], "restored");
         let json = serde_json::to_value(AdoptionError::switched("s")).unwrap();
@@ -1939,6 +1971,24 @@ mod tests {
         }];
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert!(error.message().contains("running from an unknown folder"));
+    }
+
+    #[test]
+    fn settings_older_than_the_saved_ones_say_to_restart_the_computer_and_offer_no_restart_button()
+    {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, None);
+        fake.ready_script = vec![ReadyError::OlderSettings];
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Your existing CORSIA is running older settings than the ones saved for it. Restart this computer, and this app will take it over."
+        );
+        assert_eq!(error.recovery, None);
+        assert_eq!(error.outcome, Outcome::Untouched);
+        assert!(error.standalone);
+        assert!(fake.events.is_empty());
+        assert_eq!(journal_step(&plan), None);
     }
 
     #[test]

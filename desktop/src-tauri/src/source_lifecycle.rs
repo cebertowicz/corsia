@@ -61,6 +61,8 @@ pub struct SourceLifecycle {
     env: Vec<(&'static str, OsString)>,
     proof_timeout: Duration,
     count_interval: Duration,
+    /// Reads a process's start time; replaced in tests.
+    stop_clock: fn(u32) -> Option<String>,
 }
 
 impl SourceLifecycle {
@@ -75,6 +77,7 @@ impl SourceLifecycle {
                 .collect(),
             proof_timeout: PROOF_TIMEOUT,
             count_interval: COUNT_INTERVAL,
+            stop_clock: process_started,
         }
     }
 
@@ -287,10 +290,15 @@ impl adoption::Lifecycle for SourceLifecycle {
         state: &Path,
         variable_names: &BTreeSet<String>,
     ) -> Result<(), ReadyError> {
-        let printed = self
-            .loaded_job()
-            .map_err(ReadyError::Failed)?
-            .ok_or(ReadyError::NotRunning)?;
+        let Some(printed) = self.loaded_job().map_err(ReadyError::Failed)? else {
+            // The source's own restart unloads the job and bootstraps it again, so an unloaded
+            // job with a restart in flight is restarting, not stopped: wait for it (or call it
+            // stuck) rather than offering a start that would race the restart's own.
+            return Err(match self.look_for_restart(state) {
+                RestartLook::Young | RestartLook::Stuck => ReadyError::Restarting,
+                RestartLook::Settled | RestartLook::Unknown => ReadyError::NotRunning,
+            });
+        };
         // The checkout that would stop it must be the one the loaded job was bootstrapped
         // from. The plist's generation must be the one the loaded job reports; a plist that
         // carries one and a print that lacks it cannot prove it, so it is refused the same
@@ -305,6 +313,16 @@ impl adoption::Lifecycle for SourceLifecycle {
             (Some(_), None) => false,
             (None, _) => running.map(Path::new) == Some(self.source.working_directory.as_path()),
         };
+        // Both generations present and different, from the very folder the settings name: the
+        // plist was rewritten without a reload, which no folder wording describes.
+        let older_settings = matches!(
+            (self.source.generation.as_deref(), printed_generation(&printed)),
+            (Some(expected), Some(loaded)) if expected != loaded
+        ) && running.map(Path::new)
+            == Some(self.source.working_directory.as_path());
+        if older_settings {
+            return Err(ReadyError::OlderSettings);
+        }
         if !proven {
             return Err(ReadyError::WrongFolder {
                 running: running
@@ -359,21 +377,32 @@ impl adoption::Lifecycle for SourceLifecycle {
     fn stop_old(
         &mut self,
         progress: &mut dyn FnMut(Option<u32>),
-        spawned: &mut dyn FnMut(StopProcess),
+        spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
     ) -> Result<(), String> {
         let mut child = self
             .cli("stop")
             .spawn()
             .map_err(|error| format!("could not stop the existing install: {error}"))?;
-        // Recorded as soon as it exists, so a Force Quit leaves the journal naming it.
-        match process_started(child.id()) {
-            Some(started) => spawned(StopProcess {
-                pid: child.id(),
-                started,
-            }),
-            None => {
-                log::warn!("the stop process's start time could not be read, so it is not recorded")
+        // Recorded as soon as it exists, so a Force Quit leaves the journal naming it. A
+        // running stop that cannot be named (its start time unreadable, or the journal write
+        // failing) is still never killed: it is let to finish and the switch is then undone,
+        // because a Force Quit now could not be recovered from.
+        let mut unrecorded = None::<String>;
+        match (self.stop_clock)(child.id()) {
+            Some(started) => {
+                let stop = StopProcess {
+                    pid: child.id(),
+                    started,
+                };
+                if let Err(error) = spawned(stop) {
+                    unrecorded = Some(format!("the journal could not name it: {error}"));
+                }
             }
+            None => match child.try_wait() {
+                // Already gone: there is nothing left to wait for, so nothing to name.
+                Ok(Some(_)) => {}
+                _ => unrecorded = Some("its start time could not be read".into()),
+            },
         }
         let mut counted = None::<Instant>;
         let status = loop {
@@ -390,6 +419,18 @@ impl adoption::Lifecycle for SourceLifecycle {
         };
         if !status.success() {
             return Err(format!("`corsia stop` exited {status}"));
+        }
+        if let Some(why) = unrecorded {
+            log::warn!("the stop process could not be recorded: {why}");
+            return Err(format!(
+                "the stop could not be recorded ({why}), so the switch is being undone"
+            ));
+        }
+        if let Some(why) = unrecorded {
+            log::warn!("the stop process could not be recorded: {why}");
+            return Err(format!(
+                "the stop could not be recorded ({why}), so the switch is being undone"
+            ));
         }
         // An exit status is a report, not proof: ask launchd and the port.
         let mut last = String::new();
@@ -588,7 +629,9 @@ mod tests {
             "env | grep -v '^\\(PWD\\|SHLVL\\|_\\|OLDPWD\\)=' | sort > \"$HOME/start.env\"; touch LOADED",
             "exit 0",
         );
-        home.lifecycle.stop_old(&mut quiet, &mut |_| {}).unwrap();
+        home.lifecycle
+            .stop_old(&mut quiet, &mut |_| Ok(()))
+            .unwrap();
         let base = home.root.path().canonicalize().unwrap();
         let expected = format!(
             "CORSIA_DRAIN_MAX_WAIT=1800\nHOME={}\nPATH=/usr/bin:/bin\n",
@@ -613,7 +656,7 @@ mod tests {
         let mut home = home("echo 'stopped OK'", "exit 0", "exit 0");
         let error = home
             .lifecycle
-            .stop_old(&mut quiet, &mut |_| {})
+            .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err();
         assert!(error.contains("did not stop"), "{error}");
         assert!(error.contains("launchd still lists"), "{error}");
@@ -625,7 +668,7 @@ mod tests {
         );
         assert!(home
             .lifecycle
-            .stop_old(&mut quiet, &mut |_| {})
+            .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err()
             .contains("exited"));
     }
@@ -636,7 +679,7 @@ mod tests {
         let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port)).unwrap();
         let error = home
             .lifecycle
-            .stop_old(&mut quiet, &mut |_| {})
+            .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err();
         assert!(error.contains("still accepts connections"), "{error}");
     }
@@ -649,7 +692,7 @@ mod tests {
         let mut home = home(drains, "exit 0", "echo x >> COUNTS; echo 2");
         let mut seen = vec![];
         home.lifecycle
-            .stop_old(&mut |count| seen.push(count), &mut |_| {})
+            .stop_old(&mut |count| seen.push(count), &mut |_| Ok(()))
             .unwrap();
         assert!(seen.len() >= 3, "{seen:?}");
         assert!(seen.iter().all(|count| *count == Some(2)), "{seen:?}");
@@ -662,7 +705,7 @@ mod tests {
         let mut seen = vec![];
         broken
             .lifecycle
-            .stop_old(&mut |count| seen.push(count), &mut |_| {})
+            .stop_old(&mut |count| seen.push(count), &mut |_| Ok(()))
             .unwrap();
         assert!(!seen.is_empty());
         assert!(
@@ -679,14 +722,32 @@ mod tests {
     }
 
     #[test]
-    fn a_job_that_is_not_loaded_is_not_running_before_anything_is_asked() {
-        let mut home = home("exit 0", "exit 0", "exit 0");
-        fs::remove_file(home.root.path().join("loaded")).unwrap();
-        assert_eq!(
-            home.lifecycle
-                .check_ready(Path::new("/state"), &BTreeSet::new()),
-            Err(ReadyError::NotRunning)
-        );
+    fn a_job_that_is_not_loaded_and_has_no_restart_in_flight_is_not_running() {
+        for answer in ["exit 0", "echo none"] {
+            let mut home = home("exit 0", "exit 0", answer);
+            fs::remove_file(home.root.path().join("loaded")).unwrap();
+            assert_eq!(
+                home.lifecycle
+                    .check_ready(Path::new("/state"), &BTreeSet::new()),
+                Err(ReadyError::NotRunning),
+                "restart look answered {answer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unloaded_job_with_a_restart_in_flight_is_restarting_not_stopped() {
+        // The source's own restart boots the job out and back in: young or old, it is a restart.
+        for age in ["5", "99999"] {
+            let mut home = home("exit 0", "exit 0", &format!("echo {age}"));
+            fs::remove_file(home.root.path().join("loaded")).unwrap();
+            assert_eq!(
+                home.lifecycle
+                    .check_ready(Path::new("/state"), &BTreeSet::new()),
+                Err(ReadyError::Restarting),
+                "request {age} s old"
+            );
+        }
     }
 
     #[test]
@@ -745,6 +806,49 @@ mod tests {
                 home.lifecycle
                     .check_ready(Path::new("/state"), &BTreeSet::new()),
                 Err(ReadyError::WrongFolder { running: None, .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn a_different_generation_from_the_same_folder_is_older_settings_not_a_different_folder() {
+        // The fake launchctl prints `<base>/checkout/backend` and generation `gen-1`.
+        let mut first = home("exit 0", "exit 0", "exit 0");
+        first.lifecycle.source.generation = Some("gen-2".into());
+        assert_eq!(
+            first
+                .lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::OlderSettings)
+        );
+        // Another folder with a different generation, or a print with no generation or no
+        // folder, keeps the folder refusal.
+        let base = first.root.path().to_path_buf();
+        first.lifecycle.source.working_directory = base.join("elsewhere/backend");
+        assert!(matches!(
+            first
+                .lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::WrongFolder { .. })
+        ));
+        for printed in [
+            "echo 'state = running'",
+            "echo 'CORSIA_SERVICE_GENERATION => gen-1'",
+        ] {
+            let mut home = home("exit 0", "exit 0", "exit 0");
+            home.lifecycle.source.generation = Some("gen-2".into());
+            let base = home.root.path().to_path_buf();
+            script(
+                &base.join("launchctl"),
+                &format!(
+                    "[ -e '{}' ] || exit 113\n{printed}",
+                    base.join("loaded").display()
+                ),
+            );
+            assert!(matches!(
+                home.lifecycle
+                    .check_ready(Path::new("/state"), &BTreeSet::new()),
+                Err(ReadyError::WrongFolder { .. })
             ));
         }
     }
@@ -884,7 +988,10 @@ mod tests {
         let mut home = home("sleep 1; rm -f LOADED", "exit 0", "exit 0");
         let mut recorded = vec![];
         home.lifecycle
-            .stop_old(&mut |_| {}, &mut |process| recorded.push(process))
+            .stop_old(&mut |_| {}, &mut |process| {
+                recorded.push(process);
+                Ok(())
+            })
             .unwrap();
         assert_eq!(recorded.len(), 1, "{recorded:?}");
         let process = recorded.remove(0);
@@ -901,6 +1008,74 @@ mod tests {
             ..this
         };
         assert!(!home.lifecycle.stop_is_running(&reused));
+    }
+
+    /// A `corsia stop` that waits for `$HOME/go`, which the test creates from its progress
+    /// callback (called only after the app has looked at the running stop), then finishes.
+    const WAITS_FOR_GO: &str = "n=0; while [ $n -lt 500 ] && [ ! -e \"$HOME/go\" ]; do sleep 0.02; n=$((n+1)); done; touch \"$HOME/stopped\"; rm -f LOADED";
+
+    #[test]
+    fn a_stop_the_journal_cannot_name_is_let_to_finish_and_then_undone() {
+        let mut home = home(WAITS_FOR_GO, "exit 0", "exit 0");
+        let base = home.root.path().to_path_buf();
+        let error = home
+            .lifecycle
+            .stop_old(
+                &mut |_| fs::write(base.join("go"), "").unwrap(),
+                &mut |_| Err("disk full".into()),
+            )
+            .unwrap_err();
+        assert!(error.contains("could not be recorded"), "{error}");
+        assert!(error.contains("disk full"), "{error}");
+        assert!(
+            base.join("stopped").exists(),
+            "the stop ran to its end, it was not killed"
+        );
+    }
+
+    #[test]
+    fn a_running_stop_whose_start_time_cannot_be_read_is_let_to_finish_and_then_undone() {
+        let mut home = home(WAITS_FOR_GO, "exit 0", "exit 0");
+        home.lifecycle.stop_clock = |_| None;
+        let base = home.root.path().to_path_buf();
+        let mut named = false;
+        let error = home
+            .lifecycle
+            .stop_old(
+                &mut |_| fs::write(base.join("go"), "").unwrap(),
+                &mut |_| {
+                    named = true;
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+        assert!(error.contains("start time could not be read"), "{error}");
+        assert!(!named);
+        assert!(base.join("stopped").exists());
+    }
+
+    /// Waits until the child has exited (without reaping it), then reports no start time:
+    /// a stop that finished before it could be looked at.
+    fn unreadable_after_exit(pid: u32) -> Option<String> {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        None
+    }
+
+    #[test]
+    fn a_stop_that_already_exited_needs_no_record() {
+        let mut home = home("rm -f LOADED", "exit 0", "exit 0");
+        home.lifecycle.stop_clock = unreadable_after_exit;
+        home.lifecycle
+            .stop_old(&mut quiet, &mut |_| panic!("nothing to name"))
+            .unwrap();
     }
 
     #[test]
