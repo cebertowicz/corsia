@@ -324,8 +324,8 @@ def get_pull_request_info(repo: str, pr_number: int) -> dict[str, Any] | None:
         "labels": labels,
         "title": title,
         "body": body,
-        "headRepoFullName": _repo_full_name(head.get("repo")),
-        "baseRepoFullName": _repo_full_name(base.get("repo")),
+        "headRepoFullName": repo_full_name(head.get("repo")),
+        "baseRepoFullName": repo_full_name(base.get("repo")),
     }
 
 
@@ -334,7 +334,7 @@ def _text_or_empty(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _repo_full_name(repo: Any) -> str | None:
+def repo_full_name(repo: Any) -> str | None:
     """Return one PR side's ``owner/name``, or None when GitHub gives no repository."""
     name = repo.get("full_name") if isinstance(repo, dict) else None
     return name if isinstance(name, str) and name else None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 
 from reviewer.gh_api import run_gh
@@ -11,6 +12,8 @@ from reviewer.reviewer_categories import LABEL_REVIEW
 log = logging.getLogger(__name__)
 
 _GH_TIMEOUT_S = 30.0
+_APPROVER_PERMISSIONS = frozenset({"admin", "maintain", "write"})
+_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?")
 
 
 def _gh(args: list[str], what: str) -> subprocess.CompletedProcess[str] | None:
@@ -20,6 +23,19 @@ def _gh(args: list[str], what: str) -> subprocess.CompletedProcess[str] | None:
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("fork hold: %s did not run: %s", what, exc)
         return None
+
+
+def sender_can_approve(repo: str, login: str | None) -> bool:
+    """Whether a login has write access to the repository; anything unverifiable is no."""
+    if not login or not _LOGIN.fullmatch(login):
+        return False
+    result = _gh(
+        ["api", f"repos/{repo}/collaborators/{login}/permission", "--jq", ".permission"],
+        f"read {login}'s permission on {repo}",
+    )
+    if result is None or result.returncode != 0:
+        return False
+    return result.stdout.strip() in _APPROVER_PERMISSIONS
 
 
 def remove_review_label(repo: str, pr_number: int) -> bool:
@@ -59,8 +75,8 @@ def waiting_run_ids(repo: str, head_sha: str) -> list[int] | None:
     return [int(line) for line in result.stdout.split() if line.isdigit()]
 
 
-def approve_waiting_runs(repo: str, head_sha: str) -> int | None:
-    """Approve every workflow run held for approval at this head; count, or None if unlistable."""
+def approve_waiting_runs(repo: str, head_sha: str) -> tuple[int, int] | None:
+    """Approve every workflow run held at this head; (approved, failed), or None if unlistable."""
     run_ids = waiting_run_ids(repo, head_sha)
     if run_ids is None:
         return None
@@ -77,4 +93,4 @@ def approve_waiting_runs(repo: str, head_sha: str) -> int | None:
                 "fork hold: approving run %d exited %d: %s",
                 run_id, result.returncode, (result.stderr or "")[:200],
             )
-    return approved
+    return approved, len(run_ids) - approved

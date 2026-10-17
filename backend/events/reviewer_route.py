@@ -26,6 +26,15 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
     if internal_event not in REVIEWER_EVENTS:
         return
 
+    from events.connectors.github_reviewer_fork_hold import reconcile_push
+
+    pr = payload.get("pull_request") or {}
+    pr_number = pr.get("number")
+    head_sha = (pr.get("head") or {}).get("sha", "")
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    # A fork head waits whoever pushed it, so this runs before the bot guard.
+    reconcile_push(repo, pr_number, head_sha, internal_event, payload)
+
     if guard.is_bot_or_self_authored(payload):
         author = payload.get("sender") or {}
         logger.info(
@@ -44,20 +53,12 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
         )
         return
 
-    pr = payload.get("pull_request") or {}
-    pr_number = pr.get("number")
-    head_sha = (pr.get("head") or {}).get("sha", "")
     logger.debug(
         "reviewer-route: push event {} PR #{} sha={} — gate evaluates on green CI or ready transition",
         internal_event,
         pr_number,
         (head_sha or "?")[:8],
     )
-
-    from events.connectors.github_reviewer_fork_hold import on_fork_push
-
-    repo = (payload.get("repository") or {}).get("full_name", "")
-    on_fork_push(repo, pr_number, head_sha, internal_event, payload)
 
 
 def check_gate_on_trigger(
@@ -174,10 +175,10 @@ def _check_label_event(
     payload: dict[str, Any],
     loop: asyncio.AbstractEventLoop | None,
 ) -> bool:
-    """Treat the review label as approval of the head named in the payload.
+    """Treat the review label as a request to approve the head named in the payload.
 
-    Only a maintainer can add a label, so the event itself is the authority;
-    the sender is recorded with the approval.
+    The label is only the trigger: the fork hold approves the pull request's
+    current head, and only for a sender with write access.
     """
     from reviewer.reviewer_categories import LABEL_REVIEW
 
@@ -194,9 +195,11 @@ def _check_label_event(
     if (payload.get("label") or {}).get("name") != LABEL_REVIEW:
         return True
 
-    from events.connectors.github_reviewer_fork_hold import approve_head
+    from events.connectors.github_reviewer_fork_hold import payload_is_fork, reconcile_label
 
-    approve_head(
+    if not payload_is_fork(payload):
+        return True
+    reconcile_label(
         repo, pr_number, head_sha, (payload.get("sender") or {}).get("login"),
         internal_event, loop,
     )

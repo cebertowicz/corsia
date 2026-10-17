@@ -53,7 +53,7 @@ def test_ingress_runs_the_label_gate_leg_off_the_loop() -> None:
         return None
 
     with patch("events.ingress.route_leg", fake_route), \
-         patch("events.connectors.github_reviewer_fork_hold.approve_head") as approve:
+         patch("events.connectors.github_reviewer_fork_hold.reconcile_label") as approve:
         result = asyncio.run(handle_event("webhook.github.pr_labeled", _labeled(LABEL_REVIEW)))
 
     assert result["reviewer_gate"] == "evaluated"
@@ -74,7 +74,7 @@ def test_every_waiting_run_at_the_head_is_approved() -> None:
         return _gh_result("11\n12\n") if args[1].startswith("repos/o/r/actions/runs?") else _gh_result()
 
     with patch("reviewer.gh_fork_hold.run_gh", run):
-        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") == 2
+        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") == (2, 0)
 
     assert calls[0][1] == "repos/o/r/actions/runs?head_sha=abc123&status=action_required&per_page=100"
     assert calls[1:] == [
@@ -93,7 +93,23 @@ def test_an_unlistable_or_unapprovable_run_is_reported_not_invented() -> None:
         return _gh_result("11\n") if "actions/runs?" in args[1] else _gh_result(returncode=403)
 
     with patch("reviewer.gh_fork_hold.run_gh", run):
-        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") == 0
+        assert gh_fork_hold.approve_waiting_runs("o/r", "abc123") == (0, 1)
+
+
+def test_only_a_login_with_write_access_can_approve() -> None:
+    from reviewer import gh_fork_hold
+
+    for permission, allowed in (("admin", True), ("write", True), ("read", False), ("none", False)):
+        with patch("reviewer.gh_fork_hold.run_gh", return_value=_gh_result(permission + "\n")) as run:
+            assert gh_fork_hold.sender_can_approve("o/r", "alice") is allowed
+        assert run.call_args.args[0][1] == "repos/o/r/collaborators/alice/permission"
+
+    with patch("reviewer.gh_fork_hold.run_gh", return_value=_gh_result(returncode=1, stderr="HTTP 404")):
+        assert gh_fork_hold.sender_can_approve("o/r", "alice") is False
+    with patch("reviewer.gh_fork_hold.run_gh") as run:
+        assert gh_fork_hold.sender_can_approve("o/r", None) is False
+        assert gh_fork_hold.sender_can_approve("o/r", "../x") is False
+    run.assert_not_called()
 
 
 def test_removing_an_absent_label_counts_as_removed() -> None:
