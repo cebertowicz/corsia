@@ -99,11 +99,14 @@ async def pair_start(body: dict):
         # otherwise materialize the host certificate while Devices is off.
         runtime.pairing.require_active()
         mode = body.get("mode")
-        prefix = transcript_prefix(
-            mode,
-            host=body.get("host"),
-            spki_sha256=host_spki_sha256() if mode == "pinned" else None,
-        )
+        try:
+            prefix = transcript_prefix(
+                mode,
+                host=body.get("host"),
+                spki_sha256=host_spki_sha256() if mode == "pinned" else None,
+            )
+        except ValueError:
+            raise runtime.pairing.reject_malformed() from None
         msg_c = _decode(body.get("msg_c"), "msg_c")
         spake, msg_s, generation = await asyncio.to_thread(runtime.pairing.start_spake)
         exchange_id, msg_s = runtime.pairing.start(

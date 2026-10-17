@@ -46,6 +46,63 @@ try {
 		}
 	}
 	console.log(`remote launch states: ${states.length * 2} renders passed`);
+
+	// Each failure's buttons reach their action. Every command answers with a recorded call; disconnect_remote
+	// answers "needs approval" so the page stays put and the shell's own handling of the startup is visible too.
+	const shellUrl = pathToFileURL(path.join(repo, 'desktop/dist-shell/index.html')).href;
+	async function press(state, button, answers = {}) {
+		const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+		await page.addInitScript((answers) => {
+			window.__calls = [];
+			window.__TAURI__ = { core: { invoke: async (command) => {
+				window.__calls.push(command);
+				const answer = answers[command];
+				if (answer?.reject) throw answer.reject;
+				return answer ?? (command === 'disconnect_remote' ? { state: 'requires_approval' } : undefined);
+			} } };
+			window.setTimeout = () => 0;
+		}, answers);
+		await page.goto(shellUrl, { waitUntil: 'load' });
+		await page.evaluate((value) => window.__corsiaShowRemoteState(value), state);
+		await page.click(button);
+		await page.waitForTimeout(50);
+		const seen = await page.evaluate(() => ({
+			calls: window.__calls,
+			status: document.getElementById('status').textContent,
+			retry: document.getElementById('actions').hidden ? null : document.getElementById('retry').textContent,
+		}));
+		return { page, ...seen };
+	}
+	const expectCalls = (label, seen, calls) => {
+		if (JSON.stringify(seen.calls) !== JSON.stringify(calls)) throw new Error(`${label}: invoked ${JSON.stringify(seen.calls)}, expected ${JSON.stringify(calls)}`);
+	};
+	// The failure card looks up the service log's location on its own; it is not one of the actions under test.
+	const notLogLookup = (command) => command !== 'get_service_log_path';
+	let clicks = 0;
+	for (const kind of ['unreachable', 'incompatible', 'too_old', 'key_changed']) {
+		const state = { kind, name: 'Studio', cause: 'network' };
+		const primary = await press(state, '#retry');
+		// Try again retries the saved remote; Pair again forgets it and starts this computer's own pairing flow.
+		expectCalls(`${kind}: primary button`, primary, [kind === 'key_changed' ? 'disconnect_remote' : 'retry_saved_remote']);
+		if (kind === 'key_changed' && primary.status !== 'Keep CORSIA running') throw new Error(`${kind}: Pair again did not continue to local setup (${primary.status})`);
+		const setUp = await press(state, '#set-up-local');
+		expectCalls(`${kind}: Set up this computer instead`, setUp, ['disconnect_remote']);
+		if (setUp.status !== 'Keep CORSIA running') throw new Error(`${kind}: Set up this computer instead did not continue to local setup (${setUp.status})`);
+		clicks += 2;
+	}
+	// A failed set-up stays on a card with an action that tries it again, never a dead end.
+	const failedSetUp = await press({ kind: 'unreachable', name: 'Studio', cause: 'network' }, '#set-up-local', { disconnect_remote: { reject: 'The service could not start.' } });
+	if (failedSetUp.status !== 'CORSIA couldn’t start' || failedSetUp.retry !== 'Try again') throw new Error(`failed set-up: ${failedSetUp.status} / ${failedSetUp.retry}`);
+	await failedSetUp.page.click('#retry');
+	await failedSetUp.page.waitForTimeout(50);
+	expectCalls('failed set-up, Try again', { calls: (await failedSetUp.page.evaluate(() => window.__calls)).filter(notLogLookup) }, ['disconnect_remote', 'disconnect_remote']);
+	// A retry that cannot find the saved remote falls back to the plain local start instead of sticking.
+	const lostRemote = await press({ kind: 'unreachable', name: 'Studio', cause: 'network' }, '#retry', { retry_saved_remote: { reject: 'no remote is saved on this computer' } });
+	if (lostRemote.status !== 'CORSIA couldn’t start') throw new Error(`lost remote: ${lostRemote.status}`);
+	await lostRemote.page.click('#retry');
+	await lostRemote.page.waitForTimeout(50);
+	expectCalls('lost remote, Try again', { calls: (await lostRemote.page.evaluate(() => window.__calls)).filter(notLogLookup) }, ['retry_saved_remote', 'start_local_service']);
+	console.log(`remote launch actions: ${clicks + 4} clicks reached their action`);
 } finally {
 	await browser.close();
 }

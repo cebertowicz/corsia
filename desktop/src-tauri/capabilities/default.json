@@ -15,6 +15,7 @@
     "allow-remote-discovered",
     "allow-remote-pair",
     "allow-retry-quit",
+    "allow-retry-saved-remote",
     "allow-save-setup-report",
     "allow-start-local-service",
     "allow-start-window-drag",

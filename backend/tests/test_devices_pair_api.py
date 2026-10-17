@@ -379,3 +379,48 @@ def test_pair_api_rejects_pinned_exchange_with_incorrect_spki_binding(monkeypatc
 
     assert refused.status_code == 401
     assert refused.json()["detail"]["reason"] == "wrong_code"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"mode": "nonsense"},
+        {"mode": "verified"},
+        {"mode": "verified", "host": "studio.local:8080"},
+        {"mode": "verified", "host": 7},
+    ],
+)
+def test_pair_start_counts_a_bad_mode_or_host_as_a_failed_try(monkeypatch, body):
+    events = []
+    monkeypatch.setattr(devices_api, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    code = _enable_pairing()
+    client = TestClient(app)
+
+    refused = client.post(
+        "/api/devices/pair/start",
+        json={**body, "msg_c": _encoded(_client_pairing(code).start())},
+    )
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == {"reason": "invalid_exchange"}
+    assert runtime.pairing._wrong_tries == 1
+    assert (("devices", "pairing_failed"), {"properties": {"reason": "invalid_exchange"}}) in events
+
+
+def test_pair_finish_counts_a_malformed_client_message_as_a_failed_try(monkeypatch):
+    events = []
+    monkeypatch.setattr(devices_api, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    _enable_pairing()
+    client = TestClient(app)
+    started = _start(client, b"not-a-pake-message")
+    assert started.status_code == 200
+
+    refused = _finish(client, started.json()["exchange_id"], b"confirm")
+    repeated = _finish(client, started.json()["exchange_id"], b"confirm")
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == {"reason": "invalid_exchange"}
+    assert repeated.status_code == 409
+    # The malformed finish and the replay of its consumed exchange each count.
+    assert runtime.pairing._wrong_tries == 2
+    assert events.count((("devices", "pairing_failed"), {"properties": {"reason": "invalid_exchange"}})) == 2

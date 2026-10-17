@@ -383,12 +383,10 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     assert direct.json()["code"]["value"] == code
     assert forwarded.json()["code"] == {
         "state": "active",
-        "expires_at": forwarded.json()["code"]["expires_at"],
         "expires_in_seconds": forwarded.json()["code"]["expires_in_seconds"],
     }
     assert devices_listener.json()["code"] == {
         "state": "active",
-        "expires_at": devices_listener.json()["code"]["expires_at"],
         "expires_in_seconds": devices_listener.json()["code"]["expires_in_seconds"],
     }
 
@@ -466,7 +464,7 @@ def test_devices_status_omits_dns_sd_failure_cause(monkeypatch, failure):
     assert set(body) == _DOCUMENTED_DEVICES_KEYS
     assert body["listening"] == {"port": 47901}
     assert body["announced_name"] is None
-    assert body["code"] == {"state": "none", "expires_at": None}
+    assert body["code"] == {"state": "none"}
     assert "expires_in_seconds" not in body["code"]
     assert not {"cause", "error", "reason", "detail", "message"} & set(_response_keys(body))
     assert raw_error not in response.text

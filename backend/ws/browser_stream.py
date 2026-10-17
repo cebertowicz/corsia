@@ -16,7 +16,7 @@ from host_access import browser_control, browser_pane
 from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 from host_access.processes import ProcessOwnerError
-from infra.auth import authenticate
+from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
 from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
@@ -61,7 +61,7 @@ async def _authenticate_pane_stream(ws: WebSocket) -> dict | None:
     try:
         message = await asyncio.wait_for(ws.receive_json(), timeout=10)
         token = message.get("token", "") if isinstance(message, dict) else ""
-        user = authenticate(token)
+        user = narrow_to_listener(ws, authenticate(token))
     except WebSocketDisconnect:
         return None  # The pane left first; there is no socket left to close.
     except (TimeoutError, ValueError):

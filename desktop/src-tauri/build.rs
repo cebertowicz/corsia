@@ -10,6 +10,7 @@ fn main() {
                 "remote_discovered",
                 "remote_pair",
                 "retry_quit",
+                "retry_saved_remote",
                 "save_setup_report",
                 "start_local_service",
                 "start_window_drag",

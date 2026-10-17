@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from urllib.parse import parse_qs
 
 import psutil
 import uvicorn
@@ -124,6 +125,11 @@ def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str
     return [value for _, _, value in sorted(set(addresses))]
 
 
+# The one Uvicorn release whose private ``_wait_tasks_to_complete`` the
+# override below was written against; any other version uses Uvicorn's own.
+_PINNED_UVICORN_VERSION = "0.49.0"
+
+
 class DevicesServer(uvicorn.Server):
     """A Uvicorn server that never claims process signal handling."""
 
@@ -132,10 +138,10 @@ class DevicesServer(uvicorn.Server):
         yield
 
     async def _wait_tasks_to_complete(self) -> None:
-        if uvicorn.__version__ != "0.49.0":
+        if uvicorn.__version__ != _PINNED_UVICORN_VERSION:
             await super()._wait_tasks_to_complete()
             return
-        # Uvicorn 0.49.0 has already sent normal connection shutdown (including WS
+        # Uvicorn has already sent normal connection shutdown (including WS
         # code 1012). Active SSE responses have no natural end, so disabling
         # Devices must disconnect transports and join their ASGI requests.
         # A streaming generator can be waiting for its next event rather than
@@ -173,11 +179,17 @@ class DevicesApp:
         self.stopping = False
 
     @staticmethod
-    async def _has_human_session(scope) -> bool:
+    def _handshake_token(scope) -> str | None:
+        """Read the token the way the API routes do: ``?token=`` wins over Bearer."""
         headers = dict(scope.get("headers", ()))
         authorization = headers.get(b"authorization", b"").decode("latin-1")
-        token = token_from_request(None, authorization)
-        user = await run_in_db(authenticate, token)
+        query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
+        query_token = (query.get("token") or [None])[0]
+        return token_from_request(query_token, authorization)
+
+    @classmethod
+    async def _has_human_session(cls, scope) -> bool:
+        user = await run_in_db(authenticate, cls._handshake_token(scope))
         return user is not None and is_person_session(user)
 
     async def __call__(self, scope, receive, send):
@@ -193,6 +205,18 @@ class DevicesApp:
             await JSONResponse({"reason": "sign_in_required"}, status_code=401)(
                 tagged, receive, send,
             )
+            return
+        # Browsers cannot set headers on a WebSocket, so the app authenticates
+        # in its first frame, where the endpoints accept a person session only
+        # on this listener. A token offered at the handshake is checked here,
+        # before the socket is accepted.
+        if (
+            tagged.get("type") == "websocket"
+            and self._handshake_token(tagged) is not None
+            and not await self._has_human_session(tagged)
+        ):
+            await receive()  # websocket.connect
+            await send({"type": "websocket.close", "code": 1008})
             return
         try:
             await self._app(tagged, receive, send)

@@ -10,6 +10,9 @@ from types import SimpleNamespace
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
+from fastapi import FastAPI, WebSocket
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from infra import devices_listener
 from infra.devices_listener import (
@@ -324,3 +327,230 @@ async def test_devices_server_uses_uvicorn_default_wait_outside_049(monkeypatch)
     await server._wait_tasks_to_complete()
 
     assert calls == [server]
+
+
+def test_devices_server_override_is_pinned_to_the_verified_uvicorn_version():
+    assert devices_listener.uvicorn.__version__ == devices_listener._PINNED_UVICORN_VERSION, (
+        "DevicesServer._wait_tasks_to_complete overrides a private Uvicorn method and only "
+        f"runs on {devices_listener._PINNED_UVICORN_VERSION}; Uvicorn is now "
+        f"{devices_listener.uvicorn.__version__}. Re-verify the override against the new "
+        "release (SSE shutdown, transport abort, task join), then update _PINNED_UVICORN_VERSION."
+    )
+
+
+_SESSIONS = {
+    "person-session": {"id": "person", "name": "Person", "token_kind": "session"},
+    "agent-token": {"id": "agent", "name": "Agent", "token_kind": "agent"},
+}
+
+
+@pytest.fixture
+def token_users(monkeypatch):
+    async def fake_run_in_db(function, *args):
+        return _SESSIONS.get(args[0])
+
+    monkeypatch.setattr(devices_listener, "run_in_db", fake_run_in_db)
+
+
+def _stub_app():
+    stub = FastAPI()
+
+    @stub.get("/api/models")
+    async def models():
+        return {"models": []}
+
+    @stub.websocket("/ws")
+    async def socket(websocket: WebSocket):
+        await websocket.accept()
+        await websocket.send_json({"type": "accepted"})
+        await websocket.close()
+
+    return stub
+
+
+def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(token_users):
+    client = TestClient(DevicesApp(_stub_app()))
+
+    assert client.get("/api/models", params={"token": "person-session"}).status_code == 200
+    assert client.get(
+        "/api/models", headers={"Authorization": "Bearer person-session"},
+    ).status_code == 200
+
+
+def test_devices_app_requires_sign_in_without_a_token_or_with_a_machine_token(token_users):
+    client = TestClient(DevicesApp(_stub_app()))
+
+    for response in (
+        client.get("/api/models"),
+        client.get("/api/models", params={"token": "agent-token"}),
+        client.get("/api/models", params={"token": "unknown"}),
+    ):
+        assert response.status_code == 401
+        assert response.json() == {"reason": "sign_in_required"}
+
+
+@pytest.mark.asyncio
+async def test_devices_app_query_token_wins_over_the_authorization_header(monkeypatch):
+    calls = []
+
+    async def fake_run_in_db(function, *args):
+        calls.append(args)
+        return {"token_kind": "session"}
+
+    monkeypatch.setattr(devices_listener, "run_in_db", fake_run_in_db)
+
+    assert await DevicesApp._has_human_session({
+        "headers": [(b"authorization", b"Bearer header-token")],
+        "query_string": b"token=query-token",
+    })
+    assert calls == [("query-token",)]
+
+
+def test_devices_app_websocket_handshake_token_must_be_a_person_session(token_users):
+    client = TestClient(DevicesApp(_stub_app()))
+
+    with client.websocket_connect("/ws?token=person-session") as person:
+        assert person.receive_json() == {"type": "accepted"}
+    with client.websocket_connect(
+        "/ws", headers={"Authorization": "Bearer person-session"},
+    ) as person:
+        assert person.receive_json() == {"type": "accepted"}
+    for presented in ("agent-token", "unknown"):
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect(f"/ws?token={presented}"):
+                pass
+        assert refused.value.code == 1008
+
+
+def test_devices_app_leaves_a_tokenless_websocket_to_its_first_frame_authentication(token_users):
+    client = TestClient(DevicesApp(_stub_app()))
+
+    with client.websocket_connect("/ws") as unauthenticated_yet:
+        assert unauthenticated_yet.receive_json() == {"type": "accepted"}
+
+
+class _FirstFrameSocket:
+    def __init__(self, listener: str | None, presented: str):
+        self.scope = {"corsia_listener": listener} if listener else {}
+        self._presented = presented
+        self.sent: list[dict] = []
+        self.closed: list[int | None] = []
+
+    async def receive_json(self):
+        return {"token": self._presented}
+
+    async def send_json(self, message):
+        self.sent.append(message)
+
+    async def close(self, code=None):
+        self.closed.append(code)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("endpoint", "refusal"),
+    [("chat", {"type": "error", "message": "Invalid or expired session"}), ("pane", None)],
+)
+async def test_devices_listener_first_frame_accepts_only_a_person_session(
+    monkeypatch, endpoint, refusal,
+):
+    from ws import browser_stream, thread_control
+
+    monkeypatch.setattr(thread_control, "active_turns_for_owner", lambda _user_id: [])
+    for module in (thread_control, browser_stream):
+        monkeypatch.setattr(module, "authenticate", lambda presented: _SESSIONS.get(presented))
+
+    async def authenticate(socket):
+        if endpoint == "chat":
+            return await thread_control.authenticate_ws(socket)
+        return await browser_stream._authenticate_pane_stream(socket)
+
+    machine = _FirstFrameSocket("devices", "agent-token")
+    assert await authenticate(machine) is None
+    assert machine.sent == ([refusal] if refusal else [])
+    assert machine.closed == [None if refusal else 1008]
+
+    person = _FirstFrameSocket("devices", "person-session")
+    assert (await authenticate(person))["id"] == "person"
+    assert person.closed == []
+
+    # Off the Devices listener a machine token keeps working.
+    main_listener = _FirstFrameSocket(None, "agent-token")
+    assert (await authenticate(main_listener))["id"] == "agent"
+
+
+# The real /ws and pane-stream endpoints behind DevicesApp, driven over ASGI.
+_REFUSED_CHAT_FRAMES = [{"type": "error", "message": "Invalid or expired session"}]
+_SOCKET_PATHS = {
+    "chat": ("/ws", _REFUSED_CHAT_FRAMES, "auth_ok"),
+    "pane": ("/api/browser/thread-1/stream", [], "no_browser_yet"),
+}
+
+
+@pytest.fixture
+def devices_sockets(monkeypatch, token_users):
+    from host_access import browser_pane
+    from ws import browser_stream, thread_control, websocket_endpoint
+
+    async def pane_closed(_thread_id):
+        return False
+
+    monkeypatch.setattr(thread_control, "active_turns_for_owner", lambda _user_id: [])
+    for module in (thread_control, browser_stream):
+        monkeypatch.setattr(module, "authenticate", lambda presented: _SESSIONS.get(presented))
+    monkeypatch.setattr(browser_stream, "_user_owns_thread", lambda _thread_id, _user_id: True)
+    monkeypatch.setattr(browser_pane, "is_open", pane_closed)
+
+    stub = FastAPI()
+    stub.add_api_websocket_route("/ws", websocket_endpoint)
+    stub.add_api_websocket_route("/api/browser/{thread_id}/stream", browser_stream.browser_stream_endpoint)
+    return TestClient(DevicesApp(stub))
+
+
+def _frames_until_close(socket) -> tuple[list, int]:
+    frames = []
+    try:
+        while True:
+            frames.append(socket.receive_json())
+    except WebSocketDisconnect as closed:
+        return frames, closed.code
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "pane"])
+@pytest.mark.parametrize("first_frame", [{"type": "subscribe_session", "thread_id": "t"}, {"token": ""}, [1, 2]])
+def test_devices_listener_closes_a_socket_whose_first_frame_is_not_an_auth_frame(
+    devices_sockets, endpoint, first_frame,
+):
+    path, refusal_frames, accepted = _SOCKET_PATHS[endpoint]
+
+    with devices_sockets.websocket_connect(path) as socket:
+        socket.send_json(first_frame)
+        frames, _code = _frames_until_close(socket)
+
+    # Nothing but the endpoint's own refusal (or nothing at all, for a frame it
+    # cannot even read) precedes the close: no auth_ok, no turn or pane state.
+    assert frames in ([], refusal_frames)
+    assert all(frame.get("type") != accepted for frame in frames)
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "pane"])
+def test_devices_listener_closes_a_machine_token_in_the_first_frame(devices_sockets, endpoint):
+    path, refusal_frames, accepted = _SOCKET_PATHS[endpoint]
+
+    with devices_sockets.websocket_connect(path) as socket:
+        socket.send_json({"token": "agent-token"})
+        frames, _code = _frames_until_close(socket)
+
+    assert frames == refusal_frames
+    assert all(frame.get("type") != accepted for frame in frames)
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "pane"])
+def test_devices_listener_accepts_a_person_session_in_the_first_frame(devices_sockets, endpoint):
+    path, _, accepted = _SOCKET_PATHS[endpoint]
+
+    with devices_sockets.websocket_connect(path) as socket:
+        socket.send_json({"token": "person-session"})
+        first = socket.receive_json()
+
+    assert accepted in (first.get("type"), first.get("state"))

@@ -4,10 +4,11 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
+use futures_util::future::{FutureExt, Shared};
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
     body::{Bytes, Incoming},
@@ -19,13 +20,14 @@ use hyper_util::rt::TokioIo;
 use tokio::{net::{TcpListener, TcpStream}, sync::oneshot};
 use tokio_rustls::TlsConnector;
 
-use crate::{remote_config::Locator, trust::{self, Trust}};
+use crate::{pairing::RemoteHost, remote_config::Locator, trust::{self, Trust}};
 
 type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
 type ResolveFuture = Pin<Box<dyn Future<Output = Result<(String, u16), ProxyError>> + Send>>;
 type Resolver = Arc<dyn Fn(Locator) -> ResolveFuture + Send + Sync>;
+type SharedResolve = Shared<Pin<Box<dyn Future<Output = Result<Target, ProxyError>> + Send>>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProxyError {
     Bind(String),
     Resolve(String),
@@ -86,6 +88,7 @@ pub async fn start_with_resolver(
         local_port: port,
         on_key_changed: Arc::new(on_key_changed),
         resolver,
+        resolved: Mutex::new(ResolveCache::default()),
     });
     tokio::spawn(async move {
         loop {
@@ -116,6 +119,97 @@ struct ProxyState {
     local_port: u16,
     on_key_changed: Arc<dyn Fn() + Send + Sync>,
     resolver: Resolver,
+    resolved: Mutex<ResolveCache>,
+}
+
+/// Where the saved locator currently points.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Target {
+    host: String,
+    port: u16,
+}
+
+/// The resolved target, kept until a connection to it fails, and the resolve
+/// in flight, which every request that needs a target shares.
+#[derive(Default)]
+struct ResolveCache {
+    current: Option<Target>,
+    flight: Option<(u64, SharedResolve)>,
+    next_flight: u64,
+}
+
+/// The cached target. With `stale` set, the caller found that target
+/// unreachable: it is dropped and resolved again, unless another request has
+/// already replaced it. Concurrent callers share one resolve.
+async fn resolve_target(state: &ProxyState, stale: Option<&Target>) -> Result<Target, ProxyError> {
+    let (id, flight) = {
+        let mut cache = state.resolved.lock().expect("resolve cache mutex is not poisoned");
+        if let Some(current) = &cache.current {
+            if Some(current) != stale {
+                return Ok(current.clone());
+            }
+        }
+        cache.current = None;
+        match &cache.flight {
+            Some((id, flight)) => (*id, flight.clone()),
+            None => {
+                let id = cache.next_flight;
+                cache.next_flight += 1;
+                let resolving = (state.resolver)(state.locator.clone());
+                let flight: SharedResolve = (Box::pin(async move {
+                    resolving.await.map(|(host, port)| Target { host, port })
+                }) as Pin<Box<dyn Future<Output = Result<Target, ProxyError>> + Send>>)
+                    .shared();
+                cache.flight = Some((id, flight.clone()));
+                (id, flight)
+            }
+        }
+    };
+    let outcome = flight.await;
+    let mut cache = state.resolved.lock().expect("resolve cache mutex is not poisoned");
+    if matches!(&cache.flight, Some((current, _)) if *current == id) {
+        cache.flight = None;
+        if let Ok(target) = &outcome {
+            cache.current = Some(target.clone());
+        }
+    }
+    outcome
+}
+
+fn describe(error: ProxyError) -> String {
+    match error {
+        ProxyError::Resolve(message) => message,
+        ProxyError::Unreachable(crate::classify::Unreachable::Network) => "remote host is unreachable on the network".into(),
+        ProxyError::Unreachable(crate::classify::Unreachable::Server) => "remote CORSIA server is unavailable".into(),
+        other => format!("{other:?}"),
+    }
+}
+
+async fn dial(target: &Target) -> Result<(RemoteHost, TcpStream), String> {
+    let remote = RemoteHost::parse(&target.host)?;
+    let stream = match remote.socket_addr(target.port) {
+        Some(address) => TcpStream::connect(address).await,
+        None => TcpStream::connect((target.host.as_str(), target.port)).await,
+    }
+    .map_err(|error| error.to_string())?;
+    Ok((remote, stream))
+}
+
+/// Open a connection to the remote host. A failed connection drops the cached
+/// address and resolves once more: a DHCP change moves a saved DNS-SD host.
+async fn connect(state: &ProxyState) -> Result<(Target, RemoteHost, TcpStream), String> {
+    let target = resolve_target(state, None).await.map_err(describe)?;
+    match dial(&target).await {
+        Ok((remote, stream)) => Ok((target, remote, stream)),
+        Err(first) => {
+            let fresh = resolve_target(state, Some(&target)).await.map_err(describe)?;
+            if fresh == target {
+                return Err(first);
+            }
+            let (remote, stream) = dial(&fresh).await?;
+            Ok((fresh, remote, stream))
+        }
+    }
 }
 
 async fn bind_loopback(preferred_port: u16) -> Result<TcpListener, ProxyError> {
@@ -156,15 +250,9 @@ async fn forward_trusted(
     mut request: Request<Incoming>,
     state: Arc<ProxyState>,
 ) -> Result<Response<ProxyBody>, String> {
-    let (host, port) = (state.resolver)(state.locator.clone()).await.map_err(|error| match error {
-        ProxyError::Resolve(message) => message,
-        ProxyError::Unreachable(crate::classify::Unreachable::Network) => "remote host is unreachable on the network".into(),
-        ProxyError::Unreachable(crate::classify::Unreachable::Server) => "remote CORSIA server is unavailable".into(),
-        other => format!("{other:?}"),
-    })?;
-    let stream = TcpStream::connect((host.as_str(), port)).await.map_err(|error| error.to_string())?;
+    let (target, remote, stream) = connect(&state).await?;
     let config = trust::client_config(&state.trust).map_err(|error| error.to_string())?;
-    let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|error| error.to_string())?;
+    let name = remote.server_name()?;
     let tls = TlsConnector::from(Arc::new(config)).connect(name, stream).await.map_err(|error| {
         if matches!(state.trust, Trust::Pinned { .. }) && error.to_string().contains("SPKI") {
             (state.on_key_changed)();
@@ -177,7 +265,7 @@ async fn forward_trusted(
     tokio::spawn(async move { let _ = connection.with_upgrades().await; });
 
     let client_upgrade = is_upgrade_request(&request).then(|| hyper::upgrade::on(&mut request));
-    rewrite_request(&mut request, &host, port)?;
+    rewrite_request(&mut request, &remote.authority(target.port))?;
     let mut response = sender.send_request(request).await.map_err(|error| error.to_string())?;
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
         if let Some(client_upgrade) = client_upgrade {
@@ -205,19 +293,19 @@ async fn default_resolve(locator: Locator) -> Result<(String, u16), ProxyError> 
     }
 }
 
-fn rewrite_request(request: &mut Request<Incoming>, host: &str, port: u16) -> Result<(), String> {
+fn rewrite_request<B>(request: &mut Request<B>, authority: &str) -> Result<(), String> {
     request.headers_mut().remove("forwarded");
     request.headers_mut().remove("x-forwarded-for");
     request.headers_mut().remove("x-forwarded-host");
     request.headers_mut().remove("x-forwarded-proto");
     request.headers_mut().insert(
         HOST,
-        HeaderValue::from_str(&format!("{host}:{port}")).map_err(|error| error.to_string())?,
+        HeaderValue::from_str(authority).map_err(|error| error.to_string())?,
     );
     let path_and_query = request.uri().path_and_query().map(|value| value.as_str()).unwrap_or("/");
     *request.uri_mut() = Uri::builder()
         .scheme("https")
-        .authority(format!("{host}:{port}"))
+        .authority(authority)
         .path_and_query(path_and_query)
         .build()
         .map_err(|error| error.to_string())?;
@@ -446,5 +534,132 @@ mod tests {
         assert!(changed.load(Ordering::SeqCst));
         proxy.stop();
         server.await.unwrap();
+    }
+
+    /// A TLS server that answers every connection until it is aborted.
+    async fn start_tls_pool(config: Arc<rustls::ServerConfig>) -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let config = Arc::clone(&config);
+                tokio::spawn(async move {
+                    let Ok(tls) = tokio_rustls::TlsAcceptor::from(config).accept(stream).await else {
+                        return;
+                    };
+                    let service = service_fn(|_| async { Ok::<_, Infallible>(Response::new(test_body("ok"))) });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(tls), service)
+                        .await;
+                });
+            }
+        });
+        (port, task)
+    }
+
+    /// A port nothing listens on.
+    async fn dead_port() -> u16 {
+        TcpListener::bind(("127.0.0.1", 0)).await.unwrap().local_addr().unwrap().port()
+    }
+
+    /// A resolver that counts its calls and answers each from `ports` in order
+    /// (the last answer repeats) after `delay`.
+    fn counting_resolver(ports: Vec<u16>, delay: Duration) -> (Resolver, Arc<std::sync::atomic::AtomicUsize>) {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let resolver: Resolver = Arc::new(move |_| {
+            let call = counted.fetch_add(1, Ordering::SeqCst);
+            let port = ports[call.min(ports.len() - 1)];
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Ok(("127.0.0.1".into(), port))
+            })
+        });
+        (resolver, calls)
+    }
+
+    async fn proxy_with(resolver: Resolver, pin: [u8; 32]) -> ProxyHandle {
+        start_with_resolver(
+            Locator::DnsSd { instance: "Studio".into() },
+            Trust::Pinned { spki_sha256: pin },
+            0,
+            || {},
+            resolver,
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn get_all(proxy: &ProxyHandle, count: usize) -> Vec<StatusCode> {
+        let url = format!("http://127.0.0.1:{}/api/health", proxy.port);
+        futures_util::future::join_all((0..count).map(|_| reqwest::get(url.clone())))
+            .await
+            .into_iter()
+            .map(|response| response.unwrap().status())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn concurrent_proxied_requests_share_one_resolve_and_later_ones_reuse_it() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let (port, server) = start_tls_pool(identity.config).await;
+        let (resolver, calls) = counting_resolver(vec![port], Duration::from_millis(150));
+        let proxy = proxy_with(resolver, identity.pin).await;
+
+        assert_eq!(get_all(&proxy, 8).await, vec![StatusCode::OK; 8]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "eight concurrent requests resolve once");
+        assert_eq!(get_all(&proxy, 2).await, vec![StatusCode::OK; 2]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "later requests reuse the cached address");
+        proxy.stop();
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_connect_failure_drops_the_cache_and_resolves_again() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let (port, server) = start_tls_pool(identity.config).await;
+        let (resolver, calls) = counting_resolver(vec![dead_port().await, port], Duration::ZERO);
+        let proxy = proxy_with(resolver, identity.pin).await;
+
+        assert_eq!(get_all(&proxy, 1).await, vec![StatusCode::OK]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the stale address is resolved once more");
+        assert_eq!(get_all(&proxy, 1).await, vec![StatusCode::OK]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the fresh address is cached");
+        proxy.stop();
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn concurrent_connect_failures_share_one_re_resolve() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let (port, server) = start_tls_pool(identity.config).await;
+        let (resolver, calls) = counting_resolver(vec![dead_port().await, port], Duration::from_millis(150));
+        let proxy = proxy_with(resolver, identity.pin).await;
+
+        assert_eq!(get_all(&proxy, 6).await, vec![StatusCode::OK; 6]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        proxy.stop();
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_address_after_a_connect_failure_is_not_dialled_twice() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let (resolver, calls) = counting_resolver(vec![dead_port().await], Duration::ZERO);
+        let proxy = proxy_with(resolver, identity.pin).await;
+
+        assert_eq!(get_all(&proxy, 1).await, vec![StatusCode::BAD_GATEWAY]);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        proxy.stop();
+    }
+
+    #[test]
+    fn rewrite_brackets_an_ipv6_authority_in_the_host_header_and_uri() {
+        let mut request = Request::builder().uri("/api/health?x=1").body(()).unwrap();
+        let authority = RemoteHost::parse("fe80::1%4").unwrap().authority(47901);
+        rewrite_request(&mut request, &authority).unwrap();
+        assert_eq!(request.headers().get(HOST).unwrap(), "[fe80::1]:47901");
+        assert_eq!(request.uri().to_string(), "https://[fe80::1]:47901/api/health?x=1");
     }
 }

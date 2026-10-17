@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from core.device_pairing import (
@@ -23,11 +26,7 @@ def test_code_uses_unambiguous_four_character_alphabet():
 
     assert len(code) == 4
     assert set(code) <= set(CODE_ALPHABET)
-    assert pairing.status() == {
-        "state": "active",
-        "expires_at": CODE_TTL_SECONDS,
-        "expires_in_seconds": 539,
-    }
+    assert pairing.status() == {"state": "active", "expires_in_seconds": 539}
 
 
 def test_disable_ends_code_and_new_code_replaces_previous_generation():
@@ -38,7 +37,7 @@ def test_disable_ends_code_and_new_code_replaces_previous_generation():
 
     assert first != second or len(CODE_ALPHABET) ** 4 > 1
     pairing.disable()
-    assert pairing.status() == {"state": "none", "expires_at": None}
+    assert pairing.status() == {"state": "none"}
     assert "expires_in_seconds" not in pairing.status()
 
 
@@ -49,7 +48,7 @@ def test_expired_code_is_not_active():
     pairing.issue_code()
     now[0] = CODE_TTL_SECONDS
 
-    assert pairing.status() == {"state": "none", "expires_at": None}
+    assert pairing.status() == {"state": "none"}
     assert "expires_in_seconds" not in pairing.status()
     with pytest.raises(PairingError, match="expired"):
         pairing.start(msg_c=b"client", transcript_prefix=b"test")
@@ -195,3 +194,97 @@ def test_failures_age_out_after_an_hour():
     _record_wrong_tries(pairing)
 
     assert pairing.status()["state"] == "none"
+
+
+def test_pairing_state_survives_worker_threads_racing_the_event_loop_calls():
+    """start_spake runs in a worker thread while status/finish/issue_code run on the loop."""
+    now = [0.0]
+    clock_lock = threading.Lock()
+    inside = [0, 0]  # threads in a clock call now, most ever at once
+
+    def clock() -> float:
+        # Every state-touching method reads the clock, so overlapping calls
+        # mean two threads are inside the pairing state at the same time.
+        # The slow, fast-moving clock also makes codes and exchanges expire
+        # mid-run, so the worker's expiry path (_end_code) races the others.
+        with clock_lock:
+            inside[0] += 1
+            inside[1] = max(inside[1], inside[0])
+            now[0] += 0.05
+            value = now[0]
+        time.sleep(0.0002)
+        with clock_lock:
+            inside[0] -= 1
+        return value
+
+    pairing = DevicePairing(clock=clock)
+    pairing.enable()
+    pairing.issue_code()
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(6)
+
+    def guarded(work):
+        def run():
+            barrier.wait()
+            for index in range(300):
+                try:
+                    work(index)
+                except PairingError:
+                    pass  # an expired or rotated code is a normal outcome
+                except BaseException as error:  # noqa: BLE001 - the assertion is that none escape
+                    errors.append(error)
+                    return
+
+        return run
+
+    def start(index):
+        spake, msg_s, generation = pairing.start_spake()
+        pairing.start(
+            msg_c=f"client-{threading.get_ident()}-{index}".encode(),
+            transcript_prefix=b"test",
+            spake=spake,
+            msg_s=msg_s,
+            generation=generation,
+        )
+
+    def finish(index):
+        # Each unknown exchange is a counted failure; keep them rare enough that
+        # the hourly pause does not turn the whole run into a no-op.
+        if index % 50 == 0:
+            pairing.finish(exchange_id=f"missing-{index}", confirm_c=b"x", name="host")
+
+    def rotate(index):
+        if index % 25 == 0:
+            pairing.issue_code()
+
+    workers = [
+        threading.Thread(target=guarded(start)),
+        threading.Thread(target=guarded(start)),
+        threading.Thread(target=guarded(start)),
+        threading.Thread(target=guarded(lambda _index: pairing.status(include_code=True))),
+        threading.Thread(target=guarded(finish)),
+        threading.Thread(target=guarded(rotate)),
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=60)
+
+    assert not any(worker.is_alive() for worker in workers)
+    assert errors == []
+    assert inside[1] == 1, "two threads were inside the pairing state at once"
+
+
+def test_malformed_client_message_in_finish_is_a_counted_failed_try():
+    pairing = DevicePairing()
+    pairing.enable()
+    pairing.issue_code()
+    exchange_id, _ = pairing.start(msg_c=b"not-a-pake-message", transcript_prefix=b"test")
+
+    with pytest.raises(PairingError) as failed:
+        pairing.finish(exchange_id=exchange_id, confirm_c=b"x", name="host")
+
+    assert failed.value.reason == "invalid_exchange"
+    assert pairing._wrong_tries == 1
+    with pytest.raises(PairingError, match="invalid_exchange"):
+        pairing.finish(exchange_id=exchange_id, confirm_c=b"x", name="host")
