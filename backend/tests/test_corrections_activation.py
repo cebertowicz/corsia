@@ -114,6 +114,7 @@ def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
     monkeypatch.setattr(delivery, "deliver_to_thread", accepted)
     asyncio.run(corrections_activation.tell_conductor_about_activation(version))
 
+    assert sent[0].startswith("Corrections classifier version v1 was installed and activated.")
     assert "moved from 3.4 to 4.0" in sent[0]
 
 

@@ -23,7 +23,8 @@ from typing import Any, Callable
 import httpx
 
 from core.corrections_asset_files import (
-    asset_root, free_bytes, previous_dir, recover_interrupted_install, sha256, short_of_space, staging_dir,
+    asset_root, free_bytes, newest_pin, previous_dir, recover_interrupted_install, root_is_newest_pin, sha256,
+    short_of_space, staging_dir,
 )
 from core.corrections_classifier import CORRECTIONS_SPEC
 from core.onnx_asset import AssetError, AssetManifest, load_manifest, run_self_test
@@ -161,6 +162,10 @@ class ClassifierDownload:
         try:
             self._flight()
         except _Failure as failure:
+            logger.warning(
+                "Corrections classifier download failed (%s); any installed version keeps serving",
+                failure.state.get("code"),
+            )
             self._set(**failure.state)
             if failure.state.get("code") == "disk_full":
                 self._watch_space()
@@ -173,7 +178,7 @@ class ClassifierDownload:
 
     def _flight(self) -> None:
         root = self._root()
-        pin = PINNED_MANIFESTS[max(PINNED_MANIFESTS)]
+        pin = PINNED_MANIFESTS[newest_pin()]
         recover_interrupted_install(root)
         if self._already_installed(root):
             self._finish()
@@ -210,7 +215,10 @@ class ClassifierDownload:
         return damaged
 
     def _already_installed(self, root: Path) -> bool:
-        """A present asset that already passes the runtime's own proof needs no download."""
+        """A present asset that passes the runtime's own proof and is the newest pin needs no download.
+
+        An older version that still passes is left serving; the flight goes on to replace it.
+        """
         if not (root / "manifest.json").is_file():
             return False
         self._set(state="self_testing")
@@ -228,9 +236,9 @@ class ClassifierDownload:
                 self._self_test(root)
             except AssetError:
                 return False
-            return True
+            return root_is_newest_pin(root)
         shutil.rmtree(previous, ignore_errors=True)
-        return True
+        return root_is_newest_pin(root)
 
     def _fetch_manifest(self, client: httpx.Client, staging: Path, pin: str) -> AssetManifest:
         path = staging / "manifest.json"
