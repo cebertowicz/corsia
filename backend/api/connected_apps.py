@@ -4,10 +4,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from api.connected_app_access import audit_actor as _audit_actor, person_only, refusal as _refusal
 from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
+from api.connected_app_errors import app_error as _app_error
 from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
@@ -27,32 +28,10 @@ BODY_SHAPE = (
 )
 
 
-def _app_error(exc: Exception) -> HTTPException:
-    from connections.app_reach import (
-        AppNotFoundError,
-        AppPendingApprovalError,
-        AppProposalExpiredError,
-        AppRevisionConflictError,
-    )
-
-    if isinstance(exc, HTTPException):
-        return exc
-    if isinstance(exc, AppNotFoundError):
-        return _refusal("connected app not found", 404)
-    if isinstance(exc, AppRevisionConflictError):
-        return _refusal("connected app changed; refresh it and retry", 409)
-    if isinstance(exc, AppProposalExpiredError):
-        return _refusal(str(exc), 409)
-    if isinstance(exc, AppPendingApprovalError):
-        return _refusal("approve or decline the change first", 409)
-    return _refusal(str(exc))
-
-
 async def _run_app_runtime(action: Literal["connect", "reconnect", "remove"], app_id: str) -> dict[str, object]:
     """Send a persisted Connected Apps action to its app-id runtime seam."""
     from tools.connected_apps_runtime import apply_connected_app_runtime
     return await apply_connected_app_runtime(action, app_id)
-
 
 
 def _agent_thread(user: dict, db) -> tuple[str, dict]:
@@ -125,6 +104,8 @@ def _config(body: dict[str, Any]) -> dict[str, Any]:
     config = body.get("config")
     if isinstance(config, dict) and {"key_refs", "asked_by_thread_id"}.intersection(config):
         raise _refusal(f"key_refs and asked_by_thread_id go beside config, not inside it. {BODY_SHAPE}")
+    if isinstance(config, dict) and "source_folder" in config:
+        raise _refusal(f"source_folder is set by CORSIA when it imports an app, not inside config. {BODY_SHAPE}")
     if not isinstance(config, dict):
         raise _refusal(f"config must be an object. {BODY_SHAPE}")
     command, url, args = config.get("command"), config.get("url"), config.get("args", [])
@@ -274,7 +255,8 @@ async def update_server(app_id: str, body: dict[str, Any], user: dict = Depends(
     except Exception as exc:
         raise _app_error(exc) from None
     if human:
-        await _run_app_runtime("reconnect", app_id)
+        from tools.connected_apps_runtime import reconnect_after_saved_write
+        await reconnect_after_saved_write(app_id)
     return result
 
 
@@ -302,13 +284,22 @@ _DECIDE_ONLY = "Only the signed-in person can approve or decline an app; open Co
 
 
 @connected_apps_router.post("/servers/{app_id}/approve")
-async def approve_server(app_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
-    """Approve an inert proposal; connection/reload is deliberately not part of this route."""
+async def approve_server(
+    app_id: str, body: dict[str, Any] | None = Body(None), user: dict = Depends(require_user),
+) -> dict[str, object]:
+    """Approve a proposal, optionally choosing where it works in the same revision-checked write."""
     person_only(user, "approve", app_id, copy=_DECIDE_ONLY, db=_db())
+    body = body or {}
+    if not set(body) <= {"reach", "expected_revision"}:
+        raise _refusal("approval takes only reach and expected_revision")
+    revision = _expected_revision(body)
     try:
         from connections.app_lifecycle import approve_proposal
         result = await run_in_db(
-            lambda: approve_proposal(app_id, audit_actor=_audit_actor(user), db=_db())
+            lambda: approve_proposal(
+                app_id, reach=body.get("reach"), expected_revision=revision,
+                audit_actor=_audit_actor(user), db=_db(),
+            )
         )
     except Exception as exc:
         raise _app_error(exc) from None

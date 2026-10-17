@@ -11,3 +11,13 @@ async def apply_connected_app_runtime(action: RuntimeAction, app_id: str) -> dic
     from tools.mcp_runtime import apply_connected_app_runtime as apply
 
     return await apply(action, app_id)
+
+
+async def reconnect_after_saved_write(app_id: str) -> dict[str, object]:
+    """Reconnect a saved change now or schedule one canonical retry after the rate limit."""
+    from tools.mcp_runtime import MCPReconnectRateLimitError, defer_connected_app_reconnect
+
+    try:
+        return await apply_connected_app_runtime("reconnect", app_id)
+    except MCPReconnectRateLimitError:
+        return await defer_connected_app_reconnect(app_id)

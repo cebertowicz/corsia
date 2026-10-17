@@ -28,17 +28,31 @@ afterEach(() => {
 });
 
 describe('SettingsView navigation', () => {
-	it('renders a nav entry and a section for every SETTINGS_SECTIONS id', () => {
+	it('renders Connected apps as its own desktop section and mobile Apps tab', () => {
 		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
 		flushSync();
 
-		const entries = [...host.querySelectorAll('.desktop-nav .nav-item')].map((el) => el.textContent?.trim().toLowerCase());
-		expect(entries).toEqual([...SETTINGS_SECTIONS]);
+		const desktopEntries = [...host.querySelectorAll('.desktop-nav .nav-item')].map((el) => el.textContent?.trim());
+		const mobileEntries = [...host.querySelectorAll('.mobile-tab')].map((el) => el.textContent?.trim());
+		expect(desktopEntries).toEqual(['Providers', 'Connected apps', 'System', 'Keys', 'Debug']);
+		expect(mobileEntries).toEqual(['Providers', 'Apps', 'System', 'Keys', 'Debug']);
 		for (const id of SETTINGS_SECTIONS) {
 			settingsActiveSection.set(id);
 			flushSync();
 			expect(host.querySelector('.settings-content')?.children.length, id).toBeGreaterThan(0);
 		}
+	});
+
+	it('renders Connected apps only in its own section', () => {
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+
+		settingsActiveSection.set('system');
+		flushSync();
+		expect(host.querySelector('.settings-content')?.textContent).not.toContain('No connected apps yet');
+
+		settingsActiveSection.set('connected-apps');
+		flushSync();
+		expect(host.querySelector('.settings-content')?.textContent).toContain('Connected apps');
 	});
 
 	it('keeps Settings navigation limited to live product surfaces', async () => {

@@ -43,11 +43,30 @@ def _write_audit(
     )
 
 
+def _remove_new_app_keys(conn: sqlite3.Connection, app_id: str) -> None:
+    """Delete the keys an import stored for an app that never became real."""
+    row = conn.execute("SELECT config_json FROM connected_apps WHERE id=?", (app_id,)).fetchone()
+    key_names = key_entry_names(app_id, json.loads(row["config_json"])) if row else set()
+    if key_names:
+        marks = ",".join("?" * len(key_names))
+        conn.execute(f"DELETE FROM key_store_entries WHERE name IN ({marks})", tuple(sorted(key_names)))
+        from infra.key_store_values import sweep_after_commit
+        sweep_after_commit(conn)
+
+
+def _reaches_nothing(reach: AppReach, *, db: sqlite3.Connection) -> bool:
+    """Selected mode with no project that still exists and no Outside projects (G-P1)."""
+    return reach.mode == "selected" and not reach.outside_projects and not any(
+        project_exists(project_id, db=db) for project_id in reach.project_ids
+    )
+
+
 def _expire_pending_proposal(conn: sqlite3.Connection, app_id: str, app: sqlite3.Row) -> dict[str, object]:
     """Apply the same durable outcome as a decline once a proposal has expired."""
     current_reach = _reach(app_id, db=conn)
     name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
     if app["pending_config_json"] is None:
+        _remove_new_app_keys(conn, app_id)
         _write_audit(
             conn, actor=("system", "proposal_expiry"), app_id=app_id, action="expire",
             reach_from=current_reach, reach_to=None,

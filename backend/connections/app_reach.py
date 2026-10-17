@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 from connections.account_policy import AccountAdmissionError, missing_project_reason, thread_scope
+from connections.app_source_folder import SOURCE_FOLDER_KEY, clean_folder_label
 from infra.time import utc_now
 
 ReachMode = Literal["all", "selected"]
@@ -222,6 +223,7 @@ def get_app(app_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
         raise AppNotFoundError("connected app not found")
     stored_config = json.loads(row["config_json"])
     asked_by_thread_id = stored_config.pop("asked_by_thread_id", None) if isinstance(stored_config, dict) else None
+    source_folder = clean_folder_label(stored_config.pop(SOURCE_FOLDER_KEY, None)) if isinstance(stored_config, dict) else None
     expired = _proposal_expired(row["state"], row["state_since"])
     return {
         "id": row["id"],
@@ -242,12 +244,13 @@ def get_app(app_id: str, *, db: sqlite3.Connection) -> dict[str, object]:
         "pending_actor_name": _requesting_agent_name(row["pending_actor_thread_id"], db=db),
         **({"asked_by": asker, "asked_by_claim": "agent"}
            if (asker := _asked_by(asked_by_thread_id, db=db)) is not None else {}),
+        **({"source_folder": source_folder} if source_folder is not None else {}),
     }
 
 
 def list_apps(*, db: sqlite3.Connection) -> list[dict[str, object]]:
-    """Read every app by id; callers never resolve an app from an old name."""
-    ids = [row["id"] for row in db.execute("SELECT id FROM connected_apps ORDER BY id")]
+    """Read every app in a fixed order (name, then id); callers never resolve an app from an old name."""
+    ids = [row["id"] for row in db.execute("SELECT id FROM connected_apps ORDER BY name COLLATE NOCASE, name, id")]
     return [get_app(app_id, db=db) for app_id in ids]
 
 
@@ -304,6 +307,21 @@ def load_missing_app_key_refs(app_id: str) -> list[str]:
     db = get_db()
     try:
         return missing_app_key_refs(app_id, db=db)
+    finally:
+        db.close()
+
+
+def load_awaits_sign_in(app_id: str) -> bool:
+    """Whether an imported needs-sign-in app has no person's sign-in yet (A-R16: no network call until then)."""
+    from infra.database import get_db
+    from tools.mcp_oauth_store import entry_name
+
+    db = get_db()
+    try:
+        row = db.execute("SELECT state FROM connected_apps WHERE id=?", (app_id,)).fetchone()
+        return row is not None and row["state"] == "needs_sign_in" and db.execute(
+            "SELECT 1 FROM key_store_entries WHERE name=? AND value_ref IS NOT NULL", (entry_name(app_id),)
+        ).fetchone() is None
     finally:
         db.close()
 

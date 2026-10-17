@@ -80,7 +80,7 @@ function settingsLink(href: string, origin: string): { section: SettingsSection;
 		return null;
 	}
 	if (url.origin !== origin) return null;
-	const match = /^\/settings\/([a-z]+)\/?$/.exec(url.pathname);
+	const match = /^\/settings\/([a-z-]+)\/?$/.exec(url.pathname);
 	const section = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
 	if (!section) return null;
 	return { section, anchor: /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null };

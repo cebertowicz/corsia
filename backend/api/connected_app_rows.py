@@ -37,9 +37,15 @@ def _agent_next_step(
     if state == "working":
         return f'Load its tools with tools_load(server="{label}").'
     if state == "needs_token":
-        return f"{label} needs a key. Press Set key next to {label} in {place}. Please don't paste it here."
+        return (
+            f"{label} needs a key. Ask the person to open Settings › Keys, find the {label} key card, and press Set. "
+            "Please don't paste it here."
+        )
     if state == "token_rejected":
-        return f"{label} didn't accept its key. Press Replace key next to {label} in {place}."
+        return (
+            f"{label} didn't accept its key. Ask the person to open Settings › Keys, find the {label} key card, "
+            "and press Replace."
+        )
     if state == "needs_sign_in":
         return f"Ask the person to press Sign in next to {label} in {place}. Please don't try to sign in yourself."
     if state == "disconnected":
@@ -100,6 +106,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "revision": app["revision"],
         "reach": app["reach"],
         "on_here": on_here,
+        **({"folder": app["source_folder"]} if app.get("source_folder") else {}),
         **({"sign_in": sign_in} if sign_in is not None else {}),
     }
 

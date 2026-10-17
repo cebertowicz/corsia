@@ -12,6 +12,12 @@ export interface ConnectedApp {
 	tool_count?: number;
 	failure_class?: string | null;
 	reach: { mode: 'all' | 'selected'; project_ids: string[]; outside_projects: boolean };
+	/** `stdio` is an app that runs on this Mac; `http` is an app at a web address. */
+	transport?: 'stdio' | 'http' | null;
+	/** Display label only: the last segment of the Claude Code folder the app was set up for. Plain text. */
+	folder?: string;
+	/** Only on the answer to Decline when it deleted a new request: the row is gone. */
+	removed?: boolean;
 	/** Present for an app at a web address. Never holds a token or the sign-in link. */
 	sign_in?: SignInView;
 }
@@ -73,8 +79,12 @@ export function signOutOfApp(id: string): Promise<SignOutResult> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/sign-out`, { method: 'POST' });
 }
 
-export function approveConnectedApp(id: string): Promise<ConnectedApp> {
-	return response(`/api/mcp/servers/${encodeURIComponent(id)}/approve`, { method: 'POST' });
+export function approveConnectedApp(app: Pick<ConnectedApp, 'id' | 'revision'>, reach?: ConnectedApp['reach']): Promise<ConnectedApp> {
+	return response(`/api/mcp/servers/${encodeURIComponent(app.id)}/approve`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ expected_revision: app.revision, ...(reach ? { reach } : {}) }),
+	});
 }
 
 export function declineConnectedApp(id: string): Promise<ConnectedApp> {

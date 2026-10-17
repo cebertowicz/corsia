@@ -163,9 +163,9 @@ async def _reconnect_connected_app_for_key(name: str) -> None:
 
     app_id = await run_in_db(runtime_app_id_for_key_entry, name)
     if app_id is not None:
-        from tools.connected_apps_runtime import apply_connected_app_runtime
+        from tools.connected_apps_runtime import reconnect_after_saved_write
 
-        await apply_connected_app_runtime("reconnect", app_id)
+        await reconnect_after_saved_write(app_id)
 
 
 @router.put("/{name}/value")
