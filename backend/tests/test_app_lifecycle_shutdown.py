@@ -77,7 +77,7 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(frontend_build, "ensure_frontend_built", lambda: None)
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)
-    monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", lambda _loop: None)
+    monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", lambda: None)
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
