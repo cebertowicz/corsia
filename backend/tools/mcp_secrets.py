@@ -36,6 +36,9 @@ _KINDS = {SECRET_ENV: "env", SECRET_HEADERS: "headers"}
 _SCHEME_WORD = r"[A-Za-z][A-Za-z0-9._-]{0,31}"
 _SCHEME = re.compile(_SCHEME_WORD)
 _SCHEMED_VALUE = re.compile(rf"({_SCHEME_WORD}) (\S+)")
+# Import splits only these: an unknown first word may itself be secret (``<id> <secret>``)
+# and must not land in agent-visible config. An agent-written scheme needs only ``_SCHEME``.
+_IMPORT_SCHEMES = frozenset({"bearer", "basic", "token", "bot"})
 # Proxy credentials are never safe to replay to an imported app. Other
 # credential-named headers are lifted into the key store rather than retained
 # in the app configuration.
@@ -81,9 +84,11 @@ def referenced_entries(server: str, config: dict) -> set[str]:
 
 
 def split_scheme(value: str) -> tuple[str | None, str]:
-    """``(scheme, token)`` for ``<scheme> <token>``; ``(None, value)`` for anything else."""
+    """``(scheme, token)`` for ``<known scheme> <token>``; ``(None, value)`` for anything else."""
     match = _SCHEMED_VALUE.fullmatch(value.strip())
-    return (match.group(1), match.group(2)) if match else (None, value)
+    if match is None or match.group(1).lower() not in _IMPORT_SCHEMES:
+        return None, value
+    return match.group(1), match.group(2)
 
 
 def header_schemes(config: dict) -> dict[str, str]:
@@ -157,10 +162,10 @@ def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[
     """``config`` with credential values lifted out, and those values by entry name.
 
     Pure: nothing is stored. Existing references are kept. A lifted
-    ``Authorization`` value of the form ``<scheme> <token>`` yields the token,
-    and its scheme goes to ``key_header_schemes``; only that header's first word
-    is a scheme by definition, so any other value with a space is left for the
-    store to refuse. A credential-named
+    ``Authorization`` value of the form ``<scheme> <token>`` with a known scheme
+    (Bearer, Basic, Token, Bot) yields the token, and its scheme goes to
+    ``key_header_schemes``; any other value with a space, an unknown first word
+    included, is left whole for the store to refuse. A credential-named
     value that is blank or not a string stays where it is for the config's own
     validation to judge. Import callers pass ``headers=True`` so Authorization,
     Cookie and other credential-named headers become managed references.
