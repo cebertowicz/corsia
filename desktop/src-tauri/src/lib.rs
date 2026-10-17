@@ -748,15 +748,29 @@ fn adoption_waiting_count(service: tauri::State<'_, AppServiceState>) -> Option<
     service.adoption_waiting.load(Ordering::Acquire).checked_sub(1)
 }
 
+/// Run a long, blocking step off the main thread, so the window keeps handling
+/// events (Quit, the live task count) while it works.
+async fn off_main_thread<T, F>(work: F) -> Result<T, adoption::AdoptionError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, adoption::AdoptionError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| adoption::AdoptionError::switched(&format!("the step did not finish: {error}")))?
+}
+
 #[tauri::command]
-fn adopt_existing_install(
-    app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
-) -> Result<ServiceStartup, adoption::AdoptionError> {
+async fn adopt_existing_install(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
+    off_main_thread(move || adopt_existing_install_blocking(&app)).await
+}
+
+fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
+    let service = app.state::<AppServiceState>();
     // Nothing has been stopped until the plan below is running.
     let untouched = adoption::AdoptionError::untouched;
     let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
-    let app_dir = default_app_dir(&app).map_err(untouched)?;
+    let app_dir = default_app_dir(app).map_err(untouched)?;
     let first_run = first_run::plan(&home, &app_dir).map_err(untouched)?;
     let first_run::FirstRun::Adoptable { source } = first_run else {
         return Err(untouched("there is no source install ready to adopt".to_string()));
@@ -780,11 +794,13 @@ fn adopt_existing_install(
 /// "Start it again": with every file where it was, start the existing install
 /// if it is stopped and release its exact hold. Never repeats the adoption.
 #[tauri::command]
-fn start_existing_again(
-    app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
-) -> Result<(), adoption::AdoptionError> {
-    let app_dir = default_app_dir(&app)?;
+async fn start_existing_again(app: tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
+    off_main_thread(move || start_existing_again_blocking(&app)).await
+}
+
+fn start_existing_again_blocking(app: &tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
+    let service = app.state::<AppServiceState>();
+    let app_dir = default_app_dir(app)?;
     let Some(plan) = adoption::interrupted_plan(&app_dir)? else { return Ok(()) };
     let mut lifecycle = SourceLifecycle { source: plan.source.clone(), token: None, waiting: None };
     service.adoption_in_progress.store(true, Ordering::Release);
@@ -803,14 +819,15 @@ fn reopen_app(app: tauri::AppHandle) -> Result<(), String> {
 
 /// "Check again": the app's service is registered; wait for it to answer.
 #[tauri::command]
-fn check_service_started(
-    app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
-) -> Result<ServiceStartup, adoption::AdoptionError> {
-    let app_dir = default_app_dir(&app).map_err(adoption::AdoptionError::switched)?;
-    let port = lifecycle::service_port(&app, &service);
-    wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
-    Ok(ServiceStartup::Ready { url: service_url(port) })
+async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
+    off_main_thread(move || {
+        let service = app.state::<AppServiceState>();
+        let app_dir = default_app_dir(&app).map_err(adoption::AdoptionError::switched)?;
+        let port = lifecycle::service_port(&app, &service);
+        wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
+        Ok(ServiceStartup::Ready { url: service_url(port) })
+    })
+    .await
 }
 
 #[tauri::command]

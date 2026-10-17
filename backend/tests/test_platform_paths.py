@@ -195,7 +195,7 @@ def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, m
     state = _adoptable_state(
         tmp_path, {"provider-openai": "stored-openai-value", "provider-anthropic": "stored-anthropic-value"}
     )
-    monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 0)
+    monkeypatch.setattr(snapshots, "backup_room", lambda database: (0, 1 << 60))
 
     snapshots.check_adoption_preflight(state, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
     assert snapshots.preflight_main([str(state), "OPENAI_API_KEY"]) == 0
@@ -204,7 +204,7 @@ def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, m
 def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_path, monkeypatch, capsys):
     snapshots = importlib.import_module("infra.adoption_snapshot")
     state = _adoptable_state(tmp_path, {})
-    monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 1 << 60)
+    monkeypatch.setattr(snapshots, "backup_room", lambda database: (1 << 60, 1 << 30))
 
     assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
     message = capsys.readouterr().err.strip()
@@ -214,6 +214,51 @@ def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_p
         message,
     )
     assert not (state / "backups").exists()
+
+
+def test_adoption_preflight_asks_the_migration_backup_room_for_its_own_database(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    asked = []
+
+    def room(database):
+        asked.append(database)
+        return 10, 1 << 40
+
+    monkeypatch.setattr(snapshots, "backup_room", room)
+
+    snapshots.check_adoption_preflight(state, [])
+
+    assert asked == [state.resolve() / "corsia.db"]
+
+
+def test_adoption_snapshot_keeps_links_as_links_through_a_restore(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "auth.json").write_text("credential")
+    (state / "linked-file").symlink_to(outside / "auth.json")
+    (state / "linked-dir").symlink_to(outside, target_is_directory=True)
+    (state / "dangling").symlink_to(tmp_path / "gone")
+    (state / "keys" / "inner-link").symlink_to(outside / "auth.json")
+
+    snapshot = snapshots.create_adoption_snapshot(state)
+
+    # Nothing a link points at is copied into the backup.
+    assert not any(path.name == "auth.json" for path in snapshot.rglob("*") if not path.is_symlink())
+    (state / "linked-dir").unlink()
+    (state / "linked-dir").mkdir()
+    snapshots.restore_adoption_snapshot(state, snapshot)
+
+    for name, target in {
+        "linked-file": outside / "auth.json",
+        "linked-dir": outside,
+        "dangling": tmp_path / "gone",
+    }.items():
+        assert (state / name).is_symlink() and (state / name).readlink() == target
+    assert (state / "keys" / "inner-link").is_symlink()
+    assert (outside / "auth.json").read_text() == "credential"
 
 
 def test_a_failed_snapshot_copy_leaves_no_partial_backup_behind(tmp_path, monkeypatch):

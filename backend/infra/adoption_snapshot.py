@@ -12,12 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from infra.database_migrations import backup_room
 from infra.ignored_environment import IGNORED_VARIABLES
 
-#: Free space the host must keep after the snapshot is written; the same
-#: reserve ``database_migrations`` holds back, read from the same variable so
-#: one setting moves both. A full disk must never meet the restarted old service.
-_FREE_FLOOR_BYTES = int(os.getenv("CORSIA_BACKUP_FREE_FLOOR_BYTES", str(10 * 1024**3)))
 #: Exit status of :func:`preflight_main` when adoption is refused with a message
 #: that is safe to show; any other failure is not forwarded.
 REFUSED = 3
@@ -28,8 +25,11 @@ class AdoptionRefused(Exception):
 
 
 def _copy_entry(source: Path, destination: Path) -> None:
-    if source.is_dir():
-        shutil.copytree(source, destination, copy_function=shutil.copy2)
+    """Copy one state entry as it is: a link stays a link, so a restore puts back the exact links."""
+    if source.is_symlink():
+        os.symlink(os.readlink(source), destination)
+    elif source.is_dir():
+        shutil.copytree(source, destination, symlinks=True, copy_function=shutil.copy2)
     else:
         shutil.copy2(source, destination)
 
@@ -82,11 +82,14 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
         for path in ([top] if top.is_file() else top.rglob("*"))
         if path.is_file() and not path.is_symlink()
     )
-    free = shutil.disk_usage(state_root).free
-    if free < needed + _FREE_FLOOR_BYTES:
+    # The snapshot takes ``needed``; the packaged backend's own pre-migration
+    # backup then needs the shared room calculation on top, so both must fit
+    # before the old service is stopped.
+    required, available = backup_room(state_root / "corsia.db")
+    if available < needed + required:
         raise AdoptionRefused(
-            f"The backup needs {(needed + _FREE_FLOOR_BYTES) / 1e9:.1f} GB free and this disk has "
-            f"{free / 1e9:.1f} GB. Free up space, then choose Try again."
+            f"The backup needs {(needed + required) / 1e9:.1f} GB free and this disk has "
+            f"{available / 1e9:.1f} GB. Free up space, then choose Try again."
         )
 
 
@@ -151,7 +154,7 @@ def restore_adoption_snapshot(state_root: Path, snapshot: Path) -> None:
     for entry in state_root.iterdir():
         if entry.name == "backups":
             continue
-        if entry.is_dir():
+        if entry.is_dir() and not entry.is_symlink():
             shutil.rmtree(entry)
         else:
             entry.unlink()
