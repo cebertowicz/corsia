@@ -114,6 +114,6 @@
 	/* The actions drop below the copy only when the row is too narrow for both, so the second line is never cut to make room. */
 	.settings-row.stack { flex-wrap: wrap; }
 	.stack .face { flex: 1 1 16rem; }
-	.stack .actions { margin-left: var(--space-2); }
+	.stack .actions { margin-left: auto; }
 	.actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-1); margin-right: calc(-1 * var(--button-pad-x-sm)); }
 </style>
