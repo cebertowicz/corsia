@@ -37,11 +37,16 @@ pub enum PairError {
     Busy,
     Unreachable(Unreachable),
     TooOld,
+    /// The host presented a key other than the pinned one: not a network failure.
+    KeyChanged,
     Protocol(String),
 }
 
 impl From<reqwest::Error> for PairError {
     fn from(error: reqwest::Error) -> Self {
+        if trust::is_pin_mismatch(&error) {
+            return Self::KeyChanged;
+        }
         if error.is_timeout() {
             return Self::Unreachable(Unreachable::Network);
         }

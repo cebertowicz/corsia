@@ -554,3 +554,33 @@ def test_devices_listener_accepts_a_person_session_in_the_first_frame(devices_so
         first = socket.receive_json()
 
     assert accepted in (first.get("type"), first.get("state"))
+
+
+@pytest.mark.asyncio
+async def test_listener_start_hands_the_announcement_its_change_callback(monkeypatch):
+    class _Server:
+        def __init__(self, _config):
+            self.should_exit = False
+
+        async def serve(self, sockets):
+            return None
+
+    class _Socket:
+        def close(self):
+            pass
+
+    started = []
+    monkeypatch.setattr(devices_listener, "ensure_host_key", lambda: ("key", "cert"))
+    monkeypatch.setattr(devices_listener, "_prebind", lambda: (_Socket(), 47901, None))
+    monkeypatch.setattr(devices_listener, "DevicesServer", _Server)
+    monkeypatch.setattr(
+        devices_listener.DNSServiceAnnouncement, "start", lambda self: started.append(self) or True
+    )
+    calls = []
+    listener = DevicesListener(app=object(), on_announcement_change=lambda: calls.append("changed"))
+
+    assert await listener.start() is True
+    started[0].on_change()
+
+    assert calls == ["changed"]
+    await listener.task

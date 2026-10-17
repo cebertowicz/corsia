@@ -703,6 +703,7 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
         Ok(version_check::Compat::Ok) => {}
         Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Err(LaunchFailure::Incompatible { app: app_version, host }),
         Ok(version_check::Compat::TooOld) => return Err(LaunchFailure::TooOld),
+        Err(pairing::PairError::KeyChanged) => return Err(LaunchFailure::KeyChanged),
         Err(pairing::PairError::Unreachable(cause)) => return Err(LaunchFailure::Unreachable(unreachable_cause(cause))),
         Err(_) => return Err(LaunchFailure::Unreachable(remote::Unreachable::Server)),
     }
@@ -801,6 +802,9 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
         PairError::Unreachable(Unreachable::Network) => "network",
         PairError::Unreachable(Unreachable::Server) => "server",
         PairError::TooOld => "too_old",
+        // The host's key changed under a pairing that just trusted it: never the network, and nothing the person can
+        // fix from this screen, so it reads as the host not being the CORSIA that was reached.
+        PairError::KeyChanged => "server",
         PairError::Protocol(_) => "server",
     };
     RemotePairResponse::Failure { ok: false, reason: reason.into(), app_version: None, host_version: None }
@@ -808,10 +812,20 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
 
 /// Why entering remote mode failed after the remote paired.
 enum PairFailure {
-    /// The shell could not set the connection up; the page is told the call failed.
+    /// The shell could not set the connection up (save, grant, proxy).
     Local(String),
-    /// The local service would not unregister; the page is told the computer's CORSIA failed.
+    /// The local service would not unregister.
     Service,
+}
+
+/// Both end on the page's `local` reason: pairing already used up the code, this computer could not finish, and the
+/// page says so instead of calling the call a network failure. The cause is logged for the person who has to fix it.
+fn pair_failure_response(failure: PairFailure) -> RemotePairResponse {
+    match failure {
+        PairFailure::Local(error) => log::error!("could not finish connecting the remote: {error}"),
+        PairFailure::Service => log::error!("could not finish connecting the remote: the local service did not unregister"),
+    }
+    RemotePairResponse::Failure { ok: false, reason: "local".into(), app_version: None, host_version: None }
 }
 
 #[tauri::command]
@@ -861,8 +875,7 @@ async fn remote_pair(
     .await;
     let proxy = match entered {
         Ok(proxy) => proxy,
-        Err(PairFailure::Local(error)) => return Err(error),
-        Err(PairFailure::Service) => return Ok(RemotePairResponse::Failure { ok: false, reason: "server".into(), app_version: None, host_version: None }),
+        Err(failure) => return Ok(pair_failure_response(failure)),
     };
     let proxy_port = proxy.port;
     replace_proxy(&remote, Some(proxy));
@@ -1628,6 +1641,41 @@ mod tests {
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
         assert_eq!(launch_state(&app), remote::LaunchState::KeyChanged { name: "Studio".into() });
+    }
+
+    #[test]
+    fn a_launch_whose_host_key_differs_from_the_saved_pin_ends_on_the_key_changed_card_not_the_network_card() {
+        let app = launch_app();
+        let identity = test_tls::generated_self_signed_identity();
+        let port = tauri::async_runtime::block_on(async {
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tauri::async_runtime::spawn(async move {
+                // The client refuses the key mid-handshake, so the accept is expected to fail.
+                if let Ok((stream, _)) = listener.accept().await {
+                    let _ = tokio_rustls::TlsAcceptor::from(identity.config).accept(stream).await;
+                }
+            });
+            port
+        });
+        let mut changed_pin = identity.pin;
+        changed_pin[0] ^= 1;
+        let saved = saved_studio(
+            remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            remote_config::RemoteTrust::from(&trust::Trust::Pinned { spki_sha256: changed_pin }),
+        );
+        tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
+        assert_eq!(launch_state(&app), remote::LaunchState::KeyChanged { name: "Studio".into() });
+        assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_pair_that_failed_after_the_code_was_used_reports_the_local_reason() {
+        for failure in [PairFailure::Local("could not save".into()), PairFailure::Service] {
+            let RemotePairResponse::Failure { ok, reason, .. } = pair_failure_response(failure) else { panic!("a failure response") };
+            assert!(!ok);
+            assert_eq!(reason, "local");
+        }
     }
 
     #[test]

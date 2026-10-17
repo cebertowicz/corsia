@@ -254,7 +254,7 @@ async fn forward_trusted(
     let config = trust::client_config(&state.trust).map_err(|error| error.to_string())?;
     let name = remote.server_name()?;
     let tls = TlsConnector::from(Arc::new(config)).connect(name, stream).await.map_err(|error| {
-        if matches!(state.trust, Trust::Pinned { .. }) && error.to_string().contains("SPKI") {
+        if matches!(state.trust, Trust::Pinned { .. }) && trust::is_pin_mismatch(&error) {
             (state.on_key_changed)();
         }
         error.to_string()

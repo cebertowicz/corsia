@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import ctypes
 import errno
 import ipaddress
@@ -13,10 +12,10 @@ import secrets
 import socket
 import stat
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 from urllib.parse import parse_qs
 
 import psutil
@@ -31,6 +30,7 @@ from infra.auth import authenticate, is_person_session, token_from_request
 from infra.config import STATE_ROOT
 from infra.db_async import run_in_db
 from infra.dns_sd import DNSServiceAnnouncement
+from infra.devices_server import _PINNED_UVICORN_VERSION, DevicesServer
 
 
 DEFAULT_PORT = 47901
@@ -125,42 +125,6 @@ def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str
     return [value for _, _, value in sorted(set(addresses))]
 
 
-# The one Uvicorn release whose private ``_wait_tasks_to_complete`` the
-# override below was written against; any other version uses Uvicorn's own.
-_PINNED_UVICORN_VERSION = "0.49.0"
-
-
-class DevicesServer(uvicorn.Server):
-    """A Uvicorn server that never claims process signal handling."""
-
-    @contextlib.contextmanager
-    def capture_signals(self):
-        yield
-
-    async def _wait_tasks_to_complete(self) -> None:
-        if uvicorn.__version__ != _PINNED_UVICORN_VERSION:
-            await super()._wait_tasks_to_complete()
-            return
-        # Uvicorn has already sent normal connection shutdown (including WS
-        # code 1012). Active SSE responses have no natural end, so disabling
-        # Devices must disconnect transports and join their ASGI requests.
-        # A streaming generator can be waiting for its next event rather than
-        # reading http.disconnect, so closing the socket alone cannot join it.
-        cast("DevicesApp", self.config.app).stopping = True
-        for connection in list(self.server_state.connections):
-            # TLS close() can wait beyond grace for a peer's close_notify;
-            # an explicit Devices stop must also release an unread SSE socket.
-            connection.transport.abort()
-        await asyncio.sleep(0)
-        requests = list(self.server_state.tasks)
-        for task in requests:
-            task.cancel()
-        await asyncio.gather(*requests, return_exceptions=True)
-        # These exact owners are now disconnected and joined. Uvicorn's
-        # generic waiter would additionally wait for a TLS peer's handshake;
-        # keep that external wait out of an explicit Devices stop.
-
-
 _PUBLIC_API_ROUTES = frozenset({
     ("GET", "/api/health"),
     ("GET", "/api/version"),
@@ -237,6 +201,8 @@ class DevicesListener:
     port: int | None = None
     error: str | None = None
     announcement: DNSServiceAnnouncement | None = None
+    # Told when the announced name or its error changes after start().
+    on_announcement_change: Callable[[], None] | None = None
 
     @property
     def listening(self) -> dict:
@@ -272,6 +238,7 @@ class DevicesListener:
         self.port = port
         self.error = None
         self.announcement = DNSServiceAnnouncement(port)
+        self.announcement.on_change = self.on_announcement_change
         self.announcement.start()
         return True
 

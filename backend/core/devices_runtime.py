@@ -46,7 +46,7 @@ class DevicesRuntime:
         if self.listener is not None and self.listener.task is not None:
             return True
         self.pairing.enable()
-        self.listener = DevicesListener(app)
+        self.listener = DevicesListener(app, on_announcement_change=schedule_devices_updated)
         if not await self.listener.start():
             self.pairing.disable()
             return False

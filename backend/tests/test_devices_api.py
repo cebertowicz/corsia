@@ -504,6 +504,37 @@ def test_devices_status_when_the_registration_callback_never_arrives(monkeypatch
     assert body["local_hostname"]
 
 
+def test_devices_status_reflects_the_name_announced_after_the_snapshot(monkeypatch):
+    """The callback lands after PUT returned: the change schedules devices_updated and GET shows the name."""
+    import core.devices_runtime as devices_runtime
+
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    updates: list[str] = []
+    with pytest.MonkeyPatch.context() as dns_seams:
+        _install_dns_seams(dns_seams, library)
+        announcement = dns_sd.DNSServiceAnnouncement(47901)
+        announcement.on_change = lambda: updates.append("devices_updated")
+        assert announcement.start() is True
+    listener = DevicesListener(app, port=47901, announcement=announcement)
+    runtime.pairing.disable()
+    runtime.pairing.enable()
+    monkeypatch.setattr(runtime, "listener", listener)
+    monkeypatch.setattr(devices_runtime, "lan_addresses", lambda *, include_link_local: ["192.168.1.20"])
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        devices_api.require_human_user,
+        lambda: {"id": "person", "token_kind": "session"},
+    )
+    client = TestClient(app, client=("127.0.0.1", 1234))
+
+    assert client.get("/api/devices").json()["announced_name"] is None
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+    library.callback(None, 0, 0, b"Studio", None, None, None)
+
+    assert updates == ["devices_updated"]
+    assert client.get("/api/devices").json()["announced_name"] == "Studio"
+
+
 def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
     async def human_session(_scope):
         return True

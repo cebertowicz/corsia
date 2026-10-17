@@ -210,6 +210,7 @@ describe('Enter the code (r7)', () => {
 		['network', '', 'CORSIA can’t reach Alex’s Mac mini. Check that it’s on and on the same network as this computer.'],
 		['incompatible', '1.4/1.2', 'This computer has CORSIA 1.4 and Alex’s Mac mini has 1.2. Update the older one, then try again.'],
 		['too_old', '', 'Alex’s Mac mini has an older CORSIA. Update it, then try again.'],
+		['local', '', 'This computer couldn’t finish connecting to Alex’s Mac mini.'],
 	];
 	it.each(onChooseScreen)('maps %s to the choose screen’s line under the address field', async (reason, versions, line) => {
 		const [app_version, host_version] = versions ? versions.split('/') : [undefined, undefined];
