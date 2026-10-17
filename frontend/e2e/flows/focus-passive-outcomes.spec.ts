@@ -5,6 +5,10 @@ import { seedOutcomes, readStates, expectObservedNoUpdate, openOutcomeThread, fo
 for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 	test.describe(`outcomes ${width} ${theme}`, () => {
 		test.use({ viewport: { width, height: 1000 }, hasTouch: width === 393, timezoneId: 'America/Los_Angeles' });
+		// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+		test.afterEach(async ({ page }) => {
+			await focusSetting(page, true);
+		});
 		test(`@surface:focus-outcomes passive composition, query, touch and keyboard ${width} ${theme}`, async ({ page, request }, info) => {
 			test.setTimeout(120_000);
 			let nudged = false;

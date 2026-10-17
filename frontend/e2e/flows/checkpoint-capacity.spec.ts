@@ -16,6 +16,11 @@ async function setContextCap(request: APIRequestContext, contextWindow: number):
 	expect(response.ok()).toBeTruthy();
 }
 
+// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+test.afterEach(async ({ page }) => {
+	await focusSetting(page, true);
+});
+
 test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and explains recovery', async ({ page, request }, testInfo) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires the isolated synthetic model catalog');
 	const title = `e2e checkpoint capacity ${Date.now()}`;

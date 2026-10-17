@@ -149,6 +149,11 @@ async function screenshot(page: Page, name: string): Promise<void> {
 	await page.screenshot({ path: path.join(directory, `${name}.png`), animations: 'disabled' });
 }
 
+// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
+
 for (const [label, width, theme] of SURFACES) {
 	test.describe(label, () => {
 		if (width === 393) test.use({ hasTouch: true, isMobile: true });

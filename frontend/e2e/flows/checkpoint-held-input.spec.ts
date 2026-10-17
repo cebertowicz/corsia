@@ -44,6 +44,11 @@ assert terminal.successor is None
 	} });
 }
 
+// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+test.afterEach(async ({ page }) => {
+	await focusSetting(page, true);
+});
+
 for (const intent of ['apply_now', 'queue_after_turn'] as const) {
 	test(`@flow:chat @surface:chat deterministic checkpoint refusal ${intent} is visible and retryable`, async ({ page, request }, testInfo) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
