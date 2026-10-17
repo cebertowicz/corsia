@@ -191,7 +191,7 @@ def _build_app(bundle: Path) -> None:
     infra = resources / "backend" / "infra"
     infra.mkdir(parents=True)
     (infra / "__init__.py").write_text("")
-    for module in ("platform_paths.py", "fs_durability.py"):
+    for module in ("platform_paths.py", "service_file.py", "fs_durability.py"):
         shutil.copy(BACKEND / "infra" / module, infra / module)
     _executable(
         resources / "python" / "bin" / "python3",

@@ -46,9 +46,8 @@ app_mode_checkout() {
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from infra.platform_paths import (
-    SERVICE_FILE, app_metadata_dir, default_state_root, service_file_lines,
-)
+from infra.platform_paths import app_metadata_dir, default_state_root
+from infra.service_file import SERVICE_FILE, service_file_lines
 app_dir = app_metadata_dir()
 print(f"app={app_dir}")
 print(f"state={default_state_root(app_bundle=Path(sys.argv[2]))}")

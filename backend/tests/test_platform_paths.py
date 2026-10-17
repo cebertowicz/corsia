@@ -19,6 +19,10 @@ def _platform_paths():
     return importlib.import_module("infra.platform_paths")
 
 
+def _service_file():
+    return importlib.import_module("infra.service_file")
+
+
 def _fake_app_module(tmp_path) -> Path:
     module = (
         tmp_path / "Applications" / "CORSIA.app" / "Contents" / "Resources"
@@ -65,7 +69,7 @@ def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
 
 
 def test_service_file_lines_honour_only_the_state_workspace_and_port(tmp_path):
-    paths = _platform_paths()
+    paths = _service_file()
     service_file = tmp_path / "service.json"
     service_file.write_text(
         '{"state_dir": "/state", "workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
@@ -79,19 +83,36 @@ def test_service_file_lines_honour_only_the_state_workspace_and_port(tmp_path):
         "port=4100",
     ]
     service_file.write_text('{"state_dir": "relative", "workspace": "relative", "port": true}')
+    # A state_dir that is not valid is an error, never a note: the launcher refuses
+    # to start instead of opening a different, empty state root.
     assert paths.service_file_lines(service_file) == [
-        "note=service.json: ignoring an invalid state_dir value",
+        "error=service.json has an invalid state_dir",
         "note=service.json: ignoring an invalid workspace value",
         "note=service.json: ignoring an invalid port value",
     ]
     service_file.write_text("[1]")
     assert paths.service_file_lines(service_file) == [
-        "note=service.json unreadable: ValueError"
+        "error=service.json unreadable: ValueError"
     ]
 
 
+def test_state_dir_validity_follows_the_table_the_app_shell_also_reads():
+    paths = _service_file()
+    table = Path(__file__).parent / "fixtures" / "state_dir_validity.txt"
+    cases = 0
+    for line in table.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        expected, value = line.split("\t", 1)
+        value = value.replace("\\u0007", "\u0007").replace("\\n", "\n")
+        assert paths.state_dir_is_valid(value) is (expected == "valid"), line
+        cases += 1
+    assert cases >= 6
+    assert paths.state_dir_is_valid(3) is False
+
+
 def test_service_file_lines_accept_state_dir_without_an_unsupported_key_note(tmp_path):
-    paths = _platform_paths()
+    paths = _service_file()
     service_file = tmp_path / "service.json"
     service_file.write_text('{"state_dir": "/state"}')
 
@@ -202,6 +223,40 @@ def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, m
     assert snapshots.preflight_main([str(state), "OPENAI_API_KEY"]) == 0
 
 
+def _restart_request(state: Path, status: str) -> None:
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute(
+            "create table if not exists self_restart_requests "
+            "(id text primary key, status text not null default 'in_flight', requested_at text not null)"
+        )
+        connection.execute("insert into self_restart_requests (id, status, requested_at) values ('r1', ?, 'now')", (status,))
+
+
+def test_adoption_preflight_refuses_while_the_source_is_restarting_itself(tmp_path, monkeypatch, capsys):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    monkeypatch.setattr(snapshots, "backup_room", lambda database: (0, 1 << 60))
+    _restart_request(state, "in_flight")
+
+    assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
+    assert capsys.readouterr().err.strip() == (
+        "Your existing CORSIA is restarting itself. Wait a minute, then choose Try again."
+    )
+    # The look is read-only: the request is still there for the source to settle.
+    with sqlite3.connect(state / "corsia.db") as connection:
+        assert connection.execute("select status from self_restart_requests").fetchall() == [("in_flight",)]
+
+
+def test_adoption_preflight_ignores_a_settled_restart_and_a_missing_table(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    monkeypatch.setattr(snapshots, "backup_room", lambda database: (0, 1 << 60))
+
+    snapshots.check_adoption_preflight(state, [])  # no self_restart_requests table at all
+    _restart_request(state, "completed")
+    snapshots.check_adoption_preflight(state, [])
+
+
 def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_path, monkeypatch, capsys):
     snapshots = importlib.import_module("infra.adoption_snapshot")
     state = _adoptable_state(tmp_path, {})
@@ -276,6 +331,42 @@ def test_adoption_snapshot_keeps_links_as_links_through_a_restore(tmp_path):
         assert (state / name).is_symlink() and (state / name).readlink() == target
     assert (state / "keys" / "inner-link").is_symlink()
     assert (outside / "auth.json").read_text() == "credential"
+
+
+def test_the_preflight_size_walk_skips_files_the_running_service_removes(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    (state / "keys" / "kept").write_bytes(b"x" * 10)
+    real_walk = os.walk
+
+    def walk_with_a_vanished_file(top, *args, **kwargs):
+        for directory, names, files in real_walk(top, *args, **kwargs):
+            yield directory, names, [*files, "removed-after-listing"]
+
+    monkeypatch.setattr(snapshots.os, "walk", walk_with_a_vanished_file)
+
+    assert snapshots._snapshot_size(state.resolve()) >= 10
+    assert snapshots._entry_size(state / "gone") == 0
+
+
+def test_a_new_attempt_keeps_only_the_newest_earlier_adoption_snapshot(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    backups = state / "backups"
+    backups.mkdir()
+    for age, name in enumerate(("adopt-oldest", "adopt-older", "adopt-newest-earlier")):
+        (backups / name).mkdir()
+        (backups / name / "corsia.db").write_text(name)
+        os.utime(backups / name, (1_000_000 + age, 1_000_000 + age))
+    (backups / "corsia.db.pre-migration").write_text("not an adoption snapshot")
+
+    snapshot = snapshots.create_adoption_snapshot(state)
+
+    assert sorted(path.name for path in backups.iterdir()) == sorted(
+        ["adopt-newest-earlier", "corsia.db.pre-migration", snapshot.name]
+    )
+    # A finished adoption's own snapshot stays: it is the safety net.
+    assert snapshot.is_dir()
 
 
 def test_a_failed_snapshot_copy_leaves_no_partial_backup_behind(tmp_path, monkeypatch):

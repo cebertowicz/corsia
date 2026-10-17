@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import sys
 from contextlib import closing
 from datetime import UTC, datetime
@@ -34,6 +35,43 @@ def _copy_entry(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
+def _entry_size(path: Path) -> int:
+    """Bytes a regular file holds; 0 for a link, a folder, or a file that has just gone."""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return 0  # the old service is still running and removes temp and log files
+    return info.st_size if stat.S_ISREG(info.st_mode) else 0
+
+
+def _snapshot_size(state_root: Path) -> int:
+    """What the snapshot will copy: the state root's regular files outside ``backups/``."""
+    total = 0
+    for top in state_root.iterdir():
+        if top.name == "backups":
+            continue
+        total += _entry_size(top)
+        if top.is_dir() and not top.is_symlink():
+            for directory, _, names in os.walk(top):
+                total += sum(_entry_size(Path(directory) / name) for name in names)
+    return total
+
+
+def _prune_earlier_snapshots(backups: Path) -> None:
+    """Keep only the newest earlier adoption snapshot.
+
+    Migration retention never touches ``adopt-*``, so each attempt would add a
+    full copy for good. The newest earlier one stays as a safety net, and the
+    snapshot a finished adoption wrote is never removed by that adoption.
+    """
+    earlier = sorted(
+        (path for path in backups.glob("adopt-*") if path.is_dir() and not path.is_symlink()),
+        key=lambda path: (path.stat().st_mtime, path.name),
+    )
+    for path in earlier[:-1]:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def stored_key_names(state_root: Path) -> set[str]:
     """Names of the key store entries that hold a value. Names only: no value is returned or logged."""
     state_root = Path(state_root)
@@ -58,6 +96,21 @@ def stored_key_names(state_root: Path) -> set[str]:
     return {name for name, ref in rows if isinstance(values.get(ref), str) and values[ref]}
 
 
+def _restart_in_flight(state_root: Path) -> bool:
+    """Whether the source install is partway through restarting itself (a read-only look)."""
+    database = Path(state_root) / "corsia.db"
+    try:
+        with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as connection:
+            row = connection.execute(
+                "SELECT 1 FROM self_restart_requests WHERE status = 'in_flight' LIMIT 1"
+            ).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such table" not in str(error):
+            raise AdoptionRefused("The restart state could not be read.") from None
+        return False  # an install that never restarted itself has no such table
+    return row is not None
+
+
 def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
     """Refuse, before the old service drains, what would fail after it has stopped.
 
@@ -75,13 +128,11 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
             "These provider keys aren’t stored in CORSIA yet: "
             f"{', '.join(missing)}. Add them in CORSIA › Settings › Keys, then choose Try again."
         )
-    needed = sum(
-        path.stat().st_size
-        for top in state_root.iterdir()
-        if top.name != "backups"
-        for path in ([top] if top.is_file() else top.rglob("*"))
-        if path.is_file() and not path.is_symlink()
-    )
+    if _restart_in_flight(state_root):
+        raise AdoptionRefused(
+            "Your existing CORSIA is restarting itself. Wait a minute, then choose Try again."
+        )
+    needed = _snapshot_size(state_root)
     # The snapshot takes ``needed``; the packaged backend's own pre-migration
     # backup then needs the shared room calculation on top, so both must fit
     # before the old service is stopped.
@@ -123,7 +174,10 @@ def create_adoption_snapshot(state_root: Path) -> Path:
     database = state_root / "corsia.db"
     if not database.is_file():
         raise FileNotFoundError(f"missing CORSIA database at {database}")
-    snapshot = state_root / "backups" / (
+    backups = state_root / "backups"
+    if backups.is_dir():
+        _prune_earlier_snapshots(backups)
+    snapshot = backups / (
         f"adopt-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex}"
     )
     snapshot.mkdir(parents=True, mode=0o700)

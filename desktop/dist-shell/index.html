@@ -284,6 +284,26 @@
 				retry.focus();
 			}
 
+			// The backend names the phase and the window picks the approved line for it. The count is
+			// display only: one that could not be read is `null`, which shows no line, never "0 tasks".
+			function showAdoptionProgress(progress) {
+				if (!progress) return;
+				line.hidden = true;
+				if (progress.phase === 'waiting') {
+					status.textContent = ADOPTION_COPY.waitingTitle;
+					if (Number.isInteger(progress.running) && progress.running > 0) {
+						line.textContent = ADOPTION_COPY.waitingCount(progress.running);
+						line.hidden = false;
+					}
+				} else if (progress.phase === 'backing_up') {
+					status.textContent = ADOPTION_COPY.backingUpTitle;
+				} else if (progress.phase === 'starting') {
+					status.textContent = 'Starting CORSIA…';
+				} else if (progress.phase === 'starting_existing') {
+					status.textContent = ADOPTION_COPY.recoveries.start_again.working;
+				}
+			}
+
 			// `failure` is the backend's { message, outcome, recovery, advice }; a plain string claims
 			// nothing about the existing install, so it offers the relaunch that is always safe.
 			async function showAdoptionFailure(failure) {
@@ -426,7 +446,7 @@
 					const startup = await invoke('start_local_service');
 					if (startup.state === 'ready') {
 						continueToService(startup);
-					} else if (startup.state === 'existing_install') {
+					} else if (startup.state === 'adoption_offered') {
 						showExistingInstall(startup.workspace);
 					} else if (startup.state === 'adoption_failed') {
 						await showAdoptionFailure(startup.failure);
@@ -443,18 +463,12 @@
 				if (adoptionPrompt) {
 					showStarting();
 					status.textContent = ADOPTION_COPY.waitingTitle;
-					const countPoll = setInterval(async () => {
+					let polling = true;
+					const progressPoll = setInterval(async () => {
 						try {
-							const count = await invoke('adoption_waiting_count');
-							if (count === null) return;
-							if (count > 0) {
-								status.textContent = ADOPTION_COPY.waitingTitle;
-								line.textContent = ADOPTION_COPY.waitingCount(count);
-								line.hidden = false;
-							} else {
-								status.textContent = ADOPTION_COPY.backingUpTitle;
-								line.hidden = true;
-							}
+							const progress = await invoke('adoption_progress');
+							// A reading that lands after the result is on screen must not replace it.
+							if (polling) showAdoptionProgress(progress);
 						} catch { /* the next reading replaces this one */ }
 					}, 1000);
 					try {
@@ -464,7 +478,8 @@
 					} catch (error) {
 						await showAdoptionFailure(error);
 					} finally {
-						clearInterval(countPoll);
+						polling = false;
+						clearInterval(progressPoll);
 					}
 					return;
 				}

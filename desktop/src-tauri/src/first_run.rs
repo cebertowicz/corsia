@@ -217,7 +217,13 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
 
     let source_plist = home.join("Library").join("LaunchAgents").join("com.corsia.prod.plist");
     if present(&source_plist)? {
-        return adoption::source_from_plist(home, &source_plist).map(|source| FirstRun::Adoptable { source });
+        // A plist this app cannot trust is not adopted, and no other path is tried.
+        return match adoption::source_from_plist(home, &source_plist) {
+            Ok(source) => Ok(FirstRun::Adoptable { source }),
+            Err(reason) => existing_install(format!(
+                "CORSIA found an existing install on this computer, and this app can’t take it over yet ({reason})."
+            )),
+        };
     }
 
     if present(&home.join(".corsia").join("config.json"))? {
@@ -583,6 +589,26 @@ mod tests {
         fs::write(home.0.join(".corsia").join("config.json"), "{}").unwrap();
 
         assert_refused(&home, "~/.corsia");
+    }
+
+    #[test]
+    fn a_source_plist_that_cannot_be_adopted_is_refused_with_nothing_changed() {
+        let home = Home::new("bad-plist");
+        let plist = home.0.join("Library/LaunchAgents/com.corsia.prod.plist");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::write(&plist, "not a plist").unwrap();
+        assert_refused(&home, "can’t take it over yet");
+
+        // A readable plist whose checkout has no lifecycle owner is refused the same way.
+        fs::write(
+            &plist,
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>{}</string><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>/work</string><key>CORSIA_STATE_DIR</key><string>/state</string><key>BACKEND_PORT</key><string>47895</string></dict></dict></plist>"#,
+                home.0.join("checkout/backend").display()
+            ),
+        )
+        .unwrap();
+        assert_refused(&home, "scripts/corsia");
     }
 
     #[test]

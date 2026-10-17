@@ -121,68 +121,6 @@ def app_metadata_dir(home: Path | None = None) -> Path:
     return _resolved(home_dir / "Library" / "Application Support" / APP_FOLDER)
 
 
-SERVICE_FILE = "service.json"
-_SERVICE_FILE_KEYS = ("state_dir", "workspace", "port")
-
-
-def service_file_lines(path: Path) -> list[str]:
-    """Parse the app's ``service.json`` into ``key=value`` lines for shell callers.
-
-    The file is parsed, never executed. Only ``state_dir`` and ``workspace``
-    (absolute, printable paths) and ``port`` (1-65535) are honoured; anything
-    else becomes a ``note=`` line that never repeats a value. The bundle's
-    launcher and its lifecycle script both read the file through this one
-    function.
-    """
-
-    def name(value: object) -> str:
-        text = str(value)
-        return text if text.isprintable() and len(text) <= 64 else "<unprintable name>"
-
-    try:
-        with open(path, "rb") as handle:
-            data = json.loads(handle.read(65536).decode("utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-    except Exception as error:
-        return [f"note={SERVICE_FILE} unreadable: {name(type(error).__name__)}"]
-    lines = [
-        f"note={SERVICE_FILE}: ignoring unsupported key {name(key)}"
-        for key in data
-        if key not in _SERVICE_FILE_KEYS
-    ]
-    for key in ("state_dir", "workspace"):
-        value = data.get(key)
-        if isinstance(value, str) and value.startswith("/") and value.isprintable():
-            lines.append(f"{key}={value}")
-        elif key in data:
-            lines.append(f"note={SERVICE_FILE}: ignoring an invalid {key} value")
-    port = data.get("port")
-    if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
-        lines.append(f"port={port}")
-    elif "port" in data:
-        lines.append(f"note={SERVICE_FILE}: ignoring an invalid port value")
-    return lines
-
-
-def service_file_state_dir(path: Path) -> Path | None:
-    """The state root ``service.json`` claims; None if absent, ValueError if unusable."""
-    try:
-        data = json.loads(path.read_bytes()[:65536])
-    except FileNotFoundError:
-        return None
-    except Exception as error:
-        raise ValueError(f"{SERVICE_FILE} unreadable") from error
-    if not isinstance(data, dict):
-        raise ValueError(f"{SERVICE_FILE} is not a JSON object")
-    if "state_dir" not in data:
-        return None
-    state_dir = data["state_dir"]
-    if not isinstance(state_dir, str) or not state_dir.startswith("/"):
-        raise ValueError(f"{SERVICE_FILE} has an invalid state_dir")
-    return Path(os.path.realpath(state_dir))
-
-
 def default_state_root(
     *,
     env: Mapping[str, str] | None = None,

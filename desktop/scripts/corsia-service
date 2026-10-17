@@ -42,12 +42,13 @@ export PYTHONPATH="$resources/python/backend-packages"
 service_file_state_dir=""
 service_file_port=""
 config_notes=""
+config_error=""
 if [ -f "$app_dir/service.json" ]; then
   config_notes="$(PYTHONNOUSERSITE=1 "$resources/python/bin/python3" -I -B -c '
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from infra.platform_paths import service_file_lines
+from infra.service_file import service_file_lines
 print("\n".join(service_file_lines(Path(sys.argv[2]))))
 ' "$resources/backend" "$app_dir/service.json" 2>/dev/null || true)"
   if [ -z "$config_notes" ]; then config_notes="note=service.json: could not be read"; fi
@@ -58,6 +59,9 @@ print("\n".join(service_file_lines(Path(sys.argv[2]))))
       state_dir=*) service_file_state_dir="${line#state_dir=}" ;;
       workspace=*) file_workspace="${line#workspace=}" ;;
       port=*) service_file_port="${line#port=}" ;;
+      error=*) config_error="${line#error=}"
+               parsed_notes="${parsed_notes}${line#error=}
+" ;;
       note=*) parsed_notes="${parsed_notes}${line#note=}
 " ;;
     esac
@@ -65,6 +69,12 @@ print("\n".join(service_file_lines(Path(sys.argv[2]))))
 $config_notes
 EOF_NOTES
   config_notes="$parsed_notes"
+  # A damaged service.json or state_dir is refused, never replaced by the default
+  # root: that would open a different, empty state root beside the adopted data.
+  if [ -z "${CORSIA_STATE_DIR:-}" ] && [ -n "$config_error" ]; then
+    printf 'CORSIA bundled backend refused to start: %s, so no other state folder was opened\n' "$config_error" >&2
+    exit 0
+  fi
   if [ -z "${CORSIA_STATE_DIR:-}" ] && [ -n "$service_file_state_dir" ]; then
     export CORSIA_STATE_DIR="$service_file_state_dir"
   fi

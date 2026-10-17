@@ -125,7 +125,7 @@ async function open(theme, failure, script = {}) {
 		window.__TAURI__ = { core: { invoke: async (command) => {
 			window.__calls.push(command);
 			if (command === 'get_service_log_path') return '/x/service.log';
-			if (command === 'adoption_waiting_count') return 0;
+			if (command === 'adoption_progress') return null;
 			if (command === 'adopt_existing_install') throw thrown;
 			if (command in scripted) {
 				const result = scripted[command];
@@ -222,10 +222,45 @@ for (const theme of ['light', 'dark']) {
 		await page.click('#retry');
 		await page.waitForFunction((last) => window.__calls.includes(last), calls[calls.length - 1], { timeout: 3000 }).catch(() => {});
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_waiting_count'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(calls)) fail(`${theme} ${name}: ran ${JSON.stringify(made)}, expected ${JSON.stringify(calls)}`);
 		if (hash && (await page.evaluate(() => window.location.hash)) !== hash) fail(`${theme} ${name}: did not continue to the service`);
 		if (after) compare(`${theme} ${name}`, await read(page), after);
+		if (failed === before) console.log(`ok   ${theme} ${name}`);
+		await page.close();
+	}
+	// While the source install drains, the window shows the backend's phase. The count is display
+	// only: one that is missing, zero or unreadable shows the title alone, never "0 tasks".
+	for (const { name, progress, title: expectedTitle, line: expectedLine } of [
+		{ name: 'progress-waiting-count', progress: { phase: 'waiting', running: 3 }, title: 'Waiting for running work to finish…', line: '3 tasks still running' },
+		{ name: 'progress-waiting-one', progress: { phase: 'waiting', running: 1 }, title: 'Waiting for running work to finish…', line: '1 task still running' },
+		{ name: 'progress-waiting-unread', progress: { phase: 'waiting', running: null }, title: 'Waiting for running work to finish…', line: null },
+		{ name: 'progress-waiting-zero', progress: { phase: 'waiting', running: 0 }, title: 'Waiting for running work to finish…', line: null },
+		{ name: 'progress-backing-up', progress: { phase: 'backing_up', running: null }, title: 'Backing up your data…', line: null },
+		{ name: 'progress-starting', progress: { phase: 'starting', running: null }, title: 'Starting CORSIA…', line: null },
+		{ name: 'progress-starting-existing', progress: { phase: 'starting_existing', running: null }, title: 'Starting your existing CORSIA…', line: null },
+	]) {
+		const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: theme });
+		await page.addInitScript((reading) => {
+			window.__calls = [];
+			window.__TAURI__ = { core: { invoke: async (command) => {
+				window.__calls.push(command);
+				if (command === 'get_service_log_path') return '/x/service.log';
+				if (command === 'adoption_progress') return reading;
+				if (command === 'adopt_existing_install') return new Promise(() => {});
+				return undefined;
+			} } };
+		}, progress);
+		await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
+		await page.evaluate(() => window.__corsiaShowExistingInstall('~/work'));
+		await page.click('#retry');
+		// The window polls once a second; wait for a reading to land.
+		await page.waitForFunction(() => window.__calls.includes('adoption_progress'), null, { timeout: 4000 });
+		await page.waitForTimeout(100);
+		const before = failed;
+		const shown = await read(page);
+		compare(`${theme} ${name}`, shown, { title: expectedTitle, line: expectedLine, note: null, details: null, button: null });
+		if (/\b0 tasks?\b/.test(shown.body)) fail(`${theme} ${name}: shows a zero count`);
 		if (failed === before) console.log(`ok   ${theme} ${name}`);
 		await page.close();
 	}
@@ -235,7 +270,7 @@ for (const theme of ['light', 'dark']) {
 		const before = failed;
 		await page.click('#quit');
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_waiting_count', 'adopt_existing_install'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'adopt_existing_install'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(['quit_app'])) fail(`${theme} quit: ran ${JSON.stringify(made)}, expected ["quit_app"]`);
 		if (failed === before) console.log(`ok   ${theme} quit`);
 		await page.close();
