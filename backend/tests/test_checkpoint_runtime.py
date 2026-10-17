@@ -615,6 +615,79 @@ async def test_task_install_failure_is_settled_before_fresh_attempt(
 
 
 @pytest.mark.asyncio
+async def test_repeated_install_failure_ends_overtaken_and_notifies(
+    isolated_db, monkeypatch,
+):
+    from core import checkpoint_runtime as runtime
+    from infra import checkpoint_settlement
+    from infra import checkpoints as store
+
+    _seed("thread-1")
+    notified: list[str] = []
+
+    async def invoke(_request, _cancel):
+        return ProviderCheckpointResult("body", None)
+
+    def install(*_args, **_kwargs):
+        raise RuntimeError("preflight refused")
+
+    async def notify(record):
+        notified.append(record.status)
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(runtime, "_notify_completion", notify)
+    monkeypatch.setattr(store, "install", install)
+    await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    )
+
+    record = await runtime.await_checkpoint("cp-1")
+
+    assert (record.status, record.error) == (
+        "overtaken", "checkpoint install failed: preflight refused",
+    )
+    assert notified == ["overtaken"]
+    assert checkpoint_settlement.reconcile_startup(reconciled_at="t9") == ()
+
+
+@pytest.mark.asyncio
+async def test_waiter_in_launch_window_awaits_the_live_attempt(
+    isolated_db, monkeypatch,
+):
+    import threading
+
+    from core import checkpoint_runtime as runtime
+    from infra import checkpoints as store
+
+    _seed("thread-1")
+    real_create = store.create_running
+    committed, release = threading.Event(), threading.Event()
+
+    def create_running(request, **kwargs):
+        record = real_create(request, **kwargs)
+        committed.set()
+        release.wait(5)
+        return record
+
+    async def invoke(_request, _cancel):
+        return ProviderCheckpointResult("body", None)
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(store, "create_running", create_running)
+    requested = asyncio.create_task(runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    ))
+    await asyncio.to_thread(committed.wait, 5)
+    waiter = asyncio.create_task(runtime.await_checkpoint("cp-1"))
+    await asyncio.sleep(0.05)
+
+    assert not waiter.done()
+    release.set()
+    await requested
+    assert (await waiter).status == "installed"
+
+
+@pytest.mark.asyncio
 async def test_blank_transport_fails_even_with_staged_edits(
     isolated_db, monkeypatch
 ):
