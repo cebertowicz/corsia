@@ -3,11 +3,12 @@ import { commentDraft, cancelCommentCapture, discardCommentDraft, type CommentDr
 import { captureComment, selectComment, selectionRange, SELECTION_LOST, type CommentSelection } from '$lib/stores/commentSelection';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import { addComment } from '$lib/stores/docComments';
+import type { SelectionLabel } from '$lib/stores/commentDraft';
 import { plainErrorText } from '$lib/plainError';
 import { submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
-export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: string; above?: boolean } | null;
+export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null;
 type Context = {
 	scope: () => string;
 	draft: () => CommentDraft | null;
@@ -102,7 +103,7 @@ export function createViewerCommentDraft(context: Context) {
 		cancelCommentCapture(context.scope());
 		const old = context.draft(), body = old?.scope === context.scope() ? (old.body ?? '') : '';
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
-			body, label: pending.label, scope: context.scope(), selection: selected, identity: {}, sequence: 0 });
+			body, label: typeof pending.label === 'function' ? pending.label() : pending.label, holdUntilDrawn: pending.inWidget, scope: context.scope(), selection: selected, identity: {}, sequence: 0 });
 		const value = pending;
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
@@ -118,8 +119,8 @@ export function createViewerCommentDraft(context: Context) {
 			if (!artifactId) throw new Error('Document artifact is unavailable.');
 			return addComment(artifactId, draft.from, draft.to, draft.text, text);
 		}, context.onFailure, draft.selection ? liveFailureMessage : undefined);
-		// A widget comment's mark is painted by the widget after placement, so only it (its label) holds the pending mark that long.
-		if (current() && draft.selection && draft.label) posted = { id, selection: draft.selection };
+		// A widget comment's mark is painted by the widget after placement, so only it holds the pending mark that long.
+		if (current() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
 		return current() ? id : null;
 	}
 	return { get pending() { return pending; }, get reason() { return reason; }, get draft() { return scoped; },

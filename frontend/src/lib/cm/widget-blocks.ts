@@ -17,10 +17,20 @@ export const widgetOf = (view: EditorView, node: Node | null): HTMLElement | nul
 export const tableSource = (doc: Text, node: { from: number; to: number }) =>
 	({ from: doc.lineAt(node.from).from, to: doc.lineAt(Math.min(node.to, doc.length)).to });
 
-/** The source of the first table the range touches, from the syntax tree the widget is drawn from; prose and code with pipes are not one. */
+/** The end of the run of non-blank lines holding `pos`: a table ends at a blank line, so parsing to here completes the one holding `pos`. */
+function runEnd(doc: Text, pos: number): number {
+	let line = doc.lineAt(Math.min(pos, doc.length));
+	while (line.number < doc.lines && doc.line(line.number + 1).text.trim() !== '') line = doc.line(line.number + 1);
+	return line.to;
+}
+
+/**
+ * The source of the first table the range touches, from the editor's own syntax tree (what the widget is drawn from); prose and
+ * code with pipes are not one. Where the tree has not reached the range yet, it parses to the end of that block and no further.
+ */
 export function tableAt(state: EditorState, from: number, to: number): { from: number; to: number } | null {
 	let found: { from: number; to: number } | null = null;
-	(ensureSyntaxTree(state, state.doc.length, 100) ?? syntaxTree(state)).iterate({ from, to, enter: (node) => {
+	(ensureSyntaxTree(state, runEnd(state.doc, to), 100) ?? syntaxTree(state)).iterate({ from, to, enter: (node) => {
 		if (found) return false;
 		if (node.name !== 'Table') return;
 		found = tableSource(state.doc, node);
@@ -69,12 +79,12 @@ export function widgetBoxAt(view: EditorView, pos: number): DOMRect | null {
 	return null;
 }
 
-/** Whether a position sits in the source a table or diagram widget replaces. */
-export function inWidgetSource(view: EditorView, pos: number): boolean {
+/** The whole lines of the source a table or diagram widget replaces around a position, or null when the position is in neither. */
+export function widgetSourceAt(view: EditorView, pos: number): { from: number; to: number } | null {
+	const { doc } = view.state;
 	for (let node = syntaxTree(view.state).resolveInner(pos, 1); node; node = node.parent!) {
-		if (node.name === 'Table') return true;
-		if (node.name === 'FencedCode') return /^```\s*mermaid/i.test(view.state.doc.lineAt(node.from).text);
-		if (!node.parent) break;
+		if (node.name === 'Table' || (node.name === 'FencedCode' && /^```\s*mermaid/i.test(doc.lineAt(node.from).text))) return tableSource(doc, node);
+		if (node.name === 'FencedCode' || !node.parent) break;
 	}
-	return false;
+	return null;
 }

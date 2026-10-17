@@ -1,6 +1,4 @@
-import { markdown } from '@codemirror/lang-markdown';
-import { EditorState } from '@codemirror/state';
-import { GFM } from '@lezer/markdown';
+import type { EditorState } from '@codemirror/state';
 import { plainQuote } from '$lib/plainQuote';
 import { tableAt } from './widget-blocks';
 
@@ -54,14 +52,9 @@ export function tableCellLabel(src: string, cell: CellSpan, quote: string): stri
 	return `“${plainQuote(quote)}” · ${row}, ${column}`;
 }
 
-/** Where a card reads a table from: the document's text, parsed as the editor parses it. */
-export function documentState(text: string): EditorState {
-	return EditorState.create({ doc: text, extensions: [markdown({ extensions: GFM })] });
-}
-
 /**
  * The one label for a comment on a table's text, shared by the composer and the card: derived from the source offsets
- * and the syntax-tree table they sit in, never persisted. Null for anything outside a table, so prose or code that
+ * and the syntax-tree table they sit in (the editor's own tree), never persisted. Null for anything outside a table, so prose or code that
  * contains a pipe keeps its ordinary quote.
  */
 export function tableCommentLabel(state: EditorState, from: number | undefined, to: number | undefined, quote: string): string | null {

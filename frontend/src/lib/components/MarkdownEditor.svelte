@@ -21,6 +21,7 @@
 	import { commentRail } from '$lib/cm/comment-rail';
 	import { widgetComments } from '$lib/cm/widget-comments';
 	import { tableCommentLabel } from '$lib/cm/widget-cells';
+	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
@@ -62,7 +63,7 @@
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
 		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
-		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: string; above?: boolean } | null) => void;
+		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
@@ -94,12 +95,12 @@
 		if (!onSelect) return;
 		const r = v.state.selection.main;
 		if (r.empty) { onSelect(null); return; }
-		const coords = v.coordsAtPos(r.to), text = v.state.sliceDoc(r.from, r.to);
+		const coords = v.coordsAtPos(r.to), text = v.state.sliceDoc(r.from, r.to), { state } = v;
 		onSelect({
 			from: r.from, to: r.to, text,
 			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
 			anchor: composerAnchor(v, r.from, r.to),
-			label: tableCommentLabel(v.state, r.from, r.to, text) ?? undefined,
+			label: () => tableCommentLabel(state, r.from, r.to, text) ?? undefined,
 		});
 	}
 
@@ -164,6 +165,17 @@
 		return new DOMRect(content.left, top, Math.max(0, right - content.left), Math.max(start.bottom, end.bottom, insert?.bottom ?? -Infinity) - top);
 	}
 
+	/** The label a comment on a table's text gets, read from this editor's own syntax tree; undefined while the editor is not up. */
+	export function tableLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
+		return view ? tableCommentLabel(view.state, from, to, quote) : undefined;
+	}
+
+	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
+	function focusWidgetComments(ids: string[], opener: HTMLElement) {
+		const open = ids.length > 1 ? curHighlights.find((h) => h.id === ids[0])?.onMarkerFocus : undefined;
+		if (open) open(ids, opener); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]));
+	}
+
 	function handleSelection(v: EditorView) {
 		const r = v.state.selection.main;
 		if (r.empty) {
@@ -203,7 +215,7 @@
 				pendingCommentMark,
 				suggestionMarks(() => ({ focus: (id) => onAnchorFocus?.(id, liveAnchor(id), true), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
-				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: (id) => onAnchorFocus?.(id, liveAnchor(id)) }),
+				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,

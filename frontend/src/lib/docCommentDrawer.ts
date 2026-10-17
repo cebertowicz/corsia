@@ -84,13 +84,13 @@ export function presence(report: (shown: boolean) => void) {
 
 /**
  * At phone width the composer sheet must not cover what is being commented on. Scrolls the editor so the subject's bottom
- * edge sits above the sheet's top, leaving the page and the editor's own measure alone when it already does.
+ * edge sits above the sheet's top, leaving the page and the editor's own measure alone when it already does. Without a
+ * sheet (a narrow canvas's composer is a popover) there is nothing to clear.
  */
-export function clearSubjectOfSheet(anchor: () => DOMRect | null, bounds: HTMLElement | null | undefined) {
+export function clearSubjectOfSheet(panel: HTMLElement | null, anchor: () => DOMRect | null, bounds: HTMLElement | null | undefined) {
 	const subject = anchor();
-	const panel = document.querySelector<HTMLElement>('.drawer-panel[aria-label="New comment"]');
 	const scroller = bounds?.querySelector<HTMLElement>('.cm-scroller');
-	if (!subject || !panel || !scroller) return;
+	if (!subject || !panel?.isConnected || !scroller) return;
 	const limit = panel.getBoundingClientRect().top - 8;
 	if (subject.bottom > limit) scroller.scrollTop += subject.bottom - limit;
 }

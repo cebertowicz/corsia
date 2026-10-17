@@ -1,9 +1,10 @@
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import type { SelectionLabel } from '$lib/stores/commentDraft';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, tableCommentLabel, type CellSpan } from './widget-cells';
-import { paintTable, unpaint, type Mark } from './widget-paint';
+import { addCommentId, commentIdsAt, paintTable, unpaint, type Mark } from './widget-paint';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -20,7 +21,10 @@ export const touchMovedBeyond = (start: { x: number; y: number }, current: { x: 
 export interface WidgetSelection {
 	from: number; to: number; text: string; top: number; left: number;
 	anchor: () => DOMRect | null;
-	label?: string;
+	/** Read when a draft is started, from the state the selection was made in: the parse it needs is paid once per comment, not per selection change. */
+	label?: SelectionLabel;
+	/** Marks a selection made inside a table or diagram widget. */
+	inWidget: true;
 	/** The Comment button sits on the selection's top edge instead of beside its end, so it never covers text in the selected row. */
 	above?: boolean;
 }
@@ -33,23 +37,26 @@ function caretAt(x: number, y: number): { node: Node; offset: number } | null {
 }
 
 /** Maps what the browser has selected inside a widget to source offsets, or null when there is nothing to comment on. */
-function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSelection | null {
+export function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSelection | null {
 	const block = blockRange(view, el);
 	if (!block || block.to <= block.from) return null;
 	const rects = [...range.getClientRects()];
 	const end = rects[rects.length - 1] ?? range.getBoundingClientRect();
 	const top = Math.min(...(rects.length ? rects : [end]).map((r) => r.top));
-	const place = { top, left: end.right, above: true };
+	const place = { top, left: end.right, above: true, inWidget: true as const };
+	const { state } = view;
 	if (el.matches(DIAGRAM)) {
-		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: 'The whole diagram', anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
+		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: () => 'The whole diagram', anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
 	}
 	const src = view.state.sliceDoc(block.from, block.to);
 	const covered = tableCells(src).map((span) => ({ span, cell: cellElement(el, span) }))
 		.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !!hit.cell && range.intersectsNode(hit.cell))
 		.map(({ span, cell }) => {
-			const part = range.cloneRange();
-			if (part.comparePoint(cell, 0) < 0) part.setStart(cell, 0);
-			if (part.comparePoint(cell, cell.childNodes.length) > 0) part.setEnd(cell, cell.childNodes.length);
+			// The selection's share of this cell: it starts and ends inside the cell, or at the cell's own edges.
+			const part = range.cloneRange(), inCell = document.createRange();
+			inCell.selectNodeContents(cell);
+			if (range.compareBoundaryPoints(Range.START_TO_START, inCell) < 0) part.setStart(cell, 0);
+			if (range.compareBoundaryPoints(Range.END_TO_END, inCell) > 0) part.setEnd(cell, cell.childNodes.length);
 			return { span, cell, part, picked: part.toString() };
 		})
 		.filter(({ picked }) => picked.trim() !== '');
@@ -66,7 +73,7 @@ function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSel
 	// The label comes from the one shared function, from the same offsets and quote the card is later given.
 	const whole = (start: { span: CellSpan; cell: HTMLTableCellElement } = first, end: { span: CellSpan; cell: HTMLTableCellElement } = last, items: Array<{ cell: HTMLTableCellElement }> = covered): WidgetSelection => {
 		const from = block.from + start.span.from, to = block.from + end.span.to, text = src.slice(start.span.from, end.span.to);
-		return { from, to, text, ...place, label: tableCommentLabel(view.state, from, to, text) ?? undefined, anchor: () => rows(items) };
+		return { from, to, text, ...place, label: () => tableCommentLabel(state, from, to, text) ?? undefined, anchor: () => rows(items) };
 	};
 	const snapped = snappedTableRows(src, covered.map(({ span }) => span));
 	if (snapped && snapped.rows > 1) {
@@ -85,14 +92,15 @@ function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSel
 	const inSource = occurrences(src.slice(span.from, span.to), picked);
 	if (inSource.length === occurrences(rendered, picked).length && inSource[index] !== undefined) {
 		const from = block.from + span.from + inSource[index];
-		return { from, to: from + picked.length, text: picked, ...place, label: tableCommentLabel(view.state, from, from + picked.length, picked) ?? undefined, anchor: rows as () => DOMRect | null };
+		return { from, to: from + picked.length, text: picked, ...place, label: () => tableCommentLabel(state, from, from + picked.length, picked) ?? undefined, anchor: rows as () => DOMRect | null };
 	}
 	return whole();
 }
 
 export interface WidgetCommentHooks {
 	onSelect: (selection: WidgetSelection | null) => void;
-	onFocus: (id: string) => void;
+	/** Every comment drawn where the click landed, with the painted element it landed on; several open the list, as the margin marker does. */
+	onFocus: (ids: string[], opener: HTMLElement) => void;
 }
 
 /**
@@ -119,8 +127,9 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private readonly listen = () => { if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.read(); }); };
 		private readonly click = (event: MouseEvent) => {
 			const origin = event.target instanceof Element ? event.target : null;
-			const target = origin?.closest<HTMLElement>('[data-comment-id]') ?? null;
-			if (target && widgetOf(this.view, target) && document.getSelection()?.isCollapsed !== false) { hooks.onFocus(target.dataset.commentId!); return; }
+			const widget = origin && widgetOf(this.view, origin);
+			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
+			if (widget && origin && ids.length > 0 && document.getSelection()?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
 			if ((this.pointer === 'touch' || this.recentTouch()) && (!origin || !widgetOf(this.view, origin))) { hooks.onSelect(null); return; }
 			this.tap(event);
 		};
@@ -234,7 +243,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 						if (el.matches(DIAGRAM)) {
 							for (const mark of mine) {
 								el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
-								el.dataset.commentId = mark.id;
+								addCommentId(el, mark);
 								el.dataset.commentAria = 'true';
 								el.setAttribute('role', 'img');
 								el.setAttribute('aria-label', 'Commented diagram');

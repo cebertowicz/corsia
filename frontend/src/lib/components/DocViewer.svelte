@@ -119,6 +119,7 @@
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
 	let docRoot = $state<HTMLElement>();
+	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
 	const commentUI = createCommentSurfaceState(() => docRoot?.querySelector<HTMLElement>('.cm-content')?.focus(), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -336,6 +337,7 @@
 	</DocViewerStatus>
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
+		bind:this={editorSurface}
 		{docState}
 		{loadError}
 		bind:value={editText}
@@ -366,7 +368,7 @@
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}
-		documentText={editText}
+		tableLabel={(from, to, quote) => editorSurface?.tableLabel(from, to, quote)}
 		focusedId={shownFocus}
 		draft={draftController.draft}
 		draftReason={draftController.reason}

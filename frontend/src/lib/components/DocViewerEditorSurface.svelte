@@ -7,10 +7,11 @@
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
+	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
-	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean };
+	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; label?: SelectionLabel; inWidget?: boolean };
 
 	let {
 		docState,
@@ -67,6 +68,10 @@
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 	} = $props();
 
+	let editor = $state<MarkdownEditor>();
+	/** The label a comment on a table's text gets, read from the editor's own syntax tree; undefined while the editor is not up. */
+	export function tableLabel(from: number | undefined, to: number | undefined, quote: string) { return editor?.tableLabel(from, to, quote); }
+
 	// The button follows the selection's end but never leaves the visible document column.
 	const EDGE = 8;
 	let column: HTMLDivElement | undefined = $state();
@@ -91,7 +96,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

@@ -5,11 +5,30 @@ export interface Mark { from: number; to: number; id: string; kind: 'placed' | '
 
 const CLASSES = ['cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending', 'cm-comment-block', 'cm-comment-block-focused', 'cm-comment-block-pending'];
 
+const PAINTED = [...CLASSES.map((name) => `.${name}`), '[data-comment-ids]'].join(',');
+
+/** Every comment drawn on an element, in the order they were painted. A pending mark has no comment to open, so it adds none. */
+export function addCommentId(el: HTMLElement, mark: Mark) {
+	if (mark.kind === 'pending') return;
+	const ids = (el.dataset.commentIds ?? '').split(',').filter(Boolean);
+	if (!ids.includes(mark.id)) el.dataset.commentIds = [...ids, mark.id].join(',');
+}
+
+/** The comments drawn at a click inside a widget: the element it landed on and every painted element around it, up to the widget. */
+export function commentIdsAt(widget: HTMLElement, target: Element): string[] {
+	const ids: string[] = [];
+	for (let el: Element | null = target; el; el = el === widget ? null : el.parentElement) {
+		for (const id of (el as HTMLElement).dataset?.commentIds?.split(',') ?? []) if (id && !ids.includes(id)) ids.push(id);
+	}
+	return ids;
+}
+
 export function unpaint(el: HTMLElement) {
 	for (const wrap of el.querySelectorAll<HTMLElement>('span.cm-comment-wrap')) wrap.replaceWith(...wrap.childNodes);
-	for (const marked of [el, ...el.querySelectorAll<HTMLElement>('[data-comment-id]')]) {
+	for (const marked of [el, ...el.querySelectorAll<HTMLElement>(PAINTED)]) {
 		marked.classList.remove(...CLASSES);
-		marked.removeAttribute('data-comment-id');
+		if (marked.classList.length === 0) marked.removeAttribute('class');
+		marked.removeAttribute('data-comment-ids');
 		if (marked.dataset.commentAria) { marked.removeAttribute('aria-label'); marked.removeAttribute('role'); marked.removeAttribute('data-comment-aria'); }
 	}
 	el.normalize();
@@ -18,7 +37,7 @@ export function unpaint(el: HTMLElement) {
 const markClasses = (kind: Mark['kind']) => kind === 'pending' ? ['cm-comment-pending'] : kind === 'focused' ? ['cm-comment-anchor', 'cm-comment-focused'] : ['cm-comment-anchor'];
 
 /** Wraps the text nodes a range holds, so a mark follows the text inside formatting. */
-function wrapRange(range: Range, mark: Mark) {
+export function wrapRange(range: Range, mark: Mark) {
 	const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT);
 	const nodes: Text[] = [];
 	for (let node = walker.nextNode(); node; node = walker.nextNode()) if (range.intersectsNode(node)) nodes.push(node as Text);
@@ -31,7 +50,7 @@ function wrapRange(range: Range, mark: Mark) {
 		if (part.collapsed) continue;
 		const wrap = document.createElement('span');
 		wrap.className = ['cm-comment-wrap', ...markClasses(mark.kind)].join(' ');
-		wrap.dataset.commentId = mark.id;
+		addCommentId(wrap, mark);
 		wrap.dataset.commentAria = 'true';
 		wrap.setAttribute('aria-label', `Commented text: ${clean(part.toString())}`);
 		part.surroundContents(wrap);
@@ -44,7 +63,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 		const from = mark.from - base, to = mark.to - base;
 		if (from <= 0 && to >= src.length) {
 			el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
-			el.dataset.commentId = mark.id;
+			addCommentId(el, mark);
 			continue;
 		}
 		const hit = cells.filter((span) => span.from < to && span.to > from);
@@ -70,7 +89,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 				if (startSet) { wrapRange(range, mark); continue; }
 			}
 			cell.classList.add(...markClasses(mark.kind));
-			cell.dataset.commentId = mark.id;
+			addCommentId(cell, mark);
 			cell.dataset.commentAria = 'true';
 			cell.setAttribute('aria-label', `Commented cell: ${clean(cell.textContent ?? '')}`);
 		}

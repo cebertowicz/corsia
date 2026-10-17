@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { documentState, snappedTableRows, tableCellLabel, tableCells, tableCommentLabel } from './widget-cells';
+import { markdown } from '@codemirror/lang-markdown';
+import { EditorState } from '@codemirror/state';
+import { GFM } from '@lezer/markdown';
+import { snappedTableRows, tableCellLabel, tableCells, tableCommentLabel } from './widget-cells';
 import { touchMovedBeyond } from './widget-comments';
 
 const TABLE = `| Name | Status | Note |
@@ -13,6 +16,8 @@ const cell = (row: number, col: number) => {
 	return found;
 };
 
+// The editor's own parser setup (`MarkdownEditor.svelte`), the state a label is read from.
+const documentState = (text: string) => EditorState.create({ doc: text, extensions: [markdown({ extensions: GFM })] });
 const label = (text: string, from: number, to: number, quote: string) => tableCommentLabel(documentState(text), from, to, quote);
 const at = (text: string, part: string) => { const from = text.indexOf(part); return [from, from + part.length] as const; };
 

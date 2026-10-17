@@ -28,7 +28,7 @@ const session = () => {
 };
 type Row = Pick<DocComment, 'placement' | 'orphaned'> | undefined;
 
-function setup(label: string | undefined) {
+function setup(inWidget: boolean, label?: string) {
 	let scope = $state('one'), live = $state.raw(session()), open = $state(false), drawn = $state(false);
 	let row = $state<Row>({ placement: 'placing' }), draft = $state.raw<CommentDraft | null>(null);
 	const stop = commentDraft.subscribe((value) => { draft = value; });
@@ -44,7 +44,7 @@ function setup(label: string | undefined) {
 	return {
 		controller,
 		async post() {
-			controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0, label });
+			controller.select({ from: 0, to: 5, text: 'alpha', top: 0, left: 0, label, inWidget });
 			controller.start(); flushSync();
 			expect(await controller.submit('body')).toBe('posted');
 			// The viewer closes the sheet and drops the draft once the comment is posted.
@@ -65,7 +65,7 @@ afterEach(() => { current?.stop(); current = undefined; discardCommentDraft(); }
 
 describe('a posted widget comment keeps its pending mark', () => {
 	it('until its placed mark is drawn', async () => {
-		current = setup('The whole table');
+		current = setup(true, 'The whole table');
 		await current.post();
 		expect(current.controller.pendingComment).not.toBeNull();
 		current.set({ drawn: true });
@@ -73,7 +73,7 @@ describe('a posted widget comment keeps its pending mark', () => {
 	});
 
 	it('until the comment ends not_placed', async () => {
-		current = setup('The whole table');
+		current = setup(true, 'The whole table');
 		await current.post();
 		expect(current.controller.pendingComment).not.toBeNull();
 		current.set({ row: { placement: 'not_placed' } });
@@ -81,21 +81,21 @@ describe('a posted widget comment keeps its pending mark', () => {
 	});
 
 	it('until the comment is orphaned', async () => {
-		current = setup('The whole table');
+		current = setup(true, 'The whole table');
 		await current.post();
 		current.set({ row: { placement: 'placing', orphaned: true } });
 		expect(current.controller.pendingComment).toBeNull();
 	});
 
 	it('until cancel()', async () => {
-		current = setup('The whole table');
+		current = setup(true, 'The whole table');
 		await current.post();
 		current.controller.cancel(); flushSync();
 		expect(current.controller.pendingComment).toBeNull();
 	});
 
 	it('until another document is shown', async () => {
-		current = setup('The whole table');
+		current = setup(true, 'The whole table');
 		await current.post();
 		current.set({ scope: 'two' });
 		expect(current.controller.pendingComment).toBeNull();
@@ -104,8 +104,16 @@ describe('a posted widget comment keeps its pending mark', () => {
 		expect(current.controller.pendingComment).toBeNull();
 	});
 
-	it('only for a widget comment: a prose comment hands over to its text mark', async () => {
-		current = setup(undefined);
+	it('whether or not it has a label to show', async () => {
+		current = setup(true);
+		await current.post();
+		expect(current.controller.pendingComment).not.toBeNull();
+		current.set({ drawn: true });
+		expect(current.controller.pendingComment).toBeNull();
+	});
+
+	it('only for a widget comment: a prose comment hands over to its text mark, even one that has a label', async () => {
+		current = setup(false, 'A label');
 		await current.post();
 		expect(current.controller.pendingComment).toBeNull();
 	});

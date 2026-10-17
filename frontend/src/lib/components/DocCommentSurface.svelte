@@ -16,27 +16,27 @@
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
 	import { clearSubjectOfSheet, clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { createCellLabels, type TableLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
-	import { documentState, tableCommentLabel } from '$lib/cm/widget-cells';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
 	/** Image comments (DCOL-FR13.6): the thumbnail heads the list; tags and cards share number, colour, hover and selected-scroll state. */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, documentText = '', focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, tableLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
 		bounds?: HTMLElement | null;
 		narrow: boolean;
 		comments: DocComment[];
-		/** Current markdown, used only to derive a table comment's label from its ordinary source offsets. */
-		documentText?: string;
+		/** Reads a table comment's label from the editor's own syntax tree. */
+		tableLabel?: TableLabelReader;
 		focusedId: string | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
 		draft: { text: string; body?: string; label?: string } | null;
@@ -75,9 +75,7 @@
 		onSheetModalChange?: (open: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
-	// Parsed once per text, and only for a document that has a pipe to be a table with.
-	const labelState = $derived(documentText.includes('|') ? documentState(documentText) : null);
-	const cellLabel = (comment: DocComment) => comment.orphaned || !labelState ? null : tableCommentLabel(labelState, comment.from, comment.to, comment.anchor);
+	const cellLabel = createCellLabels(() => tableLabel);
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
 	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
 	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;
@@ -119,9 +117,12 @@
 	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
 	$effect(() => onSheetModalChange?.(sheet.modalOpen));
 	// The same anchor that positions a desktop composer identifies the source rows or diagram to keep above the sheet.
+	// The draft sheet exists only at phone width; a narrow canvas's composer is a popover, with no sheet element to clear.
+	let draftSheet = $state<HTMLElement | null>(null);
 	$effect(() => {
-		if (!sheetDrawer || surfaceState?.kind !== 'draft' || typeof anchor !== 'function') return;
-		void tick().then(() => clearSubjectOfSheet(anchor, bounds));
+		const sheetElement = draftSheet;
+		if (!sheetElement || surfaceState?.kind !== 'draft' || typeof anchor !== 'function') return;
+		void tick().then(() => clearSubjectOfSheet(sheetElement, anchor, bounds));
 	});
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
@@ -345,7 +346,7 @@
 		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if narrow && sheet.state}<AdaptiveDrawer ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}>{@render content()}</AdaptiveDrawer>
+	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}>{@render content()}</AdaptiveDrawer>
 	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
