@@ -326,6 +326,26 @@ def test_app_mode_uses_its_bundle_service_and_service_json_never_a_checkout(app)
     assert not (app.home / "Library" / "LaunchAgents").exists()
 
 
+@pytest.mark.parametrize(
+    "service_json",
+    ['{"state_dir": "relative/path"}', "{not json"],
+    ids=["invalid-state-dir", "unreadable"],
+)
+def test_app_mode_refuses_a_service_json_it_cannot_honour_instead_of_using_the_default_root(app, service_json):
+    """The launcher and the app refuse these; the lifecycle CLI must not fall back to an empty root."""
+    service_file = app.home / "Library" / "Application Support" / "CORSIA" / "service.json"
+    service_file.write_text(service_json)
+
+    result = app.run("stop")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "no other state folder was opened" in result.stderr
+    assert app.calls() == []
+    # An explicit state root from the caller is the caller's choice, as for the launcher.
+    explicit = app.run("stop", CORSIA_STATE_DIR=str(app.root / "explicit-state"))
+    assert "no other state folder was opened" not in explicit.stderr
+
+
 def test_the_same_scripts_outside_an_app_bundle_are_a_checkout(app):
     checkout = app.root / "checkout" / "scripts"
     shutil.copytree(app.script.parent, checkout)

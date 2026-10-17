@@ -14,8 +14,9 @@ use std::{
 
 use crate::{
     adoption::{self, ReadyError, RestartLook, StopProcess},
-    probe_health, release_proof, run_service_command, unregister_service, wait_for_service,
-    APP_SERVICE_LABEL, HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT,
+    probe_health, release_proof, run_service_command,
+    service_management::service_label,
+    unregister_service, wait_for_service, HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT,
 };
 
 /// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
@@ -270,6 +271,60 @@ fn process_started(pid: u32) -> Option<String> {
     (written == size).then(|| format!("{}.{:06}", info.pbi_start_tvsec, info.pbi_start_tvusec))
 }
 
+/// A fresh, private file for one `corsia stop`'s output.
+fn stop_record() -> Option<(std::fs::File, PathBuf)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let path = std::env::temp_dir().join(format!(
+        "corsia-adopt-stop-{}-{nanos}.log",
+        std::process::id()
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .ok()
+        .map(|file| (file, path))
+}
+
+/// The last line the checkout's CLI wrote, without its colour codes and marker glyph: its own
+/// words for why it refused. Shown to the person, never matched.
+fn refusal_line(path: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(4096)))
+        .ok()?;
+    let mut tail = Vec::new();
+    file.read_to_end(&mut tail).ok()?;
+    let text = String::from_utf8_lossy(&tail);
+    let mut plain = String::new();
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' {
+            // An ANSI escape: `ESC [ ... <letter>`.
+            for next in characters.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            plain.push(character);
+        }
+    }
+    let line = plain
+        .lines()
+        .map(|line| {
+            line.trim_start_matches(|c: char| !c.is_alphanumeric())
+                .trim()
+        })
+        .rfind(|line| !line.is_empty())?;
+    Some(line.chars().take(400).collect())
+}
+
 /// The `CORSIA_SERVICE_GENERATION => <value>` line of `launchctl print`.
 fn printed_generation(printed: &str) -> Option<&str> {
     printed
@@ -296,23 +351,25 @@ impl adoption::Lifecycle for SourceLifecycle {
             // stuck) rather than offering a start that would race the restart's own.
             return Err(match self.look_for_restart(state) {
                 RestartLook::Young | RestartLook::Stuck => ReadyError::Restarting,
-                RestartLook::Settled | RestartLook::Unknown => ReadyError::NotRunning,
+                RestartLook::Settled => ReadyError::NotRunning,
+                // A look that could not be read proves neither state: never claim one.
+                RestartLook::Unknown => ReadyError::Failed(
+                    "could not tell whether the existing install is restarting".into(),
+                ),
             });
         };
         // The checkout that would stop it must be the one the loaded job was bootstrapped
-        // from. The plist's generation must be the one the loaded job reports; a plist that
-        // carries one and a print that lacks it cannot prove it, so it is refused the same
-        // way. A plist with no generation falls back to the printed working directory, and a
-        // print without that line is refused too.
+        // from. This is the narrowed copy of the checkout's own rule
+        // (`service_loaded_definition_matches` in scripts/corsia.d/service.sh), kept only
+        // because no released checkout exposes that check read-only: the plist's generation
+        // must be the one the loaded job reports, and anything else (no generation in the
+        // plist, none in the print) cannot be proven, exactly as `corsia stop` refuses it.
+        // Port, interpreter, workspace and state-directory mismatches are left to that stop.
         let running = printed_working_directory(&printed);
-        let proven = match (
-            self.source.generation.as_deref(),
-            printed_generation(&printed),
-        ) {
-            (Some(expected), Some(loaded)) => expected == loaded,
-            (Some(_), None) => false,
-            (None, _) => running.map(Path::new) == Some(self.source.working_directory.as_path()),
-        };
+        let proven = matches!(
+            (self.source.generation.as_deref(), printed_generation(&printed)),
+            (Some(expected), Some(loaded)) if expected == loaded
+        );
         // Both generations present and different, from the very folder the settings name: the
         // plist was rewritten without a reload, which no folder wording describes.
         let older_settings = matches!(
@@ -343,6 +400,11 @@ impl adoption::Lifecycle for SourceLifecycle {
             Some(0) => Ok(()),
             // Exit 4: the source is partway through restarting itself.
             Some(4) => Err(ReadyError::Restarting),
+            // Exit 5: the data is from a newer schema than the bundled backend opens (the
+            // backend owns the version, so the app holds no copy of it).
+            Some(5) => Err(ReadyError::Failed(
+                "adoption refused before changes: your data is newer than this app".into(),
+            )),
             // Exit 3 carries a refusal written to be shown: names and byte counts only.
             Some(3) => Err(ReadyError::Refused(
                 String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -379,8 +441,17 @@ impl adoption::Lifecycle for SourceLifecycle {
         progress: &mut dyn FnMut(Option<u32>),
         spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
     ) -> Result<(), String> {
-        let mut child = self
-            .cli("stop")
+        // The stop's output goes to a file, never a pipe: a pipe closed by an app that quit
+        // would kill the stop mid-drain. It is read only after the stop has failed, to show
+        // the checkout's own refusal; no decision is made from it.
+        let record = stop_record();
+        let mut command = self.cli("stop");
+        if let Some((file, _)) = &record {
+            if let Ok(file) = file.try_clone() {
+                command.stdout(Stdio::from(file));
+            }
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("could not stop the existing install: {error}"))?;
         // Recorded as soon as it exists, so a Force Quit leaves the journal naming it. A
@@ -417,14 +488,16 @@ impl adoption::Lifecycle for SourceLifecycle {
             }
             thread::sleep(Duration::from_millis(50));
         };
+        let refusal = record.and_then(|(_, path)| {
+            let line = refusal_line(&path);
+            let _ = std::fs::remove_file(&path);
+            line
+        });
         if !status.success() {
-            return Err(format!("`corsia stop` exited {status}"));
-        }
-        if let Some(why) = unrecorded {
-            log::warn!("the stop process could not be recorded: {why}");
-            return Err(format!(
-                "the stop could not be recorded ({why}), so the switch is being undone"
-            ));
+            return Err(match refusal {
+                Some(line) => format!("`corsia stop` exited {status}: {line}"),
+                None => format!("`corsia stop` exited {status}"),
+            });
         }
         if let Some(why) = unrecorded {
             log::warn!("the stop process could not be recorded: {why}");
@@ -480,15 +553,17 @@ impl adoption::Lifecycle for SourceLifecycle {
         run_service_command("register")?;
         wait_for_service(port, app_dir)?;
         release_proof::replaced_since(
-            &format!("gui/{}/{APP_SERVICE_LABEL}", unsafe { libc::geteuid() }),
+            &format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label()),
             since,
         )
     }
 
     fn stop_new(&mut self, state: &Path, port: u16) -> Result<(), String> {
-        let pid = release_proof::launchd_pid(&format!("gui/{}/{APP_SERVICE_LABEL}", unsafe {
-            libc::geteuid()
-        }));
+        let pid = release_proof::launchd_pid(&format!(
+            "gui/{}/{}",
+            unsafe { libc::geteuid() },
+            service_label()
+        ));
         unregister_service()?;
         release_proof::prove_released(pid, port, &self.bundled.python, &state.join("corsia.db"))
     }
@@ -674,6 +749,28 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_stop_shows_the_checkouts_own_line_and_leaves_the_job_loaded() {
+        // `fail` in scripts/corsia writes a coloured, marked line to stdout and returns 1.
+        let mut home = home(
+            "printf '  \\033[0;31m\u{274c} Installed x does not describe this checkout\\033[0m\\n'; exit 1",
+            "exit 0",
+            "exit 0",
+        );
+        let error = home
+            .lifecycle
+            .stop_old(&mut quiet, &mut |_| Ok(()))
+            .unwrap_err();
+        assert!(
+            error.ends_with(": Installed x does not describe this checkout"),
+            "{error:?}"
+        );
+        assert!(
+            home.root.path().join("loaded").exists(),
+            "nothing was stopped"
+        );
+    }
+
+    #[test]
     fn a_stop_that_leaves_the_port_answering_is_not_a_stop() {
         let mut home = home("rm -f LOADED", "exit 0", "exit 0");
         let _held = TcpListener::bind(("127.0.0.1", home.lifecycle.source.port)).unwrap();
@@ -723,16 +820,13 @@ mod tests {
 
     #[test]
     fn a_job_that_is_not_loaded_and_has_no_restart_in_flight_is_not_running() {
-        for answer in ["exit 0", "echo none"] {
-            let mut home = home("exit 0", "exit 0", answer);
-            fs::remove_file(home.root.path().join("loaded")).unwrap();
-            assert_eq!(
-                home.lifecycle
-                    .check_ready(Path::new("/state"), &BTreeSet::new()),
-                Err(ReadyError::NotRunning),
-                "restart look answered {answer:?}"
-            );
-        }
+        let mut home = home("exit 0", "exit 0", "echo none");
+        fs::remove_file(home.root.path().join("loaded")).unwrap();
+        assert_eq!(
+            home.lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::NotRunning)
+        );
     }
 
     #[test]
@@ -748,6 +842,17 @@ mod tests {
                 "request {age} s old"
             );
         }
+    }
+
+    #[test]
+    fn an_unloaded_job_with_an_unreadable_restart_look_is_not_called_stopped() {
+        let mut home = home("exit 0", "exit 0", "exit 7");
+        fs::remove_file(home.root.path().join("loaded")).unwrap();
+        assert!(matches!(
+            home.lifecycle
+                .check_ready(Path::new("/state"), &BTreeSet::new()),
+            Err(ReadyError::Failed(_))
+        ));
     }
 
     #[test]
@@ -854,7 +959,10 @@ mod tests {
     }
 
     #[test]
-    fn a_plist_without_a_generation_is_judged_by_the_printed_working_directory() {
+    fn a_plist_without_a_generation_is_refused_like_the_checkouts_own_stop_refuses_it() {
+        // service.sh `service_loaded_definition_matches` returns 1 when the plist carries no
+        // generation, so `corsia stop` would refuse after a passing preflight. The folder
+        // wording still comes from the print.
         // The fake launchctl prints `<base>/checkout/backend` and generation `gen-1`.
         let mut home = home("exit 0", "exit 0", "exit 0");
         home.lifecycle.source.generation = None;
@@ -862,8 +970,14 @@ mod tests {
             .lifecycle
             .check_ready(Path::new("/state"), &BTreeSet::new());
         assert!(
-            !matches!(same, Err(ReadyError::WrongFolder { .. })),
-            "the same folder is adopted without a generation: {same:?}"
+            matches!(
+                same,
+                Err(ReadyError::WrongFolder {
+                    running: Some(_),
+                    ..
+                })
+            ),
+            "the same folder is still refused without a generation: {same:?}"
         );
         let base = home.root.path().to_path_buf();
         home.lifecycle.source.working_directory = base.join("elsewhere/backend");
@@ -921,6 +1035,13 @@ mod tests {
         );
         assert!(matches!(ready("exit 1"), Err(ReadyError::Failed(_))));
         assert_eq!(ready("exit 4"), Err(ReadyError::Restarting));
+        // Data from a newer schema: the backend owns the version, the app only maps its answer.
+        assert_eq!(
+            ready("exit 5"),
+            Err(ReadyError::Failed(
+                "adoption refused before changes: your data is newer than this app".into()
+            ))
+        );
     }
 
     #[test]

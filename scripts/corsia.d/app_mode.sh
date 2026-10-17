@@ -38,7 +38,7 @@ APP_SERVICE_LABEL=ai.corsia.service
 # Resources here). An explicit CORSIA_WORKSPACE or BACKEND_PORT still wins
 # over service.json, as it does for the launcher.
 app_mode_checkout() {
-    local resolved line
+    local resolved line config_error=""
     PYTHON="$CORSIA_DIR/python/bin/python3"
     ENV_FILE=""
     BOOTSTRAP_CONFIG=""
@@ -67,6 +67,7 @@ if (app_dir / SERVICE_FILE).is_file():
                 [ -n "${CORSIA_STATE_DIR:-}" ] \
                     || _corsia_app_state_root="${line#state_dir=}"
                 ;;
+            error=*) config_error="${line#error=}" ;;
             workspace=*)
                 [ -n "${CORSIA_WORKSPACE:-}" ] \
                     || export CORSIA_WORKSPACE="${line#workspace=}"
@@ -74,6 +75,12 @@ if (app_dir / SERVICE_FILE).is_file():
             port=*) [ -n "${BACKEND_PORT:-}" ] || BACKEND_PORT="${line#port=}" ;;
         esac
     done <<< "$resolved"
+    # The launcher and the app refuse the same way: falling back to the default state root
+    # would open a different, empty folder beside the data service.json names.
+    if [ -z "${CORSIA_STATE_DIR:-}" ] && [ -n "$config_error" ]; then
+        echo "CORSIA refused to run: $config_error, so no other state folder was opened" >&2
+        return 1
+    fi
 }
 
 app_mode_runtime_identity() {

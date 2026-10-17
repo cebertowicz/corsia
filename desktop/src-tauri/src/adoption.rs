@@ -8,7 +8,7 @@
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -158,14 +158,9 @@ impl Plan {
     }
 
     /// All refusal conditions run before the source service is touched.
-    pub fn preflight(&self, supported_schema: u32) -> Result<(), String> {
+    pub fn preflight(&self) -> Result<(), String> {
         if !self.source.state.join("corsia.db").is_file() {
             return Err("the existing install has no corsia.db".into());
-        }
-        if schema_version(&self.source.state.join("corsia.db"))
-            .is_some_and(|version| version > supported_schema)
-        {
-            return Err("your data is newer than this app".into());
         }
         Ok(())
     }
@@ -717,12 +712,11 @@ fn wait_until_ready(
 pub fn adopt(
     plan: &Plan,
     lifecycle: &mut impl Lifecycle,
-    supported_schema: u32,
     cancel: &AtomicBool,
     phase: &mut dyn FnMut(Phase),
 ) -> Result<(), AdoptionError> {
     // Up to the stop, nothing has been asked of the old install.
-    plan.preflight(supported_schema).map_err(|error| {
+    plan.preflight().map_err(|error| {
         AdoptionError::untouched(format!("adoption refused before changes: {error}"))
     })?;
     let variable_names = plan.variable_names().map_err(AdoptionError::untouched)?;
@@ -953,17 +947,6 @@ fn rollback(
     )))
 }
 
-/// The `user_version` in the database's 100-byte header. Only the header is read:
-/// the file can be gigabytes.
-fn schema_version(database: &Path) -> Option<u32> {
-    let mut header = [0_u8; 64];
-    File::open(database).ok()?.read_exact(&mut header).ok()?;
-    if &header[..16] != b"SQLite format 3\0" {
-        return None;
-    }
-    Some(u32::from_be_bytes(header[60..64].try_into().ok()?))
-}
-
 fn io(error: std::io::Error) -> String {
     error.to_string()
 }
@@ -1153,9 +1136,7 @@ mod tests {
     /// Runs `adopt` with no Quit and records the phases shown.
     fn adopt_quietly(plan: &Plan, fake: &mut Fake) -> (Result<(), AdoptionError>, Vec<Phase>) {
         let mut phases = vec![];
-        let result = adopt(plan, fake, 1, &AtomicBool::new(false), &mut |p| {
-            phases.push(p)
-        });
+        let result = adopt(plan, fake, &AtomicBool::new(false), &mut |p| phases.push(p));
         (result, phases)
     }
 
@@ -1366,6 +1347,31 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_stop_changes_nothing_and_its_cause_reaches_the_person() {
+        // The stop is the first effect: before it only the app's own journal exists.
+        let (_home, plan) = plan(false);
+        let plist = fs::read(&plan.source.plist).unwrap();
+        let state_before = fs::read(plan.source.state.join("corsia.db")).unwrap();
+        let mut fake = fake_for(&plan, Some("stop_old"));
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(error.outcome, Outcome::Restored);
+        assert!(
+            error.message().contains("stop failed"),
+            "{}",
+            error.message()
+        );
+        assert_eq!(fake.events, ["stop_old", "start_old"]);
+        assert_eq!(fs::read(&plan.source.plist).unwrap(), plist);
+        assert_eq!(
+            fs::read(plan.source.state.join("corsia.db")).unwrap(),
+            state_before
+        );
+        assert!(!plan.app_dir.join("service.json").exists());
+        assert!(!plan.adopted_dir().join(PLIST).exists());
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
     fn a_backup_that_cannot_be_put_back_never_starts_the_old_service() {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, Some("start_new"));
@@ -1393,7 +1399,7 @@ mod tests {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, None);
         let cancel = AtomicBool::new(true);
-        let error = adopt(&plan, &mut fake, 1, &cancel, &mut |_| {}).unwrap_err();
+        let error = adopt(&plan, &mut fake, &cancel, &mut |_| {}).unwrap_err();
         assert_eq!(error.outcome, Outcome::Untouched);
         // The install was proven loaded just before the Quit was seen, so the line may say so.
         assert!(error.running);
@@ -1414,7 +1420,7 @@ mod tests {
             let mut fake = fake_for(&plan, None);
             let cancel = Arc::new(AtomicBool::new(false));
             fake.quit_at = Some((at, cancel.clone()));
-            let error = adopt(&plan, &mut fake, 1, &cancel, &mut |_| {}).unwrap_err();
+            let error = adopt(&plan, &mut fake, &cancel, &mut |_| {}).unwrap_err();
             assert_eq!(error.outcome, Outcome::Restored, "{at}");
             assert!(error.message().contains("cancelled"), "{at}");
             assert_eq!(fake.events, expected, "{at}");
@@ -1429,7 +1435,7 @@ mod tests {
         let mut fake = fake_for(&plan, None);
         let cancel = Arc::new(AtomicBool::new(false));
         fake.quit_at = Some(("start_new", cancel.clone()));
-        adopt(&plan, &mut fake, 1, &cancel, &mut |_| {}).unwrap();
+        adopt(&plan, &mut fake, &cancel, &mut |_| {}).unwrap();
         assert_eq!(journal_step(&plan), Some(Step::Registered));
     }
 
@@ -1701,52 +1707,6 @@ mod tests {
         let logged = format!("adoption skipped source .env keys: {}", names.join(", "));
         assert_eq!(names, ["TUNING", "API_KEY"]);
         assert!(!logged.contains("secret-value") && !logged.contains("true"));
-    }
-
-    #[test]
-    fn future_schema_refuses_before_the_stop() {
-        let (_home, plan) = plan(false);
-        let mut database = fs::read(plan.source.state.join("corsia.db")).unwrap();
-        database[60..64].copy_from_slice(&2u32.to_be_bytes());
-        fs::write(plan.source.state.join("corsia.db"), database).unwrap();
-        let mut fake = fake_for(&plan, None);
-        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
-        assert_eq!(error.outcome, Outcome::Untouched);
-        assert!(!error.running);
-        assert!(error.message().contains("newer"));
-        assert!(fake.events.is_empty());
-    }
-
-    #[test]
-    fn the_schema_version_comes_from_the_header_alone() {
-        let dir = tempfile::Builder::new()
-            .prefix("corsia-schema-")
-            .tempdir_in("/private/tmp")
-            .unwrap();
-        let header = |version: u32| {
-            let mut bytes = vec![0_u8; 100];
-            bytes[..16].copy_from_slice(b"SQLite format 3\0");
-            bytes[60..64].copy_from_slice(&version.to_be_bytes());
-            bytes
-        };
-        let database = dir.path().join("corsia.db");
-        fs::write(&database, header(7)).unwrap();
-        assert_eq!(schema_version(&database), Some(7));
-        // A multi-gigabyte database is not loaded to read four bytes: the file here is sparse.
-        let big = File::options().append(true).open(&database).unwrap();
-        big.set_len(2 * 1024 * 1024 * 1024).unwrap();
-        assert_eq!(schema_version(&database), Some(7));
-        let other = dir.path().join("other.db");
-        fs::write(
-            &other,
-            b"not a database, but longer than the header it would need to be",
-        )
-        .unwrap();
-        assert_eq!(schema_version(&other), None);
-        let short = dir.path().join("short.db");
-        fs::write(&short, b"SQLite format 3\0").unwrap();
-        assert_eq!(schema_version(&short), None);
-        assert_eq!(schema_version(&dir.path().join("missing.db")), None);
     }
 
     #[test]
@@ -2081,7 +2041,7 @@ mod tests {
         let mut fake = fake_for(&plan, None);
         fake.ready_script = vec![ReadyError::Restarting];
         fake.restart_forever = Some(RestartLook::Young);
-        let error = adopt(&plan, &mut fake, 1, &AtomicBool::new(true), &mut |_| {}).unwrap_err();
+        let error = adopt(&plan, &mut fake, &AtomicBool::new(true), &mut |_| {}).unwrap_err();
         assert_eq!(error.outcome, Outcome::Untouched);
         assert!(!error.standalone);
         assert!(fake.events.is_empty());
@@ -2169,7 +2129,7 @@ mod tests {
         let mut fake = fake_for(&plan, None);
         let cancel = Arc::new(AtomicBool::new(false));
         fake.quit_at = Some(("stop_old", cancel.clone()));
-        let error = adopt(&plan, &mut fake, 1, &cancel, &mut |_| {}).unwrap_err();
+        let error = adopt(&plan, &mut fake, &cancel, &mut |_| {}).unwrap_err();
         assert_eq!(error.outcome, Outcome::Restored);
         assert_eq!(fake.events, ["stop_old", "start_old"]);
         assert!(plan.source.plist.exists());

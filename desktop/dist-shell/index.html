@@ -307,7 +307,7 @@
 			function showAdoptionProgress(progress) {
 				if (!progress) return;
 				line.hidden = true;
-				// A Quit that is waiting on the switch says so, for the two phases it waits through.
+				// A Quit that is waiting on the switch says so, for the three phases it waits through.
 				note.textContent = progress.quit_pending === true ? ADOPTION_COPY.quitPending : '';
 				note.hidden = !note.textContent;
 				if (progress.phase === 'waiting') {

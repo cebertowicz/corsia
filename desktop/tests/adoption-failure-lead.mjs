@@ -303,6 +303,7 @@ for (const theme of ['light', 'dark']) {
 		{ name: 'progress-quit-pending-backing-up', progress: { phase: 'backing_up', quit_pending: true }, title: 'Backing up your data…', line: null, note: quitPendingNote },
 		{ name: 'progress-starting', progress: { phase: 'starting', running: null }, title: 'Starting CORSIA…', line: null },
 		{ name: 'progress-starting-existing', progress: { phase: 'starting_existing', running: null }, title: 'Starting your existing CORSIA…', line: null },
+		{ name: 'progress-quit-pending-starting-existing', progress: { phase: 'starting_existing', quit_pending: true }, title: 'Starting your existing CORSIA…', line: null, note: quitPendingNote },
 	]) {
 		const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: theme });
 		await page.addInitScript((reading) => {

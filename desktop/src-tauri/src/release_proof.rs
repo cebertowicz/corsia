@@ -201,7 +201,10 @@ mod tests {
         let mut looks = 0;
         while !port_refuses(port) {
             looks += 1;
-            assert!(looks < 50, "the port still answers after its listener was dropped");
+            assert!(
+                looks < 50,
+                "the port still answers after its listener was dropped"
+            );
             std::thread::sleep(Duration::from_millis(100));
         }
     }

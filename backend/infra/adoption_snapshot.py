@@ -23,10 +23,17 @@ REFUSED = 3
 #: Exit status when the source is partway through restarting itself: the app waits
 #: for that to settle instead of showing a refusal.
 RESTARTING = 4
+#: Exit status when the source's data is from a newer schema than this backend opens: the app
+#: says so in its own words, so nothing is printed for it to show.
+DATA_NEWER = 5
 
 
 class AdoptionRefused(Exception):
     """Adoption cannot start. The text names keys and byte counts, never a value."""
+
+
+class AdoptionDataNewer(AdoptionRefused):
+    """The database's schema is newer than this backend's own ``SCHEMA_VERSION``."""
 
 
 class AdoptionRestarting(AdoptionRefused):
@@ -133,6 +140,21 @@ def restart_in_flight_age(state_root: Path) -> float | None:
     return min(ages) if ages else None
 
 
+def database_schema_version(database: Path) -> int | None:
+    """The ``user_version`` in the 100-byte header, or ``None`` when the header cannot be read.
+
+    Only the header is read: the file can be gigabytes, and the source service holds it open.
+    """
+    try:
+        with open(database, "rb") as handle:
+            header = handle.read(100)
+    except OSError:
+        return None
+    if len(header) < 64 or not header.startswith(b"SQLite format 3\0"):
+        return None
+    return int.from_bytes(header[60:64], "big")
+
+
 def restart_in_flight(state_root: Path) -> bool:
     """Whether the source install is partway through restarting itself (a read-only look)."""
     return restart_in_flight_age(state_root) is not None
@@ -146,6 +168,11 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
     snapshot (the state root's size outside ``backups/``) and keep its reserve.
     """
     state_root = Path(state_root).resolve()
+    from infra.schema import SCHEMA_VERSION
+
+    found = database_schema_version(state_root / "corsia.db")
+    if found is not None and found > SCHEMA_VERSION:
+        raise AdoptionDataNewer("The existing data is newer than this app.")
     present = set(variables)
     wanted = {variable: entry for entry, variable in IGNORED_VARIABLES.items() if variable in present}
     stored = stored_key_names(state_root)
@@ -180,12 +207,14 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
 
 
 def preflight_main(arguments: list[str]) -> int:
-    """Entry for the app: ``[state_root, *key_variable_names]``. Exit 0 ready, 3 refused, 4 restarting."""
+    """Entry for the app: ``[state_root, *key_variable_names]``. Exit 0 ready, 3 refused, 4 restarting, 5 data newer."""
     try:
         check_adoption_preflight(Path(arguments[0]), arguments[1:])
     except AdoptionRestarting as restarting:
         print(restarting, file=sys.stderr)
         return RESTARTING
+    except AdoptionDataNewer:
+        return DATA_NEWER
     except AdoptionRefused as refusal:
         print(refusal, file=sys.stderr)
         return REFUSED

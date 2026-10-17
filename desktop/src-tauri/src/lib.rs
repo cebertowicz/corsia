@@ -50,9 +50,6 @@ const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const KNOWN_SCHEMA_VERSION: u32 = 125;
-/// The launchd label of the app's own service (its plist is `ai.corsia.service.plist`).
-const APP_SERVICE_LABEL: &str = "ai.corsia.service";
 
 #[derive(Default)]
 struct AppServiceState {
@@ -1094,7 +1091,8 @@ struct AdoptionProgress {
     phase: adoption::Phase,
     /// A Quit was asked for and will be carried out once the existing install
     /// is running again as before, which is only ever true while the stop is
-    /// still draining or the backup is being made.
+    /// still draining, the backup is being made, or the existing install is being
+    /// started again.
     quit_pending: bool,
 }
 
@@ -1105,7 +1103,9 @@ impl AdoptionProgress {
             quit_pending: quit_asked
                 && matches!(
                     phase,
-                    adoption::Phase::Waiting { .. } | adoption::Phase::BackingUp
+                    adoption::Phase::Waiting { .. }
+                        | adoption::Phase::BackingUp
+                        | adoption::Phase::StartingExisting
                 ),
         }
     }
@@ -1178,7 +1178,6 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
     let adopted = adoption::adopt(
         &plan,
         &mut lifecycle,
-        KNOWN_SCHEMA_VERSION,
         &service.adoption_cancel_requested,
         &mut |phase| set_adoption_phase(&service, Some(phase)),
     );
@@ -1211,12 +1210,18 @@ fn start_existing_again_blocking(app: &tauri::AppHandle) -> Result<(), adoption:
     let Some(plan) = adoption::interrupted_plan(&app_dir)? else { return Ok(()) };
     let resources = bundled_resource_dir(app).map_err(adoption::AdoptionError::reopen)?;
     let mut lifecycle = SourceLifecycle::new(plan.source.clone(), Bundled::in_resources(&resources));
+    service.adoption_cancel_requested.store(false, Ordering::Release);
     service.adoption_in_progress.store(true, Ordering::Release);
     let started = adoption::start_again(&plan, &mut lifecycle, &mut |phase| {
         set_adoption_phase(&service, Some(phase))
     });
     service.adoption_in_progress.store(false, Ordering::Release);
     set_adoption_phase(&service, None);
+    // A Quit asked for meanwhile only waited for the existing install to be running again.
+    let quit_asked = service.adoption_cancel_requested.load(Ordering::Acquire);
+    if quit_after_adoption(quit_asked, &started) {
+        lifecycle::request_quit(app);
+    }
     started
 }
 
@@ -2168,23 +2173,7 @@ mod tests {
     }
 
     #[test]
-    fn known_schema_version_matches_the_backend_schema_version() {
-        // Adoption refuses a database newer than the app knows; a stale copy
-        // would refuse good installs or admit ones the app cannot open.
-        let source = fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../backend/infra/schema.py"),
-        )
-        .expect("read backend/infra/schema.py");
-        let declared: u32 = source
-            .lines()
-            .find_map(|line| line.strip_prefix("SCHEMA_VERSION = "))
-            .and_then(|value| value.trim().parse().ok())
-            .expect("SCHEMA_VERSION in backend/infra/schema.py");
-        assert_eq!(KNOWN_SCHEMA_VERSION, declared);
-    }
-
-    #[test]
-    fn a_waiting_quit_is_reported_only_while_the_stop_or_the_backup_runs() {
+    fn a_waiting_quit_is_reported_only_while_the_stop_the_backup_or_the_restart_runs() {
         use adoption::Phase::*;
         for (phase, quit_asked, pending) in [
             (Waiting { running: Some(2) }, true, true),
@@ -2192,7 +2181,7 @@ mod tests {
             (BackingUp, true, true),
             (WaitingRestart, true, false),
             (Starting, true, false),
-            (StartingExisting, true, false),
+            (StartingExisting, true, true),
         ] {
             assert_eq!(AdoptionProgress::new(phase, quit_asked).quit_pending, pending, "{phase:?}");
         }
@@ -2242,11 +2231,6 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.outcome, adoption::Outcome::Unconfirmed);
         assert_eq!(error.recovery, Some(adoption::Recovery::Reopen));
-    }
-
-    #[test]
-    fn the_app_service_label_matches_its_plist() {
-        assert_eq!(format!("{APP_SERVICE_LABEL}.plist"), service_management::PLIST_NAME);
     }
 
     #[test]

@@ -223,6 +223,24 @@ def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, m
     assert snapshots.preflight_main([str(state), "OPENAI_API_KEY"]) == 0
 
 
+def test_adoption_preflight_refuses_data_from_a_newer_schema_than_the_backend_opens(tmp_path, monkeypatch, capsys):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    schema = importlib.import_module("infra.schema")
+    state = _adoptable_state(tmp_path, {})
+    monkeypatch.setattr(snapshots, "backup_room", lambda database: (0, 1 << 60))
+    database = state / "corsia.db"
+
+    for version, expected in ((schema.SCHEMA_VERSION, 0), (schema.SCHEMA_VERSION - 1, 0), (schema.SCHEMA_VERSION + 1, snapshots.DATA_NEWER)):
+        with sqlite3.connect(database) as connection:
+            connection.execute(f"PRAGMA user_version={version}")
+        assert snapshots.database_schema_version(database) == version
+        assert snapshots.preflight_main([str(state)]) == expected
+    assert snapshots.DATA_NEWER == 5
+    assert capsys.readouterr().err == ""  # nothing to forward: the app words this itself
+    # A file whose header cannot be read is not called newer.
+    assert snapshots.database_schema_version(state / "missing.db") is None
+
+
 def _restart_request(state: Path, status: str) -> None:
     with sqlite3.connect(state / "corsia.db") as connection:
         connection.execute(
