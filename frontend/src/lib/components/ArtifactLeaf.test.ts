@@ -58,9 +58,10 @@ vi.mock('$lib/stores/docCommentArrivals', () => ({
 	releaseCommentArrival: () => {},
 	releaseCommentArrivals: () => {},
 }));
-vi.mock('$lib/stores/docComments', () => ({
+vi.mock('$lib/stores/docComments', async () => ({
 	docComments: mocks.docComments,
 	commentLoads: { subscribe(run: (value: Record<string, unknown>) => void) { run({}); return () => {}; } },
+	hasNewReplies: (await import('$lib/stores/docCommentProjection')).hasNewReplies,
 	rangeFor: mocks.rangeFor,
 	remapComments: () => {},
 	loadComments: mocks.loadComments,

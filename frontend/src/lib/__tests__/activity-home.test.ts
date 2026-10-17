@@ -450,7 +450,7 @@ describe('buildActivityGroups sections', () => {
 		const result = sections([
 			labeled('paused-liveness', 'waiting', { liveness: 'paused' }),
 			labeled('paused-state', 'waiting', { planState: 'paused' }),
-			// A paused plan can still carry a needs-you label (pause contract rule 5).
+			// A stale response must not promote a paused row if it still carries an old needs-you label.
 			labeled('paused-needs-you', 'needs_you', { planState: 'paused' }),
 			labeled('paused-liveness-working', 'working', { liveness: 'paused' }),
 		]);
