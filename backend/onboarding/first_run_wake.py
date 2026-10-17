@@ -21,7 +21,7 @@ APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
 #: The whole set of fact reads shares this budget; the first model pick waits no longer.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
-    "first_run_path", "harness_ready", "sources_missing", "local_download",
+    "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
     "gmail_eligible", "web_search_ready", "github_ready", "own_omlx_source",
     "setup", "user_profile",
 })
@@ -34,6 +34,7 @@ UNAVAILABLE_READS = {
     "web_search_key": "one web_search call",
     "harness_ready": "tool model_sources, once, without recheck",
     "sources_missing": "tool model_sources, once, without recheck",
+    "agents_found": "none; leave OpenClaw and Hermes Agent out of step 4",
     "local_download": "corsia_api GET /api/providers/local/setup",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
@@ -108,6 +109,16 @@ def _app_sources_missing(snapshot: dict[str, Any]) -> dict[str, str]:
         name: state for name, source in (("claude_code", "claude-code"), ("codex", "codex"))
         if (state := states.get(source)) in {"not_installed", "needs_auth"}
     }
+
+
+def _app_agents_found() -> list[str]:
+    """Which of OpenClaw and Hermes Agent have a config here: a stat, never a read, since the person has not said yes."""
+    from pathlib import Path
+
+    from tools import mcp_import_agents
+
+    home = Path.home()
+    return [source for source in mcp_import_agents.SOURCES if mcp_import_agents.config_path(source, home).is_file()]
 
 
 def _app_local_download() -> dict[str, Any]:
@@ -206,6 +217,7 @@ async def _app_setup_facts() -> dict[str, Any]:
 
     reads = await _read_facts({
         "model_sources": lambda: run_in_db(_model_sources),
+        "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
         "web_search_ready": setup_decisions.web_search_works,
         "own_omlx_source": lambda: run_off_db(_own_omlx_source),
@@ -227,6 +239,7 @@ async def _app_setup_facts() -> dict[str, Any]:
         "first_run_path": "app",
         "harness_ready": harness_ready,
         "sources_missing": sources_missing,
+        "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
         # Every install is offered Google setup; the key stays for the first-run reference's gate.
         "gmail_eligible": True,

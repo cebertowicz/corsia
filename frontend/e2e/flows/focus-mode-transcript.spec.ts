@@ -4,6 +4,12 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { createSession, openAppByUrl, openSettings, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
+import { setFocusMode } from '../support/focusMode';
+
+// Specs here turn Focus off through Settings; Focus is a persisted server setting, so restore its default.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
 
 function seedTerminalTurns(
 	humanMessageId: string,
@@ -32,8 +38,9 @@ function seedTerminalTurns(
 }
 
 async function closeSettings(page: import('@playwright/test').Page) {
+	// Phone: the header's one back names the page it returns to ("Settings", SettingsView.svelte), not "Back".
 	const button = (page.viewportSize()?.width ?? 0) <= 768
-		? page.getByRole('button', { name: 'Back', exact: true })
+		? page.locator('.shell-header .h-back')
 		: page.getByRole('button', { name: 'Close settings' });
 	await button.click();
 }
@@ -122,8 +129,8 @@ test('@surface:focus-paging Focus pages history through the first visible entry'
 	await expect(page.getByText('Current visible reply.')).toBeVisible();
 	await saveFocusPagingProof(page, testInfo, 'focus-on-393x852');
 
-	const loadOlder = page.getByRole('button', { name: 'Load older messages' });
-	await loadOlder.click();
+	// MessageList.svelte pages older history on its own while the view cannot scroll (OlderHistoryRow.svelte keeps its
+	// button only for when it cannot), so the older visible replies arrive without a click.
 	await expect(page.getByText('Preload visible reply 2.')).toBeVisible();
 	await saveFocusPagingProof(page, testInfo, 'load-older-adds-visible-item');
 

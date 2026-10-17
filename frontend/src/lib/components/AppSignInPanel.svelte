@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import {
 		appSignInStatus, cancelAppSignIn, SignInStartError, signOutOfApp, startAppSignIn,
@@ -18,8 +18,11 @@
 		onChange: (patch: Partial<ConnectedApp>) => void;
 		onRefresh: () => void;
 		onSignedOut: () => void;
+		/** Set by the person's approve click when the approved app asks for a sign-in: start it once, as if Sign in were pressed. */
+		autoStart?: boolean;
+		onAutoStarted?: () => void;
 	}
-	let { app, signInHere, confirmOut, onConfirmOut, onChange, onRefresh, onSignedOut }: Props = $props();
+	let { app, signInHere, confirmOut, onConfirmOut, onChange, onRefresh, onSignedOut, autoStart = false, onAutoStarted }: Props = $props();
 
 	const view = $derived(app.sign_in);
 	const pending = $derived(view?.status === 'pending');
@@ -77,6 +80,13 @@
 		finally { busy = false; }
 	}
 
+	// Approving an app that needs a sign-in goes straight on to it; the blocked-page fallback covers a browser that refuses the tab.
+	$effect(() => {
+		if (!autoStart || app.state !== 'needs_sign_in' || !signInHere) return;
+		onAutoStarted?.();
+		untrack(() => void signIn());
+	});
+
 	// While a sign-in is pending the page asks the backend how it went; the row updates when the person finishes.
 	$effect(() => {
 		clearInterval(poll);
@@ -116,18 +126,18 @@
 		{/if}
 		<div class="actions">
 			{#if pending}
-				<Button loading={busy} onclick={signIn}>Open the page again</Button>
-				{#if blocked && link}<Button onclick={copyLink}>{copied ? 'Copied' : 'Copy sign-in link'}</Button>{/if}
-				<Button loading={busy} onclick={cancel}>Cancel</Button>
+				<Button variant="ghost" size="sm" loading={busy} onclick={signIn}>Open the page again</Button>
+				{#if blocked && link}<Button variant="ghost" size="sm" onclick={copyLink}>{copied ? 'Copied' : 'Copy sign-in link'}</Button>{/if}
+				<Button variant="ghost" size="sm" loading={busy} onclick={cancel}>Cancel</Button>
 			{:else if failed}
-				<Button loading={busy} onclick={signIn}>{NO_RETRY.has(view.failure_class ?? '') ? 'Sign in' : 'Try again'}</Button>
+				<Button variant="primary" size="sm" loading={busy} onclick={signIn}>{NO_RETRY.has(view.failure_class ?? '') ? 'Sign in' : 'Try again'}</Button>
 			{:else if view.signed_in}
 				{#if confirmOut}
-					<Button variant="danger" loading={busy} onclick={signOut}>Sign out</Button>
-					<Button onclick={() => onConfirmOut(false)}>Cancel</Button>
+					<span class="danger-text"><Button variant="ghost" size="sm" loading={busy} onclick={signOut}>Sign out</Button></span>
+					<Button variant="ghost" size="sm" onclick={() => onConfirmOut(false)}>Cancel</Button>
 				{/if}
 			{:else if app.state === 'needs_sign_in' && signInHere}
-				<Button loading={busy} onclick={signIn}>Sign in</Button>
+				<Button variant="primary" size="sm" loading={busy} onclick={signIn}>Sign in</Button>
 			{/if}
 		</div>
 	</div>
@@ -139,5 +149,9 @@
 	.label { color: var(--text-tertiary); }
 	.said span { color: var(--text-tertiary); }
 	.error { color: var(--red); }
-	.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+	.actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-left: calc(-1 * var(--button-pad-x-sm)); }
+	/* A filled step keeps its box, not its text, on the title edge. */
+	.actions:has(> :global(.btn.primary:first-child)) { margin-left: 0; }
+	/* Signing out is a text action in the danger tone. */
+	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 </style>

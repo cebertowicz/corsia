@@ -43,10 +43,14 @@ test.describe('@flow:nav-shell @surface:navigation v2 shell — project scope + 
 		await projRow.click();
 		await expect(page.locator('.palette')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Back to workspace' })).toBeVisible({ timeout: 10_000 });
-		await expect(page.locator('.pane-scope')).toContainText(projName);
+		// A project's Activity carries no right pane; the project's name shows in the main column beside the Activity heading.
+		await expect(page.getByRole('heading', { name: 'Activity', level: 1 })).toBeVisible();
+		await expect(page.locator('main').first()).toContainText(projName);
 
 		// Session creation is Send/Queue-only (#611/#612 removed create-on-keystroke);
 		// actually send so a scoped session is created (a bare fill no longer does).
+		// A project opens on its Activity, so start the chat from New chat.
+		await page.getByRole('button', { name: 'New chat' }).first().click();
 		await sendChatMessage(page, `scoped hello ${stamp}`);
 		await expect.poll(async () => {
 			const s = await (await request.get(`/api/threads?token=${tok}`)).json();
@@ -98,6 +102,8 @@ test.describe('@flow:nav-shell @surface:navigation v2 shell — project scope + 
 		await page.keyboard.press('Enter');
 		await expect(page.locator('.palette')).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Back to workspace' })).toBeVisible({ timeout: 10_000 });
-		await expect(page.locator('.pane-scope')).toContainText(projName);
+		// A project's Activity carries no right pane; the project's name shows in the main column beside the Activity heading.
+		await expect(page.getByRole('heading', { name: 'Activity', level: 1 })).toBeVisible();
+		await expect(page.locator('main').first()).toContainText(projName);
 	});
 });

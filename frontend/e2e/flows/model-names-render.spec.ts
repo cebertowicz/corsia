@@ -41,6 +41,8 @@ test('model names render from the catalog projection', async ({ page }) => {
 	await expect(page.locator('.model-sheet')).toContainText('Opus 5.5');
 	await expect(page.locator('.model-sheet')).toContainText('Haiku 4.5');
 	await expect(page.locator('.model-sheet')).not.toContainText('not returned');
+	// InputBarModelSheet.svelte: the header names the bound account; the account list opens on demand.
+	await page.locator('.model-sheet button.picker-account-title').click();
 	for (const account of claudeAccounts) await expect(page.locator('.model-sheet')).toContainText(account.label.name);
 	for (const segment of ['5h 38% left', 'wk 59% left', '5h 58% left', 'wk 22% left', '5h 85% left', 'wk 75% left']) {
 		await expect(page.locator('.model-sheet')).toContainText(segment);

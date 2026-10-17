@@ -94,7 +94,9 @@ def reconnect_mcp_server(args: argparse.Namespace) -> int:
 
 
 def approve_mcp_server(args: argparse.Namespace) -> int:
-    return _call_server_api("POST", _server_path(args.server_id, "/approve"))
+    return _call_server_api(
+        "POST", _server_path(args.server_id, "/approve"), body={"expected_revision": args.expected_revision},
+    )
 
 
 def configure_mcp(_args) -> int:
@@ -142,6 +144,7 @@ def build_parser(subparsers) -> None:
 
     approve = commands.add_parser("approve", help="Approve a pending MCP server change")
     approve.add_argument("server_id")
+    approve.add_argument("--expected-revision", type=int, required=True)
     approve.set_defaults(func=approve_mcp_server)
 
     configure = commands.add_parser("configure", help="Retired; add apps through Connected apps")

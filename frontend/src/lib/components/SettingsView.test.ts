@@ -42,6 +42,16 @@ describe('SettingsView navigation', () => {
 		}
 	});
 
+	it('draws the Connected apps title as the page title, as Skills does', () => {
+		selectSettingsSection('connected-apps');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		const titles = [...host.querySelectorAll('.section-host > h2.page-title')].map((el) => el.textContent);
+		expect(titles).toEqual(['Connected apps']);
+		expect(host.querySelectorAll('.section-host h2')).toHaveLength(1);
+	});
+
 	it('keeps Settings navigation limited to live product surfaces', async () => {
 		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
 		flushSync();

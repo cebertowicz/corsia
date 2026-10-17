@@ -17,6 +17,10 @@ export function unplaced(comment: DocComment): boolean {
 	return (comment.placement === 'placing' || comment.placement === 'not_placed') && !comment.drawn;
 }
 
+/** Whether a just-posted comment may still get its first drawn mark: it exists, is not orphaned or refused placement, and is not drawn yet. */
+export const awaitsFirstMark = (comment: DocComment | undefined, drawn: boolean) =>
+	!!comment && !comment.orphaned && comment.placement !== 'not_placed' && !drawn;
+
 /** Build the editor's immutable target from the canonical comment range. */
 export function canvasCommentScrollTarget(comments: DocComment[], text: string, id: string, focus: boolean, origin: ScrollOrigin): CanvasScrollTarget | null {
 	const comment = comments.find((item) => item.id === id);

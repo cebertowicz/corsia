@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canvasCommentHighlights, canvasCommentRange, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from './docCanvasComments';
+import { awaitsFirstMark, canvasCommentHighlights, canvasCommentRange, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from './docCanvasComments';
 import { agentColor } from './docPresence';
 import type { DocComment } from './stores/docComments';
 
@@ -165,5 +165,15 @@ describe('comment surface status', () => {
 
 	it('counts only open threads for the header pill', () => {
 		expect(commentSurfaceStatus([comment('a', 0, 'x'), comment('b', 0, 'x', { resolved: true }), comment('c', 0, 'x', { resolved: true, orphaned: true })]).commentCount).toBe(1);
+	});
+});
+
+describe('awaitsFirstMark', () => {
+	it('holds a pending mark only for a comment that can still be drawn', () => {
+		expect(awaitsFirstMark(comment('a', 0, 'x', { placement: 'placing' }), false)).toBe(true);
+		expect(awaitsFirstMark(comment('a', 0, 'x', { placement: 'placed' }), true)).toBe(false);
+		expect(awaitsFirstMark(comment('a', 0, 'x', { placement: 'not_placed' }), false)).toBe(false);
+		expect(awaitsFirstMark(comment('a', 0, 'x', { orphaned: true }), false)).toBe(false);
+		expect(awaitsFirstMark(undefined, false)).toBe(false);
 	});
 });

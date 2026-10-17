@@ -37,6 +37,7 @@ describe('settleHeight', () => {
 		expect(animate).toHaveBeenCalledTimes(1);
 		const frames = animate.mock.calls[0][0] as Array<{ height: string }>;
 		expect(frames.map((frame) => frame.height)).toEqual(['300px', '200px']);
+		expect(animate.mock.calls[0][1]).toMatchObject({ fill: 'backwards' });
 	});
 
 	it('cuts when disabled, as under reduced motion or a drag', () => {
@@ -55,6 +56,18 @@ describe('settleHeight', () => {
 		height = 150;
 		notify();
 		expect(animate).not.toHaveBeenCalled();
+	});
+
+	it('eases a later size change after the first animation finishes', () => {
+		const node = panel();
+		settleHeight(node, { enabled: true });
+		height = 200;
+		notify();
+		finish();
+		height = 120;
+		notify();
+		expect(animate).toHaveBeenCalledTimes(2);
+		expect((animate.mock.calls[1][0] as Array<{ height: string }>).map((frame) => frame.height)).toEqual(['200px', '120px']);
 	});
 
 	it('eases on from where it stopped when the content changed again mid-way', () => {
