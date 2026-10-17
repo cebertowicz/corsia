@@ -149,7 +149,8 @@ def test_the_note_text_quotes_the_person_and_names_when_they_sent_it(monkeypatch
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
         "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
-        "The triage is working state, not part of your reply."
+        "The triage is working state, not part of your reply. "
+        "If you already fixed and triaged it when the message arrived, do nothing more."
     )
 
 
