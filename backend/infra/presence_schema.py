@@ -59,4 +59,24 @@ PRESENCE_SCHEMA_SQL = """
         ON presence_visits(user_id, entered_at);
     CREATE INDEX IF NOT EXISTS idx_presence_visits_thread
         ON presence_visits(thread_id, entered_at);
+    -- Focus intervals are Measurement-only. They deliberately do not alter the
+    -- shared presence record used by agents, checkpoints, or Plans.
+    CREATE TABLE IF NOT EXISTS measurement_focus_users (
+        user_id TEXT PRIMARY KEY,
+        focused_since TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS measurement_focus_intervals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        surface TEXT NOT NULL CHECK (length(trim(surface)) > 0),
+        thread_id TEXT NOT NULL REFERENCES threads(id),
+        session_id TEXT NOT NULL,
+        focused_at TEXT NOT NULL,
+        blurred_at TEXT,
+        CHECK (blurred_at IS NULL OR blurred_at >= focused_at)
+    );
+    CREATE INDEX IF NOT EXISTS idx_focus_intervals_thread_time
+        ON measurement_focus_intervals(thread_id, focused_at);
+    CREATE INDEX IF NOT EXISTS idx_focus_intervals_user_time
+        ON measurement_focus_intervals(user_id, focused_at);
 """
