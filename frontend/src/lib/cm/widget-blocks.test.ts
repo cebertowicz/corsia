@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
@@ -29,7 +29,7 @@ function drawnTable(view: EditorView) {
 
 let view: EditorView;
 const open = () => view = new EditorView({ state: EditorState.create({ doc: DOC, extensions }), parent: document.body });
-afterEach(() => { view?.destroy(); document.body.replaceChildren(); });
+afterEach(() => { view?.destroy(); document.body.replaceChildren(); vi.restoreAllMocks(); });
 
 describe('tableRowAt', () => {
 	const at = (needle: string) => DOC.indexOf(needle, TABLE_FROM);
@@ -76,10 +76,12 @@ describe('tableAt', () => {
 		expect(tableAt(state, prose, prose + 5)).toBeNull();
 	});
 
-	it('reads a table that follows a long unparsed document', () => {
+	it('reads a table that follows a long unparsed document, however slow the machine', () => {
 		const long = `${'paragraph\n\n'.repeat(5000)}${TABLE}\n\n${'tail\n\n'.repeat(5000)}`;
 		const state = EditorState.create({ doc: long, extensions });
 		const from = long.indexOf('Dana');
+		let now = 0;
+		vi.spyOn(Date, 'now').mockImplementation(() => now += 1000);
 		expect(tableAt(state, from, from + 4)?.from).toBe(long.indexOf('| Item'));
 	});
 });
