@@ -26,8 +26,14 @@ from tools.registry import ToolRegistry, _is_reserved_execution_param
 class _StoredHeadersAuth(httpx.Auth):
     """Send managed header keys while keeping their values out of transport logs."""
 
-    def __init__(self, headers: dict[str, str], origin: str | None = None) -> None:
-        self._headers = headers
+    def __init__(
+        self, headers: dict[str, str], origin: str | None = None, schemes: dict[str, str] | None = None,
+    ) -> None:
+        schemes = schemes or {}
+        # Each stored value is the token alone; its scheme goes back in front when sent.
+        self._headers = {name: f"{schemes[name]} {value}" if name in schemes else value for name, value in headers.items()}
+        # The sent value and the bare token are both secret; the longer one is replaced first.
+        self._secrets = sorted({*self._headers.values(), *headers.values()}, key=len, reverse=True)
         self._origin = url_origin(origin) if origin is not None else None
 
     def auth_flow(self, request):
@@ -41,9 +47,9 @@ class _StoredHeadersAuth(httpx.Auth):
 
     def redact(self, value):
         if isinstance(value, str):
-            for header_value in self._headers.values():
-                if header_value:
-                    value = value.replace(header_value, "[REDACTED]")
+            for secret in self._secrets:
+                if secret:
+                    value = value.replace(secret, "[REDACTED]")
             return value
         if isinstance(value, dict):
             return {self.redact(key): self.redact(item) for key, item in value.items()}
@@ -201,7 +207,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
     from tools.mcp_oauth_auth import OAuthGrantAuth
-    from tools.mcp_secrets import resolve
+    from tools.mcp_secrets import header_schemes, resolve
 
     auth = None
     transport_task: asyncio.Task | None = None
@@ -228,7 +234,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         if secret_headers:
             if auth is not None:
                 raise MCPConfigError("stored header keys cannot be combined with bearer_file")
-            auth = _StoredHeadersAuth(secret_headers, config["url"])
+            auth = _StoredHeadersAuth(secret_headers, config["url"], header_schemes(config))
             options["auth"] = auth
         elif auth is None:
             auth = options["auth"] = OAuthGrantAuth(config.get("connected_app_id", name), config["url"])
