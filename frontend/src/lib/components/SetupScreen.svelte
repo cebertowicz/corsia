@@ -25,7 +25,7 @@
 	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
 	const classifier = createSetupClassifier();
-	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: () => refreshSources() });
+	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: (strict) => refreshSources(strict) });
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
 	const localPick = createSetupLocalPick();
@@ -134,7 +134,7 @@
 
 	async function beginSetup() {
 		void classifier.start();
-		if (status.existing_omlx) {
+		if (status.existing_omlx && localPick.wanted) {
 			existingOmlxConsent = true;
 			page = 'models';
 			return;
@@ -159,12 +159,7 @@
 
 	async function decideExistingOmlx(useIt: boolean) {
 		void recordSetupProgress({ local_ai: useIt }, get(token));
-		if (!useIt) {
-			existingOmlxConsent = false;
-			localPick.wanted = false;
-			page = 'account';
-			return;
-		}
+		if (!useIt) { existingOmlxConsent = false; localPick.wanted = false; page = 'account'; return; }
 		localSetupBusy = true;
 		localStartError = '';
 		let returnToModels = false;
@@ -177,13 +172,8 @@
 			const started = typeof start === 'string' ? start === 'started' : start.ok;
 			if (started) localDownloadPending = true;
 			else localStartError = 'The local model couldn’t start.';
-		} catch {
-			localStartError = 'The local model couldn’t start.';
-		} finally {
-			localSetupBusy = false;
-			existingOmlxConsent = false;
-			page = returnToModels ? 'models' : 'account';
-		}
+		} catch { localStartError = 'The local model couldn’t start.'; }
+		finally { localSetupBusy = false; existingOmlxConsent = false; page = returnToModels ? 'models' : 'account'; }
 	}
 
 	async function applyFolderBeforeAccount() {
@@ -227,6 +217,7 @@
 			// A session opened here has no socket until something connects it; the app shell only connects on mount.
 			connect();
 			await Promise.all([refreshSources(), classifier.read()]);
+			await loadCloudProviders();
 			password = ''; confirmation = '';
 			if (status.ready_ai && canFinish) return finishSetupWithBestEffortSelection(get(token), sources, finishSetup);
 			page = 'models';
@@ -234,11 +225,18 @@
 		finally { accountBusy = false; }
 	}
 
-	async function refreshSources() {
+	/** The API-key form needs the provider list; if it cannot be read, say so instead of showing an empty choice. */
+	async function loadCloudProviders() {
+		await loadProviders();
+		if (!get(providers).some((provider) => provider.type === 'cloud')) sourceError = 'CORSIA couldn’t load the list of providers. Try again.';
+	}
+
+	/** A strict refresh answers a check the person asked for, so a failed recheck is shown, never replaced by the stored rows. */
+	async function refreshSources(strict = false) {
 		const current = get(token);
 		if (!current) return;
 		try {
-			sources = await recheckSources(current).catch(() => fetchSources(current));
+			sources = await (strict ? recheckSources(current) : recheckSources(current).catch(() => fetchSources(current)));
 			localDownloadPending = false;
 			sourceError = '';
 		} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
@@ -286,36 +284,23 @@
 		try {
 			await cancelLocalDownload(current);
 			await refreshSources();
-		} catch {
-			sourceError = 'CORSIA couldn’t cancel the local model download. Try again.';
-		} finally {
-			localSetupBusy = false;
-		}
+		} catch { sourceError = 'CORSIA couldn’t cancel the local model download. Try again.'; }
+		finally { localSetupBusy = false; }
 	}
 
 	async function retryLocalDownload() {
 		const current = get(token);
 		if (!current || localSetupBusy || localDownloading) return;
-		if (status.existing_omlx) {
-			existingOmlxConsent = true;
-			return;
-		}
+		if (status.existing_omlx) { existingOmlxConsent = true; return; }
 		localSetupBusy = true;
 		sourceError = '';
 		localStartError = '';
 		try {
 			const result = await setupLocalSource(current);
-			if (result.code === 'consent_required') {
-				existingOmlxConsent = true;
-				return;
-			}
+			if (result.code === 'consent_required') { existingOmlxConsent = true; return; }
 			if (!result.ok) sourceError = 'The local model couldn’t start. Try again, or choose another source.';
-		} catch {
-			sourceError = 'The local model couldn’t start. Try again, or choose another source.';
-		} finally {
-			await refreshSources();
-			localSetupBusy = false;
-		}
+		} catch { sourceError = 'The local model couldn’t start. Try again, or choose another source.'; }
+		finally { await refreshSources(); localSetupBusy = false; }
 	}
 
 	async function saveApiKey() {
@@ -340,7 +325,8 @@
 		if (status.classifier) classifier.accept(status.classifier);
 		localPick.wanted = progress.local_ai ?? status.local_eligible !== false;
 		existingOmlxConsent = progress.step === 'local-consent'; page = 'models';
-		await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
+		await Promise.all([refreshSources(), classifier.read()]);
+		await loadCloudProviders();
 	}
 
 	$effect(() => {
@@ -384,7 +370,7 @@
 				<Field variant="chip" layout="stacked" label="API key">
 					<select aria-label="Provider" bind:value={providerName}>{#each $providers.filter((provider) => provider.type === 'cloud') as provider}<option value={provider.name}>{provider.label}</option>{/each}</select>
 					<input type="password" aria-label="API key" placeholder="Paste your key" bind:value={apiKey} />
-					<Button variant="chip" size="sm" onclick={saveApiKey} disabled={!apiKey.trim() || savingKey}>{savingKey ? 'Saving…' : 'Save'}</Button>
+					<Button variant="chip" size="sm" onclick={saveApiKey} disabled={!apiKey.trim() || savingKey || !$providers.some((provider) => provider.name === providerName)}>{savingKey ? 'Saving…' : 'Save'}</Button>
 				</Field>
 			{:else}<div class="api-key-action"><Button variant="chip" size="sm" onclick={() => keyOpen = true}>Use an API key instead</Button></div>{/if}
 			{#if sourceError}<Message variant="err">{sourceError}</Message>{/if}

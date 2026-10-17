@@ -16,7 +16,7 @@ export type RowView = {
 export interface ConnectDeps {
 	token: () => string | null;
 	sources: () => ModelSource[];
-	refreshSources: () => Promise<void>;
+	refreshSources: (strict?: boolean) => Promise<void>;
 }
 
 export const VENDOR_COPY: Record<string, { cli: string; uses: string; maker: string; origin: string; account: string; page: string }> = {
@@ -130,11 +130,11 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'confirm') {
 			return {
 				meta: lines(`CORSIA installs ${copy.cli} for you.`),
-				detail: `${entry.operation === 'update' ? 'Update' : 'Set up'} ${copy.cli}? This runs ${copy.maker}’s official installer, downloaded from ${copy.origin}, and then you sign in to your ${copy.account} account.`,
-				confirm: [{ label: entry.operation === 'update' ? 'Update' : 'Set up', run: () => void startInstall(source, entry.operation) }, { label: 'Cancel', run: () => setConnect(source.source, undefined) }],
+				detail: `${entry.operation === 'update' ? 'Reinstall' : 'Set up'} ${copy.cli}? This runs ${copy.maker}’s official installer, downloaded from ${copy.origin}, and then you sign in to your ${copy.account} account.`,
+				confirm: [{ label: entry.operation === 'update' ? 'Reinstall' : 'Set up', run: () => void startInstall(source, entry.operation) }, { label: 'Cancel', run: () => setConnect(source.source, undefined) }],
 			};
 		}
-		if (entry?.phase === 'installing') return { meta: `${entry.operation === 'update' ? 'Updating' : 'Installing'} with ${copy.maker}’s official installer. This can take up to 3 minutes.`, busy: true };
+		if (entry?.phase === 'installing') return { meta: `${entry.operation === 'update' ? 'Reinstalling' : 'Installing'} with ${copy.maker}’s official installer. This can take up to 3 minutes.`, busy: true };
 		if (entry?.phase === 'signing-in') {
 			return {
 				meta: `${entry.installed ? 'Installed. ' : ''}Finish signing in to your ${copy.account} account in the browser window that just opened.`,
@@ -148,7 +148,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			const why = entry.reason ? `: ${entry.reason}` : '';
 			const next = entry.reason?.includes('internet') ? 'Check your connection, then choose Try again.' : 'Choose Try again.';
 			return {
-				meta: lines(''), error: true, detail: `Couldn’t ${entry.operation === 'update' ? 'update' : 'install'} ${copy.cli}${why}. ${next}`,
+				meta: lines(''), error: true, detail: `Couldn’t ${entry.operation === 'update' ? 'reinstall' : 'install'} ${copy.cli}${why}. ${next}`,
 				action: { label: 'Try again', run: () => void startInstall(source) },
 				more: copy.page ? [{ label: 'Open the install page', run: () => void openExternalUrl(copy.page) }] : undefined,
 			};
@@ -157,12 +157,22 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.limited) return { meta: lines('It has reached its usage limit for now.') };
 		if (source.state === 'unverified' && source.cli_package_manager) {
 			const command = source.cli_package_manager === 'homebrew'
-				? `brew upgrade ${source.source === 'claude-code' ? 'claude-code' : 'codex'}`
-				: `npm update -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;
+				? `brew reinstall ${source.source === 'claude-code' ? 'claude-code' : 'codex'}`
+				: `npm install -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;
 			const manager = source.cli_package_manager === 'homebrew' ? 'Homebrew' : 'npm';
-			return { meta: lines(`CORSIA can’t use this copy of ${copy.cli}, which ${manager} installed.`), detail: `Update it in Terminal with ${command}. CORSIA notices when you come back to this window.`, error: true };
+			return {
+				meta: lines(`CORSIA can’t use this copy of ${copy.cli}, which ${manager} installed.`), error: true,
+				detail: `${source.reason ? `${source.reason}. ` : ''}Reinstall it in Terminal with ${command}. CORSIA notices when you come back to this window.`,
+				action: { label: 'Check again', run: () => void deps.refreshSources(true) },
+			};
 		}
-		if (source.state === 'unverified') return { meta: lines(`CORSIA can’t use this version of ${copy.cli}. Update installs the current one with ${copy.maker}’s official installer.`), action: { label: 'Update', run: () => setConnect(source.source, { phase: 'confirm', operation: 'update' }) } };
+		if (source.state === 'unverified') {
+			return {
+				meta: lines(`CORSIA couldn’t check ${copy.cli}’s sign-in.`), error: true, detail: source.reason ?? undefined,
+				action: { label: 'Reinstall', run: () => setConnect(source.source, { phase: 'confirm', operation: 'update' }) },
+				more: [{ label: 'Check again', run: () => void deps.refreshSources(true) }, { label: 'Sign in', run: () => void beginSignIn(source) }],
+			};
+		}
 		return { meta: lines(`${copy.cli} is installed. Sign in to use it.`), action: { label: 'Sign in', run: () => void beginSignIn(source) } };
 	}
 
