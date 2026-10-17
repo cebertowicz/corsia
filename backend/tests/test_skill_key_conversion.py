@@ -27,7 +27,8 @@ LEGACY = (
     + BODY
 )
 BOTH = "---\nname: both\ndescription: Both keys\nmaestro:\n  handler: {kind: cli}\ncorsia:\n  handler: {kind: instruction}\n---\n# Both\n"
-MISFILED = "maestro.handler is CORSIA metadata, which is read only under corsia; move the block there"
+MISFILED = "maestro.handler is CORSIA metadata, which no reader reads under maestro; move it to corsia.yaml beside SKILL.md"
+RETIRED = "the top-level corsia block is retired for handler and workflow data"
 
 
 def _db() -> sqlite3.Connection:
@@ -70,7 +71,7 @@ def test_rewrites_only_the_frontmatter_key_and_keeps_the_body_byte_identical(tmp
     assert converted == LEGACY.replace("maestro:  # kept comment", "corsia:  # kept comment", 1)
     assert converted.endswith(BODY) and converted.count("\nmaestro:\n") == 1
     before, after = validate_skill_text(LEGACY), validate_skill_text(converted)
-    assert after.ok and after.body == before.body
+    assert after.body == before.body
     assert after.metadata["corsia"] == before.metadata["maestro"]
     assert "maestro" not in after.metadata
 
@@ -84,20 +85,18 @@ def test_a_converted_file_no_longer_matches_the_rewrite():
     assert rewrite_skill_key(converted) == (converted, None)
 
 
-def test_the_reader_sees_the_retired_block_only_after_it_is_converted(tmp_path, monkeypatch):
+def test_the_reader_sees_the_renamed_block_only_after_it_is_converted(tmp_path, monkeypatch):
     from core.skill_key_conversion import convert_legacy_skill_keys
 
     workspace, _project, db = _workspace(tmp_path, monkeypatch)
-    broken = LEGACY.replace("kind: instruction", "kind: not-a-kind", 1)
-    skill = _write(workspace / "skills" / "sample" / "SKILL.md", broken)
-    kind_error = "corsia.handler.kind must be one of connection_action, cli, instruction, native_tool, script"
+    skill = _write(workspace / "skills" / "sample" / "SKILL.md", LEGACY)
 
-    before = validate_skill_text(broken)
+    before = validate_skill_text(LEGACY)
     convert_legacy_skill_keys(workspace, db=db)
     after = validate_skill_text(skill.read_text(encoding="utf-8"))
 
-    assert MISFILED in before.errors and kind_error not in before.errors
-    assert after.errors == [kind_error]
+    assert MISFILED in before.errors and not any(RETIRED in error for error in before.errors)
+    assert [error for error in after.errors if RETIRED in error] and MISFILED not in after.errors
 
 
 def test_the_pass_runs_once_per_install_and_later_files_fail_validation(tmp_path, monkeypatch):
@@ -181,7 +180,7 @@ def test_a_file_with_both_keys_is_refused_logged_and_left_unchanged(tmp_path, mo
     assert result is not None and result.converted == 0 and result.refused == 1
     assert skill.read_text(encoding="utf-8") == BOTH
     assert any(line.startswith("WARNING|") and str(skill) in line and "both" in line for line in lines), lines
-    assert validate_skill_text(BOTH).errors == [MISFILED]
+    assert MISFILED in validate_skill_text(BOTH).errors
 
 
 def test_every_registry_root_converts_and_the_system_projection_does_not(tmp_path, monkeypatch):

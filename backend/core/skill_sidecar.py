@@ -21,7 +21,7 @@ POINTER_KEY = "corsia-data"
 FORMAT_KEY = "corsia-format"
 # Lessons and captures keep the top-level frontmatter block until they get their own
 # context type; a sidecar never carries them.
-_BLOCK_ONLY_KEYS = ("lesson", "capture")
+BLOCK_ONLY_KEYS = ("lesson", "capture")
 
 
 def pointer_errors(metadata_field: Any) -> tuple[bool, list[str]]:
@@ -53,7 +53,7 @@ def parse_sidecar(text: str) -> tuple[dict[str, Any] | None, list[str]]:
         return None, [f"{SIDECAR_FILE} must be a mapping"]
     errors = [
         f"{key} is not allowed in {SIDECAR_FILE}; it stays in the SKILL.md corsia block"
-        for key in _BLOCK_ONLY_KEYS
+        for key in BLOCK_ONLY_KEYS
         if key in data
     ]
     return (None if errors else data), errors

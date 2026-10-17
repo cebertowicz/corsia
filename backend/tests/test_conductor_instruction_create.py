@@ -22,9 +22,6 @@ from tools.conductor_instruction_create import ConductorInstructionFileCreateToo
 SKILL = """---
 name: agent-check
 description: Use when checking the installed agent.
-corsia:
-  handler:
-    kind: instruction
 ---
 Read scripts/check.py for the deterministic check.
 """
