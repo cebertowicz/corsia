@@ -475,6 +475,37 @@ def test_devices_status_omits_dns_sd_failure_cause(monkeypatch, failure):
     assert str(dns_sd._KDNS_SERVICE_ERR_SERVICE_NOT_RUNNING) not in response.text
 
 
+def test_devices_status_when_the_registration_callback_never_arrives(monkeypatch):
+    """A Mac whose network never lets mDNSResponder confirm the name: no hang, no error, a state to act on."""
+    import core.devices_runtime as devices_runtime
+
+    library = _DNSLibrary(register_results=[dns_sd._KDNS_SERVICE_ERR_NO_ERROR])
+    with pytest.MonkeyPatch.context() as dns_seams:
+        _install_dns_seams(dns_seams, library)
+        announcement = dns_sd.DNSServiceAnnouncement(47901)
+        assert announcement.start() is True
+    assert announcement.announced_name is None and announcement.error is None
+    listener = DevicesListener(app, port=47901, announcement=announcement)
+    runtime.pairing.disable()
+    runtime.pairing.enable()
+    monkeypatch.setattr(runtime, "listener", listener)
+    monkeypatch.setattr(devices_runtime, "lan_addresses", lambda *, include_link_local: ["192.168.1.20"])
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        devices_api.require_human_user,
+        lambda: {"id": "person", "token_kind": "session"},
+    )
+
+    response = TestClient(app, client=("127.0.0.1", 1234)).get("/api/devices")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["listening"] == {"port": 47901}
+    assert body["announced_name"] is None
+    assert body["lan_addresses"] == ["192.168.1.20"]
+    assert body["local_hostname"]
+
+
 def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
     async def human_session(_scope):
         return True
