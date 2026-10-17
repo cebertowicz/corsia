@@ -1,6 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import type { EditorState, Text } from '@codemirror/state';
-import type { SyntaxNodeRef } from '@lezer/common';
+import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { CellSpan } from './widget-cells';
 
@@ -60,6 +60,19 @@ export function diagramAt(state: EditorState, from: number, to: number): { from:
 	} });
 	const block = found as { from: number; to: number } | null;
 	return block && from === block.from && to === block.to ? block : null;
+}
+
+/** Whether the range lies inside the text of one code span or block, which is drawn as written: it has no inline marks to drop. */
+export function codeTextAt(state: EditorState, from: number, to: number): boolean {
+	const tree = ensureSyntaxTree(state, Math.min(to, state.doc.length), 100) ?? syntaxTree(state);
+	for (let node: SyntaxNode | null = tree.resolveInner(from, 1); node; node = node.parent) {
+		if (node.name === 'CodeText') return from >= node.from && to <= node.to;
+		if (node.name === 'InlineCode') {
+			const marks = node.getChildren('CodeMark');
+			return marks.length === 2 && from >= marks[0].to && to <= marks[1].from;
+		}
+	}
+	return false;
 }
 
 /** A block widget's source range: a table's own length, a fenced block's whole fence. */

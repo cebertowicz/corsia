@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
-import { snappedTableRows, tableCellLabel, tableCells, widgetCommentLabel } from './widget-cells';
+import { cardQuoteLabel, snappedTableRows, tableCellLabel, tableCells, widgetCommentLabel } from './widget-cells';
 import { touchMovedBeyond } from './widget-comments';
 
 const TABLE = `| Name | Status | Note |
@@ -78,6 +78,27 @@ describe('widgetCommentLabel names a whole diagram', () => {
 		const code = '```js\nlet a = 1;\n```';
 		expect(label(code, 0, code.length, code)).toBeNull();
 		expect(label(text, 0, to + 5, text.slice(0, to + 5))).toBeNull();
+	});
+});
+
+describe('cardQuoteLabel', () => {
+	const card = (text: string, part: string) => cardQuoteLabel(documentState(text), ...at(text, part), part);
+
+	it('quotes text inside a code span or block as written', () => {
+		expect(card('Try `2*3*4` here', '2*3*4')).toBe('“2*3*4”');
+		expect(card('```py\nx = a*b*c  # \\.\n```', 'a*b*c  # \\.')).toBe('“a*b*c  # \\.”');
+		expect(card('Intro\n\n    snake_case_name * 2 *\n', 'snake_case_name * 2 *')).toBe('“snake_case_name * 2 *”');
+	});
+
+	it('keeps the plain quote for prose, a whole code span and a range that runs out of the code', () => {
+		expect(card('Some **bold** prose', '**bold**')).toBeNull();
+		expect(card('Try `2*3*4` here', '`2*3*4`')).toBeNull();
+		expect(card('Try `2*3*4` here', '2*3*4` here')).toBeNull();
+	});
+
+	it('gives a table or diagram comment its widget label', () => {
+		const document = `before\n\n${TABLE}\n\nafter`;
+		expect(card(document, 'Yes')).toBe('“Yes” · Delta, Status');
 	});
 });
 

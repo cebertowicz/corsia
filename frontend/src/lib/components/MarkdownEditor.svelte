@@ -20,7 +20,7 @@
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
 	import { widgetComments } from '$lib/cm/widget-comments';
-	import { widgetCommentLabel } from '$lib/cm/widget-cells';
+	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
@@ -165,9 +165,9 @@
 		return new DOMRect(content.left, top, Math.max(0, right - content.left), Math.max(start.bottom, end.bottom, insert?.bottom ?? -Infinity) - top);
 	}
 
-	/** The label a comment on a table's text gets, read from this editor's own syntax tree; undefined while the editor is not up. */
+	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
-		return view ? widgetCommentLabel(view.state, from, to, quote) : undefined;
+		return view ? cardQuoteLabel(view.state, from, to, quote) : undefined;
 	}
 
 	/**

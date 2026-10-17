@@ -1,6 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import { plainQuote } from '$lib/plainQuote';
-import { diagramAt, tableAt } from './widget-blocks';
+import { codeTextAt, diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
@@ -73,6 +73,16 @@ export function widgetCommentLabel(state: EditorState, from: number | undefined,
 	if (rows > 1) return `${rows} rows, from “${named(cells.find((span) => span.row === hit[0].row && span.col === 0) ?? hit[0])}”`;
 	if (hit.length > 1) return `${hit.length} cells, from “${named(hit[0])}”`;
 	return tableCellLabel(src, hit[0], quote);
+}
+
+/**
+ * What a comment's card shows in place of its plain quote: the widget label, or for a range inside a code span's or block's text the
+ * quote as written, since code has no inline marks to drop. Null keeps the plain quote.
+ */
+export function cardQuoteLabel(state: EditorState, from: number | undefined, to: number | undefined, quote: string): string | null {
+	const label = widgetCommentLabel(state, from, to, quote);
+	if (label !== null || from === undefined || to === undefined || from < 0 || to < from || to > state.doc.length) return label;
+	return codeTextAt(state, from, to) ? `“${quote.trim()}”` : null;
 }
 
 /** The full contiguous source range and cells for a selection crossing one or more table rows. */
