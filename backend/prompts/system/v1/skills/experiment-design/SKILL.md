@@ -1,9 +1,6 @@
 ---
 name: experiment-design
 description: Use before designing, running, extending or reading out any experiment, benchmark, A/B or comparative evaluation (model, prompt, wording, tool, workflow, cost, performance), and when defining or interpreting a KPI to decide whether a change worked. Run it in stages that each must earn the next, with a confirmation bar matched to consequence. Not for regression tests, passive monitoring or source inspection.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Experiment design

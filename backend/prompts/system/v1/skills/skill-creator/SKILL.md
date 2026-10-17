@@ -1,9 +1,6 @@
 ---
 name: skill-creator
 description: Use when creating, relocating, or updating a CORSIA skill—choose the location, keep the trigger discoverable and instructions concise, avoid shadowed or unreadable sources, and verify the skill agents will actually receive.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Skill creator
@@ -36,11 +33,10 @@ The body is imperative and holds only non-obvious procedure, decision rules, req
 ---
 name: example-skill
 description: What it does and when it must be used.
-corsia:
-  handler:
-    kind: instruction
 ---
 ```
+
+Frontmatter is block style and holds spec fields only. CORSIA data (a non-default handler or a workflow) goes in `corsia.yaml` beside SKILL.md, named by the `metadata` key `corsia-data` (see skill `decision-brief`).
 
 No README, changelog, or other process files.
 

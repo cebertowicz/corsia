@@ -1,9 +1,6 @@
 ---
 name: backlog-intake
 description: Use when filing, triaging, labeling, or deduplicating issues or backlog items in the project's tracker, or when a report should become one — classify the type, follow the tracker's templates with reproduction or journey evidence, check duplicates and documented intent, route to the owning label, state severity and success signal. Not for ranking items or fixing them.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Backlog intake
