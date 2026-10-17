@@ -42,8 +42,10 @@ def view(*, db: sqlite3.Connection | None = None) -> dict:
     }
 
 
-def start_after_account(*, db: sqlite3.Connection) -> None:
+def start_after_account(first_run_path: str | None, *, db: sqlite3.Connection) -> None:
     """The first account was made in the app: setup is now at Connect an AI, with any earlier choice kept."""
+    if first_run_path != "app":
+        return
     set_setting(KEY, {**(read(db=db) or {}), "step": "models"}, db=db)
 
 

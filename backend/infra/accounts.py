@@ -179,10 +179,9 @@ def _create_account(
             from infra.corsia_agent import ensure_corsia_agent
 
             conductor_id = ensure_corsia_agent(name, model=None, db=conn)
-            if first_run_path == "app":
-                from infra.setup_progress import start_after_account
+            from infra.setup_progress import start_after_account
 
-                start_after_account(db=conn)
+            start_after_account(first_run_path, db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership

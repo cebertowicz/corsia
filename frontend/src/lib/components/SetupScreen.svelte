@@ -14,6 +14,7 @@
 	import { connect } from '$lib/ws';
 	import { finishSetupWithBestEffortSelection } from '$lib/setupFirstModel';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
+	import { saveSetupReport, setupReportInvoke } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -154,10 +155,7 @@
 	}
 
 	/** Finishing is the one thing that closes setup for good: it is recorded before the app opens. */
-	async function finishSetup() {
-		await recordSetupProgress({ completed: true }, get(token));
-		onFinished();
-	}
+	const finishSetup = async () => { await recordSetupProgress({ completed: true }, get(token)); onFinished(); };
 
 	async function decideExistingOmlx(useIt: boolean) {
 		void recordSetupProgress({ local_ai: useIt }, get(token));
@@ -240,16 +238,10 @@
 		const current = get(token);
 		if (!current) return;
 		try {
-			sources = await recheckSources(current);
+			sources = await recheckSources(current).catch(() => fetchSources(current));
 			localDownloadPending = false;
 			sourceError = '';
-		} catch {
-			try {
-				sources = await fetchSources(current);
-				localDownloadPending = false;
-				sourceError = '';
-			} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
-		}
+		} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
 
 	let rechecking = false;
@@ -326,18 +318,6 @@
 		}
 	}
 
-	const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
-	async function saveSetupReport() {
-		const invoke = setupReportInvoke();
-		if (!invoke) return;
-		reportError = '';
-		try {
-			await invoke('save_setup_report');
-		} catch {
-			reportError = 'CORSIA couldn’t save the report. Try again.';
-		}
-	}
-
 	async function saveApiKey() {
 		if (!apiKey.trim() || savingKey) return;
 		savingKey = true; sourceError = '';
@@ -351,8 +331,7 @@
 
 	/** The account exists, so the pre-account status gate is closed: the backend's record says where to pick up, and the facts are read fresh. */
 	async function resumeSetup() {
-		statusError = '';
-		page = 'checking';
+		statusError = ''; page = 'checking';
 		const progress = await fetchSetupProgress(get(token));
 		if (!progress) { statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.'; page = 'error'; return; }
 		if (progress.setup_completed) { onFinished(); return; }
@@ -360,8 +339,7 @@
 		folder = status.work_folder || folder;
 		if (status.classifier) classifier.accept(status.classifier);
 		localPick.wanted = progress.local_ai ?? status.local_eligible !== false;
-		existingOmlxConsent = progress.step === 'local-consent';
-		page = 'models';
+		existingOmlxConsent = progress.step === 'local-consent'; page = 'models';
 		await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
 	}
 
@@ -387,7 +365,7 @@
 		{#if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error' && setupReportInvoke()}
-			<Button variant="chip" onclick={() => void saveSetupReport()}>Save a report</Button>
+			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
 		{/if}
 	{/snippet}
 
