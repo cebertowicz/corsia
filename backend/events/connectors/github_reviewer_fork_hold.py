@@ -21,7 +21,7 @@ from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
 
 WAITING_TEXT = "approve the fork's workflow runs in GitHub, then add the review label (remove it first if present)"
 APPROVED_TEXT = "head approved; the review runs once its checks pass"
-UNVERIFIED_TEXT = "could not check the labeler's write access on GitHub; add the review label again"
+UNVERIFIED_TEXT = "could not check the labeler's write access on GitHub; add the review label again (remove it first if present)"
 
 
 def is_fork(head_repo: str | None, base_repo: str | None) -> bool:
@@ -40,6 +40,11 @@ def payload_is_fork(payload: dict[str, Any]) -> bool:
     return is_fork(_side_repo(pr, "head"), base)
 
 
+def _reviewed(repo: str, pr_number: int, head_sha: str) -> bool:
+    """Whether this head already has its final review, so its presence status must stay as it is."""
+    return reviewer_gate_state.get_reviewed_sha(reviewer_gate_state.pr_key(repo, pr_number)) == head_sha
+
+
 def _publish(repo: str, head_sha: str, text: str = WAITING_TEXT) -> None:
     """Show a non-success presence status so the head cannot merge unreviewed."""
     from reviewer.reviewer_status import set_status
@@ -54,6 +59,8 @@ def holds_review(
     if not is_fork(pr_info.get("headRepoFullName"), pr_info.get("baseRepoFullName")):
         return False
     if reviewer_gate_state.get_approved_sha(reviewer_gate_state.pr_key(repo, pr_number)) == head_sha:
+        return False
+    if _reviewed(repo, pr_number, head_sha):
         return False
     log.info("reviewer-gate: PR #{} sha={} — fork head awaiting maintainer approval", pr_number, head_sha[:8])
     emit_product_event(
@@ -90,6 +97,8 @@ def approve_labeled_head(
     checks to go green. The label is consumed either
     way, so adding it again always fires a new event. A permission GitHub could
     not answer approves nothing and is reported as unverified, not as a denial.
+    A head already reviewed keeps its final presence status: the label does not
+    re-run its review.
     """
     from events.reviewer_gate import on_pull_request_ready_for_review
     from reviewer.gh_fork_hold import remove_review_label, sender_can_approve
@@ -106,6 +115,8 @@ def approve_labeled_head(
             "sender": sender, "label_removed": label_removed,
         },
     )
+    if _reviewed(repo, pr_number, head_sha):
+        return
     if approved is None:
         _publish(repo, head_sha, UNVERIFIED_TEXT)
     if approved:

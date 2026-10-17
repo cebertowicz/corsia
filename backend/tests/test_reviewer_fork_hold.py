@@ -191,6 +191,32 @@ def test_the_label_never_approves_workflow_runs(_reload_gate):
     assert _approved(gate_mod) == "abc123def"
 
 
+@pytest.mark.parametrize("can_approve", [True, None])
+def test_a_label_on_a_reviewed_head_keeps_its_final_presence_status(_reload_gate, can_approve):
+    gate_mod = _reload_gate
+    gate_mod.reviewer_gate_state.record_approval(PR_KEY, "abc123def")
+    gate_mod.reviewer_gate_state.mark_reviewed(PR_KEY, "abc123def")
+    out = _label(
+        gate_mod, _payload("labeled", "abc123def", sender="maintainer"), FORK_INFO,
+        can_approve=can_approve, green=False,
+    )
+
+    out.status.assert_not_called()
+    out.review.assert_not_called()
+    out.remove.assert_called_once_with("owner/repo", 42)
+
+
+@pytest.mark.parametrize(("green", "conclusion"), [(True, "success"), (False, "action_required")])
+def test_a_fork_head_reviewed_before_the_hold_shipped_is_not_held(_reload_gate, green, conclusion):
+    gate_mod = _reload_gate
+    gate_mod.reviewer_gate_state.mark_reviewed(PR_KEY, "abc123def")
+
+    out = _gate(gate_mod, FORK_INFO, green=green, conclusion=conclusion)
+
+    out.status.assert_not_called()
+    out.review.assert_not_called()
+
+
 def test_a_label_names_the_head_it_was_added_on_even_if_a_push_landed_since(_reload_gate):
     gate_mod = _reload_gate
     current = {**FORK_INFO, "headRefOid": "newhead222"}
