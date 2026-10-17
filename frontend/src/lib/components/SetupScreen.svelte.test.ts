@@ -898,6 +898,7 @@ describe('SetupScreen', () => {
 		type Fake = {
 			sources: Record<string, unknown>[];
 			installPost: { status: number; body: unknown };
+			updatePost: { status: number; body: unknown };
 			install: { state: string; reason: string | null; path_shadowed_by?: string | null };
 			signin: string;
 			posted: string[];
@@ -908,7 +909,7 @@ describe('SetupScreen', () => {
 
 		async function openConnectStep(sources: Record<string, unknown>[]) {
 			if (component) await unmount(component);
-			fake = { sources, installPost: { status: 200, body: { ok: true } }, install: { state: 'running', reason: null }, signin: 'waiting', posted: [] };
+			fake = { sources, installPost: { status: 200, body: { ok: true } }, updatePost: { status: 200, body: { ok: true } }, install: { state: 'running', reason: null }, signin: 'waiting', posted: [] };
 			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = String(input);
 				const method = init?.method ?? 'GET';
@@ -919,6 +920,7 @@ describe('SetupScreen', () => {
 				if (url === '/api/providers/sources/recheck' && fake.recheckFails) return json({}, 500);
 				if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: fake.sources });
 				if (url === '/api/providers/cli/claude-code/install' && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
+				if (url === '/api/providers/cli/claude-code/update' && method === 'POST') return json(fake.updatePost.body, fake.updatePost.status);
 				if (url === '/api/providers/cli/claude-code/install') return json(fake.install);
 				if (url === '/api/providers/cli/claude-code/link') return json({ ok: true, outcome: 'linked' });
 				if (url.startsWith('/api/corsia-agent?token=')) return json({ target: { thread_id: 'conductor-1' } });
@@ -991,9 +993,56 @@ describe('SetupScreen', () => {
 			expect(row('Claude Code').textContent).toContain('CORSIA couldn’t check Claude Code’s sign-in.');
 			expect(row('Claude Code').textContent).toContain('it could not be started');
 			expect(row('Codex').textContent).toContain('CORSIA couldn’t check Codex’s sign-in.');
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Check again', 'Sign in']);
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Reinstall', 'Check again', 'Sign in']);
 			await press(row('Claude Code'), 'Check again');
 			expect(fake.posted.some((call) => call.startsWith('POST /api/providers/sources/recheck'))).toBe(true);
+		});
+
+		it('reinstalls an unverified CLI only after confirmation, then rechecks it', async () => {
+			await openConnectStep([claude('unverified', { reason: 'it could not be started' })]);
+
+			await press(row('Claude Code'), 'Reinstall');
+			expect(row('Claude Code').textContent).toContain('Reinstall Claude Code? This runs Anthropic’s official installer');
+			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/update');
+
+			await press(row('Claude Code'), 'Reinstall');
+			expect(fake.posted).toContain('POST /api/providers/cli/claude-code/update');
+			expect(row('Claude Code').textContent).toContain('Reinstalling with Anthropic’s official installer.');
+
+			const rechecksBefore = fake.posted.filter((call) => call === 'POST /api/providers/sources/recheck').length;
+			fake.install = { state: 'done', reason: null };
+			fake.sources = [claude('ready', { accounts: [{ state: 'ready' }] })];
+			await refocus();
+			expect(fake.posted.filter((call) => call === 'POST /api/providers/sources/recheck').length).toBeGreaterThan(rechecksBefore);
+			expect(row('Claude Code').textContent).toContain('Ready');
+		});
+
+		it('names the package manager and the exact reinstall command, with Check again, for a copy it owns', async () => {
+			await openConnectStep([
+				claude('unverified', { cli_package_manager: 'homebrew', reason: 'it could not be started' }),
+				{ source: 'codex', name: 'Codex', state: 'unverified', cli_package_manager: 'npm' },
+			]);
+
+			expect(row('Claude Code').textContent).toContain('which Homebrew installed');
+			expect(row('Claude Code').textContent).toContain('it could not be started');
+			expect(row('Claude Code').textContent).toContain('Reinstall it in Terminal with brew reinstall claude-code.');
+			expect(row('Codex').textContent).toContain('Reinstall it in Terminal with npm install -g @openai/codex.');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Check again']);
+			await press(row('Claude Code'), 'Check again');
+			expect(fake.posted).not.toContain('POST /api/providers/cli/claude-code/update');
+		});
+
+		it('shows the package-manager command when the reinstall is refused because a package manager owns the copy', async () => {
+			await openConnectStep([claude('unverified')]);
+			fake.updatePost = { status: 409, body: { reason: 'package_managed' } };
+			fake.sources = [claude('unverified', { cli_package_manager: 'npm' })];
+
+			await press(row('Claude Code'), 'Reinstall');
+			await press(row('Claude Code'), 'Reinstall');
+
+			expect(row('Claude Code').textContent).toContain('which npm installed');
+			expect(row('Claude Code').textContent).toContain('npm install -g @anthropic-ai/claude-code');
+			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Check again']);
 		});
 
 		it('says so when Check again cannot recheck, rather than showing the stored result as fresh', async () => {

@@ -172,6 +172,29 @@ async def test_second_post_returns_the_existing_running_job(monkeypatch):
     await cli_install._jobs["claude-code"].task
 
 
+@pytest.mark.asyncio
+async def test_update_reuses_the_installer_unless_a_package_manager_owns_the_cli(monkeypatch):
+    from api import cli_install
+
+    refreshed = []
+    monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: "/usr/local/bin/codex")
+    monkeypatch.setattr(cli_install, "package_manager_for", lambda *_args: None)
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: refreshed.append(True) or asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+
+    assert await cli_install.start_update("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    await cli_install._jobs["codex"].task
+    assert refreshed == [True]
+
+    cli_install._jobs.clear()
+    monkeypatch.setattr(cli_install, "package_manager_for", lambda *_args: "npm")
+    response = await cli_install.start_update("codex", {})
+    assert response.status_code == 409 and response.body == b'{"reason":"package_managed"}'
+    assert "codex" not in cli_install._jobs
+
+
 def _nothing_installed(monkeypatch):
     """Neither the service PATH nor the login shell knows the CLI."""
     from api import cli_install

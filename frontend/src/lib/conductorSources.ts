@@ -41,6 +41,8 @@ export interface ModelSource {
 	download_stalled?: boolean;
 	/** Why the local server isn't ready, as a code; `reason` is only its wording. */
 	reason_code?: 'not_running' | 'no_models' | null;
+	/** Set when an unusable CLI belongs to Homebrew or npm; setup leaves it to that manager. */
+	cli_package_manager?: 'homebrew' | 'npm';
 	/** Set when the CLI is installed but the service cannot see it; Fix links it. */
 	invisible_binary?: string | null;
 	/** A failed local setup's reason, kept until the next attempt. */

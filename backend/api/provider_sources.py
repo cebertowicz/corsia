@@ -68,6 +68,12 @@ def _harness_source(provider: str) -> dict[str, Any]:
     if view["state"] == "not_installed":
         from api.provider_cli_link import invisible_binary
         source["invisible_binary"] = invisible_binary(provider)
+    if view["state"] == "unverified":
+        from cli_location import package_manager_for
+
+        manager = package_manager_for(provider)
+        if manager:
+            source["cli_package_manager"] = manager
     if view["state"] == "ready":
         limit = _default_limit(provider)
         if limit:
