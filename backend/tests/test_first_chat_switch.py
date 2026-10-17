@@ -172,6 +172,20 @@ class TestSwitch:
 
         assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1") is False
 
+    async def test_a_failed_switch_does_not_leave_the_operation_handled(self, agent, monkeypatch):
+        hook.record_first_model(agent, LOCAL)
+        monkeypatch.setattr("thread.model.switch_model", AsyncMock(side_effect=RuntimeError("refused")))
+        await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+
+        door = AsyncMock()
+        monkeypatch.setattr("thread.model.switch_model", door)
+        retried = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+        again = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+
+        assert retried is True
+        assert again is False
+        door.assert_awaited_once()
+
 
 class TestSigninSeam:
     """finish_signin asks for the switch only when a first-run sign-in's own read came back ready."""

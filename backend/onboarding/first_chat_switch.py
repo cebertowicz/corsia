@@ -8,7 +8,8 @@ door (``thread.model.switch_model``). Three guards keep it narrow:
 1. only the first chat setup created: the CORSIA agent, whose first model setup recorded;
 2. only if the person has not picked a model in it since: the thread still holds that
    model, in the same execution epoch, with no switch pending;
-3. only once per sign-in operation: a repeated ready signal for the same operation is a no-op.
+3. only once per sign-in operation: a repeated ready signal for the same operation is a no-op,
+   unless its switch failed, which releases the claim so the next completion retries.
 """
 
 from __future__ import annotations
@@ -87,6 +88,15 @@ def claim_switch(provider: str, operation_id: str, *, db: sqlite3.Connection) ->
         return str(marker["thread_id"]), destination
 
 
+def release_claim(operation_id: str, *, db: sqlite3.Connection) -> None:
+    """Un-handle ``operation_id`` after a failed switch, so the next completion of it asks again."""
+    with write_transaction(db, scope="first_chat_switch_release") as connection:
+        marker = get_setting(SETTINGS_KEY, db=connection)
+        if marker and operation_id in marker.get("handled", []):
+            set_setting(SETTINGS_KEY, {**marker, "handled": [h for h in marker["handled"] if h != operation_id]},
+                        db=connection)
+
+
 async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, account_id: str) -> bool:
     """Switch the first chat to ``provider``'s model if the three guards hold; whether a switch was asked for."""
     from infra.db_async import run_in_db
@@ -100,6 +110,13 @@ async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, a
         finally:
             db.close()
 
+    def release() -> None:
+        db = get_db()
+        try:
+            release_claim(operation_id, db=db)
+        finally:
+            db.close()
+
     claimed = await run_in_db(claim)
     if claimed is None:
         return False
@@ -110,6 +127,7 @@ async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, a
             reason=REASON, checkpoint_override="target", account_id=account_id,
         )
     except Exception:  # noqa: BLE001 - the chat stays on the local model; the person can pick in the model picker
-        log.warning("first chat switch to %s failed", destination, exc_info=True)
+        log.error("first chat switch to %s failed; the next sign-in completion will retry", destination, exc_info=True)
+        await run_in_db(release)
         return False
     return True
