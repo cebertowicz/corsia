@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { fetchRevision, fetchTree, type DocRevision, type TreeRoot } from '$lib/api/docs';
 import { openArtifactTab } from '$lib/stores/artifactWorkspace';
+import { defaultTabTitle } from '$lib/artifactTabTitle';
 import { openSubagentRequest } from '$lib/stores/subagents';
 import { activeThreadId } from '$lib/stores/threads';
 import { emitProductEvent } from '$lib/product_events';
@@ -104,10 +105,6 @@ function hasScheme(href: string): boolean {
 	return /^[a-z][a-z\d+.-]*:/i.test(href);
 }
 
-function titleFor(path: string): string {
-	return path.split('/').filter(Boolean).at(-1) ?? path;
-}
-
 /** Opens an external link in the correct host without changing web navigation. */
 export async function openExternalUrl(href: string): Promise<void> {
 	if (document.documentElement.dataset.shell === 'tauri') {
@@ -175,7 +172,7 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 		deps.openArtifact(threadId, {
 			artifactId: revision.artifact_id,
 			path: revision.path ?? path,
-			title: titleFor(revision.path ?? path),
+			title: defaultTabTitle(revision.path ?? path),
 		});
 		return { result: 'document', target: 'workspace_document' };
 	} catch {

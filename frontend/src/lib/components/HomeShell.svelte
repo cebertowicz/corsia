@@ -342,6 +342,7 @@
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 	@media (max-width: 768px) {
 		.app { bottom: auto; height: 100vh; }
+		@media (display-mode: standalone) { .app { height: 100dvh; } }
 		.main {
 			transform: translateX(0);
 			transition: transform var(--dur-spring) var(--ease-entrance);

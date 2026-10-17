@@ -490,6 +490,68 @@ async def test_provider_failure_is_one_terminal_row(isolated_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_task_exit_before_capture_is_failed(isolated_db, monkeypatch):
+    from core import checkpoint_runtime as runtime
+
+    _seed("thread-1")
+
+    async def invoke(_request, _cancel):
+        return ProviderCheckpointResult("body", None)
+
+    async def capture_failure(_checkpoint_id, _result):
+        raise RuntimeError("capture persistence failed")
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(runtime, "_capture_and_install", capture_failure)
+    await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    )
+
+    record = await runtime.await_checkpoint("cp-1")
+
+    assert (record.status, record.error) == ("failed", "capture persistence failed")
+
+
+@pytest.mark.asyncio
+async def test_install_failure_ends_the_attempt_failed_without_retry(
+    isolated_db, monkeypatch,
+):
+    from core import checkpoint_runtime as runtime
+    from infra import checkpoints as store
+
+    _seed("thread-1")
+    real_install = store.install
+    installs: list[str] = []
+
+    async def invoke(_request, _cancel):
+        return ProviderCheckpointResult("body", None)
+
+    def install(checkpoint_id, **kwargs):
+        installs.append(checkpoint_id)
+        if checkpoint_id == "cp-1":
+            raise RuntimeError("install persistence failed")
+        return real_install(checkpoint_id, **kwargs)
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(store, "install", install)
+    await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    )
+
+    record = await runtime.await_checkpoint("cp-1")
+
+    assert (record.status, record.error) == ("failed", "install persistence failed")
+    assert record.raw_result == "body"
+    assert store.reconcile_startup(reconciled_at="t9") == ()
+    fresh = await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-fresh"), _provider("thread-1", "cp-fresh")
+    )
+    assert fresh.id == "cp-fresh"
+    assert (await runtime.await_checkpoint("cp-fresh")).status == "installed"
+    assert installs == ["cp-1", "cp-fresh"]
+
+
+@pytest.mark.asyncio
 async def test_blank_transport_fails_even_with_staged_edits(
     isolated_db, monkeypatch
 ):
