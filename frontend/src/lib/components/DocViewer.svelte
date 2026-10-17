@@ -18,17 +18,18 @@
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
-	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
 	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
+	import { connectionState } from '$lib/stores/connection';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
-		effectiveDraftTarget, existingDraft, seedDraft,
+		withDraftArtifactId, existingDraft, seedDraft,
 		enrichDraftTarget, setDraftText, flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
@@ -122,7 +123,7 @@
 		});
 	});
 	let docRoot = $state<HTMLElement>();
-	const commentUI = createCommentSurfaceState(() => docRoot?.querySelector<HTMLElement>('.cm-content')?.focus(), () => targetKey);
+	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	function setCommentScrollTarget(id: string, focus: boolean, origin: ScrollOrigin) {
@@ -175,6 +176,7 @@
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
+	let wasConnected = false;
 	export function reload() {
 		if (liveSession) reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus);
 		else reloadNonce += 1;
@@ -202,6 +204,12 @@
 		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
 		legacyAwaitingSave = false;
 		reloadNonce += 1;
+	});
+	$effect(() => {
+		const connected = $connectionState === 'connected';
+		const shouldReopen = connected && !wasConnected && openRefusal?.code === 'not_connected';
+		wasConnected = connected;
+		if (shouldReopen) reloadNonce += 1;
 	});
 	function onPrepareCleanReload(): Promise<(() => void) | null> {
 		const d = target;
@@ -235,7 +243,7 @@
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
 			// These fields describe the mounted target, not its predecessor.
-			loadedArtifactId = effectiveDraftTarget(d).artifactId;
+			loadedArtifactId = withDraftArtifactId(d).artifactId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
 			readonly = opened.unsaved;
 			confirming = opened.confirming;

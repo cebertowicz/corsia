@@ -48,8 +48,13 @@ OFF_LIMITS_ROWS = (
     ("B11", "POST", r"^/api/plans/operator/threads/[^/]+/seen$", "records the person as actor"),
     ("B11", "POST", r"^/api/artifacts/[^/]+/comments/[^/]+/viewed$", "records the person as actor"),
     ("B11", "POST|DELETE", r"^/api/doc-reviews(?:/|$)", "records the person as actor"),
+    ("B11", "POST", r"^/api/threads/[^/]+/messages/[^/]+/(?:retry|cancel)$", "records the person as actor"),
     ("B12", "DELETE", r"^/api/security(?:/|$)",
      "dismissing the person's security alert would hide it from them; reading it stays open"),
+    ("B15", "POST", r"^/api/mcp/servers/[^/]+/(?:approve|decline)$",
+     "only the signed-in person may approve or decline a connected-app proposal"),
+    ("B16", ".*", r"^/api/mcp/servers/[^/]+/(?:sign-in|sign-out)$",
+     "only the signed-in person may start, cancel or read a sign-in to a connected app, or sign out of it"),
 )
 OFF_LIMITS = tuple((method, path) for _, method, path, _ in OFF_LIMITS_ROWS)
 
@@ -97,10 +102,17 @@ _RECOGNIZED_KEY = re.compile(
 )
 
 
+def off_limits_reason(path: str, method: str = "GET") -> str | None:
+    """Return the fixed policy reason when this call requires a person."""
+    for _, method_pattern, path_pattern, reason in OFF_LIMITS_ROWS:
+        if re.fullmatch(method_pattern, method) and re.search(path_pattern, path):
+            return reason
+    return None
+
+
 def off_limits(path: str, method: str = "GET") -> bool:
     """Check permanent path families and operations that require a human actor."""
-    return any(re.fullmatch(method_pattern, method) and re.search(path_pattern, path)
-               for method_pattern, path_pattern in OFF_LIMITS)
+    return off_limits_reason(path, method) is not None
 
 
 def contains_forbidden_fields(value: Any) -> bool:

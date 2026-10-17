@@ -110,11 +110,65 @@ export function fromHsl([h, s, l]: [number, number, number]): Rgb {
 }
 
 /**
+ * APCA's contrast model, SAPC-8 with the "0.0.98G-4g" constant group (the constants the W3 draft shipped).
+ * Formula and constants: SAPC-APCA by Andrew Somers, https://github.com/Myndex/SAPC-APCA — reimplemented
+ * here, not vendored. APCA is the WCAG 3 draft model, built to fix the one place WCAG 2 is wrong: a
+ * mid-tone fill, where WCAG 2's ratio says black and white read the same and they plainly do not.
+ * `norm*` are the exponents for dark ink on a lighter fill, `rev*` for light ink on a darker one.
+ */
+const APCA = {
+	/** APCA emulates monitor perception with a plain 2.4 power instead of WCAG 2's piecewise curve. */
+	monitorExponent: 2.4,
+	srgbY: [0.2126729, 0.7151522, 0.072175] as const,
+	normBG: 0.56,
+	normTXT: 0.57,
+	revTXT: 0.62,
+	revBG: 0.65,
+	/** A near-black Y below this is soft-clamped upwards, so black on black still reads as no contrast. */
+	blkThrs: 0.022,
+	blkClmp: 1.414,
+	scale: 1.14,
+	/** Raw SAPC values under this collapse to 0: they would flip polarity before they read as nothing. */
+	loClip: 0.1,
+	offset: 0.027,
+	deltaYMin: 0.0005,
+};
+
+/** APCA's linear-light Y for an sRGB colour: each channel at 2.4, then the sRGB coefficients. */
+export function apcaY([r, g, b]: Rgb): number {
+	const channel = (value: number) => (value / 255) ** APCA.monitorExponent;
+	return APCA.srgbY[0] * channel(r) + APCA.srgbY[1] * channel(g) + APCA.srgbY[2] * channel(b);
+}
+
+/**
+ * APCA lightness contrast (`Lc`) of `text` on `background`. Signed as APCA signs it: negative for light ink
+ * on a dark fill, positive for dark ink on a light fill — never take the sign as meaningful, only the
+ * magnitude. Unlike `contrastRatio` this is polarity sensitive, and its scale is perceptual: 75 is body text,
+ * 60 is the floor for large text, and white on black is about -106 rather than an unbounded 21.
+ */
+export function apcaLc(text: Rgb, background: Rgb): number {
+	const softClamp = (y: number) => (y > APCA.blkThrs ? y : y + (APCA.blkThrs - y) ** APCA.blkClmp);
+	const txtY = softClamp(apcaY(text));
+	const bgY = softClamp(apcaY(background));
+	if (Math.abs(bgY - txtY) < APCA.deltaYMin) return 0;
+	if (bgY > txtY) {
+		const sapc = (bgY ** APCA.normBG - txtY ** APCA.normTXT) * APCA.scale;
+		return (sapc < APCA.loClip ? 0 : sapc - APCA.offset) * 100;
+	}
+	const sapc = (bgY ** APCA.revBG - txtY ** APCA.revTXT) * APCA.scale;
+	return (sapc > -APCA.loClip ? 0 : sapc + APCA.offset) * 100;
+}
+
+/**
  * The same hue stepped darker (light theme) or lighter (dark theme) until it meets `min`
  * against every surface; the colour itself when it already does.
  */
 export function stepToContrast(own: Rgb, on: Rgb[], theme: 'light' | 'dark', min: number): Rgb {
-	const meets = (tone: Rgb) => on.every((surface) => contrastRatio(tone, surface) >= min);
+	return stepUntil(own, theme, (tone) => on.every((surface) => contrastRatio(tone, surface) >= min));
+}
+
+/** The same hue stepped darker (light) or lighter (dark) until `meets` holds; `own` itself (same object) when it does. */
+export function stepUntil(own: Rgb, theme: 'light' | 'dark', meets: (tone: Rgb) => boolean): Rgb {
 	if (meets(own)) return own;
 	const [h, s, l] = toHsl(own);
 	const step = theme === 'light' ? -0.005 : 0.005;
@@ -125,9 +179,18 @@ export function stepToContrast(own: Rgb, on: Rgb[], theme: 'light' | 'dark', min
 	return theme === 'light' ? [0, 0, 0] : [255, 255, 255];
 }
 
-/** White or near-black, whichever reads better on `fill`; white when the fill is not a colour this parses. */
+/** The two inks an accent fill may carry. */
+export const INK_WHITE = '#ffffff';
+const INK_BLACK = '#0a0a0b';
+
+/**
+ * White or near-black, whichever APCA reads better on `fill` — the larger `|Lc|` of the two. WCAG 2's ratio
+ * cannot make this call on a mid-tone fill: it rates black and white on `#0083af` within half a point of each
+ * other, and picks black, which reads badly on a mid blue. White when the fill is not a colour this parses.
+ */
 export function inkOn(fill: string): string {
 	const rgb = parseColor(fill);
-	if (!rgb) return '#ffffff';
-	return contrastRatio(rgb, [255, 255, 255]) >= contrastRatio(rgb, [10, 10, 11]) ? '#ffffff' : '#0a0a0b';
+	if (!rgb) return INK_WHITE;
+	const reads = (ink: string) => Math.abs(apcaLc(parseHex(ink)!, rgb));
+	return reads(INK_WHITE) >= reads(INK_BLACK) ? INK_WHITE : INK_BLACK;
 }

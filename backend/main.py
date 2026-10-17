@@ -70,6 +70,7 @@ from api.registry_pane import router as registry_pane_router
 from api.registry_ownership import router as registry_ownership_router
 from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
+from api.google import router as google_router
 from api.keys import router as keys_router
 
 
@@ -110,6 +111,7 @@ async def _emit_error_api(request: Request, exc: Exception):
 app.include_router(system_router)
 app.include_router(system_perf_router)
 app.include_router(keys_router)
+app.include_router(google_router)
 app.include_router(uploads_router)
 app.include_router(turns_router)
 app.include_router(drain_router)
@@ -184,8 +186,14 @@ async def serve_frontend(path: str):
             {"status": "CORSIA UI backend running",
              "frontend": "not built yet — export CORSIA_BACKEND_URL, then use vite dev"},
         )
-    file_path = FRONTEND_DIR / path
-    if file_path.is_file():
+    # Only files inside the build are served; any other path gets the app page.
+    root = FRONTEND_DIR.resolve()
+    try:
+        file_path = (root / path).resolve()
+        servable = file_path.is_relative_to(root) and file_path.is_file()
+    except ValueError:  # an embedded NUL byte; real I/O faults still raise
+        servable = False
+    if servable:
         import mimetypes
         content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
         content = file_path.read_bytes()

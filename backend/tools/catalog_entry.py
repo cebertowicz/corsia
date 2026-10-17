@@ -24,6 +24,7 @@ ToolCategory = Literal[
     "connection_admin",
     "host_access",
     "discovery",
+    "google",
 ]
 
 

@@ -200,3 +200,46 @@ async def test_roster_tools_deny_ordinary_and_foreign_scope_threads(isolated_db)
     assert "must share a scope" in foreign_read
     assert "must share a scope" in foreign_write
     assert _roster_change_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_conductor_renames_an_agent_through_the_audited_roster_write(isolated_db):
+    conductor, target, _, _ = _project_and_threads()
+    entry = json.loads(await AgentRosterEntryTool().execute(target, _thread_id=conductor))
+    await AgentRosterUpdateTool().execute(
+        target, entry["updated_at"], responsibility="Owns routing.", _thread_id=conductor,
+    )
+    entry = json.loads(await AgentRosterEntryTool().execute(target, _thread_id=conductor))
+    before = _roster_change_count()
+
+    renamed = json.loads(await AgentRosterUpdateTool().execute(
+        target, entry["updated_at"], name="  Release owner ", _thread_id=conductor,
+    ))
+
+    assert renamed["changed"] is True
+    assert _roster_change_count() == before + 1
+    current = json.loads(await AgentRosterEntryTool().execute(target, _thread_id=conductor))
+    assert current["name"] == "Release owner"
+    retry = json.loads(await AgentRosterUpdateTool().execute(
+        target, current["updated_at"], name="Release owner", _thread_id=conductor,
+    ))
+    assert retry["changed"] is False
+    assert _roster_change_count() == before + 1
+
+
+@pytest.mark.asyncio
+async def test_rename_is_refused_for_a_non_conductor_and_an_invalid_name(isolated_db):
+    conductor, target, ordinary, _ = _project_and_threads()
+    entry = json.loads(await AgentRosterEntryTool().execute(target, _thread_id=conductor))
+
+    refused = await AgentRosterUpdateTool().execute(
+        target, entry["updated_at"], name="Hijacked", _thread_id=ordinary,
+    )
+    assert refused.startswith("Error:")
+    for bad in ("   ", "x" * 81, 7):
+        invalid = await AgentRosterUpdateTool().execute(
+            target, entry["updated_at"], name=bad, _thread_id=conductor,
+        )
+        assert invalid.startswith("Error: name must"), bad
+    current = json.loads(await AgentRosterEntryTool().execute(target, _thread_id=conductor))
+    assert current["name"] != "Hijacked"

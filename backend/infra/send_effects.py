@@ -107,7 +107,6 @@ async def _register_upload_effect(
 def _schedule_title_effect(
     thread_id: str,
     thread_row: Any,
-    content: str,
     source_input_id: str,
 ) -> None:
     from ws.post_turn import start_title_early
@@ -116,7 +115,7 @@ def _schedule_title_effect(
         title_task = _ACCEPTED_TITLE_TASKS.get(thread_id)
         if title_task is None or title_task.done():
             title_task = asyncio.create_task(
-                start_title_early(thread_id, str(thread_row["user_id"]), content)
+                start_title_early(thread_id, str(thread_row["user_id"]))
             )
             _ACCEPTED_TITLE_TASKS[thread_id] = title_task
             _ACCEPTED_EFFECT_TASKS.add(title_task)
@@ -158,7 +157,6 @@ async def run_send_accepted_effects(
     *,
     thread_id: str,
     thread_row: Any,
-    content: str,
     attachments: list | None,
     accepted_effects: dict | None,
     source_input_id: str,
@@ -169,7 +167,7 @@ async def run_send_accepted_effects(
     if accepted_effects.get("uploads"):
         await _register_upload_effect(thread_id, attachments, source_input_id)
     if accepted_effects.get("title"):
-        _schedule_title_effect(thread_id, thread_row, content, source_input_id)
+        _schedule_title_effect(thread_id, thread_row, source_input_id)
     send_ref = accepted_effects.get("send_ref")
     if send_ref is not None:
         await _emit_send_ref_effect(thread_id, send_ref, source_input_id)
@@ -184,7 +182,6 @@ async def run_batch_accepted_effects(batch, thread_row: Any) -> None:
         await run_send_accepted_effects(
             thread_id=batch.thread_id,
             thread_row=thread_row,
-            content=item.content,
             attachments=public_attachments(options.get("attachments") or []),
             accepted_effects=options.get("accepted_effects"),
             source_input_id=item.message_id,

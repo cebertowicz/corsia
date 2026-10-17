@@ -48,6 +48,10 @@ def test_protected_policy_denies_sensitive_paths_but_preserves_safe_ssh_files(
         Path("/tmp/corsia-shell-envelope-example.sb"),
         for_write=False,
     )
+    assert policy.denial(
+        Path("/tmp/corsia-mcp-envelope-example.sb"),
+        for_write=True,
+    )
     assert policy.denial(Path("/tmp/corsia-restart"), for_write=True)
     assert policy.denial(
         state_root / "runtime" / "corsia-restart.signal",
@@ -80,6 +84,39 @@ def test_protected_policy_denies_sensitive_paths_but_preserves_safe_ssh_files(
     assert all(
         "never lease-authorized" not in denial for denial in protected_denials if denial
     )
+
+
+def test_generated_profile_rules_match_host_path_denials(tmp_path) -> None:
+    from tools.host_path_policy import (
+        GENERATED_PROFILE_PREFIXES,
+        ProtectedHostPathPolicy,
+        _sandbox_regex,
+        generated_profile_temp_roots,
+    )
+    from tools.safehouse_launch import _generated_profile_temp_rules
+
+    policy = ProtectedHostPathPolicy(
+        home=tmp_path / "home",
+        state_root=tmp_path / "state",
+    )
+    expected_pairs = {
+        (root, prefix)
+        for root in generated_profile_temp_roots()
+        for prefix in GENERATED_PROFILE_PREFIXES
+    }
+    expected_rules = tuple(
+        f'(deny file-write* (regex #"^{_sandbox_regex(str(root))}/{prefix}[^/]*\\.sb$"))'
+        for root in generated_profile_temp_roots()
+        for prefix in GENERATED_PROFILE_PREFIXES
+    )
+    denied_pairs = {
+        (root, prefix)
+        for root, prefix in expected_pairs
+        if policy.denial(root / f"{prefix}example.sb", for_write=True)
+    }
+
+    assert _generated_profile_temp_rules() == expected_rules
+    assert denied_pairs == expected_pairs
 
 
 def test_protected_policy_exposes_only_protected_mode_rules(

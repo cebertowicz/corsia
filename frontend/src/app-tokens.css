@@ -76,10 +76,10 @@
   --text-secondary: #adadb2;
   --text-muted: #adadb2;
   --text-tertiary: #919196;
-  --accent: #60a5fa;
-  --accent-hover: #93c5fd;
-  --accent-subtle: rgba(96, 165, 250, 0.12);
-  --accent-bg-hover: rgba(96, 165, 250, 0.14);
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
   --green: #34d399;
   --green-bg: rgba(52, 211, 153, 0.08);
   --green-border: rgba(52, 211, 153, 0.25);
@@ -128,13 +128,16 @@
   --purple-bg: rgba(139, 92, 246, 0.10);
   --purple-line: rgba(139, 92, 246, 0.28);
 
-  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA-blue defaults;
-     under a project scope +layout replaces --accent and every role from accentRoles(). */
-  --accent-text: var(--accent);
-  --accent-wash: rgba(96, 165, 250, 0.08);
-  --accent-line: rgba(96, 165, 250, 0.28);
+  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA default, and the
+     default *is* a project colour: the corsia project's own accent, #007faa. Every value below is exactly what
+     `accentRoles('#007faa', 'dark')` returns (pinned by `app-tokens.accent.test.ts`), so the no-project default and
+     a project painted #007faa look the same. Under a project scope +layout replaces --accent and every role from
+     accentRoles(); --accent-hover and --accent-subtle (theme blocks) follow through var(). */
+  --accent-text: #009cd0;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
-  --accent-on-fill: #0a0a0b;
+  --accent-on-fill: #ffffff;
   --violet-brand: #8b5cf6;
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
@@ -151,7 +154,7 @@
   --glass-thin:          color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   --glass-regular:       color-mix(in srgb, var(--bg-secondary) 68%, transparent);
   --glass-regular-thick: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
-  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  --glass-thick:         color-mix(in srgb, var(--bg-secondary) 92%, transparent);
   --glass-rim: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glass-scrim: rgba(0, 0, 0, 0.28);
   --glass-elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 8px rgba(0, 0, 0, 0.15), 0 8px 32px rgba(0, 0, 0, 0.40);
@@ -179,10 +182,10 @@
   --text-secondary: #46464b;
   --text-muted: #46464b;
   --text-tertiary: #636368;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-subtle: rgba(37, 99, 235, 0.08);
-  --accent-bg-hover: rgba(37, 99, 235, 0.16);
+  --accent: #007faa;
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
+  --accent-bg-hover: var(--accent-subtle);
   --green: #34d399;
   --green-bg: #f0fdf4;
   --green-border: rgba(34, 197, 94, 0.3);
@@ -219,9 +222,9 @@
 }
 
 [data-theme="light"] {
-  --accent-text: #1d4ed8;
-  --accent-wash: rgba(37, 99, 235, 0.10);
-  --accent-line: rgba(37, 99, 235, 0.32);
+  --accent-text: #006a8e;
+  --accent-wash: color-mix(in srgb, #007faa 12%, transparent);
+  --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
   --teal: #0d9488;
@@ -248,12 +251,12 @@
 }
 
 @supports (color: color(display-p3 1 1 1)) {
+  /* The accent and its roles are deliberately absent here: #007faa is authored as sRGB, and a wider-gamut
+     variant of it would be an invented colour that `accentRoles()` cannot derive. */
   :root {
     --teal: color(display-p3 0.176 0.831 0.749);
     --sky: color(display-p3 0.376 0.647 0.98);
     --amber: color(display-p3 0.961 0.62 0.043);
-    --accent: color(display-p3 0.376 0.647 0.98);
-    --accent-hover: color(display-p3 0.576 0.773 0.992);
     --purple: color(display-p3 0.545 0.361 0.965);
     --purple-2: color(display-p3 0.698 0.608 1);
     --purple-text: color(display-p3 0.733 0.659 1);
@@ -262,18 +265,9 @@
     --teal: color(display-p3 0.051 0.58 0.533);
     --sky: color(display-p3 0.145 0.388 0.922);
     --amber: color(display-p3 0.851 0.467 0.024);
-    --accent: color(display-p3 0.145 0.388 0.922);
-    --accent-hover: color(display-p3 0.114 0.306 0.816);
-    --accent-text: color(display-p3 0.114 0.306 0.816);
     --purple: color(display-p3 0.486 0.361 0.965);
     --purple-2: color(display-p3 0.427 0.298 0.902);
     --purple-text: color(display-p3 0.357 0.247 0.816);
   }
 }
 
-/* Hover and subtle tones keep their own CORSIA-blue shades by default; under a project scope (+layout sets the
-   attribute) they follow its accent through the roles rather than a second derivation. */
-:root[data-project-accent] {
-  --accent-hover: var(--accent);
-  --accent-subtle: var(--accent-wash);
-}

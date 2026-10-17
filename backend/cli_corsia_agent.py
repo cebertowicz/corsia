@@ -1,13 +1,13 @@
 """``corsia agent warm`` — pre-warm the CORSIA agent's prefix at install.
 
-When the local starter model is ready, the first reply from the
+When the local model setup installed is ready, the first reply from the
 CORSIA agent is faster if the server has already prefilled its system and tool
 prefix. The server owns that work (``POST /api/threads/{id}/warm`` renders
 through the send path and runs the warm); this command asks for it once, holds
 that one request open until the warm ends, and shows the person that something
 is happening.
 
-It never fails the install: every outcome exits 0, and the starter simply not
+It never fails the install: every outcome exits 0, and the local model simply not
 being ready prints nothing at all. The one-hour service token comes in
 ``CORSIA_SOURCES_SERVICE_TOKEN`` from the shell, as for ``corsia sources``.
 """
@@ -23,7 +23,7 @@ import urllib.parse
 from collections.abc import Callable
 
 from cli_sources import READ_TIMEOUT_SECONDS, RouteMissing, _read_token, request_json
-from llm.local_profiles import DEFAULT_PROFILE
+from llm.local_model import set_up_model
 
 WARM_TIMEOUT_SECONDS = 300
 # The request outlives the deadline a little so the server's answer, not our
@@ -51,9 +51,16 @@ def _step_prefix() -> str:
 
 
 def _starter_catalog_id(token: str) -> str | None:
-    """The starter's catalog id when its row reads ``ready``, else None."""
+    """The set-up local model's catalog id when its row reads ``ready``, else None.
+
+    Setup records the model it installed (``local_model.record_set_up``); with no
+    record there is nothing to warm.
+    """
+    model = set_up_model()
+    if model is None:
+        return None
     payload = request_json("GET", "/api/models", token, READ_TIMEOUT_SECONDS)
-    suffix = f"/{DEFAULT_PROFILE.model}"
+    suffix = f"/{model.model}"
     for row in payload.get("models") or []:
         if (
             isinstance(row, dict)

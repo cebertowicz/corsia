@@ -31,13 +31,9 @@ _CONTROL_FILES = (
 )
 _RAW_DEVICE_RE = re.compile(r"^/dev/(?:r?disk)[^/]*$")
 _CORSIA_PLIST_RE = re.compile(r"corsia.*\.plist$", re.IGNORECASE)
-GENERATED_WORKSPACE_PROJECTIONS = (
-    Path(".corsia/context"),
-    Path(".corsia/skills"),
-)
-
-# Hard-floor denials are not lease-eligible. Saying so stops an agent from
-# requesting a lease that can never open the path.
+GENERATED_WORKSPACE_PROJECTIONS = (Path(".corsia/context"), Path(".corsia/skills"))
+GENERATED_PROFILE_PREFIXES = ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
+# Hard-floor denials cannot be opened by a host-access lease.
 _NO_LEASE = " No host-access lease can open it."
 _PRIVATE_STATE_DENIAL = "CORSIA and Safehouse private state is blocked in protected mode." + _NO_LEASE
 _CREDENTIAL_DENIAL = "Stored secrets are closed to every agent route." + _NO_LEASE
@@ -48,6 +44,15 @@ def _sandbox_text(value: Path | str) -> str:
 
 def _sandbox_regex(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def generated_profile_temp_roots() -> tuple[Path, ...]:
+    """Return every lexical and /private temporary root for generated profiles."""
+    roots = {Path(tempfile.gettempdir()), Path("/tmp")}
+    for root in tuple(roots):
+        raw = str(root)
+        roots.add(Path(raw.removeprefix("/private") if raw.startswith("/private/") else "/private" + raw))
+    return tuple(sorted(roots))
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,16 +167,11 @@ class ProtectedHostPathPolicy:
         if _RAW_DEVICE_RE.fullmatch(str(candidate)):
             return "Raw device access is blocked in protected mode." + _NO_LEASE
 
-        temporary_roots = {
-            canonical(Path(tempfile.gettempdir())),
-            canonical(Path("/tmp")),
-        }
+        temporary_roots = {canonical(root) for root in generated_profile_temp_roots()}
         if (
             candidate.parent in temporary_roots
             and candidate.suffix == ".sb"
-            and candidate.name.startswith(
-                ("corsia-shell-envelope-", "corsia-controlled-git-")
-            )
+            and candidate.name.startswith(GENERATED_PROFILE_PREFIXES)
         ):
             return (
                 "Generated Safehouse profiles are blocked in protected mode."
@@ -248,10 +248,12 @@ class ProtectedHostPathPolicy:
         policy already words both outcomes, so reuse those exact messages
         rather than restating them.
         """
-        for path in denied_paths_in(text):
-            message = self.ordinary_denial(path, for_write=False)
-            if message is None:
-                message = self.denial(path, for_write=True)
+        return self.denial_guidance_for_paths(denied_paths_in(text))
+
+    def denial_guidance_for_paths(self, paths: Iterable[Path]) -> str | None:
+        """Name the first denied protected path from an already-parsed path list."""
+        for path in paths:
+            message = self.ordinary_denial(path, for_write=False) or self.denial(path, for_write=True)
             if message:
                 return f"{path} — {message}"
         return None

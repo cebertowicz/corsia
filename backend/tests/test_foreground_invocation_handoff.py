@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from infra.state.context import _current_tool_invocation_id, tool_invocation_context
-from tools.registry import ToolRegistry
+from tools.registry import _is_reserved_execution_param
+from tools.tool_execution_context import inject_context, strip_reserved_context
 from tools.shell_guard import safehouse_subprocess_env
 
 
@@ -138,13 +139,13 @@ async def test_checkpoint_native_clears_inherited_foreground_invocation(monkeypa
 
 
 def test_registry_forwards_invocation_only_to_bash_and_strips_public_override():
-    params = ToolRegistry._strip_reserved_context({
+    params = strip_reserved_context({
         "command": "fake", "_thread_invocation_id": "forged",
-    })
+    }, _is_reserved_execution_param)
     context = {"id": "thread", "project_id": "project"}
     with tool_invocation_context("current"):
-        forwarded = ToolRegistry._inject_context(params, context, tool_name="bash")
-        other = ToolRegistry._inject_context(params, context, tool_name="read_file")
+        forwarded = inject_context(params, context, tool_name="bash")
+        other = inject_context(params, context, tool_name="read_file")
     assert forwarded["_thread_invocation_id"] == "current"
     assert "_thread_invocation_id" not in other
     assert "_thread_invocation_id" not in params

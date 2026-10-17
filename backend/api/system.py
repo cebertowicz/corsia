@@ -20,6 +20,7 @@ from infra import state
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
+from infra.platform_paths import app_bundle_root
 from infra.settings import (
     delete_agent_default,
     get_feature_flags,
@@ -38,6 +39,15 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
+
+def _debug_version_overlay_default() -> bool:
+    """Hide the checkout build stamp in an immutable packaged app by default.
+
+    A source checkout has commits a developer can act on, while an app bundle
+    has no checkout (api/version.py likewise reports no disk head there). A
+    saved Settings > Debug value still wins; this supplies only the default.
+    """
+    return app_bundle_root() is None
 
 
 @router.get("/health")
@@ -102,7 +112,9 @@ def _features_snapshot(flags: dict | None = None) -> dict:
     """
     resolved = flags if flags is not None else get_feature_flags()
     return {
-        "debug_version_overlay": resolved.get("debug_version_overlay", True),
+        "debug_version_overlay": resolved.get(
+            "debug_version_overlay", _debug_version_overlay_default()
+        ),
         "focus_mode": resolved.get("focus_mode", True),
         # The sampler's real state, not the saved flag: a start that failed reads off.
         "cpu_profiler": cpu_sampler_running(),
@@ -283,11 +295,22 @@ _system_cache: dict = {"data": None, "ts": 0.0}
 _SYSTEM_CACHE_TTL = 5  # seconds
 
 
-@router.get("/system")
-async def system_status(user: dict = Depends(require_user)):
-    """Return cached system performance metrics and live GitHub poller state."""
+def _live_platform_status() -> dict:
+    """The non-cached poller state included in each system status response."""
     from events.connectors.github_notifications import poller_status
     from events.connectors.github_pr_quiet_watch import quiet_watch_status
+    from events.connectors.gmail_poller import poller_status as gmail_poller_status
+
+    return {
+        "github_notifications": poller_status(),
+        "gmail_poller": gmail_poller_status(),
+        "pr_quiet_watch": quiet_watch_status(),
+    }
+
+
+@router.get("/system")
+async def system_status(user: dict = Depends(require_user)):
+    """Return cached system performance metrics and live platform poller state."""
 
     now = time.monotonic()
     if (
@@ -296,8 +319,7 @@ async def system_status(user: dict = Depends(require_user)):
     ):
         return {
             **_system_cache["data"],
-            "github_notifications": poller_status(),
-            "pr_quiet_watch": quiet_watch_status(),
+            **_live_platform_status(),
             "network_setup": _network_setup(),
         }
 
@@ -358,7 +380,6 @@ async def system_status(user: dict = Depends(require_user)):
     _system_cache["ts"] = time.monotonic()
     return {
         **result,
-        "github_notifications": poller_status(),
-        "pr_quiet_watch": quiet_watch_status(),
+        **_live_platform_status(),
         "network_setup": _network_setup(),
     }

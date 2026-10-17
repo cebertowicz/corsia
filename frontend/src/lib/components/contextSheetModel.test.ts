@@ -437,7 +437,7 @@ describe('contextSheetSnapshotModel', () => {
 				id: 'usage:conversation-history',
 				category: 'History',
 				label: 'Conversation history',
-				countLabel: '23 Messages',
+				countLabel: '23 messages',
 				tokenLabel: '23k tokens',
 			}),
 			expect.objectContaining({
@@ -1206,6 +1206,57 @@ describe('held-by-the-harness row', () => {
 				tokenCount: -5_000,
 			}),
 		]));
+	});
+
+	it('breaks connected-app tool costs into sorted action rows that reconcile', () => {
+		const model = contextSheetSnapshotModel({
+			model_context_window: 1000, system_tokens: 0, tool_def_tokens: 100,
+			history_tokens: 0, user_tokens: 0, total_used: 100, utilization: 0.1,
+			was_trimmed: false, history_messages: 0,
+			context_snapshot: { source_inventory: [
+				{ source_id: 'native:tool-index:github', origin_section: 'tools', label: 'github', inclusion: 'included', prompt_tokens: 30, metadata: { provider: 'mcp_index', server_name: 'github', display_name: 'GitHub', tool_count: 46 } },
+				{ source_id: 'native:tool-index:linear', origin_section: 'tools', label: 'linear', inclusion: 'included', prompt_tokens: 10, metadata: { provider: 'mcp_index', server_name: 'linear', display_name: 'Linear', tool_count: 4 } },
+				{ source_id: 'native:tool-definitions', origin_section: 'tools', label: 'CORSIA tools', inclusion: 'included', prompt_tokens: 60, metadata: { provider: 'corsia_tools' } },
+			] },
+		});
+		const tools = model?.sourceGroups.find((group) => group.id === 'tools');
+		expect(tools?.sources.map((row) => row.label)).toEqual(['GitHub', 'Linear', 'CORSIA tools']);
+		expect(tools?.sources.map((row) => row.countLabel)).toEqual(['46 actions', '4 actions', '']);
+		expect(tools?.tokenCount).toBe(100);
+	});
+
+	it('carves looked-up app definitions out of History without moving any total', () => {
+		const usage = {
+			model_context_window: 10000, system_tokens: 0, tool_def_tokens: 0,
+			history_tokens: 1000, user_tokens: 50, total_used: 1050, utilization: 0.105,
+			was_trimmed: false, history_messages: 6, context_snapshot: { source_inventory: [] },
+			loaded_tool_tokens: [
+				{ server: 'github', display_name: 'GitHub', tokens: 400 },
+				{ server: 'linear', display_name: 'Linear', tokens: 150 },
+			],
+		};
+		const model = contextSheetSnapshotModel(usage);
+		const history = model?.sourceGroups.find((group) => group.id === 'history');
+		const rows = Object.fromEntries((history?.sources ?? []).map((row) => [row.label, row.tokenCount]));
+		expect(rows).toMatchObject({
+			'Conversation history': 450, 'GitHub, looked up (estimated)': 400, 'Linear, looked up (estimated)': 150, 'Current message': 50,
+		});
+		expect(history?.tokenCount).toBe(1050);
+		expect(usage.total_used).toBe(1050);
+		const looked = (history?.sources ?? []).filter((row) => row.label.includes('looked up'));
+		expect(looked.map((row) => row.id)).toEqual(['usage:loaded-tool:github', 'usage:loaded-tool:linear']);
+		expect(looked.every((row) => row.statusClass === 'included' && row.countLabel === '')).toBe(true);
+	});
+
+	it('shows History unchanged when nothing was looked up', () => {
+		const model = contextSheetSnapshotModel({
+			model_context_window: 10000, system_tokens: 0, tool_def_tokens: 0,
+			history_tokens: 1000, user_tokens: 0, total_used: 1000, utilization: 0.1,
+			was_trimmed: false, history_messages: 6, context_snapshot: { source_inventory: [] },
+		});
+		const history = model?.sourceGroups.find((group) => group.id === 'history');
+		expect(history?.sources.map((row) => row.label)).toEqual(['Conversation history']);
+		expect(history?.tokenCount).toBe(1000);
 	});
 
 });

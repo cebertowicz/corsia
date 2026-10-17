@@ -382,3 +382,68 @@ def test_unavailable_usage_and_boundary_usage_keep_runtime_ctx_shape():
         "content_hash": "c" * 64,
         "total_used": 10,
     }
+
+
+LOOKED_UP = [
+    {"server": "github", "display_name": "GitHub", "tokens": 1_200},
+    {"server": "linear", "display_name": "Linear", "tokens": 300},
+]
+
+
+def test_receipt_and_live_payload_carry_the_looked_up_rows_as_a_structured_field():
+    from infra.context_receipts import (
+        ContextReceiptIdentity,
+        context_usage_receipt,
+        live_context_usage_payload,
+    )
+
+    usage = {**_measured_usage(), "loaded_tool_tokens": LOOKED_UP}
+
+    receipt = context_usage_receipt(usage, ContextReceiptIdentity("native", "test/model", 1))
+
+    assert receipt["loaded_tool_tokens"] == LOOKED_UP
+    assert live_context_usage_payload(usage)["loaded_tool_tokens"] == LOOKED_UP
+    assert json.loads(json.dumps(receipt))["loaded_tool_tokens"] == LOOKED_UP
+
+
+def test_receipt_keeps_only_well_formed_looked_up_rows():
+    from infra.context_receipts import context_usage_summary
+
+    usage = {**_measured_usage(), "loaded_tool_tokens": [
+        {"server": "github", "tokens": 5},
+        {"server": "", "tokens": 5},
+        {"server": "bad", "tokens": 0},
+        {"server": "bool", "tokens": True},
+        {"server": "text", "tokens": "7"},
+        {"server": "extra", "display_name": "Extra", "tokens": 9, "payload": "x" * 1000},
+        "github",
+    ]}
+
+    assert context_usage_summary(usage)["loaded_tool_tokens"] == [
+        {"server": "github", "display_name": "github", "tokens": 5},
+        {"server": "extra", "display_name": "Extra", "tokens": 9},
+    ]
+    assert context_usage_summary({**usage, "loaded_tool_tokens": "nope"})["loaded_tool_tokens"] == []
+    assert "loaded_tool_tokens" not in context_usage_summary(_measured_usage())
+
+
+def test_a_stored_receipt_reads_back_with_its_looked_up_rows():
+    from infra.context_receipts import ContextReceiptIdentity, attach_context_receipt
+
+    connection = _connection()
+    connection.execute(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+        "VALUES ('assistant-1','thread-1','assistant','answer',?,'now',1)",
+        (json.dumps({"turn_id": "turn-1"}),),
+    )
+
+    attach_context_receipt(
+        "thread-1", "assistant-1",
+        context_usage={**_measured_usage(), "loaded_tool_tokens": LOOKED_UP},
+        identity=ContextReceiptIdentity("native", "test/model", 1), db=connection,
+    )
+
+    stored = json.loads(
+        connection.execute("SELECT metadata FROM messages WHERE id='assistant-1'").fetchone()["metadata"]
+    )
+    assert stored["context_usage"]["loaded_tool_tokens"] == LOOKED_UP

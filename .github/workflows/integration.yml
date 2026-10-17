@@ -75,6 +75,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install uvx for MCP launch proof
+        run: |
+          python -m pip install uv==0.13.1
+          uvx --version
+
       - name: Install Safehouse
         run: scripts/install-ci-safehouse
 

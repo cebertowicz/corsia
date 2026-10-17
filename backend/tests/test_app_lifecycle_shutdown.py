@@ -79,7 +79,7 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(network_discovery, "get_servers", lambda: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
     monkeypatch.setattr(harness_models, "_REFRESH_TASKS", {})
-    monkeypatch.setattr(mcp_runtime, "_stack", None)
+    monkeypatch.setattr(mcp_runtime, "_stack", None, raising=False)
     monkeypatch.setattr(mcp_runtime, "_stopped", False)
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())

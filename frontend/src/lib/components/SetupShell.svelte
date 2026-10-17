@@ -25,7 +25,7 @@
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
-	let primaryButton = $state<HTMLButtonElement | null>(null);
+	let primaryButton = $state<HTMLButtonElement | undefined>();
 	let primaryLabelDuration = $state(0);
 	let previousPrimaryLabel: string | undefined;
 	let flipVersion = 0;
@@ -57,7 +57,7 @@
 		if (jobs.length === 0) shownJobs = [];
 	}
 
-	function readPrimaryLabelDuration(node: HTMLElement | null) {
+	function readPrimaryLabelDuration(node: HTMLElement | undefined) {
 		return node ? Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 : 0;
 	}
 
@@ -155,6 +155,14 @@
 			css: (t: number) => `height: ${t * height}px; opacity: ${t}; overflow: hidden`,
 		};
 	}
+
+	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
+			return fade(node, { duration: tight });
+		}
+		return peerFade(node, params, options);
+	}
 </script>
 
 <div class="setup-shell">
@@ -181,7 +189,7 @@
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
 			{#key page}
-				<section class="pane-scene" data-setup-page={page} in:peerFade out:peerFade onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
 					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body">{@render children?.()}</div>
@@ -208,22 +216,6 @@
 
 <style>
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
-	/*
-	 * Setup keeps its own blue until its coherence pass (#863) moves it to the app accent. Each role has its own shade
-	 * because one hex cannot be a fill, ink on that fill, text and a hairline at AA in both themes.
-	 */
-	.setup-shell {
-		--accent-fill: #3aa9d0; --accent-on-fill: #04121a; --accent-text: #2e9cc4; --accent-line: #2e9cc4;
-		--accent-wash: color-mix(in srgb, #2e9cc4 10%, transparent);
-		--accent: #2e9cc4; --accent-hover: #3aa9d0;
-	}
-	:global([data-theme='light']) .setup-shell {
-		--accent-fill: #00769e; --accent-on-fill: #ffffff; --accent-text: #006d92; --accent-line: #00769e;
-		--accent-wash: color-mix(in srgb, #00769e 10%, transparent);
-		--accent: #00769e; --accent-hover: #006d92;
-	}
-	/* An on toggle is a fill: its track, border and focus ring all take the fill shade. */
-	.setup-shell :global(.tg) { --accent: var(--accent-fill); --accent-hover: var(--accent-fill); }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }

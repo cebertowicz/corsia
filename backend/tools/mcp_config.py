@@ -60,7 +60,7 @@ class BearerFileAuth(httpx.Auth):
         return value
 
 
-_active_auth: ContextVar[BearerFileAuth | None] = ContextVar("mcp_auth", default=None)
+_active_auth: ContextVar[httpx.Auth | None] = ContextVar("mcp_auth", default=None)
 
 
 class _TransportLogFilter(logging.Filter):
@@ -78,12 +78,21 @@ class _TransportLogFilter(logging.Filter):
 _log_filter = _TransportLogFilter()
 
 
-def protect_transport_logs(auth: BearerFileAuth | None) -> None:
+def protect_transport_logs(auth: BearerFileAuth | httpx.Auth | None) -> None:
     """Redact SDK logs in this connection task and its inherited SDK tasks."""
     _active_auth.set(auth)
     for name in list(logging.Logger.manager.loggerDict):
         if name.startswith(("mcp.", "httpcore.", "httpx")):
             logging.getLogger(name).addFilter(_log_filter)
+
+
+def url_origin(url: str) -> tuple[str, str, int] | None:
+    """``url``'s scheme, host and port, defaults filled in; None without a scheme or host. Every MCP origin check uses it."""
+    parsed = urlsplit(url)
+    if not parsed.scheme or not parsed.hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    return (scheme, parsed.hostname.lower(), parsed.port or (443 if scheme == "https" else 80))
 
 
 def timeout_seconds(config: dict, field: str, default: float) -> float:
@@ -132,9 +141,9 @@ def http_options(config: dict) -> tuple[dict, BearerFileAuth | None]:
         raise MCPConfigError("headers must be an object of non-secret string values")
     if (any(key.lower() in {"authorization", "proxy-authorization", "cookie"} for key in headers)
             or sanitize_credential_data(headers) != headers):
-        raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
+        raise MCPConfigError("literal credential headers are refused; store credential headers as app keys")
     auth = BearerFileAuth(config["bearer_file"]) if config.get("bearer_file") else None
-    return {"auth": auth, "headers": headers, "follow_redirects": not bool(auth),
+    return {"auth": auth, "headers": headers, "follow_redirects": False,
             "timeout": httpx.Timeout(10, read=timeout_seconds(config, "tool_timeout", 30))}, auth
 
 
@@ -146,7 +155,7 @@ def safe_error(error: BaseException) -> str:
         return str(error)
     if isinstance(error, httpx.HTTPStatusError):
         if error.response.status_code == 401:
-            return "HTTP 401: authentication rejected; check the server's bearer_file"
+            return "HTTP 401: authentication rejected; check the app key"
         return f"HTTP {error.response.status_code}: server rejected the request"
     if isinstance(error, (TimeoutError, httpx.TimeoutException)):
         return "request timed out; check server availability"

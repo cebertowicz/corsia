@@ -35,6 +35,7 @@ from tools.sandbox_config import (
     registered_repo_for_path,
     repo_worktree_root,
 )
+from tools.sandbox_git import sandbox_literal
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
 from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, shell_env_pass_names
@@ -590,7 +591,7 @@ def _validate_worktree_target(target: str, cwd: str) -> str | None:
 
 
 def _sandbox_path(path: Path) -> str:
-    return str(path.resolve(strict=False)).replace("\\", "\\\\").replace('"', '\\"')
+    return sandbox_literal(path.resolve(strict=False))
 
 
 def _direct_git_command(
@@ -707,10 +708,9 @@ def pinned_repo_sandbox_profile(
             or not policy.source_binding_valid
         ):
             rules.append(f'(deny file-write* (subpath "{_sandbox_path(repo)}"))')
-            for worktree in worktrees:
+            for worktree in worktrees:  # resolved roots proved by this request's listing
                 rules.append(
-                    f'(allow file-read* file-write* (subpath '
-                    f'"{_sandbox_path(worktree)}"))'
+                    f'(allow file-read* file-write* (subpath "{sandbox_literal(worktree)}"))'
                 )
     controlled_identity_write: set[Path] = set()
     worktree_control_repo: Path | None = None
@@ -808,8 +808,8 @@ def pinned_repo_sandbox_profile(
         if repo != worktree_control_repo:
             rules.extend(
                 f'(deny file-write* '
-                f'(literal "{_sandbox_path(worktree / ".git")}"))'
-                for worktree in verified_worktrees_by_repo.get(repo, ())
+                f'(literal "{sandbox_literal(worktree / ".git")}"))'
+                for worktree in verified_worktrees_by_repo.get(repo, ())  # .git proved a plain file
             )
     for unsupported in list_unsupported_pinned_repos(policies):
         rules.extend(
@@ -988,7 +988,6 @@ def safehouse_argv(
     leased: bool = False,
     external_agent: bool = False,
     agent_account: AgentAccountView | None = None,
-    gws_home: Path | None = None,
     thread_id: str | None = None,
     policies: list[RepoPolicy] | None = None,
 ) -> list[str]:
@@ -1006,7 +1005,7 @@ def safehouse_argv(
         # untrusted below, so that file is not live lease authority.
         argv.append("--allow-workdir-config-writes")
     else:
-        if rw := ":".join(map(str, _canonical_paths([*get_sandbox_add_dirs_rw(thread_id, policies=policies), *([gws_home] if gws_home else [])]))):
+        if rw := ":".join(map(str, _canonical_paths(get_sandbox_add_dirs_rw(thread_id, policies=policies)))):
             argv.append(f"--add-dirs={rw}")
         read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account)]
         if ro := ":".join(map(str, _canonical_paths(read_only))):

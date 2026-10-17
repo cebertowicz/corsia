@@ -643,7 +643,12 @@ Two compensating patterns:
 1. **Body pinned to `--bg-primary` on mobile** (`app.css:218–220`). The
    transparent-body trick that lets desktop vibrancy through becomes a
    non-matching color behind the iOS status bar; pinning to primary keeps
-   the status-bar bg (driven by theme-color meta) seamless.
+   the status-bar bg (driven by theme-color meta) seamless. The installed
+   iOS app uses `apple-mobile-web-app-status-bar-style=default`, so the
+   system draws the status bar above the page and the page starts below
+   it; in that standalone mode `100vh` is the full screen height while
+   the layout viewport is shorter, so the shell sizes to `100dvh` under
+   `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
 2. **3-stop linear gradient on glass headers** (ChatHeader, AppShellBar
    on mobile):
    ```css
