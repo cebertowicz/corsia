@@ -18,7 +18,7 @@
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
-	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
 	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
@@ -123,7 +123,7 @@
 		});
 	});
 	let docRoot = $state<HTMLElement>();
-	const commentUI = createCommentSurfaceState(() => docRoot?.querySelector<HTMLElement>('.cm-content')?.focus(), () => targetKey);
+	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	function setCommentScrollTarget(id: string, focus: boolean, origin: ScrollOrigin) {
