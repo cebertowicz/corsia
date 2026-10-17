@@ -3,9 +3,10 @@
 A block filed under any other key is not read, so it must fail validation loudly
 rather than validate cleanly while its handler and workflow silently disappear.
 
-Every place a skill author copies the block from must file it under the same key,
-including the YAML example inside a skill body (skill-creator's template), so the last
-test scans every column-0 block opener in every tracked SKILL.md, not only frontmatter.
+Every place a skill author copies CORSIA data from must use a form the reader reads.
+Tracked skills now keep it in a ``corsia.yaml`` sidecar, so the last test validates
+every tracked sidecar with its SKILL.md, and still fails any column-0 block opener left
+in a tracked SKILL.md (frontmatter or a body example) under a key other than ``corsia:``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from core.skill_validation import validate_skill_text
+from core.skill_sidecar import SIDECAR_FILE
+from core.skill_validation import validate_skill_file, validate_skill_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 KEY = "corsia"
@@ -67,25 +69,32 @@ def test_another_tools_metadata_is_left_alone_even_under_the_same_field_names() 
     assert result.ok is True, result.errors
 
 
-def test_every_skill_file_files_its_block_under_the_key_the_reader_reads() -> None:
-    tracked = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "ls-files", "-z", "*SKILL.md"],
+def _tracked(pattern: str) -> list[str]:
+    out = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z", pattern],
         capture_output=True, check=True,
-    ).stdout.decode("utf-8").split("\0")
+    ).stdout.decode("utf-8")
+    return [rel for rel in out.split("\0") if rel and (REPO_ROOT / rel).is_file()]
+
+
+def test_every_skill_file_files_its_data_where_the_reader_reads_it() -> None:
+    sidecars = _tracked(f"*/{SIDECAR_FILE}")
+    assert sidecars, f"no tracked {SIDECAR_FILE} found at all: the check would prove nothing"
+    invalid = [
+        f"{rel}: {result.errors}"
+        for rel in sidecars
+        if not (result := validate_skill_file((REPO_ROOT / rel).parent / "SKILL.md")).ok
+    ]
+    assert not invalid, "tracked sidecars that fail validation:\n  " + "\n  ".join(invalid)
+
     opener = re.compile(r"^([\"']?)([^\s:#\"']+)\1:[ \t]*(?:#.*)?\n[ \t]+(?:handler|workflow):", re.MULTILINE)
-    block_lines = 0
     misfiled: list[str] = []
-    for rel in filter(None, tracked):
-        path = REPO_ROOT / rel
-        if not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8")
+    for rel in _tracked("*SKILL.md"):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         for match in opener.finditer(text):
-            block_lines += 1
             if match.group(2) != KEY:
                 number = text.count("\n", 0, match.start()) + 1
                 misfiled.append(f"{rel}:{number}: {match.group(2)}:")
-    assert block_lines, "no SKILL.md block opener found at all: the check would prove nothing"
     assert not misfiled, (
         f"{len(misfiled)} SKILL.md block(s) are filed under a key other than '{KEY}:', so a "
         "skill written from them fails validation:\n  " + "\n  ".join(misfiled)

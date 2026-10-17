@@ -1,9 +1,6 @@
 ---
 name: agent-team-decomposition
 description: Use when designing or revising an agent roster, deciding whether work belongs inline, in a thread, with a persistent owner, or in a temporary subagent, splitting or merging persistent responsibilities, naming roles, briefing or spawning subagents, or assigning one accountable owner across domains.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Agent team decomposition
