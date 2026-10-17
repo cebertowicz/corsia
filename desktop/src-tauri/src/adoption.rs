@@ -7,7 +7,7 @@
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     thread,
@@ -30,7 +30,6 @@ pub struct SourceInstall {
     pub python: PathBuf,
     pub env_file: PathBuf,
     pub plist_provider_key_names: Vec<String>,
-    pub legacy_v1: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,7 +102,6 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
         lifecycle_script: source_root.join("scripts/corsia"),
         python,
         env_file: home.join(".corsia/.env"),
-        legacy_v1: state == workspace.join(".corsia"),
         plist_provider_key_names: environment
             .keys()
             .filter(|name| is_provider_key_name(name))
@@ -702,6 +700,19 @@ pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), Adopti
     }
 }
 
+/// At launch, before first-run selection: finish an interrupted adoption's undo.
+/// `Ok(Some(error))` is an undo that could not finish, carrying the outcome and
+/// the recovery the person is offered; `Err` is a journal that could not be read.
+pub fn recover_on_launch<L: Lifecycle>(
+    app_dir: &Path,
+    lifecycle_for: impl FnOnce(&Plan) -> L,
+) -> Result<Option<AdoptionError>, String> {
+    let Some(interrupted) = interrupted_plan(app_dir)? else {
+        return Ok(None);
+    };
+    Ok(recover(&interrupted, &mut lifecycle_for(&interrupted)).err())
+}
+
 /// The "Start it again" action: only for a journal whose files are all where
 /// they were. Anything further along needs the whole undo, which is `recover`.
 pub fn start_again(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), AdoptionError> {
@@ -770,12 +781,15 @@ fn rollback(
     )))
 }
 
+/// The `user_version` in the database's 100-byte header. Only the header is read:
+/// the file can be gigabytes.
 fn schema_version(database: &Path) -> Option<u32> {
-    let bytes = fs::read(database).ok()?;
-    if bytes.len() < 64 || &bytes[..16] != b"SQLite format 3\0" {
+    let mut header = [0_u8; 64];
+    File::open(database).ok()?.read_exact(&mut header).ok()?;
+    if &header[..16] != b"SQLite format 3\0" {
         return None;
     }
-    Some(u32::from_be_bytes(bytes[60..64].try_into().ok()?))
+    Some(u32::from_be_bytes(header[60..64].try_into().ok()?))
 }
 
 fn io(error: std::io::Error) -> String {
@@ -1002,7 +1016,6 @@ mod tests {
                     python: PathBuf::from("/usr/bin/python3"),
                     env_file,
                     plist_provider_key_names: vec![],
-                    legacy_v1,
                 },
                 app_dir,
             },
@@ -1113,6 +1126,91 @@ mod tests {
             interrupted_plan(&plan.app_dir).unwrap().is_none(),
             "a finished undo leaves no journal to repeat"
         );
+    }
+
+    #[test]
+    fn a_failed_undo_at_launch_reaches_the_person_with_its_outcome_and_recovery() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
+        write_journal(
+            &plan,
+            Step::ServiceWritten,
+            Some(&plan.source.state.join("backups/fake-adoption")),
+        )
+        .unwrap();
+        // The old install's files are back but it will not start: the cause picks the button.
+        let fake = fake(Some("start_old"));
+        let failure = recover_on_launch(&plan.app_dir, move |_| fake)
+            .unwrap()
+            .expect("the undo could not finish");
+        assert_eq!(failure.outcome, Outcome::Unconfirmed);
+        assert_eq!(failure.recovery, Some(Recovery::StartAgain));
+        assert!(failure
+            .message
+            .contains("old install could not be restored"));
+        assert!(
+            interrupted_plan(&plan.app_dir).unwrap().is_some(),
+            "a failed undo keeps its journal for the recovery to finish"
+        );
+    }
+
+    #[test]
+    fn a_failed_undo_that_left_files_part_way_offers_a_reopen() {
+        let (_home, plan) = plan(false);
+        fs::create_dir_all(plan.adopted_dir()).unwrap();
+        move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)).unwrap();
+        write_journal(
+            &plan,
+            Step::ServiceWritten,
+            Some(&plan.source.state.join("backups/fake-adoption")),
+        )
+        .unwrap();
+        let fake = fake(Some("stop_new"));
+        let failure = recover_on_launch(&plan.app_dir, move |_| fake)
+            .unwrap()
+            .expect("the undo could not finish");
+        assert_eq!(failure.outcome, Outcome::Unconfirmed);
+        assert_eq!(failure.recovery, Some(Recovery::Reopen));
+    }
+
+    #[test]
+    fn launch_without_an_interrupted_adoption_has_nothing_to_undo() {
+        let (_home, plan) = plan(false);
+        let untouched = recover_on_launch(&plan.app_dir, |_| -> Fake { panic!("nothing to undo") });
+        assert_eq!(untouched, Ok(None));
+    }
+
+    #[test]
+    fn the_schema_version_comes_from_the_header_alone() {
+        let dir = tempfile::Builder::new()
+            .prefix("corsia-schema-")
+            .tempdir_in("/private/tmp")
+            .unwrap();
+        let header = |version: u32| {
+            let mut bytes = vec![0_u8; 100];
+            bytes[..16].copy_from_slice(b"SQLite format 3\0");
+            bytes[60..64].copy_from_slice(&version.to_be_bytes());
+            bytes
+        };
+        let database = dir.path().join("corsia.db");
+        fs::write(&database, header(7)).unwrap();
+        assert_eq!(schema_version(&database), Some(7));
+        // A multi-gigabyte database is not loaded to read four bytes: the file here is sparse.
+        let big = File::options().append(true).open(&database).unwrap();
+        big.set_len(2 * 1024 * 1024 * 1024).unwrap();
+        assert_eq!(schema_version(&database), Some(7));
+        let other = dir.path().join("other.db");
+        fs::write(
+            &other,
+            b"not a database, but longer than the header it would need to be",
+        )
+        .unwrap();
+        assert_eq!(schema_version(&other), None);
+        let short = dir.path().join("short.db");
+        fs::write(&short, b"SQLite format 3\0").unwrap();
+        assert_eq!(schema_version(&short), None);
+        assert_eq!(schema_version(&dir.path().join("missing.db")), None);
     }
 
     #[test]

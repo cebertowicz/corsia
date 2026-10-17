@@ -95,6 +95,8 @@ enum ServiceStartup {
     Ready { url: String },
     RequiresApproval,
     ExistingInstall { install_dir: String, workspace: String },
+    /// An earlier adoption's undo could not finish; the window offers the recovery the backend chose.
+    AdoptionFailed { failure: adoption::AdoptionError },
 }
 
 /// Drag-region handler injected into every page (including external URLs
@@ -595,11 +597,12 @@ fn start_service(
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
     let app_dir = default_app_dir(app)?;
-    if let Some(interrupted) = adoption::interrupted_plan(&app_dir)? {
-        let mut lifecycle = SourceLifecycle { source: interrupted.source.clone(), token: None, waiting: None };
-        // The undo finishes before anything else, then launch goes on as if
-        // nothing had been tried: the restored install is offered for adoption again.
-        adoption::recover(&interrupted, &mut lifecycle).map_err(|error| error.message)?;
+    // The undo finishes before anything else, then launch goes on as if
+    // nothing had been tried: the restored install is offered for adoption again.
+    let make_lifecycle = |plan: &adoption::Plan| SourceLifecycle { source: plan.source.clone(), token: None, waiting: None };
+    if let Some(failure) = adoption::recover_on_launch(&app_dir, make_lifecycle)? {
+        log::error!("interrupted adoption could not be undone: {}", failure.message);
+        return Ok(ServiceStartup::AdoptionFailed { failure });
     }
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
@@ -1142,6 +1145,12 @@ pub fn run() {
                             let _ = window.eval(format!("window.__corsiaShowExistingInstall?.({install_dir}, {workspace});"));
                         }
                     }
+                    Ok(ServiceStartup::AdoptionFailed { failure }) => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let failure = serde_json::to_string(&failure).unwrap_or_default();
+                            let _ = window.eval(format!("window.__corsiaShowAdoptionFailure?.({failure});"));
+                        }
+                    }
                     Err(error) => {
                         log::error!("bundled CORSIA service did not start: {error}");
                         if let Some(window) = app_handle.get_webview_window("main") {
@@ -1432,7 +1441,6 @@ mod tests {
                 python: nowhere.join("python"),
                 env_file: nowhere.join(".env"),
                 plist_provider_key_names: vec![],
-                legacy_v1: false,
             },
             waiting: None,
             token: Some("service-credential".into()),

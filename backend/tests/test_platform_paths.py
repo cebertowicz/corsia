@@ -7,6 +7,7 @@ import sqlite3
 import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -214,6 +215,17 @@ def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_p
         message,
     )
     assert not (state / "backups").exists()
+
+
+def test_adoption_preflight_refuses_when_only_prunable_backups_make_room(tmp_path, monkeypatch, capsys):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    # Room is claimed, but only by superseded backups that are pruned after the snapshot is written.
+    monkeypatch.setattr(snapshots, "backup_room", lambda database: (0, 1 << 60))
+    monkeypatch.setattr(snapshots.shutil, "disk_usage", lambda path: SimpleNamespace(free=0))
+
+    assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
+    assert "Free up space" in capsys.readouterr().err
 
 
 def test_adoption_preflight_asks_the_migration_backup_room_for_its_own_database(tmp_path, monkeypatch):

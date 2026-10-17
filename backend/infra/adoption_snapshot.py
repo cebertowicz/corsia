@@ -86,7 +86,9 @@ def check_adoption_preflight(state_root: Path, variables: list[str]) -> None:
     # backup then needs the shared room calculation on top, so both must fit
     # before the old service is stopped.
     required, available = backup_room(state_root / "corsia.db")
-    if available < needed + required:
+    # ``available`` counts old pre-migration backups the migration prunes later, so
+    # the snapshot itself must also fit in what is free now.
+    if available < needed + required or shutil.disk_usage(state_root).free < needed:
         raise AdoptionRefused(
             f"The backup needs {(needed + required) / 1e9:.1f} GB free and this disk has "
             f"{available / 1e9:.1f} GB. Free up space, then choose Try again."

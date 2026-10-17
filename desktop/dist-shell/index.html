@@ -428,6 +428,8 @@
 						continueToService(startup);
 					} else if (startup.state === 'existing_install') {
 						showExistingInstall(startup.install_dir, startup.workspace);
+					} else if (startup.state === 'adoption_failed') {
+						await showAdoptionFailure(startup.failure);
 					} else {
 						await showBackgroundApproval();
 					}
@@ -480,6 +482,7 @@
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
 			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
 			window.__corsiaShowExistingInstall = showExistingInstall;
+			window.__corsiaShowAdoptionFailure = showAdoptionFailure;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			quit.addEventListener('click', () => window.__TAURI__?.window?.getCurrentWindow?.().close());

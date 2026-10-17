@@ -186,6 +186,36 @@ for (const theme of ['light', 'dark']) {
 		}
 		await page.close();
 	}
+	// A failed undo found at launch is shown the same way, from the cause the backend chose, and
+	// Try again after a settled one asks the service to start and can find it again.
+	for (const { name, failure, expected } of [
+		{ name: 'launch-undo-start-again', failure: unconfirmed(holdText, 'start_again'), expected: { title, line: startAgainLine, note: reboot, details: holdText, button: 'Start it again' } },
+		{ name: 'launch-undo-reopen', failure: unconfirmed(stalledText, 'reopen'), expected: { title, line: reopenLine, note: null, details: stalledText, button: 'Reopen CORSIA' } },
+	]) {
+		const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: theme });
+		await page.addInitScript((scripted) => {
+			window.__calls = [];
+			window.__TAURI__ = { core: { invoke: async (command) => {
+				window.__calls.push(command);
+				if (command === 'get_service_log_path') return '/x/service.log';
+				if (command === 'start_local_service') return { state: 'adoption_failed', failure: scripted };
+				return undefined;
+			} } };
+		}, failure);
+		await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
+		const before = failed;
+		await page.evaluate((shown) => window.__corsiaShowAdoptionFailure(shown), failure);
+		compare(`${theme} ${name} at launch`, await read(page), expected);
+		if (name === 'launch-undo-reopen') {
+			// Try again after a settled failure starts the service, which finds the failed undo again.
+			await page.evaluate((shown) => window.__corsiaShowAdoptionFailure({ ...shown, outcome: 'restored', recovery: null }), failure);
+			await page.click('#retry');
+			await page.waitForFunction((text) => document.getElementById('retry').textContent === text, 'Reopen CORSIA');
+			compare(`${theme} ${name} after Try again`, await read(page), expected);
+		}
+		if (failed === before) console.log(`ok   ${theme} ${name}`);
+		await page.close();
+	}
 	for (const { name, failure, script, calls, after, hash } of actions) {
 		const page = await open(theme, failure, script);
 		const before = failed;
