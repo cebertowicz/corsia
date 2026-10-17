@@ -8,7 +8,7 @@ socket or block a message.
 
 Frames::
 
-    {"type": "presence", "surface": "chat", "thread_id": "…", "state": "foreground"}
+    {"type": "presence", "surface": "chat", "thread_id": "…", "state": "foreground", "focused": true}
     {"type": "presence", "surface": "chat", "thread_id": "…", "state": "background",
      "reason": "hidden"}        # reason optional; "hidden" starts the 30 s grace
     {"type": "presence", "surface": "chat", "thread_id": "…", "state": "idle",
@@ -108,8 +108,11 @@ async def handle_presence(ws: WebSocket, user: dict, data: dict, *, owned_thread
                     "message": "not_authorized_for_session",
                 })
                 return
-            await _apply(presence.claim, user_id=user["id"], surface=surface,
-                         thread_id=thread_id, session=session_id(ws))
+            await _apply(
+                presence.claim, user_id=user["id"], surface=surface,
+                thread_id=thread_id, session=session_id(ws),
+                focused=data.get("focused") if isinstance(data.get("focused"), bool) else None,
+            )
             return
         parsed = _parse_release(data)
         if parsed is None:

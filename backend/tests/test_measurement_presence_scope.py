@@ -87,6 +87,41 @@ async def _hours(measurement_series, *, project: str = "all", agent: str | None 
         db.close()
 
 
+def _seed_focus(db, thread_id: str, *, session: str, began: str, ended: str | None) -> None:
+    db.execute(
+        "INSERT OR IGNORE INTO measurement_focus_users (user_id,focused_since) VALUES ('steve',?)",
+        (began,),
+    )
+    db.execute(
+        "INSERT INTO measurement_focus_intervals "
+        "(user_id,surface,thread_id,session_id,focused_at,blurred_at) VALUES "
+        "('steve','chat',?,?,?,?)",
+        (thread_id, session, began, ended),
+    )
+
+
+@pytest.mark.asyncio
+async def test_focus_intervals_end_on_blur_and_union_across_windows(isolated_db):
+    """Measurement excludes the shared visit after focus-aware reporting starts."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        _seed_visit(db, "shared-presence", thread_id="agent-a")
+        _seed_focus(db, "agent-a", session="desktop", began="2026-09-21T12:00:00Z", ended="2026-09-21T12:10:00Z")
+        _seed_focus(db, "agent-a", session="phone", began="2026-09-21T12:05:00Z", ended="2026-09-21T12:15:00Z")
+        _seed_focus(db, "agent-a", session="desktop", began="2026-09-21T12:20:00Z", ended="2026-09-21T12:30:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    # 12:00–12:15 counts once across devices; blur then refocus creates 12:20–12:30.
+    assert await _hours(measurement_series, project="one") == pytest.approx(25 / 60)
+
+
 @pytest.mark.asyncio
 async def test_project_only_scope_keeps_project_level_presence(isolated_db):
     """The baseline a project-only query must keep: its own closure plus project-level visits."""
