@@ -90,7 +90,7 @@ fn is_corsia_label(label: &str) -> bool {
     label.starts_with("com.corsia.") || label.starts_with("ai.corsia.")
 }
 
-fn service_label() -> &'static str {
+pub(crate) fn service_label() -> &'static str {
     PLIST_NAME
         .strip_suffix(".plist")
         .expect("service plist name has its required suffix")
