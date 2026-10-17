@@ -1,4 +1,4 @@
-import { rangeFor, type DocComment } from '$lib/stores/docComments';
+import { hasNewReplies, rangeFor, type DocComment } from '$lib/stores/docComments';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -52,7 +52,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: comment.replyWaiting, onMarkerFocus, suggestion }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasNewReplies(comment), onMarkerFocus, suggestion }];
 	});
 }
 
