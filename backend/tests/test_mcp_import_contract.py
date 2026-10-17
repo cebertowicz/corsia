@@ -119,7 +119,7 @@ def test_trailing_claude_project_folder_import_stays_in_its_project(tmp_path: Pa
 
 def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
     assert mcp_import.IMPORT_NONE_FOUND == (
-        "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
+        "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent."
     )
     assert mcp_import.IMPORT_UNSUPPORTED == "CORSIA can't connect to that kind of app yet."
     assert mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE == (
