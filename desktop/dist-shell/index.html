@@ -204,8 +204,14 @@
 				backingUpTitle: 'Backing up your data…',
 
 				failureTitle: 'CORSIA couldn’t switch over',
-				// Before the old service is stopped nothing has changed, so "running again" would be false.
-				failureLine: (reason, nothingChanged) => `${nothingChanged ? 'Nothing was changed. Your existing CORSIA is still running.' : 'Your existing CORSIA is running again, as it was.'} ${reason}`,
+				// Three outcomes, from the backend rather than the reason text: never stopped, stopped
+				// and restored, or not known to be running (also what a plain string means).
+				failureLead: {
+					untouched: 'Nothing was changed. Your existing CORSIA is still running.',
+					restored: 'Your existing CORSIA is running again, as it was.',
+					unconfirmed: 'We couldn’t confirm your existing CORSIA is running.',
+				},
+				failureLine: (reason, outcome) => `${ADOPTION_COPY.failureLead[outcome] ?? ADOPTION_COPY.failureLead.unconfirmed} ${reason}`,
 			};
 			let quitFailure = false;
 			let adoptionPrompt = false;
@@ -242,15 +248,15 @@
 				retry.focus();
 			}
 
-			// `failure` is the backend's { message, nothingChanged }; a plain string means it had stopped.
+			// `failure` is the backend's { message, outcome }; a plain string claims nothing.
 			async function showAdoptionFailure(failure) {
 				const reason = typeof failure === 'string' ? failure : failure?.message;
-				const nothingChanged = typeof failure === 'object' && failure?.nothingChanged === true;
+				const outcome = typeof failure === 'object' ? failure?.outcome : undefined;
 				quitFailure = false;
 				adoptionPrompt = false;
 				backgroundApproval.hidden = true;
 				status.textContent = ADOPTION_COPY.failureTitle;
-				line.textContent = ADOPTION_COPY.failureLine(typeof reason === 'string' ? reason : 'CORSIA couldn’t switch over.', nothingChanged);
+				line.textContent = ADOPTION_COPY.failureLine(typeof reason === 'string' ? reason : 'CORSIA couldn’t switch over.', outcome);
 				line.hidden = false;
 				log.hidden = false;
 				spinner.hidden = true;

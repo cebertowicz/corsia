@@ -147,9 +147,11 @@ pub trait Lifecycle {
     /// provider key is stored (names compared, nothing else read) and the disk
     /// holds the backup plus a reserve. Runs before anything is drained.
     fn check_ready(&mut self, state: &Path, key_names: &BTreeSet<String>) -> Result<(), String>;
-    /// Start an exact authenticated drain operation. It has not released the
+    /// The id the drain will carry, so a failed start can still cancel it.
+    fn new_operation_id(&mut self) -> String;
+    /// Start the drain operation with that id. It has not released the
     /// source service yet; the caller owns polling and cancellation.
-    fn begin_drain(&mut self) -> Result<DrainStatus, String>;
+    fn begin_drain(&mut self, operation_id: &str) -> Result<DrainStatus, String>;
     /// Return the live count for the same operation, never a projection of a
     /// replacement operation.
     fn drain_status(&mut self, operation_id: &str) -> Result<DrainStatus, String>;
@@ -298,43 +300,74 @@ fn provider_key_names(path: &Path, plist_names: &[String]) -> Result<BTreeSet<St
     Ok(names)
 }
 
-/// Why adoption stopped, and whether it had touched anything yet. The window
-/// words its first line from `nothing_changed`, never from the reason text.
+/// What state the existing install is in when adoption stops. The window words
+/// its first line from this, never from the reason text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Outcome {
+    /// It was never stopped and holds no new restart operation.
+    Untouched,
+    /// It was stopped, then started again from its own files.
+    Restored,
+    /// Not known to be running, or still holding new work.
+    Unconfirmed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct AdoptionError {
     pub message: String,
-    /// True only for a failure before the source service was stopped, when
-    /// the old install was never touched. A plain `String` error converts to
-    /// false: claiming "untouched" falsely is worse than "restored".
-    #[serde(rename = "nothingChanged")]
-    pub nothing_changed: bool,
+    pub outcome: Outcome,
 }
 
 impl AdoptionError {
-    pub fn before_stop(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            nothing_changed: true,
-        }
+    pub fn untouched(message: impl Into<String>) -> Self {
+        Self::with(message, Outcome::Untouched)
     }
 
+    pub fn restored(message: impl Into<String>) -> Self {
+        Self::with(message, Outcome::Restored)
+    }
+
+    #[cfg(test)]
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    fn with(message: impl Into<String>, outcome: Outcome) -> Self {
+        Self {
+            message: message.into(),
+            outcome,
+        }
+    }
 }
 
+/// A plain error claims nothing: the window says it could not confirm the old
+/// install, the one reading that is never false.
 impl From<String> for AdoptionError {
     fn from(message: String) -> Self {
-        Self {
-            message,
-            nothing_changed: false,
-        }
+        Self::with(message, Outcome::Unconfirmed)
     }
 }
 
 impl From<&str> for AdoptionError {
     fn from(message: &str) -> Self {
         message.to_string().into()
+    }
+}
+
+/// Ends the held drain after `cause`. The old install is untouched only when
+/// the source confirms the exact operation is cancelled; its restart hold
+/// never expires, so an unconfirmed cancel may leave it holding every new turn.
+fn abandon_drain(
+    lifecycle: &mut impl Lifecycle,
+    operation_id: &str,
+    cause: String,
+) -> AdoptionError {
+    match lifecycle.cancel_drain(operation_id) {
+        Ok(()) => AdoptionError::untouched(cause),
+        Err(error) => AdoptionError::from(format!(
+            "{cause}; the hold on new work could not be released: {error}"
+        )),
     }
 }
 
@@ -346,70 +379,74 @@ pub fn adopt(
     supported_schema: u32,
     cancel_requested: &AtomicBool,
 ) -> Result<(), AdoptionError> {
-    // Everything up to the bootout leaves the old install untouched.
+    // Up to the drain, nothing has been asked of the old install.
     plan.preflight(supported_schema).map_err(|error| {
-        AdoptionError::before_stop(format!("adoption refused before changes: {error}"))
+        AdoptionError::untouched(format!("adoption refused before changes: {error}"))
     })?;
     let key_names = plan
         .expected_key_names()
-        .map_err(AdoptionError::before_stop)?;
+        .map_err(AdoptionError::untouched)?;
     // The backend's refusal is a whole sentence that tells the person what to
     // do, so it is shown as written.
     lifecycle
         .check_ready(&plan.source.state, &key_names)
-        .map_err(AdoptionError::before_stop)?;
-    let started = lifecycle
-        .begin_drain()
-        .map_err(AdoptionError::before_stop)?;
-    let operation_id = started.operation_id.clone();
+        .map_err(AdoptionError::untouched)?;
+    // From the drain request on, the source may hold new work until the exact
+    // operation is cancelled, so every failure before the bootout cancels it.
+    let operation_id = lifecycle.new_operation_id();
+    let started = match lifecycle.begin_drain(&operation_id) {
+        Ok(started) => started,
+        Err(error) => return Err(abandon_drain(lifecycle, &operation_id, error)),
+    };
     let mut status = started;
     loop {
         if cancel_requested.load(Ordering::Acquire) {
-            lifecycle
-                .cancel_drain(&operation_id)
-                .map_err(AdoptionError::before_stop)?;
-            return Err(AdoptionError::before_stop(
-                "adoption cancelled; the source service is still running",
+            return Err(abandon_drain(
+                lifecycle,
+                &operation_id,
+                "adoption cancelled; the source service is still running".into(),
             ));
         }
         if status.operation_id != operation_id || !status.active {
-            let _ = lifecycle.cancel_drain(&operation_id);
-            return Err(AdoptionError::before_stop(
-                "adoption drain changed before completion; the source service is still running",
+            return Err(abandon_drain(
+                lifecycle,
+                &operation_id,
+                "adoption drain changed before completion; the source service is still running"
+                    .into(),
             ));
         }
         if status.active_processes == 0 {
             break;
         }
         thread::sleep(Duration::from_millis(250));
-        status = lifecycle
-            .drain_status(&operation_id)
-            .map_err(AdoptionError::before_stop)?;
+        status = match lifecycle.drain_status(&operation_id) {
+            Ok(status) => status,
+            Err(error) => return Err(abandon_drain(lifecycle, &operation_id, error)),
+        };
     }
-    lifecycle
-        .complete_drain(&operation_id)
-        .map_err(AdoptionError::before_stop)?;
+    if let Err(error) = lifecycle.complete_drain(&operation_id) {
+        return Err(abandon_drain(lifecycle, &operation_id, error));
+    }
     if let Err(error) = lifecycle.bootout_old() {
         return Err(match lifecycle.start_old() {
-            Ok(()) => format!("{error}; the source service was restarted"),
-            Err(restart_error) => {
-                format!("{error}; the source service could not be restarted: {restart_error}")
-            }
-        }
-        .into());
+            Ok(()) => AdoptionError::restored(format!("{error}; the source service was restarted")),
+            Err(restart_error) => AdoptionError::from(format!(
+                "{error}; the source service could not be restarted: {restart_error}"
+            )),
+        });
     }
     write_journal(plan, Step::Stopped, None)?;
     let snapshot = match lifecycle.backup(&plan.source.state) {
         Ok(snapshot) => snapshot,
-        Err(error) => return rollback(plan, lifecycle, error, None).map_err(Into::into),
+        Err(error) => return rollback(plan, lifecycle, error, None),
     };
     write_journal(plan, Step::BackedUp, Some(&snapshot))?;
     if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
-        return rollback(plan, lifecycle, error, None).map_err(Into::into);
+        return rollback(plan, lifecycle, error, None);
     }
     if plan.source.config.exists() {
         if let Err(error) = move_to(&plan.source.config, &plan.adopted_dir().join("config.json")) {
-            return rollback(plan, lifecycle, error, None).map_err(Into::into);
+            return rollback(plan, lifecycle, error, None);
         }
     }
     if plan.source.env_file.exists() {
@@ -418,7 +455,7 @@ pub fn adopt(
             &plan.source.env_file,
             &plan.adopted_dir().join("service.env"),
         ) {
-            return rollback(plan, lifecycle, error, None).map_err(Into::into);
+            return rollback(plan, lifecycle, error, None);
         }
         if !names.is_empty() {
             log::info!("adoption skipped source .env keys: {}", names.join(", "));
@@ -426,17 +463,17 @@ pub fn adopt(
     }
     write_journal(plan, Step::MetadataMoved, Some(&snapshot))?;
     if let Err(error) = write_service(plan) {
-        return rollback(plan, lifecycle, error, None).map_err(Into::into);
+        return rollback(plan, lifecycle, error, None);
     }
     write_journal(plan, Step::ServiceWritten, Some(&snapshot))?;
     if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.port, &plan.app_dir) {
-        return rollback(plan, lifecycle, error, Some(&snapshot)).map_err(Into::into);
+        return rollback(plan, lifecycle, error, Some(&snapshot));
     }
     if let Err(error) = write_journal(plan, Step::NewStarted, Some(&snapshot)) {
-        return rollback(plan, lifecycle, error, Some(&snapshot)).map_err(Into::into);
+        return rollback(plan, lifecycle, error, Some(&snapshot));
     }
     if let Err(error) = write_journal(plan, Step::Registered, Some(&snapshot)) {
-        return rollback(plan, lifecycle, error, Some(&snapshot)).map_err(Into::into);
+        return rollback(plan, lifecycle, error, Some(&snapshot));
     }
     Ok(())
 }
@@ -505,7 +542,7 @@ pub fn recover(plan: &Plan, lifecycle: &mut impl Lifecycle) -> Result<(), String
         "recovering interrupted adoption".into(),
         snapshot,
     )
-    .map(|_| ())
+    .map_err(|error| error.message)
 }
 
 fn rollback(
@@ -513,7 +550,9 @@ fn rollback(
     lifecycle: &mut impl Lifecycle,
     cause: String,
     snapshot: Option<&Path>,
-) -> Result<(), String> {
+) -> Result<(), AdoptionError> {
+    // Any `?` below leaves the old install stopped on purpose or by failure,
+    // which converts to Outcome::Unconfirmed.
     if let Some(snapshot) = snapshot {
         lifecycle
             .stop_new(&plan.source.state, plan.source.port)
@@ -525,7 +564,9 @@ fn rollback(
     lifecycle
         .start_old()
         .map_err(|error| format!("{cause}; old install could not be restored: {error}"))?;
-    Err(format!("{cause}; the old install was restored"))
+    Err(AdoptionError::restored(format!(
+        "{cause}; the old install was restored"
+    )))
 }
 
 fn schema_version(database: &Path) -> Option<u32> {
@@ -550,10 +591,15 @@ mod tests {
         ready_asked: Vec<BTreeSet<String>>,
         events: Vec<&'static str>,
         fail: Option<&'static str>,
+        also_fail: Option<&'static str>,
         statuses: VecDeque<DrainStatus>,
         real_state: bool,
     }
     impl Fake {
+        fn fails(&self, step: &str) -> bool {
+            self.fail == Some(step) || self.also_fail == Some(step)
+        }
+
         fn status(&mut self) -> DrainStatus {
             self.statuses.pop_front().unwrap_or(DrainStatus {
                 operation_id: "a".into(),
@@ -587,20 +633,35 @@ mod tests {
                 Ok(())
             }
         }
-        fn begin_drain(&mut self) -> Result<DrainStatus, String> {
+        fn new_operation_id(&mut self) -> String {
+            "a".into()
+        }
+        fn begin_drain(&mut self, _: &str) -> Result<DrainStatus, String> {
             self.events.push("begin_drain");
+            if self.fails("begin_drain") {
+                return Err("begin failed".into());
+            }
             Ok(self.status())
         }
         fn drain_status(&mut self, _: &str) -> Result<DrainStatus, String> {
             self.events.push("drain_status");
+            if self.fails("drain_status") {
+                return Err("status failed".into());
+            }
             Ok(self.status())
         }
         fn cancel_drain(&mut self, _: &str) -> Result<(), String> {
             self.events.push("cancel_drain");
+            if self.fails("cancel_drain") {
+                return Err("cancel failed".into());
+            }
             Ok(())
         }
         fn complete_drain(&mut self, _: &str) -> Result<(), String> {
             self.events.push("complete_drain");
+            if self.fails("complete_drain") {
+                return Err("complete failed".into());
+            }
             Ok(())
         }
         fn bootout_old(&mut self) -> Result<(), String> {
@@ -638,7 +699,7 @@ mod tests {
         }
         fn stop_new(&mut self, _: &Path, _: u16) -> Result<(), String> {
             self.events.push("stop_new");
-            if self.fail == Some("stop_new") {
+            if self.fails("stop_new") {
                 Err("new stop failed".into())
             } else {
                 Ok(())
@@ -646,10 +707,7 @@ mod tests {
         }
         fn restore_backup(&mut self, state: &Path, snapshot: &Path) -> Result<(), String> {
             self.events.push("restore_backup");
-            if matches!(
-                self.fail,
-                Some("restore_backup") | Some("start_new_restore_backup")
-            ) {
+            if self.fails("restore_backup") || self.fails("start_new_restore_backup") {
                 return Err("restore failed".into());
             }
             if self.real_state {
@@ -659,6 +717,9 @@ mod tests {
         }
         fn start_old(&mut self) -> Result<(), String> {
             self.events.push("start_old");
+            if self.fails("start_old") {
+                return Err("old start failed".into());
+            }
             Ok(())
         }
     }
@@ -668,6 +729,7 @@ mod tests {
             ready_asked: vec![],
             events: vec![],
             fail,
+            also_fail: None,
             statuses: VecDeque::new(),
             real_state: false,
         }
@@ -1036,7 +1098,7 @@ mod tests {
             vec![BTreeSet::from(["OPENAI_API_KEY".to_string()])]
         );
         assert_eq!(error.message(), "OPENAI_API_KEY is not stored in CORSIA.");
-        assert!(error.nothing_changed);
+        assert_eq!(error.outcome, Outcome::Untouched);
         assert!(!error.message().contains("never-log-this"));
         assert!(fake.events.is_empty());
     }
@@ -1124,46 +1186,130 @@ mod tests {
         assert_eq!(fake.events, ["begin_drain", "cancel_drain"]);
     }
 
+    /// Fresh plan and fake for one scenario; `statuses` lets a drain wait.
+    fn scenario(
+        fail: Option<&'static str>,
+        also_fail: Option<&'static str>,
+        waiting: bool,
+    ) -> (TempDir, Plan, Fake) {
+        let (home, plan) = plan(false);
+        let mut fake = fake(fail);
+        fake.also_fail = also_fail;
+        fake.real_state = true;
+        if waiting {
+            fake.statuses.push_back(DrainStatus {
+                operation_id: "a".into(),
+                active_processes: 1,
+                active: true,
+            });
+        }
+        (home, plan, fake)
+    }
+
+    fn outcome_of(
+        fail: Option<&'static str>,
+        also_fail: Option<&'static str>,
+        waiting: bool,
+    ) -> Outcome {
+        let (_home, plan, mut fake) = scenario(fail, also_fail, waiting);
+        adopt(&plan, &mut fake, 1, &uncancelled())
+            .unwrap_err()
+            .outcome
+    }
+
     #[test]
-    fn only_a_failure_before_the_stop_reports_that_nothing_changed() {
-        // Before the old service is stopped: a refused preflight, a refused
-        // readiness check, and a cancelled wait all left it untouched.
-        let (_newer_home, newer) = plan(false);
-        let mut database = fs::read(newer.source.state.join("corsia.db")).unwrap();
+    fn refusals_before_the_drain_leave_the_install_untouched() {
+        let (_home, plan) = plan(false);
+        let mut database = fs::read(plan.source.state.join("corsia.db")).unwrap();
         database[60..64].copy_from_slice(&2u32.to_be_bytes());
-        fs::write(newer.source.state.join("corsia.db"), database).unwrap();
-        let refused = adopt(&newer, &mut fake(None), 1, &uncancelled()).unwrap_err();
-        assert!(refused.nothing_changed);
+        fs::write(plan.source.state.join("corsia.db"), database).unwrap();
+        let newer = adopt(&plan, &mut fake(None), 1, &uncancelled()).unwrap_err();
+        assert_eq!(newer.outcome, Outcome::Untouched);
 
-        let (_ready_home, ready) = plan(false);
-        let refused = adopt(&ready, &mut fake(Some("check_ready")), 1, &uncancelled()).unwrap_err();
-        assert!(refused.nothing_changed);
+        assert_eq!(
+            outcome_of(Some("check_ready"), None, false),
+            Outcome::Untouched
+        );
+    }
 
-        let cancelled = adopt(&ready, &mut fake(None), 1, &AtomicBool::new(true)).unwrap_err();
-        assert!(cancelled.nothing_changed);
+    #[test]
+    fn a_drain_failure_is_untouched_only_when_the_cancel_is_confirmed() {
+        // drain_status and complete_drain are the two steps a held drain can
+        // fail at; begin_drain can fail after the source took the request.
+        for step in ["begin_drain", "drain_status", "complete_drain"] {
+            let waiting = step == "drain_status";
+            let (_home, plan, mut cancelled) = scenario(Some(step), None, waiting);
+            let error = adopt(&plan, &mut cancelled, 1, &uncancelled()).unwrap_err();
+            assert_eq!(error.outcome, Outcome::Untouched, "{step}, cancel works");
+            assert_eq!(cancelled.events.last(), Some(&"cancel_drain"), "{step}");
+            assert!(!cancelled.events.contains(&"bootout_old"), "{step}");
 
-        // After the stop: whatever failed, the old install was stopped and then
-        // brought back, so the window says "running again".
-        for step in ["bootout_old", "backup", "start_new"] {
-            let (_failing_home, failing_plan) = plan(false);
-            let mut failing = fake(Some(step));
-            failing.real_state = true;
-            let error = adopt(&failing_plan, &mut failing, 1, &uncancelled()).unwrap_err();
-            assert!(!error.nothing_changed, "{step} failed after the stop");
+            let (_home, plan, mut stuck) = scenario(Some(step), Some("cancel_drain"), waiting);
+            let error = adopt(&plan, &mut stuck, 1, &uncancelled()).unwrap_err();
+            assert_eq!(error.outcome, Outcome::Unconfirmed, "{step}, cancel fails");
+            assert!(error.message().contains("could not be released"), "{step}");
+            assert!(!stuck.events.contains(&"bootout_old"), "{step}");
         }
     }
 
     #[test]
-    fn the_failure_reaches_the_window_as_a_flag_not_as_text_to_match() {
-        let json = serde_json::to_value(AdoptionError::before_stop("x")).unwrap();
+    fn a_cancelled_wait_is_untouched_only_when_the_cancel_is_confirmed() {
+        let (_home, plan, mut fake) = scenario(None, None, false);
+        let error = adopt(&plan, &mut fake, 1, &AtomicBool::new(true)).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Untouched);
+
+        let (_home, plan, mut fake) = scenario(None, Some("cancel_drain"), false);
+        let error = adopt(&plan, &mut fake, 1, &AtomicBool::new(true)).unwrap_err();
+        assert_eq!(error.outcome, Outcome::Unconfirmed);
+    }
+
+    #[test]
+    fn a_failure_after_the_stop_is_restored_or_unconfirmed() {
+        // The old install was stopped and came back from its own files.
+        for step in ["bootout_old", "backup", "start_new"] {
+            assert_eq!(
+                outcome_of(Some(step), None, false),
+                Outcome::Restored,
+                "{step}"
+            );
+        }
+        // It was stopped and could not be brought back, or was deliberately left stopped.
         assert_eq!(
-            json,
-            serde_json::json!({ "message": "x", "nothingChanged": true })
+            outcome_of(Some("bootout_old"), Some("start_old"), false),
+            Outcome::Unconfirmed
         );
-        let json = serde_json::to_value(AdoptionError::from("y".to_string())).unwrap();
+        assert_eq!(
+            outcome_of(Some("backup"), Some("start_old"), false),
+            Outcome::Unconfirmed
+        );
+        for step in ["stop_new", "restore_backup"] {
+            let (_home, plan, mut fake) = scenario(Some("start_new"), Some(step), false);
+            let error = adopt(&plan, &mut fake, 1, &uncancelled()).unwrap_err();
+            assert_eq!(error.outcome, Outcome::Unconfirmed, "{step}");
+            assert!(
+                !fake.events.contains(&"start_old"),
+                "{step} never restarts the old install"
+            );
+        }
+    }
+
+    #[test]
+    fn the_failure_reaches_the_window_as_an_outcome_not_as_text_to_match() {
+        let json = serde_json::to_value(AdoptionError::untouched("x")).unwrap();
         assert_eq!(
             json,
-            serde_json::json!({ "message": "y", "nothingChanged": false })
+            serde_json::json!({ "message": "x", "outcome": "untouched" })
+        );
+        let json = serde_json::to_value(AdoptionError::restored("y")).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "message": "y", "outcome": "restored" })
+        );
+        // A plain error claims nothing.
+        let json = serde_json::to_value(AdoptionError::from("z".to_string())).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "message": "z", "outcome": "unconfirmed" })
         );
     }
 

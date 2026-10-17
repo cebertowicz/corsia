@@ -361,10 +361,14 @@ impl SourceLifecycle {
 }
 
 impl adoption::Lifecycle for SourceLifecycle {
-    fn begin_drain(&mut self) -> Result<adoption::DrainStatus, String> {
-        let token = self.service_token()?; let operation_id = Self::operation_id();
+    fn new_operation_id(&mut self) -> String {
+        Self::operation_id()
+    }
+
+    fn begin_drain(&mut self, operation_id: &str) -> Result<adoption::DrainStatus, String> {
+        let token = self.service_token()?;
         let value = self.drain_request("POST", "", &token, None, Some(serde_json::json!({"reason": "packaged-app adoption", "operation_id": operation_id})))?;
-        Self::parse_drain(value, &operation_id)
+        Self::parse_drain(value, operation_id)
     }
 
     fn drain_status(&mut self, operation_id: &str) -> Result<adoption::DrainStatus, String> {
@@ -404,7 +408,7 @@ impl adoption::Lifecycle for SourceLifecycle {
             .current_dir(&backend).output()
             .map_err(|error| format!("could not check the existing install: {error}"))?;
         match output.status.code() {
-            Some(0) => Ok(()),
+            Some(0) => self.service_token().map(|_| ()),
             // Exit 3 carries a refusal written to be shown: names and byte counts only.
             Some(3) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
             _ => Err(format!("could not check the existing install: exited {}", output.status)),
@@ -712,12 +716,12 @@ fn adopt_existing_install(
     service: tauri::State<'_, AppServiceState>,
 ) -> Result<ServiceStartup, adoption::AdoptionError> {
     // Nothing has been stopped until the plan below is running.
-    let before_stop = adoption::AdoptionError::before_stop;
-    let home = app.path().home_dir().map_err(|error| before_stop(format!("could not resolve the home folder: {error}")))?;
-    let app_dir = default_app_dir(&app).map_err(before_stop)?;
-    let first_run = first_run::plan(&home, &app_dir).map_err(before_stop)?;
+    let untouched = adoption::AdoptionError::untouched;
+    let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
+    let app_dir = default_app_dir(&app).map_err(untouched)?;
+    let first_run = first_run::plan(&home, &app_dir).map_err(untouched)?;
     let first_run::FirstRun::Adoptable { source } = first_run else {
-        return Err(before_stop("there is no source install ready to adopt".to_string()));
+        return Err(untouched("there is no source install ready to adopt".to_string()));
     };
     let port = source.port;
     let plan = adoption::Plan { source: source.clone(), app_dir: app_dir.clone() };

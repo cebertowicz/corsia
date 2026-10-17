@@ -1,7 +1,7 @@
 // Checks the first line of the adoption failure screen in the real launch shell:
 // a failure raised before the old service was stopped says nothing changed; one
-// raised after it says the old service is running again. The window reads the
-// backend's `nothingChanged` flag, never the reason text.
+// after a restore says it is running again; one that left it unconfirmed says so.
+// The window reads the backend's `outcome`, never the reason text.
 //
 // usage: node desktop/tests/adoption-failure-lead.mjs [--screenshots <dir>]
 import { createRequire } from 'node:module';
@@ -36,13 +36,18 @@ const browser = await chromium.launch();
 
 const keys = 'These provider keys aren’t stored in CORSIA yet: OPENAI_API_KEY. Add them in CORSIA › Settings › Keys, then choose Try again.';
 const space = 'The backup needs 4.2 GB free and this disk has 1.1 GB. Free up space, then choose Try again.';
+const untouched = 'Nothing was changed. Your existing CORSIA is still running.';
+const restored = 'Your existing CORSIA is running again, as it was.';
+const unconfirmed = 'We couldn’t confirm your existing CORSIA is running.';
 const cases = [
-	// The same reason text, once with each flag: only the flag decides the lead.
-	{ name: '3b-refused-keys', failure: { message: keys, nothingChanged: true }, lead: 'Nothing was changed. Your existing CORSIA is still running.' },
-	{ name: '3c-refused-space', failure: { message: space, nothingChanged: true }, lead: 'Nothing was changed. Your existing CORSIA is still running.' },
-	{ name: 'after-stop', failure: { message: 'the new service did not become ready; the old install was restored', nothingChanged: false }, lead: 'Your existing CORSIA is running again, as it was.' },
-	{ name: 'same-text-after-stop', failure: { message: space, nothingChanged: false }, lead: 'Your existing CORSIA is running again, as it was.' },
-	{ name: 'plain-string', failure: 'could not restart', lead: 'Your existing CORSIA is running again, as it was.' },
+	// The same reason text with each outcome: only the outcome decides the lead.
+	{ name: '3b-refused-keys', failure: { message: keys, outcome: 'untouched' }, lead: untouched },
+	{ name: '3c-refused-space', failure: { message: space, outcome: 'untouched' }, lead: untouched },
+	{ name: 'after-stop', failure: { message: 'the new service did not become ready; the old install was restored', outcome: 'restored' }, lead: restored },
+	{ name: 'same-text-restored', failure: { message: space, outcome: 'restored' }, lead: restored },
+	{ name: 'same-text-unconfirmed', failure: { message: space, outcome: 'unconfirmed' }, lead: unconfirmed },
+	{ name: 'hold-not-released', failure: { message: 'status failed; the hold on new work could not be released: cancel failed', outcome: 'unconfirmed' }, lead: unconfirmed },
+	{ name: 'plain-string', failure: 'could not restart', lead: unconfirmed },
 ];
 
 let failed = 0;
