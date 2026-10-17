@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -45,6 +45,8 @@ class LocalModel:
     repository: str
     download_size_bytes: int
     context_window: int
+    #: A name the profile gives the model; without one the name comes from the repository id.
+    name: str | None = field(default=None, compare=False)
 
     @property
     def model(self) -> str:
@@ -53,7 +55,9 @@ class LocalModel:
 
     @property
     def display_name(self) -> str:
-        """The repo id without owner or build suffix: ``Jundot/Qwen3.8-27B-oQ4e-mtp`` is "Qwen3.8 27B"."""
+        """The profile's name when it gives one, else the repo id without owner or build suffix: ``Jundot/Qwen3.8-27B-oQ4e-mtp`` is "Qwen3.8 27B"."""
+        if self.name:
+            return self.name
         name = _BUILD_SUFFIX.sub("", self.model).removesuffix("-it").replace("-", " ")
         return name[:1].upper() + name[1:]
 
@@ -102,13 +106,17 @@ def from_recommendation(raw: object) -> LocalModel | None:
             or not isinstance(size, int) or size <= 0 or isinstance(context, bool)
             or not isinstance(context, int) or context < MIN_CONTEXT):
         return None
-    return LocalModel(repository, size, min(context, MAX_CONTEXT))
+    name = raw.get("display_name")
+    return LocalModel(repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None)
 
 
 def to_record(model: LocalModel) -> dict:
     """The model as a state record keeps it: the recommender row, read back with ``from_recommendation``."""
-    return {"repo_id": model.repository, "download_bytes": model.download_size_bytes,
-            "max_context": model.context_window}
+    record = {"repo_id": model.repository, "download_bytes": model.download_size_bytes,
+              "max_context": model.context_window}
+    if model.name:
+        record["display_name"] = model.name
+    return record
 
 
 def pick(payload: object) -> LocalModel | None:

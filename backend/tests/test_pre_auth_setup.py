@@ -473,6 +473,23 @@ def test_status_names_a_ready_cli_source_from_the_stored_check(monkeypatch, stat
     assert setup_api._ready_ai() == expected
 
 
+@pytest.mark.parametrize(
+    ("checked", "expected"),
+    [
+        ({}, True),
+        ({"claude-code": "t1"}, True),
+        ({"claude-code": "t1", "codex": "t2"}, False),
+    ],
+)
+def test_status_says_the_install_check_is_pending_until_both_tools_have_a_result(monkeypatch, checked, expected):
+    from connections import models as connection_models
+    from connections import source_state
+
+    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
+    monkeypatch.setattr(source_state, "row_state", lambda row: {"checked_at": checked.get(row["provider"])})
+    assert setup_api._ai_check_pending() is expected
+
+
 def test_routes_are_registered():
     from main import app
 

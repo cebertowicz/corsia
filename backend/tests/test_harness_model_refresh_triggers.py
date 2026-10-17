@@ -133,6 +133,7 @@ async def test_session_update_refreshes_requested_harness_selection_without_fall
         actor_id="u",
         reason="harness_model_switch",
         checkpoint_override=None,
+        setup_selection=False,
     )
 
 
@@ -201,6 +202,7 @@ async def test_session_update_returns_accepted_for_pending_switch(
         actor_id="u",
         reason="harness_model_switch",
         checkpoint_override="current",
+        setup_selection=False,
     )
 
 

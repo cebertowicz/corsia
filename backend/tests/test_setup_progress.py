@@ -104,7 +104,7 @@ def test_a_finished_setup_never_reopens_even_with_no_model(client):
     token = _create_account(client)
     assert _put(client, {"completed": True}, token).status_code == 200
 
-    assert _progress(client, token) == {"setup_completed": True, "step": None, "local_ai": None}
+    assert _progress(client, token) == {"setup_completed": True, "step": None, "local_ai": None, "picks": None}
     # A late step write, as from a slow tab, cannot reopen it.
     assert _put(client, {"step": "models"}, token).status_code == 200
     assert _progress(client, token)["setup_completed"] is True
@@ -115,7 +115,7 @@ def test_an_install_with_no_record_and_an_account_counts_as_completed(client):
     token, _expires = accounts.issue_token("existing", kind="session", label="browser")
 
     assert setup_progress.read() is None
-    assert _progress(client, token) == {"setup_completed": True, "step": None, "local_ai": None}
+    assert _progress(client, token) == {"setup_completed": True, "step": None, "local_ai": None, "picks": None}
     # An old install cannot be dropped into setup by a step write either.
     assert _put(client, {"step": "models"}, token).status_code == 200
     assert _progress(client, token)["setup_completed"] is True
@@ -176,3 +176,53 @@ def test_update_reads_and_writes_inside_one_write_transaction(isolated_db, monke
     setup_progress.update(local_ai=True)
 
     assert in_transaction == [True]
+
+
+ALL_PICKS = {"claude": True, "chatgpt": False, "key": True}
+
+
+def test_welcome_picks_survive_the_account_and_a_reload(client):
+    assert _put(client, {"picks": ALL_PICKS, "local_ai": True}).status_code == 200  # checked on Welcome, before any account
+    token = _create_account(client)
+
+    for _reload in range(2):
+        progress = _progress(client, token)
+        assert progress["picks"] == ALL_PICKS
+        assert progress["local_ai"] is True
+        assert progress["step"] == "models"
+
+
+def test_picks_change_after_the_account_and_a_later_write_keeps_the_rest(client):
+    token = _create_account(client)
+    assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": True, "key": False}}, token).status_code == 200
+    assert _put(client, {"local_ai": False}, token).status_code == 200
+
+    progress = _progress(client, token)
+    assert progress["picks"] == {"claude": False, "chatgpt": True, "key": False}
+    assert progress["local_ai"] is False
+
+
+def test_no_picks_reads_as_none_not_as_all_unchecked(client):
+    assert _progress(client, _create_account(client))["picks"] is None
+
+
+@pytest.mark.parametrize("picks", [
+    {"claude": True},
+    {"claude": True, "chatgpt": True, "key": True, "other": True},
+    {"claude": "yes", "chatgpt": False, "key": False},
+])
+def test_picks_must_say_yes_or_no_for_exactly_the_three_choices(client, picks):
+    token = _create_account(client)
+
+    assert _put(client, {"picks": picks}, token).status_code == 422
+    assert _progress(client, token)["picks"] is None
+
+
+def test_a_completed_setup_ignores_a_late_picks_write(client):
+    token = _create_account(client)
+    assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
+    assert _put(client, {"completed": True}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": False, "key": False}}, token).status_code == 200
+
+    assert _progress(client, token)["picks"] == ALL_PICKS

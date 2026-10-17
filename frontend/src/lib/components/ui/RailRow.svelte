@@ -19,11 +19,19 @@
 		icon?: Snippet;
 		/** The approved setup-step icon when a custom snippet is unnecessary. */
 		iconName?: 'sparkle' | 'person' | 'chip' | 'computer' | 'code';
+		/**
+		 * A choice row: `one` is a radio (a ring), `many` a checkbox (a box). It carries its own ring or box glyph, stays
+		 * clickable while checked, and a screen reader hears it as checked rather than as the current step.
+		 */
+		pick?: 'one' | 'many';
+		checked?: boolean;
 		onclick?: () => void;
 	}
 
-	const { label, state = 'todo', meta, progress, icon, iconName, action, onclick }: Props = $props();
-	const interactive = $derived(!!onclick && state !== 'todo' && state !== 'current');
+	const { label, state = 'todo', meta, progress, icon, iconName, action, pick, checked = false, onclick }: Props = $props();
+	/** A pick row shows checked as `current` and unchecked as `idle`; the glyph and wash carry it. */
+	const shown = $derived(pick ? (checked ? 'current' : 'idle') : state);
+	const interactive = $derived(!!onclick && shown !== 'todo' && shown !== 'current');
 	const hasDetails = $derived(Boolean(meta || progress !== undefined));
 
 	function tokenFade(node: Element) {
@@ -45,14 +53,22 @@
 
 {#snippet inner()}
 	<span class="lead" aria-hidden="true">
-		{#key state}
+		{#key shown}
 			<span class="lead-state" in:leadMotion out:leadMotion>
-				{#if state === 'done'}
+				{#if shown === 'done'}
 					<svg class="done-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path pathLength="1" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-				{:else if state === 'busy'}
+				{:else if shown === 'busy'}
 					<svg class="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
-				{:else if state === 'error'}
+				{:else if shown === 'error'}
 					<i class="reddot"></i>
+				{:else if pick}
+					<svg class="pick-glyph" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+						{#if pick === 'one'}
+							<circle cx="12" cy="12" r="8" />{#if checked}<circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />{/if}
+						{:else}
+							<rect x="4" y="4" width="16" height="16" rx="4" />{#if checked}<path d="M8.5 12.5l2.5 2.5 4.5-5" />{/if}
+						{/if}
+					</svg>
 				{:else if icon}
 					{@render icon()}
 				{:else if iconName === 'sparkle'}
@@ -85,10 +101,12 @@
 	</span>
 {/snippet}
 
-{#if interactive}
-	<button type="button" class="row {state}" in:railMotion out:railMotion {onclick}>{@render inner()}</button>
+{#if pick}
+	<button type="button" role={pick === 'one' ? 'radio' : 'checkbox'} aria-checked={checked} class="row pick {shown}" in:railMotion out:railMotion {onclick}>{@render inner()}</button>
+{:else if interactive}
+	<button type="button" class="row {shown}" in:railMotion out:railMotion {onclick}>{@render inner()}</button>
 {:else}
-	<div class="row {state}" class:has-action={!!action} in:railMotion out:railMotion aria-current={state === 'current' ? 'step' : undefined}>{@render inner()}</div>
+	<div class="row {shown}" class:has-action={!!action} in:railMotion out:railMotion aria-current={shown === 'current' ? 'step' : undefined}>{@render inner()}</div>
 {/if}
 
 <style>
@@ -101,6 +119,8 @@
 	button.row { cursor: pointer; }
 	button.row:hover { background: var(--bg-hover); color: var(--text-primary); }
 	button.row:active { background: var(--accent-wash); }
+	/* A checked pick keeps its wash under the pointer; the plain hover tint would otherwise win and grey it out. */
+	.row.pick.current:hover { background: var(--accent-wash); }
 	@media (prefers-reduced-motion: reduce) {
 		button.row { transition: background var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap); }
 		button.row::before { transition: opacity var(--dur-tight) var(--ease-snap); }
@@ -119,6 +139,10 @@
 	.lead :global(svg) { flex: none; opacity: 0.85; }
 	.row.current .lead { color: var(--accent); }
 	.row.current .lead :global(svg) { opacity: 1; }
+	/* The unchecked glyph is the row's outline: full strength, so it reads at 3:1 on the pane. */
+	.row.pick .lead :global(svg) { opacity: 1; }
+	.row.pick.idle .lead { color: var(--text-secondary); }
+	.row.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.row.done .lead, .row.busy .lead { color: var(--accent); }
 	.reddot { width: calc(var(--space-1) * 2); height: calc(var(--space-1) * 2); border-radius: var(--radius-circle); background: var(--red); }
 	.done-check path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw-check var(--dur-tight) var(--ease-snap) forwards; }
@@ -132,7 +156,7 @@
 	.details { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows calc(var(--dur-standard) * 0.7) var(--ease-snap), opacity calc(var(--dur-standard) * 0.7) var(--ease-snap); }
 	.details.open { grid-template-rows: 1fr; opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
 	.details-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1px; }
-	.meta { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.2; }
+	.meta { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.2; text-wrap: pretty; }
 	.row.error .meta { color: var(--red-text); }
 	/* A row that carries its own fix keeps its message in secondary text; only its dot is red. */
 	.row.has-action .meta { color: var(--text-secondary); }

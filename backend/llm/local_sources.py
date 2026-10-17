@@ -165,22 +165,28 @@ def omlx_management(record: Any = _UNSET) -> dict[str, Any]:
     ``restore_failed`` covers a stop that did not finish, so Settings offers it again.
     ``cannot_check`` is their oMLX's version while CORSIA manages one too old to recommend.
     ``forgets_key``: stopping removes the admin key, which CORSIA stored only to manage it.
+    ``starter_note``: why the starter model was downloaded, when their oMLX had no pick;
+    ``starter_name`` is that model's name, for the background download's label.
     A restore record the person never chose management for reads as not managed.
     """
     from llm import local_model, own_omlx_management
+    from llm.local_setup_prepare import fallback_note
 
     if record is _UNSET:
         record = own_omlx_management.read()
     if record is None or (record.active and not record.consented):
         return {"state": "not_managed", "cannot_check": None, "required_version": local_model.OMLX_PIN,
-                "restores": [], "forgets_key": False}
+                "restores": [], "forgets_key": False, "starter_note": None, "starter_name": None}
     restores = [*_restore_lines(record.originals_global),
                 *(line for model, values in sorted(record.originals_models.items())
                   for line in _restore_lines(values, model))]
+    starter = record.model if record.manages and record.fallback else None
     return {"state": "managed" if record.manages else "restore_failed",
             "cannot_check": record.cannot_check if record.manages else None,
             "required_version": local_model.OMLX_PIN, "restores": restores,
-            "forgets_key": record.key_registered}
+            "forgets_key": record.key_registered,
+            "starter_note": fallback_note(starter) if starter else None,
+            "starter_name": starter.display_name if starter else None}
 
 
 def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:

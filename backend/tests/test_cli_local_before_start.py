@@ -175,19 +175,6 @@ def test_an_ineligible_mac_with_the_local_flag_says_to_drop_it(monkeypatch, entr
     ]
 
 
-def test_a_mac_where_no_recommended_model_fits_is_told_the_same_as_a_small_one(monkeypatch, entry, capsys):
-    _subscription(monkeypatch, None)
-    _flight(monkeypatch, entry, {"ok": True, "skipped": "none_fits", "message": "no model"})
-
-    assert before_start.run_before_start(force_local=False) == before_start.EXIT_NEEDS_PROVIDER
-    assert entry == ["discover", "flight"]
-    assert capsys.readouterr().out.splitlines()[1:] == [
-        NEEDS_A_MODEL,
-        "     Sign in to Claude Code or Codex, then run the install again:",
-        *SIGN_IN_LINES,
-    ]
-
-
 def test_an_unexpected_error_is_one_line_not_a_traceback(monkeypatch, entry, capsys):
     async def boom(_stages):
         raise RuntimeError("database locked")

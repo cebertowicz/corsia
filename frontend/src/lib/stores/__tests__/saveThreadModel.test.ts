@@ -60,6 +60,19 @@ describe('saveThreadModel', () => {
 		expect(currentModel()).toBe('model-after');
 	});
 
+	it('sends setup as the source only when setup asks, never for a person’s own pick', async () => {
+		const bodies: unknown[] = [];
+		vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
+			bodies.push(JSON.parse(String(init?.body)));
+			return modelResponse('model-after', '2026-07-17T10:00:01.000000');
+		}));
+
+		await saveThreadModel('thread-1', 'model-after', 'tok');
+		await saveThreadModel('thread-1', 'model-after', 'tok', 'setup');
+
+		expect(bodies).toEqual([{ model: 'model-after' }, { model: 'model-after', source: 'setup' }]);
+	});
+
 	it('returns a pending receipt without changing the selected model', async () => {
 		seed('model-before');
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(

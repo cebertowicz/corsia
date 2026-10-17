@@ -16,7 +16,7 @@
 		page: string;
 		title: string;
 		lede?: string;
-		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string };
+		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean };
 		mark?: boolean;
 		onPrimary?: () => void;
 		secondary?: Snippet;
@@ -158,6 +158,24 @@
 		};
 	}
 
+	/**
+	 * Marks the body `data-more` while content sits under the dock edge and `data-above` while it sits under the title
+	 * and intro, so each edge fades its content out only on the side where there is more to scroll to.
+	 */
+	function scrollCue(node: HTMLElement) {
+		const sync = () => {
+			node.dataset.more = String(node.scrollTop + node.clientHeight < node.scrollHeight - 1);
+			node.dataset.above = String(node.scrollTop > 1);
+		};
+		node.addEventListener('scroll', sync, { passive: true });
+		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
+		resize?.observe(node);
+		const mutate = typeof MutationObserver === 'undefined' ? null : new MutationObserver(sync);
+		mutate?.observe(node, { childList: true, subtree: true });
+		sync();
+		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
+	}
+
 	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
@@ -194,7 +212,7 @@
 				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
 					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
-					<div class="body">{@render children?.()}</div>
+					<div class="body" use:scrollCue>{@render children?.()}</div>
 				</section>
 			{/key}
 		</div>
@@ -202,7 +220,7 @@
 			<div>{@render secondary?.()}</div>
 			{#if primary}
 				<div class="primary-action">
-					{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
+					{#if primary.note && (primary.disabled || primary.noteAlways)}<span class="footer-note">{primary.note}</span>{/if}
 					<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary} bind:el={primaryButton}>
 						<span class="primary-label-stack">
 							{#key primary.label}
@@ -220,7 +238,7 @@
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
-	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
+	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
 	.pane-scenes { display: grid; flex: 1; min-height: 0; }
 	.pane-scene { grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -229,7 +247,11 @@
 	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
 	.lede { max-width: calc(var(--space-8) * 9); margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
-	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); }
+	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; scrollbar-width: thin; }
+	/* The attributes are set by the scrollCue action, which Svelte cannot see: without :global it prunes the rule as unused. */
+	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
+	.body:global([data-above='true']) { --cue-top: var(--space-4); }
+	.body:global([data-more='true']) { --cue-bottom: var(--space-4); }
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
 	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
@@ -239,6 +261,12 @@
 	:global(.primary-action .btn.pill) { overflow: hidden; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
+	/* The setup floor (800 x 600): tighten the spacing before anything scrolls. */
+	@media (max-height: 43.75em) {
+		.pane { padding-top: var(--space-8); }
+		.lede { margin-top: var(--space-2); }
+		.body { margin-top: var(--space-3); padding-bottom: var(--space-2); }
+	}
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }
 	.job-row { min-height: 0; display: grid; grid-template-rows: 1fr; overflow: hidden; }

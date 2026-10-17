@@ -1,9 +1,6 @@
 ---
 name: memory-placement
 description: Use when the user corrects your work or states a rule, preference, or fact that should outlive this turn, when you infer a reusable rule of your own to try, and when a checkpoint review keeps or retires a continuity entry; pick the one existing destination whose audience will have it in time. Not for live task state (use the plan) or for editing files another owner writes.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Memory placement

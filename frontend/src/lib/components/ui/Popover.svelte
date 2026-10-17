@@ -7,7 +7,7 @@
 
 <script lang="ts">
 	import { tick } from 'svelte';
-	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, bounds = null, avoidRect, initialFocus, children }: {
+	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -15,6 +15,10 @@
 		placement?: 'right' | 'bottom';
 		/** Make the content a column bounded by the popover, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
+		/** A CSS width for a card that should span the column of text it covers, instead of the default card width. */
+		width?: string;
+		/** Called with the card each time it has been placed, so an owner can measure where it landed. */
+		onPlace?: (card: HTMLElement) => void;
 		/** Keep the surface inside this element (the canvas it belongs to) instead of anywhere in the window. */
 		bounds?: HTMLElement | null;
 		/** A live rectangle the card should clear vertically when it cannot fit beside its anchor. */
@@ -61,6 +65,8 @@
 		let top = rect.bottom + gap;
 		if (placement === 'bottom') {
 			if (left + width > area.right - gap) left = rect.right - width;
+			// Below the anchor when it fits; otherwise above it, never clamped up over the anchor.
+			if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) top = rect.top - height - gap;
 		} else if (rect.right + gap + width <= area.right - gap) {
 			// Beside the anchor, never over it.
 			left = rect.right + gap; top = rect.top;
@@ -79,6 +85,8 @@
 		top = Math.max(area.top + gap, Math.min(top, area.bottom - height - gap));
 		left = Math.max(area.left + gap, Math.min(left, area.right - width - gap));
 		style = `left: ${left}px; top: ${top}px; max-width: ${width}px;`;
+		// The style lands on the card in the frame after it is set: the owner measures it then.
+		if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
 	}
 	$effect(() => {
 		if (!open) return;
@@ -108,7 +116,7 @@
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} />
 
 {#if open}
-	<div class="popover" class:fill data-popover bind:this={surface} style={hidden ? `${style} visibility: hidden;` : style} role="dialog" aria-hidden={hidden || undefined}>{@render children()}</div>
+	<div class="popover" class:fill data-popover bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} visibility: hidden;` : style}`} role="dialog" aria-hidden={hidden || undefined}>{@render children()}</div>
 {/if}
 
 <style>
