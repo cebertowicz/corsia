@@ -11,15 +11,12 @@ through the module at call time so one set of names is patched and observed.
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Callable
 
 from llm import local_model, local_profiles, own_omlx_management
 from llm import local_setup as ls
-from llm.local_model import LocalModel, PickUnavailable, omlx_has_recommender
+from llm.local_model import LocalModel, omlx_has_recommender
 from llm.local_setup_ownership import own_omlx_admin_key, own_omlx_port
-
-log = logging.getLogger(__name__)
 
 # The data-defined starter for an oMLX CORSIA does not manage, unchanged until #817
 # decides that journey; CORSIA's own oMLX picks through its recommender instead.
@@ -39,9 +36,10 @@ async def _managed_download(server_id: str, report: Callable[[str], None], liste
     """Download the recommender's pick into their oMLX unless it is there; whether CORSIA set one up.
 
     An oMLX too old to recommend is recorded so its row says so. When the recommender
-    has no pick (it answers none, or cannot answer), the starter model is downloaded
-    the same way and recorded as the fallback so setup says so; a computer under
-    24 GiB gets none. A model the person already had stays theirs, so only the two
+    answers none, the starter model is downloaded the same way and recorded as the
+    fallback so setup says so; a computer under 24 GiB gets none. When it cannot
+    answer, ``PickUnavailable`` propagates: setup ends in the failed check, with
+    the cause as its message, as it does on a new oMLX, and installs nothing. A model the person already had stays theirs, so only the two
     oMLX-wide settings are offered.
     """
     version = await asyncio.to_thread(ls.omlx_version)
@@ -50,11 +48,7 @@ async def _managed_download(server_id: str, report: Callable[[str], None], liste
         return False
     await asyncio.to_thread(own_omlx_management.update, cannot_check=None)
     report("Finding the model that fits this computer")
-    try:
-        pick = await local_model.ask_recommender(server_id)
-    except PickUnavailable as exc:
-        log.warning("Your oMLX could not recommend a model: %s", exc)
-        pick = None
+    pick = await local_model.ask_recommender(server_id)
     fallback = pick is None
     if fallback:
         if not await asyncio.to_thread(ls.local_memory_ok):
