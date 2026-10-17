@@ -310,6 +310,24 @@ describe('browser binding', () => {
 		iframe.remove();
 	});
 
+	it('on a phone, starts on a visible page and ends when the page is hidden', () => {
+		vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' });
+		const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+		const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+		window.dispatchEvent(new Event('pointerdown'));
+		startPresence('phone-thread');
+		vi.advanceTimersByTime(DWELL_MS);
+		const started = socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+		expect(started.map((frame) => [frame.state, frame.focused])).toEqual([['foreground', true]]);
+		socket.send.mockClear();
+		visibility.mockReturnValue('hidden');
+		document.dispatchEvent(new Event('visibilitychange'));
+		const ended = socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+		expect(ended.map((frame) => [frame.state, frame.reason])).toEqual([['background', 'hidden']]);
+		hasFocus.mockRestore();
+		visibility.mockRestore();
+	});
+
 	it('goes idle on the page input clock, the one the Plans pane reads', () => {
 		window.dispatchEvent(new Event('pointerdown'));
 		startPresence('t9');
