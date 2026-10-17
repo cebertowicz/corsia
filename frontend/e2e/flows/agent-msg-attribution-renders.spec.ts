@@ -13,6 +13,7 @@ import {
 	waitForWsConnected,
 } from '../support/corsia';
 import { focusSetting } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 
 const BACKEND_PORT = Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110);
@@ -24,11 +25,8 @@ const DELEGATE_CLI = path.join(REPO_ROOT, 'backend/scripts/delegate_cli.py');
 
 test.describe('@flow:delegation @surface:chat agent message attribution renders', () => {
 	// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-	// A fresh load starts from a known shell (phone sidebar closed), whatever state the test ended in.
-	test.afterEach(async ({ page }) => {
-		await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
-		await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
-		await focusSetting(page, true);
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
 	});
 
 	test('delegation send with attribution renders its sender chip', async ({ page, request }, testInfo) => {

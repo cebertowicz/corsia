@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { setFocusMode } from '../support/focusMode';
 import { syntheticPng } from '../support/syntheticImages';
 
 /**
@@ -111,14 +112,6 @@ function recordAsk(artifact: Artifact, { retire = false }: { retire?: boolean } 
 		encoding: 'utf8',
 		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
 	});
-}
-
-async function setFocusMode(request: APIRequestContext, enabled: boolean): Promise<void> {
-	const updated = await request.patch('/api/settings', {
-		headers: { Authorization: `Bearer ${TEST_TOKEN}` },
-		data: { features: { focus_mode: enabled } },
-	});
-	expect(updated.ok(), await updated.text()).toBeTruthy();
 }
 
 type Surface = readonly [label: string, width: number, theme: 'light' | 'dark'];

@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { seedOutcomes, readStates, expectObservedNoUpdate, openOutcomeThread, focusSetting, expandLoadedWork, assertPassiveGeometry, appendClosure, assertOutcomeOrder, assertOutcomeSidebar } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 
 for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 	test.describe(`outcomes ${width} ${theme}`, () => {
 		test.use({ viewport: { width, height: 1000 }, hasTouch: width === 393, timezoneId: 'America/Los_Angeles' });
 		// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-		test.afterEach(async ({ page }) => {
-			await focusSetting(page, true);
+		test.afterEach(async ({ request }) => {
+			await setFocusMode(request, true);
 		});
 		test(`@surface:focus-outcomes passive composition, query, touch and keyboard ${width} ${theme}`, async ({ page, request }, info) => {
 			test.setTimeout(120_000);

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chatComposer, createSession, lastAssistantMessage, saveEvidenceScreenshot, TEST_TOKEN, watchSessionSubscriptions } from '../support/corsia';
 import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -45,8 +46,8 @@ assert terminal.successor is None
 }
 
 // Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-test.afterEach(async ({ page }) => {
-	await focusSetting(page, true);
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
 });
 
 for (const intent of ['apply_now', 'queue_after_turn'] as const) {
@@ -97,7 +98,6 @@ for (const intent of ['apply_now', 'queue_after_turn'] as const) {
 		} finally {
 			expect((await request.delete(`/api/threads/${threadId}?token=${encodeURIComponent(TEST_TOKEN)}`)).ok()).toBeTruthy();
 			expect((await request.patch(profile, { data: { context_window: 128_000 } })).ok()).toBeTruthy();
-			await focusSetting(page, true);
 		}
 	});
 }

@@ -8,6 +8,7 @@ import {
 	waitForWsConnected,
 } from '../support/corsia';
 import { focusSetting } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 
 function makeMsg(id: string, sessionId: string, role: 'user' | 'assistant', content: string, ts: string) {
 	return { id, thread_id: sessionId, role, content, created_at: ts, metadata: null };
@@ -15,11 +16,8 @@ function makeMsg(id: string, sessionId: string, role: 'user' | 'assistant', cont
 
 test.describe('@flow:paging @surface:chat conversation message paging', () => {
 	// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-	let focusTurnedOff = false;
-	test.afterEach(async ({ page }) => {
-		if (!focusTurnedOff) return;
-		focusTurnedOff = false;
-		await focusSetting(page, true);
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
 	});
 
 	test('long conversation stays bounded and scrolls with wheel input', async ({ page, request }) => {
@@ -47,7 +45,6 @@ test.describe('@flow:paging @surface:chat conversation message paging', () => {
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
 		// Focus is on by default since #565 and hides finished work; this spec counts raw rows.
 		await focusSetting(page, false);
-		focusTurnedOff = true;
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}

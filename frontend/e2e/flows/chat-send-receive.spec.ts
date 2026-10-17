@@ -16,6 +16,7 @@ import {
 	waitForWsConnected,
 } from '../support/corsia';
 import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { readMockCallCount, releaseMockGate, seedMockResponses, seedPressuredHistory } from '../support/mock';
 
 const CHECKPOINT_REPLY = {
@@ -60,8 +61,8 @@ async function openPressuredSession(
 
 test.describe('@flow:chat @surface:chat chat send/receive', () => {
 	// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-	test.afterEach(async ({ page }) => {
-		await focusSetting(page, true);
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
 	});
 
 	test('typed message sends, assistant responds, both render in order', async ({ page, request }, testInfo) => {
@@ -226,7 +227,7 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		);
 	});
 
-	test('irreparable pressured send retains the accepted head without a retry loop', async ({ page, request }, testInfo) => {
+	test('irreparable pressured send settles the accepted head as failed without a retry loop', async ({ page, request }, testInfo) => {
 		test.setTimeout(90_000);
 		const pressureFixture = await openPressuredSession(
 			page,
@@ -252,13 +253,14 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 			/Not delivered: .*minimum provider continuation exceeds the context window/i,
 			{ timeout: 30_000 },
 		);
-		const callsAfterFailure = await readMockCallCount(request);
+		// proved_no_write means the preflight refused before any provider call, so the mock saw none.
+		expect(await readMockCallCount(request)).toBe(0);
 
 		// Nothing retries on its own: the failed row and the provider call count stay put.
 		await page.waitForTimeout(1_500);
 		await expect(userMessages(page)).toHaveCount(pressureFixture.userMessageCount + 1);
 		await expect(failureCaption).toHaveCount(1);
-		expect(await readMockCallCount(request)).toBe(callsAfterFailure);
-		await saveEvidenceScreenshot(page, testInfo, 'irreparable-pressured-send-retained');
+		expect(await readMockCallCount(request)).toBe(0);
+		await saveEvidenceScreenshot(page, testInfo, 'irreparable-pressured-send-failed');
 	});
 });

@@ -24,7 +24,7 @@ async function visitChip(
 	return chip;
 }
 
-test('reserves the estimate marker without changing width at 393px', async ({ page }) => {
+test('keeps the same chip width for measured and estimated sources at 393px', async ({ page }) => {
 	for (const theme of ['dark', 'light'] as const) {
 		const measured = await visitChip(page, theme, 'measured');
 		const measuredWidth = await measured.evaluate((element) => element.getBoundingClientRect().width);

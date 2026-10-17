@@ -2,9 +2,10 @@ import { expect, test } from '@playwright/test';
 import { createSession, openAppByUrl, chatComposer, sendButton, TEST_TOKEN, watchSessionSubscriptions } from './support/corsia';
 import { seedMockResponses } from './support/mock';
 import { focusSetting } from './support/focusOutcomeProof';
+import { setFocusMode } from './support/focusMode';
 
-test.afterEach(async ({ page }) => {
-  await focusSetting(page, true);
+test.afterEach(async ({ request }) => {
+  await setFocusMode(request, true);
 });
 
 for (const width of [1280, 393]) {

@@ -4,6 +4,7 @@ import {
 	TEST_TOKEN, watchSessionSubscriptions,
 } from '../support/corsia';
 import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 async function setContextCap(request: APIRequestContext, contextWindow: number): Promise<void> {
@@ -17,8 +18,8 @@ async function setContextCap(request: APIRequestContext, contextWindow: number):
 }
 
 // Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
-test.afterEach(async ({ page }) => {
-	await focusSetting(page, true);
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
 });
 
 test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and explains recovery', async ({ page, request }, testInfo) => {
@@ -62,6 +63,5 @@ test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and exp
 		await saveEvidenceScreenshot(page, testInfo, 'checkpoint-capacity-recovered');
 	} finally {
 		await setContextCap(request, 128_000);
-		await focusSetting(page, true);
 	}
 });
