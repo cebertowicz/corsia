@@ -102,7 +102,25 @@ try {
 	await lostRemote.page.click('#retry');
 	await lostRemote.page.waitForTimeout(50);
 	expectCalls('lost remote, Try again', { calls: (await lostRemote.page.evaluate(() => window.__calls)).filter(notLogLookup) }, ['retry_saved_remote', 'start_local_service']);
-	console.log(`remote launch actions: ${clicks + 4} clicks reached their action`);
+	// A disconnect that forgot the remote but could not bring this computer's CORSIA back returns to the shell with
+	// this card; its action starts this computer's own service.
+	const returned = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+	await returned.addInitScript(() => {
+		window.__calls = [];
+		window.__TAURI__ = { core: { invoke: async (command) => { window.__calls.push(command); return undefined; } } };
+	});
+	await returned.goto(shellUrl, { waitUntil: 'load' });
+	await returned.evaluate(() => window.__corsiaShowServiceFailure('CORSIA service registration did not persist'));
+	const card = await returned.evaluate(() => ({
+		status: document.getElementById('status').textContent,
+		line: document.getElementById('line').textContent,
+		retry: document.getElementById('actions').hidden ? null : document.getElementById('retry').textContent,
+	}));
+	if (card.status !== 'CORSIA couldn’t start' || !card.line.includes('did not persist') || card.retry !== 'Try again') throw new Error(`returned failure card: ${JSON.stringify(card)}`);
+	await returned.click('#retry');
+	await returned.waitForTimeout(50);
+	expectCalls('returned failure card, Try again', { calls: (await returned.evaluate(() => window.__calls)).filter(notLogLookup) }, ['start_local_service']);
+	console.log(`remote launch actions: ${clicks + 5} clicks reached their action`);
 } finally {
 	await browser.close();
 }

@@ -50,6 +50,10 @@ const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Default)]
 struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
+    /// The local service ports already granted their commands; a capability can't be removed, so each is added once.
+    granted_local_ports: Mutex<std::collections::BTreeSet<u16>>,
+    /// A failure the startup shell page has to draw once it is on screen again (see `show_shell_failure`).
+    pending_shell_failure: Mutex<Option<String>>,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
 }
@@ -299,6 +303,35 @@ fn service_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// The commands the pages the local service serves call: first-run folder choice and the setup report, Connect to
+/// another computer, and the window-drag handler injected on every page. Never `disconnect_remote` (the remote page's
+/// own command), `start_local_service` or the quit and login-item commands (the startup shell's).
+const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
+    "allow-choose-work-folder",
+    "allow-configure-work-folder",
+    "allow-remote-discovered",
+    "allow-remote-pair",
+    "allow-save-setup-report",
+    "allow-start-window-drag",
+];
+
+/// Lets the page the local service serves at this exact origin call its commands. The app's command ACL refuses every
+/// origin it does not name, and the service page is not the startup shell, so without this the first-run folder
+/// choice and the Connect to another computer screens are refused.
+fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<(), String> {
+    let mut granted = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner);
+    if granted.contains(&port) {
+        return Ok(());
+    }
+    let capability = LOCAL_SERVICE_PERMISSIONS.iter().fold(
+        CapabilityBuilder::new(format!("local-service-origin-{port}")).remote(service_url(port)).window("main"),
+        |capability, permission| capability.permission(*permission),
+    );
+    app.add_capability(capability).map_err(|error| format!("could not grant local service commands: {error}"))?;
+    granted.insert(port);
+    Ok(())
+}
+
 fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     match app.path().resource_dir() {
         Ok(path) => Ok(path),
@@ -426,6 +459,7 @@ fn start_service(
     match register_or_report_status(port)? {
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
+            grant_local_service_origin(app, service, port)?;
             Ok(ServiceStartup::Ready {
                 url: service_url(port),
             })
@@ -521,6 +555,7 @@ fn configure_work_folder(
         restart_service,
         || wait_for_service(port, &app_dir),
     )?;
+    grant_local_service_origin(&app, &service, port)?;
     *service
         .app_dir
         .lock()
@@ -846,6 +881,26 @@ fn is_shell_origin(actual: &str) -> bool {
     tauri::Url::parse(actual).is_ok_and(|url| url.scheme() == "tauri" && url.host_str() == Some("localhost"))
 }
 
+/// Puts the startup shell back in front of the person with a failure card that carries its action. Used when the
+/// page they are on has nothing left to recover with (its proxy is stopped and the local service did not come up).
+/// The card is drawn from the page-load hook, once the shell page's own script is running.
+fn show_shell_failure<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, reason: &str) {
+    *service.pending_shell_failure.lock().unwrap_or_else(PoisonError::into_inner) = Some(reason.to_owned());
+    let navigated = app
+        .get_webview_window("main")
+        .ok_or_else(|| "the CORSIA window is unavailable".to_owned())
+        .and_then(|window| window.navigate(tauri::Url::parse("tauri://localhost").expect("a valid URL")).map_err(|error| error.to_string()));
+    if let Err(error) = navigated {
+        log::error!("could not return to the startup shell: {error}");
+    }
+}
+
+/// The script that draws the pending shell failure, taken so it is drawn once.
+fn take_shell_failure_script(service: &AppServiceState) -> Option<String> {
+    let reason = service.pending_shell_failure.lock().unwrap_or_else(PoisonError::into_inner).take()?;
+    Some(format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(&reason).unwrap_or_default()))
+}
+
 /// Forgets the saved remote and brings the local service back. Called by the remote page's Disconnect and by the
 /// startup shell's launch-failure actions; it answers like `start_local_service`.
 #[tauri::command]
@@ -882,6 +937,11 @@ fn disconnect_remote(
         Err(remote_lifecycle::DisconnectError::NotForgotten(error)) => Err(error),
         Err(remote_lifecycle::DisconnectError::Forgotten(error)) => {
             report_remote_state(&app, |connection| connection.local());
+            // The calling page's proxy is gone, so it cannot show the error with a way forward; the startup
+            // shell can. A shell caller is already on it and draws the failure from this error itself.
+            if !is_shell_origin(actual.as_str()) {
+                show_shell_failure(&app, &service, &error);
+            }
             Err(error)
         }
     }
@@ -1118,7 +1178,12 @@ pub fn run() {
             save_setup_report,
             start_window_drag,
         ])
-        .on_page_load(|webview, _payload| {
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) && is_shell_origin(payload.url().as_str()) {
+                if let Some(script) = take_shell_failure_script(&webview.app_handle().state::<AppServiceState>()) {
+                    let _ = webview.eval(script);
+                }
+            }
             // Inject the drag handler on every page load. Idempotent —
             // the script self-guards via __corsia_drag_handler_installed
             // so multiple injections don't double-bind.
@@ -1444,6 +1509,99 @@ mod tests {
             assert!(SHELL_COMMANDS.contains(&command), "{command} is not a registered app command");
             assert!(invoke_from(&webview, command, "tauri://localhost").is_ok(), "{command} is not granted to the startup shell");
         }
+    }
+
+    /// Every command the frontend calls by name through the shell bridge: `invoke('x'`, outside tests and design pages.
+    fn frontend_commands() -> std::collections::BTreeSet<String> {
+        fn walk(folder: &Path, found: &mut std::collections::BTreeSet<String>) {
+            for entry in fs::read_dir(folder).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    if name != "_design" && name != "node_modules" {
+                        walk(&path, found);
+                    }
+                } else if (name.ends_with(".ts") || name.ends_with(".svelte")) && !name.contains(".test.") {
+                    let source = fs::read_to_string(&path).unwrap();
+                    for part in source.split("invoke('").skip(1) {
+                        found.insert(part[..part.find('\'').unwrap()].to_owned());
+                    }
+                }
+            }
+        }
+        let mut found = std::collections::BTreeSet::new();
+        walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/src"), &mut found);
+        found
+    }
+
+    /// The commands only the remote page calls (Settings > Disconnect): its own origin gets it, the local service's does not.
+    const REMOTE_PAGE_ONLY: &[&str] = &["disconnect_remote"];
+
+    fn service_origin_app(port: u16) -> (tauri::App<tauri::test::MockRuntime>, tauri::WebviewWindow<tauri::test::MockRuntime>) {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        grant_local_service_origin(app.handle(), &AppServiceState::default(), port).unwrap();
+        (app, webview)
+    }
+
+    #[test]
+    fn the_local_service_origin_is_allowed_every_command_its_pages_call() {
+        let called = frontend_commands();
+        assert_eq!(
+            called.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["choose_work_folder", "configure_work_folder", "disconnect_remote", "remote_discovered", "remote_pair", "save_setup_report"],
+            "the frontend's commands changed: grant each page its commands, or add it to the remote-page-only list"
+        );
+        let (_app, webview) = service_origin_app(47895);
+        let origin = service_url(47895);
+        for command in called.iter().map(String::as_str).chain(["start_window_drag"]) {
+            let allowed = invoke_from(&webview, command, &origin).is_ok();
+            assert_eq!(allowed, !REMOTE_PAGE_ONLY.contains(&command), "{command} from {origin}");
+        }
+    }
+
+    #[test]
+    fn the_local_service_grant_is_for_that_exact_origin_and_those_commands_only() {
+        let (_app, webview) = service_origin_app(47895);
+        for command in SHELL_COMMANDS {
+            let local = LOCAL_SERVICE_PERMISSIONS.contains(&format!("allow-{}", command.replace('_', "-")).as_str());
+            assert_eq!(invoke_from(&webview, command, &service_url(47895)).is_ok(), local, "{command} from the local service origin");
+            for other in ["http://127.0.0.1:47896", "http://localhost:47895", "https://127.0.0.1:47895", "http://studio.example:47895", "http://127.0.0.1"] {
+                let refusal = invoke_from(&webview, command, other).unwrap_err();
+                assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_proxy_origin_keeps_only_its_two_commands_beside_the_local_service_grant() {
+        let (app, webview) = service_origin_app(47895);
+        grant_remote_proxy_origin(app.handle(), 47911).unwrap();
+        for command in SHELL_COMMANDS {
+            let allowed = invoke_from(&webview, command, "http://127.0.0.1:47911").is_ok();
+            assert_eq!(allowed, ["disconnect_remote", "start_window_drag"].contains(command), "{command} from the proxy origin");
+        }
+    }
+
+    #[test]
+    fn granting_the_local_service_origin_again_adds_nothing() {
+        let app = acl_test_app();
+        let service = AppServiceState::default();
+        grant_local_service_origin(app.handle(), &service, 47895).unwrap();
+        grant_local_service_origin(app.handle(), &service, 47895).unwrap();
+        grant_local_service_origin(app.handle(), &service, 47896).unwrap();
+        assert_eq!(*service.granted_local_ports.lock().unwrap(), std::collections::BTreeSet::from([47895, 47896]));
+    }
+
+    #[test]
+    fn a_disconnect_that_cannot_bring_the_local_service_back_returns_to_a_shell_card_with_an_action() {
+        let app = launch_app();
+        let service = AppServiceState::default();
+        show_shell_failure(app.handle(), &service, "CORSIA service registration did not persist");
+        let script = take_shell_failure_script(&service).expect("the shell has a failure to draw");
+        assert_eq!(script, "window.__corsiaShowServiceFailure?.(\"CORSIA service registration did not persist\");");
+        assert!(take_shell_failure_script(&service).is_none(), "the failure is drawn once");
+        assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()), "the window did not return to the startup shell");
     }
 
     fn saved_studio(locator: remote_config::Locator, trust: remote_config::RemoteTrust) -> remote_config::RemoteRecord {
