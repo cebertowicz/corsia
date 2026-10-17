@@ -132,6 +132,16 @@ def _start_current_corrections_classifier() -> None:
         classifier_download.start(on_failure=_report_classifier_download_failure)
 
 
+def _schedule_current_corrections_classifier() -> None:
+    """Reconcile off the startup path: verifying the installed asset hashes its files, and nothing waits on the result."""
+    import infra.app_loop as app_loop
+
+    async def reconcile() -> None:
+        await asyncio.to_thread(_start_current_corrections_classifier)
+
+    app_loop.submit(reconcile())
+
+
 async def _start_runtime_services() -> None:
     # The database is initialized by now; diagnostics and capture start before
     # the services below so their startup lines reach the conductor log store.
@@ -163,7 +173,7 @@ async def _start_runtime_services() -> None:
 
     set_corrections_waker(startup_scan)
     recover_interrupted_install()
-    await asyncio.to_thread(_start_current_corrections_classifier)
+    _schedule_current_corrections_classifier()
     startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 

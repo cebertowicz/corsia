@@ -118,3 +118,31 @@ def test_a_startup_download_that_fails_while_an_older_asset_serves_stays_a_warni
 
 def test_a_failure_with_no_live_event_loop_is_logged_and_never_escapes_the_flight(tmp_path, monkeypatch):
     assert _failed_startup_flight(tmp_path, monkeypatch, installed=False, loop=False) == []
+
+
+async def test_startup_does_not_wait_for_the_classifier_reconcile(monkeypatch):
+    import asyncio
+    import threading
+
+    import infra.app_loop as app_loop
+
+    monkeypatch.setattr(app_loop, "_LOOP", asyncio.get_running_loop())
+    release = threading.Event()
+    finished = threading.Event()
+
+    def blocked_reconcile():
+        release.wait(timeout=10)
+        finished.set()
+
+    monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", blocked_reconcile)
+
+    app_startup_runtime._schedule_current_corrections_classifier()
+    await asyncio.sleep(0.05)  # the scheduled task is running its hash-bound work and startup is already past it
+    assert not finished.is_set()
+
+    release.set()
+    for _ in range(100):
+        if finished.is_set():
+            break
+        await asyncio.sleep(0.05)
+    assert finished.is_set()

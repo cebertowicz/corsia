@@ -116,6 +116,7 @@ def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
 
     assert sent[0].startswith("Corrections classifier version v1 was installed and activated.")
     assert "moved from 3.4 to 4.0" in sent[0]
+    assert sent[0].count("v1") == 1  # the version reads once, in the prefix
 
 
 def test_notice_is_marked_only_after_acceptance_and_is_not_resent(isolated_db, monkeypatch):

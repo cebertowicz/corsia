@@ -101,8 +101,8 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
         detail = installed + f"Corrections are now counted for the last {activation['weeks']} weeks."
     else:
         detail = installed + (
-            f"Corrections for the last {activation['weeks']} weeks were re-read with classifier "
-            f"version {version.version}; the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
+            f"Corrections for the last {activation['weeks']} weeks were re-read with it; "
+            f"the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
         )
     from events.delivery import deliver_to_thread
 
