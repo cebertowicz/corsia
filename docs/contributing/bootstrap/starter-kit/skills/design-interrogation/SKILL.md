@@ -1,9 +1,6 @@
 ---
 name: design-interrogation
 description: Use when designing or reviewing an architecture, schema, memory or retrieval system, performance or scalability plan, or any design that is expensive to reverse — steel-man and dismantle the options, define the central tradeoff precisely, budget the critical path, name what breaks at scale, and find the weakest assumption and the first prototype to kill it. Not for small changes inside an approved design.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Design interrogation
