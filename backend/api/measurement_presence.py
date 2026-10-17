@@ -43,27 +43,39 @@ def presence_allocation_cte(grain: Grain) -> str:
          f"SELECT {boundary(':gend_partial')} AS instant,0 AS delta"]
     )
     return f"""
-      presence_intervals AS (
-        SELECT v.thread_id,v.project_id,
-          MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
-          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
-        FROM threads t JOIN presence_visits v ON v.thread_id=t.id
-        WHERE t.user_id=:user_id AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+      presence_intervals AS MATERIALIZED (
+        SELECT a.thread_id,t.project_id,
+          MAX(datetime(a.focused_at),datetime(:from_ts)) AS began,
+          MIN(COALESCE(datetime(a.blurred_at),datetime('now')),datetime(:to_ts)) AS ended
+        FROM measurement_focus_intervals a JOIN threads t ON t.id=a.thread_id
+        WHERE t.user_id=:user_id AND a.focused_at<:to_ts
+          AND COALESCE(datetime(a.blurred_at),datetime('now'))>:from_ts
         UNION ALL
         SELECT v.thread_id,v.project_id,
           MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
-          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
-        FROM presence_visits v
+          MIN(datetime(v.exited_at),datetime(COALESCE(f.focused_since, v.exited_at)),datetime(:to_ts)) AS ended
+        FROM threads t JOIN presence_visits v ON v.thread_id=t.id
+        LEFT JOIN measurement_focus_users f ON f.user_id=v.user_id
+        WHERE t.user_id=:user_id AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+          AND (f.focused_since IS NULL OR v.entered_at<f.focused_since)
+        UNION ALL
+        SELECT v.thread_id,v.project_id,
+          MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
+          MIN(datetime(v.exited_at),datetime(COALESCE(f.focused_since, v.exited_at)),datetime(:to_ts)) AS ended
+        FROM presence_visits v LEFT JOIN measurement_focus_users f ON f.user_id=v.user_id
         WHERE v.thread_id IS NULL AND v.project_id IS NOT NULL
           AND v.user_id=:user_id
           AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+          AND (f.focused_since IS NULL OR v.entered_at<f.focused_since)
         UNION ALL
         SELECT p.thread_id,t.project_id,
           MAX(datetime(p.last_entered_at),datetime(:from_ts)) AS began,
           MIN(COALESCE(datetime(p.exit_pending_at),datetime('now')),datetime(:to_ts)) AS ended
         FROM thread_presence p JOIN threads t ON t.id=p.thread_id
+        LEFT JOIN measurement_focus_users f ON f.user_id=p.user_id
         WHERE t.user_id=:user_id AND p.present=1
           AND p.last_entered_at<:to_ts AND COALESCE(datetime(p.exit_pending_at),datetime('now'))>:from_ts
+          AND f.user_id IS NULL
       ), presence_events AS (
         SELECT began AS instant,1 AS delta FROM presence_intervals WHERE began<ended
         UNION ALL SELECT ended AS instant,-1 AS delta FROM presence_intervals WHERE began<ended
@@ -75,10 +87,10 @@ def presence_allocation_cte(grain: Grain) -> str:
       ), presence_segments AS (
         SELECT instant AS began,LEAD(instant) OVER (ORDER BY instant) AS ended,active_visits
         FROM presence_coverage
-      ), presence_live_segments AS (
+      ), presence_live_segments AS MATERIALIZED (
         SELECT began,ended,(julianday(ended)-julianday(began))*86400.0 AS seconds
         FROM presence_segments WHERE active_visits>0 AND ended IS NOT NULL AND began<ended
-      ), presence_active_threads AS (
+      ), presence_active_threads AS MATERIALIZED (
         SELECT s.began,s.ended,v.thread_id
         FROM presence_live_segments s JOIN presence_intervals v ON v.began<=s.began AND v.ended>=s.ended
         WHERE v.thread_id IS NOT NULL GROUP BY s.began,s.ended,v.thread_id
@@ -136,14 +148,23 @@ def presence_coverage(db, user_id: str, zone: str) -> PresenceCoverage:
     row = db.execute("""
         SELECT MIN(instant) AS instant FROM (
           SELECT datetime(v.entered_at) AS instant
-          FROM presence_visits v JOIN threads t ON t.id=v.thread_id WHERE t.user_id=:user_id
+          FROM presence_visits v JOIN threads t ON t.id=v.thread_id
+          LEFT JOIN measurement_focus_users f ON f.user_id=v.user_id
+          WHERE t.user_id=:user_id AND (f.focused_since IS NULL OR v.entered_at<f.focused_since)
           UNION ALL
-          SELECT datetime(entered_at) AS instant FROM presence_visits
-          WHERE thread_id IS NULL AND user_id=:user_id
+          SELECT datetime(v.entered_at) AS instant FROM presence_visits v
+          LEFT JOIN measurement_focus_users f ON f.user_id=v.user_id
+          WHERE v.thread_id IS NULL AND v.user_id=:user_id
+            AND (f.focused_since IS NULL OR v.entered_at<f.focused_since)
+          UNION ALL
+          SELECT datetime(a.focused_at) AS instant
+          FROM measurement_focus_intervals a JOIN threads t ON t.id=a.thread_id
+          WHERE t.user_id=:user_id
           UNION ALL
           SELECT datetime(p.last_entered_at) AS instant
           FROM thread_presence p JOIN threads t ON t.id=p.thread_id
-          WHERE t.user_id=:user_id
+          WHERE t.user_id=:user_id AND NOT EXISTS (
+            SELECT 1 FROM measurement_focus_users f WHERE f.user_id=p.user_id)
         ) WHERE instant IS NOT NULL
     """, {"user_id": user_id}).fetchone()
     return PresenceCoverage(row["instant"] if row and row["instant"] else None, zone)
@@ -159,7 +180,8 @@ def scoped_presence_cte(grain: Grain, scope_threads: str) -> str:
 
     ``scoped_attention`` is the scope's union time: a composite scope counts each slice
     once, an agent its evenly split thread slices. ``scoped_visits`` are the scope's
-    clipped visits, the observations behind that time.
+    clipped intervals, the observations behind that time: a legacy visit before a user's
+    cutover, a focus interval (one per blur and refocus) from it on.
     """
     predicate = presence_predicate(scope_threads)
     return f"""{presence_allocation_cte(grain)}, scoped_attention AS (
@@ -176,7 +198,10 @@ def scoped_presence_cte(grain: Grain, scope_threads: str) -> str:
 
 
 def presence_family_sql(grain: Grain, scope_threads: str) -> str:
-    """Return each scope's presence hours by period, with n the visits that began in it."""
+    """Return each scope's presence hours by period, with n the intervals that began in it.
+
+    After a user's cutover each focus interval counts, so n is not a count of sittings.
+    """
     return f"""
       WITH {scoped_presence_cte(grain, scope_threads)}, hours AS (
         SELECT {grain.bucket('began')} AS period,SUM(seconds)/3600.0 AS value

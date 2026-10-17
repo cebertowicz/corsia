@@ -24,6 +24,7 @@ type Timer = { at: number; fn: () => void; live: boolean };
 function fakeEnv() {
 	let clock = 1_000_000;
 	let visible = true;
+	let focused = true;
 	let lastInput = -Infinity;
 	const timers: Timer[] = [];
 	const sent: PresenceFrame[] = [];
@@ -32,6 +33,7 @@ function fakeEnv() {
 		now: () => clock,
 		lastInputAt: () => lastInput,
 		isVisible: () => visible,
+		isFocused: () => focused,
 		setTimer: (fn, ms) => {
 			const timer = { at: clock + ms, fn, live: true };
 			timers.push(timer);
@@ -59,6 +61,7 @@ function fakeEnv() {
 		/** Input the page clock saw before any tracker existed. */
 		inputEarlier: () => { lastInput = clock; },
 		setVisible: (value: boolean) => { visible = value; },
+		setFocused: (value: boolean) => { focused = value; },
 	};
 }
 
@@ -74,7 +77,7 @@ describe('presence claim computation', () => {
 		expect(sent).toEqual([]);
 		advance(1);
 		expect(sent).toEqual([
-			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground' },
+			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground', focused: true },
 		]);
 	});
 
@@ -86,7 +89,7 @@ describe('presence claim computation', () => {
 		tracker.updateDocumentOpenCapability({ canShow: false, showing: null });
 		advance(DWELL_MS);
 		expect(sent).toEqual([
-			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground' },
+			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground', focused: true },
 			{
 				type: 'presence', surface: 'chat', thread_id: 't1', state: 'document_open_capability',
 				document_open: { can_show: false, visible_artifact_id: null },
@@ -131,6 +134,23 @@ describe('presence claim computation', () => {
 		expect(sent).toEqual([]);
 		input(tracker);
 		expect(states(sent)).toEqual(['foreground']);
+	});
+
+	it('ends and restarts a Measurement interval when focus leaves and returns', () => {
+		const { env, sent, advance, input, setFocused } = fakeEnv();
+		const tracker = createPresenceTracker(env);
+		input(tracker);
+		tracker.show('t1');
+		advance(DWELL_MS);
+		setFocused(false);
+		tracker.focusChanged();
+		setFocused(true);
+		tracker.focusChanged();
+		expect(sent).toEqual([
+			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground', focused: true },
+			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground', focused: false },
+			{ type: 'presence', surface: 'chat', thread_id: 't1', state: 'foreground', focused: true },
+		]);
 	});
 
 	it('sends background tagged hidden when the page is hidden, then re-dwells', () => {
@@ -268,6 +288,44 @@ describe('browser binding', () => {
 		expect(frames.map((frame) => frame.state)).toEqual(['foreground', 'foreground', 'background']);
 		expect(frames.every((frame) => frame.thread_id === 't9' && frame.surface === 'chat')).toBe(true);
 		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it('keeps the Measurement visit focused when interaction moves into an iframe', () => {
+		const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+		window.dispatchEvent(new Event('pointerdown'));
+		startPresence('iframe-thread');
+		vi.advanceTimersByTime(DWELL_MS);
+		expect(JSON.parse(socket.send.mock.calls[0][0] as string).focused).toBe(true);
+		socket.send.mockClear();
+		const iframe = document.createElement('iframe');
+		document.body.append(iframe);
+		iframe.focus();
+		hasFocus.mockReturnValue(false);
+		window.dispatchEvent(new Event('blur'));
+		vi.advanceTimersByTime(0);
+		const frames = socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+		expect(frames).toEqual([]);
+		expect(getPresenceTracker()?.claimed).toBe(true);
+		hasFocus.mockRestore();
+		iframe.remove();
+	});
+
+	it('on a phone, starts on a visible page and ends when the page is hidden', () => {
+		vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' });
+		const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+		const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+		window.dispatchEvent(new Event('pointerdown'));
+		startPresence('phone-thread');
+		vi.advanceTimersByTime(DWELL_MS);
+		const started = socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+		expect(started.map((frame) => [frame.state, frame.focused])).toEqual([['foreground', true]]);
+		socket.send.mockClear();
+		visibility.mockReturnValue('hidden');
+		document.dispatchEvent(new Event('visibilitychange'));
+		const ended = socket.send.mock.calls.map(([raw]) => JSON.parse(raw as string));
+		expect(ended.map((frame) => [frame.state, frame.reason])).toEqual([['background', 'hidden']]);
+		hasFocus.mockRestore();
+		visibility.mockRestore();
 	});
 
 	it('goes idle on the page input clock, the one the Plans pane reads', () => {

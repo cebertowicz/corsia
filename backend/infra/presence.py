@@ -34,6 +34,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+import infra.measurement_focus as measurement_focus
 import infra.presence_records as presence_records
 from infra.database import write_transaction
 from infra.presence_time import iso, parse, seen_boundary
@@ -98,7 +99,7 @@ def _require_surface(surface: str) -> None:
 
 def claim(
     db: sqlite3.Connection, *, user_id: str, surface: str, thread_id: str,
-    session: str, now: datetime,
+    session: str, now: datetime, focused: bool | None = None,
 ) -> Changed:
     """Record that ``session`` now shows ``thread_id`` on ``surface``.
 
@@ -133,6 +134,11 @@ def claim(
         if opening:
             presence_records.enter(db, user_id, thread_id, now)
             changed.append((user_id, thread_id))
+        if focused is not None:
+            measurement_focus.set_focused(
+                db, user_id=user_id, surface=surface, thread_id=thread_id,
+                session=session, focused=focused, now=now,
+            )
     return changed
 
 
@@ -217,6 +223,7 @@ def _release(
     if key is None:
         return
     visit = _visits[key]
+    measurement_focus.end_session(db, session=session, surface=surface, now=stamp)
     visit.claims.pop(session, None)
     visit.document_open.pop(session, None)
     if reason == "hidden":
@@ -332,6 +339,7 @@ def reconcile_startup(db: sqlite3.Connection, *, now: datetime) -> None:
     with _LOCK:
         _visits.clear()
         _session_keys.clear()
+        measurement_focus.reconcile_startup(db, now=now)
         with write_transaction(db, scope="presence_reconcile"):
             db.execute(
                 "UPDATE thread_presence SET "
@@ -365,3 +373,4 @@ def delete_thread_presence(db: sqlite3.Connection, thread_id: str) -> None:
     """
     db.execute("DELETE FROM thread_presence WHERE thread_id=?", (thread_id,))
     db.execute("DELETE FROM presence_visits WHERE thread_id=?", (thread_id,))
+    measurement_focus.delete_thread(db, thread_id)

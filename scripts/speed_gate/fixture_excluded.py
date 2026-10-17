@@ -14,6 +14,10 @@ DERIVED_ROLLUP = ("derived from llm_usage by the application's own rollup refres
 NOT_IN_CENSUS = "absent from the production census's table list, so there is no volume to reproduce"
 
 
+NEW_IN_SCHEMA = ("added after the production census, so production holds no rows to reproduce; the Measurement "
+                 "attention read over it is measured with the table empty")
+
+
 def _small(count: int) -> str:
     return (f"{count} row(s) in production: the fixture keeps what init_db and the harness's test accounts "
             "create, not a copy of production's")
@@ -40,6 +44,7 @@ EXCLUDED: dict[str, str] = {
     "system_bulletin_identity": _small(1),
     "outcome_event_counters": _small(1),
     "users": _small(1),
+    **{table: NEW_IN_SCHEMA for table in ("measurement_focus_intervals", "measurement_focus_users")},
     **{table: NOT_IN_CENSUS for table in (
         "action_drafts", "artifact_relocation_intents", "connected_app_audit", "connected_app_reach",
         "connected_apps", "connection_rules", "doc_feedback_edit_items", "durable_write_intents",

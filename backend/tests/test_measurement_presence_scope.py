@@ -87,6 +87,41 @@ async def _hours(measurement_series, *, project: str = "all", agent: str | None 
         db.close()
 
 
+def _seed_focus(db, thread_id: str, *, session: str, began: str, ended: str | None) -> None:
+    db.execute(
+        "INSERT OR IGNORE INTO measurement_focus_users (user_id,focused_since) VALUES ('steve',?)",
+        (began,),
+    )
+    db.execute(
+        "INSERT INTO measurement_focus_intervals "
+        "(user_id,surface,thread_id,session_id,focused_at,blurred_at) VALUES "
+        "('steve','chat',?,?,?,?)",
+        (thread_id, session, began, ended),
+    )
+
+
+@pytest.mark.asyncio
+async def test_focus_intervals_end_on_blur_and_union_across_windows(isolated_db):
+    """Measurement excludes the shared visit after focus-aware reporting starts."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        _seed_visit(db, "shared-presence", thread_id="agent-a")
+        _seed_focus(db, "agent-a", session="desktop", began="2026-09-21T12:00:00Z", ended="2026-09-21T12:10:00Z")
+        _seed_focus(db, "agent-a", session="phone", began="2026-09-21T12:05:00Z", ended="2026-09-21T12:15:00Z")
+        _seed_focus(db, "agent-a", session="desktop", began="2026-09-21T12:20:00Z", ended="2026-09-21T12:30:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    # 12:00–12:15 counts once across devices; blur then refocus creates 12:20–12:30.
+    assert await _hours(measurement_series, project="one") == pytest.approx(25 / 60)
+
+
 @pytest.mark.asyncio
 async def test_project_only_scope_keeps_project_level_presence(isolated_db):
     """The baseline a project-only query must keep: its own closure plus project-level visits."""
@@ -306,3 +341,83 @@ def test_the_index_and_the_series_start_coverage_on_the_same_local_day(isolated_
     assert series_start == "2026-09-20"
     assert starts["active_hours_per_outcome"] == starts["time_on_platform_h"] == series_start
     assert starts["estimated_human_hours_per_active_hour"] == "2026-09-20"
+
+
+def _seed_visit_at(db, thread_id: str, entered: str, exited: str, *, project_id: str | None = None) -> None:
+    db.execute(
+        "INSERT INTO presence_visits (user_id,surface,thread_id,project_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+        "VALUES ('steve','chat',?,?,?,?,0,1,'hidden')",
+        (thread_id, project_id, entered, exited),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_visit_straddling_the_cutover_counts_once_with_no_gap(isolated_db):
+    """Each period has one source: legacy visits before the user's cutover, focus intervals from it on.
+
+    The legacy visit runs 12:00-13:00 and the first focus interval opens at the cutover, 12:30,
+    so the legacy side is clipped there (12:00-12:30), the focus side covers 12:30-12:50, and a
+    legacy visit recorded wholly after the cutover is ignored.
+    """
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        _seed_visit_at(db, "agent-a", "2026-09-21T12:00:00Z", "2026-09-21T13:00:00Z", project_id="one")
+        _seed_visit_at(db, "agent-a", "2026-09-21T14:00:00Z", "2026-09-21T15:00:00Z", project_id="one")
+        _seed_focus(db, "agent-a", session="desktop", began="2026-09-21T12:30:00Z", ended="2026-09-21T12:50:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    assert await _hours(measurement_series, project="one") == pytest.approx(50 / 60)
+
+
+@pytest.mark.asyncio
+async def test_the_cutover_applies_per_user(isolated_db):
+    """A user with no focus-aware frame yet keeps their legacy visits whole."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        _seed_visit_at(db, "agent-a", "2026-09-21T12:00:00Z", "2026-09-21T13:00:00Z", project_id="one")
+        db.execute(
+            "INSERT INTO measurement_focus_users (user_id,focused_since) VALUES ('someone-else','2026-09-21T12:30:00Z')"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert await _hours(measurement_series, project="one") == pytest.approx(1.0)
+
+
+def test_coverage_starts_at_a_project_level_visit_before_the_cutover(isolated_db):
+    """Coverage and the allocator read the same legacy rows: a project-level visit from before
+    the cutover still starts coverage, one from after it does not."""
+    from api.measurement_presence import presence_coverage
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        db.execute(
+            "INSERT INTO presence_visits (user_id,surface,thread_id,project_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+            "VALUES ('steve','project',NULL,'one','2026-09-10T12:00:00Z','2026-09-10T13:00:00Z',3600,1,'hidden'),"
+            "('steve','project',NULL,'one','2026-09-22T12:00:00Z','2026-09-22T13:00:00Z',3600,1,'hidden')"
+        )
+        db.execute(
+            "INSERT INTO measurement_focus_users (user_id,focused_since) VALUES ('steve','2026-09-21T12:00:00Z')"
+        )
+        db.commit()
+        assert presence_coverage(db, "steve", "UTC").started_at == "2026-09-10 12:00:00"
+        db.execute("DELETE FROM presence_visits WHERE entered_at<'2026-09-21'")
+        db.commit()
+        assert presence_coverage(db, "steve", "UTC").started_at is None
+    finally:
+        db.close()
