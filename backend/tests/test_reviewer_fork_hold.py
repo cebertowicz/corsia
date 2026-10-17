@@ -167,13 +167,28 @@ def test_the_label_before_green_checks_lets_the_green_event_run_the_review(_relo
 
 
 def test_the_label_never_approves_workflow_runs(_reload_gate):
-    from reviewer import gh_fork_hold
+    from events.reviewer_route import check_gate_on_trigger
 
-    assert not hasattr(gh_fork_hold, "approve_waiting_runs")
-    with patch("reviewer.gh_fork_hold.run_gh") as run:
-        _label(_reload_gate, _payload("labeled", "abc123def", sender="maintainer"), FORK_INFO)
+    gate_mod = _reload_gate
 
-    run.assert_not_called()
+    def gh(args, timeout):
+        stdout = "write\n" if args[-2:] == ["--jq", ".permission"] else ""
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=FORK_INFO), \
+         patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=False), \
+         patch.object(gate_mod, "emit_product_event"), \
+         patch("reviewer.reviewer_status.set_status"), \
+         patch("events.connectors.github_reviewer_fork_hold.emit_product_event"), \
+         patch("reviewer.gh_fork_hold.run_gh", side_effect=gh) as run:
+        check_gate_on_trigger("webhook.github.pr_labeled", _payload("labeled", "abc123def", sender="maintainer"))
+
+    calls = [call.args[0] for call in run.call_args_list]
+    assert calls == [
+        ["api", "repos/owner/repo/collaborators/maintainer/permission", "--jq", ".permission"],
+        ["api", "-X", "DELETE", f"repos/owner/repo/issues/42/labels/{LABEL_REVIEW}"],
+    ]
+    assert _approved(gate_mod) == "abc123def"
 
 
 def test_a_label_names_the_head_it_was_added_on_even_if_a_push_landed_since(_reload_gate):

@@ -81,10 +81,12 @@ def approve_labeled_head(
 ) -> None:
     """Approve the head a label was added on, for a sender with write access, then run the gate.
 
-    The head is the one in the label event, never a fresh read: a push between
-    the maintainer's look and the label leaves that old head approved and the
-    new head held. The label is consumed either way, so adding it again always
-    fires a new event.
+    The head is the one GitHub put in the label event, which is the head when
+    the label was added, never a later read: a push after the label is held. A
+    push that lands before the click is approved, so the label approves the head
+    the PR shows at that moment, and its review still waits for that head's own
+    checks to go green. The label is consumed either
+    way, so adding it again always fires a new event.
     """
     from events.reviewer_gate import on_pull_request_ready_for_review
     from reviewer.gh_fork_hold import remove_review_label, sender_can_approve
