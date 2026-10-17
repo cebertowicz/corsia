@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
@@ -132,19 +132,6 @@ const longHostAccessPurpose = [
 	'Confirm at the end that the bridge remains healthy after a second discovery interval and that the intended device is visible to Home Assistant.',
 	'Report the exact setting changed, the verification performed, whether rollback was required, and any residual risk that needs a separate request.',
 ].join(' ');
-
-/** A sheet slides in; its box is the place it settles, so wait for two identical reads. */
-async function settledBox(locator: Locator) {
-	let previous: { x: number; y: number; width: number; height: number } | null = null;
-	await expect.poll(async () => {
-		const box = await locator.boundingBox();
-		const still = !!box && !!previous && box.x === previous.x && box.y === previous.y
-			&& box.width === previous.width && box.height === previous.height;
-		previous = box;
-		return still;
-	}).toBe(true);
-	return locator.boundingBox();
-}
 
 async function selectThread(page: Page, title: string) {
 	const mobile = (page.viewportSize()?.width ?? 0) <= 768;
@@ -339,12 +326,14 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
 
 		const viewport = page.viewportSize();
-		const box = await settledBox(dialog);
+		// The sheet slides up from below on open; its bounds are read where it comes to rest.
+		await expect.poll(async () => {
+			const rest = await dialog.boundingBox();
+			return !!rest && rest.x >= 0 && rest.y >= 0 && rest.x + rest.width <= viewport!.width
+				&& rest.y + rest.height <= viewport!.height;
+		}, 'the review sheet rests inside the viewport').toBe(true);
+		const box = await dialog.boundingBox();
 		expect(box).toBeTruthy();
-		expect(box!.x).toBeGreaterThanOrEqual(0);
-		expect(box!.y).toBeGreaterThanOrEqual(0);
-		expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');
@@ -444,11 +433,13 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toBeVisible();
 		expect(decisions).toHaveLength(1);
 
-		const activeDialogBox = await settledBox(activeDialog);
+		await expect.poll(async () => {
+			const rest = await activeDialog.boundingBox();
+			return !!rest && rest.x >= 0 && rest.x + rest.width <= viewport!.width
+				&& rest.y + rest.height <= viewport!.height;
+		}, 'the active-lease sheet rests inside the viewport').toBe(true);
+		const activeDialogBox = await activeDialog.boundingBox();
 		expect(activeDialogBox).toBeTruthy();
-		expect(activeDialogBox!.x).toBeGreaterThanOrEqual(0);
-		expect(activeDialogBox!.x + activeDialogBox!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(activeDialogBox!.y + activeDialogBox!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');
