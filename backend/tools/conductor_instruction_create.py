@@ -19,6 +19,7 @@ from tools.conductor_instruction_files import _actor_user_id, _instruction_paths
 from tools.file_write_completion import GUIDANCE_PARAMETERS
 
 MAX_INSTALL_BYTES = 32_768
+_SUPPORTING_PATH = re.compile(r"corsia\.yaml|(?:scripts|references)/[a-zA-Z0-9_.-]+")
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def _undelivered_error(kind: str) -> str:
 
 
 def _install_paths(target, kind: str, name: str | None, content: str, supporting_files: dict) -> dict[Path, bytes]:
-    from core.skill_validation import validate_skill_dir_name, validate_skill_text
+    from core.skill_validation import validate_skill_bundle, validate_skill_dir_name
 
     workspace = resolve_workspace_root(config.WORKSPACE)
     scope_root = workspace
@@ -74,15 +75,22 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
             validate_skill_dir_name(name)
         except ValueError as exc:
             raise RosterChangeError("skill name must be lowercase letters, numbers and hyphens") from exc
-        valid = validate_skill_text(content)
-        if not valid.ok or valid.name != name:
-            raise RosterChangeError("SKILL.md requires matching name, description and valid corsia frontmatter")
         root = tray / "skills" / name
         writes = {root / "SKILL.md": content.encode()}
         for relative, text in supporting_files.items():
-            if not re.fullmatch(r"(?:scripts|references)/[a-zA-Z0-9_.-]+", relative) or not isinstance(text, str):
-                raise RosterChangeError("supporting_files paths must be one-level scripts/ or references/ files with text content")
+            if not _SUPPORTING_PATH.fullmatch(relative) or not isinstance(text, str):
+                raise RosterChangeError(
+                    "supporting_files paths must be corsia.yaml or one-level scripts/ or references/ files with text content"
+                )
             writes[root / relative] = text.encode()
+        # Validate SKILL.md together with its sidecar, so a pointer to a corsia.yaml
+        # this install does not write fails here instead of after delivery.
+        valid = validate_skill_bundle(content, supporting_files)
+        if not valid.ok or valid.name != name:
+            raise RosterChangeError(
+                "SKILL.md requires matching name, description and spec frontmatter; "
+                "CORSIA data goes in a corsia.yaml supporting file named by metadata corsia-data"
+            )
     else:
         raise RosterChangeError("kind must be responsibility or skill")
     for path in writes:
@@ -177,7 +185,7 @@ class ConductorInstructionFileCreateTool(Tool):
     def description(self) -> str:
         return (
             "Load skill coordination-api for setup. For the CORSIA agent or a project conductor in the same scope: create and attach a target thread's "
-            "RESPONSIBILITY.md, or install its thread skill and optional scripts/references. "
+            "RESPONSIBILITY.md, or install its thread skill with optional corsia.yaml and scripts/references. "
             "Use expected_revision='absent' for creation; copy the returned bundle revision "
             "for later edits. Same desired state retries are idempotent. Returns verified next-turn "
             "bootloader or skills-list delivery; support scripts are available, never executed. "
