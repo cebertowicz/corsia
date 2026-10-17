@@ -25,8 +25,9 @@ export function isMermaidFence(node: SyntaxNodeRef, doc: Text): boolean {
 }
 
 /**
- * The editor's syntax tree parsed at least to `pos`. These lookups answer a person's action, so they finish the parse rather than
- * stop at a time budget: a partly parsed tree would silently answer "no block here" on a slower machine.
+ * The editor's syntax tree parsed at least to `pos`. These lookups must be right, so they finish the parse rather than stop at a time
+ * budget: a partly parsed tree would silently answer "no block here" on a slower machine. Callers include comment-card labels, which
+ * run when a document opens, so the first label near the end of a long document parses up to it synchronously; later reads reuse it.
  */
 const treeTo = (state: EditorState, pos: number) =>
 	ensureSyntaxTree(state, Math.min(pos, state.doc.length), Infinity) ?? syntaxTree(state);
