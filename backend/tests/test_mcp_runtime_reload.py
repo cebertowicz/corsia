@@ -48,6 +48,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
     monkeypatch.setattr(mcp_runtime, "_app_tools", {})
     monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_configs", {})
     monkeypatch.setattr(mcp_runtime, "_app_states", {})
     monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
     monkeypatch.setattr(state, "_agent", None)
@@ -196,6 +197,68 @@ def test_connected_app_reconnect_rate_limit_names_the_ten_second_wait(runtime):
         asyncio.run(mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))
 
 
+def test_connect_restarts_a_running_app_when_its_stored_config_changed(runtime, monkeypatch):
+    mcp_runtime, tools, _ = runtime
+    versions = {"app-1": 1}
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            app_id = args[0]
+            return "GitHub", {"connected_app_id": app_id, "version": versions[app_id]}
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+
+    async def scenario():
+        first = await mcp_runtime.apply_connected_app_runtime("connect", "app-1")
+        assert first["state"] == "working"
+        versions["app-1"] = 2
+        refreshed = await mcp_runtime.apply_connected_app_runtime("connect", "app-1")
+        assert refreshed["state"] == "working"
+
+    asyncio.run(scenario())
+
+    assert [tool.name for tool in tools] == ["GitHub_1", "GitHub_2"]
+    assert not tools[0].session_open
+    assert tools[1].session_open
+
+
+def test_a_saved_write_inside_the_reconnect_window_restarts_at_once(runtime, monkeypatch):
+    """A person's saved change is not a Reconnect press: it reaches the app now, even seconds after one."""
+    from tools.connected_apps_runtime import reconnect_after_saved_write
+
+    mcp_runtime, tools, _ = runtime
+    version = [1]
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return "GitHub", {"connected_app_id": args[0], "version": version[0]}
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+
+    async def scenario():
+        assert (await mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))["state"] == "working"
+        version[0] = 2
+        saved = await reconnect_after_saved_write("app-1")
+        assert saved["state"] == "working"
+        with pytest.raises(mcp_runtime.MCPReconnectRateLimitError):
+            await mcp_runtime.apply_connected_app_runtime("reconnect", "app-1")
+
+    asyncio.run(scenario())
+
+    assert [tool.name for tool in tools] == ["GitHub_1", "GitHub_2"]
+    assert not tools[0].session_open and tools[1].session_open
+
+
 def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, monkeypatch):
     from infra import state
     from tools.registry import ToolRegistry
@@ -329,6 +392,27 @@ def test_connect_runs_the_real_key_lookup_for_a_local_and_a_keyed_app(runtime, i
     assert local_result["state"] == "working"
     assert keyed_result["state"] == "needs_token"
     assert mcp_runtime.connected_app_state(str(keyed["id"]))["state"] == "needs_token"
+
+
+@pytest.mark.parametrize("live_state", ["needs_sign_in", "working", "connecting"])
+def test_no_new_app_starts_in_a_live_state(runtime, isolated_db, live_state):
+    """A-R16: a new app is a person's add or a request waiting for approval; startup connects neither kind early."""
+    from connections.app_lifecycle import create_app
+    from connections.app_reach import AppReachError
+    from infra.database import get_db
+
+    mcp_runtime, tools, _gate = runtime
+    everywhere = {"mode": "all", "project_ids": [], "outside_projects": False}
+    db = get_db()
+    try:
+        with pytest.raises(AppReachError):
+            create_app("Public", {"url": "https://example.test/mcp", "key_refs": []}, everywhere, state=live_state, db=db)
+        waiting = create_app("Public", {"url": "https://example.test/mcp", "key_refs": []}, everywhere, state="awaiting_approval", db=db)
+    finally:
+        db.close()
+
+    assert str(waiting["id"]) not in asyncio.run(mcp_runtime.start_connected_app_runtime())
+    assert tools == []
 
 
 def test_runtime_error_after_connecting_publishes_failed_and_a_later_connect_retries(runtime, monkeypatch):

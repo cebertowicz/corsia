@@ -21,6 +21,7 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	token.set(null);
 });
 
@@ -33,8 +34,28 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
 		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), { method: 'POST' }));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_revision: 1 }) })));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
+		const connectedRow = host.querySelector('.app-row');
+		expect(connectedRow?.querySelector('.summary')?.getAttribute('aria-expanded')).toBe('false');
+		expect(connectedRow?.querySelector('[aria-hidden="true"]')?.textContent).toBe('›');
+	});
+
+	it('uses the waiting-row type treatment for connected rows too', async () => {
+		const connected = { ...awaiting, id: 'notes', name: 'Notes', state: 'working', tool_count: 2 };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [connected, awaiting] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-copy strong')).toHaveLength(2));
+		expect(host.querySelector('.app-copy')?.classList.contains('waiting-copy')).toBe(true);
+		expect(host.querySelector('.app-copy .second.status')).toBeNull();
+		expect(host.querySelector('.app-copy .second')?.textContent).toBe('Connected · 2 actions · All projects');
+	});
+
+	it('uses amber only for connected-app states needing attention', async () => {
+		const needsSignIn = { ...awaiting, id: 'notion', name: 'Notion', state: 'needs_sign_in' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [needsSignIn] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.app-copy .second.status')?.textContent).toContain('Needs you to sign in'));
 	});
 
 	it('calls decline for an awaiting approval row', async () => {
@@ -46,6 +67,17 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
 	});
 
+	it('removes the row once Decline deletes a new request, and keeps the others', async () => {
+		const second = { ...awaiting, id: 'linear', name: 'Linear' };
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/decline') ? { id: 'github', removed: true } : { servers: [awaiting, second] } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(2));
+		([...host.querySelectorAll('.waiting-row')[0].querySelectorAll('button')].find((button) => button.textContent?.includes('Decline')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(1));
+		expect(host.querySelector('.waiting-copy strong')?.textContent).toBe('Linear');
+	});
+
 	it('names the projects an app works in on its row', async () => {
 		const catalog = [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }, { id: 'home', name: 'Home renovation', status: 'active', accent_color: null }];
 		const selected = { ...awaiting, state: 'working', reach: { mode: 'selected', project_ids: ['q4', 'home'], outside_projects: true } };
@@ -53,6 +85,184 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Q4 launch, Home renovation, 1 more'));
 		expect(host.textContent).not.toContain('Select individually');
+	});
+
+	it('shows an empty-reach row as waiting for a place, with no Approve until one is saved', async () => {
+		const folderApp = { ...awaiting, id: 'postgres', name: 'Postgres', reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [folderApp] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+		expect(host.querySelector('.waiting-copy .status')?.textContent).toBe('Waiting for your approval');
+		const labels = [...host.querySelectorAll('.waiting-actions button')].map((button) => button.textContent?.trim());
+		expect(labels).toEqual(['Choose where it works…', 'Decline']);
+	});
+
+	it('shows the folder label as plain text under the status', async () => {
+		const folderApp = { ...awaiting, id: 'postgres', name: 'Postgres', folder: '<b>shop</b>', reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [folderApp] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('From Claude Code · <b>shop</b> folder'));
+		expect(host.querySelector('.waiting-copy b')).toBeNull();
+	});
+
+	it('gives every waiting row the same rhythm: an idle sign-in view reserves no empty panel', async () => {
+		const place = { mode: 'selected', project_ids: [], outside_projects: false };
+		const rows = [
+			{ ...awaiting, id: 'acme', name: 'Acme', reach: place },
+			{ ...awaiting, id: 'notes', name: 'Notes', transport: 'http', sign_in: { status: 'idle', signed_in: false }, reach: place },
+			{ ...awaiting, id: 'postgres', name: 'Postgres', reach: place },
+		];
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: rows }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(3));
+		for (const row of host.querySelectorAll('.waiting-row')) {
+			expect(row.querySelector('.waiting-panel')).toBeNull();
+			expect([...row.children].map((child) => child.classList.contains('waiting-copy') ? 'copy' : child.classList.contains('waiting-actions') ? 'actions' : 'other')).toEqual(['copy', 'actions']);
+		}
+	});
+
+	it('still shows the sign-in panel on a waiting row once there is something to say', async () => {
+		const pending = { ...awaiting, id: 'notes', name: 'Notes', transport: 'http', sign_in: { status: 'pending', signed_in: false }, reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [pending] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.waiting-panel')).not.toBeNull());
+	});
+
+	it('lists the rows in the order the server sends them', async () => {
+		const place = { mode: 'selected', project_ids: [], outside_projects: false };
+		const rows = ['Acme', 'Linear', 'Notes', 'Postgres'].map((name) => ({ ...awaiting, id: name.toLowerCase(), name, reach: place }));
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: rows }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(4));
+		expect([...host.querySelectorAll('.waiting-copy strong')].map((el) => el.textContent)).toEqual(['Acme', 'Linear', 'Notes', 'Postgres']);
+	});
+
+	it('offers only Dismiss on an expired request', async () => {
+		const expired = { ...awaiting, state: 'expired', reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ servers: [expired] }) }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Request expired'));
+		expect(host.textContent).not.toContain('Choose where it works…');
+		expect(host.textContent).not.toContain('Reconnect');
+		(host.querySelector('.app-row button') as HTMLButtonElement).click();
+		flushSync();
+		expect([...host.querySelectorAll('.app-row .actions button')].map((button) => button.textContent?.trim())).toEqual(['Dismiss']);
+		(host.querySelector('.app-row .actions button') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
+	});
+
+	it('shows a pending change on a working app as Approve and Decline, with no place action', async () => {
+		const pending = { ...awaiting, tool_count: 3, reach: { mode: 'selected', project_ids: ['q4'], outside_projects: false } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [pending] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+		const labels = [...host.querySelectorAll('.waiting-actions button')].map((button) => button.textContent?.trim());
+		expect(labels).toEqual(['Approve', 'Decline']);
+		expect(host.textContent).not.toContain('Choose where it works…');
+	});
+
+	it('shows a failed action on its own row only', async () => {
+		const second = { ...awaiting, id: 'linear', name: 'Linear' };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input).includes('/decline')
+			? { ok: false, status: 500, json: async () => ({ detail: 'nope' }), text: async () => 'nope' }
+			: { ok: true, json: async () => ({ servers: [awaiting, second] }) }));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(2));
+		([...host.querySelectorAll('.waiting-row')[1].querySelectorAll('button')].find((b) => b.textContent?.includes('Decline')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row .error').length).toBe(1));
+		expect(host.querySelectorAll('.waiting-row')[1].querySelector('.error')).not.toBeNull();
+		expect(host.querySelectorAll('.waiting-row')[0].querySelector('.error')).toBeNull();
+	});
+
+	it('approves an empty-reach row from the sheet with the chosen place and the row revision', async () => {
+		const folderApp = { ...awaiting, id: 'postgres', name: 'Postgres', revision: 3, reach: { mode: 'selected', project_ids: [], outside_projects: false } };
+		const catalog = [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }];
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/approve')
+			? { ...folderApp, state: 'working', revision: 4, reach: { mode: 'selected', project_ids: ['q4'], outside_projects: false } }
+			: String(input).includes('/api/projects') ? { projects: catalog } : { servers: [folderApp] } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('Choose where it works…'));
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Choose where it works…')) as HTMLButtonElement).click();
+		flushSync();
+		const approve = () => [...document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve') as HTMLButtonElement;
+		expect(approve().disabled).toBe(true);
+		([...document.body.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Q4 launch')) as HTMLInputElement).click();
+		flushSync();
+		expect(document.body.textContent).toContain('Agents in Q4 launch will be able to use Postgres.');
+		expect(approve().disabled).toBe(false);
+		approve().click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/postgres/approve'), expect.objectContaining({
+			method: 'POST',
+			body: JSON.stringify({ expected_revision: 3, reach: { mode: 'selected', project_ids: ['q4'], outside_projects: false } }),
+		})));
+		await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
+	});
+
+	it("shows the server's Mac notice on a waiting row, so a direct Approve shows it too", async () => {
+		const local = { ...awaiting, transport: 'stdio', notice: 'notice text from the server' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [local, { ...awaiting, id: 'web', name: 'Web' }] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row')).toHaveLength(2));
+		const [first, second] = host.querySelectorAll('.waiting-row');
+		expect(first.textContent).toContain('notice text from the server');
+		expect(second.textContent).not.toContain('notice text from the server');
+	});
+
+	describe('approving an app that needs a sign-in', () => {
+		const tracker = { ...awaiting, id: 'tracker', name: 'Tracker', transport: 'http', sign_in: { status: 'idle', signed_in: false } };
+		const signInPosts = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.filter(([input, init]) => String(input).includes('/sign-in') && (init as RequestInit | undefined)?.method === 'POST');
+		function serve(row: typeof tracker, approvedState: string) {
+			return vi.fn(async (input: RequestInfo | URL) => ({ ok: true, status: 200, clone() { return this; }, json: async () => {
+				const path = String(input);
+				if (path.includes('/approve')) return { ...row, state: approvedState, revision: 2 };
+				if (path.includes('/sign-in')) return { authorization_url: 'https://auth.example.test/authorize?state=abc', expires_at: 't', reopened: false };
+				if (path.includes('/api/projects')) return { projects: [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }] };
+				return { servers: [row], sign_in_here: true };
+			} }));
+		}
+
+		it('starts the sign-in once from the Approve click, with no second click', async () => {
+			vi.stubGlobal('open', vi.fn(() => null));
+			const fetch = serve(tracker, 'needs_sign_in');
+			vi.stubGlobal('fetch', fetch);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+			(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+			await vi.waitFor(() => expect(signInPosts(fetch)).toHaveLength(1));
+			await vi.waitFor(() => expect(host.textContent).toContain("Tracker's sign-in page is open in your browser."));
+			await settle();
+			expect(signInPosts(fetch)).toHaveLength(1);
+		});
+
+		it('starts the sign-in once from the place sheet that approves', async () => {
+			vi.stubGlobal('open', vi.fn(() => null));
+			const placeless = { ...tracker, reach: { mode: 'selected' as const, project_ids: [], outside_projects: false } };
+			const fetch = serve(placeless, 'needs_sign_in');
+			vi.stubGlobal('fetch', fetch);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.textContent).toContain('Choose where it works…'));
+			([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Choose where it works…')) as HTMLButtonElement).click();
+			flushSync();
+			([...document.body.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Q4 launch')) as HTMLInputElement).click();
+			flushSync();
+			([...document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve') as HTMLButtonElement).click();
+			await vi.waitFor(() => expect(signInPosts(fetch)).toHaveLength(1));
+			await settle();
+			expect(signInPosts(fetch)).toHaveLength(1);
+		});
+
+		it('starts no sign-in when the approved app connects without one', async () => {
+			const fetch = serve(tracker, 'working');
+			vi.stubGlobal('fetch', fetch);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+			(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+			await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
+			await settle();
+			expect(signInPosts(fetch)).toHaveLength(0);
+		});
 	});
 
 	it('renders the empty-state copy when there are no apps', async () => {
@@ -95,6 +305,23 @@ describe('WhereItWorks', () => {
 		await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
 		const call = fetch.mock.calls.find(([input]) => String(input).includes('/reach'));
 		expect(JSON.parse(String(call?.[1]?.body)).reach).toEqual({ mode: 'all', project_ids: [], outside_projects: false });
+	});
+
+	it("shows the server's Mac notice on the approve sheet only", async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
+		const notice = 'notice text from the server';
+		const reach = { mode: 'selected', project_ids: [], outside_projects: false };
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(host.textContent).toContain(notice);
+		unmount(component);
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'http', reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(host.textContent).not.toContain("It can do anything you can do on this Mac");
+		unmount(component);
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(host.textContent).not.toContain(notice);
 	});
 
 	it('disables Save until an individual target is selected', async () => {

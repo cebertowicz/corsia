@@ -109,7 +109,9 @@ def test_authorization_and_cookie_headers_lift_to_references():
     assert "headers" not in clean
     assert clean["secret_headers"] == ["Authorization", "Cookie"]
     mcp_secrets.check_references(clean)
-    assert set(lifted.values()) == {"Bearer example", "session=example"}
+    # The scheme stays in the config; only the token goes to the store.
+    assert set(lifted.values()) == {"example", "session=example"}
+    assert clean["key_header_schemes"] == [{"header": "Authorization", "scheme": "Bearer"}]
 
 
 def test_resolve_returns_stored_values_and_names_missing_variables_without_values(store):
