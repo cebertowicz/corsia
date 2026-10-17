@@ -145,10 +145,7 @@
 		cloud.toggle(key);
 		void recordSetupProgress({ picks: { ...cloud.picks } }, get(token));
 		// The local switch is locked on while nothing else will run chat, so unchecking the last pick turns it back on.
-		if (!hasSource && !noModel && !localPick.wanted) {
-			localPick.change(true, Boolean(status.existing_omlx));
-			void recordSetupProgress({ local_ai: true }, get(token));
-		}
+		if (!hasSource && !noModel && !localPick.wanted) { localPick.change(true, Boolean(status.existing_omlx)); void recordSetupProgress({ local_ai: true }, get(token)); }
 	}
 
 	/** Each checked tool installs, then opens its sign-in by itself. */

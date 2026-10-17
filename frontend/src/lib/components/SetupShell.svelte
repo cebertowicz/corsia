@@ -249,7 +249,7 @@
 	.lede { max-width: calc(var(--space-8) * 9); margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
 	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; scrollbar-width: thin; }
 	/* The attributes are set by the scrollCue action, which Svelte cannot see: without :global it prunes the rule as unused. */
-	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, #000 var(--cue-top), #000 calc(100% - var(--cue-bottom)), transparent); }
+	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
 	.body:global([data-above='true']) { --cue-top: var(--space-4); }
 	.body:global([data-more='true']) { --cue-bottom: var(--space-4); }
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
@@ -262,7 +262,7 @@
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 	/* The setup floor (800 x 600): tighten the spacing before anything scrolls. */
-	@media (max-height: 700px) {
+	@media (max-height: 43.75em) {
 		.pane { padding-top: var(--space-8); }
 		.lede { margin-top: var(--space-2); }
 		.body { margin-top: var(--space-3); padding-bottom: var(--space-2); }
