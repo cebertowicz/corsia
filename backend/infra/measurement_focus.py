@@ -2,13 +2,40 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
+from typing import ParamSpec
 
 from infra.database import write_transaction
 from infra.presence_time import iso
 
+log = logging.getLogger(__name__)
 
+_P = ParamSpec("_P")
+
+
+def _fail_soft(write: Callable[_P, None]) -> Callable[_P, None]:
+    """Keep a failed Measurement write from reaching shared presence.
+
+    Focus intervals only feed Measurement attention; the presence claim, release
+    and restart paths that call these writes own the shared state and must finish
+    whether or not the interval write could run (a lock, a full disk). A lost
+    write costs that interval, never a stuck visit.
+    """
+    @functools.wraps(write)
+    def run(*args: _P.args, **kwargs: _P.kwargs) -> None:
+        try:
+            write(*args, **kwargs)
+        except sqlite3.Error:
+            log.warning("measurement focus write %s failed; attention loses this interval",
+                        write.__name__, exc_info=True)
+    return run
+
+
+@_fail_soft
 def set_focused(
     db: sqlite3.Connection, *, user_id: str, surface: str, thread_id: str,
     session: str, focused: bool, now: datetime,
@@ -37,6 +64,7 @@ def set_focused(
         )
 
 
+@_fail_soft
 def end_session(db: sqlite3.Connection, *, session: str, surface: str, now: datetime) -> None:
     """Close any focus interval when its underlying presence claim leaves.
 
@@ -51,6 +79,7 @@ def end_session(db: sqlite3.Connection, *, session: str, surface: str, now: date
         )
 
 
+@_fail_soft
 def reconcile_startup(db: sqlite3.Connection, *, now: datetime) -> None:
     """No focus claim survives a server restart."""
     with write_transaction(db, scope="measurement_focus_reconcile"):
@@ -61,5 +90,9 @@ def reconcile_startup(db: sqlite3.Connection, *, now: datetime) -> None:
 
 
 def delete_thread(db: sqlite3.Connection, thread_id: str) -> None:
-    """Remove Measurement intervals with their thread's other presence state."""
+    """Remove Measurement intervals with their thread's other presence state.
+
+    Not fail-soft: it runs in the thread delete's own transaction, and a row left
+    behind would still reference the deleted thread.
+    """
     db.execute("DELETE FROM measurement_focus_intervals WHERE thread_id=?", (thread_id,))
