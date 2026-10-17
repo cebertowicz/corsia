@@ -80,6 +80,7 @@ describe('resolveLinkTarget', () => {
 	it.each([
 		['/settings/providers', 'providers', null],
 		['/settings/system#restart', 'system', 'restart'],
+		['/settings/connected-apps', 'connected-apps', null],
 		['http://corsia.test/settings/providers', 'providers', null],
 	])('opens Settings in place for the same-origin link %s', async (href, section, anchor) => {
 		const d = deps();

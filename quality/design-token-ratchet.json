@@ -685,7 +685,7 @@
     },
     "frontend/src/lib/components/AddRepoModal.svelte": {
       "raw_colors": 1,
-      "raw_px": 19,
+      "raw_px": 17,
       "heavy_borders": 0,
       "raw_shadows": 1,
       "row_menu_buttons": 0
@@ -720,7 +720,7 @@
     },
     "frontend/src/lib/components/ArtifactPane.svelte": {
       "raw_colors": 0,
-      "raw_px": 25,
+      "raw_px": 22,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -765,20 +765,6 @@
       "raw_px": 8,
       "heavy_borders": 0,
       "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/components/AttentionCard.svelte": {
-      "raw_colors": 0,
-      "raw_px": 15,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/components/AttentionCardActions.svelte": {
-      "raw_colors": 1,
-      "raw_px": 11,
-      "heavy_borders": 0,
-      "raw_shadows": 1,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/AttentionRollup.svelte": {
@@ -874,7 +860,14 @@
     },
     "frontend/src/lib/components/ConfirmDialog.svelte": {
       "raw_colors": 0,
-      "raw_px": 3,
+      "raw_px": 0,
+      "heavy_borders": 0,
+      "raw_shadows": 0,
+      "row_menu_buttons": 0
+    },
+    "frontend/src/lib/components/ConnectedAppsSettings.svelte": {
+      "raw_colors": 0,
+      "raw_px": 2,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -888,7 +881,7 @@
     },
     "frontend/src/lib/components/ContextSheetSources.svelte": {
       "raw_colors": 0,
-      "raw_px": 3,
+      "raw_px": 2,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -902,7 +895,7 @@
     },
     "frontend/src/lib/components/CreateProjectModal.svelte": {
       "raw_colors": 0,
-      "raw_px": 9,
+      "raw_px": 7,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1044,7 +1037,7 @@
       "raw_colors": 9,
       "raw_px": 34,
       "heavy_borders": 0,
-      "raw_shadows": 2,
+      "raw_shadows": 1,
       "row_menu_buttons": 1
     },
     "frontend/src/lib/components/HomeOverlays.svelte": {
@@ -1072,7 +1065,7 @@
       "raw_colors": 0,
       "raw_px": 3,
       "heavy_borders": 0,
-      "raw_shadows": 1,
+      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/HostAccessActiveLeaseDrawer.svelte": {
@@ -1455,7 +1448,7 @@
     },
     "frontend/src/lib/components/ProjectRepos.svelte": {
       "raw_colors": 0,
-      "raw_px": 6,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1468,8 +1461,8 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/ProjectSettingsView.svelte": {
-      "raw_colors": 4,
-      "raw_px": 32,
+      "raw_colors": 0,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1483,7 +1476,7 @@
     },
     "frontend/src/lib/components/ProvidersPolicyBlock.svelte": {
       "raw_colors": 0,
-      "raw_px": 7,
+      "raw_px": 4,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1511,7 +1504,7 @@
     },
     "frontend/src/lib/components/RepoRow.svelte": {
       "raw_colors": 0,
-      "raw_px": 17,
+      "raw_px": 6,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1520,7 +1513,7 @@
       "raw_colors": 0,
       "raw_px": 2,
       "heavy_borders": 0,
-      "raw_shadows": 1,
+      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/SendRefChip.svelte": {
@@ -1532,7 +1525,7 @@
     },
     "frontend/src/lib/components/SettingsDebug.svelte": {
       "raw_colors": 0,
-      "raw_px": 37,
+      "raw_px": 35,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1581,7 +1574,7 @@
     },
     "frontend/src/lib/components/SettingsView.svelte": {
       "raw_colors": 0,
-      "raw_px": 22,
+      "raw_px": 3,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1608,7 +1601,7 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/SetupShell.svelte": {
-      "raw_colors": 14,
+      "raw_colors": 0,
       "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
@@ -1658,8 +1651,8 @@
     },
     "frontend/src/lib/components/SkillScopePanel.svelte": {
       "raw_colors": 0,
-      "raw_px": 10,
-      "heavy_borders": 1,
+      "raw_px": 1,
+      "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
@@ -1810,13 +1803,6 @@
       "raw_shadows": 1,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/components/WorkspaceSettingsView.svelte": {
-      "raw_colors": 0,
-      "raw_px": 24,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
     "frontend/src/lib/components/activity/ActivityGroupBlock.svelte": {
       "raw_colors": 0,
       "raw_px": 3,
@@ -1854,7 +1840,7 @@
     },
     "frontend/src/lib/components/activity/ActivityView.svelte": {
       "raw_colors": 0,
-      "raw_px": 11,
+      "raw_px": 13,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1931,9 +1917,9 @@
     },
     "frontend/src/lib/components/comments/CommentThread.svelte": {
       "raw_colors": 0,
-      "raw_px": 33,
+      "raw_px": 27,
       "heavy_borders": 0,
-      "raw_shadows": 2,
+      "raw_shadows": 1,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/comments/CommentsPill.svelte": {
@@ -2526,7 +2512,7 @@
     },
     "frontend/src/lib/components/ui/Button.svelte": {
       "raw_colors": 0,
-      "raw_px": 8,
+      "raw_px": 7,
       "heavy_borders": 1,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2575,7 +2561,7 @@
     },
     "frontend/src/lib/components/ui/PathPicker.svelte": {
       "raw_colors": 0,
-      "raw_px": 14,
+      "raw_px": 12,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2701,7 +2687,7 @@
     },
     "frontend/src/lib/components/v7/HostSection.svelte": {
       "raw_colors": 0,
-      "raw_px": 22,
+      "raw_px": 20,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -3973,13 +3959,6 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/stores/projectSettings.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
     "frontend/src/lib/stores/projects.ts": {
       "raw_colors": 0,
       "raw_px": 0,
@@ -4190,13 +4169,6 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/stores/workspaceSettings.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
     "frontend/src/lib/subagentOpen.ts": {
       "raw_colors": 0,
       "raw_px": 0,
@@ -4324,14 +4296,14 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/utils/contrast.ts": {
-      "raw_colors": 3,
+      "raw_colors": 2,
       "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/utils/projectColors.ts": {
-      "raw_colors": 25,
+      "raw_colors": 26,
       "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
@@ -4450,13 +4422,6 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/ws/streamState.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
-    "frontend/src/lib/ws/threadSwitchFields.ts": {
       "raw_colors": 0,
       "raw_px": 0,
       "heavy_borders": 0,

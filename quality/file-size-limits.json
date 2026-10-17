@@ -50,10 +50,9 @@
     "frontend/src/lib/components/DocumentsView.svelte": 522,
     "frontend/src/lib/components/HostAccessLeaseControl.svelte": 559,
     "frontend/src/lib/components/InputBar.svelte": 409,
-    "frontend/src/lib/components/ProjectSettingsView.svelte": 530,
     "frontend/src/lib/ws/handlers.ts": 365,
     "frontend/src/lib/ws/handlersTurns.ts": 478,
-    "frontend/src/routes/+page.svelte": 499,
+    "frontend/src/routes/+page.svelte": 495,
     "frontend/src/routes/_design/+page.svelte": 608
   },
   "function_limits": {

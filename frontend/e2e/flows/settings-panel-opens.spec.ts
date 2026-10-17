@@ -1,6 +1,6 @@
 
 import { expect, test } from '@playwright/test';
-import { captureConsoleErrors, loginByUrl, openSettings, saveEvidenceScreenshot } from '../support/corsia';
+import { captureConsoleErrors, loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot } from '../support/corsia';
 
 test.describe('@flow:settings @surface:settings settings panel opens', () => {
 	test('System settings has no retired Core Agent controls or legacy summary requests', async ({ page }, testInfo) => {
@@ -12,7 +12,7 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 		});
 		await loginByUrl(page);
 		await openSettings(page);
-		await page.getByRole('button', { name: 'System', exact: true }).click();
+		await openSettingsSection(page, 'System');
 		await expect(page.getByRole('combobox', { name: 'Reviewer model', exact: true })).toBeVisible();
 		await expect(page.locator('#core-agent-primary-model')).toHaveCount(0);
 		await expect(page.getByText('Core Agent', { exact: true })).toHaveCount(0);
@@ -23,17 +23,14 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 		expect(summaryRequests).toEqual([]);
 	});
 
-	test('opens to providers, navigates through tabs, raises zero console errors', async ({ page }, testInfo) => {
+	test('opens to providers, navigates through sections, raises zero console errors', async ({ page }, testInfo) => {
 		const consoleErrors = captureConsoleErrors(page);
 		await loginByUrl(page);
 		await openSettings(page);
+		await openSettingsSection(page, 'Providers');
+		await expect(page.getByRole('heading', { name: 'Accounts and rollover', exact: true })).toBeVisible();
 
-		await expect(page.locator('.providers-host').first()).toBeVisible();
-
-		await page.getByRole('button', { name: 'Costs' }).click();
-		await expect(page.locator('.settings-content')).toBeVisible();
-
-		await page.getByRole('button', { name: 'System' }).click();
+		await openSettingsSection(page, 'System');
 		await expect(page.locator('.settings-content')).toBeVisible();
 		const autoApprove = page.getByRole('button', {
 			name: 'Automatically approve reviewed host-access leases',
@@ -48,7 +45,7 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 		await autoApprove.click();
 		await expect(autoApprove).toHaveAttribute('aria-pressed', initialAutoApprove!);
 
-		await page.getByRole('button', { name: 'Debug' }).click();
+		await openSettingsSection(page, 'Debug');
 		await expect(page.locator('.settings-content')).toBeVisible();
 
 		await saveEvidenceScreenshot(page, testInfo, 'settings-panel-opens');
@@ -90,8 +87,11 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 		// Click the rail directly; openSettings() would toggle the sidebar a
 		// second time on mobile and close it.
 		await settingsRail.click();
-		await expect(page.getByRole('button', { name: 'Providers' })).toBeVisible();
-		await page.getByRole('button', { name: 'System' }).click();
+		const providers = (page.viewportSize()?.width ?? 0) <= 768
+			? page.locator('.settings-view .mobile-root [data-settings-section="providers"] button.face')
+			: page.locator('.settings-view .desktop-nav [data-settings-section="providers"]');
+		await expect(providers).toBeVisible();
+		await openSettingsSection(page, 'System');
 		await expect(page.getByText('3 commits behind on dev')).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'settings-system-update-available');
 
@@ -142,7 +142,7 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 
 		await loginByUrl(page);
 		await openSettings(page);
-		await page.getByRole('button', { name: 'System' }).click();
+		await openSettingsSection(page, 'System');
 
 		await expect(page.getByRole('button', { name: 'Update', exact: true })).toHaveCount(0);
 

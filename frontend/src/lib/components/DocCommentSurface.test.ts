@@ -342,8 +342,7 @@ describe('DocCommentSurface suggestions', () => {
 			const { set, onClose } = renderFollowing({ ...suggestion, replacement: null });
 			await vi.waitFor(() => expect(popover().style.left).toBe('548px'));
 			const before = placed();
-			host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
-			const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+			const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
 			input.value = 'A half-written reply';
 			input.dispatchEvent(new Event('input', { bubbles: true }));
 			flushSync();
@@ -404,9 +403,9 @@ describe('DocCommentSurface suggestions', () => {
 	it('focuses Reply without turning input clicks into text navigation', async () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [{ ...suggestion, replacement: null }], onFocus });
-		host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click();
+		host.querySelector<HTMLTextAreaElement>('.ct-input')!.focus();
 		await vi.waitFor(() => expect(document.activeElement?.classList.contains('ct-input')).toBe(true));
-		host.querySelector<HTMLInputElement>('.ct-input')!.click();
+		host.querySelector<HTMLTextAreaElement>('.ct-input')!.click();
 		expect(onFocus).not.toHaveBeenCalled();
 	});
 	it('consumes drawer Escape once and restores its opener without reaching the document', () => {
@@ -710,8 +709,6 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const state = fromStore(comments);
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 		render({ state: { kind: 'list' }, get comments() { return state.current; } });
-		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
-		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
 		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
@@ -754,8 +751,6 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const onResolve = vi.fn();
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 		render({ state: { kind: 'list' }, get comments() { return state.current; }, onResolve });
-		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
-		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
 		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		comments.set([{ ...plain, resolved: true }]); flushSync();

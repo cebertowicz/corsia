@@ -43,12 +43,12 @@ describe('contextSourceNavigation', () => {
 				layer: 'workspace',
 				ownerSurface: 'context-builder',
 				stableReference: 'workspace://context/PROJECT.md',
-			})).toBe('Open Workspace settings');
+			})).toBe('Open Context settings');
 			expect(contextSourceOwnerLabel({
 				layer: 'workspace',
 				ownerSurface: 'context-builder',
 				stableReference: 'workspace://context/PROJECT.md',
-			})).toBe('Workspace settings');
+			})).toBe('Context settings');
 			expect(contextSourceOwnerTarget({
 				layer: 'corsia',
 				ownerSurface: 'system-tier',
@@ -64,12 +64,12 @@ describe('contextSourceNavigation', () => {
 				layer: 'workspace',
 				ownerSurface: 'context-builder',
 				stableReference: 'thread://s/system-prompt',
-			})).toBe('Workspace settings');
+			})).toBe('Context settings');
 			expect(contextSourceOwnerLabel({
 				layer: 'workspace',
 				ownerSurface: 'workspace-settings',
 				stableReference: 'workspace://context/PROJECT.md',
-			})).toBe('Workspace settings');
+			})).toBe('Context settings');
 
 		expect(contextSourceOwnerTarget({
 			layer: 'summary',

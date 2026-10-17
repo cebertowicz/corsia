@@ -62,13 +62,17 @@ def test_category_rise_fails_with_source_and_hint(token_ratchet, capsys):
     assert "semantic colour token" in err
 
 
-def test_drop_passes_without_requiring_baseline_update(token_ratchet):
+def test_drop_passes_and_reports_a_baseline_update(token_ratchet, capsys):
     module, write, baseline = token_ratchet
     path = "frontend/src/Card.svelte"
     write(path, "<style>.card { color: var(--text-primary); }</style>")
     baseline({path: counts(raw_colors=1)})
 
     assert module.main([]) == 0
+    assert (
+        f"design-token debt is below baseline in: {path}; "
+        "run --update-baseline to record the reductions"
+    ) in capsys.readouterr().out
 
 
 def test_update_baseline_only_lowers_counts(token_ratchet):
@@ -128,6 +132,23 @@ def test_numeric_var_fallback_is_exempt_but_color_fallback_is_not(token_ratchet,
 
     assert module.main([]) == 0
     assert "" == capsys.readouterr().err
+
+
+def test_shadow_none_passes_but_a_raw_shadow_fails(token_ratchet, capsys):
+    module, write, baseline = token_ratchet
+    path = "frontend/src/Card.svelte"
+    write(
+        path,
+        "<style>\n.flat { box-shadow: none; }\n"
+        ".ring { box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }\n</style>",
+    )
+    baseline({path: counts(raw_px=1)})
+
+    assert module.main([]) == 1
+    err = capsys.readouterr().err
+    assert f"{path}: raw_shadows increased" in err
+    assert "0 0 0 3px" in err
+    assert "box-shadow: none" not in err
 
 
 def test_literal_ellipsis_button_fails(token_ratchet, capsys):

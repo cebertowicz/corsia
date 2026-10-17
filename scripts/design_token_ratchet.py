@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Freeze frontend design-token debt so it can only improve.
+"""Prevent frontend design-token debt from growing.
 
 The committed baseline records every currently governed frontend source file.
-Normal checks fail only when a category rises, or a new file has a violation.
+Normal checks fail only when a category rises, or a new file has a violation;
+they report unrecorded reductions without changing the baseline.
 ``--update-baseline`` removes deleted files and lowers recorded counts; it
 refuses to write if any existing count would rise or a new file has debt.
 """
@@ -66,6 +67,18 @@ def violations(
             if (previous is None and current) or (previous is not None and current > previous[category]):
                 failures.append((path, category))
     return failures
+
+
+def reductions(
+    measured: dict[str, dict[str, int]], baseline: dict[str, dict[str, int]]
+) -> list[str]:
+    """Return files whose recorded debt can be lowered."""
+    return [
+        path
+        for path, row in measured.items()
+        if (previous := baseline.get(path)) is not None
+        and any(current < previous[category] for category, current in row.items())
+    ]
 
 
 def print_failures(
@@ -144,6 +157,12 @@ def main(argv: list[str]) -> int:
             print_failures(failures, findings)
             return 1
         print(f"{len(measured)} frontend files, no design-token category above baseline")
+        lowered = reductions(measured, baseline)
+        if lowered:
+            print(
+                "design-token debt is below baseline in: " + ", ".join(lowered)
+                + "; run --update-baseline to record the reductions"
+            )
     if "--report" in argv:
         print_report(measured)
     return 0

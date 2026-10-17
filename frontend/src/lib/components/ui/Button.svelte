@@ -78,7 +78,7 @@
 	}
 
 	.btn.md { height: 32px; padding: 0 13px; font-size: var(--text-subhead); }
-	.btn.sm { height: 28px; padding: 0 10px; font-size: var(--text-footnote); }
+	.btn.sm { height: 28px; padding: 0 var(--button-pad-x-sm); font-size: var(--text-footnote); }
 
 	.btn.secondary {
 		background: var(--bg-secondary);
