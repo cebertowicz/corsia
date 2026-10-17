@@ -1,8 +1,9 @@
 """A skill that still carries the legacy top-level ``corsia:`` block loads unchanged.
 
-Pins the pre-sidecar behavior for a real packaged System skill (decision-brief) and a
-user thread skill with an inline block: validation fields, effective workflows and
-workflow versions. Sidecar versions are pinned beside them.
+Pins the pre-sidecar behavior for the real packaged decision-brief data folded back
+into the legacy block, and a user thread skill with an inline block: validation
+fields, effective workflows and workflow versions. Sidecar versions are pinned beside
+them.
 """
 
 from __future__ import annotations
@@ -11,9 +12,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from core.skill_scanning import scan_scope
-from core.skill_validation import validate_skill_bundle, validate_skill_file, validate_skill_text
+from core.skill_validation import (
+    parse_frontmatter,
+    validate_skill_bundle,
+    validate_skill_file,
+    validate_skill_text,
+)
 from core.skills_registry import SkillResolution
 from infra.system_package import system_package_dir
 from tools import workflow_task_fields
@@ -53,7 +60,12 @@ def _skills_root(tmp_path: Path, name: str, text: str) -> Path:
 
 @pytest.fixture
 def decision_brief_text() -> str:
-    return (system_package_dir() / "skills/decision-brief/SKILL.md").read_text(encoding="utf-8")
+    """The packaged decision-brief in its legacy form: sidecar data inline, no pointer."""
+    folder = system_package_dir() / "skills/decision-brief"
+    meta, body = parse_frontmatter((folder / "SKILL.md").read_text(encoding="utf-8"))
+    meta.pop("metadata")
+    meta["corsia"] = yaml.safe_load((folder / "corsia.yaml").read_text(encoding="utf-8"))
+    return f"---\n{yaml.safe_dump(meta, sort_keys=False)}---\n{body}"
 
 
 @pytest.mark.parametrize("name", ["decision-brief", "thread-flow"])
@@ -110,15 +122,21 @@ def test_effective_workflows_follow_a_sidecar_skill(tmp_path, monkeypatch):
     assert workflows["sidecar-flow"].required_steps == ("only",)
 
 
-def test_system_version_of_a_legacy_skill_keeps_its_old_form():
+def test_system_version_of_a_skill_without_a_sidecar_keeps_its_old_form(monkeypatch, tmp_path):
+    _fake_system(monkeypatch, tmp_path, sidecar=False)
+
+    assert _workflow_version(SimpleNamespace(name="flow", scope="system")) == "system:skills/flow/SKILL.md:v9:aaa"
+
+
+def test_packaged_decision_brief_version_covers_its_recorded_sidecar():
     from core.system_tier import system_tier_manifest
 
-    skill = SimpleNamespace(name="decision-brief", scope="system")
     manifest = system_tier_manifest()
-    entry = next(i for i in manifest.files if i.path == "skills/decision-brief/SKILL.md")
+    digests = {i.path: i.sha256 for i in manifest.files}
 
-    assert _workflow_version(skill) == (
-        f"system:skills/decision-brief/SKILL.md:{manifest.version}:{entry.sha256}"
+    assert _workflow_version(SimpleNamespace(name="decision-brief", scope="system")) == (
+        f"system:skills/decision-brief/SKILL.md:{manifest.version}:"
+        f"{digests['skills/decision-brief/SKILL.md']}+{digests['skills/decision-brief/corsia.yaml']}"
     )
 
 

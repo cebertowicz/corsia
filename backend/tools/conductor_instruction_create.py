@@ -90,6 +90,7 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
             raise RosterChangeError(
                 "SKILL.md requires matching name, description and spec frontmatter; "
                 "CORSIA data goes in a corsia.yaml supporting file named by metadata corsia-data"
+                + "".join(f"; {error}" for error in valid.errors)
             )
     else:
         raise RosterChangeError("kind must be responsibility or skill")

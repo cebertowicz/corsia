@@ -156,3 +156,44 @@ async def test_invalid_skill_and_support_path_do_not_write(isolated_db, tmp_path
                                     supporting_files=supports, _thread_id=actor)
         assert result.startswith("Error:"), result
     assert not (workspace / ".threads" / target / "skills").exists()
+
+
+SIDECAR_SKILL = """---
+name: agent-check
+description: Use when checking the installed agent.
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: "1"
+---
+Follow the steps.
+"""
+SIDECAR = "handler:\n  kind: instruction\nworkflow:\n  steps:\n    - id: check\n      title: Run the check\n"
+
+
+@pytest.mark.asyncio
+async def test_skill_installs_with_its_corsia_yaml_sidecar(isolated_db, tmp_path, monkeypatch):
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    receipt = json.loads(await ConductorInstructionFileCreateTool().execute(
+        target, "skill", "absent", SIDECAR_SKILL, name="agent-check",
+        supporting_files={"corsia.yaml": SIDECAR}, _thread_id=actor,
+    ))
+    assert receipt["ok"], receipt
+    assert (Path(receipt["path"]).parent / "corsia.yaml").read_text() == SIDECAR
+    db = get_db()
+    try:
+        skills = resolve_effective_skills(thread_id=target, project_id=None, workspace=workspace, db=db)
+    finally:
+        db.close()
+    row = next(row for row in skills.included if row.name == "agent-check")
+    assert row.corsia["workflow"]["steps"][0]["id"] == "check"
+
+
+@pytest.mark.asyncio
+async def test_pointer_without_its_sidecar_or_with_a_bad_one_does_not_install(isolated_db, tmp_path, monkeypatch):
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    tool = ConductorInstructionFileCreateTool()
+    for supports in ({}, {"corsia.yaml": "lesson: {}\n"}, {"other.yaml": SIDECAR}):
+        result = await tool.execute(target, "skill", "absent", SIDECAR_SKILL, name="agent-check",
+                                    supporting_files=supports, _thread_id=actor)
+        assert result.startswith("Error:"), result
+    assert not (workspace / ".threads" / target / "skills").exists()
