@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { scrollToRange } from './comment-marks';
+import { trackOverlaySheet } from './visible-region';
 
 const TABLE = '| Item | Owner |\n|---|---|\n| Alpha | Dana |\n| Bravo | Eli |';
 const DOC = `# Title\n\nIntro paragraph.\n\n${TABLE}\n\nAfter.`;
@@ -90,6 +91,46 @@ describe('scrollToRange inside a table', () => {
 		vi.advanceTimersByTime(300);
 		expect(rowRect(1).top + 20).toBeCloseTo((BAND.top + BAND.bottom) / 2, 0);
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	/** The desktop list drawer: it sits beside the editor in a two-column grid, so its top is the editor's top. */
+	const sideDrawer = () => {
+		const drawer = document.body.appendChild(document.createElement('section'));
+		drawer.setAttribute('data-doc-comments-drawer', '');
+		drawer.getBoundingClientRect = () => rect(BAND.top, BAND.bottom - BAND.top);
+	};
+
+	it('is not narrowed by the drawer beside the editor: a saved visible row stays put and a table row centres', () => {
+		sideDrawer();
+		const saved = editorWithTable([520, 560]);
+		scrollToRange(saved.view, DANA, DANA, 'comment-save');
+		vi.advanceTimersByTime(300);
+		expect(saved.dispatch).not.toHaveBeenCalled();
+		expect(saved.scrollTop()).toBe(0);
+		const navigated = editorWithTable([900, 940]);
+		scrollToRange(navigated.view, DANA, DANA);
+		vi.advanceTimersByTime(300);
+		expect(navigated.rowRect(1).top + 20).toBeCloseTo((BAND.top + BAND.bottom) / 2, 0);
+	});
+
+	it('moves a row that sits behind the sheet of its surface to above the sheet, and keeps one that is above it', () => {
+		const backdrop = document.body.appendChild(document.createElement('div'));
+		backdrop.setAttribute('data-adaptive-drawer', '');
+		const panel = backdrop.appendChild(document.createElement('div'));
+		backdrop.getBoundingClientRect = () => rect(0, BAND.bottom);
+		Object.defineProperty(panel, 'offsetHeight', { value: 200 });
+		const stop = trackOverlaySheet(document.body, () => panel);
+		const behind = editorWithTable([520, 560]);
+		scrollToRange(behind.view, DANA, DANA, 'comment-save');
+		vi.advanceTimersByTime(300);
+		// The sheet rests at 400: the row ends above it.
+		expect(behind.rowRect(1).bottom).toBeLessThanOrEqual(BAND.bottom - 200);
+		expect(behind.rowRect(1).top).toBeGreaterThanOrEqual(BAND.top);
+		const above = editorWithTable([200, 240]);
+		scrollToRange(above.view, DANA, DANA, 'comment-save');
+		vi.advanceTimersByTime(300);
+		expect(above.scrollTop()).toBe(0);
+		stop();
 	});
 
 	it("writes the scroller only inside CodeMirror's measure cycle", () => {

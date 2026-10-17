@@ -95,4 +95,23 @@ describe('widgetSourceAt', () => {
 		expect(widgetSourceAt(code, 8)).toBeNull();
 		code.destroy();
 	});
+
+	// The renderer draws a diagram only when the fence's info string, trimmed and lowercased, is exactly mermaid.
+	const sourceIn = (doc: string, needle: string) => {
+		const editor = new EditorView({ state: EditorState.create({ doc, extensions }), parent: document.body });
+		try { return widgetSourceAt(editor, doc.indexOf(needle)); } finally { editor.destroy(); }
+	};
+
+	it('takes a tilde or an indented mermaid fence as a diagram, as the renderer does', () => {
+		const tilde = 'intro\n\n~~~mermaid\ngraph TD; A-->B\n~~~\n';
+		expect(sourceIn(tilde, 'A-->B')).toEqual({ from: tilde.indexOf('~~~mermaid'), to: tilde.length - 1 });
+		const indented = 'intro\n\n  ```Mermaid \n  graph TD; A-->B\n  ```\n';
+		expect(sourceIn(indented, 'A-->B')).toEqual({ from: indented.indexOf('  ```'), to: indented.length - 1 });
+	});
+
+	it('gives no target for a mermaid-js or other code fence, which the renderer leaves as code', () => {
+		expect(sourceIn('```mermaid-js\ngraph TD; A-->B\n```\n', 'A-->B')).toBeNull();
+		expect(sourceIn('```mermaidish\nx\n```\n', 'x')).toBeNull();
+		expect(sourceIn('```\nplain\n```\n', 'plain')).toBeNull();
+	});
 });

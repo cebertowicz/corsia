@@ -6,7 +6,7 @@ import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
 import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
-import { tableSource } from './widget-blocks';
+import { blockSource, isMermaidFence } from './widget-blocks';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -80,9 +80,7 @@ class MermaidWidget extends WidgetType {
  * null. Reads the FencedCode node's CodeInfo (language) and CodeText children.
  */
 function mermaidFence(node: SyntaxNodeRef, doc: EditorState['doc']): string | null {
-	const info = node.node.getChild('CodeInfo');
-	if (!info) return null;
-	if (doc.sliceString(info.from, info.to).trim().toLowerCase() !== 'mermaid') return null;
+	if (!isMermaidFence(node, doc)) return null;
 	const text = node.node.getChild('CodeText');
 	return text ? doc.sliceString(text.from, text.to) : '';
 }
@@ -198,7 +196,7 @@ function buildTableDecorations(state: EditorState): DecorationSet {
 	syntaxTree(state).iterate({
 		enter: (node) => {
 			if (node.name !== 'Table') return;
-			const { from, to } = tableSource(doc, node);
+			const { from, to } = blockSource(doc, node);
 			const src = doc.sliceString(from, to);
 			decos.push(Decoration.replace({ widget: new TableWidget(src), block: true }).range(from, to));
 			return false;
@@ -244,8 +242,7 @@ function buildMermaidDecorations(state: EditorState): DecorationSet {
 			if (node.name !== 'FencedCode') return;
 			const code = mermaidFence(node, doc);
 			if (code === null) return; // a non-mermaid fence: left as styled code
-			const from = doc.lineAt(node.from).from;
-			const to = doc.lineAt(Math.min(node.to, doc.length)).to;
+			const { from, to } = blockSource(doc, node);
 			decos.push(Decoration.replace({ widget: new MermaidWidget(code), block: true }).range(from, to));
 			return false;
 		}

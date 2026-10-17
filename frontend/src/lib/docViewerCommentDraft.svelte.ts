@@ -91,11 +91,11 @@ export function createViewerCommentDraft(context: Context) {
 	}
 	// This document's draft, kept across a close (its body survives); the pending highlight shows only while its composer is open.
 	const scoped = $derived.by(() => { const draft = context.draft(); return draft?.scope === context.scope() ? draft : null; });
-	// A live tap shows the widget's pending mark before Comment is pressed; selecting elsewhere clears it.
-	// Once the sheet opens, the scoped draft remains the sole owner of the captured range.
+	// A live tap in a widget shows its pending mark before Comment is pressed; selecting elsewhere clears it, and prose has none.
+	// While the composer is open the scoped draft owns the mark: a new selection does not take it.
 	// A held mark is never resolved against another session's Y doc.
 	const held = $derived(posted && posted.selection.session === context.session() ? posted.selection : null);
-	const pendingComment = $derived((pending ? selected : context.isOpen() ? scoped?.selection : held) ?? null);
+	const pendingComment = $derived((context.isOpen() ? scoped?.selection : pending?.inWidget ? selected : held) ?? null);
 	$effect(() => { if (posted && !context.awaitsMark(posted.id)) posted = null; });
 	function cancel(): void { posted = null; discardCommentDraft(context.scope()); context.onClose(); }
 	function start(): void {

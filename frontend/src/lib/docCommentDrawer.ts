@@ -83,16 +83,26 @@ export function presence(report: (shown: boolean) => void) {
 }
 
 /**
- * At phone width the composer sheet must not cover what is being commented on. Scrolls the editor so the subject's bottom
- * edge sits above the sheet's top, leaving the page and the editor's own measure alone when it already does. Without a
- * sheet (a narrow canvas's composer is a popover) there is nothing to clear.
+ * Calls `reveal` once a sheet has come up and again whenever it moves or changes size (the keyboard rising or falling under
+ * a followKeyboard sheet, its content settling), in the next frame so the layout it reads is current. Returns the stop; with no
+ * sheet or nothing to call, there is nothing to watch.
  */
-export function clearSubjectOfSheet(panel: HTMLElement | null, anchor: () => DOMRect | null, bounds: HTMLElement | null | undefined) {
-	const subject = anchor();
-	const scroller = bounds?.querySelector<HTMLElement>('.cm-scroller');
-	if (!subject || !panel?.isConnected || !scroller) return;
-	const limit = panel.getBoundingClientRect().top - 8;
-	if (subject.bottom > limit) scroller.scrollTop += subject.bottom - limit;
+export function onSheetMoved(panel: HTMLElement | null, reveal?: () => void): () => void {
+	if (!panel || !reveal) return () => {};
+	const viewport = panel.ownerDocument.defaultView?.visualViewport;
+	let frame = 0;
+	const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(reveal); };
+	const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule);
+	observer?.observe(panel);
+	viewport?.addEventListener('resize', schedule);
+	viewport?.addEventListener('scroll', schedule);
+	schedule();
+	return () => {
+		cancelAnimationFrame(frame);
+		observer?.disconnect();
+		viewport?.removeEventListener('resize', schedule);
+		viewport?.removeEventListener('scroll', schedule);
+	};
 }
 
 /** Brings a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */

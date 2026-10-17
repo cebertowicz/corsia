@@ -15,7 +15,8 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
-	import { clearSubjectOfSheet, clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type TableLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
@@ -28,7 +29,7 @@
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, tableLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, tableLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -73,6 +74,8 @@
 		onDrawerShown?: (shown: boolean) => void;
 		/** The sheet controller's modal presence, including its closing scrim. */
 		onSheetModalChange?: (open: boolean) => void;
+		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
+		onRevealDraft?: () => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => tableLabel);
@@ -116,14 +119,12 @@
 	});
 	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
 	$effect(() => onSheetModalChange?.(sheet.modalOpen));
-	// The same anchor that positions a desktop composer identifies the source rows or diagram to keep above the sheet.
-	// The draft sheet exists only at phone width; a narrow canvas's composer is a popover, with no sheet element to clear.
+	// The editor keeps its text above whichever of these sheets is up: it reads where it rests from `trackOverlaySheet`.
+	let listSheet = $state<HTMLElement | null>(null);
 	let draftSheet = $state<HTMLElement | null>(null);
-	$effect(() => {
-		const sheetElement = draftSheet;
-		if (!sheetElement || surfaceState?.kind !== 'draft' || typeof anchor !== 'function') return;
-		void tick().then(() => clearSubjectOfSheet(sheetElement, anchor, bounds));
-	});
+	$effect(() => trackOverlaySheet(bounds, () => covered || !sheet.open ? null : sheet.state?.kind === 'list' && sheetDrawer ? listSheet : draftSheet));
+	// The draft sheet exists only at phone width; a narrow canvas's composer is a popover, with no sheet to keep the subject above.
+	$effect(() => onSheetMoved(surfaceState?.kind === 'draft' ? draftSheet : null, onRevealDraft));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -343,7 +344,7 @@
 
 {#if surfaceState || sheet.closing}
 	{#if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}>{@render content()}</AdaptiveDrawer>

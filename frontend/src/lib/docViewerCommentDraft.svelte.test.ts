@@ -16,8 +16,9 @@ vi.mock('$lib/stores/commentSelection', async (original) => ({
  * The pending mark of a posted widget comment is held by the controller until one of these exits clears it.
  *
  * | state                          | pendingComment                | leaves when                                                      |
- * | selection made, not opened     | the selection                 | select(null), start()                                            |
- * | sheet open                     | the scoped draft's selection  | cancel(), the target changes                                     |
+ * | widget selection, not opened   | the selection                 | select(null), start()                                            |
+ * | prose selection, not opened    | none (the browser shows it)   | -                                                                |
+ * | sheet open                     | the scoped draft's selection  | cancel(), the target changes; a new selection never takes it     |
  * | posted widget comment, waiting | the held selection            | drawn, not_placed, orphaned or gone; cancel(); the target changes |
  * | posted prose comment           | none (its text mark is drawn) | -                                                                |
  */
@@ -116,5 +117,31 @@ describe('a posted widget comment keeps its pending mark', () => {
 		current = setup(false, 'A label');
 		await current.post();
 		expect(current.controller.pendingComment).toBeNull();
+	});
+});
+
+describe('the pending mark before and while the composer is open', () => {
+	const selection = (from: number, to: number, inWidget: boolean) => ({ from, to, text: 'alpha beta'.slice(from, to), top: 0, left: 0, inWidget });
+
+	it('is painted for a widget selection and not for prose', () => {
+		current = setup(true);
+		current.controller.select(selection(0, 5, false)); flushSync();
+		expect(current.controller.pendingComment).toBeNull();
+		current.controller.select(selection(0, 5, true)); flushSync();
+		expect(current.controller.pendingComment).not.toBeNull();
+		current.controller.select(null); flushSync();
+		expect(current.controller.pendingComment).toBeNull();
+	});
+
+	it("stays the open draft's selection when the editor selects something else", () => {
+		current = setup(true);
+		current.controller.select(selection(0, 5, true));
+		current.controller.start(); flushSync();
+		const owned = current.controller.pendingComment;
+		expect(owned).not.toBeNull();
+		current.controller.select(selection(6, 10, true)); flushSync();
+		expect(current.controller.pendingComment).toBe(owned);
+		current.controller.select(selection(6, 10, false)); flushSync();
+		expect(current.controller.pendingComment).toBe(owned);
 	});
 });

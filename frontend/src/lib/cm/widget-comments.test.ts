@@ -94,6 +94,15 @@ describe('tableCommentLabel reads the table the widget draws', () => {
 		expect(label(text, start, start + TABLE.length, TABLE)).toBe('The whole table');
 	});
 
+	it('keeps the real quote of a prose selection that runs through a table', () => {
+		const text = `intro\n\n${TABLE}\n\nafter`;
+		const [intro] = at(text, 'intro'), [, after] = at(text, 'after');
+		expect(label(text, intro, after, text.slice(intro, after))).toBeNull();
+		// Running out of either end of the table is not the whole table.
+		expect(label(text, intro, text.indexOf('ordinary'), 'x')).toBeNull();
+		expect(label(text, text.indexOf('| Name'), after, 'x')).toBeNull();
+	});
+
 	it('names several cells of one row', () => {
 		const [from] = at(TABLE, 'Delta'), [, to] = at(TABLE, 'ordinary');
 		expect(label(TABLE, from, to, TABLE.slice(from, to))).toBe('3 cells, from “Delta”');

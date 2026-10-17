@@ -21,7 +21,7 @@
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
-	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, commentsInDocumentOrder } from '$lib/docCanvasComments';
+	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
@@ -43,7 +43,6 @@
 	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
-	import type { ScrollOrigin } from '$lib/cm/comment-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -123,14 +122,13 @@
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
-	function setCommentScrollTarget(id: string, focus: boolean, origin: ScrollOrigin) {
-		scroll.value = canvasCommentScrollTarget(listedComments, editText, id, focus, origin);
-	}
+	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it.
+	const revealDraft = () => { const { draft } = draftController; if (draft) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
 	function focusComment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) {
 		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
-		setCommentScrollTarget(id, false, 'navigation');
+		scroll.toComment(id, false, 'navigation');
 	}
-	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) setCommentScrollTarget(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); }
+	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); }
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading)); }
 	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }
@@ -142,7 +140,7 @@
 		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
-	function focusInText(id: string, placement?: 'top') { setCommentScrollTarget(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
+	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
@@ -156,7 +154,7 @@
 	async function submitComment(text: string) {
 		const id = await draftController.submit(text);
 		if (!id) return;
-		setCommentScrollTarget(id, true, 'comment-save');
+		scroll.toComment(id, true, 'comment-save');
 		focusedDocComment.set(id);
 		commentUI.state = { kind: 'thread', id };
 		commentDraft.set(null);
@@ -393,6 +391,7 @@
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
 		onSheetModalChange={(open) => commentUI.sheetModalOpen = open}
+		onRevealDraft={revealDraft}
 		images={images.groups}
 		{covered}
 	/>

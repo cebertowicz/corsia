@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import type { EditorState, Text } from '@codemirror/state';
+import type { SyntaxNodeRef } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { CellSpan } from './widget-cells';
 
@@ -13,9 +14,15 @@ export const widgetOf = (view: EditorView, node: Node | null): HTMLElement | nul
 	return widget && view.contentDOM.contains(widget) ? widget : null;
 };
 
-/** The whole lines a Table node's widget replaces: the one definition of a table's source range. */
-export const tableSource = (doc: Text, node: { from: number; to: number }) =>
+/** The whole lines a table's or diagram's block widget replaces: the one definition of a widget's source range. */
+export const blockSource = (doc: Text, node: { from: number; to: number }) =>
 	({ from: doc.lineAt(node.from).from, to: doc.lineAt(Math.min(node.to, doc.length)).to });
+
+/** Whether a FencedCode node is drawn as a diagram: the one definition of a diagram's identity, shared by the renderer and the scroll target. */
+export function isMermaidFence(node: SyntaxNodeRef, doc: Text): boolean {
+	const info = node.node.getChild('CodeInfo');
+	return !!info && doc.sliceString(info.from, info.to).trim().toLowerCase() === 'mermaid';
+}
 
 /** The end of the run of non-blank lines holding `pos`: a table ends at a blank line, so parsing to here completes the one holding `pos`. */
 function runEnd(doc: Text, pos: number): number {
@@ -33,7 +40,7 @@ export function tableAt(state: EditorState, from: number, to: number): { from: n
 	(ensureSyntaxTree(state, runEnd(state.doc, to), 100) ?? syntaxTree(state)).iterate({ from, to, enter: (node) => {
 		if (found) return false;
 		if (node.name !== 'Table') return;
-		found = tableSource(state.doc, node);
+		found = blockSource(state.doc, node);
 		return false;
 	} });
 	return found;
@@ -46,7 +53,7 @@ export function blockRange(view: EditorView, el: HTMLElement): { from: number; t
 	const { doc } = view.state;
 	if (el.matches(TABLE)) return { from, to: Math.min(doc.length, from + Number(el.dataset.srcLength ?? 0)) };
 	for (let node = syntaxTree(view.state).resolveInner(Math.min(from + 1, doc.length), 1); node; node = node.parent!) {
-		if (node.name === 'FencedCode') return { from: doc.lineAt(node.from).from, to: doc.lineAt(Math.min(node.to, doc.length)).to };
+		if (node.name === 'FencedCode') return blockSource(doc, node);
 		if (!node.parent) break;
 	}
 	return null;
@@ -83,7 +90,7 @@ export function widgetBoxAt(view: EditorView, pos: number): DOMRect | null {
 export function widgetSourceAt(view: EditorView, pos: number): { from: number; to: number } | null {
 	const { doc } = view.state;
 	for (let node = syntaxTree(view.state).resolveInner(pos, 1); node; node = node.parent!) {
-		if (node.name === 'Table' || (node.name === 'FencedCode' && /^```\s*mermaid/i.test(doc.lineAt(node.from).text))) return tableSource(doc, node);
+		if (node.name === 'Table' || (node.name === 'FencedCode' && isMermaidFence(node, doc))) return blockSource(doc, node);
 		if (node.name === 'FencedCode' || !node.parent) break;
 	}
 	return null;

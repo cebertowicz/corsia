@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import type { DocComment } from '$lib/stores/docComments';
-import { canvasFocusedCommentScrollTarget, type CanvasScrollTarget } from '$lib/docCanvasComments';
+import type { ScrollOrigin } from '$lib/cm/comment-marks';
+import { canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, type CanvasScrollTarget } from '$lib/docCanvasComments';
 
 /**
  * Where the editor should scroll next: the focused comment's text, kept while that comment stays focused, and any target
@@ -23,5 +24,7 @@ export function createCommentScrollTarget(source: {
 	return {
 		get value() { return target; },
 		set value(next: CanvasScrollTarget | null) { target = next; },
+		/** Scrolls to a comment's text as it is now placed; a comment with no text to jump to clears the target. */
+		toComment(id: string, focus: boolean, origin: ScrollOrigin) { target = canvasCommentScrollTarget(source.comments(), source.text(), id, focus, origin); },
 	};
 }

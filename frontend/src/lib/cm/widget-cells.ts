@@ -54,18 +54,18 @@ export function tableCellLabel(src: string, cell: CellSpan, quote: string): stri
 
 /**
  * The one label for a comment on a table's text, shared by the composer and the card: derived from the source offsets
- * and the syntax-tree table they sit in (the editor's own tree), never persisted. Null for anything outside a table, so prose or code that
- * contains a pipe keeps its ordinary quote.
+ * and the syntax-tree table they sit in (the editor's own tree), never persisted. Null for anything outside a table, and for a range that
+ * runs past one, so prose or code that contains a pipe, or a selection that merely includes a table, keeps its ordinary quote.
  */
 export function tableCommentLabel(state: EditorState, from: number | undefined, to: number | undefined, quote: string): string | null {
 	if (from === undefined || to === undefined || from < 0 || to < from || to > state.doc.length) return null;
 	const table = tableAt(state, from, to);
 	if (!table) return null;
-	if (from <= table.from && to >= table.to) return 'The whole table';
 	if (from < table.from || to > table.to) return null;
 	const src = state.sliceDoc(table.from, table.to), cells = tableCells(src);
 	const hit = cells.filter((span) => span.to > span.from && span.from < to - table.from && span.to > from - table.from);
 	if (hit.length === 0) return null;
+	if (hit.length === cells.filter((span) => span.to > span.from).length) return 'The whole table';
 	const rows = new Set(hit.map((span) => span.row)).size;
 	const named = (span: CellSpan) => snippet(clean(plainQuote(src.slice(span.from, span.to))));
 	if (rows > 1) return `${rows} rows, from “${named(cells.find((span) => span.row === hit[0].row && span.col === 0) ?? hit[0])}”`;

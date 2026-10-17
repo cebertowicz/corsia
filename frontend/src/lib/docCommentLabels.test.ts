@@ -37,4 +37,25 @@ describe('createCellLabels', () => {
 		expect(createCellLabels(() => read)({ ...comment, orphaned: true })).toBeNull();
 		expect(read).not.toHaveBeenCalled();
 	});
+
+	it('keeps one entry per comment however often its offsets shift', () => {
+		const read = vi.fn<TableLabelReader>(() => 'label');
+		const label = createCellLabels(() => read);
+		for (let shift = 0; shift < 50; shift++) label({ ...comment, from: 10 + shift, to: 14 + shift });
+		expect(read).toHaveBeenCalledTimes(50);
+		// Only the latest position is held: a repeat of it does not read, an earlier one does.
+		label({ ...comment, from: 59, to: 63 });
+		expect(read).toHaveBeenCalledTimes(50);
+		label({ ...comment, from: 10, to: 14 });
+		expect(read).toHaveBeenCalledTimes(51);
+	});
+
+	it('replaces the entry when the quote changes', () => {
+		const read = vi.fn<TableLabelReader>(() => 'label');
+		const label = createCellLabels(() => read);
+		label(comment);
+		label({ ...comment, anchor: 'Eli' });
+		expect(read).toHaveBeenCalledTimes(2);
+		expect(read).toHaveBeenLastCalledWith(10, 14, 'Eli');
+	});
 });
