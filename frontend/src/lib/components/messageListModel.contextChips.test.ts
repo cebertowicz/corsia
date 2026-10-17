@@ -188,6 +188,58 @@ describe('grouped context chips', () => {
 	});
 });
 
+describe('a correction note is for the agent only', () => {
+	const NOTE = 'Correction recorded on your work (message c1, sent 2026-10-16 13:05 PDT): "Wrong file."\n'
+		+ 'Proposed tier: none yet; you set it.';
+	const note = ev('n', NOTE, {
+		chip: null, object_kind: 'thread_context', change_kind: 'note',
+		details: { kind: 'correction_note', correction_subject: 'message:c1', reoffer_unwritten: true },
+	});
+	/** The lone-note digest as `materialize_pending_digest` stores it: its summary is the note's first line. */
+	function noteDigest(id: string, state: string, events = [note]) {
+		return backendDigest(id, events, {
+			content: `[PASSIVE CONTEXT DIGEST]\n${NOTE}`,
+			delivery_state: state,
+			metadata: {
+				type: 'context_event', event_type: 'context.digest', event_disposition: 'passive',
+				summary: events.length === 1 ? NOTE.split('\n')[0] : `${events.length} context updates`,
+				context_events: events,
+			},
+		});
+	}
+
+	it('shows no row, chip line or preview in the transcript, Focus or not', () => {
+		const rows = [
+			{ id: 'ask', thread_id: THREAD, role: 'user', content: 'Thanks.' },
+			noteDigest('d1', 'delivered'),
+			{ id: 'work', thread_id: THREAD, role: 'assistant', content: '', metadata: { turn_id: 't', tool_calls: [{ id: 'x' }] } },
+		];
+		const { visibleMessages, pendingContextDigest } = buildMessageListPresentation(rows);
+
+		expect(visibleMessages.map((row) => row.id)).toEqual(['ask', 'work']);
+		expect(pendingContextDigest).toBeNull();
+		for (const focus of [true, false]) {
+			expect(JSON.stringify(buildTranscriptPresentation(visibleMessages, focus))).not.toContain('Correction recorded');
+		}
+	});
+
+	it('shows nothing while it waits to be delivered', () => {
+		const { visibleMessages, pendingContextDigest } = buildMessageListPresentation([noteDigest('d1', 'queued')]);
+
+		expect(visibleMessages).toEqual([]);
+		expect(pendingContextDigest).toBeNull();
+	});
+
+	it('leaves the rest of a mixed digest and counts only what it shows', () => {
+		const mixed = noteDigest('d1', 'delivered', [note, ev('a', 'Plan paused')]);
+		const [row] = buildMessageListPresentation([mixed]).visibleMessages as Array<Record<string, any>>;
+
+		expect(row.metadata.summary).toBe('Plan paused');
+		expect(passiveContextEventLabel(row)).toBe('Plan paused');
+		expect(JSON.stringify(row.metadata)).not.toContain('Correction recorded');
+	});
+});
+
 describe('Focus-mode transcript runs', () => {
 	it('uses only an explicit for_user mark for assistant content', () => {
 		const rows = [
