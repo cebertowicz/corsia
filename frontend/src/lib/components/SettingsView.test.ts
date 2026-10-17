@@ -8,6 +8,7 @@ import { get } from 'svelte/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
+const scrollIntoView = Element.prototype.scrollIntoView;
 
 beforeEach(() => {
 	token.set('test-token');
@@ -24,6 +25,8 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+	Element.prototype.scrollIntoView = scrollIntoView;
 	token.set(null);
 	resetSettingsNavigation();
 });

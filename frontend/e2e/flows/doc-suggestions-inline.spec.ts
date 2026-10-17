@@ -77,7 +77,7 @@ for (const [width, height, project] of layouts) {
 			await saveEvidenceScreenshot(page, testInfo, `document-suggestions-inline-open-${width}`, { fullPage: false });
 		});
 
-		test(`@flow:document-suggestions pressing an inline suggestion focuses its card, with or without the comments list at ${width}`, async ({ page, request }) => {
+		test(`@flow:document-suggestions pressing an inline suggestion focuses its card once the comments list is closed at ${width}`, async ({ page, request }) => {
 			const { drawer, editor, ids: [loose, fine] } = await openSuggestionDocument(page, request, PROSE, [
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
@@ -162,7 +162,8 @@ for (const [width, height, project] of layouts) {
 		});
 
 		test(`@flow:document-suggestions typing inside a quote drops that suggestion's inline marks and keeps its card at ${width}`, async ({ page, request }) => {
-			test.fixme(true, 'cebertowicz/corsia#1009: a caret reaching a suggestion quote reopens its card on every caret move, so the editor cannot take the typed character on a canvas under 900 px');
+			// Loud quarantine of a product defect (EAS anti-pattern #10): tracked in #1009, owned by Documents & Artifacts; remove this line when it is fixed, and review it by 2026-10-24 whether or not it is.
+			test.fixme(true, 'cebertowicz/corsia#1009 (review by 2026-10-24): a caret reaching a suggestion quote reopens its card on every caret move, so the editor cannot take the typed character on a canvas under 900 px');
 			const { drawer, editor, ids: [loose, fine], row } = await openSuggestionDocument(page, request, PROSE, [
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
