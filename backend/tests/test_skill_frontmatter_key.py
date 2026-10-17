@@ -1,7 +1,8 @@
-"""A skill's CORSIA block is read under ``corsia:`` and only ``corsia:``.
+"""A skill's handler and workflow data is read from ``corsia.yaml`` and nowhere else.
 
-A block filed under any other key is not read, so it must fail validation loudly
-rather than validate cleanly while its handler and workflow silently disappear.
+The top-level ``corsia:`` block is read only for lesson data (``lesson``, ``capture``).
+A handler or workflow block there, or under any other key, is not read, so it must fail
+validation loudly rather than validate cleanly while its data silently disappears.
 
 Every place a skill author copies CORSIA data from must use a form the reader reads.
 Tracked skills now keep it in a ``corsia.yaml`` sidecar, so the last test validates
@@ -36,15 +37,14 @@ description: Proves which block is read
 """
 
 
-def test_the_corsia_block_is_validated_under_its_own_name() -> None:
+def test_a_corsia_block_is_read_under_its_own_name_and_is_retired_for_handler_data() -> None:
     result = validate_skill_text(_broken_handler(KEY))
 
-    assert result.ok is False, "the corsia block was not read at all"
-    assert (
-        "corsia.handler.kind must be one of connection_action, cli, instruction, "
-        "native_tool, script"
-    ) in result.errors
-    assert "corsia.workflow.steps must be a list" in result.errors
+    assert result.ok is False
+    assert len(result.errors) == 1
+    assert "the top-level corsia block is retired" in result.errors[0]
+    assert "corsia.yaml" in result.errors[0] and "corsia-data" in result.errors[0]
+    assert result.corsia is None
 
 
 def test_a_block_filed_under_another_key_fails_loudly_and_is_not_read() -> None:
@@ -52,8 +52,10 @@ def test_a_block_filed_under_another_key_fails_loudly_and_is_not_read() -> None:
 
     assert result.ok is False
     assert result.errors == [
-        "corsai.handler is CORSIA metadata, which is read only under corsia; move the block there",
-        "corsai.workflow is CORSIA metadata, which is read only under corsia; move the block there",
+        "corsai.handler is CORSIA metadata, which no reader reads under corsai; "
+        "move it to corsia.yaml beside SKILL.md",
+        "corsai.workflow is CORSIA metadata, which no reader reads under corsai; "
+        "move it to corsia.yaml beside SKILL.md",
     ]
     assert KEY not in result.metadata
 
