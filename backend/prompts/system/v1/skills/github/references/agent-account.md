@@ -38,9 +38,9 @@ Done when `gh auth status` succeeds.
 
 ## Connect
 
-1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`.
-2. Tell the person: open the URL in a browser signed in **as the agents' GitHub account** (a private window works), never their own, and enter the code.
-3. Call `action: "check"` until the account reads `ready` or names a cause.
+1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`; or `signin.cause`, with `signin.next` when there is a recovery step (do it instead of waiting; a cause with no `next` has none, so tell the person in plain words what failed and stop); or, when no sign-in started, the account's status: do its top-level `next` if set, otherwise act on its row in the table above.
+2. If you created the agents' account in this setup's shared browser window, open `signin.verification_uri` in that same window: it is already signed in as the agents' account. Otherwise tell the person to open it in a browser signed in **as the agents' GitHub account** (a private window works), never their own. Either way, give the person `signin.user_code` to enter; never type it yourself.
+3. Call `action: "check"` every few seconds while `signin.status` is `waiting`: the person is still entering the code, so keep checking even though `account` reads `needs_auth` until they finish. Any other status means the sign-in is over. On `failed`, follow `signin.next` when it is there, including what it says to do if the cause repeats; a failure with no `next` has none, so tell the person in plain words what failed and stop. Otherwise (`completed`, `superseded`, or no `signin` at all) act on `account`'s row in the table above; `ready` means done. If the same cause returns after a second `connect`, tell the person in plain words what failed and stop.
 
 For the agents' account, never run `gh auth login`, `gh auth logout`, `gh auth setup-git` or `git config` for credentials or identity in the shell, and never ask for a token, name or email. The account's home is read-only to shells and its identity comes from GitHub.
 

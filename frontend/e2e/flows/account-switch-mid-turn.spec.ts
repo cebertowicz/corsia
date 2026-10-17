@@ -109,12 +109,23 @@ finally:
 `, threadId)) as Claim;
 }
 
+// Accounts sit behind each vendor header and start collapsed (model-first-picker-renders.spec.ts asserts
+// aria-expanded="false"); open every vendor's chooser so its account rows can be picked.
+async function expandAccountChoosers(page: Page): Promise<void> {
+	// The accounts load after the sheet opens, so wait for the first chooser before clicking.
+	await expect(page.locator('.model-sheet button.picker-account-title').first()).toBeVisible();
+	const closed = page.locator('.model-sheet button.picker-account-title[aria-expanded="false"]');
+	// Each click removes a row from this live selector, so always click the first one left.
+	while (await closed.count() > 0) await closed.first().click();
+}
+
 async function openThread(page: Page, title: string): Promise<void> {
 	await openAppByUrl(page);
 	await page.locator('.thread-item').filter({ hasText: title }).click();
 	await waitForModelListLoaded(page);
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
+	await expandAccountChoosers(page);
 }
 
 async function screenshotPendingPicker(page: Page, testInfo: TestInfo): Promise<void> {
@@ -166,6 +177,7 @@ test('@flow:chat @surface:picker account choice during a running turn moves on t
 		await page.locator('.thread-item').filter({ hasText: title }).click();
 		await waitForModelListLoaded(page);
 		await page.locator('button.model-chip').click();
+		await expandAccountChoosers(page);
 		await expect(page.locator('button.account-usage-row.picker', { hasText: 'Account B' })).toHaveAttribute('aria-pressed', 'true');
 		await expect(page.locator('.model-sheet .switch-marker')).toHaveCount(0);
 	} finally {

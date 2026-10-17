@@ -16,13 +16,14 @@ import shutil
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
-from infra import accounts, config, user_profile
+from infra import accounts, config, setup_progress, user_profile
+from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
@@ -47,6 +48,16 @@ class LocalDownloadRequest(BaseModel):
     consent_existing: bool = False
     #: Welcome's choice for it: Let CORSIA manage it, Use mine, or None where it wasn't shown.
     manage_existing: bool | None = None
+
+
+class SetupProgressUpdate(BaseModel):
+    """One change to the setup record: a step, the local-AI choice, or completion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step: str | None = None
+    local_ai: bool | None = None
+    completed: bool = False
 
 
 class FirstAccountRequest(BaseModel):
@@ -207,6 +218,43 @@ async def setup_status(request: Request) -> dict | Response:
     if await run_in_db(accounts.has_users):
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
     return await run_in_db(_setup_status)
+
+
+@router.get("/progress", response_model=None)
+async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
+    """Where setup stands for a signed-in person; while unfinished, the eligibility facts are read fresh."""
+
+    def _read() -> dict:
+        progress = setup_progress.view()
+        return progress if progress["setup_completed"] else {**progress, "status": _setup_status()}
+
+    return await run_in_db(_read)
+
+
+@router.put("/progress", response_model=None)
+async def setup_progress_update(request: Request, authorization: str | None = Header(None)) -> dict | Response:
+    """Record a setup step, the local-AI choice or completion.
+
+    Before the first account only the local-AI choice is taken, on the same loopback boundary as the
+    other pre-account routes; after it, any signed-in session may record all three.
+    """
+    signed_in = await run_in_db(accounts.has_users)
+    if signed_in:
+        if not authenticate(token_from_request(None, authorization)):
+            return Response(status_code=401)
+    elif not _trusted_json_post(request):
+        return Response(status_code=403)
+    try:
+        body = SetupProgressUpdate.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        return Response(status_code=422)
+    if not signed_in and (body.step is not None or body.completed):
+        return Response(status_code=422)
+    try:
+        await run_in_db(lambda: setup_progress.update(step=body.step, local_ai=body.local_ai, completed=body.completed))
+    except setup_progress.SetupProgressError:
+        return Response(status_code=422)
+    return {"ok": True}
 
 
 async def _before_first_account(request: Request, *, post: bool) -> Response | None:

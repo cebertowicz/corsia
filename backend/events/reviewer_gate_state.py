@@ -35,6 +35,33 @@ def mark_reviewed(pr_key: str, head_sha: str) -> None:
         )
 
 
+def get_approved_sha(pr_key: str) -> str | None:
+    """Return the head a maintainer approved for review, or None."""
+    from infra.database import get_db
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT approved_sha FROM reviewer_gate_approval WHERE pr_key = ?",
+            (pr_key,),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def record_approval(pr_key: str, head_sha: str) -> None:
+    """Persist the one head a maintainer approved; it replaces any earlier head."""
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="record_review_approval") as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO reviewer_gate_approval (pr_key, approved_sha) "
+            "VALUES (?, ?)",
+            (pr_key, head_sha),
+        )
+
+
 def pr_key(repo: str, pr_number: int) -> str:
     """Build the canonical repository and pull-request key for gate state."""
     return f"{repo}#{pr_number}"

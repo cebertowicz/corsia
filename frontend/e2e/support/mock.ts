@@ -111,7 +111,7 @@ export async function seedPressuredHistory(
     request: APIRequestContext,
     sessionId: string,
     token: string,
-): Promise<number> {
+): Promise<{ contextWindow: number; userMessageCount: number }> {
     const resp = await request.post(
         BASE_URL + '/api/test/seed-pressured-history?token=' + encodeURIComponent(token),
         { data: { thread_id: sessionId } },
@@ -126,5 +126,11 @@ export async function seedPressuredHistory(
     if (!Number.isInteger(body.context_window) || body.context_window <= 0) {
         throw new Error(`Invalid pressure context window: ${JSON.stringify(body.context_window)}`);
     }
-    return body.context_window as number;
+    if (!Number.isInteger(body.turns) || body.turns <= 0) {
+        throw new Error(`Invalid pressured-history turn count: ${JSON.stringify(body.turns)}`);
+    }
+    return {
+        contextWindow: body.context_window as number,
+        userMessageCount: body.turns as number,
+    };
 }
