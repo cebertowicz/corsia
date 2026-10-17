@@ -74,10 +74,8 @@ def _folder_errors(folder: Path, writes: dict[Path, bytes]) -> tuple[str, ...]:
         sidecar, problem = read_sidecar(folder)
     if errors:
         return errors
-    validation = validate_skill_bundle(text, None if sidecar is None else {SIDECAR_FILE: sidecar})
-    if validation.ok:
-        return ()
-    return ((problem,) if problem else ()) + tuple(validation.errors)
+    files = None if sidecar is None else {SIDECAR_FILE: sidecar}
+    return tuple(validate_skill_bundle(text, files, sidecar_problem=problem).errors)
 
 
 def _decoded(data: bytes, name: str) -> tuple[str, tuple[str, ...]]:

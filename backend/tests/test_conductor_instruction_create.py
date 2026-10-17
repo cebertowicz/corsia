@@ -197,3 +197,14 @@ async def test_pointer_without_its_sidecar_or_with_a_bad_one_does_not_install(is
                                     supporting_files=supports, _thread_id=actor)
         assert result.startswith("Error:"), result
     assert not (workspace / ".threads" / target / "skills").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_name_mismatch_is_refused_as_a_name_mismatch(isolated_db, tmp_path, monkeypatch):
+    _, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    result = await ConductorInstructionFileCreateTool().execute(
+        target, "skill", "absent", SIDECAR_SKILL, name="other-check",
+        supporting_files={"corsia.yaml": SIDECAR}, _thread_id=actor,
+    )
+    assert "SKILL.md name 'agent-check' must match the skill name 'other-check'" in result, result
+    assert "corsia.yaml" not in result

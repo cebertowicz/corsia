@@ -86,12 +86,10 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
         # Validate SKILL.md together with its sidecar, so a pointer to a corsia.yaml
         # this install does not write fails here instead of after delivery.
         valid = validate_skill_bundle(content, supporting_files)
-        if not valid.ok or valid.name != name:
-            raise RosterChangeError(
-                "SKILL.md requires matching name, description and spec frontmatter; "
-                "CORSIA data goes in a corsia.yaml supporting file named by metadata corsia-data"
-                + "".join(f"; {error}" for error in valid.errors)
-            )
+        if not valid.ok:
+            raise RosterChangeError("SKILL.md is not a valid skill" + "".join(f"; {error}" for error in valid.errors))
+        if valid.name != name:
+            raise RosterChangeError(f"SKILL.md name {valid.name!r} must match the skill name {name!r}")
     else:
         raise RosterChangeError("kind must be responsibility or skill")
     for path in writes:

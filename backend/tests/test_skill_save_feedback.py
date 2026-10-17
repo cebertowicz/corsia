@@ -258,6 +258,24 @@ def test_skill_folder_is_validated_whichever_file_a_save_writes(tmp_path):
     assert invalid_skill_write({tmp_path / "notes" / "x" / "corsia.yaml": b"lesson: {}\n"}) is None
 
 
+def test_an_unreadable_sidecar_on_disk_fails_a_save_as_the_loader_does(tmp_path):
+    from core.skill_validation import validate_skill_file
+    from infra.skill_save_validation import invalid_skill_write
+
+    folder = tmp_path / "skills" / "demo"
+    folder.mkdir(parents=True)
+    skill = folder / "SKILL.md"
+    (tmp_path / "elsewhere.yaml").write_text(_SIDECAR, encoding="utf-8")
+    (folder / "corsia.yaml").symlink_to(tmp_path / "elsewhere.yaml")
+    skill.write_text(_POINTER, encoding="utf-8")
+    refused = invalid_skill_write({skill: _POINTER.encode()})
+    assert refused is not None
+    assert list(refused.errors) == validate_skill_file(skill).errors
+    assert len(refused.errors) == 1 and "symlink" in refused.errors[0]
+    no_pointer = "---\nname: demo\ndescription: Use when testing saves.\n---\n# Demo\n"
+    assert invalid_skill_write({skill: no_pointer.encode()}) is None
+
+
 @pytest.mark.asyncio
 async def test_invalid_sidecar_write_is_refused_without_bytes(skill_save_scope):
     from tools.filesystem_rw import WriteFileTool

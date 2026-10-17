@@ -208,12 +208,17 @@ def validate_skill_text(text: str) -> SkillValidation:
     return _validate(text, bundle=False)
 
 
-def validate_skill_bundle(skill_md: str, files: Mapping[str, str] | None) -> SkillValidation:
+def validate_skill_bundle(
+    skill_md: str, files: Mapping[str, str] | None, *, sidecar_problem: str | None = None,
+) -> SkillValidation:
     """Validate a ``SKILL.md`` with the supplied folder files; no filesystem access.
 
     ``files`` maps folder-relative names to their text; only ``corsia.yaml`` is read.
+    ``sidecar_problem`` is the caller's :func:`read_sidecar` problem, reported only when
+    the skill points at a sidecar, exactly as :func:`validate_skill_file` reports it.
     """
-    return _validate(skill_md, bundle=True, sidecar=(files or {}).get(SIDECAR_FILE))
+    sidecar = (files or {}).get(SIDECAR_FILE)
+    return _validate(skill_md, bundle=True, sidecar=sidecar, problem=sidecar_problem)
 
 
 def _sidecar_corsia(
