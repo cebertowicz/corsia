@@ -17,7 +17,7 @@ from infra import failed_wake_surface as surface
 from infra.database import get_db, write_transaction
 from infra.failed_wake_surface import REPORT_EVENT, WAKE_FAILED_REASON, drive_failed_wake_owners
 from infra.input_admission import accept_thread_input
-from infra.input_writes import sequence_attempt
+from infra.input_sequencing import sequence_attempt
 from infra.queued_input_settlement import fail_queued
 from infra.thread_input_types import FailedInputBatch
 from tests.event_routing_helpers import mk_session

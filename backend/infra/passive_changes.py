@@ -58,6 +58,34 @@ def append_thread_context_note(
     )
 
 
+# A note whose details carry this key is journaled again when the digest that
+# carried it ends without reaching the model, so a restart or a Stop before the
+# write cannot lose it. A digest that may have been written is never repeated.
+REOFFER_UNWRITTEN = "reoffer_unwritten"
+
+
+def reoffer_unwritten_notes(db: sqlite3.Connection, message_ids: tuple[str, ...]) -> None:
+    """Journal again each marked note from digests that ended proved unwritten."""
+    for message_id in message_ids:
+        row = db.execute(
+            "SELECT thread_id,metadata FROM messages WHERE id=? AND write_outcome='proved_no_write' "
+            "AND delivery_state IN ('failed','cancelled') AND json_valid(metadata) "
+            "AND json_extract(metadata,'$.event_type')='context.digest'",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        for event in json.loads(row["metadata"]).get("context_events") or ():
+            details = event.get("details") if isinstance(event, dict) else None
+            if isinstance(details, dict) and details.get(REOFFER_UNWRITTEN):
+                # Rendering lifted the chip out of the details; put it back.
+                chip = {"chip": event["chip"]} if "chip" in event else {}
+                append_thread_context_note(
+                    db, thread_id=str(row["thread_id"]), summary=str(event["summary"]),
+                    details={**chip, **details},
+                )
+
+
 def append_change(
     db: sqlite3.Connection,
     *,

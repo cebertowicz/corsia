@@ -317,3 +317,19 @@ it('keeps the body and enabled Comment after HTTP refusal, then dismisses its to
 	expect(dismiss).toHaveBeenCalledWith('refusal');
 	expect(get(commentDraft)).toBeNull();
 });
+it('returns focus to the editor without scrolling when the comment popover is dismissed', async () => {
+	// A bare element focus() makes WebKit scroll to the start of the document when the DOM selection is gone;
+	// CodeMirror's focus() restores its own selection and keeps the scroll position.
+	vi.stubGlobal('innerWidth', 1440);
+	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 0, right: 10, top: 0, bottom: 10 });
+	await open();
+	docComments.set({ artifact: [{ id: 'c1', from: 6, to: 10, anchor: 'beta', author: 'you', text: 'note', at: '2026-10-07T00:00:00Z', resolved: false, replies: [] }] });
+	flushSync();
+	await vi.waitFor(() => expect(host.querySelector('.cm-comment-anchor')).not.toBeNull());
+	EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!.dispatch({ selection: { anchor: 8 } }); flushSync();
+	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
+	const viewFocus = vi.spyOn(EditorView.prototype, 'focus');
+	document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); flushSync();
+	expect(document.querySelector('[data-popover]')).toBeNull();
+	expect(viewFocus).toHaveBeenCalledOnce();
+});
