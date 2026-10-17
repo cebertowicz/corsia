@@ -122,19 +122,19 @@ def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
         "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
     )
     assert mcp_import.IMPORT_UNSUPPORTED == "CORSIA can't connect to that kind of app yet."
-    assert mcp_import.IMPORT_FOLDER_OUTSIDE_PROJECT == (
-        "To use it in a project, connect it from that project's settings."
+    assert mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE == (
+        "**{App}**: not working yet. Choose where it works, then approve it."
     )
     assert mcp_import.IMPORT_KEY_STAYS_IN_CODEX == (
-        "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
+        "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
     )
     assert all("bearer_file" not in line for line in (
         mcp_import.IMPORT_NONE_FOUND,
         mcp_import.IMPORT_UNSUPPORTED,
-        mcp_import.IMPORT_FOLDER_OUTSIDE_PROJECT,
+        mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE,
         mcp_import.IMPORT_KEY_STAYS_IN_CODEX,
-        mcp_import.IMPORT_NEEDS_SIGN_IN,
     ))
+    assert not hasattr(mcp_import, "IMPORT_NEEDS_SIGN_IN")  # a sign-in import reads as waiting for approval
 
 
 def test_imported_header_key_is_marked_set_for_the_approval_projection(tmp_path: Path) -> None:
@@ -186,7 +186,7 @@ def test_empty_stored_header_value_does_not_change_safe_text() -> None:
     assert _StoredHeadersAuth({"X-Empty": ""}, "https://example.test").redact("safe") == "safe"
 
 
-def test_url_only_claude_http_is_excluded_as_needing_sign_in(tmp_path: Path) -> None:
+def test_url_only_claude_http_imports_as_waiting_for_approval(tmp_path: Path) -> None:
     _json(tmp_path / ".claude.json", {
         "mcpServers": {"Bare HTTP": {"type": "http", "url": "https://example.test/mcp"}},
     })
@@ -196,11 +196,10 @@ def test_url_only_claude_http_is_excluded_as_needing_sign_in(tmp_path: Path) -> 
             [{"source": "claude_code", "name": "Bare HTTP"}], db=db, home=tmp_path, actor="agent",
         )
 
-        assert imported == {"rows": [{
-            "name": "Bare HTTP", "status": "needs_sign_in",
-            "message": "I can't bring over **Bare HTTP** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
-        }]}
-        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+        assert imported["rows"] == [{
+            "id": imported["rows"][0]["id"], "name": "Bare HTTP", "state": "awaiting_approval",
+        }]
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
     finally:
         db.close()
 
@@ -248,7 +247,7 @@ def test_codex_declared_bearer_token_imports_as_needing_a_key(tmp_path: Path) ->
         db.close()
 
 
-def test_url_only_sse_is_excluded_as_needing_sign_in(tmp_path: Path) -> None:
+def test_url_only_sse_imports_as_waiting_for_approval(tmp_path: Path) -> None:
     name, transport = "SSE", "sse"
     _json(tmp_path / ".claude.json", {
         "mcpServers": {name: {"type": transport, "url": "https://example.test/mcp"}},
@@ -260,10 +259,9 @@ def test_url_only_sse_is_excluded_as_needing_sign_in(tmp_path: Path) -> None:
         )
 
         assert imported["rows"] == [{
-            "name": name, "status": "needs_sign_in",
-            "message": f"I can't bring over **{name}** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+            "id": imported["rows"][0]["id"], "name": name, "state": "awaiting_approval",
         }]
-        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
     finally:
         db.close()
 
@@ -282,10 +280,9 @@ def test_oauth_declaration_overrides_a_credential_header_for_http(tmp_path: Path
         )
 
         assert imported["rows"] == [{
-            "name": "OAuth", "status": "needs_sign_in",
-            "message": "I can't bring over **OAuth** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
+            "id": imported["rows"][0]["id"], "name": "OAuth", "state": "awaiting_approval",
         }]
-        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
     finally:
         db.close()
 
@@ -322,7 +319,9 @@ def test_stdio_without_environment_stays_importable(tmp_path: Path) -> None:
         db.close()
 
 
-def test_cant_bring_over_output_names_every_needs_sign_in_case(tmp_path: Path) -> None:
+def test_every_sign_in_case_waits_for_approval_without_lifted_keys(tmp_path: Path) -> None:
+    from connections.app_reach import get_app
+
     _json(tmp_path / ".claude.json", {"mcpServers": {
         "Bare": {"type": "http", "url": "https://example.test/mcp"},
         "SSE": {"type": "sse", "url": "https://example.test/sse"},
@@ -339,12 +338,11 @@ def test_cant_bring_over_output_names_every_needs_sign_in_case(tmp_path: Path) -
             ], db=db, home=tmp_path, actor="agent",
         )
 
-        assert imported["rows"] == [
-            {
-                "name": name, "status": "needs_sign_in",
-                "message": f"I can't bring over **{name}** (Claude Code) yet: it needs you to sign in, and CORSIA can't do that yet.",
-            }
-            for name in ("Bare", "SSE", "OAuth")
-        ]
+        assert [row["state"] for row in imported["rows"]] == ["awaiting_approval"] * 3
+        assert all("message" not in row for row in imported["rows"])
+        oauth = get_app(imported["rows"][2]["id"], db=db)
+        assert not oauth["config"].get("key_refs")
+        assert "secret" not in json.dumps(oauth)
+        assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 3
     finally:
         db.close()

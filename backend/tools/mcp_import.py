@@ -14,6 +14,7 @@ from pathlib import Path
 import tomllib
 from typing import Any
 
+from connections.app_source_folder import clean_folder_label
 from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
 from tools.mcp_import_reach import project_reach
@@ -29,9 +30,8 @@ log = logging.getLogger("corsia.key_audit")
 # The import conversation is assembled from these canonical person-facing lines.
 IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
-IMPORT_FOLDER_OUTSIDE_PROJECT = "To use it in a project, connect it from that project's settings."
-IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Connected apps after it comes over."
-IMPORT_NEEDS_SIGN_IN = "I can't bring over **{App}** ({client}) yet: it needs you to sign in, and CORSIA can't do that yet."
+IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
+IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
 
 
 def _home() -> Path:
@@ -109,7 +109,7 @@ def _has_refused_proxy_authorization(config: dict[str, Any]) -> bool:
 
 
 def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
-    """Whether a remote app cannot be imported before C supplies sign-in."""
+    """Whether a remote app must be imported in its sign-in-needed state."""
     if _kind(source, config) != "remote":
         return False
     if "oauth" in config:
@@ -191,7 +191,7 @@ def detected_sources(home: Path | None = None) -> list[dict[str, Any]]:
             item: dict[str, str] = {"name": name, "kind": kind}
             if folder is not None:
                 # Path.name is the only persisted/displayed part of a project path.
-                item["folder"] = folder.name or folder.resolve(strict=False).name
+                item["folder"] = clean_folder_label(folder.name or folder.resolve(strict=False).name) or ""
             servers.append(item)
         if servers:
             results.append({"source": source, "app": _SOURCE_LABELS[source], "servers": servers})
@@ -219,12 +219,7 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
             copied["headers"] = headers
     if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
         copied["needs_token"] = True
-        header_env = config.get("env_http_headers")
-        if isinstance(header_env, dict):
-            copied["secret_headers"] = [
-                name for name, value in header_env.items()
-                if isinstance(name, str) and name and isinstance(value, str) and value
-            ]
+        mcp_secrets.declare_codex_keys(config, copied)
     for source_key, target_key in (("connect_timeout", "connect_timeout"),
                                    ("startup_timeout_sec", "connect_timeout"),
                                    ("tool_timeout", "tool_timeout"),
@@ -296,6 +291,19 @@ def _key_refs(app_id: str, config: dict[str, Any]) -> tuple[dict[str, Any], dict
     return {**clean, "key_refs": refs}, lifted
 
 
+def _sign_in_config(app_id: str, source: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Keep a hosted app's web settings while discarding its prior credentials."""
+    copied = _copyable_config(source, config)
+    copied.pop("needs_token", None)
+    copied.pop("secret_headers", None)
+    copied.pop(mcp_secrets.HEADER_SCHEMES, None)
+    clean, _discarded = mcp_secrets.split_secrets(app_id, copied, headers=True)
+    clean.pop("secret_env", None)
+    clean.pop("secret_headers", None)
+    clean.pop(mcp_secrets.HEADER_SCHEMES, None)
+    return {**clean, "key_refs": []}
+
+
 def audit_import_key_write(actor: str, source: str, name: str) -> None:
     """Audit import key writes without emitting the value or generated key name."""
     log.info("key import: actor=%s source=%s app=%s", actor, source, name)
@@ -334,31 +342,35 @@ def import_selected(
         if _kind(source, source_config) == "unsupported" or _has_refused_proxy_authorization(source_config):
             rows.append({"name": name, "status": "cannot_connect"})
             continue
-        if _needs_sign_in(source, source_config):
-            rows.append({
-                "name": name, "status": "needs_sign_in",
-                "message": IMPORT_NEEDS_SIGN_IN.format(App=name, client=_SOURCE_LABELS[source]),
-            })
-            continue
         reach, outside_folder = project_reach(folder, db=db)
         if reach is None:
-            rows.append({"name": name, "status": "outside_project", "folder": outside_folder or ""})
-            continue
+            # The folder is display-only: it reaches nothing until the person chooses a place (G-P1).
+            reach = {"mode": "selected", "project_ids": [], "outside_projects": False}
         try:
-            copied = _copyable_config(source, source_config)
             app_id = str(uuid.uuid4())
-            config, lifted = _key_refs(app_id, copied)
-            _validate(app_id, {**config, "secret_env": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "env"],
-                               "secret_headers": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "header"]})
+            lifted: dict[str, str]
+            if _needs_sign_in(source, source_config):
+                # A hosted app that signs in waits for approval like any import and brings no keys;
+                # its first connect after approval asks the person to sign in (C-R1).
+                config, lifted = _sign_in_config(app_id, source, source_config), {}
+                _validate(app_id, config)
+            else:
+                config, lifted = _key_refs(app_id, _copyable_config(source, source_config))
+                _validate(app_id, {**config, "secret_env": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "env"],
+                                   "secret_headers": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "header"]})
             with write_transaction(db, scope="mcp_import"):
                 result = create_pending_app(
                     name, config, reach, actor_thread_id=actor, app_id=app_id,
-                    audit_actor=("agent", actor), db=db,
+                    source_folder=outside_folder, audit_actor=("agent", actor), db=db,
                 )
                 for entry_name, value in lifted.items():
                     key_store.set_managed_value(entry_name, value, db=db)
                     audit_import_key_write(actor, _SOURCE_LABELS[source], name)
-            rows.append({"id": str(result["id"]), "name": name, "state": "awaiting_approval"})
+            row = {"id": str(result["id"]), "name": name, "state": "awaiting_approval"}
+            if outside_folder is not None:
+                row["folder"] = clean_folder_label(outside_folder) or ""
+                row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE.format(App=name)
+            rows.append(row)
         except AppNameOverlapError:
             rows.append({"name": name, "status": "already_exists"})
         except (MCPConfigError, key_store.KeyStoreError):
