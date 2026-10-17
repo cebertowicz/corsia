@@ -1,5 +1,5 @@
 import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
-import { accountToSignIn, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startCliUpdate, startSignin } from '$lib/conductorSourcesApi';
+import { accountToSignIn, cancelCliInstall, cancelSignin, checkSignin, getCliInstall, linkCli, startCliInstall, startCliUpdate, startSignin } from '$lib/conductorSourcesApi';
 import { openExternalUrl } from '$lib/linkTargetResolver';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 
@@ -7,7 +7,7 @@ import { fetchCorsiaAgent } from '$lib/utils/conductor';
 type ConnectPhase = { phase: 'confirm' | 'installing' | 'signing-in' | 'path-shadow' | 'failed'; operation?: 'install' | 'update'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin'; reason?: string | null; shadowedBinary?: string };
 
 export type RowView = {
-	meta: string; ready?: boolean; busy?: boolean; error?: boolean; detail?: string;
+	meta: string; ready?: boolean; busy?: boolean; spinning?: boolean; error?: boolean; detail?: string;
 	action?: { label: string; run: () => void };
 	confirm?: { label: string; run: () => void }[];
 	more?: { label: string; run: () => void }[];
@@ -92,6 +92,20 @@ export function createSetupConnect(deps: ConnectDeps) {
 		}
 	}
 
+	/** Stop the installer; the row goes back to what its source says (Set up). An install that had just finished carries on as one. */
+	async function cancelInstall(source: ModelSource) {
+		const current = deps.token();
+		if (!current) return;
+		const vendor = source.source;
+		const entry = flow[vendor];
+		try {
+			const install = await cancelCliInstall(current, vendor);
+			if (install.state === 'done') await afterInstalled(vendor, install.path_shadowed_by);
+			else if (install.state === 'failed') setConnect(vendor, { phase: 'failed', failed: 'install', operation: entry?.operation, reason: install.reason });
+			else if (install.state !== 'running') setConnect(vendor, undefined);
+		} catch { /* The install keeps its row; the next look at it settles it. */ }
+	}
+
 	let ticking = false;
 	/** One look at every install and sign-in under way. */
 	async function tickConnect() {
@@ -103,6 +117,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 				if (entry?.phase === 'installing') {
 					const install = await getCliInstall(current, vendor).catch(() => null);
 					if (install?.state === 'done' || install?.state === 'idle') await afterInstalled(vendor, install.path_shadowed_by);
+					else if (install?.state === 'cancelled') setConnect(vendor, undefined);
 					else if (install?.state === 'failed') setConnect(vendor, { phase: 'failed', failed: 'install', operation: entry.operation, reason: install.reason });
 				} else if (entry?.phase === 'path-shadow') {
 					const source = deps.sources().find((candidate) => candidate.source === vendor);
@@ -114,6 +129,16 @@ export function createSetupConnect(deps: ConnectDeps) {
 				}
 			}
 		} finally { ticking = false; }
+	}
+
+	/**
+	 * Take a tool the person checked on Welcome as far as it goes with no further click: install it, then open its
+	 * sign-in. A tool that is ready, limited, out of date or already under way is left to its row.
+	 */
+	async function connectPicked(source: ModelSource) {
+		if (flow[source.source] || sourceIsReady(source) || source.limited || source.state === 'unverified') return;
+		if (source.state === 'not_installed') await startInstall(source);
+		else await beginSignIn(source);
 	}
 
 	function connectRow(source: ModelSource): RowView {
@@ -134,11 +159,11 @@ export function createSetupConnect(deps: ConnectDeps) {
 				confirm: [{ label: entry.operation === 'update' ? 'Reinstall' : 'Set up', run: () => void startInstall(source, entry.operation) }, { label: 'Cancel', run: () => setConnect(source.source, undefined) }],
 			};
 		}
-		if (entry?.phase === 'installing') return { meta: `${entry.operation === 'update' ? 'Reinstalling' : 'Installing'} with ${copy.maker}’s official installer. This can take up to 3 minutes.`, busy: true };
+		if (entry?.phase === 'installing') return { meta: `${entry.operation === 'update' ? 'Reinstalling' : 'Installing'} ${copy.cli}`, busy: true, spinning: true, action: { label: 'Cancel', run: () => void cancelInstall(source) } };
 		if (entry?.phase === 'signing-in') {
 			return {
 				meta: `${entry.installed ? 'Installed. ' : ''}Finish signing in to your ${copy.account} account in the browser window that just opened.`,
-				busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) },
+				busy: true, action: { label: 'Sign in', run: () => void openSignInAgain(source) },
 			};
 		}
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
@@ -179,6 +204,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 	return {
 		get active() { return active; },
 		tick: tickConnect,
+		connectPicked,
 		row: connectRow,
 	};
 }

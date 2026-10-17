@@ -46,6 +46,8 @@ class Management:
     active: bool = True
     #: The model CORSIA downloaded into their oMLX, the only one whose settings it writes.
     model: LocalModel | None = None
+    #: ``model`` is the starter because their oMLX's recommender had no pick (setup says so).
+    fallback: bool = False
     originals_global: dict[str, Any] = field(default_factory=dict)
     #: oMLX model id -> that model's values before CORSIA's first change to each.
     originals_models: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -100,6 +102,7 @@ def read() -> Management | None:
     return Management(
         active=raw.get("active") is True,
         model=model,
+        fallback=raw.get("fallback") is True,
         originals_global=globals_ if isinstance(globals_, dict) else {},
         originals_models=_originals_models(raw),
         key_registered=raw.get("key_registered") is True,

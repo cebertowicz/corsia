@@ -64,6 +64,10 @@ export interface OwnOmlxManagement {
 	restores: string[];
 	/** Stopping removes the admin key CORSIA read to manage it. */
 	forgets_key: boolean;
+	/** Why CORSIA downloaded the starter model into their oMLX: it recommended none. */
+	starter_note?: string | null;
+	/** That starter model's name, which labels its background download. */
+	starter_name?: string | null;
 }
 
 /** The harness sources: Claude Code and Codex. */

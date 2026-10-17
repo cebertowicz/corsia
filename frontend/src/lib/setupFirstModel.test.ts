@@ -29,7 +29,7 @@ describe('selectSetupFirstModel', () => {
 			if (url === '/api/models?thread_id=corsia-thread') return response({ models: [readyClaude] });
 			if (url === '/api/threads/corsia-thread?token=setup-token') {
 				expect(init?.method).toBe('PATCH');
-				expect(JSON.parse(String(init?.body))).toEqual({ model: 'claude-code/sonnet' });
+				expect(JSON.parse(String(init?.body))).toEqual({ model: 'claude-code/sonnet', source: 'setup' });
 				return response({ model: 'claude-code/sonnet', model_updated_at: '2026-10-16T00:00:00Z' });
 			}
 			throw new Error(`unexpected request: ${url}`);
@@ -44,6 +44,37 @@ describe('selectSetupFirstModel', () => {
 			'/api/models?thread_id=corsia-thread',
 			'/api/threads/corsia-thread?token=setup-token',
 		]);
+	});
+
+	it('prefers a ready Claude Code or Codex over the local model, whatever order they became ready in', async () => {
+		const saved: unknown[] = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.startsWith('/api/corsia-agent')) return response({ target: { thread_id: 'corsia-thread' } });
+			if (url === '/api/models?thread_id=corsia-thread') return response({ models: [{ ...readyClaude, id: 'omlx/qwen', connection: 'omlx', litellm_model: 'omlx/qwen' }, readyClaude] });
+			if (url.startsWith('/api/threads/corsia-thread')) { saved.push(JSON.parse(String(init?.body))); return response({ model: 'claude-code/sonnet', model_updated_at: '2026-10-16T00:00:00Z' }); }
+			throw new Error(`unexpected request: ${url}`);
+		}));
+
+		await expect(selectSetupFirstModel('setup-token', [
+			{ source: 'omlx', name: 'This computer', state: 'ready' },
+			{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ account_id: 'a', label: 'me', label_verified: true, identified: true, state: 'ready', resets_at: null, corsia_agent_binding: true }] },
+		])).resolves.toBe(true);
+		expect(saved).toEqual([{ model: 'claude-code/sonnet', source: 'setup' }]);
+	});
+
+	it('chooses the local model only when no cloud source is ready', async () => {
+		const saved: unknown[] = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.startsWith('/api/corsia-agent')) return response({ target: { thread_id: 'corsia-thread' } });
+			if (url === '/api/models?thread_id=corsia-thread') return response({ models: [{ ...readyClaude, id: 'omlx/qwen', connection: 'omlx', litellm_model: 'omlx/qwen' }] });
+			if (url.startsWith('/api/threads/corsia-thread')) { saved.push(JSON.parse(String(init?.body))); return response({ model: 'omlx/qwen', model_updated_at: '2026-10-16T00:00:00Z' }); }
+			throw new Error(`unexpected request: ${url}`);
+		}));
+
+		await expect(selectSetupFirstModel('setup-token', [{ source: 'omlx', name: 'This computer', state: 'ready' }])).resolves.toBe(true);
+		expect(saved).toEqual([{ model: 'omlx/qwen', source: 'setup' }]);
 	});
 
 	it('keeps setup recovery when its ready source has no ready catalog model', async () => {

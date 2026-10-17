@@ -257,11 +257,11 @@ def test_the_parser_has_no_model_choice_because_omlx_picks_it():
         parser.parse_args(["local", "setup", "--profile", "qwen-27b-oq4e"])
 
 
-def test_a_mac_no_recommended_model_fits_exits_without_a_provider(monkeypatch, capsys):
+def test_a_skipped_setup_with_no_local_model_exits_without_a_provider(monkeypatch, capsys):
     import cli_local
     from llm.local_setup_prepare import NO_LOCAL_MODEL
 
-    _patch_follow(monkeypatch, [], post={"ok": True, "skipped": "none_fits", "message": NO_LOCAL_MODEL})
+    _patch_follow(monkeypatch, [], post={"ok": True, "skipped": "ineligible", "message": NO_LOCAL_MODEL})
 
     assert cli_local.cmd_setup(_args()) == cli_local.EXIT_NO_PROVIDER
     assert capsys.readouterr().out == f"{NO_LOCAL_MODEL}\n"

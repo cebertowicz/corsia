@@ -12,6 +12,7 @@
   },
   "starter_model": {
     "repo_id": "prism-ml/Ternary-Bonsai-2-27B-mlx-2bit",
+    "display_name": "Ternary Bonsai 2",
     "download_bytes": 8608739065,
     "max_context": 32768
   }
