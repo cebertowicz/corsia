@@ -73,10 +73,10 @@ describe('HomePageView setup resume', () => {
 		expect(seen.resume).toEqual([]);
 	});
 
-	it('opens setup as a resume, which can retry, when the record cannot be read', async () => {
+	it('leaves the app alone when the record cannot be read, so a failed read never locks out a finished install', async () => {
 		await open(true);
 
-		expect(seen.resume).toContain(true);
+		expect(seen.resume).toEqual([]);
 	});
 
 	it('asks nothing of the backend while signed out', async () => {
