@@ -8,11 +8,12 @@ start a Turn.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 
 from fastapi import WebSocketDisconnect
 
 import ws as ws_endpoint
-from infra import presence
+from infra import presence, presence_time
 from infra.ws_session import session_id
 from infra.thread_liveness import read_thread_liveness
 from ws import presence_control
@@ -129,6 +130,46 @@ def test_live_view_reports_current_claims(pdb):
 
     asyncio.run(_scenario())
     assert presence.live_view(USER, thread) == ("here", None)
+
+
+def test_focus_frames_close_measurement_without_releasing_shared_presence(pdb):
+    thread = new_thread(pdb, "focus-only")
+    socket = _Socket([])
+
+    async def _scenario() -> None:
+        for focused in (True, False):
+            await presence_control.handle_presence(
+                socket, {"id": USER},
+                {"type": "presence", "surface": "chat", "thread_id": thread,
+                 "state": "foreground", "focused": focused},
+                owned_thread_fn=ws_endpoint._owned_thread,
+            )
+
+    asyncio.run(_scenario())
+
+    assert presence.live_view(USER, thread) == ("here", None)
+    interval = pdb.execute(
+        "SELECT focused_at,blurred_at FROM measurement_focus_intervals WHERE thread_id=?", (thread,),
+    ).fetchone()
+    assert interval["focused_at"] is not None
+    assert interval["blurred_at"] is not None
+
+
+def test_idle_frame_closes_the_focus_interval_at_the_last_input(pdb):
+    thread = new_thread(pdb, "focus-idle")
+    socket = _Socket([])
+    t0 = datetime(2026, 10, 16, 12, 0)
+    sid = session_id(socket)
+    presence.claim(pdb, user_id=USER, surface="chat", thread_id=thread,
+                   session=sid, now=t0, focused=True)
+
+    presence.release(pdb, session=sid, surface="chat", reason="idle",
+                     now=t0 + timedelta(minutes=14), idle_for=timedelta(minutes=10))
+
+    interval = pdb.execute(
+        "SELECT blurred_at FROM measurement_focus_intervals WHERE thread_id=?", (thread,),
+    ).fetchone()
+    assert interval["blurred_at"] == presence_time.iso(t0 + timedelta(minutes=4))
 
 
 def test_document_open_snapshot_filters_claims_without_changing_presence(pdb):
