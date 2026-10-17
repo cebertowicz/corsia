@@ -9,7 +9,9 @@ import {
 	resetSettingsNavigation,
 	returnToProjectPage,
 	openSectionFromProject,
+	retrySettingsAnchor,
 	selectSettingsSection,
+	settingsAnchor,
 	settingsNavigation,
 } from './settingsNavigation';
 
@@ -68,5 +70,46 @@ describe('settings navigation transitions', () => {
 			await closeSettingsBack(select, fallback);
 			expect(fallback).toHaveBeenCalledTimes(1);
 		});
+	});
+});
+
+describe('settingsAnchor', () => {
+	function anchoredNode(shown: { value: boolean }) {
+		const node = document.createElement('div');
+		node.scrollIntoView = vi.fn();
+		node.checkVisibility = () => shown.value;
+		return node;
+	}
+
+	it('scrolls at once when its content is already shown, as on desktop', () => {
+		const node = anchoredNode({ value: true });
+		const action = settingsAnchor(node, 'update');
+		requestSettingsSection('system', 'update');
+		expect(node.scrollIntoView).toHaveBeenCalledTimes(1);
+		expect(get(settingsNavigation).anchor).toBeNull();
+		action.destroy();
+	});
+
+	it('keeps the request while its content is hidden, then scrolls and clears it once shown, as on a phone', () => {
+		const shown = { value: false };
+		const node = anchoredNode(shown);
+		const action = settingsAnchor(node, 'update');
+		requestSettingsSection('system', 'update');
+		expect(node.scrollIntoView).not.toHaveBeenCalled();
+		expect(get(settingsNavigation).anchor).toBe('update');
+
+		shown.value = true;
+		retrySettingsAnchor();
+		expect(node.scrollIntoView).toHaveBeenCalledTimes(1);
+		expect(get(settingsNavigation).anchor).toBeNull();
+		action.destroy();
+	});
+
+	it('retrying with no pending anchor does nothing', () => {
+		const node = anchoredNode({ value: true });
+		const action = settingsAnchor(node, 'update');
+		retrySettingsAnchor();
+		expect(node.scrollIntoView).not.toHaveBeenCalled();
+		action.destroy();
 	});
 });

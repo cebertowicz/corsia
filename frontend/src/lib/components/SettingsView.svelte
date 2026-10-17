@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { loadProviders } from '$lib/stores/providers';
 	import ProviderManager from './ProviderManager.svelte';
 	import ProvidersPolicyBlock from './ProvidersPolicyBlock.svelte';
@@ -20,6 +21,7 @@
 		closeSettingsProject,
 		consumeSettingsOpenRequest,
 		returnToProjectPage,
+		retrySettingsAnchor,
 		selectSettingsSection,
 		setSettingsDrill,
 		settingsNavigation,
@@ -70,6 +72,11 @@
 	$effect(() => {
 		void openRequest;
 		if (consumeSettingsOpenRequest()) mobileOpen = true;
+	});
+	// The section mounts while the phone still hides its content, so an anchor can only scroll once the flush that
+	// shows it has been applied.
+	$effect(() => {
+		if (mobileOpen) void tick().then(retrySettingsAnchor);
 	});
 
 	function select(id: SettingsSection) {

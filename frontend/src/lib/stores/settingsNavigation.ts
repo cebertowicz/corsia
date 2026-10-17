@@ -145,6 +145,11 @@ export function consumeSettingsOpenRequest(): boolean {
 	return true;
 }
 
+/** Re-offers a pending anchor to its element; call once the content it lives in has been shown. */
+export function retrySettingsAnchor() {
+	if (get(state).anchor) change(() => ({}));
+}
+
 /**
  * Put on every `data-settings-anchor` element. When this element mounts, or a request for it
  * arrives while it is mounted, it scrolls into view and clears the request: the element that
@@ -154,6 +159,9 @@ export function settingsAnchor(node: HTMLElement, id: string | null | undefined)
 	let mine = id;
 	const consume = (s: SettingsNavigation) => {
 		if (!mine || s.anchor !== mine) return;
+		// Hidden content (a phone mounts its section before it shows the content) has no box to scroll: leave the
+		// request pending; `retrySettingsAnchor` runs it once the content is shown.
+		if (node.checkVisibility?.() === false) return;
 		node.scrollIntoView({ block: 'start' });
 		clearSettingsAnchor(mine);
 	};
