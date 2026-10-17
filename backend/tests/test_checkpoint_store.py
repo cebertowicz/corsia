@@ -378,7 +378,7 @@ def test_capture_and_stop_are_one_exact_compare_and_swap() -> None:
         _capture(db, "cp-cancelled")
 
 
-def test_failure_is_terminal_only_before_capture() -> None:
+def test_failure_is_terminal_only_while_nonterminal() -> None:
     from infra.checkpoints import (
         CheckpointTransitionError,
         create_running,
@@ -392,12 +392,16 @@ def test_failure_is_terminal_only_before_capture() -> None:
     assert (failed.status, failed.error) == ("failed", "provider refused")
     with pytest.raises(CheckpointTransitionError, match="capture"):
         _capture(db, "cp-failed")
+    with pytest.raises(CheckpointTransitionError, match="failure"):
+        fail("cp-failed", error="again", ended_at="t3", db=db)
 
+    # A captured row is failed only by its own install raising; its bytes stay.
     _seed_thread(db, "captured-fail")
     create_running(_request("captured-fail", "cp-captured-fail"), db=db)
-    _capture(db, "cp-captured-fail")
-    with pytest.raises(CheckpointTransitionError, match="failure"):
-        fail("cp-captured-fail", error="too late", ended_at="t3", db=db)
+    captured = _capture(db, "cp-captured-fail")
+    install_failed = fail("cp-captured-fail", error="install raised", ended_at="t3", db=db)
+    assert (install_failed.status, install_failed.error) == ("failed", "install raised")
+    assert install_failed.raw_result == captured.raw_result
 
 
 def test_install_preserves_raw_bytes_and_advances_monotonic_head() -> None:
@@ -1052,8 +1056,7 @@ def test_epoch_change_overtakes_candidate_and_hides_old_head() -> None:
 
 
 def test_startup_fails_running_publishes_captured_and_keeps_installed() -> None:
-    from infra.checkpoint_settlement import reconcile_startup
-    from infra.checkpoints import create_running
+    from infra.checkpoints import create_running, reconcile_startup
 
     db = _db()
     for thread_id in ("running", "captured", "installed"):

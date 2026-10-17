@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from collections.abc import Callable
 from typing import Any
 
@@ -11,13 +11,6 @@ from core.checkpoint_capture import (
     capture_and_install as _capture_and_install,
     read_checkpoint as _read,
     terminal_failure as _terminal_failure,
-)
-from core.checkpoint_handles import (
-    forget as _forget,
-    launch_window as _launch_window,
-    launching as _launching,
-    tasks as _tasks,
-    Handle as _Handle,
 )
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
 from core.checkpoint_fold_gate import refuse_limited_target as _refuse_limited_target
@@ -33,13 +26,23 @@ from core.checkpoint_types import (
     ProviderCheckpointResult,
 )
 from infra import checkpoint_queries
-from infra import checkpoint_settlement
 from infra import checkpoints as checkpoint_store
 from infra import idle_checkpoints as idle_checkpoint_store
 from infra.checkpoints import CheckpointConflict
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 
+
+
+@dataclass(slots=True)
+class _Handle:
+    task: asyncio.Task[CheckpointRecord]
+    cancel_event: asyncio.Event
+    thread_id: str
+    tool_executor: Any = None
+
+
+_tasks: dict[str, _Handle] = {}
 
 
 async def _invoke(
@@ -161,7 +164,9 @@ async def _execute(
     provider_request: ProviderCheckpointRequest,
     cancel_event: asyncio.Event,
 ) -> CheckpointRecord:
-    record: CheckpointRecord | None = None
+    # This task owns the attempt and ends its row terminal before it exits.
+    # Only process shutdown after capture, or a failure write that itself
+    # raises, leaves a row for reconcile_startup_checkpoints.
     try:
         if cancel_event.is_set():
             raise asyncio.CancelledError
@@ -174,31 +179,33 @@ async def _execute(
         )
         if cancel_event.is_set():
             raise asyncio.CancelledError
-        await _capture_and_install(checkpoint_id, result)
+        try:
+            return await _capture_and_install(checkpoint_id, result)
+        except Exception:
+            from loguru import logger
+
+            logger.exception("checkpoint capture or install raised: {}", checkpoint_id)
+            raise
     except asyncio.CancelledError:
         await run_in_db(
             checkpoint_store.cancel,
             checkpoint_id,
             ended_at=utc_now_iso(),
         )
+        return await _read(checkpoint_id)
     except Exception as error:
-        await _terminal_failure(checkpoint_id, error)
+        return await _terminal_failure(checkpoint_id, error)
     finally:
         record = await _read(checkpoint_id)
-        try:
-            if record.status in {"running", "captured"}:
-                record = await run_in_db(
-                    checkpoint_settlement.settle_nonterminal,
-                    checkpoint_id,
-                    reconciled_at=utc_now_iso(),
-                    running_error="checkpoint task exited before capture",
-                )
-        finally:
-            # A settlement that raised leaves the row for the next waiter's
-            # ownerless settle; the re-drive is what brings that waiter.
-            await _notify_completion(record)
-    assert record is not None
-    return record
+        await _notify_completion(record)
+
+
+def _forget(checkpoint_id: str, task: asyncio.Task[CheckpointRecord]) -> None:
+    handle = _tasks.get(checkpoint_id)
+    if handle is not None and handle.task is task:
+        _tasks.pop(checkpoint_id, None)
+    if not task.cancelled():
+        task.exception()
 
 
 def _validate_pair(
@@ -242,16 +249,15 @@ async def request_checkpoint(
         raise CheckpointNotAdmitted("checkpoint provider capacity is unavailable")
     _validate_pair(request, provider_request)
     await _refuse_limited_target(provider_request)
-    with _launch_window(request.id):
-        try:
-            record = await run_in_db(checkpoint_store.create_running, request)
-        except CheckpointConflict:
-            active = await run_in_db(checkpoint_queries.active_for_thread, request.thread_id)
-            if active is not None:
-                return active
-            raise
-        if record.id == request.id:
-            _launch_checkpoint(request, provider_request)
+    try:
+        record = await run_in_db(checkpoint_store.create_running, request)
+    except CheckpointConflict:
+        active = await run_in_db(checkpoint_queries.active_for_thread, request.thread_id)
+        if active is not None:
+            return active
+        raise
+    if record.id == request.id:
+        _launch_checkpoint(request, provider_request)
     return record
 
 
@@ -286,21 +292,20 @@ async def request_idle_checkpoint(turn_id: str, admission):
         except CheckpointTargetLimited:
             target_limited = True
             request = provider_request = None
-    with _launch_window(None if request is None else request.id):
-        result, cancelled = await _commit_idle_marker(
-            idle_checkpoint_store.consume_idle_marker,
-            turn_id,
-            request,
-        )
-        if target_limited and result.disposition is IdleCheckpointDisposition.REFUSED:
-            result = replace(result, reason=IdleCheckpointReason.TARGET_LIMITED)
-        if (
-            result.disposition is IdleCheckpointDisposition.ADMITTED
-            and result.record is not None
-            and request is not None
-            and provider_request is not None
-        ):
-            _launch_checkpoint(request, provider_request)
+    result, cancelled = await _commit_idle_marker(
+        idle_checkpoint_store.consume_idle_marker,
+        turn_id,
+        request,
+    )
+    if target_limited and result.disposition is IdleCheckpointDisposition.REFUSED:
+        result = replace(result, reason=IdleCheckpointReason.TARGET_LIMITED)
+    if (
+        result.disposition is IdleCheckpointDisposition.ADMITTED
+        and result.record is not None
+        and request is not None
+        and provider_request is not None
+    ):
+        _launch_checkpoint(request, provider_request)
     if cancelled is not None:
         raise cancelled
     return result
@@ -332,21 +337,10 @@ async def fail_idle_checkpoint(
 
 async def await_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     """Await live work without transferring cancellation ownership."""
-    launching = _launching.get(checkpoint_id)
-    if launching is not None:
-        await launching.wait()
     handle = _tasks.get(checkpoint_id)
     if handle is not None:
         return await asyncio.shield(handle.task)
-    record = await _read(checkpoint_id)
-    if record.status in {"running", "captured"}:
-        return await run_in_db(
-            checkpoint_settlement.settle_nonterminal,
-            checkpoint_id,
-            reconciled_at=utc_now_iso(),
-            running_error="checkpoint task has no local owner",
-        )
-    return record
+    return await _read(checkpoint_id)
 
 
 async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
@@ -385,7 +379,7 @@ async def shutdown_checkpoint_tasks() -> None:
 async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
     """Resolve the only two nonterminal crash windows once at startup."""
     records = await run_in_db(
-        checkpoint_settlement.reconcile_startup,
+        checkpoint_store.reconcile_startup,
         reconciled_at=utc_now_iso(),
     )
     for record in records:

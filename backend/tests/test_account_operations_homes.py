@@ -379,7 +379,6 @@ async def test_actual_execute_freezes_before_cold_await_and_spend_stays_on_write
     db, row, _ = _launched_session(vendors, 'claude-code', tmp_path)
     db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
         "VALUES ('boundary','destination','assistant','synthetic history','t',1)")
-    db.execute("UPDATE threads SET next_message_seq=2 WHERE id='destination'")
     db.commit()
     checkpoints.create_running(replace(_checkpoint('destination', 'checkpoint'),
         through_seq=1, through_message_id='boundary', originating_turn_id='frozen', first_included_seq=None,
@@ -421,17 +420,16 @@ async def test_actual_execute_freezes_before_cold_await_and_spend_stays_on_write
             'prompt_tokens': 3, 'completion_tokens': 2, 'cache_read_tokens': 0,
             'cache_creation_tokens': 0, 'total_tokens': 5})
         return ProviderCheckpointResult('cold body', None)
-    async def capture(identity, result):
+    async def capture(_identity, result):
         assert result.raw_body == 'cold body'
-        return checkpoints.capture(identity, raw_result=result.raw_body,
-            usage_json=None, captured_at='t', db=db)
+        return SimpleNamespace(status='captured')
     async def notify(_record):
         pass
     monkeypatch.setattr(checkpoint_runtime, '_invoke', invoke)
     monkeypatch.setattr(checkpoint_runtime, '_capture_and_install', capture)
     monkeypatch.setattr(checkpoint_runtime, '_notify_completion', notify)
     result = await checkpoint_runtime._execute('checkpoint', request, asyncio.Event())
-    assert result.status == ('failed' if change == 'login' else 'installed'), getattr(result, 'error', None)
+    assert result.status == ('failed' if change == 'login' else 'captured'), getattr(result, 'error', None)
     if change == 'login':
         assert result.error is not None and 'account_login_unverified' in result.error, result.error
     assert len(calls) == 2 and calls[0].vendor_account_id == calls[1].vendor_account_id == row['id']

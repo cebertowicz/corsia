@@ -198,6 +198,7 @@ def admit_cold_input(
             raise CheckpointTransitionError("cold checkpoint input is no longer admissible")
 
 
+
 def adopt_cold(
     checkpoint_id: str, *, db: sqlite3.Connection | None = None,
 ) -> None:
@@ -330,15 +331,19 @@ def fail(
     ended_at: str,
     db: sqlite3.Connection | None = None,
 ) -> CheckpointRecord:
-    """Record a terminal provider failure only before any result was captured."""
+    """Record a terminal failure of an attempt still running or captured.
+
+    A captured row reaches here only when its own install raised; it ends
+    failed with that error instead of waiting for a retry.
+    """
     with write_transaction(db, scope="checkpoint_fail") as connection:
         changed = connection.execute(
             "UPDATE checkpoints SET status='failed',error=?,ended_at=? "
-            "WHERE id=? AND status='running'",
+            "WHERE id=? AND status IN ('running','captured')",
             (error, ended_at, checkpoint_id),
         )
         if changed.rowcount != 1:
-            raise CheckpointTransitionError("checkpoint failure lost its running CAS")
+            raise CheckpointTransitionError("checkpoint failure lost its nonterminal CAS")
         return _required_record(connection, checkpoint_id)
 
 
@@ -356,3 +361,35 @@ def cancel(
             (ended_at, checkpoint_id),
         )
         return _required_record(connection, checkpoint_id) if changed.rowcount == 1 else None
+
+
+def reconcile_startup(
+    *,
+    reconciled_at: str,
+    db: sqlite3.Connection | None = None,
+) -> tuple[CheckpointRecord, ...]:
+    """Fail unpaid running rows and publish already-captured bytes once."""
+    with write_transaction(db, scope="checkpoint_reconcile") as connection:
+        rows = connection.execute(
+            "SELECT id,status FROM checkpoints WHERE status IN ('running','captured') "
+            "ORDER BY generation_order"
+        ).fetchall()
+        reconciled: list[CheckpointRecord] = []
+        for row in rows:
+            checkpoint_id = str(row["id"])
+            if row["status"] == "running":
+                connection.execute(
+                    "UPDATE checkpoints SET status='failed',error=?,ended_at=? "
+                    "WHERE id=? AND status='running'",
+                    ("checkpoint interrupted before capture", reconciled_at, checkpoint_id),
+                )
+                reconciled.append(_required_record(connection, checkpoint_id))
+            else:
+                reconciled.append(
+                    install(
+                        checkpoint_id,
+                        installed_at=reconciled_at,
+                        db=connection,
+                    )
+                )
+        return tuple(reconciled)
