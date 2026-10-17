@@ -1052,7 +1052,8 @@ def test_epoch_change_overtakes_candidate_and_hides_old_head() -> None:
 
 
 def test_startup_fails_running_publishes_captured_and_keeps_installed() -> None:
-    from infra.checkpoints import create_running, reconcile_startup
+    from infra.checkpoint_settlement import reconcile_startup
+    from infra.checkpoints import create_running
 
     db = _db()
     for thread_id in ("running", "captured", "installed"):
