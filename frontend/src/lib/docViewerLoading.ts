@@ -2,7 +2,7 @@ import { fetchContent, fetchRevision, type DocContent } from '$lib/api/docs';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { DocOpenError, docOpenRefusal, liveUnavailable, SNAPSHOT_REFUSAL_MESSAGE, type DocOpenRefusal, type LiveUnavailable } from '$lib/docOpenRefusal';
-import { effectiveDraftTarget, enrichDraftTarget, existingDraft, flushDraft, type DocSaveDraft } from '$lib/stores/docSaveQueue';
+import { withDraftArtifactId, enrichDraftTarget, existingDraft, flushDraft, type DocSaveDraft } from '$lib/stores/docSaveQueue';
 import { openLiveDocument } from '$lib/stores/liveDocuments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import type { TabLoadSignal } from '$lib/artifactTabs';
@@ -102,7 +102,7 @@ async function load(options: LoadOptions): Promise<void> {
 		}
 	}
 	if (!isCurrent()) return;
-	const effective = effectiveDraftTarget(target);
+	const effective = withDraftArtifactId(target);
 	const response = await fetchContent(effective.path, {
 		projectId: effective.projectId, threadId: effective.threadId, liveOpen: true,
 	});

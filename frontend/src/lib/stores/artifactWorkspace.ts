@@ -7,7 +7,7 @@ import {
 	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
 import { openBrowserTab } from '$lib/artifactAuxiliaryTabs';
-import { clearDraft, existingDraft } from '$lib/stores/docSaveQueue';
+import { clearDraft, existingDraft, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
 import { clearTabViewState } from '$lib/stores/tabViewState';
@@ -145,6 +145,10 @@ function mutate(
 		for (const tab of current.tabs) if (!remaining.has(tab.instanceId)) removed.push(tab.instanceId);
 		return { ...all, [threadId]: next };
 	});
+	// Every tab write passes here, so a draft's path follows its tab's whichever reducer moved it.
+	for (const tab of get(threadWorkspaces)[threadId]?.tabs ?? []) {
+		if (tab.kind === 'document') relocateDraftTarget(tab, tab.path);
+	}
 	// Every dropped tab takes its live binding and in-session camera/place with it, however it was removed.
 	for (const instanceId of removed) {
 		closeLiveDocument(instanceId);

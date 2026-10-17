@@ -12,7 +12,7 @@ vi.mock('$lib/stores/docComments', () => ({ flushPositions: mocks.flushPositions
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.toastShow } }));
 
 import {
-	clearDraft, closeTabWithSaveGate, docSaveActivities, docSaveDrafts, draftKey, effectiveDraftTarget,
+	clearDraft, closeTabWithSaveGate, docSaveActivities, docSaveDrafts, draftKey, withDraftArtifactId,
 	enrichDraftTarget, existingDraft, flushDraft, relocateDraftTarget, seedDraft, setDraftText,
 } from './docSaveQueue';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -164,7 +164,7 @@ describe('docSaveQueue', () => {
 		expect(get(docSaveDrafts)).toHaveProperty(draftKey(pathOnly));
 
 		setDraftText(pathOnly, 'local revision');
-		expect(effectiveDraftTarget(pathOnly)).toMatchObject({
+		expect(withDraftArtifactId(pathOnly)).toMatchObject({
 			artifactId: 'resolved-artifact',
 			path: '/project/unregistered.md',
 		});
