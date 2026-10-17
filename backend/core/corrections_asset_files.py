@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 
 from core import corrections_classifier as classifier
 from core.corrections_asset_pins import PINNED_MANIFESTS
+from core.onnx_asset import AssetError, load_pinned_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +37,45 @@ def asset_root() -> Path:
     return STATE_ROOT / "assets" / classifier.CORRECTIONS_SPEC.asset_id
 
 
+_VERSION_LABEL = re.compile(r"v([0-9]+)")
+
+
+def version_number(label: str) -> int:
+    """Order a pinned version label; only ``v<number>`` is accepted."""
+    match = _VERSION_LABEL.fullmatch(label)
+    if match is None:
+        raise AssetError(f"classifier version {label!r} is not of the form v<number>")
+    return int(match.group(1))
+
+
+def newest_pin() -> str:
+    """The highest pinned version label, ordered by number (``v10`` is newer than ``v9``)."""
+    return max(PINNED_MANIFESTS, key=version_number)
+
+
+def root_is_newest_pin(root: Path) -> bool:
+    """Whether the manifest at ``root`` names the newest source-pinned version."""
+    try:
+        version = json.loads((root / "manifest.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return version == newest_pin()
+
+
+def current_asset_verified(root: Path | None = None) -> bool:
+    """Whether the installed root is the newest complete source-pinned asset."""
+    root = root or asset_root()
+    try:
+        manifest = load_pinned_manifest(root, classifier.CORRECTIONS_SPEC)
+        manifest.verify_files(classifier.CORRECTIONS_SPEC)
+    except (AssetError, OSError):
+        return False
+    return manifest.version == newest_pin()
+
+
 def staging_dir(root: Path) -> Path:
     """Beside the root, so the final swap is a rename on one filesystem."""
-    return root.parent / f".{root.name}.staging-{max(PINNED_MANIFESTS)}"
+    return root.parent / f".{root.name}.staging-{newest_pin()}"
 
 
 def previous_dir(root: Path) -> Path:

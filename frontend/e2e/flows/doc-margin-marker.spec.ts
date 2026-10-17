@@ -194,8 +194,8 @@ async function reveal(page: Page, index: number) {
 		const now = marker.getBoundingClientRect();
 		const point = (x: number, y: number) => {
 			const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('.cm-comment-marker');
-			// A marker under a bottom sheet is covered by design: only the sheet's own surface may cover one.
-			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('.canvas-comment-drawer.sheet');
+			// A marker under a bottom sheet is covered by design: only the sheet and its scrim over the document column may cover one (RSR-7).
+			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]');
 			return { x, y, hit: hit?.dataset.commentIds ?? null, covered };
 		};
 		const cx = now.left + now.width / 2, cy = now.top + now.height / 2;
@@ -509,19 +509,23 @@ test.describe('@flow:doc-margin-marker', () => {
 		await settle(page);
 		const withDrawer = await markers(page);
 		expect(withDrawer.map((marker) => keysOf(opened, marker)), 'the drawer does not change the clusters').toEqual(before);
-		// A canvas too narrow for a side column gets the drawer as a bottom sheet over its lower part (this viewport is as tall as the
-		// whole document, so it cannot scroll a covered marker clear): a marker is reachable or covered by that sheet, nothing else.
-		let reachable = 0;
+		// A canvas too narrow for a side column gets the drawer as a modal bottom sheet over the document column, scrim included
+		// (RSR-7): a marker is reachable or covered by the sheet and its scrim, nothing else, and none is reachable through the scrim.
 		for (let index = 0; index < withDrawer.length; index += 1) {
 			const seen = await reveal(page, index);
 			const centre = seen.points[0];
-			if (centre.hit === seen.ids) reachable += 1;
-			else expect.soft(centre.covered, `drawer open: marker ${index} is reachable or covered by the sheet only`).toBe(true);
+			expect.soft(centre.covered, `drawer open: marker ${index} is covered by the sheet or its scrim`).toBe(true);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		expect(reachable, 'with the drawer open the markers above it are still reachable').toBeGreaterThan(0);
 		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+		// With the sheet closed the markers are reachable again.
+		let reachable = 0;
+		for (let index = 0; index < withDrawer.length; index += 1) {
+			const seen = await reveal(page, index);
+			if (seen.points[0].hit === seen.ids) reachable += 1;
+		}
+		expect(reachable, 'with the sheet closed the markers are reachable').toBe(withDrawer.length);
 
 		// Scroll and zoom each get a canvas of their own at that size from the start, as a reload would give, rather than
 		// resizing this one: a mobile page resized mid-test is a harness state no user is ever in.

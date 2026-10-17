@@ -62,15 +62,16 @@ test.describe('@flow:doc-table-async-parse @surface:documents a table below the 
 		// made — the only thing that can produce the widget is the parse-worker rebuild.
 		// CodeMirror virtualizes, so the buried line isn't in the DOM until we scroll its
 		// container there; step the scroll so the parse worker advances over the region.
+		// A document canvas clips its leaf body (ArtifactLeaf.svelte), so the editor's own scroller scrolls.
 		const editor = page.locator('.cm-editor');
 		await expect(editor).toBeVisible({ timeout: 10_000 });
-		const leafBody = page.locator('.leaf-body');
-		const scrollHeight = await leafBody.evaluate((sc) => sc.scrollHeight);
+		const scroller = page.locator('.cm-scroller');
+		const scrollHeight = await scroller.evaluate((sc) => sc.scrollHeight);
 		for (let y = 0; y <= scrollHeight; y += Math.max(300, Math.ceil(scrollHeight / 12))) {
-			await leafBody.evaluate((sc, top) => { sc.scrollTop = top; }, y);
+			await scroller.evaluate((sc, top) => { sc.scrollTop = top; }, y);
 			await page.waitForTimeout(50);
 		}
-		await leafBody.evaluate((sc) => { sc.scrollTop = sc.scrollHeight; });
+		await scroller.evaluate((sc) => { sc.scrollTop = sc.scrollHeight; });
 
 		const table = page.locator('.cm-md-table table').first();
 		await expect(table).toBeVisible({ timeout: 10_000 });
