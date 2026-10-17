@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
-import { lastUserMessage, loginByUrl, openSettings, saveEvidenceScreenshot } from './support/corsia';
+import { createSession, lastUserMessage, loginByUrl, openSettings, saveEvidenceScreenshot, userMessages } from './support/corsia';
 
 const viewports = [
 	{ name: '1440', width: 1440, height: 900 },
@@ -23,6 +23,7 @@ for (const viewport of viewports) {
 		test(`Connect an app captures the reviewed states at ${viewport.name} ${theme}`, async ({ page }, testInfo) => {
 			let pendingConnect: Route | null = null;
 			const messages: Record<string, unknown>[] = [];
+			const corsiaThreadId = await createSession(page.request, `Connect app fixture ${viewport.name} ${theme}`);
 			page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
 				const frame = JSON.parse(String(payload));
 				if (frame.type === 'message') messages.push(frame);
@@ -37,6 +38,13 @@ for (const viewport of viewports) {
 				await route.fulfill({ json: { servers: [] } });
 			});
 			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }] } }));
+			await page.route('**/api/corsia-agent**', (route) => route.fulfill({ json: {
+				target: { thread_id: corsiaThreadId, model: process.env.CORSIA_E2E_MODEL ?? 'mock/test-model', updated_at: '2026-10-16T00:00:00Z' },
+				first_run_pending: false,
+			} }));
+			await page.route('**/api/system/update-status**', (route) => route.fulfill({ json: {
+				branch: 'dev', current_sha: 'fixture', remote_sha: 'fixture', commits_behind: 0, available: false, checked_at: 1, error: null,
+			} }));
 			await loginByUrl(page, { waitForComposer: false });
 			await openSettings(page);
 			await (viewport.name === '1440'
@@ -97,6 +105,7 @@ for (const viewport of viewports) {
 			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
 			await expect(dialog).toBeHidden();
 			await expect(lastUserMessage(page)).toContainText('Connect a Google account for all my projects');
+			await expect(userMessages(page)).toHaveCount(1);
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeEmpty();
 			await expect.poll(() => messages.filter((frame) => frame.content === 'Connect a Google account for all my projects').length).toBe(1);
 			await capture(page, testInfo, `google-after-continue-${viewport.name}-${theme}`, { fullPage: false });

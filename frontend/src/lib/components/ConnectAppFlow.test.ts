@@ -61,6 +61,17 @@ describe('ConnectAppFlow', () => {
 		expect(host.textContent).toContain("It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. Connect only apps you trust.");
 	});
 
+	it('asks for the connection detail before the name for each app kind', () => {
+		render();
+		press('Continue');
+		expect([...host.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))).toEqual(['What it runs', 'Name']);
+		press('Back');
+		const web = [...host.querySelectorAll('input[type="radio"]')].find((input) => input.parentElement?.textContent?.includes('web address')) as HTMLInputElement;
+		web.click();
+		press('Continue');
+		expect([...host.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))).toEqual(['Web address', 'Name']);
+	});
+
 	it('keeps an empty setup form in place with a direct error', () => {
 		render();
 		press('Continue');
@@ -110,6 +121,7 @@ describe('ConnectAppFlow', () => {
 		press('Connect');
 		await vi.waitFor(() => expect(host.textContent).toContain('The app did not answer'));
 		expect(host.textContent).toContain('Where it works');
+		expect(host.textContent).toContain('Check the command, then try again.');
 	});
 
 	it('opens CORSIA with the Google request instead of starting OAuth', () => {

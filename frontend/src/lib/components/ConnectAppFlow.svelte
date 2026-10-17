@@ -33,6 +33,9 @@
 	const reachLine = $derived(mode === 'all'
 		? `Agents in ${allNames.join(', ')} and any new project will be able to use it.`
 		: `Only agents in ${selectedNames.join(', ')} will be able to use it.`);
+	const recoveryHint = $derived(error
+		? kind === 'local' ? 'Check the command, then try again.' : 'Check the address, then try again.'
+		: '');
 
 	function selectKind(next: AppKind): void {
 		kind = next;
@@ -123,8 +126,8 @@
 			<section aria-labelledby="connect-app-setup">
 				<h2 class="step-heading" id="connect-app-setup">Set it up</h2>
 				{#if kind === 'local'}
-					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
 					<label class="field"><span>What it runs</span><small>Paste what the app's setup instructions say to run</small><input aria-label="What it runs" value={command} oninput={(event) => command = event.currentTarget.value} placeholder="npx -y @example/app" /></label>
+					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
 					<p class="notice">It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. Connect only apps you trust.</p>
 				{:else}
 					<label class="field"><span>Web address</span><small>Paste the address from the app's setup instructions</small><input aria-label="Web address" value={address} oninput={(event) => suggestName(event.currentTarget.value)} placeholder="https://mcp.example.com" /></label>
@@ -151,7 +154,7 @@
 		{:else if result}
 			<section aria-live="polite"><h2>{result.name}: {result.state === 'working' ? `Connected${result.tool_count ? ` · ${result.tool_count} actions` : ''}` : result.state === 'needs_sign_in' ? 'Needs you to sign in' : result.state === 'needs_token' ? 'Needs a key' : 'Connected'}</h2></section>
 		{/if}
-		{#if error}<p class="error" role="alert">{error}</p>{/if}
+		{#if error}<p class="error" role="alert">{error}</p><p class="recovery">{recoveryHint}</p>{/if}
 	</div>
 	{#snippet foot()}
 		<div class="actions">
@@ -184,5 +187,6 @@
 	.checklist { display: grid; gap: var(--space-2); padding-left: var(--space-6); color: var(--text-secondary); }
 	.checklist label { display: flex; align-items: flex-start; gap: var(--space-2); }
 	.error { margin: 0; color: var(--red); font-size: var(--text-footnote); }
+	.recovery { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.actions { display: flex; gap: var(--space-2); margin-left: auto; }
 </style>
