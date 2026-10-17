@@ -23,6 +23,8 @@
 	let signInHere = $state(false);
 	let signedOut = $state<Set<string>>(new Set());
 	let confirmingOut = $state<string | null>(null);
+	/** The app whose approval just came back asking for a sign-in; its panel starts the sign-in once. */
+	let signInAfterApprove = $state<string | null>(null);
 	const isOpen = (app: ConnectedApp): boolean => openId === app.id || needsSignInAttention(app);
 
 	function stateLine(app: ConnectedApp): string {
@@ -78,7 +80,7 @@
 		errorId = app.id;
 		actionError = '';
 		try {
-			if (action === 'approve') replace(await approveConnectedApp(app));
+			if (action === 'approve') approved(await approveConnectedApp(app));
 			else if (action === 'decline') {
 				// Declining a new request deletes it, so the answer is `removed` and the row goes; a pending change on a working app comes back as that app.
 				const next = await declineConnectedApp(app.id);
@@ -92,6 +94,10 @@
 	}
 
 	function replace(next: ConnectedApp): void { apps = apps.map((app) => app.id === next.id ? { ...app, ...next } : app); }
+	function approved(next: ConnectedApp): void {
+		replace(next);
+		if (next.state === 'needs_sign_in') signInAfterApprove = next.id;
+	}
 	onMount(() => { void loadProjects(); void load(); });
 </script>
 
@@ -112,6 +118,7 @@
 						<strong title={app.name}>{app.name}</strong>
 						<span class="second status">{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}</span>
 						{#if app.folder}<span class="second">From Claude Code · {app.folder} folder</span>{/if}
+						{#if app.notice}<span class="second">{app.notice}</span>{/if}
 					</div>
 					<div class="waiting-actions">
 						{#if needsPlace(app)}
@@ -136,7 +143,7 @@
 						<div class="details">
 							{#if errorId === app.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 							<AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
-								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} />
+								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} autoStart={signInAfterApprove === app.id} onAutoStarted={() => signInAfterApprove = null} />
 							<div class="actions">
 								{#if app.state === 'expired'}
 									<!-- A request that ran out can't be placed, reconnected or approved; Dismiss runs Decline's cleanup (copy sheet). -->
@@ -157,7 +164,7 @@
 	{/if}
 </section>
 
-{#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { replace(app); whereApp = null; }} />{/if}
+{#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { if (whereApprove) approved(app); else replace(app); whereApp = null; }} />{/if}
 
 <style>
 	.connected-apps { width: 100%; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }

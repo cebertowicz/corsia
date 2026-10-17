@@ -21,6 +21,7 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 	token.set(null);
 });
 
@@ -199,6 +200,71 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
 	});
 
+	it("shows the server's Mac notice on a waiting row, so a direct Approve shows it too", async () => {
+		const local = { ...awaiting, transport: 'stdio', notice: 'notice text from the server' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [local, { ...awaiting, id: 'web', name: 'Web' }] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row')).toHaveLength(2));
+		const [first, second] = host.querySelectorAll('.waiting-row');
+		expect(first.textContent).toContain('notice text from the server');
+		expect(second.textContent).not.toContain('notice text from the server');
+	});
+
+	describe('approving an app that needs a sign-in', () => {
+		const tracker = { ...awaiting, id: 'tracker', name: 'Tracker', transport: 'http', sign_in: { status: 'idle', signed_in: false } };
+		const signInPosts = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.filter(([input, init]) => String(input).includes('/sign-in') && (init as RequestInit | undefined)?.method === 'POST');
+		function serve(row: typeof tracker, approvedState: string) {
+			return vi.fn(async (input: RequestInfo | URL) => ({ ok: true, status: 200, clone() { return this; }, json: async () => {
+				const path = String(input);
+				if (path.includes('/approve')) return { ...row, state: approvedState, revision: 2 };
+				if (path.includes('/sign-in')) return { authorization_url: 'https://auth.example.test/authorize?state=abc', expires_at: 't', reopened: false };
+				if (path.includes('/api/projects')) return { projects: [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }] };
+				return { servers: [row], sign_in_here: true };
+			} }));
+		}
+
+		it('starts the sign-in once from the Approve click, with no second click', async () => {
+			vi.stubGlobal('open', vi.fn(() => null));
+			const fetch = serve(tracker, 'needs_sign_in');
+			vi.stubGlobal('fetch', fetch);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+			(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+			await vi.waitFor(() => expect(signInPosts(fetch)).toHaveLength(1));
+			await vi.waitFor(() => expect(host.textContent).toContain("Tracker's sign-in page is open in your browser."));
+			await settle();
+			expect(signInPosts(fetch)).toHaveLength(1);
+		});
+
+		it('starts the sign-in once from the place sheet that approves', async () => {
+			vi.stubGlobal('open', vi.fn(() => null));
+			const placeless = { ...tracker, reach: { mode: 'selected' as const, project_ids: [], outside_projects: false } };
+			const fetch = serve(placeless, 'needs_sign_in');
+			vi.stubGlobal('fetch', fetch);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.textContent).toContain('Choose where it works…'));
+			([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Choose where it works…')) as HTMLButtonElement).click();
+			flushSync();
+			([...document.body.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Q4 launch')) as HTMLInputElement).click();
+			flushSync();
+			([...document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve') as HTMLButtonElement).click();
+			await vi.waitFor(() => expect(signInPosts(fetch)).toHaveLength(1));
+			await settle();
+			expect(signInPosts(fetch)).toHaveLength(1);
+		});
+
+		it('starts no sign-in when the approved app connects without one', async () => {
+			const fetch = serve(tracker, 'working');
+			vi.stubGlobal('fetch', fetch);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
+			(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+			await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
+			await settle();
+			expect(signInPosts(fetch)).toHaveLength(0);
+		});
+	});
+
 	it('renders the empty-state copy when there are no apps', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
@@ -241,19 +307,19 @@ describe('WhereItWorks', () => {
 		expect(JSON.parse(String(call?.[1]?.body)).reach).toEqual({ mode: 'all', project_ids: [], outside_projects: false });
 	});
 
-	it('shows the Mac notice on the approve sheet for a stdio app only', async () => {
+	it("shows the server's Mac notice on the approve sheet only", async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
-		const notice = "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys.";
+		const notice = 'notice text from the server';
 		const reach = { mode: 'selected', project_ids: [], outside_projects: false };
-		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
 		expect(host.textContent).toContain(notice);
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'http', reach }, approve: true, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
-		expect(host.textContent).not.toContain(notice);
+		expect(host.textContent).not.toContain("It can do anything you can do on this Mac");
 		unmount(component);
-		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', reach }, onClose: vi.fn(), onSaved: vi.fn() } });
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, transport: 'stdio', notice, reach }, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
 		expect(host.textContent).not.toContain(notice);
 	});

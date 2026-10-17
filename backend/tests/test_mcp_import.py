@@ -261,8 +261,6 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
     key_is_set = False
 
     async def load(fn, *args):
-        if fn.__name__ == "load_awaits_sign_in":
-            return False
         if fn.__name__ == "load_runtime_app_config":
             return "codex", {
                 **app["config"], "secret_headers": ["Authorization"], "connected_app_id": args[0],
@@ -340,12 +338,9 @@ def test_import_mixes_sign_in_pending_place_unsupported_and_plain_without_http(t
     ], db=db, home=tmp_path, actor="agent")
 
     sign_in, pending_place, unsupported, plain = imported["rows"]
-    assert sign_in == {
-        "id": sign_in["id"], "name": "OAuth", "state": "needs_sign_in",
-        "message": "OAuth: needs you to sign in. Press Sign in next to OAuth in Settings › Connected apps.",
-    }
+    assert sign_in == {"id": sign_in["id"], "name": "OAuth", "state": "awaiting_approval"}
     app = get_app(sign_in["id"], db=db)
-    assert app["state"] == "needs_sign_in"
+    assert app["state"] == "awaiting_approval"
     assert app["config"] == {
         "url": "https://example.test/mcp", "transport": "http", "headers": {"X-Region": "us-west-2"},
         "connect_timeout": 12, "key_refs": [],
@@ -360,7 +355,8 @@ def test_import_mixes_sign_in_pending_place_unsupported_and_plain_without_http(t
 
 
 @pytest.mark.asyncio
-async def test_imported_oauth_row_starts_sign_in_through_the_api(tmp_path, monkeypatch, env):
+async def test_an_approved_oauth_import_starts_sign_in_for_the_person_only(tmp_path, monkeypatch, env):
+    """C-R7: the person's approve and Sign in reach the provider; an agent's sign-in is refused."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -372,24 +368,41 @@ async def test_imported_oauth_row_starts_sign_in_through_the_api(tmp_path, monke
         "OAuth": {"type": "http", "url": MCP_URL, "oauth": {}},
     }})
     monkeypatch.setattr(mcp_import, "_home", lambda: tmp_path)
+    connects: list[tuple[str, str]] = []
+
+    async def needs_sign_in(action: str, app_id: str) -> dict[str, object]:
+        connects.append((action, app_id))
+        return {"state": "needs_sign_in", "state_since": "t", "tool_count": 0, "failure_class": None}
+
+    monkeypatch.setattr("tools.connected_apps_runtime.apply_connected_app_runtime", needs_sign_in)
+    actor = {"who": {"id": OWNER_USER, "thread_id": "thread-a", "token_kind": "internal"}}
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_user_header_only] = lambda: {"id": OWNER_USER}
-    app.dependency_overrides[require_user] = lambda: {"id": OWNER_USER, "token_kind": "session"}
+    app.dependency_overrides[require_user_header_only] = lambda: actor["who"]
+    app.dependency_overrides[require_user] = lambda: actor["who"]
 
     with TestClient(app, base_url="http://127.0.0.1:3001", client=("127.0.0.1", 5000)) as client:
         imported = client.post("/api/mcp/import", json={
             "servers": [{"source": "claude_code", "name": "OAuth"}],
         })
         app_id = imported.json()["rows"][0]["id"]
+        agent_sign_in = client.post(f"/api/mcp/servers/{app_id}/sign-in")
+        actor["who"] = {"id": OWNER_USER, "token_kind": "session"}
+        approved = client.post(f"/api/mcp/servers/{app_id}/approve", json={"expected_revision": 1})
+        actor["who"] = {"id": OWNER_USER, "thread_id": "thread-a", "token_kind": "internal"}
+        agent_after_approve = client.post(f"/api/mcp/servers/{app_id}/sign-in")
+        actor["who"] = {"id": OWNER_USER, "token_kind": "session"}
         sign_in = client.post(f"/api/mcp/servers/{app_id}/sign-in", headers={
             "Authorization": f"Bearer {SESSION}",
         })
 
-        assert imported.status_code == 200
+        assert imported.status_code == 200 and imported.json()["rows"][0]["state"] == "awaiting_approval"
+        assert agent_sign_in.status_code == agent_after_approve.status_code == 403
+        assert approved.status_code == 200 and approved.json()["state"] == "needs_sign_in"
+        assert connects == [("connect", app_id)]
         assert sign_in.status_code == 200
         assert sign_in.json()["authorization_url"].startswith(f"{BASE}/authorize")
-        assert env.fake.registrations
+        assert len(env.fake.registrations) == 1
         client.portal.call(flow.stop_all)
 
 

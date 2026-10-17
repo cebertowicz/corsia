@@ -32,7 +32,6 @@ IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Clau
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
 IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
 IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
-IMPORT_NEEDS_SIGN_IN = "{App}: needs you to sign in. Press Sign in next to {App} in Settings › Connected apps."
 
 
 def _home() -> Path:
@@ -318,7 +317,7 @@ def import_selected(
     This is deliberately the only import writer. It never reads or writes the
     retired ``tools.mcpServers`` setting.
     """
-    from connections.app_lifecycle import create_app, create_pending_app
+    from connections.app_lifecycle import create_pending_app
     from connections.app_reach import AppNameOverlapError
     from infra import key_store
     from infra.database import write_transaction
@@ -349,22 +348,16 @@ def import_selected(
             reach = {"mode": "selected", "project_ids": [], "outside_projects": False}
         try:
             app_id = str(uuid.uuid4())
+            lifted: dict[str, str]
             if _needs_sign_in(source, source_config):
-                config = _sign_in_config(app_id, source, source_config)
+                # A hosted app that signs in waits for approval like any import and brings no keys;
+                # its first connect after approval asks the person to sign in (C-R1).
+                config, lifted = _sign_in_config(app_id, source, source_config), {}
                 _validate(app_id, config)
-                result = create_app(
-                    name, config, reach, state="needs_sign_in", app_id=app_id,
-                    created_by_thread_id=actor, audit_actor=("agent", actor), db=db,
-                )
-                rows.append({
-                    "id": str(result["id"]), "name": name, "state": "needs_sign_in",
-                    "message": IMPORT_NEEDS_SIGN_IN.format(App=name),
-                })
-                continue
-            copied = _copyable_config(source, source_config)
-            config, lifted = _key_refs(app_id, copied)
-            _validate(app_id, {**config, "secret_env": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "env"],
-                               "secret_headers": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "header"]})
+            else:
+                config, lifted = _key_refs(app_id, _copyable_config(source, source_config))
+                _validate(app_id, {**config, "secret_env": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "env"],
+                                   "secret_headers": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "header"]})
             with write_transaction(db, scope="mcp_import"):
                 result = create_pending_app(
                     name, config, reach, actor_thread_id=actor, app_id=app_id,

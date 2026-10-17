@@ -133,11 +133,8 @@ def test_import_status_copy_is_exact_and_never_mentions_bearer_file() -> None:
         mcp_import.IMPORT_UNSUPPORTED,
         mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE,
         mcp_import.IMPORT_KEY_STAYS_IN_CODEX,
-        mcp_import.IMPORT_NEEDS_SIGN_IN,
     ))
-    assert mcp_import.IMPORT_NEEDS_SIGN_IN == (
-        "{App}: needs you to sign in. Press Sign in next to {App} in Settings › Connected apps."
-    )
+    assert not hasattr(mcp_import, "IMPORT_NEEDS_SIGN_IN")  # a sign-in import reads as waiting for approval
 
 
 def test_imported_header_key_is_marked_set_for_the_approval_projection(tmp_path: Path) -> None:
@@ -189,7 +186,7 @@ def test_empty_stored_header_value_does_not_change_safe_text() -> None:
     assert _StoredHeadersAuth({"X-Empty": ""}, "https://example.test").redact("safe") == "safe"
 
 
-def test_url_only_claude_http_imports_as_needing_sign_in(tmp_path: Path) -> None:
+def test_url_only_claude_http_imports_as_waiting_for_approval(tmp_path: Path) -> None:
     _json(tmp_path / ".claude.json", {
         "mcpServers": {"Bare HTTP": {"type": "http", "url": "https://example.test/mcp"}},
     })
@@ -200,8 +197,7 @@ def test_url_only_claude_http_imports_as_needing_sign_in(tmp_path: Path) -> None
         )
 
         assert imported["rows"] == [{
-            "id": imported["rows"][0]["id"], "name": "Bare HTTP", "state": "needs_sign_in",
-            "message": "Bare HTTP: needs you to sign in. Press Sign in next to Bare HTTP in Settings › Connected apps.",
+            "id": imported["rows"][0]["id"], "name": "Bare HTTP", "state": "awaiting_approval",
         }]
         assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
     finally:
@@ -251,7 +247,7 @@ def test_codex_declared_bearer_token_imports_as_needing_a_key(tmp_path: Path) ->
         db.close()
 
 
-def test_url_only_sse_imports_as_needing_sign_in(tmp_path: Path) -> None:
+def test_url_only_sse_imports_as_waiting_for_approval(tmp_path: Path) -> None:
     name, transport = "SSE", "sse"
     _json(tmp_path / ".claude.json", {
         "mcpServers": {name: {"type": transport, "url": "https://example.test/mcp"}},
@@ -263,8 +259,7 @@ def test_url_only_sse_imports_as_needing_sign_in(tmp_path: Path) -> None:
         )
 
         assert imported["rows"] == [{
-            "id": imported["rows"][0]["id"], "name": name, "state": "needs_sign_in",
-            "message": f"{name}: needs you to sign in. Press Sign in next to {name} in Settings › Connected apps.",
+            "id": imported["rows"][0]["id"], "name": name, "state": "awaiting_approval",
         }]
         assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
     finally:
@@ -285,8 +280,7 @@ def test_oauth_declaration_overrides_a_credential_header_for_http(tmp_path: Path
         )
 
         assert imported["rows"] == [{
-            "id": imported["rows"][0]["id"], "name": "OAuth", "state": "needs_sign_in",
-            "message": "OAuth: needs you to sign in. Press Sign in next to OAuth in Settings › Connected apps.",
+            "id": imported["rows"][0]["id"], "name": "OAuth", "state": "awaiting_approval",
         }]
         assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 1
     finally:
@@ -325,7 +319,9 @@ def test_stdio_without_environment_stays_importable(tmp_path: Path) -> None:
         db.close()
 
 
-def test_every_needs_sign_in_case_creates_a_row_with_recovery_copy(tmp_path: Path) -> None:
+def test_every_sign_in_case_waits_for_approval_without_lifted_keys(tmp_path: Path) -> None:
+    from connections.app_reach import get_app
+
     _json(tmp_path / ".claude.json", {"mcpServers": {
         "Bare": {"type": "http", "url": "https://example.test/mcp"},
         "SSE": {"type": "sse", "url": "https://example.test/sse"},
@@ -342,11 +338,11 @@ def test_every_needs_sign_in_case_creates_a_row_with_recovery_copy(tmp_path: Pat
             ], db=db, home=tmp_path, actor="agent",
         )
 
-        assert [row["state"] for row in imported["rows"]] == ["needs_sign_in"] * 3
-        assert [row["message"] for row in imported["rows"]] == [
-            f"{name}: needs you to sign in. Press Sign in next to {name} in Settings › Connected apps."
-            for name in ("Bare", "SSE", "OAuth")
-        ]
+        assert [row["state"] for row in imported["rows"]] == ["awaiting_approval"] * 3
+        assert all("message" not in row for row in imported["rows"])
+        oauth = get_app(imported["rows"][2]["id"], db=db)
+        assert not oauth["config"].get("key_refs")
+        assert "secret" not in json.dumps(oauth)
         assert db.execute("SELECT count(*) FROM connected_apps").fetchone()[0] == 3
     finally:
         db.close()

@@ -93,8 +93,26 @@ class FakeAS:
         if auth:
             self.mcp_hosts_with_auth.append(request.headers.get("host", ""))
         if auth.removeprefix("Bearer ") in self.valid_access:
-            return JSONResponse({"jsonrpc": "2.0", "id": 1, "result": {}})
+            return await self._signed_in_mcp(request)
         return PlainTextResponse("", 401, headers={"www-authenticate": f'Bearer resource_metadata="{BASE}/.well-known/oauth-protected-resource/mcp"'})
+
+    async def _signed_in_mcp(self, request: Request):
+        """Answer the MCP handshake and one tool for a signed-in request; a bare POST keeps its empty result."""
+        if request.method == "GET":
+            return PlainTextResponse("", 405)  # no server-sent stream
+        try:
+            message = await request.json()
+        except ValueError:
+            message = {}
+        method = message.get("method") if isinstance(message, dict) else None
+        if method is not None and "id" not in message:
+            return PlainTextResponse("", 202)
+        result: dict[str, object] = {}
+        if method == "initialize":
+            result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "1"}}
+        elif method == "tools/list":
+            result = {"tools": [{"name": "list_issues", "description": "List issues", "inputSchema": {"type": "object", "properties": {}}}]}
+        return JSONResponse({"jsonrpc": "2.0", "id": message.get("id", 1) if isinstance(message, dict) else 1, "result": result})
 
     async def _revoke(self, request: Request):
         form = parse_qs((await request.body()).decode())

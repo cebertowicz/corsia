@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import {
 		appSignInStatus, cancelAppSignIn, SignInStartError, signOutOfApp, startAppSignIn,
@@ -18,8 +18,11 @@
 		onChange: (patch: Partial<ConnectedApp>) => void;
 		onRefresh: () => void;
 		onSignedOut: () => void;
+		/** Set by the person's approve click when the approved app asks for a sign-in: start it once, as if Sign in were pressed. */
+		autoStart?: boolean;
+		onAutoStarted?: () => void;
 	}
-	let { app, signInHere, confirmOut, onConfirmOut, onChange, onRefresh, onSignedOut }: Props = $props();
+	let { app, signInHere, confirmOut, onConfirmOut, onChange, onRefresh, onSignedOut, autoStart = false, onAutoStarted }: Props = $props();
 
 	const view = $derived(app.sign_in);
 	const pending = $derived(view?.status === 'pending');
@@ -76,6 +79,13 @@
 		} catch (cause) { error = cause instanceof Error ? cause.message : 'Could not sign out. Try again.'; }
 		finally { busy = false; }
 	}
+
+	// Approving an app that needs a sign-in goes straight on to it; the blocked-page fallback covers a browser that refuses the tab.
+	$effect(() => {
+		if (!autoStart || app.state !== 'needs_sign_in' || !signInHere) return;
+		onAutoStarted?.();
+		untrack(() => void signIn());
+	});
 
 	// While a sign-in is pending the page asks the backend how it went; the row updates when the person finishes.
 	$effect(() => {

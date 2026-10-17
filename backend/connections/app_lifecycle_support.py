@@ -43,10 +43,14 @@ def _write_audit(
     )
 
 
-def _remove_new_app_keys(conn: sqlite3.Connection, app_id: str) -> None:
-    """Delete the keys an import stored for an app that never became real."""
-    row = conn.execute("SELECT config_json FROM connected_apps WHERE id=?", (app_id,)).fetchone()
-    key_names = key_entry_names(app_id, json.loads(row["config_json"])) if row else set()
+def _delete_app_keys(conn: sqlite3.Connection, app_id: str) -> None:
+    """Delete the keys of one app's live and pending config: a person's remove, or a request that never became real."""
+    row = conn.execute("SELECT config_json,pending_config_json FROM connected_apps WHERE id=?", (app_id,)).fetchone()
+    key_names: set[str] = set()
+    if row is not None:
+        key_names = key_entry_names(app_id, json.loads(row["config_json"]))
+        if row["pending_config_json"] is not None:
+            key_names |= key_entry_names(app_id, json.loads(row["pending_config_json"]))
     if key_names:
         marks = ",".join("?" * len(key_names))
         conn.execute(f"DELETE FROM key_store_entries WHERE name IN ({marks})", tuple(sorted(key_names)))
@@ -66,7 +70,7 @@ def _expire_pending_proposal(conn: sqlite3.Connection, app_id: str, app: sqlite3
     current_reach = _reach(app_id, db=conn)
     name = conn.execute("SELECT name FROM connected_apps WHERE id=?", (app_id,)).fetchone()["name"]
     if app["pending_config_json"] is None:
-        _remove_new_app_keys(conn, app_id)
+        _delete_app_keys(conn, app_id)
         _write_audit(
             conn, actor=("system", "proposal_expiry"), app_id=app_id, action="expire",
             reach_from=current_reach, reach_to=None,

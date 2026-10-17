@@ -3,9 +3,6 @@
 	import { Button, Modal } from '$lib/components/ui';
 	import { approveConnectedApp, saveConnectedAppReach, type ConnectedApp } from '$lib/api/connectedApps';
 
-	/** Shown with the approve sheet for an app that runs on this Mac (copy sheet: Mac notice). */
-	const MAC_APP_NOTICE = "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys.";
-
 	let { app, approve = false, onClose, onSaved }: { app: ConnectedApp; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedApp) => void } = $props();
 	let mode = $state<'all' | 'selected'>(app.reach.mode);
 	let selected = $state(new Set(app.reach.project_ids));
@@ -90,7 +87,8 @@
 			</div>
 		{/if}
 		<div class="effect">
-			{#if approve && app.transport === 'stdio'}<p class="second">{MAC_APP_NOTICE}</p>{/if}
+			<!-- An app that runs on this Mac carries the server's notice while it waits; it shows when you approve it (B-R22). -->
+			{#if approve && app.notice}<p class="second">{app.notice}</p>{/if}
 			<p class="second" role="status">{effectLine}</p>
 			{#if error}<p class="error" role="alert">{error}</p>{/if}
 		</div>

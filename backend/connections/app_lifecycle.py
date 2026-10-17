@@ -5,8 +5,8 @@ import sqlite3
 import uuid
 
 from connections.app_lifecycle_support import (
-    _assert_name_available, _assert_selected_projects_exist, _config_json,
-    _ensure_app_key_entries, _expire_pending_proposal, _reaches_nothing, _remove_new_app_keys,
+    _assert_name_available, _assert_selected_projects_exist, _config_json, _delete_app_keys,
+    _ensure_app_key_entries, _expire_pending_proposal, _reaches_nothing,
     _write_audit, _write_projects,
 )
 from connections.app_notices import append_app_notice
@@ -14,7 +14,7 @@ from connections.app_source_folder import SOURCE_FOLDER_KEY, clean_folder_label
 from connections.app_reach import (
     AppNotFoundError, AppPendingApprovalError, AppProposalExpiredError,
     AppReachError, AppRevisionConflictError, PENDING_STATE, _proposal_expired,
-    _reach, _requesting_agent_name, get_app, key_entry_names, normalize_reach,
+    _reach, _requesting_agent_name, get_app, normalize_reach,
 )
 from infra.database import write_transaction
 from infra.time import utc_now_iso
@@ -31,7 +31,13 @@ def create_app(
     audit_actor: tuple[str, str] | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Create an app with opaque JSON config and explicit reach in one write."""
+    """Create an app with opaque JSON config and explicit reach in one write.
+
+    A new app is either a person's (``disconnected`` until its first connect) or a request
+    waiting for approval (:func:`create_pending_app`); no other path makes an app live.
+    """
+    if state not in {"disconnected", PENDING_STATE}:
+        raise AppReachError("a new app starts disconnected or waiting for approval")
     if not isinstance(name, str) or not name.strip():
         raise AppReachError("invalid app name")
     normalized = normalize_reach(reach)
@@ -331,7 +337,7 @@ def decline_proposal(
         else:
             current_reach = _reach(app_id, db=conn)
             if app["pending_config_json"] is None:
-                _remove_new_app_keys(conn, app_id)
+                _delete_app_keys(conn, app_id)
                 _write_audit(
                     conn, actor=audit_actor, app_id=app_id, action="decline",
                     reach_from=current_reach, reach_to=None,
@@ -371,21 +377,11 @@ def delete_app(
 ) -> dict[str, object]:
     """Delete an app; people remove its stable-id keys and agents deliberately retain them."""
     with write_transaction(db, scope="connected_app_delete") as conn:
-        app = conn.execute(
-            "SELECT config_json,pending_config_json FROM connected_apps WHERE id=?", (app_id,)
-        ).fetchone()
-        if app is None:
+        if conn.execute("SELECT 1 FROM connected_apps WHERE id=?", (app_id,)).fetchone() is None:
             raise AppNotFoundError("connected app not found")
         current_reach = _reach(app_id, db=conn)
         if remove_keys:
-            key_names = key_entry_names(app_id, json.loads(app["config_json"]))
-            if app["pending_config_json"] is not None:
-                key_names |= key_entry_names(app_id, json.loads(app["pending_config_json"]))
-            if key_names:
-                marks = ",".join("?" * len(key_names))
-                conn.execute(f"DELETE FROM key_store_entries WHERE name IN ({marks})", tuple(sorted(key_names)))
-                from infra.key_store_values import sweep_after_commit
-                sweep_after_commit(conn)
+            _delete_app_keys(conn, app_id)
         _write_audit(
             conn, actor=audit_actor, app_id=app_id, action="remove",
             reach_from=current_reach, reach_to=None,

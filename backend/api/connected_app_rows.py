@@ -1,6 +1,16 @@
 """Safe Connected Apps list-row projections for people and agents."""
 from __future__ import annotations
 
+#: The one notice for an app that runs on this Mac: shown when it is connected, approved or brought over (B-R22).
+LOCAL_APP_NOTICE = (
+    "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
+    "Connect only apps you trust."
+)
+
+
+def local_app_notice(config: object) -> str | None:
+    return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
+
 
 def _transport(config: object) -> str | None:
     if not isinstance(config, dict):
@@ -106,6 +116,9 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "revision": app["revision"],
         "reach": app["reach"],
         "on_here": on_here,
+        **({"notice": notice} if app["state"] == "awaiting_approval" and (
+            notice := local_app_notice(app["pending_config"] or config)
+        ) else {}),
         **({"folder": app["source_folder"]} if app.get("source_folder") else {}),
         **({"sign_in": sign_in} if sign_in is not None else {}),
     }

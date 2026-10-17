@@ -821,15 +821,18 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('.reddot')).toBeNull();
 	});
 
-	it('looks again for room when the window regains focus, only while the download is stopped for space', async () => {
+	it('looks again for room when the window regains focus while the download is stopped for space', async () => {
 		const rechecks: string[] = [];
 		const onRequest = (url: string) => { if (url === '/api/setup/classifier/recheck') rechecks.push(url); };
 		await reachModels(failedSpace, { onRequest });
 		window.dispatchEvent(new Event('focus'));
 		await settle();
 		expect(rechecks).toEqual(['/api/setup/classifier/recheck']);
+	});
 
-		rechecks.length = 0;
+	it('does not look again for room on focus when the download failed another way or is running', async () => {
+		const rechecks: string[] = [];
+		const onRequest = (url: string) => { if (url === '/api/setup/classifier/recheck') rechecks.push(url); };
 		await reachModels({ state: 'failed', code: 'checksum_failed', reason: 'The download was damaged.', retryable: true }, { onRequest });
 		window.dispatchEvent(new Event('focus'));
 		await settle();
@@ -837,7 +840,7 @@ describe('SetupScreen', () => {
 		window.dispatchEvent(new Event('focus'));
 		await settle();
 		expect(rechecks).toEqual([]);
-	}, 15_000);
+	});
 
 	it('leaves the rail free of it once the download is ready', async () => {
 		await reachModels({ state: 'ready' });
