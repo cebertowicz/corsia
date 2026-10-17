@@ -176,7 +176,9 @@
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
 	/* The ledes and the empty, loading and error states are one body size, inset to the edge the page title and rows use. */
-	.lede, .state { margin: 0 0 var(--space-2); padding: 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
+	.lede, .state { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
+	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
+	.state { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
 	.state { margin-top: var(--space-5); display: grid; gap: var(--space-3); justify-items: start; }
 	.state p { margin: 0; }
 	.rows { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-4); }

@@ -130,14 +130,14 @@
 				{#if blocked && link}<Button variant="ghost" size="sm" onclick={copyLink}>{copied ? 'Copied' : 'Copy sign-in link'}</Button>{/if}
 				<Button variant="ghost" size="sm" loading={busy} onclick={cancel}>Cancel</Button>
 			{:else if failed}
-				<Button variant="ghost" size="sm" loading={busy} onclick={signIn}>{NO_RETRY.has(view.failure_class ?? '') ? 'Sign in' : 'Try again'}</Button>
+				<Button variant="primary" size="sm" loading={busy} onclick={signIn}>{NO_RETRY.has(view.failure_class ?? '') ? 'Sign in' : 'Try again'}</Button>
 			{:else if view.signed_in}
 				{#if confirmOut}
 					<span class="danger-text"><Button variant="ghost" size="sm" loading={busy} onclick={signOut}>Sign out</Button></span>
 					<Button variant="ghost" size="sm" onclick={() => onConfirmOut(false)}>Cancel</Button>
 				{/if}
 			{:else if app.state === 'needs_sign_in' && signInHere}
-				<Button variant="ghost" size="sm" loading={busy} onclick={signIn}>Sign in</Button>
+				<Button variant="primary" size="sm" loading={busy} onclick={signIn}>Sign in</Button>
 			{/if}
 		</div>
 	</div>
