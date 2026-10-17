@@ -865,18 +865,26 @@ async def test_background_timeout_cleanup_failure_is_retained_and_spool_joined(
                 pass
 
 
+def _spawn_sleeper(*extra_arguments: str) -> subprocess.Popen:
+    """A child that has finished starting the interpreter and is sleeping.
+
+    A framework build's launcher re-executes the real interpreter after Popen returns, so the child's executable
+    changes once; a test that fingerprints it first must wait until the interpreter itself says it is running.
+    """
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time;print('ready', flush=True);time.sleep(30)", *extra_arguments],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert child.stdout is not None
+    assert child.stdout.readline().strip() == "ready"
+    return child
+
+
 def test_process_discovery_redacts_arguments_and_signal_revalidates_binding() -> None:
     from host_access import processes
 
-    child = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import time;time.sleep(30)",
-            "--token",
-            "literal-secret",
-        ]
-    )
+    child = _spawn_sleeper("--token", "literal-secret")
     try:
         discovered = processes.discover_processes(pid=child.pid, limit=1)
         assert len(discovered) == 1
@@ -933,9 +941,7 @@ def test_process_discovery_structurally_rejects_pid_one_and_backend_pid() -> Non
 def test_identity_bound_backend_descendant_can_be_signaled() -> None:
     from host_access.processes import discover_processes, signal_bound_process
 
-    child = subprocess.Popen(
-        [sys.executable, "-c", "import time;time.sleep(30)"]
-    )
+    child = _spawn_sleeper()
     try:
         metadata = discover_processes(pid=child.pid)[0]
         signal_bound_process(
