@@ -120,9 +120,9 @@ describe('Settings › Keys', () => {
 		const withEnv = { ...webSearch, ignored_env_var: 'BRAVE_API_KEY' };
 		entries = [withEnv, maps];
 		await mountKeys();
-		expect(host.querySelector('[data-key-entry="web-search"] [data-ignored-env]')!.textContent)
+		expect(host.querySelector('[data-key-entry="web-search"] [data-row-note]')!.textContent)
 			.toBe('BRAVE_API_KEY in the environment is ignored. Change the key here.');
-		expect(host.querySelector('[data-key-entry="maps"] [data-ignored-env]')).toBeNull();
+		expect(host.querySelector('[data-key-entry="maps"] [data-row-note]')).toBeNull();
 	});
 
 	it('names when a set key was saved', async () => {
@@ -248,19 +248,19 @@ describe('Settings › Keys', () => {
 			expect(get(settingsNavigation).section).toBe('providers');
 		});
 
-		it('lists built-in keys first, then every provider as a row in one card with no heading per provider', async () => {
+		it('lists built-in keys first, then every provider as a row in one group with no heading per provider', async () => {
 			providerKeys = [anthropic, openai, groq];
 			await mountKeys();
 			expect(host.textContent).not.toContain('Other keys');
-			const subhead = [...host.querySelectorAll('h3')].find((h) => h.textContent === 'Provider keys')!;
+			const subhead = [...host.querySelectorAll('h3')].find((h) => h.textContent?.trim() === 'Provider keys')!;
 			const webCard = host.querySelector('[data-key-entry="web-search"]')!;
 			expect(webCard.compareDocumentPosition(subhead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-			const card = row('anthropic').closest('.settings-card')!;
-			expect(card.querySelectorAll('[data-provider-key]')).toHaveLength(3);
-			expect(card.querySelector('h3')).toBeNull();
+			const group = row('anthropic').closest('.settings-group')!;
+			expect(group.querySelectorAll('[data-provider-key]')).toHaveLength(3);
+			expect(group.querySelectorAll('h3')).toHaveLength(1);
 		});
 
-		it('lists each server as a row in the same card as the providers, by name, with no heading of its own', async () => {
+		it('lists each server as a row in the same group as the providers, by name, with no heading of its own', async () => {
 			providerKeys = [anthropic, openai];
 			serverKeys = [
 				{ name: 'server-ns-1', server_id: 'ns-1', label: 'Studio', is_set: true },
@@ -269,10 +269,10 @@ describe('Settings › Keys', () => {
 			await mountKeys();
 			const studio = host.querySelector<HTMLElement>('[data-server-key="ns-1"]')!;
 			const plan = host.querySelector<HTMLElement>('[data-server-key="ns-2"]')!;
-			const card = row('anthropic').closest('.settings-card')!;
-			expect(studio.closest('.settings-card')).toBe(card);
-			expect(plan.closest('.settings-card')).toBe(card);
-			expect(card.querySelector('h3')).toBeNull();
+			const group = row('anthropic').closest('.settings-group')!;
+			expect(studio.closest('.settings-group')).toBe(group);
+			expect(plan.closest('.settings-group')).toBe(group);
+			expect(group.querySelectorAll('h3')).toHaveLength(1);
 			expect(row('openai').compareDocumentPosition(studio) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 			expect(studio.textContent).toContain('Studio');
 			expect(studio.textContent).toContain('Set');
@@ -289,13 +289,13 @@ describe('Settings › Keys', () => {
 		it('shows the Provider keys heading for servers alone', async () => {
 			serverKeys = [{ name: 'server-ns-1', server_id: 'ns-1', label: 'Studio', is_set: true }];
 			await mountKeys();
-			expect([...host.querySelectorAll('h3')].some((h) => h.textContent === 'Provider keys')).toBe(true);
+			expect([...host.querySelectorAll('h3')].some((h) => h.textContent?.trim() === 'Provider keys')).toBe(true);
 		});
 
 		it('says only that an environment key is ignored, since the key is changed in Providers', async () => {
 			providerKeys = [{ ...anthropic, is_set: false, ignored_env_var: 'ANTHROPIC_API_KEY' }, openai];
 			await mountKeys();
-			expect(row('anthropic').querySelector('[data-ignored-env]')!.textContent).toBe('ANTHROPIC_API_KEY in the environment is ignored.');
+			expect(row('anthropic').querySelector('[data-row-note]')!.textContent).toBe('ANTHROPIC_API_KEY in the environment is ignored.');
 			expect(row('openai').textContent).not.toContain('ignored');
 		});
 

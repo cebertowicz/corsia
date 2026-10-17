@@ -275,10 +275,7 @@
 	{/if}
 
 	{#if grouped.loaded.length > 0}
-		<div class="section loaded">
-			<span class="section-label">{loadedLabel}</span>
-			<span class="section-rule"></span>
-		</div>
+		<div class="section">{loadedLabel}</div>
 		{#each grouped.loaded as m (m.id)}
 			<ModelRow
 				name={m.name}
@@ -295,10 +292,7 @@
 	{/if}
 
 	{#if grouped.loading.length > 0}
-		<div class="section loading">
-			<span class="section-label">Loading</span>
-			<span class="section-rule"></span>
-		</div>
+		<div class="section">Loading</div>
 		{#each grouped.loading as m (m.id)}
 			<ModelRow
 				name={m.name}
@@ -312,10 +306,7 @@
 	{/if}
 
 	{#if grouped.available.length > 0}
-		<div class="section">
-			<span class="section-label">{availableLabel}</span>
-			<span class="section-rule"></span>
-		</div>
+		<div class="section">{availableLabel}</div>
 		{#each visibleAvailable as m (m.id)}
 			<ModelRow
 				name={m.name}
@@ -342,55 +333,40 @@
 {/if}
 
 <style>
+	/* The expanded body is a nested list under its provider row: labels, rows and messages start on
+	   the provider's name column, and space alone separates them, as between Settings groups. */
+	.section, .phase-stub, .row-msg, .show-more {
+		margin-left: calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		margin-right: var(--space-2);
+	}
 	.section {
-		display: flex; align-items: center; gap: 8px;
-		padding: 14px 18px 8px;
+		padding: var(--space-3) 0 var(--space-1);
+		font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary);
 	}
-	.section-label {
-		font-size: var(--text-caption); font-weight: 700; letter-spacing: 0.12em;
-		color: var(--text-tertiary); text-transform: uppercase;
-	}
-	.section-rule {
-		flex: 1; height: 1px;
-		background: linear-gradient(90deg, var(--border-subtle) 30%, transparent);
-	}
-	.section.loaded .section-label  { color: var(--accent-text); }
-	.section.loading .section-label { color: var(--amber); }
 
+	/* A text action, like the offer's "Show all". */
 	.show-more {
-		display: block; width: 100%;
-		text-align: center;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-		padding: 10px;
-		border-top: 1px solid var(--border-subtle);
-		background: transparent;
-		border-left: 0; border-right: 0; border-bottom: 0;
+		display: block;
+		padding: var(--space-1) 0;
+		border: 0; background: none;
+		color: var(--accent-text);
+		font: inherit; font-size: var(--text-footnote);
 		cursor: pointer;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
 	}
-	.show-more:hover { color: var(--text-secondary); background: var(--bg-secondary); }
+	.show-more:hover { text-decoration: underline; }
+	.show-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 
 	.phase-stub {
-		padding: 14px 18px;
-		font-size: var(--text-footnote);
+		padding: var(--space-2) 0;
+		font-size: var(--text-caption);
 		color: var(--text-tertiary);
 	}
+	.phase-stub.err { color: var(--red-text); }
 
-	@media (max-width: 480px) {
-		.section { padding: 10px 12px 6px; }
-		.phase-stub { padding: 10px 12px; }
-	}
-	.phase-stub.err { color: var(--red); }
-
+	/* A failure is stated in the status text colour, not a box. */
 	.row-msg {
-		margin: 8px 18px;
-		padding: 6px 10px;
-		font-size: var(--text-footnote);
-		color: var(--red);
-		background: var(--red-bg);
-		border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
-		border-radius: var(--radius-xs);
+		padding: var(--space-1) 0;
+		font-size: var(--text-caption);
+		color: var(--red-text);
 	}
 </style>

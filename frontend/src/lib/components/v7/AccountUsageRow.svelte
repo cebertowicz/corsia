@@ -74,7 +74,8 @@
 		{#if order !== null}<span class="order" aria-label={`Rollover order ${order}`}>{order}</span>{/if}
 		<strong>{label.name}{#if hasEmail}{' · '}<span class="email">{label.email}</span>{/if}</strong>
 		{#if usageLimit}
-			<p class="usage" aria-label="Account usage">{usageLimit}</p>
+			<!-- A limited account cannot run a turn: red, as the picker shows it. -->
+			<p class="usage" aria-label="Account usage"><span class="red">{usageLimit}</span></p>
 		{:else if segments.length}
 			<p class="usage" aria-label={`Account usage: ${usageLabel}`}>
 				{#each segments as segment, index (index)}
@@ -96,9 +97,10 @@
 	.usage { margin: 3px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.usage .amber { color: var(--amber-text); }
 	.usage .red { color: var(--red-text); }
-	.compact { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
-	.compact strong { min-width: 0; font-size: var(--text-footnote); font-weight: 600; }
-	.compact .usage { margin: 0 0 0 auto; text-align: right; white-space: nowrap; }
+	/* Compact is a Settings list row: row-name type, usage as trailing detail, space alone between rows. */
+	.compact { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--list-row-min-height); }
+	.compact strong { min-width: 0; font-size: var(--text-subhead); font-weight: 400; }
+	.compact .usage { margin: 0 0 0 auto; text-align: right; white-space: nowrap; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 	.order { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; }
 	.controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 

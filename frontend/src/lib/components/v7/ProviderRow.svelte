@@ -3,6 +3,7 @@
 	import { quintOut } from 'svelte/easing';
 	import type { Snippet } from 'svelte';
 	import { providerEnabled, type HostProvider } from '$lib/stores/providersV7';
+	import { Toggle } from '$lib/components/ui';
 
 	interface Props {
 		provider: HostProvider;
@@ -48,7 +49,7 @@
 	class:expanded
 	class:has-loaded={hasLoaded}
 >
-	<div class="pr-head" class:configurable>
+	<div class="pr-head">
 		<button
 			type="button"
 			class="pr-expand"
@@ -73,13 +74,7 @@
 		</button>
 
 		{#if configurable}
-			<button
-				type="button"
-				class="tg"
-				class:on={enabled}
-				aria-label={enabled ? 'Disable' : 'Enable'}
-				onclick={() => onToggleEnable?.()}
-			></button>
+			<Toggle checked={enabled} ariaLabel={enabled ? 'Disable' : 'Enable'} onchange={() => onToggleEnable?.()} />
 		{/if}
 	</div>
 
@@ -95,29 +90,24 @@
 </div>
 
 <style>
-	.pr {
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-subtle);
-		border-radius: var(--radius);
-		transition: all var(--dur-tight) var(--ease-snap);
-		overflow: hidden;
-		position: relative;
-	}
-	.pr:hover { border-color: var(--border); }
-	.pr.expanded {
-		background: var(--bg-tertiary);
-		box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 1px 2px rgba(0,0,0,0.3);
-	}
+	/* A Settings list row: flat on the pane with a hover wash for a pointer, no box at rest or
+	   when open. The status dot takes the project-mark column so names line up with other rows. */
+	.pr { position: relative; }
 
+	/* The switch column keeps the md Toggle's width on every row, so a row without a switch
+	   (an agent CLI) keeps its gear in the same column as the rows above it. */
 	.pr-head {
 		display: grid;
-		grid-template-columns: 22px minmax(0, 1fr) auto 28px;
+		grid-template-columns: var(--project-mark-size) minmax(0, 1fr) auto 34px 28px;
 		align-items: center;
-		gap: 12px;
-		padding: 12px 14px;
+		gap: var(--space-3);
+		min-height: var(--list-row-min-height);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
 	}
-	.pr-head.configurable {
-		grid-template-columns: 22px minmax(0, 1fr) auto auto 28px;
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last row tapped. */
+	@media (hover: hover) {
+		.pr-head:hover { background: var(--bg-hover); }
 	}
 	.pr-expand {
 		grid-column: 1 / -1;
@@ -140,8 +130,10 @@
 		outline-offset: -2px;
 	}
 	.pr-expand .chev { grid-column: -2; cursor: inherit; }
+	/* The chevron box hugs its glyph at the column's end, so the glyph ends on the content edge with every other row's trailing control. */
+	.pr-expand .ico-btn.chev { width: auto; justify-self: end; }
 	.pr-head > .ico-btn { grid-column: 3; grid-row: 1; z-index: 1; }
-	.pr-head > .tg { grid-column: 4; grid-row: 1; z-index: 1; }
+	.pr-head > :global(.tg) { grid-column: 4; grid-row: 1; z-index: 1; }
 
 	.dot-wrap { display: flex; justify-content: center; }
 	.dot {
@@ -149,43 +141,26 @@
 		flex-shrink: 0;
 		position: relative;
 	}
-	.dot::after {
-		content: '';
-		position: absolute; inset: -4px;
-		border-radius: var(--radius-circle); opacity: 0.18;
-	}
-	.dot.online   { background: var(--green); box-shadow: 0 0 8px color-mix(in srgb, var(--green) 50%, transparent); }
-	.dot.online::after { background: var(--green); animation: pulse 2.4s ease-out infinite; }
-	.dot.idle     { background: var(--amber); box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 40%, transparent); }
-	.dot.error    { background: var(--red); box-shadow: 0 0 8px color-mix(in srgb, var(--red) 40%, transparent); }
+	/* Status is a plain dot in its colour: no glow, no pulse. */
+	.dot.online   { background: var(--green); }
+	.dot.idle     { background: var(--amber); }
+	.dot.error    { background: var(--red); }
 	.dot.disabled { background: var(--text-tertiary); }
 
-	@keyframes pulse {
-		0%   { transform: scale(1);   opacity: 0.4; }
-		100% { transform: scale(2.6); opacity: 0; }
-	}
-
-	.pr-info { min-width: 0; }
-	.pr-info .name-row {
-		display: flex; align-items: center; gap: 10px;
-		margin-bottom: 4px;
-	}
-	.name {
-		font-size: var(--text-callout);
-		font-weight: 600;
-		letter-spacing: -0.01em;
-		color: var(--text-primary);
-	}
+	.pr-info { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+	.pr-info .name-row { display: flex; align-items: center; gap: var(--space-2); }
+	.name { font-size: var(--text-subhead); color: var(--text-primary); }
 
 	.meta {
-		font-size: var(--text-subhead); color: var(--text-tertiary);
+		font-size: var(--text-caption); color: var(--text-tertiary);
 		font-variant-numeric: tabular-nums;
 	}
+	/* A second status line, indented to the name column. */
 	.discovery-warning {
-		margin: -4px 14px 10px 48px;
-		font-size: var(--text-footnote);
-		color: var(--amber);
-		line-height: 1.35;
+		margin: 0 var(--space-2) var(--space-1) calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		font-size: var(--text-caption);
+		color: var(--amber-text);
+		line-height: 1.45;
 	}
 
 	.ico-btn {
@@ -204,56 +179,8 @@
 	.ico-btn.chev :global(svg) { transition: transform var(--dur-standard) var(--ease-snap); }
 	.pr.expanded .pr-expand .ico-btn.chev :global(svg) { transform: rotate(180deg); }
 
-	.tg {
-		--w: 36px; --h: 20px;
-		width: var(--w); height: var(--h);
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-pill);
-		position: relative;
-		transition: all var(--dur-tight) var(--ease-snap);
-		flex-shrink: 0;
-		cursor: pointer;
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.3);
-	}
-	.tg::after {
-		content: '';
-		position: absolute;
-		width: 14px; height: 14px;
-		border-radius: var(--radius-circle);
-		background: linear-gradient(180deg, #d8d8e0, #b8b8c0);
-		top: 2px; left: 2px;
-		transition: all var(--dur-tight) var(--ease-snap);
-		box-shadow: 0 1px 2px rgba(0,0,0,0.4);
-	}
-	.tg.on {
-		background: linear-gradient(180deg, var(--accent-hover), var(--accent));
-		border-color: var(--accent);
-		box-shadow: inset 0 1px 1px rgba(0,0,0,0.2), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
-	}
-	.tg.on::after {
-		left: calc(var(--w) - 18px);
-		background: linear-gradient(180deg, #ffffff, #f0f0f5);
-	}
-
-	.pr-body {
-		border-top: 1px solid var(--border-subtle);
-		background: var(--bg-secondary);
-	}
-
 	@media (max-width: 480px) {
-		.pr-head {
-			grid-template-columns: 18px minmax(0, 1fr) 28px 20px;
-			gap: 8px;
-			padding: 10px 12px;
-		}
-		.pr-head.configurable { grid-template-columns: 18px minmax(0, 1fr) 28px 36px 20px; }
-		.pr-info .name-row { gap: 6px; margin-bottom: 2px; }
-		.name { font-size: var(--text-subhead); }
-		.meta { font-size: var(--text-footnote); }
+		.pr-head { grid-template-columns: var(--project-mark-size) minmax(0, 1fr) 28px 34px 20px; }
 		.ico-btn { width: 28px; height: 28px; }
-		.tg { --w: 32px; --h: 18px; }
-		.tg::after { width: 12px; height: 12px; top: 2px; left: 2px; }
-		.tg.on::after { left: calc(var(--w) - 16px); }
 	}
 </style>

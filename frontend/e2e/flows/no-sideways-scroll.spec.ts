@@ -506,7 +506,7 @@ async function settingsTabReady(page: Page, tab: string, timeout = 20_000) {
 	await expect(page.getByRole('heading', { name: heading, exact: true }), `the ${tab} tab shows its content`).toBeVisible({ timeout });
 	await expect(page.locator('.settings-content .loading'), `the ${tab} tab has stopped loading`).toHaveCount(0, { timeout });
 	if (tab === 'Debug') {
-		const versionCards = page.locator('.settings-content .settings-card').filter({ has: page.locator('dl.kv') });
+		const versionCards = page.locator('.settings-content .settings-group').filter({ has: page.locator('dl.kv') });
 		await expect(versionCards, 'all four Debug version cards are populated').toHaveCount(4, { timeout });
 		await expect(versionCards.locator('h3'), 'the four canonical Debug version cards are shown in order').toHaveText([
 			'Frontend — this browser bundle',

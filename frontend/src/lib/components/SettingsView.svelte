@@ -124,7 +124,7 @@
 	<div class="settings-content" class:mobile-section={mobileOpen} use:toastAnchorSurface>
 		<div class="section-host">
 			{#if section === 'providers'}
-				<div class="inset"><ProviderManager /></div>
+				<ProviderManager />
 				<div class="policy"><ProvidersPolicyBlock /></div>
 			{:else if section === 'connected-apps'}
 				<h2 class="page-title">Connected apps</h2>
@@ -138,14 +138,15 @@
 			{:else if section === 'projects'}
 				<SettingsProjects />
 			{:else if section === 'system'}
-				<div class="inset">
-					<SettingsSystem {systemStatus} onSwitchSection={(s) => selectSettingsSection(s as SettingsSection)} />
-					<SystemBulletinsSetting />
-				</div>
+				<h2 class="page-title">System</h2>
+				<SettingsSystem {systemStatus} onSwitchSection={(s) => selectSettingsSection(s as SettingsSection)} />
+				<SystemBulletinsSetting />
 			{:else if section === 'keys'}
-				<div class="inset"><SettingsKeys /></div>
+				<h2 class="page-title">Keys</h2>
+				<SettingsKeys />
 			{:else if section === 'debug'}
-				<div class="inset"><SettingsDebug /></div>
+				<h2 class="page-title">Debug</h2>
+				<SettingsDebug />
 			{/if}
 		</div>
 	</div>
@@ -207,9 +208,7 @@
 		padding: 0 var(--space-2);
 		font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary);
 	}
-	/* Sections that draw their own title: inset them to the edge the list pages use. */
-	.inset { padding: 0 var(--space-2); }
-	.policy { margin-top: var(--space-8); padding: 0 var(--space-2); }
+	.policy { margin-top: var(--space-6); padding: 0 var(--space-2); }
 	.mobile-root { display: none; }
 
 	@media (max-width: 768px) {
@@ -218,12 +217,11 @@
 		.settings-content { display: none; padding: var(--space-3) var(--space-3) var(--space-6); }
 		.settings-content.mobile-section { display: block; }
 		/* The app header names the page on a phone; the title is not drawn again under it but stays the page's heading for assistive tech. */
-		.section-host :global(.page-title),
-		.inset :global(.page-head h2), .inset :global(.section-header h2) {
+		.section-host :global(.page-title) {
 			position: absolute; width: 1px; height: 1px; padding: 0; margin: 0;
 			overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 		}
-		.inset :global(.page-head) { justify-content: flex-end; }
+		.section-host :global(.page-head) { justify-content: flex-end; }
 		/* The visually hidden title remains the first DOM child; do not let it create an extra group gap. */
 		.section-host > :global(.settings-group:first-of-type) { margin-top: 0; }
 		.mobile-root { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: var(--space-3); }

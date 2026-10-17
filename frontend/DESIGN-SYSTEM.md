@@ -878,8 +878,9 @@ trailing col. Mobile (≤720px) collapses to single column.
 
 **Native control styling** (provided via `:global()` selectors): inputs/
 selects/textareas get `--bg-tertiary` bg, `--border` border, `--radius-xs`
-(6px), 32px height, 12.5px font. Focus ring is 3px `--accent-wash`
-box-shadow.
+(6px), 32px height, 12.5px font. Focus ring is `--shadow-focus` (3px
+`--accent-wash` box-shadow); a native control outside a Field uses the
+same token.
 
 Native chrome stripped from selects (custom chevron data-URI inside
 `Field`) and number inputs (spinners hidden). If a real number-stepper UI
