@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import tools.mcp_import_json5 as mcp_import_json5
+import tools.mcp_secrets as mcp_secrets
 
 SOURCES = ("openclaw", "hermes")
 _MAX_CONFIG_BYTES = 1_000_000
@@ -156,6 +157,7 @@ def withhold_references(copied: dict[str, Any]) -> None:
     The tool resolves ``${VAR}`` from its own ``.env``, which is never read, so storing the
     placeholder as the credential would send a literal ``${VAR}``. The name goes on the same
     reference lists the Codex import uses, and the person sets the value in Settings > Keys.
+    An ``Authorization: Bearer ${VAR}`` keeps its known scheme, as a literal one does on import.
     """
     for field, listed, token in (("env", "secret_env", False), ("headers", "secret_headers", True)):
         values = copied.get(field)
@@ -170,5 +172,10 @@ def withhold_references(copied: dict[str, Any]) -> None:
         else:
             del copied[field]
         copied[listed] = [*copied.get(listed, []), *names]
+        for name in names if token else []:
+            scheme = mcp_secrets.split_scheme(values[name])[0] if name.lower() == "authorization" else None
+            if scheme is not None:
+                pair = {"header": name, "scheme": scheme}
+                copied[mcp_secrets.HEADER_SCHEMES] = [*copied.get(mcp_secrets.HEADER_SCHEMES, []), pair]
         if token:
             copied["needs_token"] = True

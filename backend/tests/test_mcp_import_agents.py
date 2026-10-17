@@ -13,6 +13,8 @@ from connections.app_reach import get_app
 from infra.database import initialize_schema
 import tools.mcp_import_json5 as mcp_import_json5
 import tools.mcp_import as mcp_import
+import tools.mcp_import_agents as mcp_import_agents
+import tools.mcp_secrets as mcp_secrets
 
 OPENCLAW_CONFIG = """
 // JSON5: comments, unquoted keys, single quotes and trailing commas.
@@ -224,7 +226,18 @@ def test_hermes_env_references_keep_only_the_variable_name(tmp_path):
     remote = get_app(result["rows"][1]["id"], db=db)["config"]
     assert remote["transport"] == "sse" and remote["needs_token"] is True
     assert remote["key_refs"] == [{"kind": "header", "name": "Authorization"}]
+    assert remote[mcp_secrets.HEADER_SCHEMES] == [{"header": "Authorization", "scheme": "Bearer"}]
     assert "${" not in json.dumps(remote)
+
+
+@pytest.mark.parametrize("value", ["${TOKEN}", "acct42 ${TOKEN}", "Bearer ${TOKEN} extra"])
+def test_a_withheld_reference_without_a_known_scheme_keeps_no_scheme(value):
+    copied = {"url": "https://mcp.example.test/mcp", "headers": {"Authorization": value, "X-Api-Key": "Bearer ${KEY}"}}
+
+    mcp_import_agents.withhold_references(copied)
+
+    assert copied["secret_headers"] == ["Authorization", "X-Api-Key"]
+    assert mcp_secrets.HEADER_SCHEMES not in copied
 
 
 def test_their_secrets_files_are_never_opened(tmp_path, monkeypatch):
