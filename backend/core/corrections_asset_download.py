@@ -33,10 +33,8 @@ from core.corrections_asset_signals import State, broadcast_update, public_state
 
 logger = logging.getLogger(__name__)
 
-# The one place the release location lives; the environment override is for disposable proofs.
-DEFAULT_BASE_URL = (
-    "https://github.com/cebertowicz/corsia/releases/download/asset-corrections-classifier-v1"
-)
+# The one place the release location lives (each pinned version has its own tag); the override is for disposable proofs.
+RELEASE_TAG_URL = "https://github.com/cebertowicz/corsia/releases/download/asset-corrections-classifier-"
 BASE_URL_ENV = "CORSIA_CORRECTIONS_ASSET_BASE_URL"
 
 DISK_MARGIN_BYTES = 256 * 1024**2
@@ -55,7 +53,7 @@ class _Failure(Exception):
 
 
 def base_url() -> str:
-    return (os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL).rstrip("/")
+    return (os.environ.get(BASE_URL_ENV) or f"{RELEASE_TAG_URL}{newest_pin()}").rstrip("/")
 
 
 def _reader(error: Exception) -> str:
@@ -117,8 +115,8 @@ class ClassifierDownload:
         if due:
             self._notify()
 
-    def start(self, *, wait: bool = False) -> State:
-        """Begin the flight, or join the running one. Idempotent; also the retry."""
+    def start(self, *, wait: bool = False, on_failure: Callable[[State], None] | None = None) -> State:
+        """Begin the flight, or join the running one. Idempotent; also the retry. ``on_failure`` hears only a flight this call begins."""
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return dict(self._state)
@@ -126,7 +124,7 @@ class ClassifierDownload:
                 return dict(self._state)
             self._state = {"state": "downloading", "bytes_done": 0, "bytes_total": 0}
             self._request()
-            self._thread = threading.Thread(target=self._run, name="classifier-download", daemon=True)
+            self._thread = threading.Thread(target=self._run, args=(on_failure,), name="classifier-download", daemon=True)
             self._thread.start()
             thread = self._thread
         if wait:
@@ -146,10 +144,10 @@ class ClassifierDownload:
         except OSError:
             logger.warning("Could not record the classifier download request", exc_info=True)
 
-    def resume(self) -> None:
+    def resume(self, *, on_failure: Callable[[State], None] | None = None) -> None:
         """At app start: carry on a download that setup asked for and a quit or crash cut short."""
         if self._requested_marker().is_file():
-            self.start()
+            self.start(on_failure=on_failure)
 
     def _finish(self) -> None:
         self._requested_marker().unlink(missing_ok=True)
@@ -158,7 +156,7 @@ class ClassifierDownload:
 
     # -- flight ---------------------------------------------------------------
 
-    def _run(self) -> None:
+    def _run(self, on_failure: Callable[[State], None] | None = None) -> None:
         try:
             self._flight()
         except _Failure as failure:
@@ -167,14 +165,15 @@ class ClassifierDownload:
                 failure.state.get("code"),
             )
             self._set(**failure.state)
+            if on_failure is not None:
+                on_failure(failure.state)
             if failure.state.get("code") == "disk_full":
                 self._watch_space()
         except Exception:
             logger.exception("Corrections classifier download failed unexpectedly")
-            self._set(
-                state="failed", code="unexpected", retryable=True,
-                reason="The download couldn’t be set up.",
-            )
+            self._set(state="failed", code="unexpected", retryable=True, reason="The download couldn’t be set up.")
+            if on_failure is not None:
+                on_failure(self.status())
 
     def _flight(self) -> None:
         root = self._root()

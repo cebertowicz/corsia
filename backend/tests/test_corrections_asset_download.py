@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
 import os
 import re
 import sys
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -664,6 +664,36 @@ def test_network_loss_gives_up_with_a_retryable_failure(tmp_path, assets, pinned
     state = flight.start(wait=True)
 
     assert state["state"] == "failed" and state["code"] == "network_lost" and state["retryable"] is True
+
+
+def test_only_the_flight_a_start_begins_reports_its_failure_once(tmp_path, assets, pinned):
+    dead = _Server(assets)
+    dead.close()
+    flight, _ = _flight(tmp_path, dead)
+    failures: list[dict] = []
+
+    flight.start(wait=True, on_failure=failures.append)
+
+    assert [state["code"] for state in failures] == ["network_lost"]
+    flight.start(wait=True)  # a retry that names no listener reports to nobody
+    assert len(failures) == 1
+
+
+def test_a_successful_flight_reports_no_failure(tmp_path, server, pinned):
+    flight, _ = _flight(tmp_path, server)
+    failures: list[dict] = []
+
+    assert flight.start(wait=True, on_failure=failures.append) == {"state": "ready"}
+    assert failures == []
+
+
+def test_the_release_location_follows_the_newest_pin_and_the_override_wins(monkeypatch):
+    monkeypatch.delenv(download.BASE_URL_ENV, raising=False)
+    monkeypatch.setattr(corrections_asset_files, "PINNED_MANIFESTS", {"v1": "a", "v2": "b"})
+
+    assert download.base_url().endswith("/asset-corrections-classifier-v2")
+    monkeypatch.setenv(download.BASE_URL_ENV, "http://127.0.0.1:9/")
+    assert download.base_url() == "http://127.0.0.1:9"
 
 
 def test_public_state_hides_internal_fields():

@@ -70,7 +70,7 @@ def current_asset_verified(root: Path | None = None) -> bool:
         manifest.verify_files(classifier.CORRECTIONS_SPEC)
     except (AssetError, OSError):
         return False
-    return root_is_newest_pin(root)
+    return manifest.version == newest_pin()
 
 
 def staging_dir(root: Path) -> Path:
