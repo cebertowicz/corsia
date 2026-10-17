@@ -241,7 +241,7 @@ class TestAppPath:
 
         app_facts = {
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
-            "local_download": {"state": "none"}, "gmail_eligible": True,
+            "agents_found": ["hermes"], "local_download": {"state": "none"}, "gmail_eligible": True,
             "web_search_ready": False, "github_ready": False, "own_omlx_source": False,
             "setup": {"setup_decisions": []},
             "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
@@ -286,12 +286,43 @@ class TestAppPath:
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+        monkeypatch.setattr(first_run_wake, "_app_agents_found", lambda: ["openclaw"])
 
         facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
 
         assert facts["sources_missing"] == expected_missing
         assert facts["local_download"] == expected_download
-        assert {"sources_missing", "local_download"} <= set(facts)
+        assert facts["agents_found"] == ["openclaw"]
+        assert set(facts) == first_run_wake.APP_FACT_KEYS
+
+    @pytest.mark.parametrize("present, expected", [
+        ((), []),
+        (("openclaw",), ["openclaw"]),
+        (("openclaw", "hermes"), ["openclaw", "hermes"]),
+    ])
+    def test_agents_found_checks_presence_without_opening_settings(self, monkeypatch, tmp_path, present, expected):
+        import builtins
+        import io
+        from pathlib import Path
+
+        from onboarding import first_run_wake
+
+        for name in ("OPENCLAW_CONFIG_PATH", "OPENCLAW_STATE_DIR", "OPENCLAW_HOME", "HERMES_HOME"):
+            monkeypatch.delenv(name, raising=False)
+        configs = {"openclaw": tmp_path / ".openclaw" / "openclaw.json", "hermes": tmp_path / ".hermes" / "config.yaml"}
+        for source in present:
+            configs[source].parent.mkdir()
+            configs[source].write_text("mcp_servers: {}\n", encoding="utf-8")
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        opened: list[str] = []
+        for target, name in ((builtins, "open"), (io, "open"), (Path, "open"), (Path, "read_text"), (Path, "read_bytes")):
+            original = getattr(target, name)
+            monkeypatch.setattr(target, name, lambda *a, _original=original, **k: opened.append(str(a[0])) or _original(*a, **k))
+
+        found = first_run_wake._app_agents_found()
+
+        assert found == expected
+        assert not [path for path in opened if str(tmp_path) in path]
 
     def test_f8_instructed_routes_remain_open_in_conductor_policy(self):
         from tools.conductor_api_policy import off_limits
@@ -367,6 +398,7 @@ class TestAppPath:
         ("own_omlx_source", ("own_omlx_source",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),
+        ("agents_found", ("agents_found",)),
     ])
     async def test_each_app_fact_read_names_its_unavailable_recovery(self, monkeypatch, failed, expected):
         from onboarding import first_run_wake
@@ -391,6 +423,8 @@ class TestAppPath:
             monkeypatch.setattr(first_run_wake, "_own_omlx_source", fail)
         elif failed == "setup":
             monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(side_effect=OSError("unavailable")))
+        elif failed == "agents_found":
+            monkeypatch.setattr(first_run_wake, "_app_agents_found", fail)
         else:
             monkeypatch.setattr(first_run_wake, "_app_user_profile", fail)
 
