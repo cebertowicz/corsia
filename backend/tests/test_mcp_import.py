@@ -338,7 +338,10 @@ def test_import_mixes_sign_in_pending_place_unsupported_and_plain_without_http(t
         "url": "https://example.test/mcp", "transport": "http", "headers": {"X-Region": "us-west-2"},
         "connect_timeout": 12, "key_refs": [],
     }
-    assert pending_place == {"name": "Pending place", "status": "outside_project", "folder": "not-corsia"}
+    assert pending_place == {
+        "id": pending_place["id"], "name": "Pending place", "state": "awaiting_approval", "folder": "not-corsia",
+        "message": mcp_import.IMPORT_FOLDER_WAITING_FOR_PLACE.format(App="Pending place"),
+    }
     assert unsupported == {"name": "Unsupported", "status": "cannot_connect"}
     assert plain == {"id": plain["id"], "name": "Plain", "state": "awaiting_approval"}
     assert db.execute("SELECT count(*) FROM key_store_entries").fetchone()[0] == 0
