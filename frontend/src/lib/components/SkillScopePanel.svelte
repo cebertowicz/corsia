@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui';
 	import SettingsRow from './SettingsRow.svelte';
 	import { createSkill, fetchSkills, type SkillRow, type SkillScope } from '$lib/api/skills';
+	import { createScopeDocumentHome } from '$lib/scopeDocumentHome.svelte';
 
 	let {
 		scope,
@@ -33,6 +34,9 @@
 	let newName = $state('');
 	let newDescription = $state('');
 	let creating = $state(false);
+
+	// With no thread on screen (Settings opened from Activity) a skill opens beside its scope's own thread.
+	const home = createScopeDocumentHome(() => (scope === 'project' ? projectId : null), () => threadId);
 
 	const invalidRows = $derived(rows.filter((row) => row.status === 'error'));
 	const validRows = $derived(rows.filter((row) => row.status !== 'error'));
@@ -74,12 +78,13 @@
 	}
 
 	// A skill file is editable and commentable, so it opens as a tab in a thread
-	// (this panel's thread when it has one, else the active thread) rather than
-	// in a standalone editor with nowhere for its comments to go.
+	// (this panel's thread when it has one, else the active thread, else its scope's
+	// thread) rather than in a standalone editor with nowhere for its comments to go.
 	function openSkill(row: SkillRow) {
 		const opened = openArtifactAndShowThread(
 			{ path: row.path, title: row.name || displayName(row.path) },
 			threadId,
+			home.thread,
 		);
 		if (opened) onOpenSkill?.();
 	}
@@ -127,12 +132,13 @@
 	{:else}
 		<div class="skills-list">
 			{#each validRows as row (row.path)}
-				<SettingsRow name={row.name} sub={row.description ?? ''} onOpen={() => openSkill(row)} />
+				<SettingsRow name={row.name} sub={row.description ?? ''} onOpen={home.canOpen ? () => openSkill(row) : undefined} />
 			{/each}
 			{#each invalidRows as row (row.path)}
-				<SettingsRow name={row.name} sub={`Omitted: ${row.errors.join(', ')}`} subTone="failed" onOpen={() => openSkill(row)} />
+				<SettingsRow name={row.name} sub={`Omitted: ${row.errors.join(', ')}`} subTone="failed" onOpen={home.canOpen ? () => openSkill(row) : undefined} />
 			{/each}
 		</div>
+		{#if home.unavailable}<p class="skills-empty">Open a conversation to view this.</p>{/if}
 	{/if}
 
 	<div class="skills-actions">

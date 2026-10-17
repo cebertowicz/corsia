@@ -17,7 +17,7 @@
 
 	async function load(id: string) {
 		const t = get(token);
-		if (!t) return;
+		if (!t) { loading = false; return; }
 		loading = true;
 		error = '';
 		try {

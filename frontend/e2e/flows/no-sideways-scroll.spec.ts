@@ -492,12 +492,12 @@ async function measurementScopedRouteReady(page: Page, data: Seed, timeout = 20_
 const SETTINGS_TAB_CONTENT: Record<string, string> = {
 	Providers: 'Accounts and rollover',
 	'Connected apps': 'Connected apps',
-	Skills: 'All projects',
-	Context: 'All projects',
+	Skills: 'Skills',
+	Context: 'Context',
 	Projects: 'Active',
 	Keys: 'Keys',
-	System: 'System',
-	Debug: 'Debug',
+	System: 'Services',
+	Debug: 'Bundle freshness',
 };
 
 async function settingsTabReady(page: Page, tab: string, timeout = 20_000) {

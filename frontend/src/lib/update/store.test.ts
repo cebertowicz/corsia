@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
-import { activeThreadId } from '$lib/stores/threads';
 import { settingsNavigation } from '$lib/stores/settingsNavigation';
 import {
 	loadUpdateStatus,
@@ -153,10 +152,9 @@ describe('update store', () => {
 		expect(notice?.pinned).toBeUndefined();
 	});
 
-	it('opens Settings at the Updates card from the notice and remembers the chat to return to', async () => {
+	it('opens Settings at the Updates card from the notice', async () => {
 		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
-		activeThreadId.set('thread-1');
 		const opened = get(settingsNavigation).openRequest;
 		await loadUpdateStatus();
 		const notice = get(toasts).find((toast) => toast.button)!;
@@ -164,9 +162,7 @@ describe('update store', () => {
 		expect(get(settingsNavigation).section).toBe('system');
 		expect(get(settingsNavigation).anchor).toBe('update');
 		expect(get(settingsNavigation).openRequest).toBe(opened + 1);
-		expect(get(settingsNavigation).returnThread).toBe('thread-1');
 		expect(get(toasts).some((toast) => toast.button)).toBe(false);
-		activeThreadId.set(null);
 	});
 
 	it('does not announce a version while an update is already running', async () => {

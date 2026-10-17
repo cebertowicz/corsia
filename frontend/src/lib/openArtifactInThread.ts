@@ -12,8 +12,8 @@ import { openArtifactTab, type OpenArtifactInput } from '$lib/stores/artifactWor
  */
 export const showArtifactThreadRequest = writable<{ threadId: string } | null>(null);
 
-function homeThread(threadId?: string | null): string | null {
-	return threadId ?? get(docPickerTarget)?.threadId ?? get(activeThreadId) ?? get(settingsNavigation).homeThread;
+function homeThread(threadId?: string | null, scopeThreadId?: string | null): string | null {
+	return threadId ?? get(docPickerTarget)?.threadId ?? get(activeThreadId) ?? get(settingsNavigation).homeThread ?? scopeThreadId ?? null;
 }
 
 /**
@@ -22,8 +22,10 @@ function homeThread(threadId?: string | null): string | null {
  * Every editable/commentable artifact needs a home thread, because that is
  * where its comments and edits are routed. The thread is, in order: the one the
  * caller names, the thread a Documents-library visit is picking *for*, the
- * currently active thread, or the thread Settings was opened over. With none of
- * those there is no home, so the caller must present the document as
+ * currently active thread, the thread Settings was opened over, or the scope's
+ * own thread (`scopeThreadId`: the workspace's CORSIA agent, a project's
+ * conductor) for a caller that knows which scope the document belongs to. With
+ * none of those there is no home, so the caller must present the document as
  * unopenable rather than opening an orphan editor.
  *
  * Returns the thread the tab was opened in, or null when there is none.
@@ -31,9 +33,10 @@ function homeThread(threadId?: string | null): string | null {
 export function openArtifactInThread(
 	input: OpenArtifactInput,
 	threadId?: string | null,
+	scopeThreadId?: string | null,
 ): string | null {
 	const picker = get(docPickerTarget);
-	const target = homeThread(threadId);
+	const target = homeThread(threadId, scopeThreadId);
 	if (!target) return null;
 	openArtifactTab(target, input);
 	if (picker) docPickerTarget.set(null);
@@ -44,13 +47,14 @@ export function openArtifactInThread(
 export function openArtifactAndShowThread(
 	input: OpenArtifactInput,
 	threadId?: string | null,
+	scopeThreadId?: string | null,
 ): string | null {
-	const target = openArtifactInThread(input, threadId);
+	const target = openArtifactInThread(input, threadId, scopeThreadId);
 	if (target) showArtifactThreadRequest.set({ threadId: target });
 	return target;
 }
 
 /** Whether a document can be opened right now — false with no home thread. */
-export function canOpenArtifact(threadId?: string | null): boolean {
-	return !!homeThread(threadId);
+export function canOpenArtifact(threadId?: string | null, scopeThreadId?: string | null): boolean {
+	return !!homeThread(threadId, scopeThreadId);
 }

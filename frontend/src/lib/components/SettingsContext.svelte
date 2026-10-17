@@ -3,7 +3,8 @@
 	import { coreSettings, loadSettings, type WorkspaceContextFile } from '$lib/stores/settings';
 	import { loadProjects, projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
-	import { canOpenArtifact, openArtifactAndShowThread } from '$lib/openArtifactInThread';
+	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
+	import { createScopeDocumentHome } from '$lib/scopeDocumentHome.svelte';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
 	import { plainResponseError } from '$lib/plainError';
 	import SettingsGroup from './SettingsGroup.svelte';
@@ -21,6 +22,8 @@
 	let error = $state('');
 	let busy = $state(false);
 	const files = $derived($coreSettings?.workspace_context_files ?? []);
+	// With no thread on screen (Settings opened from Activity) a file opens beside the CORSIA agent's thread.
+	const home = createScopeDocumentHome(() => null);
 
 	function fileName(file: WorkspaceContextFile): string {
 		const raw = file.name || file.path;
@@ -33,7 +36,7 @@
 	}
 
 	function view(file: WorkspaceContextFile) {
-		openArtifactAndShowThread({ path: file.path, title: fileName(file) });
+		openArtifactAndShowThread({ path: file.path, title: fileName(file) }, null, home.thread);
 	}
 
 	async function request(url: string, method: string, body: object, fallback: string): Promise<boolean> {
@@ -87,13 +90,14 @@
 			name={fileName(file)}
 			sub={file.exists ? filePath(file) : 'Missing'}
 			subTone={file.exists ? 'quiet' : 'failed'}
-			onOpen={file.exists && canOpenArtifact() ? () => view(file) : undefined}
+			onOpen={file.exists && home.canOpen ? () => view(file) : undefined}
 			menuItems={[{ id: 'remove', label: 'Remove from context', disabled: busy }]}
 			onMenuSelect={() => remove(file)}
 		/>
 	{:else}
 		<p class="empty">No context files for all projects yet.</p>
 	{/each}
+	{#if files.some((file) => file.exists) && home.unavailable}<p class="empty">Open a conversation to view this.</p>{/if}
 	<div class="actions">
 		<Button size="sm" variant="ghost" disabled={busy} onclick={addExisting}>Add existing</Button>
 		<SettingsContextCreate label="New context file for all projects" {busy} onCreate={create} />

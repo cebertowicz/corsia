@@ -60,6 +60,7 @@
 		lastEmittedView = next;
 	});
 
+	$effect(() => { recordSettingsHomeThread(activeView, get(activeThreadId)); }); // every route out of Settings clears the thread it opened over
 	let lastSettingsOpenRequest = 0;
 	$effect(() => {
 		const request = $settingsNavigation.openRequest;
@@ -102,8 +103,7 @@
 			clearDocPickerTarget();
 		}
 		threadSettingsOpen.set(false);
-		// Settings keeps the thread it opened over, so a file opened there has a tab to land in.
-		recordSettingsHomeThread(view, get(activeThreadId));
+		recordSettingsHomeThread(view, get(activeThreadId)); // Settings keeps the thread it opened over, so a file opened there has a tab to land in.
 		if (!options.preserveActiveThread) activeThreadId.set(null);
 		activeView = view;
 		if (!options.preserveActiveThread) messages.set([]);

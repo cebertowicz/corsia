@@ -20,9 +20,11 @@ export interface SettingsNavigation {
 	drill: SettingsDrill | null;
 	/** Counts deep-link opens (a gear, a chat link); a consumer acts once per new value. */
 	openRequest: number;
-	/** The thread a deep link to Settings came from; Back returns there instead of to Activity. */
-	returnThread: string | null;
-	/** The thread on screen when Settings opened: a file opened from Settings becomes its tab. Null outside Settings. */
+	/**
+	 * The thread Settings opened over: a file opened from Settings becomes its tab, and Back returns there
+	 * instead of to Activity. Kept across a Settings → Documents → Settings round trip; null once the person
+	 * leaves Settings by any other route.
+	 */
 	homeThread: string | null;
 	/** An element in the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 	anchor: string | null;
@@ -41,15 +43,14 @@ export interface SettingsNavigation {
  * openSettingsProject         project (a row in the Projects list); pending anchor cleared
  * closeSettingsProject        project cleared; pending anchor cleared
  * setSettingsDrill            drill
- * recordSettingsHomeThread    homeThread: the active thread while Settings shows, else null
- * rememberSettingsReturnThread returnThread
- * closeSettingsBack           returnThread cleared
+ * recordSettingsHomeThread    homeThread: the active thread when Settings shows over one, kept while Documents shows, else null
+ * closeSettingsBack           homeThread cleared (the selection that follows would clear it too)
  * clearSettingsAnchor         anchor cleared (an anchored element calls it once it has scrolled)
  * resetSettingsNavigation     every field to its initial value
  */
 const initial = (): SettingsNavigation => ({
 	section: 'providers', project: null, fromProject: null, drill: null,
-	openRequest: 0, returnThread: null, homeThread: null, anchor: null,
+	openRequest: 0, homeThread: null, anchor: null,
 });
 const state = writable<SettingsNavigation>(initial());
 export const settingsNavigation: Readable<SettingsNavigation> = { subscribe: state.subscribe };
@@ -61,7 +62,14 @@ function change(patch: (current: SettingsNavigation) => Partial<SettingsNavigati
 /** The harness connection or cloud provider whose Providers card should open expanded and scroll into view. */
 export const providerCardRequest = writable<string | null>(null);
 
+/** Links already in saved messages name a section that has since moved. */
+const MOVED_SECTIONS: Record<string, { section: SettingsSection; anchor: string }> = {
+	'system#connected-apps': { section: 'connected-apps', anchor: 'connected-apps' },
+};
+
 export function requestSettingsSection(section: SettingsSection, anchor: string | null = null) {
+	const moved = MOVED_SECTIONS[`${section}#${anchor}`];
+	if (moved) ({ section, anchor } = moved);
 	change((s) => ({
 		section, anchor, fromProject: null,
 		project: section === 'projects' ? s.project : null,
@@ -110,13 +118,17 @@ export function setSettingsDrill(drill: SettingsDrill | null) {
 	change(() => ({ drill }));
 }
 
-/** Settings keeps the thread it opened over, so a file opened there has a tab to land in. */
+/**
+ * Settings keeps the thread it opened over, so a file opened there has a tab to land in. Called with every
+ * view the app shows: Documents is the one view Settings sends the person to and back from (Add existing,
+ * Browse), so it keeps the thread; any other view is the person leaving Settings.
+ */
 export function recordSettingsHomeThread(view: string, activeThread: string | null) {
-	change((s) => ({ homeThread: view === 'settings' ? (activeThread ?? s.homeThread) : null }));
-}
-
-export function rememberSettingsReturnThread(threadId: string | null) {
-	change(() => ({ returnThread: threadId }));
+	change((s) => {
+		if (view === 'settings') return { homeThread: activeThread ?? s.homeThread };
+		if (view === 'documents') return {};
+		return { homeThread: null };
+	});
 }
 
 export function clearSettingsAnchor(anchor?: string) {
@@ -174,8 +186,8 @@ export function requestProviderCard(connection: string) {
 
 /** Close Settings: back to the thread a deep link came from, else to the fallback (Activity). */
 export async function closeSettingsBack(selectThread: (id: string) => Promise<unknown>, fallback: () => void) {
-	const id = get(state).returnThread;
-	rememberSettingsReturnThread(null);
+	const id = get(state).homeThread;
+	change(() => ({ homeThread: null }));
 	if (id) await selectThread(id);
 	else fallback();
 }

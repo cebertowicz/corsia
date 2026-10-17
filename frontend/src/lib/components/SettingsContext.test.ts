@@ -98,4 +98,28 @@ describe('SettingsContext', () => {
 			returnSection: 'context',
 		});
 	});
+
+	it('with no thread on screen, opens a context file beside the CORSIA agent\'s thread', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({
+			ok: true,
+			json: async () => (String(input).startsWith('/api/corsia-agent') ? { thread_id: 'corsia-thread' } : { projects: [] }),
+		})));
+		component = mount(SettingsContext, { target: host, props: {} });
+		flushSync();
+
+		await vi.waitFor(() => expect(row('AGENTS.md')!.querySelector('button')).toBeTruthy());
+		row('AGENTS.md')!.querySelector<HTMLButtonElement>('button')!.click();
+
+		expect(get(threadWorkspaces)['corsia-thread']?.tabs.map((tab) => tab.title)).toEqual(['AGENTS.md']);
+		expect(get(showArtifactThreadRequest)).toEqual({ threadId: 'corsia-thread' });
+		expect(host.textContent).not.toContain('Open a conversation to view this.');
+	});
+
+	it('with no thread on screen and none for the workspace, the row is text and says what to do', async () => {
+		component = mount(SettingsContext, { target: host, props: {} });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain('Open a conversation to view this.'));
+		expect(row('AGENTS.md')!.querySelector('button')).toBeNull();
+	});
 });

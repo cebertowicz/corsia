@@ -107,3 +107,11 @@ export async function fetchCorsiaAgent(token: string | null): Promise<Coordinati
 export function fetchScopeTarget(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
 	return scope ? fetchConductor(token, scope) : fetchCorsiaAgent(token);
 }
+
+/** The thread a scope's documents open beside when none is on screen: the project's conductor, or the workspace's CORSIA agent. Null when the scope has none. */
+export async function fetchScopeHomeThread(token: string | null, projectId: string | null): Promise<string | null> {
+	const lookup = projectId
+		? await fetchConductor(token, { id: projectId, name: '', color: '' })
+		: await fetchCorsiaAgent(token);
+	return lookup.kind === 'target' ? lookup.target.thread_id : null;
+}

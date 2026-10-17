@@ -146,7 +146,7 @@
 <style>
 	.repo-item { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); }
 	.repo-item.missing { opacity: 0.75; }
-	.repo-summary { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: 38px; }
+	.repo-summary { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: var(--list-row-min-height); }
 	.row-text { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-width: 0; }
 	.nm { font-size: var(--text-subhead); color: var(--text-primary); }
 	.sub { font-size: var(--text-caption); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

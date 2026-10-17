@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
 import {
+	closeSettingsBack,
 	openProjectSettings,
+	recordSettingsHomeThread,
 	requestSettingsSection,
 	resetSettingsNavigation,
 	returnToProjectPage,
@@ -31,5 +33,52 @@ describe('settings navigation transitions', () => {
 		requestSettingsSection('providers', 'nowhere');
 		selectSettingsSection('keys');
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null });
+	});
+
+	describe('the thread Settings opened over', () => {
+		it('survives a Settings -> Documents -> Settings round trip', () => {
+			recordSettingsHomeThread('settings', 'thread-1');
+			recordSettingsHomeThread('documents', null); // Context "Add existing", Skills "Browse": the thread is gone from the route
+			recordSettingsHomeThread('settings', null); // back in Settings, no thread on screen
+			expect(get(settingsNavigation).homeThread).toBe('thread-1');
+		});
+
+		it.each(['chat', 'activity', 'measurement'])('is cleared when the person leaves Settings for %s', (view) => {
+			recordSettingsHomeThread('settings', 'thread-1');
+			recordSettingsHomeThread(view, null);
+			expect(get(settingsNavigation).homeThread).toBeNull();
+		});
+
+		it('is cleared by leaving from Documents too, so a later Settings does not inherit it', () => {
+			recordSettingsHomeThread('settings', 'thread-1');
+			recordSettingsHomeThread('documents', null);
+			recordSettingsHomeThread('chat', 'thread-2');
+			recordSettingsHomeThread('settings', null);
+			expect(get(settingsNavigation).homeThread).toBeNull();
+		});
+
+		it('is the only record of it: Back returns to it, once', async () => {
+			recordSettingsHomeThread('settings', 'thread-1');
+			const select = vi.fn(async () => undefined);
+			const fallback = vi.fn();
+			await closeSettingsBack(select, fallback);
+			expect(select).toHaveBeenCalledWith('thread-1');
+			expect(fallback).not.toHaveBeenCalled();
+			expect(get(settingsNavigation).homeThread).toBeNull();
+			await closeSettingsBack(select, fallback);
+			expect(fallback).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('links already in saved messages', () => {
+		it('/settings/system#connected-apps opens Connected apps', () => {
+			requestSettingsSection('system', 'connected-apps');
+			expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', anchor: 'connected-apps' });
+		});
+
+		it('leaves other System anchors on System', () => {
+			requestSettingsSection('system', 'update');
+			expect(get(settingsNavigation)).toMatchObject({ section: 'system', anchor: 'update' });
+		});
 	});
 });

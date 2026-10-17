@@ -57,7 +57,6 @@
 				accent_color: d.accent_color ?? null,
 				path: d.path ?? null,
 				projects_root: typeof d.projects_root === 'string' ? d.projects_root : '',
-				context_files: Array.isArray(d.context_files) ? d.context_files.map(String) : [],
 			};
 			name = project.name;
 			description = project.description;
