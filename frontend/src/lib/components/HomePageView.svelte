@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { get } from 'svelte/store';
 	import LoginScreen from './LoginScreen.svelte';
 	import SetupScreen from './SetupScreen.svelte';
 	import HomeShell from './HomeShell.svelte';
@@ -8,6 +9,8 @@
 	import type ChatPanel from './ChatPanel.svelte';
 	import type { View } from '$lib/homePaneConfig';
 	import type { ProjectPick } from '$lib/stores/projects';
+	import { token } from '$lib/stores/auth';
+	import { fetchSetupProgress } from '$lib/setupProgress';
 
 	let {
 		isAuthenticated,
@@ -85,6 +88,18 @@
 
 	const easeOutQuint = cubicOut;
 	let setupMode = $state<'login' | 'flow'>('login');
+	// The backend, not this tab, knows whether a signed-in person finished setup. Read once per session, never during setup itself.
+	let setupResume = $state(false);
+	let setupChecked = false;
+	$effect(() => {
+		if (!isAuthenticated) { setupChecked = false; return; }
+		if (setupMode === 'flow') { setupChecked = true; return; }
+		if (setupChecked) return;
+		setupChecked = true;
+		void fetchSetupProgress(get(token)).then((progress) => {
+			if (progress && !progress.setup_completed) { setupResume = true; setupMode = 'flow'; }
+		});
+	});
 
 	function reduceMotion() {
 		return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -111,9 +126,10 @@
 {#if setupMode === 'flow'}
 	<div class="auth-gate" out:authGateExit>
 		<SetupScreen
+			resume={setupResume}
 			onExistingAccount={() => setupMode = 'login'}
 			onAccountCreated={() => setupMode = 'flow'}
-			onFinished={() => setupMode = 'login'}
+			onFinished={() => { setupMode = 'login'; setupResume = false; }}
 		/>
 	</div>
 {:else if !isAuthenticated}
