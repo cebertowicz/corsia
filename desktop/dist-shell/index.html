@@ -52,6 +52,22 @@
 			font-size: var(--text-footnote);
 			line-height: var(--lh-normal);
 		}
+		.note {
+			max-width: calc(var(--space-8) * 8);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+		}
+		.details {
+			max-width: calc(var(--space-8) * 12);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+		}
+		.details summary { cursor: pointer; }
+		.details p { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
 		.log code {
 			display: block;
 			margin-top: var(--space-1);
@@ -163,6 +179,8 @@
 		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
 		<p id="line" class="line" hidden></p>
+		<p id="note" class="note" hidden></p>
+		<details id="details" class="details" hidden><summary>Details</summary><p id="details-text"></p></details>
 		<p id="log" class="log" hidden>Service log<code id="log-path"></code></p>
 		<div id="spinner" class="spinner"></div>
 		<section id="background-approval" class="background-approval" hidden aria-labelledby="status">
@@ -174,6 +192,7 @@
 		</section>
 		<div id="actions" class="actions" hidden>
 			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
+			<button id="quit" class="secondary" type="button" hidden>Quit</button>
 			<button id="retry" class="primary" type="button">Try again</button>
 		</div>
 	</div>
@@ -183,6 +202,9 @@
 			const invoke = window.__TAURI__?.core?.invoke;
 			const status = document.getElementById('status');
 			const line = document.getElementById('line');
+			const note = document.getElementById('note');
+			const details = document.getElementById('details');
+			const detailsText = document.getElementById('details-text');
 			const log = document.getElementById('log');
 			const logPath = document.getElementById('log-path');
 			const spinner = document.getElementById('spinner');
@@ -193,24 +215,141 @@
 			const openLoginItems = document.getElementById('open-login-items');
 			const retry = document.getElementById('retry');
 			const failureLoginItems = document.getElementById('failure-login-items');
+			const quit = document.getElementById('quit');
+			const ADOPTION_COPY = {
+				questionTitle: 'Use the CORSIA already on this computer?',
+				questionLine: (_installDir, workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It waits for running work to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
+
+				waitingTitle: 'Waiting for running work to finish…',
+				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
+				backingUpTitle: 'Backing up your data…',
+
+				failureTitle: 'CORSIA couldn’t switch over',
+				// Four outcomes, from the backend rather than the reason text: never stopped, stopped
+				// and restored, not known to be running (also what a plain string means), or switched
+				// over and still starting. The reason text only ever goes under Details, except a
+				// refusal written for the person, which tells them what to do and is the line.
+				failureLead: {
+					untouched: 'Nothing was changed. Your existing CORSIA is still running.',
+					restored: 'Your existing CORSIA is running again, as it was.',
+				},
+				mayNotBeRunning: 'Your existing CORSIA may not be running.',
+				// An unconfirmed install names the one action the app runs to put it back.
+				recoveries: {
+					start_again: { line: 'Choose Start it again.', button: 'Start it again', working: 'Starting your existing CORSIA…', note: 'If that doesn’t work, restart this computer.' },
+					reopen: { line: 'Choose Reopen CORSIA to put it back.', button: 'Reopen CORSIA', working: 'Reopening CORSIA…', note: '' },
+				},
+				switched: { title: 'CORSIA switched over and is still starting.', button: 'Check again' },
+			};
 			let quitFailure = false;
+			let adoptionPrompt = false;
+			// What the failure screen's button runs: { kind, failure }, or null for Try again.
+			let adoptionRecovery = null;
 			let approvalPoll;
 			let approvalPollInFlight = false;
 			let continuationStarted = false;
 
 			function showStarting() {
 				quitFailure = false;
+				adoptionPrompt = false;
+				adoptionRecovery = null;
 				status.textContent = 'Starting CORSIA…';
 				line.hidden = true;
+				note.hidden = true;
+				details.hidden = true;
 				log.hidden = true;
 				spinner.hidden = false;
 				actions.hidden = true;
 				backgroundApproval.hidden = true;
+				quit.hidden = true;
+			}
+
+			function showExistingInstall(installDir, workDir) {
+				clearInterval(approvalPoll);
+				adoptionPrompt = true;
+				adoptionRecovery = null;
+				status.textContent = ADOPTION_COPY.questionTitle;
+				line.textContent = ADOPTION_COPY.questionLine(installDir, workDir);
+				line.hidden = false;
+				note.hidden = true;
+				details.hidden = true;
+				log.hidden = true;
+				spinner.hidden = true;
+				backgroundApproval.hidden = true;
+				failureLoginItems.hidden = true;
+				quit.hidden = false;
+				retry.textContent = 'Use it';
+				actions.hidden = false;
+				retry.disabled = false;
+				retry.focus();
+			}
+
+			// `failure` is the backend's { message, outcome, recovery, advice }; a plain string claims
+			// nothing about the existing install, so it offers the relaunch that is always safe.
+			async function showAdoptionFailure(failure) {
+				const given = failure && typeof failure === 'object' ? failure : {};
+				const reason = typeof failure === 'string' ? failure : given.message;
+				const detail = typeof reason === 'string' && reason ? reason : 'CORSIA couldn’t switch over.';
+				const outcome = given.outcome;
+				const settled = outcome === 'untouched' || outcome === 'restored';
+				const kind = settled ? null : outcome === 'switched' ? 'check' : given.recovery === 'start_again' ? 'start_again' : 'reopen';
+				quitFailure = false;
+				adoptionPrompt = false;
+				adoptionRecovery = kind ? { kind, failure: { message: detail, outcome, recovery: given.recovery } } : null;
+				backgroundApproval.hidden = true;
+				const recovery = ADOPTION_COPY.recoveries[kind];
+				if (kind === 'check') {
+					status.textContent = ADOPTION_COPY.switched.title;
+					line.hidden = true;
+					note.hidden = true;
+				} else {
+					status.textContent = ADOPTION_COPY.failureTitle;
+					const lead = settled ? ADOPTION_COPY.failureLead[outcome] : `${ADOPTION_COPY.mayNotBeRunning} ${recovery.line}`;
+					line.textContent = given.advice === true && settled ? `${lead} ${detail}` : lead;
+					line.hidden = false;
+					note.textContent = recovery?.note ?? '';
+					note.hidden = !note.textContent;
+				}
+				detailsText.textContent = detail;
+				details.hidden = given.advice === true && settled;
+				details.open = false;
+				log.hidden = false;
+				spinner.hidden = true;
+				failureLoginItems.hidden = true;
+				quit.hidden = false;
+				retry.textContent = kind === 'check' ? ADOPTION_COPY.switched.button : recovery ? recovery.button : 'Try again';
+				actions.hidden = false;
+				try { logPath.textContent = await invoke('get_service_log_path'); } catch { logPath.textContent = 'Service log location unavailable'; }
+				retry.disabled = false;
+				retry.focus();
+			}
+
+			// The failure screen's button: each recovery is an action the app runs, never an instruction.
+			async function runRecovery({ kind, failure }) {
+				showStarting();
+				status.textContent = ADOPTION_COPY.recoveries[kind]?.working ?? 'Starting CORSIA…';
+				try {
+					if (kind === 'start_again') {
+						await invoke('start_existing_again');
+						await showAdoptionFailure({ message: failure.message, outcome: 'restored' });
+					} else if (kind === 'reopen') {
+						await invoke('reopen_app');
+					} else {
+						const startup = await invoke('check_service_started');
+						if (startup.state === 'ready') continueToService(startup);
+						else await showAdoptionFailure({ message: failure.message, outcome: 'switched' });
+					}
+				} catch (error) {
+					await showAdoptionFailure(error);
+				}
 			}
 
 			async function showFailure(why, quitting = false) {
 				clearInterval(approvalPoll);
 				quitFailure = quitting;
+				adoptionRecovery = null;
+				note.hidden = true;
+				details.hidden = true;
 				backgroundApproval.hidden = true;
 				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
 				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : typeof why === 'string' ? why : '';
@@ -219,6 +358,7 @@
 				spinner.hidden = true;
 				failureLoginItems.hidden = !quitting;
 				failureLoginItems.className = quitting ? 'primary' : 'secondary';
+				quit.hidden = false;
 				retry.className = quitting ? 'secondary' : 'primary';
 				actions.hidden = false;
 				try {
@@ -246,6 +386,9 @@
 
 			async function showBackgroundApproval() {
 				quitFailure = false;
+				adoptionRecovery = null;
+				note.hidden = true;
+				details.hidden = true;
 				line.textContent = 'Turn this on so your agents keep working when you close this window.';
 				line.hidden = false;
 				log.hidden = true;
@@ -283,6 +426,8 @@
 					const startup = await invoke('start_local_service');
 					if (startup.state === 'ready') {
 						continueToService(startup);
+					} else if (startup.state === 'existing_install') {
+						showExistingInstall(startup.install_dir, startup.workspace);
 					} else {
 						await showBackgroundApproval();
 					}
@@ -292,6 +437,35 @@
 			}
 
 			async function retryFailure() {
+				if (adoptionRecovery) return runRecovery(adoptionRecovery);
+				if (adoptionPrompt) {
+					showStarting();
+					status.textContent = ADOPTION_COPY.waitingTitle;
+					const countPoll = setInterval(async () => {
+						try {
+							const count = await invoke('adoption_waiting_count');
+							if (count === null) return;
+							if (count > 0) {
+								status.textContent = ADOPTION_COPY.waitingTitle;
+								line.textContent = ADOPTION_COPY.waitingCount(count);
+								line.hidden = false;
+							} else {
+								status.textContent = ADOPTION_COPY.backingUpTitle;
+								line.hidden = true;
+							}
+						} catch { /* the next reading replaces this one */ }
+					}, 1000);
+					try {
+						const startup = await invoke('adopt_existing_install');
+						if (startup.state === 'ready') continueToService(startup);
+						else await showAdoptionFailure('CORSIA couldn’t switch over.');
+					} catch (error) {
+						await showAdoptionFailure(error);
+					} finally {
+						clearInterval(countPoll);
+					}
+					return;
+				}
 				if (!quitFailure) return start();
 				retry.disabled = true;
 				status.textContent = 'Stopping CORSIA…';
@@ -305,8 +479,10 @@
 			window.__corsiaShowServiceFailure = showFailure;
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
 			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
+			window.__corsiaShowExistingInstall = showExistingInstall;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
+			quit.addEventListener('click', () => window.__TAURI__?.window?.getCurrentWindow?.().close());
 			retry.addEventListener('click', retryFailure);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);

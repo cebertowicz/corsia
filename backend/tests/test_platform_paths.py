@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import re
+import sqlite3
 import stat
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -62,21 +63,23 @@ def test_app_folder_name_is_one_value_across_the_app_launcher_and_backend():
     ]
 
 
-def test_service_file_lines_honour_only_the_workspace_and_port(tmp_path):
+def test_service_file_lines_honour_only_the_state_workspace_and_port(tmp_path):
     paths = _platform_paths()
     service_file = tmp_path / "service.json"
     service_file.write_text(
-        '{"workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
+        '{"state_dir": "/state", "workspace": "/w", "port": 4100, "PATH": "/evil", "x\\u0007": 1}'
     )
 
     assert paths.service_file_lines(service_file) == [
         "note=service.json: ignoring unsupported key PATH",
         "note=service.json: ignoring unsupported key <unprintable name>",
+        "state_dir=/state",
         "workspace=/w",
         "port=4100",
     ]
-    service_file.write_text('{"workspace": "relative", "port": true}')
+    service_file.write_text('{"state_dir": "relative", "workspace": "relative", "port": true}')
     assert paths.service_file_lines(service_file) == [
+        "note=service.json: ignoring an invalid state_dir value",
         "note=service.json: ignoring an invalid workspace value",
         "note=service.json: ignoring an invalid port value",
     ]
@@ -84,6 +87,148 @@ def test_service_file_lines_honour_only_the_workspace_and_port(tmp_path):
     assert paths.service_file_lines(service_file) == [
         "note=service.json unreadable: ValueError"
     ]
+
+
+def test_service_file_lines_accept_state_dir_without_an_unsupported_key_note(tmp_path):
+    paths = _platform_paths()
+    service_file = tmp_path / "service.json"
+    service_file.write_text('{"state_dir": "/state"}')
+
+    assert paths.service_file_lines(service_file) == ["state_dir=/state"]
+
+
+def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = tmp_path / "Application Support" / "com.cebertowicz.corsia" / "state"
+    state.mkdir(parents=True)
+    database = state / "corsia.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("create table agents (id text)")
+        connection.execute("insert into agents values ('before-adopt')")
+    database.chmod(0o600)
+    keys = state / "keys"
+    keys.mkdir(mode=0o700)
+    key = keys / "provider"
+    key.write_text("kept-private")
+    key.chmod(0o600)
+    (state / "devices").mkdir(mode=0o700)
+    (state / "devices" / "registered").write_text("device")
+
+    snapshot = snapshots.create_adoption_snapshot(state)
+    with sqlite3.connect(database) as connection:
+        connection.execute("insert into agents values ('new-build')")
+    (state / "keys" / "new-key").write_text("new")
+    (state / "new-build-file").write_text("new")
+    (state / "corsia.db-wal").write_text("wal")
+    (state / "corsia.db-shm").write_text("shm")
+
+    snapshots.restore_adoption_snapshot(state, snapshot)
+
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("select id from agents order by id").fetchall() == [("before-adopt",)]
+    assert not (state / "new-build-file").exists()
+    assert not (state / "keys" / "new-key").exists()
+    assert not (state / "corsia.db-wal").exists()
+    assert not (state / "corsia.db-shm").exists()
+    assert key.read_text() == "kept-private"
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o700
+    assert stat.S_IMODE(key.stat().st_mode) == 0o600
+    assert stat.S_IMODE(database.stat().st_mode) == 0o600
+
+
+def _adoptable_state(tmp_path, stored: dict[str, str]) -> Path:
+    """A state root whose one values file holds ``stored`` (entry name -> value), as the key store writes it."""
+    import json
+
+    state = tmp_path / "state"
+    (state / "keys").mkdir(parents=True)
+    with sqlite3.connect(state / "corsia.db") as connection:
+        connection.execute(
+            "create table key_store_entries (name text primary key, created_at text not null, value_ref text)"
+        )
+        values = {}
+        for name, value in stored.items():
+            reference = f"{name}.0123456789abcdef"
+            values[reference] = value
+            connection.execute(
+                "insert into key_store_entries values (?, 'now', ?)", (name, reference)
+            )
+        # A row with no value, and a leftover from the key store's temporary file.
+        connection.execute("insert into key_store_entries values ('provider-groq', 'now', null)")
+    (state / "keys" / "values.json").write_text(json.dumps(values))
+    (state / "keys" / ".values.json.deadbeef.tmp").write_text("{}")
+    return state
+
+
+def test_adoption_preflight_names_the_stored_keys_it_misses_in_the_single_values_file(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {"provider-openai": "stored-openai-value"})
+
+    with pytest.raises(snapshots.AdoptionRefused) as refused:
+        snapshots.check_adoption_preflight(state, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"])
+
+    message = str(refused.value)
+    assert message == (
+        "These provider keys aren’t stored in CORSIA yet: ANTHROPIC_API_KEY. "
+        "Add them in CORSIA › Settings › Keys, then choose Try again."
+    )
+    assert "ANTHROPIC_API_KEY" in message
+    assert "OPENAI_API_KEY" not in message
+    assert "stored-openai-value" not in message
+
+
+def test_adoption_preflight_refuses_a_key_store_it_cannot_read_instead_of_calling_it_empty(tmp_path):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = tmp_path / "state"
+    state.mkdir()
+    connection = sqlite3.connect(state / "corsia.db")
+    connection.execute("CREATE TABLE key_store_entries (name TEXT)")  # no value_ref column
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(snapshots.AdoptionRefused):
+        snapshots.stored_key_names(state)
+
+
+def test_adoption_preflight_passes_when_every_expected_key_is_stored(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(
+        tmp_path, {"provider-openai": "stored-openai-value", "provider-anthropic": "stored-anthropic-value"}
+    )
+    monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 0)
+
+    snapshots.check_adoption_preflight(state, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"])
+    assert snapshots.preflight_main([str(state), "OPENAI_API_KEY"]) == 0
+
+
+def test_adoption_preflight_refuses_when_the_backup_and_reserve_do_not_fit(tmp_path, monkeypatch, capsys):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+    monkeypatch.setattr(snapshots, "_FREE_FLOOR_BYTES", 1 << 60)
+
+    assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
+    message = capsys.readouterr().err.strip()
+    # The measured numbers and the next step, in the person's terms.
+    assert re.fullmatch(
+        r"The backup needs [\d.]+ GB free and this disk has [\d.]+ GB\. Free up space, then choose Try again\.",
+        message,
+    )
+    assert not (state / "backups").exists()
+
+
+def test_a_failed_snapshot_copy_leaves_no_partial_backup_behind(tmp_path, monkeypatch):
+    snapshots = importlib.import_module("infra.adoption_snapshot")
+    state = _adoptable_state(tmp_path, {})
+
+    def full_disk(source, destination):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(snapshots, "_copy_entry", full_disk)
+
+    with pytest.raises(OSError):
+        snapshots.create_adoption_snapshot(state)
+
+    assert list((state / "backups").iterdir()) == []
 
 
 def test_default_state_root_is_the_state_child_of_the_app_folder_in_the_app(tmp_path):

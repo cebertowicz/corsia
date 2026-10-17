@@ -122,16 +122,17 @@ def app_metadata_dir(home: Path | None = None) -> Path:
 
 
 SERVICE_FILE = "service.json"
-_SERVICE_FILE_KEYS = ("workspace", "port")
+_SERVICE_FILE_KEYS = ("state_dir", "workspace", "port")
 
 
 def service_file_lines(path: Path) -> list[str]:
     """Parse the app's ``service.json`` into ``key=value`` lines for shell callers.
 
-    The file is parsed, never executed. Only ``workspace`` (an absolute,
-    printable path) and ``port`` (1-65535) are honoured; anything else becomes
-    a ``note=`` line that never repeats a value. The bundle's launcher and its
-    lifecycle script both read the file through this one function.
+    The file is parsed, never executed. Only ``state_dir`` and ``workspace``
+    (absolute, printable paths) and ``port`` (1-65535) are honoured; anything
+    else becomes a ``note=`` line that never repeats a value. The bundle's
+    launcher and its lifecycle script both read the file through this one
+    function.
     """
 
     def name(value: object) -> str:
@@ -150,11 +151,12 @@ def service_file_lines(path: Path) -> list[str]:
         for key in data
         if key not in _SERVICE_FILE_KEYS
     ]
-    workspace = data.get("workspace")
-    if isinstance(workspace, str) and workspace.startswith("/") and workspace.isprintable():
-        lines.append(f"workspace={workspace}")
-    elif "workspace" in data:
-        lines.append(f"note={SERVICE_FILE}: ignoring an invalid workspace value")
+    for key in ("state_dir", "workspace"):
+        value = data.get(key)
+        if isinstance(value, str) and value.startswith("/") and value.isprintable():
+            lines.append(f"{key}={value}")
+        elif key in data:
+            lines.append(f"note={SERVICE_FILE}: ignoring an invalid {key} value")
     port = data.get("port")
     if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
         lines.append(f"port={port}")

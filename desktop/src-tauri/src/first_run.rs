@@ -20,6 +20,8 @@ use std::{
 
 use serde::Serialize;
 
+use crate::adoption;
+
 pub const SERVICE_FILE: &str = "service.json";
 const WORKSPACE_FOLDER: &str = "corsia";
 const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
@@ -33,8 +35,11 @@ pub enum FirstRun {
     Configured,
     /// Nothing from an earlier install: create this workspace and record it.
     Fresh { workspace: PathBuf },
-    /// An earlier install is present: write nothing and show this reason.
+    /// An earlier install is present but does not meet the source-service
+    /// contract required for adoption: write nothing and show this reason.
     ExistingInstall { reason: String },
+    /// A rendered source service plist identifies a moveable source install.
+    Adoptable { source: adoption::SourceInstall },
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -210,6 +215,11 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
         return Ok(FirstRun::Configured);
     }
 
+    let source_plist = home.join("Library").join("LaunchAgents").join("com.corsia.prod.plist");
+    if present(&source_plist)? {
+        return adoption::source_from_plist(home, &source_plist).map(|source| FirstRun::Adoptable { source });
+    }
+
     if present(&home.join(".corsia").join("config.json"))? {
         return existing_install(
             "CORSIA found an existing install on this computer (~/.corsia). \
@@ -326,7 +336,9 @@ fn write_service_file(app_dir: &Path, workspace: &Path, port: u16) -> Result<(),
     let workspace = workspace
         .to_str()
         .ok_or("the workspace path is not valid UTF-8")?;
+    let state_dir = app_dir.join("state").to_str().ok_or("the state path is not valid UTF-8")?.to_owned();
     let body = serde_json::to_vec_pretty(&serde_json::json!({
+        "state_dir": state_dir,
         "workspace": workspace,
         "port": port,
     }))
@@ -485,12 +497,13 @@ mod tests {
         assert!(workspace.is_dir());
         let recorded: serde_json::Value =
             serde_json::from_slice(&fs::read(home.app_dir().join(SERVICE_FILE)).unwrap()).unwrap();
+        assert_eq!(recorded["state_dir"], home.app_dir().join("state").to_str().unwrap());
         assert_eq!(recorded["workspace"], workspace.to_str().unwrap());
         assert_eq!(recorded["port"], 47_895);
         assert_eq!(
             recorded.as_object().unwrap().len(),
-            2,
-            "only workspace and port are recorded"
+            3,
+            "only state_dir, workspace and port are recorded"
         );
         assert_eq!(recorded_port(&home.app_dir()), Some(47_895));
         assert!(!home.app_dir().join("service.json.tmp").exists());

@@ -62,6 +62,10 @@ if (app_dir / SERVICE_FILE).is_file():
         case "$line" in
             app=*) _corsia_app_dir="${line#app=}" ;;
             state=*) _corsia_app_state_root="${line#state=}" ;;
+            state_dir=*)
+                [ -n "${CORSIA_STATE_DIR:-}" ] \
+                    || _corsia_app_state_root="${line#state_dir=}"
+                ;;
             workspace=*)
                 [ -n "${CORSIA_WORKSPACE:-}" ] \
                     || export CORSIA_WORKSPACE="${line#workspace=}"
@@ -76,7 +80,7 @@ app_mode_runtime_identity() {
         echo "This CORSIA app has no workspace recorded in $_corsia_app_dir/service.json; open CORSIA to finish setting it up." >&2
         return 1
     fi
-    CORSIA_STATE_DIR="$_corsia_app_state_root"
+    CORSIA_STATE_DIR="${CORSIA_STATE_DIR:-$_corsia_app_state_root}"
     export CORSIA_WORKSPACE CORSIA_STATE_DIR
     # The launcher sends the service's output here.
     BACKEND_LOG="${BACKEND_LOG:-$CORSIA_STATE_DIR/logs/service.log}"

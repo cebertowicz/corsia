@@ -1,0 +1,205 @@
+// Checks the adoption failure screen in the real launch shell: what each outcome says, which
+// button it offers, and that the button runs the right command and nothing else. The window reads
+// the backend's `outcome` and `recovery`, never the reason text, and the reason only appears under
+// Details (except a refusal written for the person, which is the line).
+//
+// usage: node desktop/tests/adoption-failure-lead.mjs [--screenshots <dir>]
+import { createRequire } from 'node:module';
+import { createServer } from 'node:http';
+import { mkdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repo = path.resolve(here, '../..');
+const shell = path.join(repo, 'desktop/dist-shell');
+const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_FROM ?? repo, 'frontend/package.json'))('playwright');
+const flag = process.argv.indexOf('--screenshots');
+const screenshots = flag > -1 ? process.argv[flag + 1] : null;
+if (screenshots) await mkdir(screenshots, { recursive: true });
+
+const types = { '.html': 'text/html', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const server = createServer(async (request, response) => {
+	try {
+		const name = new URL(request.url, 'http://127.0.0.1').pathname.replace(/^\/(desktop\/dist-shell\/)?/, '');
+		const file = path.resolve(shell, name || 'index.html');
+		if (!file.startsWith(`${shell}${path.sep}`)) throw new Error('outside the shell');
+		response.writeHead(200, { 'content-type': types[path.extname(file)] ?? 'text/plain' });
+		response.end(await readFile(file));
+	} catch {
+		response.writeHead(404);
+		response.end();
+	}
+});
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const browser = await chromium.launch();
+
+const title = 'CORSIA couldn’t switch over';
+const keys = 'These provider keys aren’t stored in CORSIA yet: OPENAI_API_KEY. Add them in CORSIA › Settings › Keys, then choose Try again.';
+const space = 'The backup needs 4.2 GB free and this disk has 1.1 GB. Free up space, then choose Try again.';
+const untouched = 'Nothing was changed. Your existing CORSIA is still running.';
+const restored = 'Your existing CORSIA is running again, as it was.';
+const startAgainLine = 'Your existing CORSIA may not be running. Choose Start it again.';
+const reopenLine = 'Your existing CORSIA may not be running. Choose Reopen CORSIA to put it back.';
+const reboot = 'If that doesn’t work, restart this computer.';
+const holdText = 'status failed; the hold on new work could not be released: cancel failed';
+const stalledText = 'recovering interrupted adoption; app service could not be stopped: new stop failed';
+const startingText = 'CORSIA did not answer within 30 seconds. See the service log.';
+
+const refused = (message) => ({ message, outcome: 'untouched', recovery: null, advice: true });
+const unconfirmed = (message, recovery) => ({ message, outcome: 'unconfirmed', recovery, advice: false });
+const settled = (message, outcome) => ({ message, outcome, recovery: null, advice: false });
+
+// `line` null means the line is hidden; `note` null means the secondary line is hidden; `details`
+// null means Details is hidden.
+const cases = [
+	{ name: '3b-refused-keys', failure: refused(keys), title, line: `${untouched} ${keys}`, note: null, details: null, button: 'Try again' },
+	{ name: '3c-refused-space', failure: refused(space), title, line: `${untouched} ${space}`, note: null, details: null, button: 'Try again' },
+	{ name: 'untouched-technical', failure: settled('source drain API returned HTTP 500', 'untouched'), title, line: untouched, note: null, details: 'source drain API returned HTTP 500', button: 'Try again' },
+	{ name: 'after-stop', failure: settled('the new service did not become ready; the old install was restored', 'restored'), title, line: restored, note: null, details: 'the new service did not become ready; the old install was restored', button: 'Try again' },
+	// The same reason text with each outcome: only the outcome decides the line.
+	{ name: 'same-text-restored', failure: settled(space, 'restored'), title, line: restored, note: null, details: space, button: 'Try again' },
+	{ name: '3d-start-again', failure: unconfirmed(holdText, 'start_again'), title, line: startAgainLine, note: reboot, details: holdText, button: 'Start it again' },
+	{ name: '3e-reopen', failure: unconfirmed(stalledText, 'reopen'), title, line: reopenLine, note: null, details: stalledText, button: 'Reopen CORSIA' },
+	// A plain error claims nothing about the existing install, so it offers the relaunch that is always safe.
+	{ name: 'plain-string', failure: 'could not restart', title, line: reopenLine, note: null, details: 'could not restart', button: 'Reopen CORSIA' },
+	{ name: '3f-still-starting', failure: settled(startingText, 'switched'), title: 'CORSIA switched over and is still starting.', line: null, note: null, details: startingText, button: 'Check again' },
+];
+
+// Each recovery button runs its own command; a script says what each command does.
+const actions = [
+	{
+		name: 'start-again-succeeds',
+		failure: unconfirmed(holdText, 'start_again'),
+		script: { start_existing_again: 'ok' },
+		calls: ['adopt_existing_install', 'start_existing_again'],
+		after: { title, line: restored, note: null, details: holdText, button: 'Try again' },
+	},
+	{
+		name: 'start-again-fails',
+		failure: unconfirmed(holdText, 'start_again'),
+		script: { start_existing_again: unconfirmed('the existing install could not be started: still down', 'start_again') },
+		calls: ['adopt_existing_install', 'start_existing_again'],
+		after: { title, line: startAgainLine, note: reboot, details: 'the existing install could not be started: still down', button: 'Start it again' },
+	},
+	{
+		name: 'reopen-runs',
+		failure: unconfirmed(stalledText, 'reopen'),
+		script: { reopen_app: 'ok' },
+		calls: ['adopt_existing_install', 'reopen_app'],
+		after: { title: 'Reopening CORSIA…', line: null, note: null, details: null, button: null },
+	},
+	{
+		name: 'reopen-fails',
+		failure: unconfirmed(stalledText, 'reopen'),
+		script: { reopen_app: 'CORSIA couldn’t reopen itself.' },
+		calls: ['adopt_existing_install', 'reopen_app'],
+		after: { title, line: reopenLine, note: null, details: 'CORSIA couldn’t reopen itself.', button: 'Reopen CORSIA' },
+	},
+	{
+		name: 'check-again-succeeds',
+		failure: settled(startingText, 'switched'),
+		script: { check_service_started: { state: 'ready', url: '/index.html#started' } },
+		calls: ['adopt_existing_install', 'check_service_started'],
+		hash: '#started',
+	},
+	{
+		name: 'check-again-fails',
+		failure: settled(startingText, 'switched'),
+		script: { check_service_started: settled('CORSIA did not answer within 30 seconds. Still no answer.', 'switched') },
+		calls: ['adopt_existing_install', 'check_service_started'],
+		after: { title: 'CORSIA switched over and is still starting.', line: null, note: null, details: 'CORSIA did not answer within 30 seconds. Still no answer.', button: 'Check again' },
+	},
+];
+
+let failed = 0;
+const fail = (message) => {
+	failed += 1;
+	console.error(`FAIL ${message}`);
+};
+
+async function open(theme, failure, script = {}) {
+	const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: theme });
+	await page.addInitScript(([thrown, scripted]) => {
+		window.__calls = [];
+		window.__TAURI__ = { core: { invoke: async (command) => {
+			window.__calls.push(command);
+			if (command === 'get_service_log_path') return '/x/service.log';
+			if (command === 'adoption_waiting_count') return 0;
+			if (command === 'adopt_existing_install') throw thrown;
+			if (command in scripted) {
+				const result = scripted[command];
+				if (result === 'ok') return undefined;
+				if (result && result.state) return result;
+				throw result;
+			}
+			return undefined;
+		} } };
+	}, [failure, script]);
+	await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
+	await page.evaluate(() => window.__corsiaShowExistingInstall('/i', '~/work'));
+	await page.click('#retry');
+	await page.waitForFunction(() => document.getElementById('status').textContent.includes('switch'));
+	return page;
+}
+
+async function read(page) {
+	return page.evaluate(() => {
+		const visible = (id) => {
+			const element = document.getElementById(id);
+			return element.hidden ? null : element.textContent;
+		};
+		const details = document.getElementById('details');
+		return {
+			title: document.getElementById('status').textContent,
+			line: visible('line'),
+			note: visible('note'),
+			details: details.hidden ? null : document.getElementById('details-text').textContent,
+			button: document.getElementById('actions').hidden ? null : document.getElementById('retry').textContent,
+			body: document.body.innerText,
+		};
+	});
+}
+
+function compare(label, shown, expected) {
+	for (const key of ['title', 'line', 'note', 'details', 'button']) {
+		if (shown[key] !== expected[key]) fail(`${label}: ${key}\n  expected: ${JSON.stringify(expected[key])}\n  shown:    ${JSON.stringify(shown[key])}`);
+	}
+}
+
+for (const theme of ['light', 'dark']) {
+	for (const { name, failure, ...expected } of cases) {
+		const page = await open(theme, failure);
+		const shown = await read(page);
+		const before = failed;
+		compare(`${theme} ${name}`, shown, expected);
+		// A switched-over install is not an error about the old one.
+		if (name === '3f-still-starting' && /existing CORSIA/.test(shown.body)) fail(`${theme} ${name}: mentions the existing CORSIA`);
+		// The raw reason never leaks into the line, except a refusal written for the person.
+		const reason = typeof failure === 'string' ? failure : failure.message;
+		if (shown.line && !failure.advice && shown.line.includes(reason)) fail(`${theme} ${name}: the reason is in the line`);
+		if (failed === before) console.log(`ok   ${theme} ${name}`);
+		if (screenshots && ['3b-refused-keys', '3c-refused-space', '3d-start-again', '3e-reopen', '3f-still-starting'].includes(name)) {
+			// Details open shows the reason a person can read or send on.
+			await page.evaluate(() => { document.getElementById('details').open = true; });
+			await page.screenshot({ path: path.join(screenshots, `${name}-${theme}.png`) });
+		}
+		await page.close();
+	}
+	for (const { name, failure, script, calls, after, hash } of actions) {
+		const page = await open(theme, failure, script);
+		const before = failed;
+		await page.click('#retry');
+		await page.waitForFunction((last) => window.__calls.includes(last), calls[calls.length - 1], { timeout: 3000 }).catch(() => {});
+		await page.waitForTimeout(150);
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_waiting_count'].includes(command));
+		if (JSON.stringify(made) !== JSON.stringify(calls)) fail(`${theme} ${name}: ran ${JSON.stringify(made)}, expected ${JSON.stringify(calls)}`);
+		if (hash && (await page.evaluate(() => window.location.hash)) !== hash) fail(`${theme} ${name}: did not continue to the service`);
+		if (after) compare(`${theme} ${name}`, await read(page), after);
+		if (failed === before) console.log(`ok   ${theme} ${name}`);
+		await page.close();
+	}
+}
+await browser.close();
+server.close();
+if (failed) process.exit(1);
