@@ -28,8 +28,9 @@ def _gh(args: list[str], what: str) -> subprocess.CompletedProcess[str] | None:
 def sender_can_approve(repo: str, login: str | None) -> bool | None:
     """Whether a login has write access to the repository.
 
-    None (logged) when GitHub could not answer, so a failed read is never
-    reported as a denial; the caller still approves nothing.
+    GitHub's 404 ("is not a user") is its answer, so it denies. None (logged)
+    when GitHub could not answer, so a failed read is never reported as a
+    denial; the caller still approves nothing.
     """
     if not login or not _LOGIN.fullmatch(login):
         return False
@@ -39,6 +40,8 @@ def sender_can_approve(repo: str, login: str | None) -> bool | None:
     )
     if result is None:
         return None
+    if result.returncode != 0 and "404" in (result.stderr or ""):
+        return False
     if result.returncode != 0:
         log.warning(
             "fork hold: reading %s's permission on %s exited %d: %s",
