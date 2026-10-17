@@ -99,12 +99,12 @@
 	.row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 	.info { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: calc(var(--space-1) * 0.75); }
 	.name { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
-	@media (max-width: 768px) { .row { flex-direction: column; gap: calc(var(--space-1) * 2.5); } }
+	@media (max-width: 48em) { .row { flex-direction: column; gap: calc(var(--space-1) * 2.5); } }
 	.desc { color: var(--text-muted); font-size: var(--text-footnote); line-height: var(--lh-normal); text-wrap: pretty; }
 	.manage { color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	/* The whole name and "itself." stay together on one line; they break only when the name alone is wider than the row. */
 	.nowrap { white-space: nowrap; }
-	@media (max-width: 768px) { .nowrap { white-space: normal; } }
+	@media (max-width: 48em) { .nowrap { white-space: normal; } }
 	/* Everything under the row is set once, at the description's size and line height on every width: the status, the
 	   problem and the countdown inherit it and only choose a colour. The code boxes keep their own size. */
 	.more { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); margin-top: var(--space-5); font-size: var(--text-footnote); line-height: var(--lh-normal); }

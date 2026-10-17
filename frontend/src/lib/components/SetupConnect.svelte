@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { Button, CodeInput, Field, RailRow } from '$lib/components/ui';
+	import { Button, CodeInput, Field, RailRow, Spinner } from '$lib/components/ui';
 	import SetupHostSteps from './SetupHostSteps.svelte';
 	import type { SetupRemote } from '$lib/setupRemote.svelte';
 	import { openExternalUrl } from '$lib/linkTargetResolver';
@@ -56,7 +56,7 @@
 			{#if remote.refusal}
 				<p class="err" role="alert" bind:this={refusalLine}>{remote.refusal}</p>
 			{:else if remote.busy || remote.connectedTo}
-				<p class="state" aria-busy="true"><span class="spinner"></span>Connecting to {remote.connectedTo || remote.label}…</p>
+				<p class="state" aria-busy="true"><Spinner size={12} />Connecting to {remote.connectedTo || remote.label}…</p>
 			{/if}
 		</div>
 	</div>
@@ -72,9 +72,9 @@
 		<div class="action"><Button variant="chip" size="sm" onclick={() => void openExternalUrl(SYSTEM_SETTINGS_LOCAL_NETWORK)}>Open System Settings</Button></div>
 	{:else if remote.noneFound}
 		<p class="sentence">No other computer running CORSIA found yet. On that computer: {SETTINGS_PATH}, then turn on Let other devices connect. Or type its address.</p>
-		<p class="state" aria-busy="true"><span class="spinner"></span>Looking…</p>
+		<p class="state" aria-busy="true"><Spinner size={12} />Looking…</p>
 	{:else}
-		<p class="state" aria-busy="true"><span class="spinner"></span>Looking…</p>
+		<p class="state" aria-busy="true"><Spinner size={12} />Looking…</p>
 	{/if}
 
 	<div class="address">
@@ -91,12 +91,6 @@
 	.sentence { margin: 0 0 var(--space-3); max-width: calc(var(--space-8) * 9); font-size: var(--text-body); line-height: var(--lh-normal); text-wrap: pretty; }
 	.action { margin: 0 0 var(--space-4); }
 	.address { max-width: calc(var(--space-8) * 8); }
-	.spinner {
-		display: inline-block; width: var(--space-3); height: var(--space-3); flex-shrink: 0;
-		border: 2px solid color-mix(in srgb, var(--accent-line) 25%, transparent); border-top-color: var(--accent-line);
-		border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite;
-	}
-	@keyframes spin { to { transform: rotate(360deg); } }
 	/* The boxes sit one --space-5 under the picture, so they read as its answer. */
 	.scroll {
 		height: 100%; min-height: 0; overflow-y: auto;
@@ -108,5 +102,4 @@
 	.scroll.above.more { mask-image: linear-gradient(to bottom, transparent, currentColor var(--space-6), currentColor calc(100% - var(--space-6)), transparent); }
 	.code { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-5); }
 	.err { margin: 0; font-size: var(--text-footnote); color: var(--red-text); text-wrap: pretty; }
-	@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 </style>

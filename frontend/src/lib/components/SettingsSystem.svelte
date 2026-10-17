@@ -264,7 +264,7 @@
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 	.confirm-text { font-size: var(--text-subhead); color: var(--text-secondary); }
-	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; order: -1; }
+	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: calc(var(--space-1) / 2); order: -1; }
 	.service-row:has(.confirm-block) { flex-wrap: wrap; }
 	.status-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
 	.status-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-subhead); }
