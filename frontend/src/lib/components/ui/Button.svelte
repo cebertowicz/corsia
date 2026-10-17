@@ -105,11 +105,12 @@
 	.btn.danger {
 		background: var(--red-bg);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
-		color: var(--red);
+		color: var(--red-text);
 	}
 	.btn.danger:hover:not(:disabled) {
 		background: color-mix(in srgb, var(--red) 18%, transparent);
 		border-color: var(--red);
+		color: var(--red-text);
 	}
 
 	.btn.ghost {

@@ -90,7 +90,7 @@
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 	</div>
 	{#snippet foot()}
-		<div class="actions"><Button onclick={onClose}>Cancel</Button><Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>Save</Button></div>
+		<div class="actions"><Button variant="ghost" onclick={onClose}>Cancel</Button><Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>Save</Button></div>
 	{/snippet}
 </Modal>
 

@@ -175,9 +175,10 @@ project scope every role is derived from the project's colour
 | `--green-bg` | | `rgba(52,211,153,0.08)` | `#f0fdf4` *(solid!)* | Light-mode value is solid hex, not rgba — known wart, do not "fix" without a sweep. |
 | `--green-border` | | `rgba(52,211,153,0.25)` | `rgba(34,197,94,0.3)` | |
 | `--green-text` | | `#34d399` | `#16a34a` | Use this for green-on-green-bg text. |
-| `--red` | Destructive / error | `#f87171` | `#f87171` | |
+| `--red` | Destructive / error | `#f87171` | `#f87171` | `--red` is for fills, borders and icons; red text uses `--red-text`. |
 | `--red-bg` | | `rgba(248,113,113,0.08)` | `#fef2f2` *(solid)* | |
 | `--red-bg-hover` | | `rgba(248,113,113,0.14)` | `#fee2e2` *(solid)* | |
+| `--red-text` | Red text | `var(--red)` | `#b91c1c` | Readable on `--red-bg` and the plain surface in both themes. |
 
 **Anti-patterns:**
 - ❌ Reaching for `--blue` directly, or `--purple` for the accent. Use the
@@ -750,8 +751,19 @@ interface Props {
 
 **Behavior:** Escape closes (when enabled), backdrop click closes (when
 enabled), inner click does NOT propagate to backdrop. Body has
-`overflow-y: auto`; modal max-height 86vh desktop / 92vh mobile. Fade
-backdrop 160ms, fly content (y: 8px) 200ms.
+`overflow-y: auto`; modal max-height 86vh on desktop, and on a phone only
+the room inside the safe-area padding, so the footer clears the home
+indicator. Fade backdrop 160ms, fly content (y: 8px) 200ms.
+
+**Header and footer have no dividers** (§0.2 rule 3); space separates them
+from the body. The footer puts every action together at the trailing edge, by
+proximity: a choice pair sits side by side where every other modal puts its
+commit, so the eye finds the commit in the same place each time. One solid
+`primary` `Button` (or `danger` for a destructive commit) is the commit, and
+every secondary (Cancel, Back, Close) is a `ghost` `Button`, never an
+outlined or secondary-filled one. No `flex: 1` spacer pins Cancel to the
+left, in `foot` or in a body action row. A destructive confirm carries no
+icon tile: its title says what happens.
 
 **Backdrop is light dim only** — `rgba(0, 0, 0, 0.28)` solid. The modal
 panel does the glass; the backdrop just de-emphasizes content. Liquid
@@ -790,7 +802,7 @@ interface Props {
   prominent action on a page or modal foot.
 - `secondary` — neutral default (`--bg-secondary` + `--border` +
   `--text-secondary`). Hovers to violet tint.
-- `danger` — red tint. Destructive or override-with-caution.
+- `danger` — red tint, `--red-text` label (readable on the tint in both themes). Destructive or override-with-caution.
 - `ghost` — transparent, low-attention. Hovers to `--bg-tertiary`.
 
 **Loading state** shows a 12px circular spinner inside the button and

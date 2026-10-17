@@ -63,7 +63,6 @@
 
 	{#snippet foot()}
 		<Button variant="ghost" onclick={onCancel}>Cancel</Button>
-		<span style="flex: 1"></span>
 		<Button variant="danger" onclick={onConfirm}>Load anyway</Button>
 	{/snippet}
 </Modal>
