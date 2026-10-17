@@ -12,7 +12,11 @@ const captureDir = process.env.CORSIA_CAPTURE_DIR;
 const captureBuild = process.env.CORSIA_CAPTURE_BUILD;
 
 async function capture(page: Page, testInfo: TestInfo, name: string): Promise<void> {
-	if (captureBuild) await expect(page.locator('.version-overlay')).toContainText(`f ${captureBuild}`);
+	if (captureBuild) {
+		const versionOverlay = page.locator('.version-overlay');
+		await expect(versionOverlay).toContainText(`f ${captureBuild}`);
+		await expect(versionOverlay).not.toContainText('⇢');
+	}
 	if (!captureDir) return saveEvidenceScreenshot(page, testInfo, name, { fullPage: false });
 	mkdirSync(captureDir, { recursive: true });
 	await page.screenshot({ path: join(captureDir, `${name}.png`), fullPage: false, animations: 'disabled' });
