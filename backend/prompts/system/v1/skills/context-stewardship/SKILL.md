@@ -1,9 +1,6 @@
 ---
 name: context-stewardship
-description: Use when evidence attributes a wrong decision to delivered context, when repeated cross-agent behavior may need promotion to a shared layer (including a conductor's periodic read of its agents' lessons), when a System instruction seems wrong or missing, or when auditing context delivery, duplication, or token cost. Not for routine local edits with no delivery, structural, or cross-agent effect.
-corsia:
-  handler:
-    kind: instruction
+description: Use when evidence ties a wrong decision to delivered context, cross-agent behavior may need promotion to a shared layer, a System instruction seems wrong or missing, or when auditing context delivery, duplication or token cost. Not for local edits with no delivery, structural or cross-agent effect.
 ---
 
 # Context stewardship
