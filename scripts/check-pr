@@ -106,6 +106,9 @@ fi
 header "1/7 file-size ratchet"
 "$VENV_PY" scripts/file_size_limits.py || fail "file-size ratchet failed — see output above"
 green "file-size ratchet: recorded limits satisfied"
+# CI's "File size ratchet" job runs this too (code-health.yml).
+"$VENV_PY" scripts/design_token_ratchet.py || fail "design-token ratchet failed — see output above"
+green "design-token ratchet: no frontend style grew past its baseline"
 
 header "2/7 antipatterns (severity=error, whole repo)"
 PYTHONPATH=tools "$VENV_PY" -m antipatterns \

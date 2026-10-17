@@ -10,6 +10,7 @@ from events.markers import (
     REVIEW_FP_MARKER_PREFIX as _REVIEW_FP_MARKER,
     REVIEW_RESOLVED_MARKER as _REVIEW_RESOLVED_MARKER,
 )
+from reviewer.reviewer_categories import LABEL_REVIEW
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +84,10 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
             return "webhook.github.pr_synchronize"
         if action == "ready_for_review":
             return "webhook.github.pr_ready_for_review"
+        if action == "labeled":
+            # Only the review label is an event; every other label stays unmapped.
+            label = payload.get("label") or {}
+            return "webhook.github.pr_labeled" if label.get("name") == LABEL_REVIEW else None
         if action == "closed":
             end = pr_end_state(payload)
             if end is None:
