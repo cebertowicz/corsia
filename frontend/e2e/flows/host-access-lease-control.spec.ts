@@ -266,7 +266,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({ leases: [lease] }),
+				// The control asks for one thread's open leases; the server answers only for that root thread
+				// and drops terminal states, which is how a revoked lease leaves the control.
+				body: JSON.stringify({
+					leases: [lease].filter((item) => {
+						const root = url.searchParams.get('root_thread_id');
+						if (root && item.root_thread_id !== root) return false;
+						return url.searchParams.get('nonterminal_only') !== 'true'
+							|| ['reviewing', 'awaiting_user', 'activating', 'active'].includes(item.state);
+					}),
+				}),
 			});
 		});
 		await page.route(`**/api/threads/${ownerSessionId}/messages**`, async (route) => {
@@ -317,12 +326,14 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
 
 		const viewport = page.viewportSize();
+		// The sheet slides up from below on open; its bounds are read where it comes to rest.
+		await expect.poll(async () => {
+			const rest = await dialog.boundingBox();
+			return !!rest && rest.x >= 0 && rest.y >= 0 && rest.x + rest.width <= viewport!.width
+				&& rest.y + rest.height <= viewport!.height;
+		}, 'the review sheet rests inside the viewport').toBe(true);
 		const box = await dialog.boundingBox();
 		expect(box).toBeTruthy();
-		expect(box!.x).toBeGreaterThanOrEqual(0);
-		expect(box!.y).toBeGreaterThanOrEqual(0);
-		expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');
@@ -358,7 +369,8 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			const activeChip = page.locator('.active-chip');
+			// The solid material is the trigger's; the wrapper only lays it out.
+			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
 				const solidProbe = document.createElement('div');
 				solidProbe.style.background = 'var(--bg-secondary)';
@@ -421,11 +433,13 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toBeVisible();
 		expect(decisions).toHaveLength(1);
 
+		await expect.poll(async () => {
+			const rest = await activeDialog.boundingBox();
+			return !!rest && rest.x >= 0 && rest.x + rest.width <= viewport!.width
+				&& rest.y + rest.height <= viewport!.height;
+		}, 'the active-lease sheet rests inside the viewport').toBe(true);
 		const activeDialogBox = await activeDialog.boundingBox();
 		expect(activeDialogBox).toBeTruthy();
-		expect(activeDialogBox!.x).toBeGreaterThanOrEqual(0);
-		expect(activeDialogBox!.x + activeDialogBox!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(activeDialogBox!.y + activeDialogBox!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');

@@ -62,6 +62,9 @@ function envelope(
         display: planDisplay("working", "active"),
         current_node_ids: options.current ?? [],
         next_node_ids: options.next ?? [],
+        oversize: null,
+        folds: [],
+        root_count: nodes.filter((item) => item.parent_id === null).length,
         nodes,
       },
     ],
@@ -157,9 +160,11 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
       await page.waitForTimeout(510);
       const menu = page.getByRole("menu", { name: `Actions for ${taskTitle}` });
       await expect(menu).toBeVisible();
+      // The menu scales in; judge the targets once the entrance settles.
       for (const item of await menu.getByRole("menuitem").all()) {
-        const box = await item.boundingBox();
-        expect(box?.height).toBeGreaterThanOrEqual(44);
+        await expect
+          .poll(async () => (await item.boundingBox())?.height ?? 0)
+          .toBeGreaterThanOrEqual(44);
       }
       await saveEvidenceScreenshot(page, testInfo, "task-actions-390px", { fullPage: false });
       await row.dispatchEvent("pointerup", { pointerType: "touch" });
@@ -257,7 +262,8 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
         role: "assistant",
         content: "Child is inspecting the projection contract.",
         created_at: "2026-08-13T00:00:01Z",
-        metadata: null,
+        // Focus shows only what the agent said to the person; every other assistant row is work.
+        metadata: { for_user: true },
       },
     ];
 
@@ -352,7 +358,8 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
     ).toBeVisible();
 
     // Settled work is always visible; there is no separate toggle to reveal it.
-    await status("Map current behavior", "Finished");
+    // A settled row names its outcome ("Done"), and its subline repeats the word with the date.
+    await expect(row("Map current behavior").locator(".row-status")).toHaveText("Done");
 
     const inlineToggle = row(delegatedTitle).getByRole("button", {
       name: "active subagent, 1 subtask left",
