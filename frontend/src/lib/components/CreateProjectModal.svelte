@@ -111,7 +111,7 @@
 	.fld input:focus, .fld textarea:focus { outline: none; border-color: var(--accent); }
 
 	.err {
-		font-size: var(--text-subhead); color: var(--red);
+		font-size: var(--text-subhead); color: var(--red-text);
 		background: color-mix(in srgb, var(--red) 8%, transparent);
 		border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
 		border-radius: var(--radius-sm); padding: 8px 10px;
