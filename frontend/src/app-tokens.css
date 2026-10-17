@@ -21,6 +21,8 @@
   --ls-cap:    0.08em;
   --ls-title: -0.01em;
 
+  --focus-ring: 0 0 0 3px var(--accent-wash);
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

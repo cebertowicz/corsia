@@ -10,6 +10,8 @@
 	 * once, and a failed write returns the decision here with its reason.
 	 */
 	import Button from '$lib/components/ui/Button.svelte';
+	// The Other / Note row is a <label>, so its textarea cannot sit inside Field: it takes Field's shared `.text-field` rules.
+	import '$lib/components/ui/text-field.css';
 	import {
 		isPickAny,
 		OTHER_OPTION_ID,
@@ -59,7 +61,7 @@
 	function resizeOther() {
 		if (!otherEl) return;
 		otherEl.style.height = 'auto';
-		otherEl.style.height = `${otherEl.scrollHeight}px`;
+		otherEl.style.height = `${otherEl.scrollHeight + otherEl.offsetHeight - otherEl.clientHeight}px`;
 		if (document.activeElement === otherEl) revealOther();
 	}
 
@@ -234,6 +236,7 @@
 						<textarea
 							bind:this={otherEl}
 							bind:value={other}
+							class="text-field"
 							placeholder="Optional: anything else the agent should know"
 							disabled={locked}
 							rows="1"
@@ -280,6 +283,7 @@
 					<textarea
 						bind:this={otherEl}
 						bind:value={other}
+						class="text-field"
 						placeholder="Type your own response"
 						disabled={locked}
 						rows="1"
@@ -342,8 +346,6 @@
 	.other-option { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--text-footnote); }
 	.other-option.selected { border-color: var(--accent); background: var(--accent-wash); }
 	.other-option > span:first-child { padding-top: var(--space-1); }
-	.other-option textarea { min-width: 0; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-primary); padding: var(--space-1) var(--space-2); outline: none; font-family: inherit; font-size: inherit; line-height: var(--lh-normal); resize: none; overflow-y: auto; min-height: calc(1em * var(--lh-normal) + var(--space-2)); max-height: min(40vh, 12em); }
-	.other-option textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 	.decision-buttons { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--bg-secondary); color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.receipt { flex: 1; min-width: 0; margin: 0; }
@@ -361,7 +363,8 @@
 	.option-row b { font-size: var(--text-subhead); }
 	.option-row small { color: var(--text-tertiary); font-size: var(--text-footnote); line-height: var(--lh-snug); }
 	.option-row:has(.tick:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.option-button:focus-visible, .other-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* The Other / Note field draws its own focus ring, so its row adds none. */
+	.option-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The drawer chrome owns the single context line beside Done at every width. */
 	@media (max-width: 720px) {
 		.decision-top { grid-template-columns: 1fr; gap: var(--space-3); }

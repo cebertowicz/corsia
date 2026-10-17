@@ -25,8 +25,10 @@ afterEach(() => {
 });
 
 describe('CommentComposer', () => {
-	it('grows to content and then scrolls at the shared composer limit', async () => {
+	it('grows to content and then scrolls at the field cap', async () => {
 		const textarea = render();
+		// The cap is the shared text field's CSS max-height (not applied in jsdom); stand it in inline.
+		textarea.style.maxHeight = '150px';
 		Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 240 });
 		textarea.value = 'A long comment';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));

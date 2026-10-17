@@ -75,6 +75,7 @@ first needs it, from what that screen gets approved with.
 | Frosted card (where you act) | `--glass-thin`, 1px `--border`, `--radius-xl`, shadow `--glass-rim, --shadow-chip`. The composer adds `--glass-blur`. | `InputBar.css` composer; `AttentionDock.svelte` `.dock-bar` |
 | Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
 | Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
+| Text field | One shape for every free-text control: 1px `--border`, `--radius-lg`, transparent fill, `--text-input` font, `--space-7` tall (a textarea grows to about six lines, then scrolls). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
 | Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
 | Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
 | Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
@@ -868,6 +869,8 @@ interface Props {
   error?: string;             // red text below (suppresses hint)
   required?: boolean;         // shows asterisk
   layout?: 'row' | 'stacked'; // default 'row'; auto-collapses on mobile
+  variant?: 'default' | 'chip' | 'nested'; // see Variants
+  hideLabel?: boolean;        // label stays the accessible name, not drawn
   trailing?: Snippet;         // right-of-control inline annotation
   children: Snippet;          // the control (input/select/textarea)
 }
@@ -876,10 +879,19 @@ interface Props {
 **Desktop layout (row):** 140px label col / 1fr control col / auto
 trailing col. Mobile (≤720px) collapses to single column.
 
-**Native control styling** (provided via `:global()` selectors): inputs/
-selects/textareas get `--bg-tertiary` bg, `--border` border, `--radius-xs`
-(6px), 32px height, 12.5px font. Focus ring is 3px `--accent-wash`
-box-shadow.
+**Native control styling** (provided via `:global()` selectors): in the
+`default` variant, inputs/selects/textareas get `--bg-tertiary` bg,
+`--border` border, `--radius-xs` (6px), 32px height, 12.5px font. Focus ring
+is 3px `--accent-wash` box-shadow.
+
+**Variants.** `chip` and `nested` draw the Text field role of §0.1 from
+`ui/text-field.css`, the one home of its border, radius, focus, error and
+disabled rules. `chip` is for a pane (glass fill); `nested` is for a card or
+sheet (no fill). Use `hideLabel` where the surrounding UI already names the
+field (a comment composer). A control whose own wrapper is a `<label>` (the
+decision drawer's Other and Note rows) cannot nest in Field: give it
+`class="text-field"` and import `text-field.css`. Multi-line fields use the
+`autosize` action.
 
 Native chrome stripped from selects (custom chevron data-URI inside
 `Field`) and number inputs (spinners hidden). If a real number-stepper UI
