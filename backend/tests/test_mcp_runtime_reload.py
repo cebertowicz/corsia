@@ -229,7 +229,7 @@ def test_connect_restarts_a_running_app_when_its_stored_config_changed(runtime, 
 
 def test_a_saved_write_inside_the_reconnect_window_restarts_at_once(runtime, monkeypatch):
     """A person's saved change is not a Reconnect press: it reaches the app now, even seconds after one."""
-    from tools.connected_apps_runtime import reconnect_after_saved_write
+    from tools.connected_apps_runtime import restart_after_saved_write
 
     mcp_runtime, tools, _ = runtime
     version = [1]
@@ -248,7 +248,7 @@ def test_a_saved_write_inside_the_reconnect_window_restarts_at_once(runtime, mon
     async def scenario():
         assert (await mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))["state"] == "working"
         version[0] = 2
-        saved = await reconnect_after_saved_write("app-1")
+        saved = await restart_after_saved_write("app-1")
         assert saved["state"] == "working"
         with pytest.raises(mcp_runtime.MCPReconnectRateLimitError):
             await mcp_runtime.apply_connected_app_runtime("reconnect", "app-1")

@@ -42,7 +42,7 @@ def client(isolated_db, tmp_path, monkeypatch):
     seed_account(OWNER_USER, SECOND_SESSION, kind="session")
     app = FastAPI()
     app.include_router(keys_api.router)
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
 def _auth(token: str = OWNER_SESSION_TOKEN) -> dict:

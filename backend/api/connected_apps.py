@@ -250,8 +250,8 @@ async def update_server(app_id: str, body: dict[str, Any], user: dict = Depends(
     except Exception as exc:
         raise _app_error(exc) from None
     if human:
-        from tools.connected_apps_runtime import reconnect_after_saved_write
-        await reconnect_after_saved_write(app_id)
+        from tools.connected_apps_runtime import restart_after_saved_write
+        await restart_after_saved_write(app_id)
     return result
 
 

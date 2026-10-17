@@ -195,7 +195,7 @@ async def test_the_sign_in_route_refuses_a_waiting_or_expired_request(journey, e
 
 async def test_every_saved_write_reaches_the_running_app_at_once(isolated_db, monkeypatch):
     from connections.app_lifecycle import create_app, replace_config
-    from tools.connected_apps_runtime import reconnect_after_saved_write
+    from tools.connected_apps_runtime import restart_after_saved_write
 
     for name, value in (
         ("_stopped", False), ("_lock", asyncio.Lock()), ("_registry", ToolRegistry()), ("_app_stacks", {}),
@@ -212,22 +212,22 @@ async def test_every_saved_write_reaches_the_running_app_at_once(isolated_db, mo
 
     monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connects)
     app_id = create_app("Notes", {"url": MCP_URL, "key_refs": [], "connect_timeout": 5}, {"mode": "all", "project_ids": [], "outside_projects": False}, db=get_db())["id"]
-    await reconnect_after_saved_write(app_id)
+    await restart_after_saved_write(app_id)
     replace_config(app_id, {"url": MCP_URL, "key_refs": [], "connect_timeout": 7}, expected_revision=1, db=get_db())
 
-    second = await reconnect_after_saved_write(app_id)
+    second = await restart_after_saved_write(app_id)
 
     assert seen == [5, 7] and second["state"] == "working"
 
 
 async def test_a_saved_write_that_cannot_restart_is_logged_with_its_app_and_class(isolated_db, monkeypatch, caplog):
-    from tools.connected_apps_runtime import reconnect_after_saved_write
+    from tools.connected_apps_runtime import restart_after_saved_write
 
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_stopped", False)
     caplog.set_level(logging.WARNING)
 
-    result = await reconnect_after_saved_write("gone-app")
+    result = await restart_after_saved_write("gone-app")
 
     assert result["state"] == "disconnected"
     assert "app_id=gone-app" in caplog.text and "AppNotFoundError" in caplog.text

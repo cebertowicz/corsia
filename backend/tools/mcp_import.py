@@ -115,7 +115,7 @@ def _has_refused_proxy_authorization(config: dict[str, Any]) -> bool:
 
 
 def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
-    """Whether a remote app must be imported in its sign-in-needed state."""
+    """Whether a remote app is imported as one that may need a sign-in once approved."""
     if _kind(source, config) != "remote":
         return False
     if "oauth" in config or mcp_import_agents.needs_sign_in(source, config):
@@ -129,8 +129,9 @@ def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
             return False
     if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
         return False
-    # Accepted limitation: public remote apps needing no key wait for C, which
-    # replaces this import-time decision with connect-time classification.
+    # A remote app with no key may be public: it waits for approval like any import,
+    # and the connect decides. With no grant `OAuthGrantAuth` sends nothing, so a
+    # public app just connects and one that wants a sign-in asks for it then.
     return True
 
 
