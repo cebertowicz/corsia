@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { expect, test } from '@playwright/test';
-import { loginByUrl, openSettings, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
+import { loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 test('@flow:settings @surface:settings network registration shows its endpoint and removes the provider', async ({ page, request }, testInfo) => {
 	// Only the external daemon is fake. The UI, HTTP routes and SQLite writes are real.
@@ -27,6 +27,7 @@ test('@flow:settings @surface:settings network registration shows its endpoint a
 	try {
 		await loginByUrl(page, { waitForComposer: false });
 		await openSettings(page);
+		await openSettingsSection(page, 'Providers'); // the phone opens Settings on its section list
 		await page.getByRole('button', { name: 'Add your first provider', exact: true }).click();
 		await page.getByRole('button', { name: /Add remote provider by IP/ }).click();
 		const dialog = page.getByRole('dialog').last();
@@ -57,8 +58,9 @@ test('@flow:settings @surface:settings network registration shows its endpoint a
 		await saveEvidenceScreenshot(page, testInfo, 'registered-provider-endpoint');
 
 		await page.getByRole('button', { name: 'Overview', exact: true }).click();
-		page.once('dialog', dialog => dialog.accept());
+		// ProviderSettingsModal.svelte confirms removal in-app (an alertdialog), not with window.confirm.
 		await page.getByRole('button', { name: 'Remove provider…', exact: true }).click();
+		await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click();
 		await expect(provider).toHaveCount(0);
 		const remaining = await request.get(api);
 		expect(remaining.ok()).toBe(true);

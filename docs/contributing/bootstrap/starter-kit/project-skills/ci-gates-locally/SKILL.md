@@ -1,9 +1,6 @@
 ---
 name: ci-gates-locally
 description: Use before pushing a branch, when a CI check fails or never reports, or when a merge gate blocks—run every blocking gate on this machine first, separate a CI infrastructure outage from a real failure, and never publish the upstream reviewer status from a contributor workspace.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Running the CI gates locally

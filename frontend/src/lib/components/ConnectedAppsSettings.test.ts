@@ -36,26 +36,25 @@ describe('ConnectedAppsSettings', () => {
 		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_revision: 1 }) })));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
-		const connectedRow = host.querySelector('.app-row');
-		expect(connectedRow?.querySelector('.summary')?.getAttribute('aria-expanded')).toBe('false');
-		expect(connectedRow?.querySelector('[aria-hidden="true"]')?.textContent).toBe('›');
+		const connectedRow = host.querySelector('.item');
+		expect(connectedRow?.querySelector('.face.open')?.getAttribute('aria-expanded')).toBe('false');
+		expect(connectedRow?.querySelector('.chev')).not.toBeNull();
 	});
 
 	it('uses the waiting-row type treatment for connected rows too', async () => {
 		const connected = { ...awaiting, id: 'notes', name: 'Notes', state: 'working', tool_count: 2 };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [connected, awaiting] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-copy strong')).toHaveLength(2));
-		expect(host.querySelector('.app-copy')?.classList.contains('waiting-copy')).toBe(true);
-		expect(host.querySelector('.app-copy .second.status')).toBeNull();
-		expect(host.querySelector('.app-copy .second')?.textContent).toBe('Connected · 2 actions · All projects');
+		await vi.waitFor(() => expect(host.querySelectorAll('[data-settings-row] .name')).toHaveLength(2));
+		expect(host.querySelector('.item .sub')?.classList.contains('attention')).toBe(false);
+		expect(host.querySelector('.item .sub')?.textContent).toBe('Connected · 2 actions · All projects');
 	});
 
 	it('uses amber only for connected-app states needing attention', async () => {
 		const needsSignIn = { ...awaiting, id: 'notion', name: 'Notion', state: 'needs_sign_in' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [needsSignIn] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelector('.app-copy .second.status')?.textContent).toContain('Needs you to sign in'));
+		await vi.waitFor(() => expect(host.querySelector('.sub.attention')?.textContent).toContain('Needs you to sign in'));
 	});
 
 	it('calls decline for an awaiting approval row', async () => {
@@ -72,10 +71,10 @@ describe('ConnectedAppsSettings', () => {
 		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/decline') ? { id: 'github', removed: true } : { servers: [awaiting, second] } }));
 		vi.stubGlobal('fetch', fetch);
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(2));
-		([...host.querySelectorAll('.waiting-row')[0].querySelectorAll('button')].find((button) => button.textContent?.includes('Decline')) as HTMLButtonElement).click();
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(1));
-		expect(host.querySelector('.waiting-copy strong')?.textContent).toBe('Linear');
+		await vi.waitFor(() => expect(host.querySelectorAll('.item').length).toBe(2));
+		([...host.querySelectorAll('.item')[0].querySelectorAll('button')].find((button) => button.textContent?.includes('Decline')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelectorAll('.item').length).toBe(1));
+		expect(host.querySelector('[data-settings-row] .name')?.textContent).toBe('Linear');
 	});
 
 	it('names the projects an app works in on its row', async () => {
@@ -92,8 +91,8 @@ describe('ConnectedAppsSettings', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [folderApp] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
-		expect(host.querySelector('.waiting-copy .status')?.textContent).toBe('Waiting for your approval');
-		const labels = [...host.querySelectorAll('.waiting-actions button')].map((button) => button.textContent?.trim());
+		expect(host.querySelector('[data-settings-row] .sub.attention')?.textContent).toBe('Waiting for your approval');
+		const labels = [...host.querySelectorAll('.settings-row .actions button')].map((button) => button.textContent?.trim());
 		expect(labels).toEqual(['Choose where it works…', 'Decline']);
 	});
 
@@ -102,7 +101,7 @@ describe('ConnectedAppsSettings', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [folderApp] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('From Claude Code · <b>shop</b> folder'));
-		expect(host.querySelector('.waiting-copy b')).toBeNull();
+		expect(host.querySelector('[data-settings-row] b')).toBeNull();
 	});
 
 	it('gives every waiting row the same rhythm: an idle sign-in view reserves no empty panel', async () => {
@@ -114,10 +113,10 @@ describe('ConnectedAppsSettings', () => {
 		];
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: rows }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(3));
-		for (const row of host.querySelectorAll('.waiting-row')) {
-			expect(row.querySelector('.waiting-panel')).toBeNull();
-			expect([...row.children].map((child) => child.classList.contains('waiting-copy') ? 'copy' : child.classList.contains('waiting-actions') ? 'actions' : 'other')).toEqual(['copy', 'actions']);
+		await vi.waitFor(() => expect(host.querySelectorAll('.item').length).toBe(3));
+		for (const row of host.querySelectorAll('.item')) {
+			expect(row.querySelector('.details')).toBeNull();
+			expect([...row.children].map((child) => child.classList.contains('settings-row') ? 'row' : 'other')).toEqual(['row']);
 		}
 	});
 
@@ -125,7 +124,7 @@ describe('ConnectedAppsSettings', () => {
 		const pending = { ...awaiting, id: 'notes', name: 'Notes', transport: 'http', sign_in: { status: 'pending', signed_in: false }, reach: { mode: 'selected', project_ids: [], outside_projects: false } };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [pending] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelector('.waiting-panel')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('.details')).not.toBeNull());
 	});
 
 	it('lists the rows in the order the server sends them', async () => {
@@ -133,8 +132,8 @@ describe('ConnectedAppsSettings', () => {
 		const rows = ['Acme', 'Linear', 'Notes', 'Postgres'].map((name) => ({ ...awaiting, id: name.toLowerCase(), name, reach: place }));
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: rows }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(4));
-		expect([...host.querySelectorAll('.waiting-copy strong')].map((el) => el.textContent)).toEqual(['Acme', 'Linear', 'Notes', 'Postgres']);
+		await vi.waitFor(() => expect(host.querySelectorAll('.item').length).toBe(4));
+		expect([...host.querySelectorAll('[data-settings-row] .name')].map((el) => el.textContent)).toEqual(['Acme', 'Linear', 'Notes', 'Postgres']);
 	});
 
 	it('offers only Dismiss on an expired request', async () => {
@@ -145,10 +144,10 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Request expired'));
 		expect(host.textContent).not.toContain('Choose where it works…');
 		expect(host.textContent).not.toContain('Reconnect');
-		(host.querySelector('.app-row button') as HTMLButtonElement).click();
+		(host.querySelector('.item button.open') as HTMLButtonElement).click();
 		flushSync();
-		expect([...host.querySelectorAll('.app-row .actions button')].map((button) => button.textContent?.trim())).toEqual(['Dismiss']);
-		(host.querySelector('.app-row .actions button') as HTMLButtonElement).click();
+		expect([...host.querySelectorAll('.item .details .actions button')].map((button) => button.textContent?.trim())).toEqual(['Dismiss']);
+		(host.querySelector('.item .details .actions button') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/decline'), { method: 'POST' }));
 	});
 
@@ -157,7 +156,7 @@ describe('ConnectedAppsSettings', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [pending] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
-		const labels = [...host.querySelectorAll('.waiting-actions button')].map((button) => button.textContent?.trim());
+		const labels = [...host.querySelectorAll('.settings-row .actions button')].map((button) => button.textContent?.trim());
 		expect(labels).toEqual(['Approve', 'Decline']);
 		expect(host.textContent).not.toContain('Choose where it works…');
 	});
@@ -168,11 +167,11 @@ describe('ConnectedAppsSettings', () => {
 			? { ok: false, status: 500, json: async () => ({ detail: 'nope' }), text: async () => 'nope' }
 			: { ok: true, json: async () => ({ servers: [awaiting, second] }) }));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row').length).toBe(2));
-		([...host.querySelectorAll('.waiting-row')[1].querySelectorAll('button')].find((b) => b.textContent?.includes('Decline')) as HTMLButtonElement).click();
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row .error').length).toBe(1));
-		expect(host.querySelectorAll('.waiting-row')[1].querySelector('.error')).not.toBeNull();
-		expect(host.querySelectorAll('.waiting-row')[0].querySelector('.error')).toBeNull();
+		await vi.waitFor(() => expect(host.querySelectorAll('.item').length).toBe(2));
+		([...host.querySelectorAll('.item')[1].querySelectorAll('button')].find((b) => b.textContent?.includes('Decline')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelectorAll('.item .error').length).toBe(1));
+		expect(host.querySelectorAll('.item')[1].querySelector('.error')).not.toBeNull();
+		expect(host.querySelectorAll('.item')[0].querySelector('.error')).toBeNull();
 	});
 
 	it('approves an empty-reach row from the sheet with the chosen place and the row revision', async () => {
@@ -204,8 +203,8 @@ describe('ConnectedAppsSettings', () => {
 		const local = { ...awaiting, transport: 'stdio', notice: 'notice text from the server' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [local, { ...awaiting, id: 'web', name: 'Web' }] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-row')).toHaveLength(2));
-		const [first, second] = host.querySelectorAll('.waiting-row');
+		await vi.waitFor(() => expect(host.querySelectorAll('.item')).toHaveLength(2));
+		const [first, second] = host.querySelectorAll('.item');
 		expect(first.textContent).toContain('notice text from the server');
 		expect(second.textContent).not.toContain('notice text from the server');
 	});
@@ -270,6 +269,40 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Ask CORSIA in chat'));
 		expect(host.textContent).not.toContain('Connect one here');
+	});
+
+	it('draws the state in its colour: red for a failure, amber for waiting on the person, quiet when working', async () => {
+		const failed = { ...awaiting, id: 'slack', name: 'Slack', state: 'failed', failure_class: 'cannot_start' };
+		const working = { ...awaiting, id: 'notes', name: 'Notes', state: 'working' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [failed, awaiting, working] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('[data-settings-row]').length).toBe(3));
+		const tone = (name: string) => host.querySelector(`[data-settings-row="${name}"] .sub`)?.className ?? '';
+		expect(tone('Slack')).toContain('failed');
+		expect(tone('GitHub')).toContain('attention');
+		expect(tone('Notes')).not.toMatch(/failed|attention/);
+		expect(host.querySelector('[data-settings-row="Slack"] .sub')?.textContent).toBe("Couldn't connect: app didn't start · All projects");
+	});
+
+	it('gives a row at most one solid action and keeps the others as text', async () => {
+		const connected = { ...awaiting, id: 'notes', name: 'Notes', state: 'working' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [awaiting, connected] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('[data-settings-row]').length).toBe(2));
+		(host.querySelector('[data-settings-row="Notes"] button.open') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.querySelectorAll('[data-settings-row="GitHub"] .actions .btn.primary')).toHaveLength(1);
+		expect(host.querySelectorAll('.item .btn.secondary, .item .btn.danger')).toHaveLength(0);
+		expect(host.querySelector('[data-settings-row="Notes"] button.open')?.getAttribute('aria-expanded')).toBe('true');
+		expect([...host.querySelectorAll('.item .details .actions .btn.ghost')].map((b) => b.textContent?.trim())).toEqual(['Where it works…', 'Reconnect', 'Remove']);
+	});
+
+	it('does not draw its own heading; the page title belongs to Settings', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet.'));
+		expect(host.querySelector('h2')).toBeNull();
+		expect(host.querySelector('p')?.textContent).toContain('Connect the apps you already use');
 	});
 });
 

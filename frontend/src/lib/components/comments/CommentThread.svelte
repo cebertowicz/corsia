@@ -93,6 +93,14 @@
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
+	// A placement normally completes in the same render turn as a new card. Do not flash a line that cannot be read,
+	// or change the phone sheet's height during the composer-to-card swap.
+	let showPlacement = $state(false);
+	$effect(() => {
+		if (comment.drawn || comment.placement !== 'placing') { showPlacement = false; return; }
+		const timer = window.setTimeout(() => { showPlacement = true; }, 200);
+		return () => window.clearTimeout(timer);
+	});
 	let resolvedOpen = $state(false);
 	let el = $state<HTMLElement>();
 	let replyField = $state<ReplyField>();
@@ -233,7 +241,7 @@
 				</button>
 			{/if}
 		</div>
-		{#if !comment.drawn && comment.placement === 'placing'}
+		{#if showPlacement}
 			<p class="ct-placement" id="comment-placement-{comment.id}" data-comment-placement>Finding its place…</p>
 		{:else if !comment.drawn && comment.placement === 'not_placed'}
 			<p class="ct-placement" id="comment-placement-{comment.id}" data-comment-placement>

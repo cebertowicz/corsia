@@ -382,6 +382,8 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undeli
 			await expect(footer.getByRole('status')).toContainText(state === 'grace' ? '1 message not sent yet · sending to ' : '1 message not sent yet · it goes to ');
 			await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
 			await page.getByRole('region', { name: 'Document comments' }).getByRole('button', { name: 'Close comments', exact: true }).click();
+			// The closing drawer stays mounted (inert) through its outro; the review panel below must be the only drawer.
+			await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
 		}
 		if (state === 'undelivered') await expect(page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);

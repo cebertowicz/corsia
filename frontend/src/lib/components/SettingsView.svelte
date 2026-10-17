@@ -127,7 +127,8 @@
 				<div class="inset"><ProviderManager /></div>
 				<div class="policy"><ProvidersPolicyBlock /></div>
 			{:else if section === 'connected-apps'}
-				<div class="inset"><ConnectedAppsSettings /></div>
+				<h2 class="page-title">Connected apps</h2>
+				<ConnectedAppsSettings />
 			{:else if section === 'skills'}
 				<h2 class="page-title">Skills</h2>
 				<SettingsSkills {onBrowseSkills} />
@@ -208,8 +209,6 @@
 	}
 	/* Sections that draw their own title: inset them to the edge the list pages use. */
 	.inset { padding: 0 var(--space-2); }
-	/* Connected apps was drawn to follow System; as its own page it starts at the top. */
-	.inset > :global(.connected-apps) { margin-top: 0; }
 	.policy { margin-top: var(--space-8); padding: 0 var(--space-2); }
 	.mobile-root { display: none; }
 
@@ -220,7 +219,7 @@
 		.settings-content.mobile-section { display: block; }
 		/* The app header names the page on a phone; the title is not drawn again under it but stays the page's heading for assistive tech. */
 		.section-host :global(.page-title),
-		.inset :global(.page-head h2), .inset :global(.section-header h2), .inset :global(.connected-apps .heading h2) {
+		.inset :global(.page-head h2), .inset :global(.section-header h2) {
 			position: absolute; width: 1px; height: 1px; padding: 0; margin: 0;
 			overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 		}

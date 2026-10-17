@@ -40,6 +40,7 @@
 	let hydratedFor = $state<string | null>(null);
 	let announcement = $state('');
 	let otherEl = $state<HTMLTextAreaElement | undefined>();
+	let actionsEl = $state<HTMLElement | undefined>();
 
 	$effect(() => {
 		if (hydratedFor === decision.id) return;
@@ -59,6 +60,24 @@
 		if (!otherEl) return;
 		otherEl.style.height = 'auto';
 		otherEl.style.height = `${otherEl.scrollHeight}px`;
+		if (document.activeElement === otherEl) revealOther();
+	}
+
+	/**
+	 * The sticky actions row paints over whatever sits at the bottom of the
+	 * scroll region, and the browser only scrolls a focused field clear of its
+	 * own viewport edge, not clear of that row. Scroll the field above the row
+	 * (the row also clears the keyboard's accessory bar, see `.decision-actions`).
+	 */
+	function revealOther() {
+		if (!otherEl || !actionsEl) return;
+		otherEl.style.scrollMarginBottom = `${actionsEl.offsetHeight + 8}px`;
+		otherEl.scrollIntoView({ block: 'nearest' });
+	}
+
+	/** The keyboard resizes the viewport after focus lands, so reveal once that layout has settled. */
+	function revealOtherAfterKeyboard() {
+		requestAnimationFrame(() => requestAnimationFrame(revealOther));
 	}
 
 	$effect(() => {
@@ -219,6 +238,7 @@
 							disabled={locked}
 							rows="1"
 							oninput={writeNote}
+							onfocus={revealOtherAfterKeyboard}
 							onblur={persist}
 						></textarea>
 					</label>
@@ -265,12 +285,13 @@
 						rows="1"
 						oninput={chooseOther}
 						onpointerdown={chooseOther}
+						onfocus={revealOtherAfterKeyboard}
 						onblur={persist}
 					></textarea>
 				</label>
 			{/if}
 			{/if}
-			<div class="decision-actions">
+			<div class="decision-actions" bind:this={actionsEl}>
 				<p class="receipt" aria-live="polite">
 					{announcement || failure?.message || (pickAny ? pickAnyReceipt : answerReady ? 'Ready to send' : 'Choose an option')}
 				</p>
@@ -346,5 +367,7 @@
 		.decision-top { grid-template-columns: 1fr; gap: var(--space-3); }
 		.option-button, .other-option { min-height: 44px; }
 		.option-row { min-height: 44px; box-sizing: border-box; }
+		/* The keyboard's floating accessory bar sits over the bottom of the page: lift the actions above it. */
+		.decision-actions { padding-bottom: calc(max(var(--space-3), env(safe-area-inset-bottom, 0px)) + var(--kb-toolbar-inset, 0px)); }
 	}
 </style>
