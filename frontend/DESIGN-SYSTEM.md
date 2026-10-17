@@ -175,9 +175,10 @@ project scope every role is derived from the project's colour
 | `--green-bg` | | `rgba(52,211,153,0.08)` | `#f0fdf4` *(solid!)* | Light-mode value is solid hex, not rgba — known wart, do not "fix" without a sweep. |
 | `--green-border` | | `rgba(52,211,153,0.25)` | `rgba(34,197,94,0.3)` | |
 | `--green-text` | | `#34d399` | `#16a34a` | Use this for green-on-green-bg text. |
-| `--red` | Destructive / error | `#f87171` | `#f87171` | |
+| `--red` | Destructive / error | `#f87171` | `#f87171` | `--red` is for fills, borders and icons; red text uses `--red-text`. |
 | `--red-bg` | | `rgba(248,113,113,0.08)` | `#fef2f2` *(solid)* | |
 | `--red-bg-hover` | | `rgba(248,113,113,0.14)` | `#fee2e2` *(solid)* | |
+| `--red-text` | Red text | `var(--red)` | `#b91c1c` | Readable on `--red-bg` and the plain surface in both themes. |
 
 **Anti-patterns:**
 - ❌ Reaching for `--blue` directly, or `--purple` for the accent. Use the

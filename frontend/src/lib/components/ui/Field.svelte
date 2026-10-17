@@ -73,7 +73,7 @@
 		font-size: var(--text-subhead);
 		color: var(--text-secondary);
 	}
-	.req { color: var(--red); margin-left: 2px; }
+	.req { color: var(--red-text); margin-left: 2px; }
 
 	.c {
 		grid-area: control;
@@ -141,7 +141,7 @@
 	}
 	.err {
 		grid-area: msg;
-		font-size: var(--text-footnote); color: var(--red);
+		font-size: var(--text-footnote); color: var(--red-text);
 	}
 
 	/* Approved for setup-only use: the composer chip's look for a text control or a select. A shared rollout needs a Product Experience decision. */
