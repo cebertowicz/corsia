@@ -64,6 +64,14 @@ export class DocFeedback {
 	readonly sendingGrace = $derived(this.pendingCount > 0 && this.graceMinutes !== null);
 	readonly graceText = $derived(`Sending to ${this.ownerName ?? 'the owner'} in ${this.graceMinutes} min`);
 	readonly sentText = $derived(`${this.sent} comment${this.sent === 1 ? '' : 's'} sent${this.ownerName ? ` to ${this.ownerName}` : ''}`);
+	/** The drawer's line for comments typed but not yet sent, or null when none wait. */
+	readonly unsent = $derived.by(() => {
+		if (!this.pendingCount) return null;
+		const count = `${this.pendingCount} message${this.pendingCount === 1 ? '' : 's'} not sent yet`;
+		const owner = this.ownerName ?? 'the owner';
+		if (this.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${this.graceMinutes} min` };
+		return { before: `${count} · ${this.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
+	});
 
 	/** Another document (or tab) is shown: leave the one before, and start afresh. */
 	show(artifactId: string | null, targetInstanceId: string | null) {
