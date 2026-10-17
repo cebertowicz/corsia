@@ -17,6 +17,7 @@ from typing import Any
 from connections.app_source_folder import clean_folder_label
 from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
+import tools.mcp_import_agents as mcp_import_agents
 from tools.mcp_import_reach import project_reach
 
 _SOURCE_LABELS = {
@@ -24,11 +25,13 @@ _SOURCE_LABELS = {
     "claude_code": "Claude Code",
     "cursor": "Cursor",
     "codex": "Codex",
+    "openclaw": "OpenClaw",
+    "hermes": "Hermes Agent",
 }
 log = logging.getLogger("corsia.key_audit")
 
 # The import conversation is assembled from these canonical person-facing lines.
-IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor or Codex."
+IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent."
 IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
 IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
 IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
@@ -50,6 +53,7 @@ def _paths(home: Path | None = None) -> dict[str, Path]:
         "claude_code": home / ".claude.json",
         "cursor": home / ".cursor" / "mcp.json",
         "codex": codex_home / "config.toml",
+        **{source: mcp_import_agents.config_path(source, home) for source in mcp_import_agents.SOURCES},
     }
 
 
@@ -78,6 +82,8 @@ def _json_servers(path: Path, key: str = "mcpServers") -> dict[str, dict[str, An
 def _kind(source: str, config: dict[str, Any]) -> str | None:
     command, url = config.get("command"), config.get("url")
     declared = config.get("type")
+    if source in mcp_import_agents.SOURCES:
+        return mcp_import_agents.kind(config)
     if source == "claude_code":
         if declared == "sdk" or (isinstance(url, str) and not declared):
             return None
@@ -113,10 +119,12 @@ def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
     """Whether a remote app must be imported in its sign-in-needed state."""
     if _kind(source, config) != "remote":
         return False
-    if "oauth" in config:
+    if "oauth" in config or mcp_import_agents.needs_sign_in(source, config):
         return True
     headers = config.get("headers", config.get("http_headers"))
     if isinstance(headers, dict):
+        if source in mcp_import_agents.SOURCES and mcp_import_agents.has_reference(headers):
+            return False
         _clean, lifted = mcp_secrets.split_secrets("import", {"headers": headers}, headers=True)
         if lifted:
             return False
@@ -131,6 +139,8 @@ def _source_entries(source: str, path: Path) -> list[tuple[str, dict[str, Any], 
     """Read just supported MCP config subtrees; a folder is never exposed whole."""
     if not path.is_file():
         return []
+    if source in mcp_import_agents.SOURCES:
+        return mcp_import_agents.entries(source, path)
     result: list[tuple[str, dict[str, Any], Path | None]] = []
     if source == "codex":
         servers = _read_toml(path).get("mcp_servers")
@@ -160,14 +170,6 @@ def _source_entries(source: str, path: Path) -> list[tuple[str, dict[str, Any], 
         for name, config in servers.items():
             if isinstance(name, str) and isinstance(config, dict):
                 result.append((name, config, Path(folder)))
-    return result
-
-
-def _source_servers(source: str, path: Path) -> dict[str, dict[str, Any]]:
-    """Compatibility view for callers that need one deterministic config per name."""
-    result: dict[str, dict[str, Any]] = {}
-    for name, config, _folder in _source_entries(source, path):
-        result.setdefault(name, config)
     return result
 
 
@@ -214,7 +216,8 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
             copied["env"] = config["env"]
     else:
         copied["url"] = config["url"]
-        copied["transport"] = "sse" if config.get("type") == "sse" else "http"
+        declared = mcp_import_agents.transport(config) if source in mcp_import_agents.SOURCES else config.get("type")
+        copied["transport"] = "sse" if declared == "sse" else "http"
         headers = config.get("headers", config.get("http_headers"))
         if headers is not None:
             copied["headers"] = headers
@@ -232,6 +235,7 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
                                    ("tool_timeout_sec", "tool_timeout")):
         if source_key in config:
             copied[target_key] = config[source_key]
+    mcp_import_agents.complete(source, config, copied)
     return copied
 
 
