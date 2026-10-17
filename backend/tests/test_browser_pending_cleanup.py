@@ -157,6 +157,16 @@ def test_exit_torn_read_type_is_emitted_only_for_specific_missing_reads(tmp_path
             DeniedProcess(), session='session', socket_dir=tmp_path,
         )
 
+    # Linux serves an empty environment once an exiting process has released its memory.
+    class EmptyEnvProcess:
+        def environ(self):
+            return {}
+
+    with pytest.raises(identity.BrowserExitTornRead):
+        identity.daemon_environment_matches(
+            EmptyEnvProcess(), session='session', socket_dir=tmp_path,
+        )
+
     # macOS returns an empty or denied executable path while a process exits, before it is a zombie.
     class ExitingProcess:
         def __init__(self, exe):
@@ -317,8 +327,11 @@ async def test_definite_failed_spawn_preserves_binding_and_allows_known_cleanup(
 
 async def test_empty_executable_read_after_close_ack_retries_to_closed(synthetic_browser, monkeypatch):
     fake = synthetic_browser
+    # Held so the post-ack poll reaches a live daemon; an early exit would skip the torn read.
+    fake.env_changes['TEST_HOLD_EXIT'] = '1'
     owner = fake.owner
     await owner.run('thread', ['snapshot'])
+    session = owner._sessions['thread'].record.session
     real_exe, real_close = psutil.Process.exe, owner._request_close
     acked, torn = [], []
 
@@ -329,10 +342,37 @@ async def test_empty_executable_read_after_close_ack_retries_to_closed(synthetic
     def exe(self):
         if acked and not torn and self.pid != psutil.Process().pid:
             torn.append(self.pid)
+            fake.release_exit(session)
             return ''
         return real_exe(self)
 
     monkeypatch.setattr(owner, '_request_close', close)
     monkeypatch.setattr(psutil.Process, 'exe', exe)
+    await owner.close_thread('thread')
+    assert torn and owner.live_count() == 0
+
+
+async def test_empty_environment_read_after_close_ack_retries_to_closed(synthetic_browser, monkeypatch):
+    fake = synthetic_browser
+    fake.env_changes['TEST_HOLD_EXIT'] = '1'  # Same hold as the executable case above.
+    owner = fake.owner
+    await owner.run('thread', ['snapshot'])
+    session = owner._sessions['thread'].record.session
+    real_environ, real_close = psutil.Process.environ, owner._request_close
+    acked, torn = [], []
+
+    async def close(runtime):
+        await real_close(runtime)
+        acked.append(True)
+
+    def environ(self):
+        if acked and not torn and self.pid != psutil.Process().pid:
+            torn.append(self.pid)
+            fake.release_exit(session)
+            return {}
+        return real_environ(self)
+
+    monkeypatch.setattr(owner, '_request_close', close)
+    monkeypatch.setattr(psutil.Process, 'environ', environ)
     await owner.close_thread('thread')
     assert torn and owner.live_count() == 0

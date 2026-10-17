@@ -4,88 +4,149 @@
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>CORSIA</title>
+	<!-- Generated from the app design tokens by desktop/scripts/gen-shell-tokens.mjs. -->
+	<link rel="stylesheet" href="tokens.css" />
 	<style>
-		:root {
-			color-scheme: dark light;
-			font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
-			--surface-dark: rgba(20, 20, 22, 0.55);
-			--surface-light: rgba(255, 255, 255, 0.55);
-			--text-dark: #e8e8ed;
-			--text-light: #1a1a1e;
-			--muted-dark: #8e8e93;
-			--muted-light: #6e6e73;
-			--card-dark: rgba(28, 28, 31, 0.65);
-			--card-light: rgba(255, 255, 255, 0.7);
-			--border-dark: rgba(255, 255, 255, 0.08);
-			--border-light: rgba(0, 0, 0, 0.08);
-			--accent-bg: rgba(139, 92, 246, 0.15);
-			--accent-border: rgba(139, 92, 246, 0.4);
-			--accent-text-dark: #b29bff;
-			--accent-text-light: #6d4ce6;
-		}
+		:root { color-scheme: dark light; font-family: var(--font-sans); }
 		* { box-sizing: border-box; }
 		html, body { height: 100%; margin: 0; -webkit-font-smoothing: antialiased; }
-		html[data-theme="dark"] body { background: var(--surface-dark); color: var(--text-dark); }
-		html[data-theme="light"] body { background: var(--surface-light); color: var(--text-light); }
+		body { background: color-mix(in srgb, var(--bg-primary) 55%, transparent); color: var(--text-primary); }
 		.app {
 			min-height: 100vh;
 			display: flex;
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
-			padding: 80px 32px 48px;
+			padding: var(--space-8) var(--space-7);
 			text-align: center;
 		}
 		.mark {
-			width: 96px;
-			height: 96px;
-			margin-bottom: 28px;
+			width: calc(var(--space-8) * 2);
+			height: calc(var(--space-8) * 2);
+			margin-bottom: var(--space-6);
 			pointer-events: none;
 			user-select: none;
 			-webkit-user-drag: none;
 		}
-		h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
-		.failure, .background-approval { width: 100%; max-width: 420px; margin-top: 24px; }
-		.failure-card {
-			border-radius: 12px;
-			padding: 20px;
-			-webkit-backdrop-filter: blur(40px) saturate(180%);
-			backdrop-filter: blur(40px) saturate(180%);
+		h1 {
+			max-width: calc(var(--space-8) * 12);
+			margin: 0;
+			font-size: var(--text-title2);
+			font-weight: var(--fw-semibold);
+			letter-spacing: var(--ls-title);
+			line-height: var(--lh-tight);
+			text-wrap: balance;
 		}
-		html[data-theme="dark"] .failure-card { background: var(--card-dark); border: 1px solid var(--border-dark); }
-		html[data-theme="light"] .failure-card { background: var(--card-light); border: 1px solid var(--border-light); }
-		.failure-copy { margin: 0; font-size: 14px; line-height: 1.5; }
-		.failure-copy + .failure-copy { margin-top: 8px; }
-		html[data-theme="dark"] .failure-copy, html[data-theme="dark"] .log-label { color: var(--muted-dark); }
-		html[data-theme="light"] .failure-copy, html[data-theme="light"] .log-label { color: var(--muted-light); }
-		.log-label { display: block; margin-top: 16px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
-		.log-path { display: block; margin-top: 6px; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; }
-		.actions { display: flex; justify-content: center; gap: 16px; margin-top: 20px; }
-		.approval-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; }
-		.approval-check { display: inline-flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; border: 1px solid var(--accent-border); border-radius: 50%; color: var(--accent-text-dark); font-size: 13px; }
-		html[data-theme="light"] .approval-check { color: var(--accent-text-light); }
-		html[data-theme] .approval-check[data-state="off"] { color: transparent; }
-		.approval-description { margin: 8px 0 16px; font-size: 14px; line-height: 1.5; }
-		html[data-theme="dark"] .approval-description { color: var(--muted-dark); }
-		html[data-theme="light"] .approval-description { color: var(--muted-light); }
-		.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-		.approval-action { flex: none; }
+		.line {
+			max-width: calc(var(--space-8) * 8);
+			margin: var(--space-2) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-callout);
+			line-height: var(--lh-normal);
+			text-wrap: pretty;
+		}
+		.log {
+			max-width: calc(var(--space-8) * 12);
+			margin: var(--space-3) 0 0;
+			color: var(--text-secondary);
+			font-size: var(--text-footnote);
+			line-height: var(--lh-normal);
+		}
+		.log code {
+			display: block;
+			margin-top: var(--space-1);
+			overflow-wrap: anywhere;
+			font-family: var(--font-mono);
+		}
+		.spinner {
+			width: var(--space-5);
+			height: var(--space-5);
+			margin-top: var(--space-5);
+			border: var(--space-1) solid var(--border);
+			border-top-color: var(--accent-line);
+			border-radius: var(--radius-circle);
+			animation: spin var(--dur-hero-plus) linear infinite;
+		}
+		@keyframes spin { to { transform: rotate(360deg); } }
+
+		.actions, .background-approval {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: var(--space-1);
+			margin-top: var(--space-6);
+		}
+		.approval-row {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: var(--space-2);
+			color: var(--text-secondary);
+			font-size: var(--text-callout);
+			line-height: var(--lh-normal);
+		}
+		.approval-check {
+			display: inline-flex;
+			flex: none;
+			width: var(--space-5);
+			height: var(--space-5);
+			align-items: center;
+			justify-content: center;
+			border: var(--space-1) solid var(--accent-line);
+			border-radius: var(--radius-circle);
+			color: transparent;
+			font-size: var(--text-footnote);
+			line-height: 1;
+		}
+		.approval-check[data-state="on"] {
+			border-color: var(--accent-fill);
+			background: var(--accent-fill);
+			color: var(--accent-on-fill);
+		}
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
 		button {
-			height: 36px;
-			padding: 0 16px;
-			border: 1px solid var(--accent-border);
-			border-radius: 8px;
-			background: var(--accent-bg);
-			color: var(--accent-text-dark);
-			font: 500 13px/1 inherit;
+			border: 0;
+			font: inherit;
 			cursor: pointer;
-			transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease;
+			transition: background var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap);
 		}
-		html[data-theme="light"] button { color: var(--accent-text-light); }
-		button:hover:not(:disabled) { background: rgba(139, 92, 246, 0.25); border-color: #8b5cf6; }
-		button:focus-visible { outline: 3px solid rgba(139, 92, 246, 0.35); outline-offset: 3px; }
-		button:disabled { cursor: wait; opacity: 0.5; }
-		@media (prefers-reduced-motion: reduce) { button { transition: none; } }
+		.primary {
+			height: calc(var(--space-7) + var(--space-2));
+			padding: 0 var(--space-5);
+			border-radius: var(--radius-pill);
+			background: var(--accent-fill);
+			color: var(--accent-on-fill);
+			font-size: var(--text-callout);
+			font-weight: var(--fw-semibold);
+		}
+		.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary)); }
+		.secondary {
+			height: var(--space-7);
+			padding: 0 var(--space-2);
+			border-radius: var(--radius-sm);
+			background: transparent;
+			color: var(--accent-text);
+			font-size: var(--text-callout);
+			font-weight: var(--fw-semibold);
+		}
+		.secondary:hover:not(:disabled) { background: var(--accent-wash); }
+		button:disabled { cursor: wait; opacity: 0.3; }
+		button:focus-visible { outline: var(--space-1) solid var(--accent-wash); outline-offset: var(--space-1); }
+		[hidden] { display: none !important; }
+		@media (prefers-reduced-motion: reduce) {
+			button { transition: none; }
+			.spinner { animation: none; }
+		}
 	</style>
 	<script>
 		(function () {
@@ -101,63 +162,70 @@
 	<div class="app" data-tauri-drag-region>
 		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
+		<p id="line" class="line" hidden></p>
+		<p id="log" class="log" hidden>Service log<code id="log-path"></code></p>
+		<div id="spinner" class="spinner"></div>
 		<section id="background-approval" class="background-approval" hidden aria-labelledby="status">
-			<p id="approval-description" class="approval-description">Turn this on so your agents keep working when you close this window.</p>
-			<div class="failure-card approval-row">
+			<div class="approval-row">
 				<span id="approval-check" class="approval-check" data-state="off"><span aria-hidden="true">✓</span><span id="approval-state" class="visually-hidden">Off</span></span>
-				<span class="failure-copy">Keep CORSIA running when the window is closed</span>
-				<button id="open-login-items" class="approval-action" type="button">Open Login Items</button>
+				<span>Keep CORSIA running when the window is closed</span>
 			</div>
+			<button id="open-login-items" class="primary" type="button">Open Login Items</button>
 		</section>
-		<section id="failure" class="failure" hidden aria-labelledby="status">
-			<div class="failure-card">
-				<p id="failure-description" class="failure-copy">CORSIA couldn’t start.</p>
-				<p id="failure-reason" class="failure-copy" hidden></p>
-				<span class="log-label">Service log</span>
-				<code id="log-path" class="log-path"></code>
-				<div class="actions">
-					<button id="failure-login-items" type="button" hidden>Open Login Items</button>
-					<button id="retry" type="button">Try again</button>
-				</div>
-			</div>
-		</section>
+		<div id="actions" class="actions" hidden>
+			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
+			<button id="retry" class="primary" type="button">Try again</button>
+		</div>
 	</div>
 
 	<script>
 		(async () => {
 			const invoke = window.__TAURI__?.core?.invoke;
 			const status = document.getElementById('status');
-			const failure = document.getElementById('failure');
+			const line = document.getElementById('line');
+			const log = document.getElementById('log');
+			const logPath = document.getElementById('log-path');
+			const spinner = document.getElementById('spinner');
+			const actions = document.getElementById('actions');
 			const backgroundApproval = document.getElementById('background-approval');
 			const approvalCheck = document.getElementById('approval-check');
 			const approvalState = document.getElementById('approval-state');
 			const openLoginItems = document.getElementById('open-login-items');
-			const logPath = document.getElementById('log-path');
-			const reason = document.getElementById('failure-reason');
 			const retry = document.getElementById('retry');
-			const failureDescription = document.getElementById('failure-description');
 			const failureLoginItems = document.getElementById('failure-login-items');
 			let quitFailure = false;
 			let approvalPoll;
 			let approvalPollInFlight = false;
 			let continuationStarted = false;
 
+			function showStarting() {
+				quitFailure = false;
+				status.textContent = 'Starting CORSIA…';
+				line.hidden = true;
+				log.hidden = true;
+				spinner.hidden = false;
+				actions.hidden = true;
+				backgroundApproval.hidden = true;
+			}
+
 			async function showFailure(why, quitting = false) {
 				clearInterval(approvalPoll);
 				quitFailure = quitting;
-				failure.dataset.mode = quitting ? 'quit' : 'startup';
-				failureDescription.textContent = quitting ? "CORSIA couldn't stop its background service." : 'CORSIA couldn’t start.';
-				failureLoginItems.hidden = !quitting;
 				backgroundApproval.hidden = true;
 				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
-				reason.textContent = typeof why === 'string' ? why : '';
-				reason.hidden = !reason.textContent;
+				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : typeof why === 'string' ? why : '';
+				line.hidden = !line.textContent;
+				log.hidden = false;
+				spinner.hidden = true;
+				failureLoginItems.hidden = !quitting;
+				failureLoginItems.className = quitting ? 'primary' : 'secondary';
+				retry.className = quitting ? 'secondary' : 'primary';
+				actions.hidden = false;
 				try {
 					logPath.textContent = await invoke('get_service_log_path');
 				} catch {
 					logPath.textContent = 'Service log location unavailable';
 				}
-				failure.hidden = false;
 				retry.disabled = false;
 				retry.focus();
 			}
@@ -177,7 +245,12 @@
 			}
 
 			async function showBackgroundApproval() {
-				failure.hidden = true;
+				quitFailure = false;
+				line.textContent = 'Turn this on so your agents keep working when you close this window.';
+				line.hidden = false;
+				log.hidden = true;
+				spinner.hidden = true;
+				actions.hidden = true;
 				status.textContent = 'Keep CORSIA running';
 				backgroundApproval.hidden = false;
 				approvalCheck.dataset.state = 'off';
@@ -200,9 +273,7 @@
 
 			async function start() {
 				if (continuationStarted) return;
-				status.textContent = 'Starting CORSIA…';
-				failure.hidden = true;
-				backgroundApproval.hidden = true;
+				showStarting();
 				retry.disabled = true;
 				if (!invoke) {
 					await showFailure();

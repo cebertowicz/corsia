@@ -7,10 +7,24 @@ import time
 
 import pytest
 
-from llm import local_setup, local_setup_gates, local_sources
+from llm import local_setup, local_setup_gates, local_setup_prepare, local_sources
+from llm.local_model import OMLX_PIN, LocalModel
 
 
 GB = 1000 ** 3
+# The model CORSIA's oMLX picked for the Mac under test.
+PICK = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 40960)
+
+
+def _eligible(monkeypatch, model=PICK):
+    """A Mac with the memory for a local model, whose oMLX already picked ``model``."""
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_prepare, "picked_model", lambda: model)
+
+
+def _ineligible(monkeypatch):
+    """A Mac under 24 GiB: no local model."""
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: False)
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +51,7 @@ def no_admin_key_stage(monkeypatch):
     monkeypatch.setattr(local_setup, "own_omlx_admin_key", lambda: None)
     monkeypatch.setattr(local_setup, "secure_local_omlx", secured)
     monkeypatch.setattr(local_setup, "_omlx_supports_loopback_auth", lambda: True)
+    monkeypatch.setattr(local_setup, "omlx_version", lambda: OMLX_PIN)
     monkeypatch.setattr(local_setup, "require_free_disk", lambda *_args: None)
     monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
 
@@ -77,7 +92,7 @@ def test_omlx_model_without_a_reported_window_has_none():
     from llm.catalog_network_models import _parse_omlx_status
 
     model = _parse_omlx_status(_status_response(
-        estimated_size=local_setup.DEFAULT_PROFILE.resident_weight_bytes))["starter"]
+        estimated_size=8_608_739_065))["starter"]
 
     assert model["context_length"] is None
     assert "context_window_source" not in model
@@ -112,12 +127,17 @@ def test_configured_starter_window_is_discovered_as_the_provider_reported_window
     class Response:
         status_code = 200
 
-    async def admin_request(_cfg, _method, _path, *, json=None, timeout=None):
-        saved.update(json)
+        @staticmethod
+        def json():
+            return {"models": [{"id": "starter", "thinking_default": None}]}
+
+    async def admin_request(_cfg, method, _path, *, json=None, timeout=None):
+        if method == "PUT":
+            saved.update(json)
         return Response()
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
-    asyncio.run(local_setup._configure_model_settings("server", 40960, local_setup.DEFAULT_PROFILE))
+    asyncio.run(local_setup._configure_model_settings("server", LocalModel("org/starter", 1, 40960)))
 
     canonical = _parse_omlx_status(_status_response())
     assert canonical["starter"]["context_length"] is None
@@ -152,7 +172,7 @@ def test_runtime_models_window_fills_an_unreported_window():
 
 
 def test_ineligible_starter_refuses_with_subscription_recovery(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(8192, False))
+    _ineligible(monkeypatch)
 
     result = asyncio.run(_finished())
 
@@ -163,15 +183,14 @@ def test_ineligible_starter_refuses_with_subscription_recovery(monkeypatch):
 
 
 def test_automatic_ineligible_starter_skips_without_weakening_safety_gate(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(8192, False))
+    _ineligible(monkeypatch)
 
     result = asyncio.run(_finished(automatic=True))
 
     assert result == {
         "ok": True,
         "skipped": "ineligible",
-        "message": "This Mac can't run a local model well. Connect a subscription or an API key in the app.",
-        "eligibility": {"context_window": 8192, "eligible": False},
+        "message": "This computer can't run a local model well. Connect a subscription or an API key in the app.",
         "progress": [],
     }
 
@@ -179,7 +198,7 @@ def test_automatic_ineligible_starter_skips_without_weakening_safety_gate(monkey
 def test_setup_uses_official_lifecycle_then_registers_downloads_and_refreshes(monkeypatch):
     events: list[str] = []
     commands: list[list[str]] = []
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_setup, "_ensure_omlx", lambda progress: events.append("install"))
     monkeypatch.setattr(local_setup, "_run", lambda command: commands.append(command))
     # A leftover oMLX settings file sets a non-default port; setup must use it.
@@ -198,16 +217,16 @@ def test_setup_uses_official_lifecycle_then_registers_downloads_and_refreshes(mo
         assert server_id == "local-server" and key
         events.append("secure")
 
-    async def configure_global(server_id, _profile=None):
+    async def configure_global(server_id, _model=None):
         assert server_id == "local-server"
         events.append("global")
 
-    async def download(server_id, progress, _profile=None):
+    async def download(server_id, progress, _model=None):
         assert server_id == "local-server"
         events.append("download")
 
-    async def configure_model(server_id, context_window, _profile=None):
-        assert (server_id, context_window) == ("local-server", 40960)
+    async def configure_model(server_id, model):
+        assert (server_id, model) == ("local-server", PICK)
         events.append("model")
 
     async def discover(server_id):
@@ -237,7 +256,7 @@ def test_setup_uses_official_lifecycle_then_registers_downloads_and_refreshes(mo
     assert result["server_id"] == "local-server"
     assert result["progress"] == [
         "Installing", "Starting", "Configuring",
-        "Downloading Ternary-Bonsai-2-27B-mlx-2bit (8.02 GiB)", "Refreshing model catalog",
+        f"Downloading {PICK.model} ({local_setup.format_size(PICK.download_size_bytes)})", "Refreshing model catalog",
     ]
     assert [action for action, _ in EMITTED] == ["started", "completed"]
     assert local_setup.setup_status() == {"state": "succeeded", "stage": None, "result": result}
@@ -250,7 +269,7 @@ def test_setup_uses_official_lifecycle_then_registers_downloads_and_refreshes(mo
 ])
 def test_setup_signs_in_with_the_key_omlx_already_holds(monkeypatch, held, registered, expected):
     keys: list[tuple[str, str]] = []
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_setup, "_ensure_omlx", lambda progress: None)
     monkeypatch.setattr(local_setup, "_run", lambda command: None)
     monkeypatch.setattr(local_setup, "own_omlx_port", lambda: 5200)
@@ -308,10 +327,10 @@ def test_download_uses_official_hf_task_endpoints(monkeypatch):
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
 
-    asyncio.run(local_setup._wait_for_download("local-server", lambda _stage: None, local_setup.DEFAULT_PROFILE))
+    asyncio.run(local_setup._wait_for_download("local-server", lambda _stage: None, PICK))
 
     assert requests == [
-        ("POST", "/hf/download", {"repo_id": local_setup.DEFAULT_PROFILE.repository, "hf_token": ""}),
+        ("POST", "/hf/download", {"repo_id": PICK.repository, "hf_token": ""}),
         ("GET", "/hf/tasks", None),
     ]
 
@@ -347,21 +366,21 @@ def test_download_progress_reports_only_new_ten_percent_increments(monkeypatch):
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr(local_setup.asyncio, "sleep", pause)
 
-    asyncio.run(local_setup._wait_for_download("local-server", reports.append, local_setup.DEFAULT_PROFILE))
+    asyncio.run(local_setup._wait_for_download("local-server", reports.append, PICK))
 
     assert reports == [
-        f"Downloading {local_setup.DEFAULT_PROFILE.model} ({local_setup.format_size(local_setup.DEFAULT_PROFILE.download_size_bytes)}, 10%)",
-        f"Downloading {local_setup.DEFAULT_PROFILE.model} ({local_setup.format_size(local_setup.DEFAULT_PROFILE.download_size_bytes)}, 20%)",
-        f"Downloading {local_setup.DEFAULT_PROFILE.model} ({local_setup.format_size(local_setup.DEFAULT_PROFILE.download_size_bytes)}, 100%)",
+        f"Downloading {PICK.model} ({local_setup.format_size(PICK.download_size_bytes)}, 10%)",
+        f"Downloading {PICK.model} ({local_setup.format_size(PICK.download_size_bytes)}, 20%)",
+        f"Downloading {PICK.model} ({local_setup.format_size(PICK.download_size_bytes)}, 100%)",
     ]
 
 
 def test_second_request_during_a_flight_reports_its_stage_without_a_second_flight(monkeypatch):
     evaluations: list[str] = []
 
-    def eligibility(*_args):
-        evaluations.append("eligibility")
-        return local_setup.Eligibility(40960, True)
+    def memory(*_args):
+        evaluations.append("memory")
+        return True
 
     async def subscription():
         evaluations.append("subscription")
@@ -380,7 +399,8 @@ def test_second_request_during_a_flight_reports_its_stage_without_a_second_fligh
     async def noop(*_args):
         return None
 
-    monkeypatch.setattr(local_setup, "profile_eligibility", eligibility)
+    monkeypatch.setattr(local_setup, "local_memory_ok", memory)
+    monkeypatch.setattr(local_setup_prepare, "picked_model", lambda: PICK)
     monkeypatch.setattr(local_setup, "_subscription_available", subscription)
     monkeypatch.setattr(local_setup, "_ensure_omlx", lambda progress: None)
     monkeypatch.setattr(local_setup, "_run", lambda command: None)
@@ -411,7 +431,7 @@ def test_second_request_during_a_flight_reports_its_stage_without_a_second_fligh
     assert first["in_progress"] is True and first["stage"] == "Installing"
     assert second["in_progress"] is True and second["stage"].startswith("Downloading")
     assert downloads == ["download"]
-    assert evaluations == ["subscription", "eligibility"]
+    assert evaluations == ["memory", "subscription"]
     assert [action for action, _ in EMITTED] == ["started", "completed"]
 
 
@@ -420,7 +440,7 @@ async def _server_id(*, port=None, api_key=None) -> str:
 
 
 def test_setup_moves_blocking_omlx_install_off_the_event_loop(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     install_entered = threading.Event()
     allow_install = threading.Event()
 
@@ -434,13 +454,13 @@ def test_setup_moves_blocking_omlx_install_off_the_event_loop(monkeypatch):
     async def register(*, port=None, api_key=None):
         return "local-server"
 
-    async def configure_global(_server_id, _profile=None):
+    async def configure_global(_server_id, _model=None):
         return None
 
-    async def download(_server_id, _progress, _profile=None):
+    async def download(_server_id, _progress, _model=None):
         return None
 
-    async def configure_model(_server_id, _context_window, _profile=None):
+    async def configure_model(_server_id, _model):
         return None
 
     async def discover(_server_id):
@@ -471,7 +491,7 @@ def test_setup_moves_blocking_omlx_install_off_the_event_loop(monkeypatch):
 
 
 def test_terminal_setup_error_projects_as_a_distinct_source_state(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
     # The host's own oMLX install must not decide the state under test.
     monkeypatch.setattr(local_sources, "installed_omlx", lambda: "/usr/local/bin/omlx")
@@ -491,7 +511,7 @@ def test_terminal_setup_error_projects_as_a_distinct_source_state(monkeypatch):
 
 def test_a_new_request_clears_the_previous_failure(monkeypatch):
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(8192, False))
+    _ineligible(monkeypatch)
     local_setup._flight.result = {"ok": False, "message": "oMLX failed"}
 
     skipped = asyncio.run(local_setup.begin_local_setup(automatic=True))
@@ -502,7 +522,7 @@ def test_a_new_request_clears_the_previous_failure(monkeypatch):
 
 
 def test_ready_managed_server_overrides_a_terminal_setup_error(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     local_setup._flight.result = {
         "ok": False, "message": "oMLX failed", "next_action": "Fix oMLX, then rerun.",
     }
@@ -517,7 +537,7 @@ def test_ready_managed_server_overrides_a_terminal_setup_error(monkeypatch):
 
 
 def test_server_setup_keeps_automatic_ineligible_semantics(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(8192, False))
+    _ineligible(monkeypatch)
 
     result = asyncio.run(local_setup.begin_local_setup(automatic=True))
 
@@ -527,7 +547,7 @@ def test_server_setup_keeps_automatic_ineligible_semantics(monkeypatch):
 
 
 def test_server_setup_keeps_if_no_subscription_semantics(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     async def available():
         return local_setup_gates.SubscriptionSource("codex", "steve@example.com")
 
@@ -639,7 +659,7 @@ def test_unknown_usage_does_not_claim_a_subscription_is_limited(monkeypatch):
 
 
 def _failing_setup(monkeypatch, failing_step, exc):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_setup, "_ensure_omlx", lambda progress: None)
     monkeypatch.setattr(local_setup, "_run", lambda command: None)
 
@@ -651,10 +671,10 @@ def _failing_setup(monkeypatch, failing_step, exc):
             raise exc
         return "local-server"
 
-    async def configure_global(_server_id, _profile=None):
+    async def configure_global(_server_id, _model=None):
         return None
 
-    async def download(_server_id, _progress, _profile=None):
+    async def download(_server_id, _progress, _model=None):
         raise exc
 
     monkeypatch.setattr(local_setup, "_wait_for_health", healthy)
@@ -675,7 +695,7 @@ def test_registration_http_exception_is_saved_with_its_detail(monkeypatch, caplo
     assert result["ok"] is False
     assert result["message"] == "oMLX refused the registration"
     assert local_setup.setup_failure()["message"] == "oMLX refused the registration"
-    assert "Local setup failed for starter" in caplog.text
+    assert "Local setup failed" in caplog.text
 
 
 def test_unreadable_omlx_payload_is_saved_as_a_readable_failure(monkeypatch):
@@ -716,22 +736,65 @@ def test_server_setup_task_failure_is_observed(caplog):
     assert "Local setup task ended with an error" in caplog.text
 
 
-def test_local_source_reports_the_starter_download_size(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+def test_local_source_reports_the_picked_models_size_and_window(monkeypatch):
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
 
-    assert local_sources.omlx_source()["download_size"] == "8.02 GiB"
+    source = local_sources.omlx_source()
+    assert (source["download_size"], source["context_window"]) == ("15.81 GiB", 40960)
+    # Until oMLX picks, there is no model to size.
+    _eligible(monkeypatch, model=None)
+    source = local_sources.omlx_source()
+    assert source["eligible"] is True and source["download_size"] is None and source["context_window"] is None
 
 
 def test_local_source_sends_the_download_percent_as_a_number(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_setup, "setup_stage", lambda: "Downloading Starter (8.60 GiB, 40%)")
     monkeypatch.setattr(local_setup, "setup_status", lambda: {"state": "running"})
+    monkeypatch.setattr(local_setup, "download_estimate", lambda: (600, False))
     source = local_sources.omlx_source()
     assert source["download_percent"] == 40 and source["setup_stage"].startswith("Downloading")
+    assert source["download_eta_seconds"] == 600 and source["download_stalled"] is False
     for stage, percent in (("Installing", None), ("Downloading Starter (8.60 GiB, 100%)", 100), ("odd 250%", 100)):
         monkeypatch.setattr(local_setup, "setup_stage", lambda stage=stage: stage)
         assert local_sources.omlx_source()["download_percent"] == percent
+
+
+def test_download_progress_estimates_only_after_measured_progress_and_marks_a_stall():
+    from llm.local_setup_results import DownloadProgress
+
+    progress = DownloadProgress(0)
+    progress.observe(100, 1_000, 0)
+    assert progress.eta_seconds is None and progress.stalled is False
+    progress.observe(300, 1_000, 10)
+    assert progress.eta_seconds == 35 and progress.stalled is False
+    progress.observe(300, 1_000, 41)
+    assert progress.eta_seconds is None and progress.stalled is True
+    # Polling continues through a pause; new transfer progress clears it without a retry.
+    progress.observe(500, 1_000, 51)
+    assert progress.eta_seconds == 25 and progress.stalled is False
+
+
+def test_cancelled_local_setup_is_a_successful_terminal_noop_for_the_source(monkeypatch):
+    async def run():
+        await asyncio.Event().wait()
+
+    async def scenario():
+        task = asyncio.create_task(run())
+        local_setup._flight.task = task
+        await asyncio.sleep(0)
+        result = await local_setup.cancel_local_setup()
+        return result, task.cancelled()
+
+    monkeypatch.setattr(local_setup.local_setup_operation, "read", lambda: None)
+    monkeypatch.setattr(local_setup.local_setup_operation, "clear", lambda: None)
+    monkeypatch.setattr(local_setup, "_notify_models_changed", lambda: None)
+    result, cancelled = asyncio.run(scenario())
+
+    assert result == {"ok": True, "cancelled": True}
+    assert local_setup._flight.result == {"ok": True, "cancelled": True}
+    assert cancelled
 
 
 @pytest.mark.parametrize(("servers", "membership", "code"), [
@@ -740,14 +803,14 @@ def test_local_source_sends_the_download_percent_as_a_number(monkeypatch):
     ([{"id": "s1", "status": "online", "kind": "omlx"}], ({"omlx@s1"}, set()), None),
 ])
 def test_local_source_names_why_it_is_not_ready_as_a_code(monkeypatch, servers, membership, code):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: servers)
     source = local_sources.omlx_source(membership)
     assert source.get("reason_code") == code
 
 
 def test_a_setup_failure_or_stopped_download_replaces_the_reason_and_its_code(monkeypatch):
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    _eligible(monkeypatch)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [{"id": "s1", "status": "offline", "kind": "omlx"}])
     monkeypatch.setattr(local_setup, "setup_failure", lambda: {"ok": False, "message": "No space left", "next_action": "Free space"})
     source = local_sources.omlx_source((set(), set()))

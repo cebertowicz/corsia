@@ -64,6 +64,13 @@ function parseColor(v: string): { rgb: RGB; a: number } {
 		const p = rgba[1].split(',').map((x) => parseFloat(x));
 		return { rgb: [p[0], p[1], p[2]], a: p[3] ?? 1 };
 	}
+	// The accent roles are authored the way `accentRoles()` writes them: a colour mixed with transparent, which
+	// composites over its surface exactly as `over()` below does.
+	const mix = /^color-mix\(in srgb,\s*#([0-9a-f]{6})\s+(\d+(?:\.\d+)?)%,\s*transparent\)$/i.exec(v.trim());
+	if (mix) {
+		const n = parseInt(mix[1], 16);
+		return { rgb: [(n >> 16) & 255, (n >> 8) & 255, n & 255], a: parseFloat(mix[2]) / 100 };
+	}
 	throw new Error(`unparseable colour: ${v}`);
 }
 

@@ -6,15 +6,18 @@ import asyncio
 
 import pytest
 
-from llm import local_setup, local_sources, omlx_global_settings
+from llm import local_setup, local_sources, omlx_global_settings, own_omlx_management
+from llm.local_model import LocalModel
 from llm.local_profiles import OMLX_GLOBAL_SETTINGS
 
 SERVER = {"id": "local-server"}
 
 
 @pytest.fixture(autouse=True)
-def clean(monkeypatch):
+def clean(monkeypatch, tmp_path):
     monkeypatch.setattr(omlx_global_settings, "_observed", {})
+    monkeypatch.setattr(omlx_global_settings, "_observed_model", {})
+    monkeypatch.setattr(own_omlx_management, "record_path", lambda: tmp_path / "own-omlx-management.json")
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kw: [
         {"id": "local-server", "status": "online", "kind": "local"}])
@@ -84,6 +87,27 @@ def test_a_slow_read_is_bounded(monkeypatch):
     asyncio.run(omlx_global_settings.record_observation(SERVER))
 
     assert _settings(local_sources.omlx_source()) is None
+
+
+def test_failed_rearm_retries_when_the_managed_model_is_seen_again(monkeypatch):
+    model = LocalModel("org/starter", 1, 32_768)
+    attempts = []
+
+    async def model_settings(_cfg, _model):
+        return {"ok": True, "settings": {"max_tokens": 1}, "thinking_default": True}
+
+    async def rearm():
+        attempts.append(True)
+        return len(attempts) == 2
+
+    monkeypatch.setattr(omlx_global_settings, "_managed_model", lambda: model)
+    monkeypatch.setattr(omlx_global_settings, "get_model_settings", model_settings)
+    monkeypatch.setattr("onboarding.omlx_settings_wake.rearm", rearm)
+    _observe(monkeypatch, {"ok": True, "settings": {"max_concurrent_requests": 8}})
+    _observe(monkeypatch, {"ok": True, "settings": {"max_concurrent_requests": 8}})
+
+    assert attempts == [True, True]
+    assert omlx_global_settings._observed_model[SERVER["id"]][0] == model.model
 
 
 def test_corsias_own_omlx_never_reports_settings(monkeypatch):

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
+    LABEL_CORRECTION,
     LABEL_UNREADABLE,
     ClassifierVersion,
     CorrectionCandidate,
@@ -45,7 +46,11 @@ def _record_fact(
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
 ) -> bool:
-    """Write one versioned local-classifier fact in its own transaction."""
+    """Write one versioned local-classifier fact in its own transaction.
+
+    A new correction queues its triage note in the same transaction.
+    """
+    from core.correction_notes import queue_correction_note
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -67,6 +72,8 @@ def _record_fact(
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
+        if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
+            queue_correction_note(db, candidate, version, result.event_id)
         return result.inserted
 
 
@@ -86,7 +93,7 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
     finally:
         db.close()
     candidates = hydrate_candidates([key])
-    return candidates[0] if candidates else None
+    return replace(candidates[0], arrived=True) if candidates else None
 
 
 async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:

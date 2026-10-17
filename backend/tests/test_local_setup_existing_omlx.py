@@ -9,10 +9,16 @@ import subprocess
 
 import pytest
 
-from llm import local_setup, local_setup_existing, local_setup_operation, local_setup_ownership, local_sources
+from llm import (
+    local_setup, local_setup_existing, local_setup_operation, local_setup_ownership, local_setup_prepare,
+    local_sources,
+)
+from llm.local_model import OMLX_PIN, LocalModel
 from vendor_account_fixtures import isolated_shutdown_tasks  # noqa: F401
 
-ELIGIBLE = local_setup.Eligibility(40960, True)
+# The model CORSIA's own oMLX picked for the Mac under test.
+PICK = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 40960)
+STARTER = local_setup_existing.OWN_OMLX_STARTER
 
 
 @pytest.fixture(autouse=True)
@@ -20,8 +26,9 @@ def fresh_flight(monkeypatch):
     local_setup_operation.clear()
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: None)
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: ELIGIBLE)
-    monkeypatch.setattr(local_setup, "omlx_version", lambda: "0.7.0")
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_prepare, "picked_model", lambda: PICK)
+    monkeypatch.setattr(local_setup, "omlx_version", lambda: OMLX_PIN)
     monkeypatch.setattr("llm.local_setup_auth.omlx_version", lambda: "0.7.0")
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
 
@@ -50,13 +57,13 @@ def calls(monkeypatch):
     async def secure(server_id, key):
         recorded.append("secure")
 
-    async def global_settings(server_id, _profile=None):
+    async def global_settings(server_id, _model=None):
         recorded.append("global_settings")
 
-    async def model_settings(server_id, window, _profile=None):
+    async def model_settings(server_id, _model):
         recorded.append("model_settings")
 
-    async def download(server_id, progress, _profile=None):
+    async def download(server_id, progress, _model=None):
         recorded.append("download")
 
     async def discover(server_id):
@@ -132,7 +139,7 @@ def test_the_starter_download_into_the_persons_omlx_uses_its_port_too(monkeypatc
     (home / ".omlx" / "settings.json").write_text(json.dumps({"server": {"port": 5200}}))
     monkeypatch.setenv("HOME", str(home))
 
-    asyncio.run(local_setup_existing.download_into_own_omlx(lambda stage: None, [], local_setup.DEFAULT_PROFILE))
+    asyncio.run(local_setup_existing.download_into_own_omlx(lambda stage: None, [], STARTER))
 
     assert calls.ports == [5200, 5200]
 
@@ -253,7 +260,7 @@ def test_a_fresh_install_still_configures_downloads_and_refreshes(monkeypatch, c
         "install", "omlx start", "health", "register", "secure", "global_settings",
         "download", "model_settings", "discover",
     ]
-    assert result["ok"] is True and result["model"] == local_setup.DEFAULT_PROFILE.model
+    assert result["ok"] is True and result["model"] == PICK.model
 
 
 def test_an_explicit_setup_adopts_an_existing_install_without_configuring_it(monkeypatch, calls):
@@ -420,7 +427,7 @@ def test_an_expired_wait_keeps_following_then_finishes_configured(monkeypatch, c
     assert {entry["seconds"] for entry in seen} == {local_setup.DOWNLOAD_BACKGROUND_POLL_SECONDS}
     assert "Still downloading" in seen[0]["stage"]
     assert calls[-2:] == ["model_settings", "discover"]  # configured and catalog refreshed
-    assert result["ok"] is True and result["model"] == local_setup.DEFAULT_PROFILE.model
+    assert result["ok"] is True and result["model"] == PICK.model
     assert local_setup.setup_status()["state"] == "succeeded"
     assert local_setup.setup_failure() is None and local_setup._flight.following is False
 
@@ -508,7 +515,7 @@ def test_add_starter_model_downloads_into_your_omlx_and_writes_no_settings(monke
     assert first["ok"] is True
     assert calls == ["health", "register", "download", "discover"]
     assert "global_settings" not in calls and "model_settings" not in calls and "install" not in calls
-    assert result["ok"] is True and result["model"] == local_setup.DEFAULT_PROFILE.model
+    assert result["ok"] is True and result["model"] == STARTER.model
     assert local_setup.setup_status()["state"] == "succeeded"
     assert "models" in notified
 
@@ -524,19 +531,19 @@ def test_add_starter_model_refuses_an_omlx_corsia_installed(monkeypatch, calls):
 
 def test_add_starter_model_refuses_a_mac_that_cannot_run_it(monkeypatch, calls):
     monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: True)
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(8192, False))
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: False)
 
     first, result = asyncio.run(_add_starter())
 
     assert first == {"ok": False, "reason": "mac_cannot_run",
-                     "message": "This Mac can't run a local model well."}
+                     "message": "This computer can't run a local model well."}
     assert result is None and calls == []
 
 
 def test_add_starter_model_reports_a_failed_download_and_writes_nothing(monkeypatch, calls):
     monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: True)
 
-    async def failing(server_id, progress, _profile=None):
+    async def failing(server_id, progress, _model=None):
         calls.append("download")
         raise RuntimeError("disk full")
 
@@ -556,7 +563,7 @@ def test_add_starter_model_while_a_flight_runs_reports_that_flight(monkeypatch, 
     async def scenario():
         gate = asyncio.Event()
 
-        async def slow(server_id, progress, _profile=None):
+        async def slow(server_id, progress, _model=None):
             await gate.wait()
 
         monkeypatch.setattr(local_setup, "_wait_for_download", slow)

@@ -70,7 +70,7 @@ def test_agent_list_hides_unreached_configuration(connected_apps_client) -> None
     assert by_name["A"]["key_refs"] == [{"kind": "env", "name": "A_TOKEN", "set": False}]
     assert by_name["A"]["on_here"] is True
     assert by_name["A"]["next_step"] == (
-        "A lost its connection. Open A in project-a's Connected apps and press Reconnect."
+        "A lost its connection. Open A in Settings › Connected apps and press Reconnect."
     )
     assert by_name["B"] == {
         "name": "B", "state": "disconnected", "on_here": False,

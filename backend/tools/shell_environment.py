@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from connections import github_agent, gws_agent_home
+from connections import github_agent
 from connections.github_agent import AgentAccountView
 from connections.github_agent_home import BOT_ENV_NAMES, is_host_identity_name
 from infra.db_async import run_in_db
@@ -33,7 +33,7 @@ def shell_env_pass_names() -> str:
 
     Safehouse skips a name the environment does not carry, so the values decide what passes.
     """
-    return ",".join((*_SHELL_PASS_NAMES, *BOT_ENV_NAMES, gws_agent_home.SHELL_ENV))
+    return ",".join((*_SHELL_PASS_NAMES, *BOT_ENV_NAMES))
 
 
 async def bind_agent_account(env: dict[str, str]) -> AgentAccountView:
@@ -44,23 +44,6 @@ async def bind_agent_account(env: dict[str, str]) -> AgentAccountView:
     view = await run_in_db(github_agent.view)
     env.update(github_agent.shell_env(view))
     return view
-
-
-def bind_gws_home(env: dict[str, str], thread_id: str | None) -> Path | None:
-    """Name this thread's own gws home in its shell env and return it for the grant, or None.
-
-    Only the thread's own home is ever named or granted; with none, the helper fails closed.
-    """
-    home = gws_agent_home.home_for(thread_id)
-    if home is not None:
-        env[gws_agent_home.SHELL_ENV] = str(home)
-    return home
-
-
-def own_gws_home(env: dict[str, str]) -> Path | None:
-    """The gws home a spawn's env names, which is the one its argv grants read-write."""
-    value = env.get(gws_agent_home.SHELL_ENV)
-    return Path(value) if value else None
 
 
 def agent_account_ro_dirs(view: AgentAccountView | None) -> list[Path]:
@@ -95,7 +78,6 @@ def safehouse_subprocess_env(
             and name not in _ENV_CONTROL_NAMES
             and not _SENSITIVE_ENV_NAME_RE.search(name)
             and not is_host_identity_name(name)
-            and name != gws_agent_home.SHELL_ENV
             and name not in {
                 "CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER",
                 "CORSIA_TOOL_INVOCATION_ID",
@@ -144,5 +126,4 @@ def shell_execution_context(
     env = safehouse_subprocess_env(
         thread_id, invocation_id=invocation_id if export_invocation else None,
     )
-    bind_gws_home(env, thread_id)
     return thread_id, project_id, turn_id, env

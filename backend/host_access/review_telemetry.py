@@ -38,6 +38,8 @@ class ReviewTelemetry:
     thread_id: str | None
     #: The requester's own model reviewed because the chosen reviewer could not run.
     reviewer_fallback: bool = False
+    #: The account the review ran on; ``None`` for a reviewer with no account.
+    account_id: str | None = None
     observed: IsolatedStructuredTelemetry | None = None
     unrecorded: list[IsolatedStructuredTelemetry] = field(default_factory=list)
 
@@ -55,6 +57,7 @@ class ReviewTelemetry:
                     record_llm_usage, self.thread_id, telemetry.catalog_id, usage,
                     source=f"host_access_{self.review_kind}_review",
                     ttft_ms=None, harness=telemetry.harness,
+                    vendor_account_id=self.account_id,
                 )
             except Exception as exc:
                 logger.warning("host-access review usage telemetry failed for {}: {}",
