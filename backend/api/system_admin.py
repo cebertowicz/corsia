@@ -342,7 +342,7 @@ async def system_update_status(
     result["server_time"] = datetime.now(timezone.utc).isoformat()
     from infra.settings import get_update_schedule
 
-    result["schedule"] = await asyncio.to_thread(get_update_schedule)
+    result["schedule"] = await run_in_db(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
         activated = await run_in_db(staged_update_activated, operation)

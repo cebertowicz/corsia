@@ -322,7 +322,8 @@ def _brief(node: dict, facts: dict) -> dict[str, Any]:
 def _severity(conditions: list[str], facts: dict) -> str:
     """What the plan needs, judged from its rows: a wait is neutral, a block is not.
 
-    What the user owes outranks a pause (pause contract rule 5). The internal
+    What the user owes outranks a node pause, but a paused plan defers its own
+    asks, so its rows carry none (``plan_defers_asks``). The internal
     ``plans.not_moving`` predicate stays agent-facing and does not add UI state.
     """
     if facts["stuck"] is not None:
