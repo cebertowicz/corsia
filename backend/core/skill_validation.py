@@ -241,9 +241,11 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 def declares_sidecar(skill_md: str) -> bool:
     """True when the frontmatter declares a ``corsia.yaml`` pointer; unreadable text declares none."""
+    import yaml
+
     try:
         return pointer_errors(parse_frontmatter(skill_md)[0].get("metadata"))[0]
-    except Exception:  # noqa: BLE001 - validation reports an unparseable frontmatter.
+    except (ValueError, yaml.YAMLError):  # validation reports an unparseable frontmatter.
         return False
 
 
