@@ -40,6 +40,23 @@ describe('a live open refused before the file snapshot arrives', () => {
 	});
 });
 
+describe('a tab whose document relocated before its draft followed', () => {
+	it('loads the tab path, taking only the artifact identity from the draft', async () => {
+		const relocated = { ...target, path: '/archive/doc.md' };
+		seedDraft(target, '# Saved');
+		api.fetchContent.mockImplementation(async (path: string) => {
+			if (path === target.path) throw new Error('404 not found');
+			return { text: '# Relocated', writable: true, freshness: null, revision: 'r2', artifact: { id: 'artifact' } };
+		});
+
+		const onReady = vi.fn();
+		await loadViewerContent({ target: relocated, isCurrent: () => true, onReady, onSnapshot: vi.fn(), onUnavailable: vi.fn() });
+
+		expect(api.fetchContent).toHaveBeenCalledExactlyOnceWith(relocated.path, expect.anything());
+		expect(onReady).toHaveBeenCalledWith(expect.objectContaining({ text: '# Relocated', artifactId: 'artifact' }));
+	});
+});
+
 describe('a tab opening from its draft', () => {
 	const draft = (editText: string, savedText: string) => ({ target, editText, savedText, status: 'idle' as const }) as unknown as Parameters<typeof openFromDraft>[0];
 
