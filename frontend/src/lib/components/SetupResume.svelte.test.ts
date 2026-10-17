@@ -20,6 +20,7 @@ let progress: SetupProgress | null;
 let sources: Record<string, unknown>[];
 let requests: string[];
 let writes: Record<string, unknown>[];
+let completionSaves: boolean;
 let onFinished: ReturnType<typeof vi.fn<() => void>>;
 
 function backend() {
@@ -28,8 +29,9 @@ function backend() {
 		const method = init?.method ?? 'GET';
 		requests.push(`${method} ${url}`);
 		if (url === '/api/setup/progress' && method === 'PUT') {
-			writes.push(JSON.parse(String(init?.body)));
-			return json({ ok: true });
+			const change = JSON.parse(String(init?.body));
+			writes.push(change);
+			return change.completed && !completionSaves ? json({}, 500) : json({ ok: true });
 		}
 		if (url === '/api/setup/progress') return progress ? json(progress) : json({}, 500);
 		if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources });
@@ -54,7 +56,7 @@ beforeEach(() => {
 	token.set('session'); user.set(null);
 	progress = { setup_completed: false, step: 'models', local_ai: null, status: { local_eligible: true, free_disk_gb: 200 } };
 	sources = [LOCAL, CODEX_SIGNED_OUT];
-	requests = []; writes = [];
+	requests = []; writes = []; completionSaves = true;
 	onFinished = vi.fn<() => void>();
 	backend();
 	host = document.createElement('div'); document.body.appendChild(host);
@@ -138,5 +140,34 @@ describe('SetupScreen resume', () => {
 
 		expect(writes).toContainEqual({ completed: true });
 		expect(onFinished).toHaveBeenCalledOnce();
+	});
+
+	it('stays on Connect an AI and says so when completion cannot be saved', async () => {
+		sources = [CODEX_READY];
+		completionSaves = false;
+		await reload();
+
+		button('Start using CORSIA')?.click();
+		await settle();
+
+		expect(onFinished).not.toHaveBeenCalled();
+		expect(host.textContent).toContain('couldn’t save that setup is finished');
+
+		completionSaves = true;
+		button('Start using CORSIA')?.click();
+		await settle();
+		expect(onFinished).toHaveBeenCalledOnce();
+	});
+
+	it('keeps a signed-in person on Connect an AI when they decline the existing oMLX', async () => {
+		progress = { ...progress!, step: 'local-consent', local_ai: true, status: { local_eligible: true, existing_omlx: true } };
+		await reload();
+
+		button('Not now')?.click();
+		await settle();
+
+		expect(host.textContent).toContain('Connect an AI');
+		expect(host.textContent).not.toContain('Create your account');
+		expect(writes).toContainEqual({ local_ai: false });
 	});
 });

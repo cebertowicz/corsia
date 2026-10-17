@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from infra.database import write_transaction
 from infra.settings import get_setting, set_setting
 
 KEY = "setup_progress"
@@ -56,13 +57,16 @@ def update(
     """Record a step, the local-AI choice or completion; a completed setup is never reopened."""
     if step is not None and step not in STEPS:
         raise SetupProgressError("unknown setup step")
-    record = read(db=db) or {}
-    if record.get("setup_completed") is True:
-        return
-    if step is not None and "step" in record:  # only a setup the app started can move; none is begun here
-        record["step"] = step
-    if local_ai is not None:
-        record["local_ai"] = local_ai
-    if completed:
-        record["setup_completed"] = True
-    set_setting(KEY, record, db=db)
+    # One write transaction around the read and the write: overlapping changes queue, so a step
+    # written late can never overwrite a completion that landed first.
+    with write_transaction(db, scope="setup_progress_update") as connection:
+        record = read(db=connection) or {}
+        if record.get("setup_completed") is True:
+            return
+        if step is not None and "step" in record:  # only a setup the app started can move; none is begun here
+            record["step"] = step
+        if local_ai is not None:
+            record["local_ai"] = local_ai
+        if completed:
+            record["setup_completed"] = True
+        set_setting(KEY, record, db=connection)

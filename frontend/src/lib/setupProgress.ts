@@ -27,7 +27,8 @@ export async function fetchSetupProgress(sessionToken: string | null): Promise<S
 
 /**
  * Tell the backend what the person chose or finished. Before the account exists only the local-AI
- * choice is taken, with no session; a failed write is not an error to show, the next change records it.
+ * choice is taken, with no session. Returns whether it was saved: a failed step or choice write is not
+ * shown (the next change records it), but completion has no next change, so its caller must act on false.
  */
 export async function recordSetupProgress(change: SetupProgressChange, sessionToken: string | null): Promise<boolean> {
 	try {

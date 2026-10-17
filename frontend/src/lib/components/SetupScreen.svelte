@@ -155,11 +155,14 @@
 	}
 
 	/** Finishing is the one thing that closes setup for good: it is recorded before the app opens. */
-	const finishSetup = async () => { await recordSetupProgress({ completed: true }, get(token)); onFinished(); };
+	const finishSetup = async () => {
+		if (await recordSetupProgress({ completed: true }, get(token))) { onFinished(); return; }
+		sourceError = 'CORSIA couldn’t save that setup is finished. Try again.'; page = 'models';
+	};
 
 	async function decideExistingOmlx(useIt: boolean) {
 		void recordSetupProgress({ local_ai: useIt }, get(token));
-		if (!useIt) { existingOmlxConsent = false; localPick.wanted = false; page = 'account'; return; }
+		if (!useIt) { existingOmlxConsent = false; localPick.wanted = false; page = get(token) ? 'models' : 'account'; return; }
 		localSetupBusy = true;
 		localStartError = '';
 		let returnToModels = false;

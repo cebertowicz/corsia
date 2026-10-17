@@ -160,3 +160,19 @@ def test_the_pre_account_write_keeps_the_loopback_boundary(client):
 
 def test_reading_progress_needs_a_session(client):
     assert client.get("/api/setup/progress", headers=HOST).status_code == 401
+
+
+def test_update_reads_and_writes_inside_one_write_transaction(isolated_db, monkeypatch):
+    """Overlapping changes queue on the write lock, so a late step cannot undo a completion that landed first."""
+    setup_progress.update(step="models")
+    in_transaction: list[bool] = []
+    real_read = setup_progress.read
+
+    def read(*, db=None):
+        in_transaction.append(bool(db is not None and db.in_transaction))
+        return real_read(db=db)
+
+    monkeypatch.setattr(setup_progress, "read", read)
+    setup_progress.update(local_ai=True)
+
+    assert in_transaction == [True]
