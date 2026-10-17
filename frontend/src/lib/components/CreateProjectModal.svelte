@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from './ui/Modal.svelte';
+	import Button from './ui/Button.svelte';
 	import AccentPicker from './ui/AccentPicker.svelte';
 	import { createProject, type ProjectInfo } from '$lib/stores/projects';
 	import { createProjectOpen } from '$lib/stores/overlays';
@@ -86,10 +87,10 @@
 		</div>
 
 		{#snippet foot()}
-			<button class="btn ghost push" onclick={close} disabled={busy}>Cancel</button>
-			<button class="btn primary" onclick={submit} disabled={!canCreate}>
+			<Button variant="ghost" onclick={close} disabled={busy}>Cancel</Button>
+			<Button variant="primary" onclick={submit} disabled={!canCreate}>
 				{busy ? 'Creating…' : 'Create project'}
-			</button>
+			</Button>
 		{/snippet}
 	</Modal>
 {/if}
@@ -110,21 +111,9 @@
 	.fld input:focus, .fld textarea:focus { outline: none; border-color: var(--accent); }
 
 	.err {
-		font-size: var(--text-subhead); color: var(--red);
+		font-size: var(--text-subhead); color: var(--red-text);
 		background: color-mix(in srgb, var(--red) 8%, transparent);
 		border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
 		border-radius: var(--radius-sm); padding: 8px 10px;
 	}
-
-	.btn {
-		font: inherit; font-size: var(--text-subhead); font-weight: 500;
-		padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
-		border: 1px solid transparent;
-	}
-	.btn.push { margin-left: auto; }
-	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
-	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent-fill); color: var(--accent-on-fill); }
-	.btn.primary:hover:not(:disabled) { background: var(--accent-hover, var(--accent)); }
-	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

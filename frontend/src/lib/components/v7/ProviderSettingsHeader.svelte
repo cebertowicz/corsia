@@ -45,7 +45,6 @@
 	.head {
 		display: flex; align-items: center; gap: 12px;
 		padding: 18px 22px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.title {
 		flex: 1;

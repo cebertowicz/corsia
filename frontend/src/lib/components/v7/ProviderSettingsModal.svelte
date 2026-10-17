@@ -298,7 +298,6 @@
 	description={removeDescription}
 	confirmLabel="Remove"
 	destructive
-	icon="delete"
 	onConfirm={handleDelete}
 	onCancel={() => (confirmingRemove = false)}
 />
