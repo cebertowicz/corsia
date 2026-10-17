@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chatComposer, createSession, lastAssistantMessage, saveEvidenceScreenshot, TEST_TOKEN, watchSessionSubscriptions } from '../support/corsia';
+import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -44,58 +45,54 @@ assert terminal.successor is None
 }
 
 for (const intent of ['apply_now', 'queue_after_turn'] as const) {
-for (const action of ['recover', 'cancel'] as const) {
-	test(`@flow:chat @surface:chat checkpoint-held input ${intent} ${action} preserves the message`, async ({ page, request }, testInfo) => {
+	test(`@flow:chat @surface:chat deterministic checkpoint refusal ${intent} is visible and retryable`, async ({ page, request }, testInfo) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-		const title = `e2e held ${action} ${Date.now()}`;
+		const title = `e2e checkpoint refusal ${intent} ${Date.now()}`;
 		const threadId = await createSession(request, title);
-		const profile = `/api/models/mock-test-model/profile?token=${TEST_TOKEN}`;
+		const profile = `/api/models/mock-test-model/profile?token=${encodeURIComponent(TEST_TOKEN)}`;
 		expect((await request.patch(profile, { data: { context_window: 128_000 } })).ok()).toBeTruthy();
 		try {
-		await seedMockResponses(request, [{ content: 'HELD_INPUT_DELIVERED_ONCE', finish_reason: 'stop' }]);
-		seedHeldInput(threadId, intent);
-		const subscriptions = watchSessionSubscriptions(page);
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
-		if ((page.viewportSize()?.width ?? 0) <= 768) {
-			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-		}
-		await page.locator('.thread-item').filter({ hasText: title }).click();
-		await expect(chatComposer(page)).toBeVisible();
-		await subscriptions.waitForSubscribed(threadId);
-		await expect(page.getByText('Keep this exact saved message', { exact: false }).first()).toBeVisible();
-		await saveEvidenceScreenshot(page, testInfo, 'checkpoint-held');
-		const waiting = page.locator(intent === 'apply_now' ? '.delivery-status' : '.queued-chip');
-		await expect(waiting.filter({ hasText: 'Waiting for checkpoint' }).first()).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
-		await expect(page.locator('.delivery-status.sending')).toHaveCount(0);
-		const cancel = page.getByRole('button', {
-			name: intent === 'apply_now' ? 'Cancel' : 'Remove queued message: Keep this exact saved message', exact: true,
-		});
-		await expect(cancel).toBeEnabled();
-		expect(await readMockCallCount(request)).toBe(0);
-			if (action === 'recover') {
-				expect((await request.patch(profile, { data: { context_window: 160_000 } })).ok()).toBeTruthy();
-				await expect(lastAssistantMessage(page)).toContainText('HELD_INPUT_DELIVERED_ONCE');
-				expect(await readMockCallCount(request)).toBe(1);
-			} else {
-				await cancel.click();
-				await expect(page.getByText('Cancelled by you', { exact: true })).toBeVisible();
-				expect(await readMockCallCount(request)).toBe(0);
-			}
-			const response = await request.get(`/api/threads/${threadId}/messages?token=${TEST_TOKEN}`);
+			await seedMockResponses(request, [{ content: 'HELD_INPUT_DELIVERED_ONCE', finish_reason: 'stop' }]);
+			seedHeldInput(threadId, intent);
+			const subscriptions = watchSessionSubscriptions(page);
+			await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
+			await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
+			await focusSetting(page, false);
+			await openOutcomeThread(page, title);
+			await expect(chatComposer(page)).toBeVisible();
+			await subscriptions.waitForSubscribed(threadId);
+			await expect(page.getByText('Keep this exact saved message', { exact: false }).first()).toBeVisible();
+			const refusal = page.getByText('Not delivered: Required checkpoint unavailable', { exact: true });
+			await expect(refusal).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled();
+			await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0);
+			await expect(page.locator('.delivery-status.sending')).toHaveCount(0);
+			expect(await readMockCallCount(request)).toBe(0);
+			await saveEvidenceScreenshot(page, testInfo, 'checkpoint-refusal-visible');
+
+			// This fixture has no install, cap-change, or model-switch owner. A later
+			// profile change cannot silently replay it; the person chooses Retry.
+			expect((await request.patch(profile, { data: { context_window: 160_000 } })).ok()).toBeTruthy();
+			await expect(refusal).toBeVisible();
+			expect(await readMockCallCount(request)).toBe(0);
+			await page.getByRole('button', { name: 'Retry', exact: true }).click();
+			await expect(lastAssistantMessage(page)).toContainText('HELD_INPUT_DELIVERED_ONCE');
+			expect(await readMockCallCount(request)).toBe(1);
+			const response = await request.get(`/api/threads/${threadId}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
 			expect(response.ok()).toBeTruthy();
 			const rows = (await response.json()).messages.filter((row: { role: string }) => row.role === 'user');
-			expect(rows).toHaveLength(1);
-			expect(rows[0]).toMatchObject({
-				id: `${threadId}:held`, content: 'Keep this exact saved message',
-				delivery_state: action === 'recover' ? 'delivered' : 'cancelled',
+			expect(rows).toHaveLength(2);
+			expect(rows.find((row: { id: string }) => row.id === `${threadId}:held`)).toMatchObject({
+				content: 'Keep this exact saved message', delivery_state: 'failed', write_outcome: 'proved_no_write',
 			});
-			await saveEvidenceScreenshot(page, testInfo, `checkpoint-held-${action}`);
+			expect(rows.find((row: { metadata?: { retried_from_message_id?: string } }) => row.metadata?.retried_from_message_id === `${threadId}:held`)).toMatchObject({
+				content: 'Keep this exact saved message', delivery_state: 'delivered', write_outcome: 'accepted',
+			});
+			await saveEvidenceScreenshot(page, testInfo, 'checkpoint-refusal-retried');
 		} finally {
-			expect((await request.delete(`/api/threads/${threadId}?token=${TEST_TOKEN}`)).ok()).toBeTruthy();
+			expect((await request.delete(`/api/threads/${threadId}?token=${encodeURIComponent(TEST_TOKEN)}`)).ok()).toBeTruthy();
 			expect((await request.patch(profile, { data: { context_window: 128_000 } })).ok()).toBeTruthy();
+			await focusSetting(page, true);
 		}
 	});
-}
 }
