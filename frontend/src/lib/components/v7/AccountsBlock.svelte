@@ -343,7 +343,6 @@
 	description="Threads on it hold until you choose another account."
 	confirmLabel="Remove"
 	destructive
-	icon="delete"
 	onConfirm={removeAccount}
 	onCancel={() => removeTarget = null}
 />

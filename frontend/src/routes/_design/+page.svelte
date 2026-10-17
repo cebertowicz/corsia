@@ -477,7 +477,6 @@
 		</Field>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showSmModal = false}>Cancel</Button>
-			<span style="flex: 1"></span>
 			<Button variant="primary" onclick={() => showSmModal = false}>Save</Button>
 		{/snippet}
 	</Modal>
@@ -497,7 +496,6 @@
 		</Section>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showMdModal = false}>Cancel</Button>
-			<span style="flex: 1"></span>
 			<Button variant="ghost" onclick={() => showMdModal = false}>Test</Button>
 			<Button variant="primary" onclick={() => showMdModal = false}>Save changes</Button>
 		{/snippet}
@@ -525,7 +523,6 @@
 		</p>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showAlertModal = false}>Cancel</Button>
-			<span style="flex: 1"></span>
 			<Button variant="danger" onclick={() => showAlertModal = false}>Load anyway</Button>
 		{/snippet}
 	</Modal>

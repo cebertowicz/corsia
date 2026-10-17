@@ -61,7 +61,7 @@
 							aria-label="Repository path"
 							placeholder="~/code/my-repo"
 						/>
-						<button class="btn ghost" onclick={onBrowse}>Browse…</button>
+						<Button onclick={onBrowse}>Browse…</Button>
 					</div>
 				</label>
 				<label class="fld">
@@ -137,10 +137,6 @@
 	.setting-detail { font-size: var(--text-caption); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.note { font-size: var(--text-footnote); color: var(--text-tertiary); margin: 0; }
 	.err { font-size: var(--text-subhead); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); border-radius: var(--radius-sm); padding: 8px 10px; }
-	.btn { font: inherit; font-size: var(--text-subhead); font-weight: 500; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent; }
-	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
-	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.mono { font-family: var(--font-mono, monospace); }
-	@media (max-width: 640px) { .add-settings { grid-template-columns: 1fr; } .pathrow { flex-direction: column; } .pathrow .btn { align-self: flex-start; } }
+	@media (max-width: 640px) { .add-settings { grid-template-columns: 1fr; } .pathrow { flex-direction: column; } .pathrow :global(.btn) { align-self: flex-start; } }
 </style>

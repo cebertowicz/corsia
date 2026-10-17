@@ -750,9 +750,14 @@ the room inside the safe-area padding, so the footer clears the home
 indicator. Fade backdrop 160ms, fly content (y: 8px) 200ms.
 
 **Header and footer have no dividers** (§0.2 rule 3); space separates them
-from the body. The footer right-aligns its actions: one solid `primary`
-`Button` for the commit, and every secondary (Cancel, Back, Close) a `ghost`
-`Button`, never an outlined or secondary-filled one.
+from the body. The footer puts every action together at the trailing edge, by
+proximity: a choice pair sits side by side where every other modal puts its
+commit, so the eye finds the commit in the same place each time. One solid
+`primary` `Button` (or `danger` for a destructive commit) is the commit, and
+every secondary (Cancel, Back, Close) is a `ghost` `Button`, never an
+outlined or secondary-filled one. No `flex: 1` spacer pins Cancel to the
+left, in `foot` or in a body action row. A destructive confirm carries no
+icon tile: its title says what happens.
 
 **Backdrop is light dim only** — `rgba(0, 0, 0, 0.28)` solid. The modal
 panel does the glass; the backdrop just de-emphasizes content. Liquid
@@ -791,7 +796,7 @@ interface Props {
   prominent action on a page or modal foot.
 - `secondary` — neutral default (`--bg-secondary` + `--border` +
   `--text-secondary`). Hovers to violet tint.
-- `danger` — red tint. Destructive or override-with-caution.
+- `danger` — red tint, `--red-text` label (readable on the tint in both themes). Destructive or override-with-caution.
 - `ghost` — transparent, low-attention. Hovers to `--bg-tertiary`.
 
 **Loading state** shows a 12px circular spinner inside the button and

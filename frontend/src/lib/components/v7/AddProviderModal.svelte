@@ -187,7 +187,6 @@
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
-			<span style="flex: 1"></span>
 			<Button
 				variant="primary"
 				disabled={busy || !endpointUrl.trim()}
@@ -216,7 +215,6 @@
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
-			<span style="flex: 1"></span>
 			<Button
 				variant="primary"
 				disabled={busy || !remoteHost.trim()}
@@ -295,7 +293,7 @@
 	}
 
 	.actions {
-		display: flex; gap: 8px; margin-top: 18px; align-items: center;
+		display: flex; gap: 8px; margin-top: 18px; align-items: center; justify-content: flex-end;
 	}
 
 </style>
