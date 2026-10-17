@@ -29,6 +29,13 @@ CAPTURE_KEY = "capture"
 #: so the bootloader scan (``context/*.md``) never delivers it.
 CAPTURE_DIR = ("context", "captures")
 
+_TRIAL_BODY_PREFIX = (
+    "# Trial lesson\n\n"
+    "An unproven hypothesis under review, not a standing rule. It grants no "
+    "new permission.\n\n- "
+)
+_TRIAL_BOUNDARY_PREFIX = "\nDoes not apply: "
+
 #: Why a hypothesis is captured rather than offered, in the owner's words.
 HOLD_REASONS = {
     "missing-derivation": (
@@ -55,6 +62,8 @@ class TrialFile:
     description: str
     body: str
     behavioral_sha256: str
+    statement: str | None
+    statement_error: str | None
 
 
 @dataclass(frozen=True)
@@ -102,6 +111,36 @@ def _day(review_after: str) -> str:
     return when.date().isoformat() if when else review_after
 
 
+def _trial_body(text: str, boundary: str | None) -> str:
+    """Render the canonical body shape shared by trial writes and list reads."""
+    body = _TRIAL_BODY_PREFIX + _one_line(text) + "\n"
+    if boundary:
+        body += _TRIAL_BOUNDARY_PREFIX + boundary + "\n"
+    return body
+
+
+def trial_statement(body: str) -> tuple[str | None, str | None]:
+    """Return a canonical trial statement, or an explicit shape error.
+
+    A valid skill with lesson metadata may still have an arbitrary body. Its
+    list row must not mistake an unrelated bullet for the lesson hypothesis.
+    """
+    if not body.startswith(_TRIAL_BODY_PREFIX):
+        return None, "trial body differs from the canonical lesson shape"
+    remainder = body.removeprefix(_TRIAL_BODY_PREFIX)
+    statement, separator, suffix = remainder.partition("\n")
+    if not statement or not separator:
+        return None, "trial body differs from the canonical lesson shape"
+    if suffix == "":
+        return statement, None
+    if not suffix.startswith(_TRIAL_BOUNDARY_PREFIX):
+        return None, "trial body differs from the canonical lesson shape"
+    boundary = suffix.removeprefix(_TRIAL_BOUNDARY_PREFIX)
+    if not boundary or "\n" in boundary.rstrip("\n") or not boundary.endswith("\n"):
+        return None, "trial body differs from the canonical lesson shape"
+    return statement, None
+
+
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
@@ -113,14 +152,7 @@ def render_trial(
     extension leaves the behavioral version, and its review, in place.
     ``origin`` names the retired lesson this one captures again.
     """
-    body = (
-        "# Trial lesson\n\n"
-        "An unproven hypothesis under review, not a standing rule. It grants no "
-        "new permission.\n\n"
-        f"- {_one_line(text)}\n"
-    )
-    if trial.boundary:
-        body += f"\nDoes not apply: {trial.boundary}\n"
+    body = _trial_body(text, trial.boundary)
     lesson = {
         "id": lesson_id, "state": trial.state, "owner": owner,
         "review_after": trial.review_after, "source_refs": _refs(source_refs),
@@ -143,9 +175,11 @@ def read_trial(text: str) -> TrialFile | None:
     lesson = parse_lesson(parsed.metadata) if parsed.ok else None
     if lesson is None or not parsed.name or not parsed.description:
         return None
+    statement, statement_error = trial_statement(parsed.body)
     return TrialFile(
         lesson=lesson, name=parsed.name, description=parsed.description, body=parsed.body,
-        behavioral_sha256=behavioral_sha256(parsed.description, parsed.body),
+        behavioral_sha256=behavioral_sha256(parsed.description, parsed.body), statement=statement,
+        statement_error=statement_error,
     )
 
 

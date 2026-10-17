@@ -7,9 +7,9 @@ import uuid
 
 import pytest
 
-from core.lesson_files import _with_lesson, render_trial, with_review_ref
+from core.lesson_files import _with_lesson, read_trial, render_trial, with_review_ref
 from core.lesson_report import ReportScope, read_report
-from core.lesson_report_inventory import STATEMENT_WORDS, first_bullet_statement, source_record
+from core.lesson_report_inventory import source_record
 from core.lesson_trials import Trial
 from tests.test_lesson_review_history import db  # noqa: F401 - shared real-schema fixture
 from tools.lesson_report import LessonReportTool
@@ -90,7 +90,7 @@ def test_an_unknown_state_is_refused(db):
         report(db, [], state="retired")
 
 
-def test_statement_is_the_first_bullet_of_a_real_trial_file_on_watch_and_trial_rows_only(db):
+def test_statement_is_from_a_real_canonical_trial_file_on_watch_and_trial_rows_only(db):
     sources = [source(1, "watch", "Never push a head the gates have not passed."),
                source(2, "trial", "Ask once, then proceed."), source(3, "retired", "Old rule.")]
     by_state = {row["state"]: row for row in report(db, sources)["rows"]}
@@ -99,28 +99,32 @@ def test_statement_is_the_first_bullet_of_a_real_trial_file_on_watch_and_trial_r
     assert "statement" not in by_state["retired"]
 
 
-def test_statement_is_cut_at_forty_words_on_a_word_boundary():
-    words = [f"w{n}" for n in range(60)]
-    statement = first_bullet_statement("# Trial lesson\n\n- " + " ".join(words) + "\n")
-    assert statement == " ".join(words[:STATEMENT_WORDS]) + "..."
-    assert len(statement.rstrip(".").split()) == STATEMENT_WORDS
-    exact = first_bullet_statement("- " + " ".join(words[:STATEMENT_WORDS]))
-    assert exact == " ".join(words[:STATEMENT_WORDS])
+def test_statement_uses_the_canonical_trial_body_shape():
+    raw = render_trial(
+        lesson_id=str(uuid.UUID(int=8)), owner="owner", name="canonical",
+        description="Use before deciding.", text="One canonical statement.",
+        trial=Trial("hypothesis", "2026-10-01"),
+        source_refs=[{"kind": "message", "reference": "correction"}],
+    )
+    parsed = read_trial(raw)
+    assert parsed
+    assert parsed.statement == "One canonical statement."
+    assert parsed.statement_error is None
 
 
-def test_statement_takes_only_the_first_bullet_with_its_continuation_lines():
-    body = "# Heading\n\nIntro prose.\n\n- First point\n  continues here.\n- Second point\n"
-    assert first_bullet_statement(body) == "First point continues here."
-    assert first_bullet_statement("* Star bullet\n\nTail") == "Star bullet"
-
-
-@pytest.mark.parametrize("body", ["", "# Trial lesson\n\nOnly prose, no bullet.\n"])
-def test_a_body_without_a_bullet_has_no_statement(body, db):
-    assert first_bullet_statement(body) is None
-    record = source(7, "watch", text="Placeholder.")
-    record["statement"] = first_bullet_statement(body)
+def test_noncanonical_trial_body_is_visible_not_misreported_as_a_statement(db):
+    malformed = render_trial(
+        lesson_id=str(uuid.UUID(int=7)), owner="owner", name="lesson-7",
+        description="Use before deciding.", text="Placeholder.",
+        trial=Trial("hypothesis", "2026-10-01", state="watch"),
+        source_refs=[{"kind": "message", "reference": "correction"}],
+    ).replace("# Trial lesson", "# Unrelated heading", 1)
+    record = source_record(malformed, "/authorized/skills/lesson-7/SKILL.md", with_statement=True)
+    assert record and record["statement_error"] == "trial body differs from the canonical lesson shape"
     [row] = report(db, [record])["rows"]
-    assert row["state"] == "watch" and "statement" not in row
+    assert row["state"] == "watch"
+    assert "statement" not in row
+    assert row["statement_error"] == "trial body differs from the canonical lesson shape"
 
 
 @pytest.mark.asyncio

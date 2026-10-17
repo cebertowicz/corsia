@@ -110,6 +110,9 @@ def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> di
     statement = (row["current_source"] or {}).get("statement")
     if row.get("state") in LISTABLE_STATES and statement:
         summary["statement"] = statement
+    statement_error = (row["current_source"] or {}).get("statement_error")
+    if row.get("state") in LISTABLE_STATES and statement_error:
+        summary["statement_error"] = statement_error
     return summary
 
 
