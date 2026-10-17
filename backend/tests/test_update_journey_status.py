@@ -175,13 +175,17 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
     from api.system_admin import system_update_status
     from automation import self_restart
     from core.turn_core import active_turn_count
-    from infra import db_async, drain, update_status
+    from infra import db_async, drain, settings, update_status
 
     class Status:
         def to_dict(self):
             return {"available": False}
 
+    schedule = {"automatic": True, "time": "04:05", "tonight_at": None}
+
     async def run_in_db(function):
+        if function is settings.get_update_schedule:
+            return schedule
         if function is self_restart.usual_update_seconds:
             return None
         if function is self_restart.latest_update_operation:
@@ -199,6 +203,7 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypa
     assert result["drain_cap_seconds"] == 17
     assert result["usual_seconds"] is None
     assert result["agents_working"] == 3
+    assert result["schedule"] == schedule
     assert datetime.fromisoformat(result["server_time"]).tzinfo == timezone.utc
 
 
