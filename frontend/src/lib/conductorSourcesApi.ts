@@ -66,32 +66,27 @@ function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
 	};
 }
 
-export type CliInstallRefusal = 'already_installed' | 'invisible_binary' | 'not_installed' | 'package_managed';
+export type CliInstallRefusal = 'already_installed' | 'invisible_binary';
 
 /**
  * Start one vendor CLI installation; callers poll its bounded per-vendor flight. A CLI that is
  * already there is not a failure: the refusal says which, and the card's state is what's stale.
  */
-async function startCliJob(t: string, vendor: string, operation: 'install' | 'update'): Promise<CliInstallRefusal | null> {
-	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/${operation}`, {
+async function startCliJob(t: string, vendor: string): Promise<CliInstallRefusal | null> {
+	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, {
 		method: 'POST', headers: headers(t),
 	});
 	if (response.status === 409) {
 		const reason = (await response.json().catch(() => null))?.reason;
-		if (reason === 'already_installed' || reason === 'invisible_binary' || reason === 'not_installed' || reason === 'package_managed') return reason;
+		if (reason === 'already_installed' || reason === 'invisible_binary') return reason;
 	}
-	if (!response.ok) throw new Error(`CLI ${operation} ${response.status}`);
+	if (!response.ok) throw new Error(`CLI install ${response.status}`);
 	return null;
 }
 
 /** Start one vendor CLI installation; callers poll its bounded per-vendor flight. */
 export function startCliInstall(t: string, vendor: string): Promise<CliInstallRefusal | null> {
-	return startCliJob(t, vendor, 'install');
-}
-
-/** Rerun a vendor's official installer for a discovered-but-unusable CLI. */
-export function startCliUpdate(t: string, vendor: string): Promise<CliInstallRefusal | null> {
-	return startCliJob(t, vendor, 'update');
+	return startCliJob(t, vendor);
 }
 
 /** Read a vendor CLI installation's current state without starting another installer. */

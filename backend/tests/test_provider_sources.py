@@ -128,14 +128,6 @@ class TestSeedCodex:
         claude = _sources(client)["claude-code"]
         assert claude["state"] == "unverified" and claude["reason"] == "Not checked yet"
 
-    def test_unverified_cli_reports_a_proven_package_manager(self, isolated_db, client, monkeypatch):
-        import cli_location
-
-        self._seed(monkeypatch, "ready")
-        monkeypatch.setattr(cli_location, "package_manager_for", lambda provider: "homebrew" if provider == "claude-code" else None)
-
-        assert _sources(client)["claude-code"]["cli_package_manager"] == "homebrew"
-
     def test_reseed_keeps_the_last_claude_verdict(self, isolated_db, client, monkeypatch):
         from connections.models import get_connection
         from connections.source_state import apply_check
@@ -147,7 +139,7 @@ class TestSeedCodex:
         assert _sources(client)["claude-code"]["state"] == "needs_auth"
 
 
-def test_steady_source_read_uses_cached_manager_prefixes_and_one_management_record(
+def test_steady_source_read_spawns_no_process_and_reads_one_management_record(
         isolated_db, client, monkeypatch):
     import cli_location
     from llm import local_sources, own_omlx_management
@@ -176,12 +168,10 @@ def test_steady_source_read_uses_cached_manager_prefixes_and_one_management_reco
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [
         {"id": "local", "kind": "local", "status": "online"}])
 
-    _sources(client)  # Warm the successful manager-prefix cache.
-    assert calls == {"subprocess": 2, "record": 1}
-    calls.update(subprocess=0, record=0)
-    _sources(client)
-
-    assert calls == {"subprocess": 0, "record": 1}
+    for _ in range(2):
+        calls.update(subprocess=0, record=0)
+        _sources(client)
+        assert calls == {"subprocess": 0, "record": 1}
 
 
 def _stream(*frames):
