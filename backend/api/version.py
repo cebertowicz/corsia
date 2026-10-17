@@ -36,6 +36,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # An app bundle has no checkout: its backend and frontend are one signed build.
 _APP_BUNDLE = app_bundle_root()
 
+# The contract between the desktop shell and a host. This is the one definition;
+# the shell's own copy is checked against this line (version_check.rs).
+SHELL_PROTOCOL: int = 1
+
 
 def _git_read(args: list[str]) -> str | None:
     """Run a git command in the repo root, return stripped stdout, or None on failure.
@@ -108,7 +112,7 @@ def _placeholder_frontend_info() -> dict:
         "commit_subject": "(frontend not built)",
         "dirty": None,
         "build_iso": "",
-        "app": {"version": "unknown", "shell_protocol": 1},
+        "app": {"version": "unknown"},
     }
 
 
@@ -160,9 +164,10 @@ def _version_payload() -> dict:
     backend["current_head"] = None if _APP_BUNDLE is not None else _current_head_info()
     backend["generation"] = os.environ.get("CORSIA_SERVICE_GENERATION")
     frontend = _read_frontend_build_info()
-    app = frontend.get("app")
-    if not isinstance(app, dict):
-        app = {"version": "unknown", "shell_protocol": 1}
+    build_app = frontend.get("app")
+    version = build_app.get("version") if isinstance(build_app, dict) else None
+    # The protocol belongs to this backend's source, not to a build file that may be missing or stale.
+    app = {"version": version if isinstance(version, str) else "unknown", "shell_protocol": SHELL_PROTOCOL}
     return {
         "frontend": frontend,
         "backend": backend,

@@ -64,6 +64,14 @@ describe('SettingsDevicesView', () => {
 		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'Try again')?.click();
 		expect(onRetry).toHaveBeenCalledOnce();
 	});
+	it('a listening failure that is not taken ports: off with a line a restart of the computer would not be, and Try again', () => {
+		const onRetry = vi.fn();
+		const text = show({ enabled: false, listener: 'unavailable' }, { onRetry });
+		expect(text).toContain('Couldn’t turn this on. CORSIA couldn’t start listening on this computer.');
+		expect(text).not.toContain('Restart this computer');
+		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'Try again')?.click();
+		expect(onRetry).toHaveBeenCalledOnce();
+	});
 	it('failed read: Couldn’t load and no switch', () => {
 		const text = show({ load: 'failed' });
 		expect(text).toContain('Couldn’t load device settings.');

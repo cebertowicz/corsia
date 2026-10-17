@@ -200,13 +200,17 @@ class DevicesListener:
     task: asyncio.Task | None = None
     port: int | None = None
     error: str | None = None
+    # Why it is not listening, in words the page can act on: ports_taken, credentials, bind or disabled.
+    reason: str | None = None
     announcement: DNSServiceAnnouncement | None = None
     # Told when the announced name or its error changes after start().
     on_announcement_change: Callable[[], None] | None = None
 
     @property
     def listening(self) -> dict:
-        return {"port": self.port} if self.port is not None else {"error": self.error}
+        if self.port is not None:
+            return {"port": self.port}
+        return {"error": self.error, "reason": self.reason} if self.error else {"error": self.error}
 
     async def start(self) -> bool:
         if self.task is not None:
@@ -216,10 +220,12 @@ class DevicesListener:
         except Exception as exc:
             logger.error("Devices listener host credentials unavailable: %s", exc)
             self.error = "Devices listener credentials unavailable"
+            self.reason = "credentials"
             return False
         sock, port, error = _prebind()
         if sock is None:
             self.error = error
+            self.reason = "ports_taken" if error == _NO_PORT_ERROR else "bind"
             return False
         assert port is not None
         config = uvicorn.Config(
@@ -237,6 +243,7 @@ class DevicesListener:
         self.task = asyncio.create_task(self.server.serve(sockets=[sock]))
         self.port = port
         self.error = None
+        self.reason = None
         self.announcement = DNSServiceAnnouncement(port)
         self.announcement.on_change = self.on_announcement_change
         self.announcement.start()
@@ -257,6 +264,9 @@ class DevicesListener:
             self.port = None
 
 
+_NO_PORT_ERROR = "No approved Devices port is available"
+
+
 def _prebind() -> tuple[socket.socket | None, int | None, str | None]:
     """Bind the approved port range without letting Uvicorn exit the backend."""
     for port in (DEFAULT_PORT, *FALLBACK_PORTS):
@@ -275,7 +285,7 @@ def _prebind() -> tuple[socket.socket | None, int | None, str | None]:
             if exc.errno == errno.EADDRINUSE:
                 continue
             return None, None, exc.strerror or str(exc)
-    return None, None, "No approved Devices port is available"
+    return None, None, _NO_PORT_ERROR
 
 
 def _key_paths(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:

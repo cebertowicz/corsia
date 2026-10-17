@@ -802,9 +802,9 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
         PairError::Unreachable(Unreachable::Network) => "network",
         PairError::Unreachable(Unreachable::Server) => "server",
         PairError::TooOld => "too_old",
-        // The host's key changed under a pairing that just trusted it: never the network, and nothing the person can
-        // fix from this screen, so it reads as the host not being the CORSIA that was reached.
-        PairError::KeyChanged => "server",
+        // The host's key moved under a pairing that just trusted it. CORSIA is running there, so the server line would
+        // be false; the local line is true and names the fix (a new code).
+        PairError::KeyChanged => "local",
         PairError::Protocol(_) => "server",
     };
     RemotePairResponse::Failure { ok: false, reason: reason.into(), app_version: None, host_version: None }
@@ -1676,6 +1676,13 @@ mod tests {
             assert!(!ok);
             assert_eq!(reason, "local");
         }
+    }
+
+    #[test]
+    fn a_host_key_that_changed_during_pairing_reports_the_local_reason_not_the_server_one() {
+        let RemotePairResponse::Failure { ok, reason, .. } = remote_pair_error(pairing::PairError::KeyChanged) else { panic!("a failure response") };
+        assert!(!ok);
+        assert_eq!(reason, "local");
     }
 
     #[test]

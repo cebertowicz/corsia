@@ -122,7 +122,7 @@ def test_host_key_failure_leaves_runtime_alive_and_devices_closed(monkeypatch):
 
     assert started is False
     assert local_runtime.enabled is False
-    assert local_runtime.snapshot()["listening"] == {"error": "Devices listener credentials unavailable"}
+    assert local_runtime.snapshot()["listening"] == {"error": "Devices listener credentials unavailable", "reason": "credentials"}
     assert local_runtime.snapshot()["announced_name"] is None
 
 
@@ -146,7 +146,7 @@ def test_disabled_development_put_refuses_without_binding_or_announcing(monkeypa
     )
 
     assert response["enabled"] is False
-    assert response["listening"] == {"error": "Devices listener disabled"}
+    assert response["listening"] == {"error": "Devices listener disabled", "reason": "disabled"}
     assert response["announced_name"] is None
 
 

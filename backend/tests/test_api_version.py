@@ -163,8 +163,9 @@ def test_version_payload_carries_the_app_version_and_shell_protocol(monkeypatch)
     """The shell's compatibility check reads ``app``; the computer name is never on this public route."""
     import api.version as api_version
 
-    app = {"version": "0.4.1", "shell_protocol": 1}
-    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {"app": app})
+    app = {"version": "0.4.1", "shell_protocol": api_version.SHELL_PROTOCOL}
+    stale = {"version": "0.4.1", "shell_protocol": 99}
+    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {"app": stale})
     monkeypatch.setattr(api_version, "_current_head_info", lambda: _UNAVAILABLE_HEAD)
     payload = api_version._version_payload()
     assert payload["app"] == app
@@ -172,5 +173,8 @@ def test_version_payload_carries_the_app_version_and_shell_protocol(monkeypatch)
 
     monkeypatch.setattr(api_version, "_read_frontend_build_info", api_version._placeholder_frontend_info)
     placeholder = api_version._version_payload()["app"]
-    assert isinstance(placeholder["shell_protocol"], int)
-    assert placeholder["version"] == "unknown"
+    assert placeholder == {"version": "unknown", "shell_protocol": api_version.SHELL_PROTOCOL}
+
+    # A build with no `app` block still reports this backend's protocol, never an unknown one a shell could misread.
+    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {})
+    assert api_version._version_payload()["app"] == {"version": "unknown", "shell_protocol": api_version.SHELL_PROTOCOL}

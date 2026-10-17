@@ -41,7 +41,7 @@ class DevicesRuntime:
     async def enable(self, app) -> bool:
         if os.environ.get("CORSIA_DEVICES_DISABLE") == "1":
             await self.disable()
-            self.listener = DevicesListener(app, error=_DEVICES_DISABLED_ERROR)
+            self.listener = DevicesListener(app, error=_DEVICES_DISABLED_ERROR, reason="disabled")
             return False
         if self.listener is not None and self.listener.task is not None:
             return True

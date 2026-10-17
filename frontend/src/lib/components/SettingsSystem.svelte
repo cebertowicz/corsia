@@ -3,6 +3,7 @@
 
 	import { readSystemVersion, restartSystem, waitForSystemRestart } from '$lib/stores/settingsSystemRestart';
 	import { logout } from '$lib/stores/auth';
+	import { toasts } from '$lib/stores/toast';
 	import { themeSetting, type ThemeSetting } from '$lib/stores/theme';
 	import { Button } from '$lib/components/ui';
 	import FocusModeSetting from './FocusModeSetting.svelte';
@@ -94,7 +95,10 @@
 			await logout();
 			await disconnectRemote();
 		} catch {
-			settingsError = 'CORSIA couldn’t disconnect from this computer. Try again.';
+			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
+			settingsError = message;
+			// Signing out comes first, so this page may already be replaced by sign-in; a toast outlives it.
+			toasts.show(message, 'error', 8000);
 		} finally {
 			accountConfirm = null;
 			accountInProgress = false;

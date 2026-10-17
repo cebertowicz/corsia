@@ -10,7 +10,7 @@ import { token } from '$lib/stores/auth';
 
 export type DevicesApi = {
 	enabled: boolean;
-	listening: { port?: number; error?: string | null };
+	listening: { port?: number; error?: string | null; reason?: string | null };
 	announced_name: string | null;
 	local_hostname: string;
 	lan_addresses: string[];
@@ -25,7 +25,7 @@ export type DevicesView = {
 	hostName: string;
 	announced: boolean;
 	busy: null | 'starting';
-	listener: 'ok' | 'all-ports-taken';
+	listener: 'ok' | 'all-ports-taken' | 'unavailable';
 	pairing: 'idle' | 'code' | 'paused';
 	code: string | null;
 	endsInSeconds: number | null;
@@ -42,6 +42,12 @@ function nameOf(api: DevicesApi): string {
 	return api.announced_name || api.local_hostname.replace(/\.local$/i, '');
 }
 
+/** Only a taken port is fixed by restarting the computer; any other failure to listen gets its own line. */
+function listenerOf(api: DevicesApi): DevicesView['listener'] {
+	if (api.enabled || !api.listening?.error) return 'ok';
+	return api.listening.reason === 'ports_taken' ? 'all-ports-taken' : 'unavailable';
+}
+
 export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOverride?: string): DevicesView {
 	// The code's characters come only over direct loopback (G11): an active code without them is a connected computer's view.
 	const readOnly = forcedReadOnly || (api.code.state === 'active' && !api.code.value);
@@ -53,7 +59,7 @@ export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOv
 		hostName: hostNameOverride || nameOf(api),
 		announced: api.enabled && Boolean(api.announced_name),
 		busy: null,
-		listener: !api.enabled && Boolean(api.listening?.error) ? 'all-ports-taken' : 'ok',
+		listener: listenerOf(api),
 		pairing: readOnly ? 'idle' : api.code.state === 'active' && code ? 'code' : api.code.state === 'paused' ? 'paused' : 'idle',
 		code,
 		endsInSeconds: api.code.state === 'active' ? api.code.expires_in_seconds ?? null : null,

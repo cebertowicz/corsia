@@ -103,7 +103,7 @@ export function unreachableLine(reason: PairReason, target: string, versions: { 
 		case 'server': return `${target} answered, but CORSIA isn’t running there.`;
 		case 'incompatible': return `This computer has CORSIA ${versions.app ?? 'a different version'} and ${target} has ${versions.host ?? 'another'}. Update the older one, then try again.`;
 		case 'too_old': return `${target} has an older CORSIA. Update it, then try again.`;
-		case 'local': return `This computer couldn’t finish connecting to ${target}. ${SETTINGS_PATH} on ${target} to get a new code and try again.`;
+		case 'local': return `CORSIA couldn’t finish connecting to ${target}. ${SETTINGS_PATH} on ${target} to get a new code and try again.`;
 		default: return null;
 	}
 }

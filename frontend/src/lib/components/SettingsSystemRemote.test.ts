@@ -11,6 +11,7 @@ vi.mock('$lib/stores/auth', async () => {
 import SettingsSystem from './SettingsSystem.svelte';
 import { connectOpen } from '$lib/stores/remoteConnect';
 import { coreSettings } from '$lib/stores/settings';
+import { toasts } from '$lib/stores/toast';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -58,6 +59,18 @@ describe('Settings › System with a shell', () => {
 		button('Disconnect')?.click();
 		await settle();
 		expect(order).toEqual(['logout', 'disconnect_remote']);
+	});
+	it('says so in a toast when the computer could not be forgotten, since sign-out already replaced this page', async () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
+		invoke = vi.fn(async (command: string) => { order.push(command); if (command === 'disconnect_remote') throw new Error('not forgotten'); });
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		const toast = vi.spyOn(toasts, 'show');
+		await show();
+		button('Disconnect')?.click(); flushSync();
+		button('Disconnect')?.click();
+		await settle();
+		expect(order).toEqual(['logout', 'disconnect_remote']);
+		expect(toast).toHaveBeenCalledWith('CORSIA couldn’t disconnect from this computer. Sign in and try again.', 'error', 8000);
 	});
 	it('Cancel leaves everything as it was', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };

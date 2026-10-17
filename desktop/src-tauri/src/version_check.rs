@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn shell_protocol_matches_the_backend_source_constant() {
         let backend = include_str!("../../../backend/api/version.py");
-        assert!(backend.contains(&format!("\"shell_protocol\": {SHELL_PROTOCOL}")));
+        assert!(backend.contains(&format!("SHELL_PROTOCOL: int = {SHELL_PROTOCOL}\n")));
     }
 
     #[tokio::test]

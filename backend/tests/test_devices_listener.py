@@ -276,7 +276,7 @@ async def test_listener_start_surfaces_a_prebind_error_without_starting_a_server
     listener = DevicesListener(app=object())
 
     assert await listener.start() is False
-    assert listener.listening == {"error": "Permission denied"}
+    assert listener.listening == {"error": "Permission denied", "reason": "bind"}
     assert listener.server is None
     assert listener.task is None
 
@@ -293,7 +293,7 @@ async def test_listener_start_contains_host_key_failure(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR, logger="infra.devices_listener"):
         assert await listener.start() is False
 
-    assert listener.listening == {"error": "Devices listener credentials unavailable"}
+    assert listener.listening == {"error": "Devices listener credentials unavailable", "reason": "credentials"}
     assert listener.server is None
     assert listener.task is None
     assert "unsafe key" in caplog.text

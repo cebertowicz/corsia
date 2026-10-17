@@ -51,7 +51,7 @@ describe('the shell commands', () => {
 		expect(await remotePair({ kind: 'address', host: 'studio.local' }, 'K7QX')).toEqual({ ok: false, reason: 'network' });
 	});
 	it('says the code was used and asks for a new one when this computer could not finish', () => {
-		expect(unreachableLine('local', 'Studio', {})).toBe(`This computer couldn’t finish connecting to Studio. ${SETTINGS_PATH} on Studio to get a new code and try again.`);
+		expect(unreachableLine('local', 'Studio', {})).toBe(`CORSIA couldn’t finish connecting to Studio. ${SETTINGS_PATH} on Studio to get a new code and try again.`);
 		expect(refusesOnCodeScreen('local')).toBe(false);
 	});
 	it('reports an unknown reason as the network too', async () => {

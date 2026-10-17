@@ -14,7 +14,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = dirname(__dirname);
 const PACKAGE = JSON.parse(readFileSync(join(FRONTEND, 'package.json'), 'utf8'));
-const SHELL_PROTOCOL = 1;
 
 function git(args) {
 	return execSync(`git ${args}`, {
@@ -67,7 +66,6 @@ function capture() {
 		build_iso: buildIso,
 		app: {
 			version: PACKAGE.version,
-			shell_protocol: SHELL_PROTOCOL,
 		},
 	};
 }
