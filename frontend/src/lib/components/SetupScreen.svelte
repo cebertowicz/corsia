@@ -13,12 +13,14 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { finishSetupWithBestEffortSelection } from '$lib/setupFirstModel';
+	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
+	import { saveSetupReport, setupReportInvoke } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
 	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta } from '$lib/setupLocalPresentation';
-	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
-	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
+	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; resume?: boolean; }
+	const { onExistingAccount, onAccountCreated, onFinished, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
 	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; error?: string };
 	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
@@ -91,10 +93,10 @@
 			case 'account':
 				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
 			case 'error':
-				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
+				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: resume ? resumeSetup : !get(token) ? readStatus : createAccount };
 			case 'models':
 				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
-				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: () => void finishSetupWithBestEffortSelection(get(token), sources, onFinished) };
+				return { title: 'Connect an AI', lede: 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: () => void finishSetupWithBestEffortSelection(get(token), sources, finishSetup) };
 		}
 	});
 
@@ -152,7 +154,11 @@
 		page = 'account';
 	}
 
+	/** Finishing is the one thing that closes setup for good: it is recorded before the app opens. */
+	const finishSetup = async () => { await recordSetupProgress({ completed: true }, get(token)); onFinished(); };
+
 	async function decideExistingOmlx(useIt: boolean) {
+		void recordSetupProgress({ local_ai: useIt }, get(token));
 		if (!useIt) {
 			existingOmlxConsent = false;
 			localPick.wanted = false;
@@ -222,7 +228,7 @@
 			connect();
 			await Promise.all([refreshSources(), classifier.read()]);
 			password = ''; confirmation = '';
-			if (status.ready_ai && canFinish) return finishSetupWithBestEffortSelection(get(token), sources, onFinished);
+			if (status.ready_ai && canFinish) return finishSetupWithBestEffortSelection(get(token), sources, finishSetup);
 			page = 'models';
 		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
@@ -232,16 +238,10 @@
 		const current = get(token);
 		if (!current) return;
 		try {
-			sources = await recheckSources(current);
+			sources = await recheckSources(current).catch(() => fetchSources(current));
 			localDownloadPending = false;
 			sourceError = '';
-		} catch {
-			try {
-				sources = await fetchSources(current);
-				localDownloadPending = false;
-				sourceError = '';
-			} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
-		}
+		} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
 
 	let rechecking = false;
@@ -262,7 +262,7 @@
 	});
 
 	const harnessSources = $derived(sources.filter(isHarness));
-	const showLocalRow = $derived(page === 'models' && Boolean(local));
+	const showLocalRow = $derived(page === 'models' && (!resume || localPick.wanted) && Boolean(local));
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows: AiRow[] = harnessSources.map((source) => {
 			const row = connectFlow.row(source);
@@ -318,18 +318,6 @@
 		}
 	}
 
-	const setupReportInvoke = () => typeof window === 'undefined' ? undefined : (window as Window & { __TAURI_INTERNALS__?: { invoke?: (command: string) => Promise<unknown> } }).__TAURI_INTERNALS__?.invoke;
-	async function saveSetupReport() {
-		const invoke = setupReportInvoke();
-		if (!invoke) return;
-		reportError = '';
-		try {
-			await invoke('save_setup_report');
-		} catch {
-			reportError = 'CORSIA couldn’t save the report. Try again.';
-		}
-	}
-
 	async function saveApiKey() {
 		if (!apiKey.trim() || savingKey) return;
 		savingKey = true; sourceError = '';
@@ -341,8 +329,27 @@
 		finally { savingKey = false; }
 	}
 
+	/** The account exists, so the pre-account status gate is closed: the backend's record says where to pick up, and the facts are read fresh. */
+	async function resumeSetup() {
+		statusError = ''; page = 'checking';
+		const progress = await fetchSetupProgress(get(token));
+		if (!progress) { statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.'; page = 'error'; return; }
+		if (progress.setup_completed) { onFinished(); return; }
+		status = (progress.status ?? {}) as SetupStatus;
+		folder = status.work_folder || folder;
+		if (status.classifier) classifier.accept(status.classifier);
+		localPick.wanted = progress.local_ai ?? status.local_eligible !== false;
+		existingOmlxConsent = progress.step === 'local-consent'; page = 'models';
+		await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
+	}
+
+	$effect(() => {
+		if (page === 'models' && get(token)) void recordSetupProgress({ step: existingOmlxConsent ? 'local-consent' : 'models' }, get(token));
+	});
+
 	onMount(() => {
-		void readStatus();
+		if (resume) void resumeSetup();
+		else void readStatus();
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const onVisible = () => { if (document.visibilityState === 'visible') void recheckOnFocus(); };
@@ -358,13 +365,13 @@
 		{#if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error' && setupReportInvoke()}
-			<Button variant="chip" onclick={() => void saveSetupReport()}>Save a report</Button>
+			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
 		{/if}
 	{/snippet}
 
 	{#if page === 'welcome'}
 		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
-			onWantedChange={(next) => localPick.change(next, Boolean(status.existing_omlx))} onRecheck={readStatus} onRetry={() => void localPick.start()}
+			onWantedChange={(next) => { localPick.change(next, Boolean(status.existing_omlx)); void recordSetupProgress({ local_ai: next }, get(token)); }} onRecheck={readStatus} onRetry={() => void localPick.start()}
 			ownOmlx={Boolean(status.existing_omlx)} manage={manageOwnOmlx} onManageChange={(next) => (manageOwnOmlx = next)} />
 	{:else if page === 'account'}
 		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />

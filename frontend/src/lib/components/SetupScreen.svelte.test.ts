@@ -130,7 +130,8 @@ describe('SetupScreen', () => {
 
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Not now')?.click();
 		await settle();
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier']);
+		// The choice is recorded for a reload; nothing is adopted.
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/progress']);
 		expect(host.textContent).toContain('Create your account');
 	});
 
@@ -158,7 +159,7 @@ describe('SetupScreen', () => {
 		expect(host.textContent).not.toContain('It won’t change your oMLX.');
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
 		await settle();
-		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/progress', '/api/setup/local-download']);
 		expect(bodies).toEqual(['{"consent_existing":true,"manage_existing":true}']);
 	});
 
