@@ -225,7 +225,12 @@ def test_adoption_preflight_refuses_when_only_prunable_backups_make_room(tmp_pat
     monkeypatch.setattr(snapshots.shutil, "disk_usage", lambda path: SimpleNamespace(free=0))
 
     assert snapshots.preflight_main([str(state)]) == snapshots.REFUSED
-    assert "Free up space" in capsys.readouterr().err
+    # The figure printed is the one that failed: what is free now, not the larger prunable total.
+    message = capsys.readouterr().err.strip()
+    assert re.fullmatch(
+        r"The backup needs [\d.]+ GB and this disk has 0\.0 GB free now\. Free up space, then choose Try again\.",
+        message,
+    )
 
 
 def test_adoption_preflight_asks_the_migration_backup_room_for_its_own_database(tmp_path, monkeypatch):
