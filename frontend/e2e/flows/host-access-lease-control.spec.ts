@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
@@ -133,6 +133,19 @@ const longHostAccessPurpose = [
 	'Report the exact setting changed, the verification performed, whether rollback was required, and any residual risk that needs a separate request.',
 ].join(' ');
 
+/** A sheet slides in; its box is the place it settles, so wait for two identical reads. */
+async function settledBox(locator: Locator) {
+	let previous: { x: number; y: number; width: number; height: number } | null = null;
+	await expect.poll(async () => {
+		const box = await locator.boundingBox();
+		const still = !!box && !!previous && box.x === previous.x && box.y === previous.y
+			&& box.width === previous.width && box.height === previous.height;
+		previous = box;
+		return still;
+	}).toBe(true);
+	return locator.boundingBox();
+}
+
 async function selectThread(page: Page, title: string) {
 	const mobile = (page.viewportSize()?.width ?? 0) <= 768;
 	const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
@@ -266,7 +279,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({ leases: [lease] }),
+				// The control asks for one thread's open leases; the server answers only for that root thread
+				// and drops terminal states, which is how a revoked lease leaves the control.
+				body: JSON.stringify({
+					leases: [lease].filter((item) => {
+						const root = url.searchParams.get('root_thread_id');
+						if (root && item.root_thread_id !== root) return false;
+						return url.searchParams.get('nonterminal_only') !== 'true'
+							|| ['reviewing', 'awaiting_user', 'activating', 'active'].includes(item.state);
+					}),
+				}),
 			});
 		});
 		await page.route(`**/api/threads/${ownerSessionId}/messages**`, async (route) => {
@@ -317,7 +339,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
 
 		const viewport = page.viewportSize();
-		const box = await dialog.boundingBox();
+		const box = await settledBox(dialog);
 		expect(box).toBeTruthy();
 		expect(box!.x).toBeGreaterThanOrEqual(0);
 		expect(box!.y).toBeGreaterThanOrEqual(0);
@@ -358,7 +380,8 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			const activeChip = page.locator('.active-chip');
+			// The solid material is the trigger's; the wrapper only lays it out.
+			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
 				const solidProbe = document.createElement('div');
 				solidProbe.style.background = 'var(--bg-secondary)';
@@ -421,11 +444,8 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toBeVisible();
 		expect(decisions).toHaveLength(1);
 
-		const activeDialogBox = await activeDialog.boundingBox();
+		const activeDialogBox = await settledBox(activeDialog);
 		expect(activeDialogBox).toBeTruthy();
-		expect(activeDialogBox!.x).toBeGreaterThanOrEqual(0);
-		expect(activeDialogBox!.x + activeDialogBox!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(activeDialogBox!.y + activeDialogBox!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');
