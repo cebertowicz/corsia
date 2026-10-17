@@ -150,6 +150,8 @@
 	.said span { color: var(--text-tertiary); }
 	.error { color: var(--red); }
 	.actions { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-left: calc(-1 * var(--button-pad-x-sm)); }
+	/* A filled step keeps its box, not its text, on the title edge. */
+	.actions:has(> :global(.btn.primary:first-child)) { margin-left: 0; }
 	/* Signing out is a text action in the danger tone. */
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 </style>
