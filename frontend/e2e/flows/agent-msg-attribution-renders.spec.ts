@@ -8,9 +8,12 @@ import {
 	captureFailedRequests,
 	createSession,
 	saveEvidenceScreenshot,
+	TEST_SESSION_TOKEN,
 	TEST_TOKEN,
 	waitForWsConnected,
 } from '../support/corsia';
+import { focusSetting } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 
 const BACKEND_PORT = Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110);
@@ -21,6 +24,11 @@ const PYTHON = path.join(REPO_ROOT, '.venv/bin/python');
 const DELEGATE_CLI = path.join(REPO_ROOT, 'backend/scripts/delegate_cli.py');
 
 test.describe('@flow:delegation @surface:chat agent message attribution renders', () => {
+	// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
+	});
+
 	test('delegation send with attribution renders its sender chip', async ({ page, request }, testInfo) => {
 		const consoleErrors = captureConsoleErrors(page);
 		const failedApiRequests = captureFailedRequests(page, (url) =>
@@ -68,14 +76,16 @@ test.describe('@flow:delegation @surface:chat agent message attribution renders'
 		);
 		expect(sendResp.ok()).toBeTruthy();
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
+		await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		// Focus is on by default and hides finished work; this spec reads the raw transcript.
+		await focusSetting(page, false);
 
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
 
-		await page.getByText(targetTitle).click({ timeout: 10_000 });
+		await page.locator('.thread-item').filter({ hasText: targetTitle }).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 
 
@@ -86,7 +96,7 @@ test.describe('@flow:delegation @surface:chat agent message attribution renders'
 		await expect(agentRow).toBeVisible({ timeout: 10_000 });
 		const markdown = agentRow.locator('.bubble-content.md-content');
 			await expect(markdown).toBeVisible();
-			await expect(markdown.locator('p')).toContainText('Paragraph content stays inside the message bubble.');
+			await expect(markdown.locator('p', { hasText: 'Paragraph content stays inside the message bubble.' })).toHaveCount(1);
 			await expect(markdown.locator('ul li')).toHaveCount(2);
 			await expect(markdown.locator('ol li')).toHaveCount(10);
 			await expect(markdown.locator('ol li').nth(9)).toHaveText('ordered item ten');
@@ -168,14 +178,15 @@ test.describe('@flow:delegation @surface:chat agent message attribution renders'
 			},
 		);
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
+		await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await focusSetting(page, false);
 
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
 
-		await page.getByText(targetTitle).click({ timeout: 10_000 });
+		await page.locator('.thread-item').filter({ hasText: targetTitle }).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 
 		const attrChip = page.locator('button.agent-attr').first();
