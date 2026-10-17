@@ -20,6 +20,8 @@ from reviewer.gh_helpers import repo_full_name
 from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
 
 WAITING_TEXT = "approve the fork's workflow runs in GitHub, then add the review label (remove it first if present)"
+APPROVED_TEXT = "head approved; the review runs once its checks pass"
+UNVERIFIED_TEXT = "could not check the labeler's write access on GitHub; add the review label again"
 
 
 def is_fork(head_repo: str | None, base_repo: str | None) -> bool:
@@ -38,11 +40,11 @@ def payload_is_fork(payload: dict[str, Any]) -> bool:
     return is_fork(_side_repo(pr, "head"), base)
 
 
-def _publish(repo: str, head_sha: str) -> None:
+def _publish(repo: str, head_sha: str, text: str = WAITING_TEXT) -> None:
     """Show a non-success presence status so the head cannot merge unreviewed."""
     from reviewer.reviewer_status import set_status
 
-    set_status(repo, head_sha, "pending", WAITING_TEXT, context=STATUS_PRESENCE_CONTEXT)
+    set_status(repo, head_sha, "pending", text, context=STATUS_PRESENCE_CONTEXT)
 
 
 def holds_review(
@@ -86,7 +88,8 @@ def approve_labeled_head(
     push that lands before the click is approved, so the label approves the head
     the PR shows at that moment, and its review still waits for that head's own
     checks to go green. The label is consumed either
-    way, so adding it again always fires a new event.
+    way, so adding it again always fires a new event. A permission GitHub could
+    not answer approves nothing and is reported as unverified, not as a denial.
     """
     from events.reviewer_gate import on_pull_request_ready_for_review
     from reviewer.gh_fork_hold import remove_review_label, sender_can_approve
@@ -95,14 +98,18 @@ def approve_labeled_head(
     if approved:
         reviewer_gate_state.record_approval(reviewer_gate_state.pr_key(repo, pr_number), head_sha)
     label_removed = remove_review_label(repo, pr_number)
+    outcome = {True: "approved", False: "denied", None: "unverified"}[approved]
     emit_product_event(
-        "reviewer_gate", "review_label_approved" if approved else "review_label_denied",
+        "reviewer_gate", f"review_label_{outcome}",
         properties={
             "repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8],
             "sender": sender, "label_removed": label_removed,
         },
     )
+    if approved is None:
+        _publish(repo, head_sha, UNVERIFIED_TEXT)
     if approved:
+        _publish(repo, head_sha, APPROVED_TEXT)
         on_pull_request_ready_for_review(
             repo=repo, head_sha=head_sha, pr_number=pr_number,
             internal_event=internal_event, loop=loop,

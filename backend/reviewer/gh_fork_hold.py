@@ -25,16 +25,26 @@ def _gh(args: list[str], what: str) -> subprocess.CompletedProcess[str] | None:
         return None
 
 
-def sender_can_approve(repo: str, login: str | None) -> bool:
-    """Whether a login has write access to the repository; anything unverifiable is no."""
+def sender_can_approve(repo: str, login: str | None) -> bool | None:
+    """Whether a login has write access to the repository.
+
+    None (logged) when GitHub could not answer, so a failed read is never
+    reported as a denial; the caller still approves nothing.
+    """
     if not login or not _LOGIN.fullmatch(login):
         return False
     result = _gh(
         ["api", f"repos/{repo}/collaborators/{login}/permission", "--jq", ".permission"],
         f"read {login}'s permission on {repo}",
     )
-    if result is None or result.returncode != 0:
-        return False
+    if result is None:
+        return None
+    if result.returncode != 0:
+        log.warning(
+            "fork hold: reading %s's permission on %s exited %d: %s",
+            login, repo, result.returncode, (result.stderr or "")[:200],
+        )
+        return None
     return result.stdout.strip() in _APPROVER_PERMISSIONS
 
 

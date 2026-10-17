@@ -157,7 +157,7 @@ def test_the_label_before_green_checks_lets_the_green_event_run_the_review(_relo
     out = _label(gate_mod, _payload("labeled", "abc123def", sender="maintainer"), FORK_INFO, green=False)
 
     out.review.assert_not_called()
-    out.status.assert_not_called()
+    assert _texts(out.status) == [fork_hold.APPROVED_TEXT]
     assert _approved(gate_mod) == "abc123def"
 
     later = _gate(gate_mod, FORK_INFO)
@@ -245,6 +245,30 @@ def test_a_label_from_someone_without_write_access_is_consumed_and_approves_noth
     assert out.emitted.call_args.args[:2] == ("reviewer_gate", "review_label_denied")
 
 
+def test_a_permission_github_could_not_answer_is_reported_as_unverified_not_denied(_reload_gate):
+    gate_mod = _reload_gate
+    out = _label(gate_mod, _payload("labeled", "abc123def", sender="maintainer"), FORK_INFO, can_approve=None)
+
+    out.review.assert_not_called()
+    out.remove.assert_called_once_with("owner/repo", 42)
+    assert _approved(gate_mod) is None
+    assert out.emitted.call_args.args[:2] == ("reviewer_gate", "review_label_unverified")
+    assert _texts(out.status) == [fork_hold.UNVERIFIED_TEXT]
+
+
+@pytest.mark.parametrize("failure", [
+    SimpleNamespace(returncode=1, stdout="", stderr="HTTP 502: Bad Gateway"),
+    OSError("gh missing"),
+])
+def test_a_failed_permission_read_is_unverified_and_logged(failure, caplog):
+    from reviewer import gh_fork_hold
+
+    effect = failure if isinstance(failure, Exception) else (lambda args, timeout: failure)
+    with patch("reviewer.gh_fork_hold.run_gh", side_effect=effect), caplog.at_level("WARNING"):
+        assert gh_fork_hold.sender_can_approve("owner/repo", "maintainer") is None
+    assert "maintainer" in caplog.text
+
+
 def test_a_label_that_could_not_be_removed_is_reported(_reload_gate):
     out = _label(
         _reload_gate, _payload("labeled", "abc123def", sender="maintainer"), FORK_INFO, label_removed=False,
@@ -276,5 +300,6 @@ def test_a_label_event_without_a_head_is_reported_as_a_label_event(_reload_gate)
     assert emitted.call_args.kwargs["properties"]["missing_fields"] == ["pull_request.head.sha"]
 
 
-def test_the_held_status_fits_githubs_description_limit():
-    assert len(fork_hold.WAITING_TEXT) <= 140
+def test_the_hold_statuses_fit_githubs_description_limit():
+    for text in (fork_hold.WAITING_TEXT, fork_hold.APPROVED_TEXT, fork_hold.UNVERIFIED_TEXT):
+        assert len(text) <= 140
