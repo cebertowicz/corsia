@@ -106,8 +106,10 @@ test.describe('@surface:settings scheduled updates parity', () => {
 			await expect(notice).toBeVisible();
 			await notice.click();
 			await expect(page.locator('[data-settings-anchor="update"]').getByRole('button', { name: 'Update now' })).toBeInViewport();
-			// Back returns to the chat the notice was opened from, not to Activity.
-			await page.getByRole('button', { name: viewport.width === 393 ? 'Back' : 'Close settings', exact: true }).click();
+			// Back returns to the chat the notice was opened from, not to Activity. The header back names where it goes: on a
+			// phone the deep-linked section first goes up to the Settings list, and the next back leaves Settings.
+			if (viewport.width === 393) await page.getByRole('button', { name: 'Settings', exact: true }).click();
+			await page.locator('.shell-header .h-back, [aria-label="Close settings"]').first().click();
 			await expect(chatComposer(page)).toBeVisible();
 		});
 	}

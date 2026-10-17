@@ -8,6 +8,7 @@ import {
   EMPTY_DISTRIBUTION,
   operatorNode,
   planDisplay,
+  withPlanContract,
 } from "../../src/lib/__tests__/fixtures/operatorPlan";
 
 function node(overrides: Parameters<typeof operatorNode>[0] = {}) {
@@ -30,6 +31,29 @@ function envelope(
     total?: number;
   } = {},
 ) {
+  const done = options.done ?? 1;
+  // The contract fields the decoder requires (oversize, folds, root_count) come from the shared fixture helper.
+  const entry = withPlanContract({
+    plan: {
+      id: `plan-${threadId}`,
+      owner_kind: "thread",
+      owner_id: threadId,
+      state: "active",
+      revision: 1,
+      updated_at: "2026-08-13T00:00:00Z",
+    },
+    owner: { label: "Conversation", project_id: null, thread_id: threadId },
+    progress: {
+      done,
+      total: options.total ?? nodes.length,
+      open: nodes.length - done,
+      liveness: "advancing",
+    },
+    display: planDisplay("working", "active"),
+    current_node_ids: options.current ?? [],
+    next_node_ids: options.next ?? [],
+    nodes,
+  });
   return {
     contract_version: 2,
     as_of: "2026-08-13T00:00:00Z",
@@ -38,34 +62,16 @@ function envelope(
     attention: { awaiting_count: 0 },
     plans: [
       {
-        plan: {
-          id: `plan-${threadId}`,
-          owner_kind: "thread",
-          owner_id: threadId,
-          state: "active",
-          revision: 1,
-          updated_at: "2026-08-13T00:00:00Z",
-        },
-        owner: { label: "Conversation", project_id: null, thread_id: threadId },
+        ...entry,
         progress: {
-          done: options.done ?? 1,
-          total: options.total ?? nodes.length,
-          open: nodes.length - (options.done ?? 1),
-          liveness: "advancing",
+          ...entry.progress,
           distribution: {
             ...EMPTY_DISTRIBUTION,
-            done: options.done ?? 1,
+            done,
             active: options.current?.length ?? 0,
             pending_ready: options.next?.length ?? 0,
           },
         },
-        display: planDisplay("working", "active"),
-        current_node_ids: options.current ?? [],
-        next_node_ids: options.next ?? [],
-        oversize: null,
-        folds: [],
-        root_count: nodes.filter((item) => item.parent_id === null).length,
-        nodes,
       },
     ],
   };

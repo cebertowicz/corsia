@@ -81,6 +81,12 @@ test('@surface:doc-send-on-close sends an open user batch exactly once before th
 	await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
 	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
 
+	// A phone's comments sheet is modal over the document column, so it closes before the tab list is reachable (RSR-7).
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+		expect(sends, 'closing the sheet alone sends nothing').toHaveLength(0);
+	}
 	// Leaving delivers: closing the tab sends the batch once, without Send now.
 	await (await tabControl(page, document.fileName, 'close')).click();
 	await expect.poll(() => sends).toHaveLength(1);
