@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-	captureConsoleErrors, createSession, loginByUrl, TEST_TOKEN,
+	captureConsoleErrors, createSession, TEST_SESSION_TOKEN, TEST_TOKEN,
 	waitForWsConnected, watchSessionSubscriptions,
 } from '../support/corsia';
 import { injectMessage } from '../support/mock';
@@ -42,7 +42,11 @@ test.describe('@flow:browser-cleanup @surface:chat browser cleanup notices', () 
 		const title = `e2e browser cleanup ${Date.now()}`;
 		const threadId = await createSession(request, title);
 		seedThreadPlan(threadId);
-		await loginByUrl(page, { waitForComposer: false });
+		// The app calls person-only routes (GET /api/host-access/leases answers 403 to an API
+		// token, backend/infra/auth.py require_human_user), so sign in as the person; loginByUrl's
+		// API token would put those 403s in the console this spec asserts empty.
+		await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
+		await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}

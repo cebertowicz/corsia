@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { fetchRevision, fetchTree, type DocRevision, type TreeRoot } from '$lib/api/docs';
 import { openArtifactTab } from '$lib/stores/artifactWorkspace';
+import { defaultTabTitle } from '$lib/artifactTabTitle';
 import { openSubagentRequest } from '$lib/stores/subagents';
 import { activeThreadId } from '$lib/stores/threads';
 import { emitProductEvent } from '$lib/product_events';
@@ -83,7 +84,8 @@ function settingsLink(href: string, origin: string): { section: SettingsSection;
 	const match = /^\/settings\/([a-z-]+)\/?$/.exec(url.pathname);
 	const section = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
 	if (!section) return null;
-	return { section, anchor: /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null };
+	const anchor = /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null;
+	return { section, anchor };
 }
 
 /** A same-origin `/thread/<id>` link, as an agent writes it to hand the person to a conversation. */
@@ -101,10 +103,6 @@ function threadLink(href: string, origin: string): string | null {
 
 function hasScheme(href: string): boolean {
 	return /^[a-z][a-z\d+.-]*:/i.test(href);
-}
-
-function titleFor(path: string): string {
-	return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
 /** Opens an external link in the correct host without changing web navigation. */
@@ -174,7 +172,7 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 		deps.openArtifact(threadId, {
 			artifactId: revision.artifact_id,
 			path: revision.path ?? path,
-			title: titleFor(revision.path ?? path),
+			title: defaultTabTitle(revision.path ?? path),
 		});
 		return { result: 'document', target: 'workspace_document' };
 	} catch {

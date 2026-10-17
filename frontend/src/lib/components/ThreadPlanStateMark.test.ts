@@ -231,14 +231,14 @@ describe('ThreadPlanStateMark', () => {
 	});
 
 
-	it('keeps the pause separate when the user owes a review', () => {
+	it('keeps an independent access request visible while its plan is paused', () => {
 		render({
-			state: 'blocked_on_you', label_key: 'needs_you', paused: true,
-			attention_items: [{ kind: 'review', title: 'Review the result', node_id: 'node-4' }],
+			state: 'blocked_on_you', label_key: 'waiting', paused: true,
+			attention_items: [{ kind: 'access', title: 'Read diagnostics', node_id: null }],
 		});
 		const mark = host.querySelector<HTMLElement>('.plan-state');
-		expect(mark?.textContent).toBe('Review');
-		expect(mark?.title).toBe('Blocked on you · Plan: Needs you · Paused');
+		expect(mark?.textContent).toBe('Allow access');
+		expect(mark?.title).toBe('Blocked on you · Plan: Waiting · Paused');
 		expect(host.querySelector('.paused-glyph')).toBeNull();
 	});
 

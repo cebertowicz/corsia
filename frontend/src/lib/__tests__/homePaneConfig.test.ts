@@ -61,10 +61,4 @@ describe('buildPaneConfig', () => {
 			expect(buildPaneConfig(view, null, SCOPE)).toBeNull();
 		}
 	});
-
-	it('suppresses every pane while settings take over', () => {
-		expect(buildPaneConfig('chat', makeThread(), SCOPE, null, true)).toBeNull();
-		expect(buildPaneConfig('chat', makeThread(), null, null, true)).toBeNull();
-		expect(buildPaneConfig('activity', null, null, null, true)).toBeNull();
-	});
 });

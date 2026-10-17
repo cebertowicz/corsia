@@ -67,7 +67,7 @@
 
 	.ico-btn.danger { color: var(--text-tertiary); }
 	.ico-btn.danger:hover:not(:disabled) {
-		background: var(--red-bg); color: var(--red);
+		background: var(--red-bg); color: var(--red-text);
 	}
 
 	.ico-btn.shell {

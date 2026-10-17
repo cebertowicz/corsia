@@ -27,8 +27,8 @@ const CHAT_SECTIONS: Section[] = [
 
 /**
  * The right pane's content for the current view, or null when the view has no pane.
- * Only workspace-scope Activity lists Projects; other non-chat views and the settings
- * takeovers (from any view) carry no pane.
+ * Only workspace-scope Activity lists Projects; other non-chat views, Settings
+ * included, carry no pane.
  * Settings live in the header's one gear, never in the pane.
  */
 export function buildPaneConfig(
@@ -36,10 +36,7 @@ export function buildPaneConfig(
 	activeThread: Thread | null,
 	scope: Scope,
 	activeThreadId?: string | null,
-	settingsTakeover = false,
 ): PaneConfig | null {
-	// Workspace/Project settings are a takeover screen: no pane, wherever they were opened from.
-	if (settingsTakeover) return null;
 	if (activeView === 'chat') {
 		// Resolve the active thread ID from the full Thread object when available,
 		// falling back to activeThreadId for the window where $activeThreadId is set

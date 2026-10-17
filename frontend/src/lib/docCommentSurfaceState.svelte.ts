@@ -1,3 +1,4 @@
+import { EditorView } from '@codemirror/view';
 import { get } from 'svelte/store';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
@@ -7,6 +8,16 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 export type CommentAnchor = NonNullable<PopoverAnchor>;
 
 export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
+
+/**
+ * Return focus to the document's editor. CodeMirror's own focus() re-applies its selection without scrolling;
+ * a bare element focus() makes WebKit put the caret at the start of the editable and scroll there once the
+ * DOM selection was cleared, as it is when the comment popover's focused control is removed.
+ */
+export function focusDocumentEditor(root: HTMLElement | undefined) {
+	const content = root?.querySelector<HTMLElement>('.cm-content');
+	(content && EditorView.findFromDOM(content))?.focus();
+}
 
 /** One owner for the canvas's anchored thread/draft and whole-document list. */
 export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string) {

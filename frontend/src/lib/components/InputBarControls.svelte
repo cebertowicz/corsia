@@ -24,10 +24,9 @@
 	import { token } from '$lib/stores/auth';
 	import { contextSourceOwnerTarget } from '$lib/contextSourceNavigation';
 	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
-	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import { uiScope } from '$lib/stores/uiScope';
+	import { openProjectSettings, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { toasts } from '$lib/stores/toast';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import {
@@ -224,11 +223,12 @@
 	function openContextSource(source: ContextSheetSourceRow) {
 		const target = contextSourceOwnerTarget(source);
 		if (target === 'project-settings') {
-			projectSettingsOpen.set(true);
+			if ($uiScope) openProjectSettings($uiScope.id);
+			else requestSettingsSection('projects');
 		} else if (target === 'thread-settings') {
 			threadSettingsOpen.set(true);
 		} else if (target === 'workspace-settings') {
-			workspaceSettingsOpen.set(true);
+			requestSettingsSection('context');
 		} else if (target === 'providers') {
 			requestSettingsSection('providers');
 		} else if (target === 'system') {

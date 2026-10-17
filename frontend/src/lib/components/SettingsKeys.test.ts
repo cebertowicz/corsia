@@ -8,7 +8,7 @@ import SettingsKeys from './SettingsKeys.svelte';
 import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
-import { providerCardRequest, settingsActiveSection } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { disconnect } from '$lib/ws/connection';
 
 const VALUE = 'BSAmarkup-test-value-0123';
@@ -245,7 +245,7 @@ describe('Settings › Keys', () => {
 			[...row('openai').querySelectorAll<HTMLButtonElement>('button')]
 				.find((b) => b.textContent?.trim() === 'Add in Providers')!.click();
 			expect(get(providerCardRequest)).toBe('openai');
-			expect(get(settingsActiveSection)).toBe('providers');
+			expect(get(settingsNavigation).section).toBe('providers');
 		});
 
 		it('lists built-in keys first, then every provider as a row in one card with no heading per provider', async () => {
@@ -283,7 +283,7 @@ describe('Settings › Keys', () => {
 			[...plan.querySelectorAll<HTMLButtonElement>('button')]
 				.find((b) => b.textContent?.trim() === 'Add in Providers')!.click();
 			expect(get(providerCardRequest)).toBe('ns-2');
-			expect(get(settingsActiveSection)).toBe('providers');
+			expect(get(settingsNavigation).section).toBe('providers');
 		});
 
 		it('shows the Provider keys heading for servers alone', async () => {

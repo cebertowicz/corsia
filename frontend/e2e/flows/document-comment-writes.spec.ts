@@ -49,8 +49,9 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await (await replyField(comment)).fill('Reply persisted.');
 	await comment.getByRole('button', { name: 'Send reply' }).click();
 	await expect(comment).toContainText('Reply persisted.');
-	await comment.getByRole('button', { name: 'Agree — end the exchange' }).click();
+	await comment.getByRole('button', { name: 'Agree', exact: true }).click();
 	await expect(comment).toContainText('Agreed');
+	await expect(await replyField(comment)).toBeVisible();
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();

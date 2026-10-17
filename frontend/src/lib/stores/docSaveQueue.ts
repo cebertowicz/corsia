@@ -70,9 +70,13 @@ export function confirmReconnectSave(key: string): void {
 	publishActivity(key);
 }
 
-/** The draft's target, which carries any identity resolved since it was seeded. */
-export function effectiveDraftTarget(target: DocViewerTarget): DocViewerTarget {
-	return existingDraft(target)?.target ?? target;
+/**
+ * The tab's target, carrying the artifact identity its draft resolved since it
+ * was seeded. The path is always the tab's: it is what the viewer opens.
+ */
+export function withDraftArtifactId(target: DocViewerTarget): DocViewerTarget {
+	const artifactId = existingDraft(target)?.target.artifactId ?? target.artifactId;
+	return artifactId === target.artifactId ? target : { ...target, artifactId };
 }
 
 /** Establishes a fresh draft from server content. Never overwrites an

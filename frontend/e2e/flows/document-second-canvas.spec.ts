@@ -54,8 +54,7 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 	await (await replyField(written)).fill('Reply from the other canvas.');
 	await written.getByRole('button', { name: 'Send reply' }).click();
 	await expect(written).toContainText('Reply from the other canvas.');
-	// The reply arrives collapsed in the canvas that did not write it.
-	await watched.getByRole('button', { name: '⊕ 1 reply' }).click();
+	// The reply arrives already attached to its thread in the other canvas.
 	await expect(watched).toContainText('Reply from the other canvas.');
 
 	await written.getByRole('button', { name: 'Resolve', exact: true }).click();

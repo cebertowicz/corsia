@@ -48,7 +48,7 @@
 
 	.host-head {
 		display: flex; align-items: center; gap: 14px;
-		padding: 6px 4px 14px;
+		padding: 6px 0 14px;
 	}
 
 	.host-title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
@@ -91,7 +91,7 @@
 	}
 
 	@media (max-width: 480px) {
-		.host-head { padding: 4px 4px 12px; gap: 10px; }
+		.host-head { padding: 4px 0 12px; gap: 10px; }
 		.host-name { font-size: var(--text-body); gap: 8px; }
 		.host-subname { font-size: var(--text-footnote); }
 		.host-meta { font-size: var(--text-footnote); gap: 8px; }

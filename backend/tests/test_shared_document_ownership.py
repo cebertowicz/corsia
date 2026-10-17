@@ -445,7 +445,7 @@ async def test_bash_callsite_annotates_and_delivers_owner_note(
     target = scope["category"] / "bash-callsite.md"
 
     async def create_subprocess(*_args, **_kwargs):
-        target.write_text("changed by shell\n", encoding="utf-8")
+        _shell_write(target, "changed by shell\n", time.time_ns())
         return _ShellProcess()
 
     monkeypatch.setattr(shell_module.asyncio, "create_subprocess_exec", create_subprocess)

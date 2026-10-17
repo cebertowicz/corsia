@@ -1,146 +1,235 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import { loadProviders } from '$lib/stores/providers';
 	import ProviderManager from './ProviderManager.svelte';
+	import ProvidersPolicyBlock from './ProvidersPolicyBlock.svelte';
 	import SettingsSystem from './SettingsSystem.svelte';
 	import SystemBulletinsSetting from './SystemBulletinsSetting.svelte';
 	import SettingsDebug from './SettingsDebug.svelte';
 	import SettingsKeys from './SettingsKeys.svelte';
+	import SettingsSkills from './SettingsSkills.svelte';
+	import SettingsContext from './SettingsContext.svelte';
+	import SettingsProjects from './SettingsProjects.svelte';
+	import SettingsRow from './SettingsRow.svelte';
 	import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 	import { loadServerVersion } from '$lib/version';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
-	import { settingsActiveSection, settingsAnchorRequest, type SettingsSection } from '$lib/stores/settingsNavigation';
+	import { isMobile } from '$lib/stores/viewport';
+	import { projects } from '$lib/stores/projects';
+	import {
+		closeSettingsProject,
+		consumeSettingsOpenRequest,
+		returnToProjectPage,
+		selectSettingsSection,
+		setSettingsDrill,
+		settingsNavigation,
+		type SettingsDrill,
+		type SettingsSection,
+	} from '$lib/stores/settingsNavigation';
 
-	let { onClose, systemStatus = {} as any }: {
+	let { onClose, onBrowseContextFiles, onBrowseSkills, systemStatus = {} as any }: {
 		onClose?: () => void;
+		onBrowseContextFiles?: () => void;
+		onBrowseSkills?: () => void;
 		systemStatus?: { memory?: any; cpu?: any };
 	} = $props();
 
+	// Effects read these, not the whole store: the drill this view writes must not re-run them.
+	const section = $derived($settingsNavigation.section);
+	const project = $derived($settingsNavigation.project);
+	const fromProject = $derived($settingsNavigation.fromProject);
+	const openRequest = $derived($settingsNavigation.openRequest);
+
 	$effect(() => {
-		if ($settingsActiveSection === 'providers') loadProviders();
-		if ($settingsActiveSection === 'debug') loadServerVersion();
+		if (section === 'providers') loadProviders();
+		if (section === 'debug') loadServerVersion();
 	});
 
-	// A chat link such as /settings/system#restart lands on its section, then on the named element.
-	$effect(() => {
-		const anchor = $settingsAnchorRequest;
-		if (!anchor) return;
-		void $settingsActiveSection;
-		void tick().then(() => {
-			document.querySelector(`[data-settings-anchor="${anchor}"]`)?.scrollIntoView({ block: 'start' });
-			settingsAnchorRequest.set(null);
-		});
-	});
-
-	const sections: { id: SettingsSection; label: string; shortLabel?: string; icon: string }[] = [
-		{ id: 'providers', label: 'Providers', icon: 'M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z' },
-		{ id: 'connected-apps', label: 'Connected apps', shortLabel: 'Apps', icon: 'M10.5 13.5l3-3m-5.5 6.5l-1 1a3 3 0 01-4.243-4.243l3-3a3 3 0 014.243 0M16 8l1-1a3 3 0 114.243 4.243l-3 3a3 3 0 01-4.243 0' },
-		{ id: 'system',    label: 'System',    icon: 'M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z' },
-		{ id: 'keys',      label: 'Keys',      icon: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4' },
-		{ id: 'debug',     label: 'Debug',     icon: 'M8 2v4M16 2v4M9 18h6M7 9h10v8a3 3 0 01-3 3h-4a3 3 0 01-3-3zM3 12h4M17 12h4M5 5l3 3M19 5l-3 3' },
+	// Three groups by kind (S-R2); space alone separates them.
+	const groups: { id: SettingsSection; label: string }[][] = [
+		[
+			{ id: 'providers', label: 'Providers' },
+			{ id: 'connected-apps', label: 'Connected apps' },
+			{ id: 'skills', label: 'Skills' },
+			{ id: 'context', label: 'Context' },
+		],
+		[{ id: 'projects', label: 'Projects' }],
+		[
+			{ id: 'keys', label: 'Keys' },
+			{ id: 'system', label: 'System' },
+			{ id: 'debug', label: 'Debug' },
+		],
 	];
+	const labelOf = (id: SettingsSection) => groups.flat().find((s) => s.id === id)?.label ?? 'Settings';
+
+	// Phone: the section list is the whole screen; a tapped row opens its section full-screen.
+	// Pure view state of this mounted view, so it stays local.
+	let mobileOpen = $state(false);
+	// A deep link (a gear, a chat link) opens its section, not the list, whether it opened
+	// Settings or arrived while Settings was already showing.
+	$effect(() => {
+		void openRequest;
+		if (consumeSettingsOpenRequest()) mobileOpen = true;
+	});
+
+	function select(id: SettingsSection) {
+		selectSettingsSection(id);
+		mobileOpen = true;
+	}
+
+	const projectName = $derived($projects.find((p) => p.id === project)?.name ?? 'Project');
+
+	// One back, in the app header: it names the page on a phone and goes up one level.
+	$effect(() => {
+		const phone = $isMobile;
+		const from = fromProject;
+		let drill: SettingsDrill | null = null;
+		if (from) {
+			drill = { title: phone ? labelOf(section) : 'Settings', backLabel: from.name, onBack: returnToProjectPage };
+		} else if (section === 'projects' && project) {
+			drill = { title: phone ? projectName : 'Settings', backLabel: 'Projects', onBack: closeSettingsProject };
+		} else if (phone && mobileOpen) {
+			drill = { title: labelOf(section), backLabel: 'Settings', onBack: () => { mobileOpen = false; } };
+		}
+		setSettingsDrill(drill);
+	});
+	$effect(() => () => setSettingsDrill(null));
 </script>
 
 <div class="settings-view">
-	<nav class="settings-nav desktop-nav">
-		<div class="settings-nav-header">
-			<span class="settings-nav-title">Settings</span>
+	<nav class="desktop-nav" aria-label="Settings">
+		<div class="nav-header">
+			<span class="nav-title">Settings</span>
 			{#if onClose}
 				<IconButton size="sm" ariaLabel="Close settings" title="Close settings" onclick={onClose}>
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M18 6L6 18M6 6l12 12"/>
-					</svg>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
 				</IconButton>
 			{/if}
 		</div>
-		{#each sections as s}
-			<button
-				class="nav-item press-tint"
-				class:active={$settingsActiveSection === s.id}
-				onclick={() => { settingsActiveSection.set(s.id); }}
-			>
-				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-					<path d={s.icon}/>
-				</svg>
-				{s.label}
-			</button>
+		{#each groups as group}
+			<div class="nav-group">
+				{#each group as s}
+					<button
+						class="nav-item"
+						data-settings-section={s.id}
+						class:active={section === s.id}
+						aria-current={section === s.id ? 'page' : undefined}
+						onclick={() => select(s.id)}
+					>{s.label}</button>
+				{/each}
+			</div>
 		{/each}
 	</nav>
 
-	<div class="settings-content" use:toastAnchorSurface>
-		{#if $settingsActiveSection === 'providers'}
-			<div class="providers-host">
-				<ProviderManager />
-			</div>
-		{:else if $settingsActiveSection === 'system'}
-			<SettingsSystem {systemStatus} onSwitchSection={(s) => { settingsActiveSection.set(s as SettingsSection); }} />
-			<SystemBulletinsSetting />
-		{:else if $settingsActiveSection === 'connected-apps'}
-			<ConnectedAppsSettings />
-		{:else if $settingsActiveSection === 'keys'}
-			<SettingsKeys />
-		{:else if $settingsActiveSection === 'debug'}
-			<SettingsDebug />
-		{/if}
+	<div class="settings-content" class:mobile-section={mobileOpen} use:toastAnchorSurface>
+		<div class="section-host">
+			{#if section === 'providers'}
+				<div class="inset"><ProviderManager /></div>
+				<div class="policy"><ProvidersPolicyBlock /></div>
+			{:else if section === 'connected-apps'}
+				<div class="inset"><ConnectedAppsSettings /></div>
+			{:else if section === 'skills'}
+				<h2 class="page-title">Skills</h2>
+				<SettingsSkills {onBrowseSkills} />
+			{:else if section === 'context'}
+				<h2 class="page-title">Context</h2>
+				<SettingsContext {onBrowseContextFiles} />
+			{:else if section === 'projects'}
+				<SettingsProjects />
+			{:else if section === 'system'}
+				<div class="inset">
+					<SettingsSystem {systemStatus} onSwitchSection={(s) => selectSettingsSection(s as SettingsSection)} />
+					<SystemBulletinsSetting />
+				</div>
+			{:else if section === 'keys'}
+				<div class="inset"><SettingsKeys /></div>
+			{:else if section === 'debug'}
+				<div class="inset"><SettingsDebug /></div>
+			{/if}
+		</div>
 	</div>
 
-	<div class="mobile-tab-bar">
-		{#each sections as s}
-			<button
-				class="mobile-tab press-tint"
-				class:active={$settingsActiveSection === s.id}
-				onclick={() => { settingsActiveSection.set(s.id); }}
-			>
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-					<path d={s.icon}/>
-				</svg>
-				{s.shortLabel ?? s.label}
-			</button>
+	<div class="mobile-root" class:hidden={mobileOpen}>
+		{#each groups as group}
+			<div class="mobile-group">
+				{#each group as s}
+					<div data-settings-section={s.id}>
+						<SettingsRow name={s.label} chevron onOpen={() => select(s.id)} />
+					</div>
+				{/each}
+			</div>
 		{/each}
 	</div>
 </div>
 
 <style>
-	/* The shell header overlays the top of main; start below it, as the project
-	   settings view does, so its buttons do not take this view's clicks. */
-	.settings-view { display: flex; flex: 1; min-height: 0; background: var(--bg-primary); overflow: hidden; position: relative; padding-top: var(--header-bottom); }
-
-	.desktop-nav { width: 200px; flex-shrink: 0; background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; padding: 0; }
-	.settings-nav-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 16px 12px; border-bottom: 1px solid var(--border-subtle); }
-	.settings-nav-title { font-size: var(--text-caption); font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
-
-	.nav-item { display: flex; align-items: center; gap: 9px; padding: 9px 16px; background: none; border: none; cursor: pointer; font-size: var(--text-callout); color: var(--text-secondary); text-align: left; width: 100%; border-radius: 0; transition: background var(--dur-tight), color var(--dur-tight); font-family: inherit; }
-	.nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.nav-item.active { background: var(--accent-subtle); color: var(--accent-text); font-weight: 500; }
-	.nav-item svg { flex-shrink: 0; opacity: 0.8; }
-	.nav-item.active svg { opacity: 1; }
-
-	.settings-content { flex: 1; overflow-y: auto; padding: 32px 40px; }
-
-	.mobile-tab-bar { display: none; }
-	.mobile-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px 10px; background: none; border: none; color: var(--text-tertiary); font-family: inherit; font-size: var(--text-caption); font-weight: 500; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: color var(--dur-tight); }
-	.mobile-tab:active { border-radius: var(--radius-sm); }
-	.mobile-tab:hover { color: var(--text-secondary); }
-	.mobile-tab.active { color: var(--accent-text); }
-
-	.providers-host {
-		background: transparent;
-		border: 0;
-		padding: 8px 24px 8px;
-		margin-bottom: 16px;
+	/* The shell header overlays the top of main; start below it so its buttons do not take this view's clicks. */
+	.settings-view {
+		display: flex; flex: 1; min-height: 0;
+		background: var(--bg-primary);
+		overflow: hidden; position: relative;
+		padding-top: var(--header-bottom);
 	}
+	.desktop-nav {
+		width: 200px; flex-shrink: 0;
+		border-right: 1px solid var(--border-subtle);
+		display: flex; flex-direction: column;
+		padding: 0 var(--space-2) var(--space-4);
+		overflow-y: auto;
+	}
+	.nav-header {
+		display: flex; align-items: center; justify-content: space-between;
+		height: var(--header-height);
+		padding: 0 var(--space-1) 0 var(--space-2);
+	}
+	.nav-title { font-size: var(--text-body); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	.nav-group { display: flex; flex-direction: column; }
+	.nav-group + .nav-group { margin-top: var(--space-4); }
+	/* §0.1 list row: flat, hover wash, the selected row in the accent wash. */
+	.nav-item {
+		display: flex; align-items: center;
+		min-height: var(--list-row-min-height); width: 100%;
+		padding: 0 var(--space-2);
+		background: none; border: none; border-radius: var(--radius-sm);
+		cursor: pointer; font: inherit; font-size: var(--text-subhead); color: var(--text-primary);
+		text-align: left;
+		transition: background var(--dur-tight);
+	}
+	.nav-item:hover { background: var(--bg-hover); }
+	.nav-item.active { background: var(--accent-wash); }
+	.nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+	.settings-content { flex: 1; min-width: 0; overflow-y: auto; padding: var(--space-6) var(--space-8) var(--space-8); }
+	.section-host { max-width: 720px; }
+	.section-host :global(.page-title) {
+		margin: 0 0 var(--space-5);
+		padding: 0 var(--space-2);
+		font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary);
+	}
+	/* Sections that draw their own title: inset them to the edge the list pages use. */
+	.inset { padding: 0 var(--space-2); }
+	/* Connected apps was drawn to follow System; as its own page it starts at the top. */
+	.inset > :global(.connected-apps) { margin-top: 0; }
+	.policy { margin-top: var(--space-8); padding: 0 var(--space-2); }
+	.mobile-root { display: none; }
 
 	@media (max-width: 768px) {
 		.settings-view { flex-direction: column; }
 		.desktop-nav { display: none; }
-		.settings-content { padding: 12px 12px 16px; }
-		.providers-host { background: transparent; border: 0; padding: 0; margin: 0; }
-		.mobile-tab-bar {
-			display: flex; flex-shrink: 0;
-			border-top: 1px solid var(--border-subtle);
-			background: var(--bg-primary);
-			padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+		.settings-content { display: none; padding: var(--space-3) var(--space-3) var(--space-6); }
+		.settings-content.mobile-section { display: block; }
+		/* The app header names the page on a phone; the title is not drawn again under it but stays the page's heading for assistive tech. */
+		.section-host :global(.page-title),
+		.inset :global(.page-head h2), .inset :global(.section-header h2), .inset :global(.connected-apps .heading h2) {
+			position: absolute; width: 1px; height: 1px; padding: 0; margin: 0;
+			overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 		}
+		.inset :global(.page-head) { justify-content: flex-end; }
+		/* The visually hidden title remains the first DOM child; do not let it create an extra group gap. */
+		.section-host > :global(.settings-group:first-of-type) { margin-top: 0; }
+		.mobile-root { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: var(--space-3); }
+		.mobile-root.hidden { display: none; }
+		.mobile-group { display: flex; flex-direction: column; }
+		.mobile-group + .mobile-group { margin-top: var(--space-4); }
 	}
 </style>

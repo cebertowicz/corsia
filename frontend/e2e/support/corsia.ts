@@ -77,7 +77,24 @@ export async function openSettings(page: Page) {
 		await expect(settingsButton).toBeVisible();
 	}
 	await settingsButton.click();
-	await expect(page.getByRole('button', { name: 'Providers' })).toBeVisible();
+	const providers = (page.viewportSize()?.width ?? 0) <= 768
+		? page.locator('.settings-view .mobile-root [data-settings-section="providers"] button.face')
+		: page.locator('.settings-view .desktop-nav [data-settings-section="providers"]');
+	await expect(providers).toBeVisible();
+}
+
+/** Opens a Settings section through the navigation that is visible at this width. */
+export async function openSettingsSection(page: Page, section: string) {
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		const root = page.locator('.settings-view .mobile-root');
+		if (!(await root.isVisible())) {
+			await page.locator('.shell-header .h-back').click();
+			await expect(root).toBeVisible();
+		}
+		await root.locator(`[data-settings-section]`).getByRole('button', { name: section, exact: true }).click();
+		return;
+	}
+	await page.locator('.settings-view .desktop-nav').getByRole('button', { name: section, exact: true }).click();
 }
 
 export async function saveEvidenceScreenshot(

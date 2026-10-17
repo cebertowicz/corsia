@@ -96,9 +96,7 @@
 		</div>
 	</div>
 	{#snippet foot()}
-		<Button variant="ghost" onclick={onClose}>Cancel</Button>
-		<span style="flex: 1"></span>
-		<Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>{approve ? 'Approve' : 'Save'}</Button>
+		<div class="actions"><Button variant="ghost" onclick={onClose}>Cancel</Button><Button variant="primary" onclick={save} disabled={!hasSelection} loading={saving}>{approve ? 'Approve' : 'Save'}</Button></div>
 	{/snippet}
 </Modal>
 

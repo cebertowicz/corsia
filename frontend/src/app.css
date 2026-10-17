@@ -45,6 +45,13 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* In an installed Home Screen web app, iOS reports 100vh as the full screen height while the
+   layout viewport (innerHeight, 100dvh) is shorter, so a 100vh shell runs past the visible bottom
+   edge. Size the shell to the layout viewport there only; a browser tab keeps 100vh. */
+@media (display-mode: standalone) {
+  html, body { height: 100dvh; }
+}
+
 body { max-width: 100vw; }
 #svelte { max-width: 100vw; overflow-x: hidden; }
 

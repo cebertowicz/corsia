@@ -184,9 +184,7 @@ def test_an_unstarted_parent_counts_its_own_ask_beside_its_child(db):
     )
 
 
-def test_what_the_user_owes_outranks_a_pause(db):
-    """Pause contract rule 5 (#1972): the chat list, the header and the agent's
-    summary all say the user's move before they say paused."""
+def test_paused_plan_defers_its_person_review_from_the_chat_list(db):
     owing = _thread(db, "owing")
     plan = _plan(db, "owing")
     _awaiting_user_review(db, plan.id)
@@ -195,12 +193,10 @@ def test_what_the_user_owes_outranks_a_pause(db):
     plan_update(db, plan.id, "pause", {"expected_revision": current}, actor=HUMAN)
 
     state = _states(db, ["owing"])["owing"]
-    assert state["state"] == "blocked_on_you"
-    assert state["label_key"] == "needs_you"
+    assert state["state"] == "paused"
+    assert state["label_key"] == "waiting"
     assert state["paused"] is True
-    assert state["attention_items"][0]["kind"] == "review"
-    assert state["attention_items"][0]["title"] == "User sign-off"
-    assert state["attention_items"][0]["node_id"]
+    assert state["attention_items"] == []
     assert status.read(db, service._plan_row(db, plan.id), actor=owing)["severity"] == "not_moving"
 
 
@@ -357,6 +353,22 @@ def test_access_requests_and_live_failures_reach_the_row(db):
     }]
     assert states["access"]["state"] == "blocked_on_you"
     assert states["access"]["attention_items"] == [{
+        "kind": "access", "title": "Read diagnostics", "node_id": None,
+    }]
+
+
+def test_paused_plan_keeps_an_independent_access_request_visible(db):
+    _thread(db, "paused-access")
+    plan = _plan(db, "paused-access")
+    _awaiting_access_request(db, "paused-access")
+    plan_update(db, plan.id, "pause", {
+        "expected_revision": service._plan_row(db, plan.id)["revision"],
+    }, actor=HUMAN)
+
+    state = _states(db, ["paused-access"])["paused-access"]
+    assert state["state"] == "blocked_on_you"
+    assert state["paused"] is True
+    assert state["attention_items"] == [{
         "kind": "access", "title": "Read diagnostics", "node_id": None,
     }]
 
@@ -585,6 +597,35 @@ def test_an_owed_item_is_the_users_move_with_or_without_open_work():
     assert operator_chat_state.chat_state({"state": "paused"}, active, owed=True) == "blocked_on_you"
 
 
+def test_pausing_a_plan_hides_its_person_review_until_resumed(db):
+    actor = _thread(db, "paused-person-review")
+    plan = _plan(db, actor.thread_id)
+    _awaiting_user_review(db, plan.id)
+
+    before_pause = _states(db, [actor.thread_id])[actor.thread_id]
+    assert before_pause["state"] == "blocked_on_you"
+    assert [item["kind"] for item in before_pause["attention_items"]] == ["review"]
+
+    plan_update(db, plan.id, "pause", {
+        "expected_revision": service._plan_row(db, plan.id)["revision"],
+    }, actor=HUMAN)
+
+    paused = _states(db, [actor.thread_id])[actor.thread_id]
+    assert paused["state"] == "paused"
+    assert paused["label_key"] == "waiting"
+    assert paused["paused"] is True
+    assert paused["attention_items"] == []
+
+    plan_update(db, plan.id, "resume", {
+        "expected_revision": service._plan_row(db, plan.id)["revision"],
+    }, actor=HUMAN)
+
+    resumed = _states(db, [actor.thread_id])[actor.thread_id]
+    assert resumed["state"] == "blocked_on_you"
+    assert resumed["label_key"] == "needs_you"
+    assert [item["kind"] for item in resumed["attention_items"]] == ["review"]
+
+
 _ZERO = dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0)
 
 
@@ -631,7 +672,7 @@ def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
     assert state["attention_items"] == []
 
 
-def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
+def test_failed_work_remains_visible_when_pause_defers_a_person_hold(db):
     actor = _thread(db, "stuck-precedence")
     plan = _plan(db, "stuck-precedence")
     overdue = (datetime.now(UTC) - not_moving.OVERDUE_GRACE - timedelta(seconds=1)).isoformat()
@@ -650,7 +691,9 @@ def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
     plan_update(db, plan.id, "pause", {
         "expected_revision": service._plan_row(db, plan.id)["revision"],
     }, actor=HUMAN)
-    assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] == "blocked_on_you"
+    paused = _states(db, ["stuck-precedence"])["stuck-precedence"]
+    assert paused["state"] == "failed"
+    assert [item["kind"] for item in paused["attention_items"]] == ["failed"]
 
 
 def test_a_future_wait_is_idle(db):

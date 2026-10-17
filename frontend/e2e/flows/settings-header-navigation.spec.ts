@@ -34,7 +34,7 @@ test('@surface:navigation project and conductor settings use their own header ge
 		await page.locator('.shell-header').getByRole('button', { name: 'Project settings' }).click();
 		await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue(name);
 		await saveEvidenceScreenshot(page, testInfo, `project-settings-${width}`);
-		await page.getByRole('button', { name }).first().click();
+		await page.locator('.shell-header .h-back').click();
 		const conductor = page.locator('.scoped-item.conductor');
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await conductor.click();

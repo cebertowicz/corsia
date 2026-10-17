@@ -1,12 +1,14 @@
 import { writable, get } from 'svelte/store';
 import {
-	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ImageRegion, type ServerComment
+	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
 } from '$lib/api/docs';
-import { relLabel } from '$lib/time';
-import { trackPlacements, type Placement } from './docCommentPlacement';
+import { trackPlacements } from './docCommentPlacement';
+import { fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
+export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
+export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
 
 function findById(rows: ServerComment[], id: string): ServerComment | null {
 	for (const r of rows) {
@@ -32,52 +34,6 @@ export async function postReconciled(
 	}
 }
 
-export type CommentAuthor = string;
-
-export interface CommentReply {
-	id?: string;
-	author: CommentAuthor;
-	authorKind?: 'user' | 'agent';
-	text: string;
-	at: string;
-}
-
-export interface DocComment {
-	id: string;
-	from?: number;
-	to?: number;
-	anchor: string;
-	author: CommentAuthor;
-	authorKind?: 'user' | 'agent';
-	authorThreadId?: string | null;
-	text: string;
-	at: string;
-	createdAt?: string;
-	resolved: boolean;
-	orphaned?: boolean;
-	acked?: boolean;
-	review?: boolean;
-	replacement?: string | null;
-	decision?: 'accepted' | 'rejected' | null;
-	decidedBy?: string | null;
-	replyWaiting?: boolean;
-	replies: CommentReply[];
-	/** Live documents only (4.2); `drawn` once browser-made positions place it. */
-	placement?: Placement;
-	/** A user-requested live placement reload is queued or in flight. */
-	placementReloading?: boolean;
-	/** The latest user-requested live placement reload was refused. */
-	placementReloadError?: boolean;
-	drawn?: boolean;
-	/** A comment on part of an image (DCOL-FR13.3); null for a text comment. */
-	region?: ImageRegion | null;
-	/** Its number on that image (FR13.4). */
-	regionNumber?: number | null;
-	/** The image changed after the pin was placed (FR13.9). */
-	regionStale?: boolean;
-	/** For an image inside a document, the workspace file it shows; null on an image artifact. */
-	imageSrc?: string | null;
-}
 
 export const docComments = writable<Record<string, DocComment[]>>({});
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
@@ -98,40 +54,6 @@ export function reshow(artifactId: string, edit: (rows: DocComment[]) => DocComm
 	placements.show(artifactId, withhold(artifactId, edit(get(docComments)[artifactId] ?? [])));
 }
 
-export function fromServer(r: ServerComment): DocComment {
-	return {
-		id: r.id,
-		from: r.from_off ?? undefined,
-		to: r.to_off ?? undefined,
-		anchor: r.anchor_text ?? '',
-		author: r.author,
-		authorKind: r.author_kind,
-		authorThreadId: r.author_thread_id,
-		text: r.body,
-		at: relLabel(r.created_at),
-		createdAt: r.created_at,
-		resolved: !!r.resolved,
-		orphaned: !!r.orphaned,
-		acked: !!r.acked,
-		review: !!r.review,
-		replacement: r.replacement,
-		decision: r.decision,
-		decidedBy: r.decided_by,
-		replyWaiting: !!r.reply_waiting,
-		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at) })),
-		...regionFromServer(r)
-	};
-}
-
-export function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale' | 'imageSrc'> {
-	if (r.region_number == null || r.region_x == null || r.region_y == null) return {};
-	return {
-		region: { x: r.region_x, y: r.region_y, w: r.region_w ?? 0, h: r.region_h ?? 0 },
-		regionNumber: r.region_number,
-		regionStale: !!r.region_stale,
-		imageSrc: r.image_src ?? null
-	};
-}
 
 type CommentFeedback = Awaited<ReturnType<typeof fetchComments>>['feedback'];
 /** Per document: the load running now, and the one load every caller that arrives meanwhile shares. */
@@ -245,7 +167,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((comment) => (
-			comment.id === result.root_id ? { ...comment, replyWaiting: result.reply_waiting } : comment
+			comment.id === result.root_id ? { ...comment, newReplyIds: result.new_reply_ids } : comment
 		)),
 	}));
 }

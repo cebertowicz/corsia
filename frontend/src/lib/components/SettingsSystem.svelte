@@ -9,6 +9,7 @@
 	import SettingsUpdate from './SettingsUpdate.svelte';
 	import { updateInFlight } from '$lib/update/store';
 	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
 		{ v: 'light', l: 'Light' },
@@ -110,13 +111,13 @@
 
 <HostAccessReviewSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card" data-settings-anchor="update">
+<div class="settings-card" data-settings-anchor="update" use:settingsAnchor={'update'}>
 	<h3>Updates</h3>
 	<p class="card-desc">Keep CORSIA current.</p>
 	<div class="service-grid"><SettingsUpdate /></div>
 </div>
 
-<div class="settings-card" data-settings-anchor="restart">
+<div class="settings-card" data-settings-anchor="restart" use:settingsAnchor={'restart'}>
 	<h3>Services</h3>
 	<p class="card-desc">Restart drains and bounces the current build.</p>
 

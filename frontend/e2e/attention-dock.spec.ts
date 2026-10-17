@@ -204,7 +204,11 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
       showcase.getByText("Raised directly — no parent review").first(),
     ).toBeVisible();
     await shot(page, "dock-04-root-direct-labelled");
-    await showcase.getByRole("button", { name: "Done", exact: true }).click();
+    // The page also holds a Setup row named Done; the drawer's own Done is AdaptiveDrawer's `.drawer-done`.
+    await showcase
+      .getByRole("dialog")
+      .getByRole("button", { name: "Done", exact: true })
+      .click();
 
     // External review hands off and never resolves someone else's object.
     await showcase.getByRole("button", { name: "External review" }).click();
