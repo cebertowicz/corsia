@@ -17,13 +17,23 @@ REVIEWER_EVENTS = frozenset(
 GATE_TRIGGER_EVENTS = frozenset({
     "webhook.github.check_suite_completed",
     "webhook.github.pr_ready_for_review",
+    "webhook.github.pr_labeled",
 })
 
 
 def run_review(internal_event: str, payload: dict[str, Any]) -> None:
-    """Handle reviewer push events without arming a review."""
+    """Handle reviewer push events without arming a review; hold a fork head for approval."""
     if internal_event not in REVIEWER_EVENTS:
         return
+
+    from events.connectors.github_reviewer_fork_hold import reconcile_push
+
+    pr = payload.get("pull_request") or {}
+    pr_number = pr.get("number")
+    head_sha = (pr.get("head") or {}).get("sha", "")
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    # A fork head waits whoever pushed it, so this runs before the bot guard.
+    reconcile_push(repo, pr_number, head_sha, internal_event, payload)
 
     if guard.is_bot_or_self_authored(payload):
         author = payload.get("sender") or {}
@@ -43,9 +53,6 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
         )
         return
 
-    pr = payload.get("pull_request") or {}
-    pr_number = pr.get("number")
-    head_sha = (pr.get("head") or {}).get("sha", "")
     logger.debug(
         "reviewer-route: push event {} PR #{} sha={} — gate evaluates on green CI or ready transition",
         internal_event,
@@ -65,6 +72,9 @@ def check_gate_on_trigger(
 
     if internal_event == "webhook.github.pr_ready_for_review":
         return _check_ready_event(internal_event, payload, loop)
+
+    if internal_event == "webhook.github.pr_labeled":
+        return _check_label_event(internal_event, payload, loop)
 
     repo = (payload.get("repository") or {}).get("full_name", "")
     suite = payload.get("check_suite") or {}
@@ -114,16 +124,8 @@ def check_gate_on_trigger(
     return True
 
 
-def _check_ready_event(
-    internal_event: str,
-    payload: dict[str, Any],
-    loop: asyncio.AbstractEventLoop | None,
-) -> bool:
-    """Validate ready-event identity before invoking the shared gate."""
-    repo = (payload.get("repository") or {}).get("full_name", "")
-    pr = payload.get("pull_request") or {}
-    head_sha = (pr.get("head") or {}).get("sha", "")
-    pr_number = pr.get("number")
+def _missing_identity(repo: Any, pr_number: Any, head_sha: Any) -> list[str]:
+    """Name the identity fields a pull request event lacks."""
     missing_fields = []
     if not isinstance(repo, str) or not repo:
         missing_fields.append("repository.full_name")
@@ -135,7 +137,20 @@ def _check_ready_event(
         missing_fields.append("pull_request.number")
     if not isinstance(head_sha, str) or not head_sha:
         missing_fields.append("pull_request.head.sha")
+    return missing_fields
 
+
+def _check_ready_event(
+    internal_event: str,
+    payload: dict[str, Any],
+    loop: asyncio.AbstractEventLoop | None,
+) -> bool:
+    """Validate ready-event identity before invoking the shared gate."""
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    pr = payload.get("pull_request") or {}
+    head_sha = (pr.get("head") or {}).get("sha", "")
+    pr_number = pr.get("number")
+    missing_fields = _missing_identity(repo, pr_number, head_sha)
     action = payload.get("action")
     if missing_fields:
         _report_invalid_ready_event(
@@ -151,6 +166,42 @@ def _check_ready_event(
         pr_number=pr_number,
         internal_event=internal_event,
         loop=loop,
+    )
+    return True
+
+
+def _check_label_event(
+    internal_event: str,
+    payload: dict[str, Any],
+    loop: asyncio.AbstractEventLoop | None,
+) -> bool:
+    """Treat the review label as a request to approve the head named in the payload.
+
+    The label is only the trigger: the fork hold approves the pull request's
+    current head, and only for a sender with write access.
+    """
+    from reviewer.reviewer_categories import LABEL_REVIEW
+
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    pr = payload.get("pull_request") or {}
+    head_sha = (pr.get("head") or {}).get("sha", "")
+    pr_number = pr.get("number")
+    missing_fields = _missing_identity(repo, pr_number, head_sha)
+    if missing_fields:
+        _report_invalid_ready_event(
+            repo, pr_number, head_sha, payload.get("action"), missing_fields,
+        )
+        return False
+    if (payload.get("label") or {}).get("name") != LABEL_REVIEW:
+        return True
+
+    from events.connectors.github_reviewer_fork_hold import payload_is_fork, reconcile_label
+
+    if not payload_is_fork(payload):
+        return True
+    reconcile_label(
+        repo, pr_number, head_sha, (payload.get("sender") or {}).get("login"),
+        internal_event, loop,
     )
     return True
 
