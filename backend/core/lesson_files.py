@@ -125,18 +125,22 @@ def trial_statement(body: str) -> tuple[str | None, str | None]:
     A valid skill with lesson metadata may still have an arbitrary body. Its
     list row must not mistake an unrelated bullet for the lesson hypothesis.
     """
+    if body.startswith("\n"):
+        body = body[1:]
     if not body.startswith(_TRIAL_BODY_PREFIX):
         return None, "trial body differs from the canonical lesson shape"
     remainder = body.removeprefix(_TRIAL_BODY_PREFIX)
     statement, separator, suffix = remainder.partition("\n")
-    if not statement or not separator:
+    if not statement:
         return None, "trial body differs from the canonical lesson shape"
-    if suffix == "":
+    if not separator or suffix == "":
         return statement, None
     if not suffix.startswith(_TRIAL_BOUNDARY_PREFIX):
         return None, "trial body differs from the canonical lesson shape"
     boundary = suffix.removeprefix(_TRIAL_BOUNDARY_PREFIX)
-    if not boundary or "\n" in boundary.rstrip("\n") or not boundary.endswith("\n"):
+    if boundary.endswith("\n"):
+        boundary = boundary[:-1]
+    if not boundary or "\n" in boundary:
         return None, "trial body differs from the canonical lesson shape"
     return statement, None
 

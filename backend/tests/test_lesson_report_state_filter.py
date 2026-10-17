@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from core.lesson_files import _with_lesson, read_trial, render_trial, with_review_ref
+from core.lesson_files import _with_lesson, read_trial, render_trial, trial_statement, with_review_ref
 from core.lesson_report import ReportScope, read_report
 from core.lesson_report_inventory import source_record
 from core.lesson_trials import Trial
@@ -103,13 +103,19 @@ def test_statement_uses_the_canonical_trial_body_shape():
     raw = render_trial(
         lesson_id=str(uuid.UUID(int=8)), owner="owner", name="canonical",
         description="Use before deciding.", text="One canonical statement.",
-        trial=Trial("hypothesis", "2026-10-01"),
+        trial=Trial("hypothesis", "2026-10-01", boundary="Not for an unreviewed change."),
         source_refs=[{"kind": "message", "reference": "correction"}],
     )
     parsed = read_trial(raw)
     assert parsed
     assert parsed.statement == "One canonical statement."
     assert parsed.statement_error is None
+    statement, error = trial_statement(parsed.body.rstrip("\n"))
+    assert statement == "One canonical statement."
+    assert error is None
+    statement, error = trial_statement(parsed.body.rstrip("\n") + "\nextra")
+    assert statement is None
+    assert error == "trial body differs from the canonical lesson shape"
 
 
 def test_noncanonical_trial_body_is_visible_not_misreported_as_a_statement(db):
