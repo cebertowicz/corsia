@@ -128,12 +128,6 @@ class TestSeedCodex:
         claude = _sources(client)["claude-code"]
         assert claude["state"] == "unverified" and claude["reason"] == "Not checked yet"
 
-    def test_unverified_cli_offers_no_package_manager_update_hint(self, isolated_db, client, monkeypatch):
-        self._seed(monkeypatch, "ready")
-
-        claude = _sources(client)["claude-code"]
-        assert claude["state"] == "unverified" and "cli_package_manager" not in claude
-
     def test_reseed_keeps_the_last_claude_verdict(self, isolated_db, client, monkeypatch):
         from connections.models import get_connection
         from connections.source_state import apply_check

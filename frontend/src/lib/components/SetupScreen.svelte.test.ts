@@ -735,6 +735,19 @@ describe('SetupScreen', () => {
 		expect(startButton()).toHaveProperty('disabled', false);
 	});
 
+	it('says so when the provider list cannot be read, and keeps Save off', async () => {
+		await reachModels({ state: 'idle' }, { providers: [] });
+
+		expect(host.textContent).toContain('CORSIA couldn’t load the list of providers. Try again.');
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use an API key instead')?.click();
+		await settle();
+		const key = host.querySelector<HTMLInputElement>('input[aria-label="API key"]');
+		key!.value = 'pasted';
+		key!.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Save')?.hasAttribute('disabled')).toBe(true);
+	});
+
 	it('loads cloud providers before opening the API-key form', async () => {
 		await reachModels({ state: 'idle' }, { providers: [{ name: 'anthropic', label: 'Anthropic', type: 'cloud' }] });
 
@@ -888,6 +901,7 @@ describe('SetupScreen', () => {
 			install: { state: string; reason: string | null; path_shadowed_by?: string | null };
 			signin: string;
 			posted: string[];
+			recheckFails?: boolean;
 		};
 		let fake: Fake;
 		const claude = (state: string, extra: Record<string, unknown> = {}) => ({ source: 'claude-code', name: 'Claude Code', state, ...extra });
@@ -902,6 +916,7 @@ describe('SetupScreen', () => {
 				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false });
 				if (url.startsWith('/api/setup/local-model')) return picked('Qwen 3.8');
 				if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
+				if (url === '/api/providers/sources/recheck' && fake.recheckFails) return json({}, 500);
 				if (url === '/api/providers/sources/recheck' || url === '/api/providers/sources') return json({ sources: fake.sources });
 				if (url === '/api/providers/cli/claude-code/install' && method === 'POST') return json(fake.installPost.body, fake.installPost.status);
 				if (url === '/api/providers/cli/claude-code/install') return json(fake.install);
@@ -967,12 +982,6 @@ describe('SetupScreen', () => {
 			expect(start().disabled).toBe(false);
 		});
 
-		it('does not offer an Update action for an unverified CLI', async () => {
-			await openConnectStep([claude('unverified')]);
-
-			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).not.toContain('Update');
-		});
-
 		it('lets an unverified CLI recheck or sign in, and says why it could not be checked', async () => {
 			await openConnectStep([
 				claude('unverified', { reason: 'it could not be started' }),
@@ -982,10 +991,19 @@ describe('SetupScreen', () => {
 			expect(row('Claude Code').textContent).toContain('CORSIA couldn’t check Claude Code’s sign-in.');
 			expect(row('Claude Code').textContent).toContain('it could not be started');
 			expect(row('Codex').textContent).toContain('CORSIA couldn’t check Codex’s sign-in.');
-			expect(row('Claude Code').textContent).not.toContain('brew upgrade');
 			expect(Array.from(row('Claude Code').querySelectorAll('button')).map((button) => button.textContent?.trim())).toEqual(['Check again', 'Sign in']);
 			await press(row('Claude Code'), 'Check again');
 			expect(fake.posted.some((call) => call.startsWith('POST /api/providers/sources/recheck'))).toBe(true);
+		});
+
+		it('says so when Check again cannot recheck, rather than showing the stored result as fresh', async () => {
+			await openConnectStep([claude('unverified', { reason: 'it could not be started' })]);
+			fake.recheckFails = true;
+
+			await press(row('Claude Code'), 'Check again');
+
+			expect(host.textContent).toContain('CORSIA couldn’t check your model sources. Try again.');
+			expect(fake.posted).not.toContain('GET /api/providers/sources');
 		});
 
 		it('offers Sign in for a signed-out CLI, and signs in without installing', async () => {

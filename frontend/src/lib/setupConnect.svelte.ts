@@ -16,7 +16,7 @@ export type RowView = {
 export interface ConnectDeps {
 	token: () => string | null;
 	sources: () => ModelSource[];
-	refreshSources: () => Promise<void>;
+	refreshSources: (strict?: boolean) => Promise<void>;
 }
 
 export const VENDOR_COPY: Record<string, { cli: string; uses: string; maker: string; origin: string; account: string; page: string }> = {
@@ -160,7 +160,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 				meta: lines(`CORSIA couldn’t check ${copy.cli}’s sign-in.`),
 				error: true,
 				detail: source.reason ?? undefined,
-				action: { label: 'Check again', run: () => void deps.refreshSources() },
+				action: { label: 'Check again', run: () => void deps.refreshSources(true) },
 				more: [{ label: 'Sign in', run: () => void beginSignIn(source) }],
 			};
 		}
