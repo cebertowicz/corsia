@@ -180,8 +180,12 @@ def _seed(db, start: str) -> bool:
     return True
 
 
-def _set_ids(db, signatures: set[str]) -> dict[str, int]:
-    """The id of each set of members, adding the ones not stored yet."""
+def _set_ids(db, signatures: list[str]) -> dict[str, int]:
+    """The id of each set of members, adding the ones not stored yet.
+
+    Ids are handed out in the order given, so callers pass them sorted: the same history builds the same
+    rows on every process (a Python set iterates in a per-process order), and read cost depends on them.
+    """
     ids: dict[str, int] = {}
     for signature in signatures:
         found = db.execute("SELECT id FROM presence_focus_sets WHERE signature=?", (signature,)).fetchone()
@@ -201,7 +205,7 @@ def _write_range(db, expected: str, low: str, high: str, totals: Totals) -> bool
         current = db.execute("SELECT built_through FROM presence_focus_rollup_state WHERE id=1").fetchone()
         if current is None or current[0] != expected:
             return False
-        ids = _set_ids(db, {signature for _, _, signature in totals})
+        ids = _set_ids(db, sorted({signature for _, _, signature in totals}))
         db.execute("DELETE FROM presence_focus_rollup WHERE bucket>=? AND bucket<?", (low, high))
         db.executemany(
             "INSERT INTO presence_focus_rollup(user_id,bucket,set_id,seconds) VALUES (?,?,?,?)",

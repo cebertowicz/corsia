@@ -217,3 +217,14 @@ def test_a_covered_read_is_served_from_the_rollup_rows(db):
     after = _answers(db)
     assert after[("all", None, "presence")] != before[("all", None, "presence")]
     assert after["roots"] != before["roots"]
+
+
+def test_set_ids_follow_the_stored_history_not_the_process(db):
+    """A set's id decides the order the read joins in, so the same history must build the same ids on every run."""
+    rng = random.Random(9)
+    for _ in range(40):
+        _random_visit(db, rng)
+    _build(db)
+    signatures = [row[0] for row in db.execute("SELECT signature FROM presence_focus_sets ORDER BY id")]
+    assert len(signatures) > 3
+    assert signatures == sorted(signatures)
