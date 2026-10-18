@@ -2,10 +2,12 @@
 	import { tick } from 'svelte';
 	import { loadProjects, projects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { ConnectAppError, createConnectedApp, type ConnectedApp } from '$lib/api/connectedApps';
+	import { ConnectAppError, connectedAppStateLine, createConnectedApp, needsTokenBody, type ConnectedApp } from '$lib/api/connectedApps';
+	import { SIGN_IN_LEDE } from '$lib/appSignIn';
 	import { requestCorsiaMessage } from '$lib/corsiaRequest';
+	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 
-	let { onClose, onConnected }: { onClose: () => void; onConnected: (app: ConnectedApp) => void } = $props();
+	let { onClose, onConnected, onSignIn }: { onClose: () => void; onConnected: (app: ConnectedApp) => void; onSignIn: (app: ConnectedApp) => void } = $props();
 	type AppKind = 'local' | 'web' | 'google';
 	type Step = 'what' | 'setup' | 'where' | 'result';
 	let step = $state<Step>('what');
@@ -182,7 +184,11 @@
 				</div>
 			</section>
 		{:else if result}
-			<section aria-live="polite"><h2>{result.name}: {result.state === 'working' ? `Connected${result.tool_count ? ` · ${result.tool_count} actions` : ''}` : result.state === 'needs_sign_in' ? 'Needs you to sign in' : result.state === 'needs_token' ? 'Needs a key' : 'Connected'}</h2></section>
+			<section aria-live="polite">
+				<h2>{result.name}: {connectedAppStateLine(result)}</h2>
+				{#if result.state === 'needs_token'}<p class="recovery">{needsTokenBody(result.name)}</p>{/if}
+				{#if result.state === 'needs_sign_in'}<p class="recovery">{SIGN_IN_LEDE}</p>{/if}
+			</section>
 		{/if}
 		{#if error}<p class="error" role="alert">{error}</p>{#if recovery}<p class="recovery">{recovery}</p>{/if}{/if}
 	</div>
@@ -194,6 +200,10 @@
 				<Button onclick={() => { step = 'what'; error = ''; }}>Back</Button><Button variant="primary" onclick={continueFromSetup}>Continue</Button>
 			{:else if step === 'where'}
 				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Try again' : 'Connect'}</Button>
+			{:else if result?.state === 'needs_token'}
+				<Button variant="primary" onclick={() => { requestSettingsSection('keys'); onClose(); }}>Set key</Button>
+			{:else if result?.state === 'needs_sign_in'}
+				<Button variant="primary" onclick={() => { onClose(); onSignIn(result); }}>Sign in</Button>
 			{:else}
 				<Button variant="primary" onclick={onClose}>Done</Button>
 			{/if}

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
-import { createSession, lastUserMessage, loginByUrl, openSettings, saveEvidenceScreenshot, TEST_SESSION_TOKEN, userMessages } from './support/corsia';
+import { createSession, lastUserMessage, loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_SESSION_TOKEN, userMessages } from './support/corsia';
 import { readMockCallCount, seedMockResponses } from './support/mock';
 
 const viewports = [
@@ -116,6 +116,45 @@ for (const viewport of viewports) {
 			await dialog.getByRole('button', { name: 'Back', exact: true }).click();
 			await expect(dialog.getByLabel('What it runs')).toBeFocused();
 			await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+			// Result states keep their full recovery/action surfaces in the reviewed frames.
+			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
+			pendingConnect = null;
+			await dialog.getByRole('button', { name: 'Connect', exact: true }).click();
+			await expect.poll(() => pendingConnect).not.toBeNull();
+			await pendingConnect!.fulfill({ json: {
+				id: 'files-needs-token', name: 'Files', state: 'needs_token', revision: 1,
+				reach: { mode: 'all', project_ids: [], outside_projects: true },
+			} });
+			await expect(dialog.getByRole('heading', { name: 'Files: Needs a key' })).toBeVisible();
+			await expect(dialog.getByText('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.')).toBeVisible();
+			await expect(dialog.getByRole('button', { name: 'Set key', exact: true })).toBeVisible();
+			await capture(page, testInfo, `needs-token-${viewport.name}-${theme}`);
+			await dialog.getByRole('button', { name: 'Set key', exact: true }).click();
+			await openSettingsSection(page, 'Connected apps');
+			await page.getByRole('button', { name: 'Connect an app', exact: true }).click();
+			const signInDialog = page.getByRole('dialog');
+			await signInDialog.getByRole('button', { name: 'Continue', exact: true }).click();
+			await signInDialog.getByLabel('Name').fill('Files');
+			await signInDialog.getByLabel('What it runs').fill('npx -y @example/app');
+			await signInDialog.getByRole('button', { name: 'Continue', exact: true }).click();
+			pendingConnect = null;
+			await signInDialog.getByRole('button', { name: 'Connect', exact: true }).click();
+			await expect.poll(() => pendingConnect).not.toBeNull();
+			await pendingConnect!.fulfill({ json: {
+				id: 'files-needs-sign-in', name: 'Files', state: 'needs_sign_in', revision: 1,
+				reach: { mode: 'all', project_ids: [], outside_projects: true },
+			} });
+			await expect(signInDialog.getByRole('heading', { name: 'Files: Needs you to sign in' })).toBeVisible();
+			await expect(signInDialog.getByText("Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.")).toBeVisible();
+			await expect(signInDialog.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+			await capture(page, testInfo, `needs-sign-in-${viewport.name}-${theme}`);
+			await signInDialog.getByRole('button', { name: 'Sign in', exact: true }).click();
+			await expect(signInDialog).toBeHidden();
+			await expect(page.getByRole('button', { name: 'Connect an app', exact: true })).toBeVisible();
+			await page.getByRole('button', { name: 'Connect an app', exact: true }).click();
+			const googleDialog = page.getByRole('dialog');
+
 			await seedMockResponses(page.request, [
 				{
 					tool_calls: [{
@@ -128,9 +167,9 @@ for (const viewport of viewports) {
 				},
 				{ content: 'I asked which Google account to use.', finish_reason: 'stop', match_thread: corsiaThreadId },
 			]);
-			await dialog.getByLabel('Google (email, calendar and files)').click();
-			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
-			await expect(dialog).toBeHidden();
+			await googleDialog.getByLabel('Google (email, calendar and files)').click();
+			await googleDialog.getByRole('button', { name: 'Continue', exact: true }).click();
+			await expect(googleDialog).toBeHidden();
 			await expect(lastUserMessage(page)).toContainText('Connect a Google account for all my projects');
 			await expect(userMessages(page)).toHaveCount(1);
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeEmpty();

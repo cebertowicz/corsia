@@ -4,10 +4,10 @@
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 	import {
-		approveConnectedApp, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
+		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
 	} from '$lib/api/connectedApps';
-	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE, signInStateLine } from '$lib/appSignIn';
+	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
@@ -30,22 +30,6 @@
 	let signInAfterApprove = $state<string | null>(null);
 	const isOpen = (app: ConnectedApp): boolean => openId === app.id || needsSignInAttention(app);
 
-	function stateLine(app: ConnectedApp): string {
-		const signIn = signInStateLine(app, signedOut.has(app.id));
-		if (signIn) return signIn;
-		switch (app.state) {
-			case 'awaiting_approval': return 'Waiting for your approval';
-			case 'connecting': return 'Connecting…';
-			case 'working': return `Connected${app.tool_count ? ` · ${app.tool_count} actions` : ''}`;
-			case 'needs_token': return 'Needs a key';
-			case 'token_rejected': return 'Key not accepted';
-			case 'needs_sign_in': return 'Needs you to sign in';
-			case 'disconnected': return 'Disconnected';
-			case 'expired': return 'Request expired';
-			case 'failed': return `Couldn't connect: ${failureLine(app.failure_class)}`;
-			default: return app.state;
-		}
-	}
 
 	/** A failure takes the failed colour, a state waiting on the person the attention colour; a working app stays quiet. */
 	function tone(app: ConnectedApp): 'quiet' | 'failed' | 'attention' {
@@ -53,9 +37,6 @@
 		return app.state === 'working' ? 'quiet' : 'attention';
 	}
 
-	function failureLine(failure: string | null | undefined): string {
-		return ({ cannot_start: "app didn't start", timed_out: 'no response', protocol_error: 'not compatible', name_collision: 'clashes with another app' }[failure ?? ''] ?? 'unknown reason');
-	}
 
 	function needsPlace(app: ConnectedApp): boolean {
 		return app.state === 'awaiting_approval' && app.reach.mode === 'selected' && app.reach.project_ids.length === 0 && !app.reach.outside_projects;
@@ -110,7 +91,7 @@
 	onMount(() => { void loadProjects(); void load(); });
 </script>
 
-{#snippet secondLine(app: ConnectedApp)}{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}{#if app.folder}<span class="line">From Claude Code · {app.folder} folder</span>{/if}{/snippet}
+{#snippet secondLine(app: ConnectedApp)}{connectedAppStateLine(app, signedOut.has(app.id))}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}{#if app.folder}<span class="line">From Claude Code · {app.folder} folder</span>{/if}{/snippet}
 
 <section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
 	<div class="heading">
@@ -179,7 +160,7 @@
 </section>
 
 {#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { if (whereApprove) approved(app); else replace(app); whereApp = null; }} />{/if}
-{#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { apps = [...apps, app]; }} />{/if}
+{#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { apps = [...apps, app]; }} onSignIn={(app) => openId = app.id} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }

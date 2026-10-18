@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { plainResponseError } from '$lib/plainError';
+import { signInStateLine } from '$lib/appSignIn';
 
 export type AppState = 'awaiting_approval' | 'connecting' | 'working' | 'needs_token' | 'token_rejected' | 'needs_sign_in' | 'disconnected' | 'failed' | 'expired';
 
@@ -72,6 +73,26 @@ export interface SignInView {
 	expires_at?: string;
 	account?: string;
 }
+
+/** The shared row/result status line; sign-in state takes precedence when it has one. */
+export function connectedAppStateLine(app: ConnectedApp, signedOutHere = false): string {
+	const signIn = signInStateLine(app, signedOutHere);
+	if (signIn) return signIn;
+	switch (app.state) {
+		case 'awaiting_approval': return 'Waiting for your approval';
+		case 'connecting': return 'Connecting…';
+		case 'working': return `Connected${app.tool_count ? ` · ${app.tool_count} actions` : ''}`;
+		case 'needs_token': return 'Needs a key';
+		case 'token_rejected': return 'Key not accepted';
+		case 'needs_sign_in': return 'Needs you to sign in';
+		case 'disconnected': return 'Disconnected';
+		case 'expired': return 'Request expired';
+		case 'failed': return `Couldn't connect: ${({ cannot_start: "app didn't start", timed_out: 'no response', protocol_error: 'not compatible', name_collision: 'clashes with another app' }[app.failure_class ?? ''] ?? 'unknown reason')}`;
+		default: return app.state;
+	}
+}
+
+export const needsTokenBody = (name: string): string => `${name} needs a key before agents can use it: a code ${name} gives you so other apps can use your account (${name} may call it a token or an API key). Create one in your ${name} settings.`;
 
 export interface SignInStart { authorization_url: string; expires_at: string; reopened: boolean }
 export interface SignInStatus extends Partial<Pick<SignInView, 'status' | 'failure_class' | 'expires_at'>> { authorization_url?: string; words?: string }
