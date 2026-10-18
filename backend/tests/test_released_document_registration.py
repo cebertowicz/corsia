@@ -91,6 +91,29 @@ async def test_released_working_document_registration_keeps_it_ownerless(
 
     assert comment["artifact_id"] == registered["id"]
     assert re_registered["id"] == registered["id"]
+    # The reader projects the former owner onto a released file; a write must
+    # not report that projection as the current owner.
+    assert re_registered["parent_thread_id"] is None
+    for requester in (former_owner, commenter):
+        api = integration_client.post(
+            f"/api/artifacts/register?token={_OWNER}",
+            json={
+                "integration": "workspace",
+                "type": registered["type"],
+                "external_id": str(path),
+                "path": str(path),
+                "parent_thread_id": requester,
+            },
+        )
+        assert api.status_code == 200, api.text
+        assert api.json()["artifact"]["parent_thread_id"] is None
+        assert api.json()["ownership"] == {
+            "ownership_changed": False,
+            "conflict": False,
+            "requested_owner_thread_id": requester,
+            "current_owner_thread_id": None,
+            "relationship_state": "subscriber-recent",
+        }
 
     db = get_db()
     try:

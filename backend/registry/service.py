@@ -305,10 +305,10 @@ def register_write_strict(
             db=_db,
         )
         merge_identity_metadata(_db, (artifact or existing)["id"], artifact_metadata)
-        artifact = models.get_artifact((artifact or existing)["id"], db=_db) or artifact
+        current = models.get_artifact((artifact or existing)["id"], db=_db) or artifact
+        artifact = current if artifact else current and {**current, "parent_thread_id": None}
         if existing is not None:
             from registry.review_edit_journal import journal_reviewed_edit
-
             journal_reviewed_edit(
                 _db, artifact, previous_sha256=last_written_sha256(existing["metadata"]),
                 new_sha256=artifact_metadata.get("last_written_sha256"),

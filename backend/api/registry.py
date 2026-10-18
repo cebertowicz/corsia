@@ -185,7 +185,7 @@ async def register_artifact(token: str, body: RegisterBody):
     current_owner = row["parent_thread_id"] if row else None
     conflict = current_owner is not None and current_owner != body.parent_thread_id
     relationship_state = (
-        "subscriber-recent" if row is None or conflict else "owner-active"
+        "subscriber-recent" if current_owner is None or conflict else "owner-active"
     )
     return {
         "ok": True,
