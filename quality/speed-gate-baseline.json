@@ -18,7 +18,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Add client Focus page and production-shaped response payload coverage after seed projection fix; speed gate bytes are TestClient-decoded, while production timing records compressed on-wire bytes for gzip-capable clients",
+  "reason": "Measure default and Focus first pages after seed payloads are omitted from run stubs; TestClient records decoded bytes",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -281,7 +281,7 @@
       "steps": 15
     },
     "/api/system": {
-      "bytes": 547,
+      "bytes": 548,
       "statements": 1,
       "steps": 15
     },
@@ -301,7 +301,7 @@
       "steps": 15
     },
     "/api/system/update-status": {
-      "bytes": 414,
+      "bytes": 436,
       "statements": 5,
       "steps": 62
     },
@@ -331,19 +331,24 @@
       "steps": 87
     },
     "/api/threads/{thread_id}/context-snapshot/next-turn": {
-      "bytes": 178318,
+      "bytes": 178789,
       "statements": 41,
       "steps": 14502
     },
     "/api/threads/{thread_id}/messages": {
       "bytes": 49831,
       "statements": 12,
-      "steps": 3039
+      "steps": 3217
+    },
+    "/api/threads/{thread_id}/messages?limit=50": {
+      "bytes": 53821,
+      "statements": 14,
+      "steps": 9274
     },
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
-      "bytes": 63783,
+      "bytes": 58671,
       "statements": 17,
-      "steps": 769320
+      "steps": 749636
     },
     "/api/threads/{thread_id}/updates": {
       "bytes": 44,
@@ -371,7 +376,7 @@
       "steps": 370
     },
     "/api/version": {
-      "bytes": 843,
+      "bytes": 767,
       "statements": 0,
       "steps": 0
     }
