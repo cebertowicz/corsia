@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.lesson_index import TRIAL_MARK, descriptor_estimates
+from core.lesson_index import TRIAL_MARK, descriptor_estimates, name_entry
 
 
 def _line_for(entry: dict[str, Any], lines: list[str]) -> str | None:
@@ -18,7 +18,7 @@ def _line_for(entry: dict[str, Any], lines: list[str]) -> str | None:
     name = str(entry.get("name", ""))
     if entry.get("listed") == "name":
         path = entry.get("path")
-        return f"{name} ({path})" if isinstance(path, str) and path else None
+        return name_entry(name, path) if isinstance(path, str) and path else None
     for prefix in (f"- {name}:", f"- {name}{TRIAL_MARK}:"):
         for line in lines:
             if line.startswith(prefix):

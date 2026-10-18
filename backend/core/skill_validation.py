@@ -125,8 +125,15 @@ def _origin_errors(origin: Any) -> list[str]:
                 errors.append("corsia.origin.adopted_at must be ISO-8601 with a zone")
         except ValueError:
             errors.append("corsia.origin.adopted_at must be ISO-8601 with a zone")
-    if "version" in origin and not text_value(origin["version"]):
-        errors.append("corsia.origin.version must be a non-empty string")
+    if "version" in origin:
+        version = origin["version"]
+        valid_version = (
+            isinstance(version, (str, int, float))
+            and not isinstance(version, bool)
+            and (not isinstance(version, str) or bool(version))
+        )
+        if not valid_version:
+            errors.append("corsia.origin.version must be a non-empty string, integer, or float")
     return errors
 
 

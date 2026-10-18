@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.lesson_index import LessonPartition
+from core.lesson_index import LessonPartition, TRIAL_MARK, index_line, line_tokens
 from core.skill_registry_types import SkillResolution, SkillRow
 
 
 def _row(
-    name: str, scope: str, scope_id: str, description: str = "Use this skill.", corsia=None,
+    name: str,
+    scope: str,
+    scope_id: str,
+    description: str = "Use this skill.",
+    corsia=None,
+    metadata: dict | None = None,
 ) -> SkillRow:
     return SkillRow(
         name=name,
@@ -16,26 +21,34 @@ def _row(
         scope_id=scope_id,
         path=Path(f"/{scope}/{scope_id}/{name}/SKILL.md"),
         body_path=Path(f"/{scope}/{scope_id}/{name}/SKILL.md"),
-        metadata={},
+        metadata=metadata or {},
         status="included",
         corsia=corsia,
     )
 
 
-def _index(monkeypatch, rows: list[SkillRow]):
+def _index(
+    monkeypatch,
+    rows: list[SkillRow],
+    *,
+    lessons: list[dict] | None = None,
+    precedence: tuple[tuple[str, str], ...] = (
+        ("system", "v1"), ("workspace", "workspace"), ("project", "project"),
+        ("thread", "parent"), ("thread", "current"),
+    ),
+):
     import core.skills_registry as registry
 
     monkeypatch.setattr(
         registry,
         "resolve_effective_skills",
-        lambda **_kwargs: SkillResolution(rows, [], [], None),
+        lambda **_kwargs: SkillResolution(rows, [], [], None, precedence),
     )
     monkeypatch.setattr(
         registry,
         "partition",
-        lambda included, omitted, **_kwargs: LessonPartition(included, omitted, []),
+        lambda included, omitted, **_kwargs: LessonPartition(included, omitted, lessons or []),
     )
-    monkeypatch.setattr(registry, "thread_ancestry", lambda *_args: ["parent", "current"])
     monkeypatch.setattr(registry, "emit_product_event", lambda *_args, **_kwargs: None)
     return registry.skill_context_sources(
         thread_id="current", project_id="project", workspace=Path("/workspace"), db=object(),
@@ -93,13 +106,13 @@ def test_index_is_byte_identical_when_resolution_scan_order_changes(monkeypatch)
 def test_adopted_copy_origin_is_projected_without_adoption_timestamp(monkeypatch):
     index = _index(monkeypatch, [_row(
         "imported", "workspace", "workspace", corsia={"origin": {
-            "source": "library:imported", "version": "1.2.3", "sha256": "a" * 64,
+            "source": "library:imported", "version": 1.2, "sha256": "a" * 64,
             "adopted_at": "2026-10-18T12:00:00Z",
         }},
     )])
 
     assert index.metadata["skills"][0]["origin"] == {
-        "source": "library:imported", "version": "1.2.3", "sha256": "a" * 64,
+        "source": "library:imported", "version": "1.2", "sha256": "a" * 64,
     }
 
 
@@ -127,3 +140,56 @@ def test_overflow_rows_sum_to_the_index_prompt_tokens(monkeypatch):
     assert all("prompt_tokens" in skill for skill in skills)
     assert sum(skill["prompt_tokens"] for skill in skills) <= inventory["prompt_tokens"]
     assert any(skill["listed"] == "name" for skill in skills)
+
+
+def _trial(name: str, description: str = "Use this skill.") -> SkillRow:
+    return _row(
+        name,
+        "thread",
+        "current",
+        description,
+        metadata={"corsia": {"lesson": {"id": "trial-id"}}},
+    )
+
+
+def _trial_record(row: SkillRow) -> dict:
+    return {
+        "id": "trial-id",
+        "name": row.name,
+        "scope": row.scope,
+        "scope_id": row.scope_id,
+        "index_line": index_line(row),
+    }
+
+
+def test_trial_uses_the_same_bounded_line_as_its_lesson_record(monkeypatch):
+    trial = _trial("trial", "x" * 501)
+    index = _index(monkeypatch, [trial], lessons=[_trial_record(trial)])
+    delivered_line = _trial_record(trial)["index_line"]
+
+    assert delivered_line in (index.prompt_content or "").splitlines()
+    assert index.metadata["lessons"][0]["index_line"] == delivered_line
+
+
+def test_trial_after_the_ordinary_limit_stays_full(monkeypatch):
+    ordinary = [
+        _row(f"skill-{number:02}", "workspace", "workspace")
+        for number in range(45)
+    ]
+    trial = _trial("skill-trial")
+    index = _index(monkeypatch, [*ordinary, trial], lessons=[_trial_record(trial)])
+    skills = index.metadata["skills"]
+
+    trial_skill = next(skill for skill in skills if skill["name"] == trial.name)
+    assert trial_skill["listed"] == "full"
+    assert f"- {trial.name}{TRIAL_MARK}:" in (index.prompt_content or "")
+    assert all(skill["name"] != trial.name for skill in skills if skill["listed"] == "name")
+
+
+def test_trial_token_estimate_uses_its_delivered_line(monkeypatch):
+    trial = _trial("trial", "x" * 501)
+    index = _index(monkeypatch, [trial], lessons=[_trial_record(trial)])
+    inventory = index.to_inventory_dict()
+    skill = inventory["metadata"]["skills"][0]
+
+    assert skill["prompt_tokens"] == line_tokens(_trial_record(trial)["index_line"])

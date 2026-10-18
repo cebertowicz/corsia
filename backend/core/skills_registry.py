@@ -6,11 +6,11 @@ registry's public imports and renders the resolved inventory into context rows.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from core.effective_context import ContextSourceEntry
-from core.lesson_index import index_line, partition
+from core.lesson_index import index_line, name_entry, partition
+from core.lesson_trials import lesson_block
 from core.role_context_sources import RoleContextResolution, RoleName
 from core.skill_registry_types import SkillResolution, SkillRow, SkillScope
 from core.skill_resolution import (
@@ -20,25 +20,12 @@ from core.skill_resolution import (
     project_dir as _project_dir,
     resolve_effective_skills,
     skill_scope_root,
-    thread_ancestry,
 )
 from infra.product_events import emit_product_event
 from infra.system_package import system_package_ref
 
 
 _NON_SYSTEM_FULL_SKILL_LIMIT = 40
-
-
-def _name_only_entry(row: SkillRow) -> str:
-    """The compact findable entry for an overflow skill."""
-    return f"{row.name} ({row.path})"
-
-
-def _full_index_line(row: SkillRow) -> str:
-    """Render a full line while bounding only non-System descriptions."""
-    if row.scope != "system" and len(row.description) > 500:
-        row = replace(row, description=row.description[:500])
-    return index_line(row)
 
 
 def _skills_index_content(
@@ -58,11 +45,11 @@ def _skills_index_content(
         f"tool: `{MCP_CORSIA_PREFIX}read_file` on Claude Code, `read_file` on other harnesses; "
         "when only the generic CORSIA tool is available, call it with name=read_file.",
     ]
-    lines.extend(_full_index_line(row) for row in full_rows)
+    lines.extend(index_line(row) for row in full_rows)
     if name_only_rows:
         lines.append(
             "Also installed, listed by name only (read its SKILL.md when the request matches the name): "
-            + ", ".join(_name_only_entry(row) for row in name_only_rows)
+            + ", ".join(name_entry(row.name, row.path) for row in name_only_rows)
         )
     if errors:
         lines.extend(["", "Not loaded — skill errors (these sources are skipped until repaired):"])
@@ -140,7 +127,7 @@ def _skill_origin(row: SkillRow) -> dict | None:
         return None
     result = {key: origin[key] for key in ("source", "sha256")}
     if "version" in origin:
-        result["version"] = origin["version"]
+        result["version"] = str(origin["version"])
     return result
 
 
@@ -171,24 +158,28 @@ def _listed_skills(
 
 
 def _ordered_index_rows(
-    rows: list[SkillRow], *, thread_id: str, db,
+    rows: list[SkillRow], *, precedence: tuple[tuple[str, str], ...],
 ) -> tuple[list[SkillRow], list[SkillRow]]:
     """Order rows for the stable full index and names-only overflow."""
-    ancestry_order = {
-        ancestor_id: index
-        for index, ancestor_id in enumerate(reversed(thread_ancestry(thread_id, db)))
-    }
+    specificity = {root: index for index, root in enumerate(reversed(precedence))}
 
-    def index_order(row: SkillRow) -> tuple[int, int, str]:
-        scope_order = {"thread": 0, "project": 1, "workspace": 2}.get(row.scope, 3)
-        return scope_order, ancestry_order.get(row.scope_id, len(ancestry_order)), row.name
+    def index_order(row: SkillRow) -> tuple[int, str]:
+        return specificity.get((row.scope, row.scope_id), len(specificity)), row.name
 
     system_rows = sorted((row for row in rows if row.scope == "system"), key=lambda row: row.name)
     other_rows = sorted((row for row in rows if row.scope != "system"), key=index_order)
-    return (
-        [*system_rows, *other_rows[:_NON_SYSTEM_FULL_SKILL_LIMIT]],
-        other_rows[_NON_SYSTEM_FULL_SKILL_LIMIT:],
-    )
+    full_rows = list(system_rows)
+    name_only_rows = []
+    ordinary_count = 0
+    for row in other_rows:
+        if lesson_block(row.metadata) is not None:
+            full_rows.append(row)
+        elif ordinary_count < _NON_SYSTEM_FULL_SKILL_LIMIT:
+            full_rows.append(row)
+            ordinary_count += 1
+        else:
+            name_only_rows.append(row)
+    return full_rows, name_only_rows
 
 
 def _displayable_skill_errors(rows: list[SkillRow]) -> list[SkillRow]:
@@ -219,7 +210,7 @@ def skill_context_sources(
     # The one writer of lesson membership: a held trial leaves the index here.
     split = partition(resolved.included, resolved.omitted, thread_id=thread_id, db=db)
     full_rows, name_only_rows = _ordered_index_rows(
-        split.offered, thread_id=thread_id, db=db,
+        split.offered, precedence=resolved.precedence,
     )
     included = [*full_rows, *name_only_rows]
     shadowed = sorted(

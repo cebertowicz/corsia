@@ -41,6 +41,20 @@ def test_origin_version_is_optional():
     assert result.corsia["origin"]["version"] == "1.2.3"
 
 
+@pytest.mark.parametrize(("version", "valid"), [
+    ("1", True),
+    ("1.2", True),
+    ("true", False),
+    ('""', False),
+])
+def test_origin_version_accepts_numbers_but_not_booleans_or_empty_strings(version: str, valid: bool):
+    result = _validate(VALID_ORIGIN + f"  version: {version}\n")
+
+    assert result.ok is valid
+    if not valid:
+        assert any("corsia.origin.version" in error for error in result.errors)
+
+
 @pytest.mark.parametrize(("suffix", "valid"), [
     ("", True),
     ("  installed_digest: " + "b" * 64 + "\n", True),
