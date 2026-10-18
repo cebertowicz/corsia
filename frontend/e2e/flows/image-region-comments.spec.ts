@@ -261,8 +261,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 		await page.setViewportSize({ width: 393, height: 852 });
 		await page.emulateMedia({ colorScheme: 'dark' });
 		const seeded = await seedImage(page, request, 'region-393');
+		const timeline = async () => page.evaluate(() => ((window as any).__ev as string[]).slice(-45).join(' ; '));
 		try {
 			await openThread(page, seeded.sessionTitle, 393);
+			await page.evaluate(() => {
+				(window as any).__ev = [];
+				const log = (e: Event) => (window as any).__ev.push(`${Math.round(performance.now())} ${e.type} ${(e.target as HTMLElement)?.className?.toString().slice(0, 24)}${e.defaultPrevented ? ' PREVENTED' : ''}`);
+				for (const type of ['touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'pointercancel', 'click', 'scroll', 'wheel']) document.addEventListener(type, log, true);
+			});
 			expect((await commentButton(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
 			expect((await pill(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
 			await shoot(page, testInfo, '393-01-open', true);
@@ -275,8 +281,10 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(sheet(page).locator('textarea')).toBeVisible();
 			await sheet(page).locator('textarea').fill('Too much padding on phones');
 			await shoot(page, testInfo, '393-03-sheet-composer', true);
+			await page.evaluate(() => (window as any).__ev.push(`${Math.round(performance.now())} ---- TAP Comment`));
 			await sheet(page).getByRole('button', { name: 'Comment', exact: true }).tap();
-			await expect(sheet(page).locator('.ct-num')).toHaveText('1');
+			try { await expect(sheet(page).locator('.ct-num')).toHaveText('1', { timeout: 4000 }); }
+			catch (error) { throw new Error(`DIAG comment-tap ${await timeline()} | ${String(error).slice(0, 60)}`); }
 			// Box mode ended after one comment.
 			await expect(commentButton(page)).toHaveAttribute('aria-pressed', 'false');
 			await shoot(page, testInfo, '393-04-sheet-card', true);
@@ -293,8 +301,10 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			for (const [dx, dy] of [[-20, 0], [20, 0], [0, -20], [0, 20]]) {
 				expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-region-tag="1"]'), { x: centre.x + dx, y: centre.y + dy })).toBe(true);
 			}
+			await page.evaluate(() => (window as any).__ev.push(`${Math.round(performance.now())} ---- TAP tag`));
 			await tag(page, 1).tap();
-			await expect(sheet(page)).toBeVisible();
+			try { await expect(sheet(page)).toBeVisible({ timeout: 4000 }); }
+			catch (error) { throw new Error(`DIAG tag-tap ${await timeline()} | ${String(error).slice(0, 60)}`); }
 			await expect(sheet(page).getByText('Too much padding on phones')).toBeVisible();
 			// The sheet leaves the picked tag in view.
 			expect(overlap((await tag(page, 1).boundingBox())!, (await sheet(page).boundingBox())!)).toBe(false);

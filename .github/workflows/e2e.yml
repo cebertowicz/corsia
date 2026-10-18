@@ -150,7 +150,7 @@ jobs:
             ) &
             sampler=$!
             trap 'kill $sampler 2>/dev/null || true' EXIT
-            bash scripts/e2e-local --grep "$E2E_GREP"
+            bash scripts/e2e-local --grep "$E2E_GREP" --repeat-each=12 --project=chromium-desktop
           else
             bash scripts/e2e-local
           fi
