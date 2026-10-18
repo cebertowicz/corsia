@@ -9,6 +9,18 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fresh_process_admission(monkeypatch) -> None:
+    # The process owner is one per process and remembers every Turn and
+    # thread it closed; an earlier test that ended the same thread-1/turn-1
+    # must not close admission for these.
+    from tools import shell
+
+    monkeypatch.setattr(shell.PROCESS_OWNER, "_closed_turns", set())
+    monkeypatch.setattr(shell.PROCESS_OWNER, "_closed_leases", set())
+    monkeypatch.setattr(shell.PROCESS_OWNER, "_closing_threads", set())
+
+
 class _Process:
     pid = 999_999
     returncode = 0
