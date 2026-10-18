@@ -64,7 +64,7 @@
 		<button
 			type="button"
 			class="ctx-source-row actionable"
-			aria-label="{source.actionLabel || 'Show details'} for {detail}{source.pendingEdit ? `, ${PENDING_EDIT_LABEL}` : ''}"
+			aria-label="{source.actionLabel || 'Show details'} for {detail}{source.tags?.length ? `, ${source.tags.join(', ')}` : ''}{source.pendingEdit ? `, ${PENDING_EDIT_LABEL}` : ''}"
 			title={source.actionLabel || detail}
 			onclick={() => onOpenSource?.(source)}
 		>

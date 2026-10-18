@@ -253,6 +253,7 @@ def resolve_effective_skills(
         omitted=omitted,
         errors=errors,
         system_unavailable=system_unavailable,
+        precedence=tuple((scope, scope_id) for _root, scope, scope_id in roots),
     )
 
 

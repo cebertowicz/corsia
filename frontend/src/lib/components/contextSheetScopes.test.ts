@@ -75,6 +75,25 @@ describe('scope grouping', () => {
 		expect(rows.reduce((sum, row) => sum + (row.tokenCount ?? 0), 0)).toBe(60);
 	});
 
+	it('keeps 41 skill rows reconciled with a name-only overflow tag', () => {
+		const skills = Array.from({ length: 41 }, (_, index) => ({
+			name: `skill-${index}`,
+			scope: 'workspace',
+			scope_id: 'workspace',
+			role: '',
+			listed: index === 40 ? 'name' : 'full',
+			prompt_tokens: 1,
+		}));
+		const model = contextSheetSnapshotModel(usage([
+			source('skills', 'dynamic', 100, { provider: 'skills', skills }),
+		]));
+		const rows = model!.sources.filter((row) => row.kind === 'skill');
+
+		expect(rows.reduce((sum, row) => sum + (row.tokenCount ?? 0), 0)).toBe(100);
+		expect(rows.some((row) => row.tokenCount !== null && row.tokenCount < 0)).toBe(false);
+		expect(rows.find((row) => row.label === 'skill-40')?.tags).toContain('name only');
+	});
+
 	it('keeps one skills row when the install did not record its skills', () => {
 		const model = contextSheetSnapshotModel(usage([source('skills', 'project', 60, { provider: 'skills', scope: 'project' })]));
 		expect(model!.sources.filter((row) => row.id.startsWith('skill:'))).toEqual([]);
