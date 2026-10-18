@@ -31,6 +31,9 @@ function providerPageSurfaces(projectName: string) {
 	] as const;
 }
 
+// Project-policy error states get the same review width as the decisive page pair.
+const projectPolicySurfaces = providerPageSurfaces;
+
 function vendorAccounts() {
 	const account = (id: string, provider: string, name: string, email: string, fiveHourUsed: number, weeklyUsed: number) => ({
 		id, provider, name, is_default: false, state: 'signed_in', revision: 1, identity: {},
@@ -426,7 +429,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await expect(region).toBeVisible();
 			return region;
 		}
-		for (const [surface, width, height, colorScheme] of surfacesFor(testInfo.project.name)) {
+		for (const [surface, width, height, colorScheme] of projectPolicySurfaces(testInfo.project.name)) {
 			await page.setViewportSize({ width, height });
 			await page.emulateMedia({ colorScheme });
 			policy = policyFor('R2');
