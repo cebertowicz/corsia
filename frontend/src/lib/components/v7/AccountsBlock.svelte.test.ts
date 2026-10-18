@@ -82,7 +82,7 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
-		it('keeps a failed workspace policy control at its saved value and reports the next action beside it', async () => {
+		it('keeps a failed workspace policy control at its saved value and reports the next action below the account row', async () => {
 			token.set('test-token');
 			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
 				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
@@ -97,6 +97,8 @@ describe('rendering and actions', () => {
 			toggle.click();
 			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't save this change. Try again."));
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
+			expect(document.getElementById('account-policy-default')?.parentElement?.className).toBe('account-copy');
+			expect(document.querySelector('.provider-account-policy-control')?.textContent).not.toContain("Couldn't save this change. Try again.");
 			expect(document.body.textContent).not.toContain('Could not save subscriptions.');
 			unmount(component);
 		});

@@ -285,6 +285,8 @@
 		{/if}
 		{#each accounts as account, index (account.id)}
 			{@const unit = policyProvider?.units.find((candidate) => candidate.id === account.id)}
+			{@const unitTarget = `unit:${provider.name}:${account.id}`}
+			{@const policyStatusId = `account-policy-${account.id}`}
 			{@const signIn = signin[account.id]}
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 			<section class="account" class:ordered={policyProvider?.rollover && policyProvider.units.length >= 2} id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
@@ -311,10 +313,12 @@
 									<ProviderAccountPolicyControls
 										accountName={displayName(account)}
 										enabled={unit.enabled}
-										toggleDisabled={policyState.isPending(`unit:${provider.name}:${account.id}`)}
+										toggleDisabled={policyState.isPending(unitTarget)}
 										moveDisabled={policyState.isPending(`order:${provider.name}:${account.id}`)}
-										pending={policyState.isPending(`unit:${provider.name}:${account.id}`) || policyState.isPending(`order:${provider.name}:${account.id}`)}
-										failed={policyState.hasFailure(`unit:${provider.name}:${account.id}`) || policyState.hasFailure(`order:${provider.name}:${account.id}`)}
+										pending={policyState.isPending(unitTarget) || policyState.isPending(`order:${provider.name}:${account.id}`)}
+										failed={policyState.hasFailure(unitTarget) || policyState.hasFailure(`order:${provider.name}:${account.id}`)}
+										showStatus={false}
+										statusId={policyStatusId}
 										position={policyProvider?.rollover && policyProvider.units.length >= 2 ? index : null}
 										total={policyProvider?.units.length ?? 0}
 										onmove={(direction) => policyState.move(policyProvider!, account.id, direction)}
@@ -323,6 +327,11 @@
 								{/if}
 							</AccountUsageRow>
 							{#if stateLabel(account)}<div class="account-meta"><span>{stateLabel(account)}</span></div>{/if}
+							{#if unit && policyState.isPending(unitTarget)}
+								<p class="account-policy-status" id={policyStatusId} role="status">Saving…</p>
+							{:else if unit && policyState.hasFailure(unitTarget)}
+								<p class="account-policy-status error" id={policyStatusId} role="status">Couldn't save this change. Try again.</p>
+							{/if}
 						</div>
 						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>

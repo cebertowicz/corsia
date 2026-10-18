@@ -89,9 +89,13 @@ function policyFor(screen: ScreenId) {
 }
 
 async function serveHarnessCatalog(page: Page) {
-	const model = { id: 'claude-code/sonnet', connection: 'claude-code', provider: 'claude-code', status: 'ready', available: true, backend: 'network' };
-	await page.route('**/api/settings/models**', (route) => route.fulfill({ json: { models: [{ ...model, enabled: 1 }] } }));
-	await page.route('**/api/models**', (route) => route.fulfill({ json: { models: [model] } }));
+	// The decisive before/after pair uses this named seed: both harnesses and all four accounts.
+	const models = [
+		{ id: 'claude-code/sonnet', connection: 'claude-code', provider: 'claude-code', status: 'ready', available: true, backend: 'network' },
+		{ id: 'codex/gpt-5', connection: 'codex', provider: 'codex', status: 'ready', available: true, backend: 'network' },
+	];
+	await page.route('**/api/settings/models**', (route) => route.fulfill({ json: { models: models.map((model) => ({ ...model, enabled: 1 })) } }));
+	await page.route('**/api/models**', (route) => route.fulfill({ json: { models } }));
 }
 
 async function servePolicyStates(page: Page, state: { screen: ScreenId }) {
@@ -219,6 +223,8 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			const content = page.locator('.settings-content');
 			await content.evaluate((element) => { element.scrollTop = element.scrollHeight; });
 			await expect(page.locator('.modal')).toHaveCount(0);
+			await expect(content.locator('[data-provider-card="claude-code"]')).toBeVisible();
+			await expect(content.locator('[data-provider-card="codex"]')).toBeVisible();
 			await expect(content.getByText('Accounts and rollover', { exact: true })).toHaveCount(0);
 			await page.screenshot({ path: testInfo.outputPath(`workspace-providers-bottom-${surface}.png`), animations: 'disabled', scale: 'css' });
 		}

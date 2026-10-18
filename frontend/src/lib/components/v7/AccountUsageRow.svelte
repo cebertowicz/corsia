@@ -142,7 +142,8 @@
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */
 		.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; }
-		.compact.ordered { grid-template-columns: auto minmax(0, 1fr) auto; }
+		/* Match the ordered detail indent to this fixed gutter, rather than a numeral's glyph width. */
+		.compact.ordered { grid-template-columns: var(--space-3) minmax(0, 1fr) auto; }
 		.compact > strong, .compact > .usage { grid-column: -3 / -2; }
 		.compact .usage { margin: 0; text-align: left; white-space: normal; }
 		.compact > .order { grid-column: 1; grid-row: 1 / span 2; align-self: start; }

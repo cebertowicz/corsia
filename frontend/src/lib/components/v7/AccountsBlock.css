@@ -20,6 +20,9 @@
 .account-manager .account-main { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
 .account-manager .account-copy { flex: 1; min-width: 0; }
 .account-manager .account-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin-top: var(--space-1); color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
+/* A save state belongs to the account, below its copy; it never competes with the controls' width. */
+.account-manager .account-policy-status { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); text-align: right; }
+.account-manager .account-policy-status.error { color: var(--red-text); }
 /* The ordinal hangs in its own gutter; account detail rows align with the name column. */
 .account-manager .account.ordered .account-meta,
 .account-manager .account.ordered > .overage-row,

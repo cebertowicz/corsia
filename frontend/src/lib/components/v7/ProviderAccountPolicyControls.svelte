@@ -10,15 +10,18 @@
 		moveDisabled?: boolean;
 		pending?: boolean;
 		failed?: boolean;
+		/** Render status separately when the host owns the account-row layout. */
+		showStatus?: boolean;
+		statusId?: string;
 		position?: number | null;
 		total?: number;
 		onmove?: (direction: -1 | 1) => void;
 		ontoggle: (enabled: boolean) => void;
 	}
 
-	let { accountName, enabled, disabled = false, toggleDisabled = disabled, moveDisabled = disabled, pending = false, failed = false, position = null, total = 0, onmove, ontoggle }: Props = $props();
+	let { accountName, enabled, disabled = false, toggleDisabled = disabled, moveDisabled = disabled, pending = false, failed = false, showStatus = true, statusId = '', position = null, total = 0, onmove, ontoggle }: Props = $props();
 	const showOrder = $derived(position !== null && total > 1 && !!onmove);
-	const statusId = $derived(`account-policy-${accountName.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
+	const resolvedStatusId = $derived(statusId || `account-policy-${accountName.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
 </script>
 
 <span class="provider-account-policy-control" aria-label={`${accountName} account policy controls`}>
@@ -27,10 +30,10 @@
 			<IconButton size="sm" ariaLabel={`Move ${accountName} up`} disabled={moveDisabled || position === 0} onclick={() => onmove?.(-1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6" /></svg></IconButton>
 			<IconButton size="sm" ariaLabel={`Move ${accountName} down`} disabled={moveDisabled || position === total - 1} onclick={() => onmove?.(1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6" /></svg></IconButton>
 		{/if}
-		<Toggle checked={enabled} disabled={toggleDisabled} ariaLabel={`Use ${accountName}`} describedBy={pending || failed ? statusId : undefined} onchange={ontoggle} />
+		<Toggle checked={enabled} disabled={toggleDisabled} ariaLabel={`Use ${accountName}`} describedBy={pending || failed ? resolvedStatusId : undefined} onchange={ontoggle} />
 	</span>
-	{#if pending}<span class="policy-status" id={statusId} role="status">Saving…</span>{/if}
-	{#if failed}<span class="policy-status error" id={statusId} role="status">Couldn't save this change. Try again.</span>{/if}
+	{#if showStatus && pending}<span class="policy-status" id={resolvedStatusId} role="status">Saving…</span>{/if}
+	{#if showStatus && failed}<span class="policy-status error" id={resolvedStatusId} role="status">Couldn't save this change. Try again.</span>{/if}
 </span>
 
 <style>
