@@ -135,11 +135,14 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
     return Target(template, url + ("?" + "&".join(query) if query else ""))
 
 
-#: Reads whose client query shape changes the response substantially. The default
-#: page is the ordinary route target above; Focus gets its own identity because
-#: the same path has different server-side projection and payload size.
+#: Reads whose client query shape and selected fixture record change the response
+#: substantially. The ordinary default page is retained, while the persistent-agent
+#: thread gets explicit default and Focus page measurements.
 CLIENT_QUERY_VARIANTS = {
-    "/api/threads/{thread_id}/messages": (("?limit=50&view=focus", "view=focus"),),
+    "/api/threads/{thread_id}/messages": (
+        ("?limit=50", "", True),
+        ("?limit=50&view=focus", "view=focus", False),
+    ),
 }
 
 
@@ -150,10 +153,16 @@ def build_targets(template: str, route, ids: dict[str, str], extra: dict[str, st
     if primary.url is None:
         return [primary]
     variants = [primary]
-    for suffix, extra_query in CLIENT_QUERY_VARIANTS.get(template, ()):
+    for suffix, extra_query, needs_agent_thread in CLIENT_QUERY_VARIANTS.get(template, ()):
+        if needs_agent_thread and "agent_thread_id" not in ids:
+            continue
         variant_ids = {**ids, "thread_id": ids.get("agent_thread_id", ids["thread_id"])}
         variant = build_target(template, route, variant_ids, extra, token)
         assert variant.url is not None  # the primary and variant share the same route contract
-        separator = "&" if "?" in variant.url else "?"
-        variants.append(Target(template + suffix, variant.url + separator + extra_query))
+        if extra_query:
+            separator = "&" if "?" in variant.url else "?"
+            variant_url = variant.url + separator + extra_query
+        else:
+            variant_url = variant.url
+        variants.append(Target(template + suffix, variant_url))
     return variants

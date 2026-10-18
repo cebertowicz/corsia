@@ -101,6 +101,39 @@ def test_bootstrap_adds_lane_columns_to_an_existing_file_as_unknown(tmp_path, mo
     assert row == ("/before", None, None, None, None, None)
 
 
+def test_bootstrap_adds_nullable_byte_columns_and_merges_old_daily_row(tmp_path, monkeypatch):
+    import duckdb
+
+    path = tmp_path / "old-timing.duckdb"
+    old = duckdb.connect(str(path))
+    old.execute(
+        "CREATE TABLE request_timing_daily (day DATE NOT NULL, method VARCHAR NOT NULL, route VARCHAR NOT NULL, "
+        "status_class VARCHAR NOT NULL, count BIGINT NOT NULL, sum_ms DOUBLE NOT NULL, max_ms DOUBLE NOT NULL, "
+        "buckets INTEGER[] NOT NULL, PRIMARY KEY (day, method, route, status_class))"
+    )
+    old.execute(
+        "INSERT INTO request_timing_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (*_KEY, 1, 2, 2, [1]),
+    )
+    old.close()
+    monkeypatch.setattr(analytics_db, "ANALYTICS_DB_PATH", path)
+    monkeypatch.delenv("CORSIA_ANALYTICS_DISABLE", raising=False)
+    analytics_db._reset_for_tests()
+    try:
+        analytics = analytics_db.get_db()
+        assert analytics.execute(
+            "SELECT sum_bytes, max_bytes FROM request_timing_daily WHERE route = '/x'"
+        ).fetchone() == (None, None)
+
+        request_timing.write_batch({_KEY: _aggregate(3, response_bytes=500)}, [])
+        assert analytics.execute(
+            "SELECT count, sum_bytes, max_bytes FROM request_timing_daily WHERE route = '/x'"
+        ).fetchone() == (2, 500, 500)
+    finally:
+        request_timing._reset_for_tests()
+        analytics_db._reset_for_tests()
+
+
 def test_write_batch_failure_rolls_back_the_whole_batch(analytics):
     analytics.execute("DROP TABLE request_slow")
 

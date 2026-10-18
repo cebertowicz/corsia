@@ -18,7 +18,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Add client Focus page and production-shaped response payload coverage after seed projection fix",
+  "reason": "Add client Focus page and production-shaped response payload coverage after seed projection fix; speed gate bytes are TestClient-decoded, while production timing records compressed on-wire bytes for gzip-capable clients",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072

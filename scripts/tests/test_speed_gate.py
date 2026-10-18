@@ -165,6 +165,23 @@ def test_message_targets_measure_default_and_focus_client_query_shapes():
     ]
 
 
+def test_message_targets_measure_agent_thread_default_page():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))
+    targets = routes.build_targets(
+        "/api/threads/{thread_id}/messages", route,
+        {"thread_id": "ordinary-thread", "agent_thread_id": "agent-thread"}, {}, "tok",
+    )
+
+    assert [target.template for target in targets] == [
+        "/api/threads/{thread_id}/messages",
+        "/api/threads/{thread_id}/messages?limit=50",
+        "/api/threads/{thread_id}/messages?limit=50&view=focus",
+    ]
+    assert targets[1].url.endswith("/agent-thread/messages?token=tok&limit=50")
+    assert targets[2].url.endswith("/agent-thread/messages?token=tok&limit=50&view=focus")
+
+
 def test_update_baseline_needs_a_reason_and_grandfathers_over_ceiling_routes(tmp_path):
     current = tmp_path / "current.json"
     current.write_text(json.dumps(result({"/a": cost(), "/slow": cost(900_000)})))

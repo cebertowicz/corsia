@@ -1,4 +1,9 @@
-"""Non-blocking, aggregate-only HTTP request timing instrumentation."""
+"""Non-blocking, aggregate-only HTTP request timing instrumentation.
+
+``response_bytes`` counts body bytes emitted to the client. This middleware
+wraps JSON compression, so for gzip-capable clients it records compressed
+on-the-wire bytes; the speed gate separately measures TestClient-decoded bytes.
+"""
 
 from __future__ import annotations
 
@@ -148,7 +153,11 @@ def _server_timing(started_at: float, timing: DbTiming) -> bytes:
 
 
 class RequestTimingMiddleware:
-    """Measure HTTP completion without buffering response bodies or streams."""
+    """Measure HTTP completion without buffering response bodies or streams.
+
+    Counts bytes passed to the outer ASGI sender, after JSON compression when
+    the client accepts it.
+    """
 
     def __init__(self, app: Callable) -> None:
         self.app = app
