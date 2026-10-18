@@ -156,13 +156,21 @@ def test_path_query_fixture_matches_each_route_semantics():
     optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
     route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("path")]))
     extra = {
+        "/api/artifacts/resolve": {"path": "/workspace/README.md"},
         "/api/files/content": {"path": "/workspace/README.md"},
+        "/api/files/revision": {"path": "/workspace/README.md"},
         "/api/fs/browse": {"path": "/workspace"},
     }
-    content = routes.build_target("/api/files/content", route, {}, extra, "tok")
-    browse = routes.build_target("/api/fs/browse", route, {}, extra, "tok")
-    assert content.url == "/api/files/content?path=%2Fworkspace%2FREADME.md"
-    assert browse.url == "/api/fs/browse?path=%2Fworkspace"
+    assert routes.build_target("/api/artifacts/resolve", route, {}, extra, "tok").url == (
+        "/api/artifacts/resolve?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/files/content", route, {}, extra, "tok").url == (
+        "/api/files/content?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/files/revision", route, {}, extra, "tok").url == (
+        "/api/files/revision?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/fs/browse", route, {}, extra, "tok").url == "/api/fs/browse?path=%2Fworkspace"
 
 
 def test_message_targets_measure_default_and_focus_client_query_shapes():

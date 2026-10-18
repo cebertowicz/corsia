@@ -102,8 +102,11 @@ def runtime_query_values() -> dict[str, dict[str, str]]:
     """Client query fixtures keyed by route, with ``*`` for shared values."""
     from infra import config
 
+    readme = str(config.WORKSPACE / "README.md")
     values = {
-        "/api/files/content": {"path": str(config.WORKSPACE / "README.md")},
+        "/api/artifacts/resolve": {"path": readme},
+        "/api/files/content": {"path": readme},
+        "/api/files/revision": {"path": readme},
         "/api/fs/browse": {"path": str(config.WORKSPACE)},
         "*": {},
     }
