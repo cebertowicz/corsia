@@ -165,10 +165,11 @@ def _app_user_profile() -> dict[str, str | None]:
     }
 
 
-async def _app_setup() -> dict[str, list[dict[str, Any]]]:
+async def _app_setup(model: str | None = None) -> dict[str, list[dict[str, Any]]]:
     from onboarding import setup_decisions
 
-    facts = await setup_decisions.read_facts(self_check_passed=True, probe_web_search=False)
+    # The import card names who receives what is read: the model this conductor runs on.
+    facts = await setup_decisions.read_facts(self_check_passed=True, probe_web_search=False, agent_model=model)
     # No address in the wake, and no projects consent: the app path never raises it.
     return {"setup_decisions": setup_decisions.build_decisions(replace(facts, email="", session_apps=()))}
 
@@ -211,7 +212,7 @@ async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
     return {"first_run_path": path, **facts}
 
 
-async def _app_setup_facts() -> dict[str, Any]:
+async def _app_setup_facts(model: str) -> dict[str, Any]:
     from infra.db_async import run_in_db, run_off_db
     from onboarding import setup_decisions
 
@@ -221,7 +222,7 @@ async def _app_setup_facts() -> dict[str, Any]:
         "local_download": lambda: asyncio.to_thread(_app_local_download),
         "web_search_ready": setup_decisions.web_search_works,
         "own_omlx_source": lambda: run_off_db(_own_omlx_source),
-        "setup": _app_setup,
+        "setup": lambda: _app_setup(model),
         "user_profile": lambda: run_off_db(_app_user_profile),
     })
     snapshot = reads.pop("model_sources")
@@ -254,7 +255,7 @@ async def _app_setup_facts() -> dict[str, Any]:
 async def setup_facts(model: str, path: str = "script") -> dict[str, Any]:
     """Facts for the selected path, bounded as one read budget and sorted on render."""
     if path == "app":
-        return await _app_setup_facts()
+        return await _app_setup_facts(model)
     if path == "script":
         return await _script_setup_facts(model, path)
     raise ValueError("first_run_path must be 'app' or 'script'")
