@@ -101,11 +101,17 @@
 	.usage .amber { color: var(--amber-text); }
 	.usage .red { color: var(--red-text); }
 	/* Compact is a Settings list row: row-name type, usage as trailing detail, space alone between rows. */
-	.compact { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--list-row-min-height); }
-	.compact strong { min-width: 0; font-size: var(--text-subhead); font-weight: 400; }
-	.compact .usage { margin: 0 0 0 auto; text-align: right; white-space: nowrap; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-	.order { flex: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; text-align: center; }
-	.controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+	.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: var(--space-2); row-gap: var(--space-1); min-width: 0; min-height: var(--list-row-min-height); }
+	.compact.ordered { grid-template-columns: var(--space-3) minmax(0, 1fr) auto auto; }
+	.compact strong { grid-column: 1; min-width: 0; font-size: var(--text-subhead); font-weight: 400; }
+	.compact.ordered > strong { grid-column: 2; }
+	.compact .usage { grid-column: 2; margin: 0; text-align: right; white-space: nowrap; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+	.compact.ordered > .usage { grid-column: 3; }
+	.order { grid-column: 1; color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; text-align: center; }
+	/* The shared control and status are separate grid participants, so status never widens controls. */
+	.controls, :global(.provider-account-policy-control) { display: contents; }
+	:global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1; justify-self: end; }
+	:global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
@@ -141,13 +147,14 @@
 	@media (max-width: 480px) {
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */
-		.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; }
+		.compact { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-2); row-gap: var(--space-1); }
 		/* Match the ordered detail indent to this fixed gutter, rather than a numeral's glyph width. */
 		.compact.ordered { grid-template-columns: var(--space-3) minmax(0, 1fr) auto; }
 		.compact > strong, .compact > .usage { grid-column: -3 / -2; }
 		.compact .usage { margin: 0; text-align: left; white-space: normal; }
 		.compact > .order { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
-		.compact > .controls { grid-column: -2 / -1; grid-row: 1 / span 2; }
+		:global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1 / span 2; }
+		:global(.policy-status) { grid-column: -3 / -1; justify-self: end; }
 		.compact strong { display: flex; flex-wrap: wrap; align-items: baseline; }
 		.compact strong .email { flex-basis: 100%; }
 		.compact strong .separator { display: none; }

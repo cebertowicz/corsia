@@ -97,8 +97,8 @@ describe('rendering and actions', () => {
 			toggle.click();
 			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't save this change. Try again."));
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
-			expect(document.getElementById('account-policy-default')?.parentElement?.className).toBe('account-copy');
-			expect(document.querySelector('.provider-account-policy-control')?.textContent).not.toContain("Couldn't save this change. Try again.");
+			expect(document.getElementById('account-policy-Plus-account-1')?.closest('.account-usage-row')).not.toBeNull();
+			expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe("Couldn't save this change. Try again.");
 			expect(document.body.textContent).not.toContain('Could not save subscriptions.');
 			unmount(component);
 		});

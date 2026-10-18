@@ -109,20 +109,21 @@
 	h3 { margin: 0; font-size: var(--text-caption); font-weight: var(--fw-regular, 400); color: var(--text-tertiary); }
 	.provider { display: flex; flex-direction: column; gap: var(--space-1); }
 	.provider > p { margin-bottom: var(--space-1); }
-	.scope-setting, .line, .account-row { display: flex; align-items: center; gap: var(--space-2); }
+	/* Every project-policy control reserves only its control column; status spans a separate row. */
+	.scope-setting, .line, .account-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); row-gap: var(--space-1); }
 	.line, .account-row { min-height: var(--list-row-min-height); }
-	.account-row > span { font-size: var(--text-subhead); color: var(--text-primary); }
-	.scope-setting, .line, .account-row { justify-content: space-between; }
-	.scope-setting > div { min-width: 0; }
+	.scope-setting > div, .line > span:first-child, .account-row > span:first-child { grid-column: 1; min-width: 0; }
+	.account-row > span:first-child { font-size: var(--text-subhead); color: var(--text-primary); }
 	/* A narrow project policy line must wrap its copy, never shrink the switch track. */
-	.scope-setting :global(.tg) { flex: 0 0 auto; }
-	.scope-label, .line > span { color: var(--text-primary); font-size: var(--text-subhead); }
+	.scope-setting :global(.tg), .line :global(.tg), .account-row :global(.provider-account-policy-controls) { grid-column: 2; justify-self: end; }
+	.scope-setting :global(.policy-status), .line :global(.policy-status), .account-row :global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
+	.scope-label, .line > span:first-child { color: var(--text-primary); font-size: var(--text-subhead); }
 	/* Going to another Settings page is a text action on the same content column. */
 	.workspace-link { display: block; margin-top: var(--space-1); }
 	.workspace-link :global(.btn.ghost) { padding-inline: 0; }
 	p { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.error { color: var(--red-text); }
-	.policy-control { display: grid; justify-items: end; gap: var(--space-1); }
+	.policy-control { display: contents; }
 	.policy-status { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.policy-status.error { color: var(--red-text); }
 </style>
