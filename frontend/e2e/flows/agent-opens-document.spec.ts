@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { chatComposer } from '../support/corsia';
 import {
 	activeArtifactId,

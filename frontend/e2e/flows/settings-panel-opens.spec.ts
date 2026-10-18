@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { captureConsoleErrors, loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_SESSION_TOKEN } from '../support/corsia';
 
 test.describe('@flow:settings @surface:settings settings panel opens', () => {

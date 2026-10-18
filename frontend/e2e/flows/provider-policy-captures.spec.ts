@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl, openSettingsSection } from '../support/corsia';
 
 type ScreenId = 'W1' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';

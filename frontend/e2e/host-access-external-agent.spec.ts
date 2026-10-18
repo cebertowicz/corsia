@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo, type WebSocketRoute } from '@playwright/test';
+import { test } from './support/test';
+import { expect, type Page, type TestInfo, type WebSocketRoute } from '@playwright/test';
 
 import { externalLease } from './fixtures/external-agent-lease';
 import {

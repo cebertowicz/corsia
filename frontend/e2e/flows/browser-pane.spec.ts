@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, sidebarThread } from '../support/corsia';
 import type { Locator } from '@playwright/test';
 

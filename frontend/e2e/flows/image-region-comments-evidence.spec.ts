@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import {
 	apiComment, appScreenshotPng, asAgent, at, commentButton, composer, drag, drawer, drawerList, expectTransition, fitButton, frame,

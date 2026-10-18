@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, watchSessionSubscriptions, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';

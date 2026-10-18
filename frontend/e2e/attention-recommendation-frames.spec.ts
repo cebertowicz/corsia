@@ -1,10 +1,5 @@
-import {
-	expect,
-	test,
-	type APIRequestContext,
-	type Page,
-	type TestInfo,
-} from '@playwright/test';
+import { test } from './support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import path from 'node:path';
 import { createSession, loadPastFirstRunLanding, openAppByUrl } from './support/corsia';
 

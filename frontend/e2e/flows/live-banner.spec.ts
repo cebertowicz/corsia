@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, openAppByUrl, waitForWsConnected, watchSessionSubscriptions } from '../support/corsia';
 
 const LONG_BASH_PHRASE = "Running grep -rn --hidden --glob='*.ts' 'live work banner truncation must preserve the full command in details' frontend/src backend/tests";

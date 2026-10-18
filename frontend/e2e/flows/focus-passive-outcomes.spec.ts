@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { seedOutcomes, readStates, expectObservedNoUpdate, openOutcomeThread, focusSetting, expandLoadedWork, assertPassiveGeometry, appendClosure, assertOutcomeOrder, assertOutcomeSidebar } from '../support/focusOutcomeProof';
 import { setFocusMode } from '../support/focusMode';

@@ -1,5 +1,6 @@
 
-import { expect, type Locator, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator } from '@playwright/test';
 import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';

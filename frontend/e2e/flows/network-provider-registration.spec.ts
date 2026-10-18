@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 test('@flow:settings @surface:settings network registration shows its endpoint and removes the provider', async ({ page, request }, testInfo) => {

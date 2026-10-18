@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl } from '../support/corsia';
 import { visibleHeaderSends } from '../support/docFeedbackFooter';
 import { journey, type Case, uniqueTitle, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';

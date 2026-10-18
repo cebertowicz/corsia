@@ -1,5 +1,6 @@
 import { showAllThreads } from '../support/commentDrawer';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
 import { layouts } from '../support/liveConcurrency';

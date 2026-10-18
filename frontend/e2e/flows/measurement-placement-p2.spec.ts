@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { e2eModel, loginByUrl, openSettings, TEST_TOKEN } from '../support/corsia';
 
 const tok = encodeURIComponent(TEST_TOKEN);
