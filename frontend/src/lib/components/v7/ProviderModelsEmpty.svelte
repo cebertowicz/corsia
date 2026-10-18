@@ -22,7 +22,7 @@
 {#if provider.name !== 'omlx' || showLocalEmpty}
 	<div class="phase-stub">
 	{#if provider.name === 'omlx'}
-		No models yet. Add one that fits this Mac.
+		No local models on this Mac. Add one that fits.
 	{:else if isExternal}
 		This endpoint hasn't listed any models. Some providers never list them: add their model IDs in the provider settings. Otherwise, check its URL and key there.
 	{:else if isHarness}

@@ -8,6 +8,7 @@ other's completion, recovery, or fallback semantics.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 from llm.local_model import LocalModel, from_recommendation, to_record
 
 _RECORD_NAME = "local-downloads.json"
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,11 +42,25 @@ def _path() -> Path:
 
 
 def _read_raw() -> dict[str, object]:
+    target = _path()
     try:
-        raw = json.loads(_path().read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, ValueError):
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return {}
-    return raw if isinstance(raw, dict) else {}
+    except (OSError, ValueError) as exc:
+        log.warning("Couldn't read Settings local-download state: %s", exc)
+        corrupt = target.with_name(f"{target.name}.corrupt")
+        try:
+            os.replace(target, corrupt)
+        except OSError as move_exc:
+            log.warning("Couldn't preserve corrupt Settings local-download state: %s", move_exc)
+            raise
+        return {}
+    if not isinstance(raw, dict):
+        log.warning("Couldn't read Settings local-download state: expected an object")
+        os.replace(target, target.with_name(f"{target.name}.corrupt"))
+        return {}
+    return raw
 
 
 def all() -> list[Download]:
@@ -67,33 +83,48 @@ def all() -> list[Download]:
     return sorted(result, key=lambda entry: entry.model.repository)
 
 
-def get(repository: str) -> Download | None:
-    return next((entry for entry in all() if entry.model.repository == repository), None)
+def get(model_id: str) -> Download | None:
+    """Return a Settings record by oMLX model id (legacy repository callers still read)."""
+    return next((entry for entry in all() if entry.model.model == model_id or entry.model.repository == model_id), None)
+
+
+def forget(model_id: str) -> None:
+    """Remove the one Settings record owned by this oMLX model id."""
+    values = _read_raw()
+    keys = [key for key, item in values.items()
+            if key == model_id or (isinstance(item, dict)
+            and (model := from_recommendation(item.get("model"))) is not None and model.model == model_id)]
+    if not keys:
+        return
+    for key in keys:
+        del values[key]
+    _write_raw(values)
+
+
+def remove(model_id: str) -> None:
+    """Compatibility alias for callers still naming a Settings record by repository."""
+    record = get(model_id)
+    if record is not None:
+        forget(record.model.model)
 
 
 def write(download: Download) -> None:
     values = _read_raw()
-    values[download.model.repository] = {
+    # Migrate a legacy repository key when this model is written again.
+    for key, item in list(values.items()):
+        if isinstance(item, dict) and (model := from_recommendation(item.get("model"))) is not None and model.model == download.model.model:
+            del values[key]
+    values[download.model.model] = {
         "model": to_record(download.model), "status": download.status,
         "speed": download.speed, "detail": download.detail,
         "server_id": download.server_id,
     }
+    _write_raw(values)
+
+
+def _write_raw(values: dict[str, object]) -> None:
     target = _path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-    try:
-        staged.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
-        os.replace(staged, target)
-    finally:
-        staged.unlink(missing_ok=True)
-
-
-def remove(repository: str) -> None:
-    values = _read_raw()
-    if repository not in values:
-        return
-    del values[repository]
-    target = _path()
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
         staged.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")

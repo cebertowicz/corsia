@@ -242,7 +242,7 @@ def test_a_second_failure_shows_cant_check_then_try_again_picks(monkeypatch):
     view = asyncio.run(_prepared())
 
     assert view["state"] == "failed" and view["model"] is None
-    assert "HTTP 504" in view["message"] and mac.downloads == []
+    assert "Couldn't check which models fit this Mac" in view["message"] and mac.downloads == []
     # Try again starts the pick afresh.
     assert asyncio.run(_prepared())["state"] == "picked" and mac.omlx.asks() == 3
 
@@ -262,7 +262,7 @@ def test_a_flight_whose_recommender_never_answers_fails_without_downloading(monk
 
     result = asyncio.run(_flown())
 
-    assert result["ok"] is False and "HTTP 502" in result["message"]
+    assert result["ok"] is False and "Couldn't check which models fit this Mac" in result["message"]
     assert mac.downloads == [] and local_setup_operation.read() is None
 
 
@@ -271,7 +271,7 @@ def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):
 
     view = asyncio.run(_prepared())
 
-    assert view["state"] == "failed" and "HTTP 404" in view["message"]
+    assert view["state"] == "failed" and "Couldn't check which models fit this Mac" in view["message"]
 
 
 def test_overlapping_prepare_requests_start_one_task(monkeypatch):

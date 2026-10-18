@@ -169,16 +169,20 @@ async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
     try:
         response = await admin_request({"server_id": server_id}, "GET", "/hf/recommendations", timeout=45.0)
     except (OmlxAdminError, httpx.HTTPError) as exc:
-        raise PickUnavailable(f"oMLX could not be reached ({type(exc).__name__}).") from exc
+        log.exception("oMLX recommender request failed")
+        raise PickUnavailable("Couldn't check which models fit this Mac. Check that oMLX is running, then try again.") from exc
     if response.status_code != 200:
-        raise PickUnavailable(f"oMLX could not check model recommendations (HTTP {response.status_code}).")
+        log.warning("oMLX recommender returned status %s", response.status_code)
+        raise PickUnavailable("Couldn't check which models fit this Mac. Check that oMLX is running, then try again.")
     try:
         payload = response.json()
     except ValueError as exc:
-        raise PickUnavailable("oMLX returned unreadable model recommendations.") from exc
+        log.warning("oMLX recommender returned unreadable data")
+        raise PickUnavailable("Couldn't check which models fit this Mac. Try again.") from exc
     sections = payload.get("sections") if isinstance(payload, dict) else None
     if not isinstance(sections, dict):
-        raise PickUnavailable("oMLX returned unreadable model recommendations.")
+        log.warning("oMLX recommender returned an invalid payload")
+        raise PickUnavailable("Couldn't check which models fit this Mac. Try again.")
     return {
         name: [model for row in rows if (model := from_recommendation(row)) is not None]
         for name, rows in sections.items() if isinstance(name, str) and isinstance(rows, list)
@@ -186,29 +190,9 @@ async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
 
 
 async def ask_recommender(server_id: str) -> LocalModel | None:
-    """Ask the managed oMLX once; None when nothing fits, ``PickUnavailable`` when it can't answer.
-
-    oMLX answers 503 before its downloader is up, 504 on a Hub timeout and 502 on
-    any other failure; its own Hub reads wait up to 30 seconds, so this waits a
-    little longer than that.
-    """
-    import httpx
-
-    from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
-
-    try:
-        response = await admin_request({"server_id": server_id}, "GET", "/hf/recommendations", timeout=45.0)
-    except (OmlxAdminError, httpx.HTTPError) as exc:
-        raise PickUnavailable(f"oMLX could not be reached ({type(exc).__name__}).") from exc
-    if response.status_code != 200:
-        raise PickUnavailable(f"oMLX could not check model recommendations (HTTP {response.status_code}).")
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise PickUnavailable("oMLX returned unreadable model recommendations.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("sections"), dict):
-        raise PickUnavailable("oMLX returned unreadable model recommendations.")
-    return pick(payload)
+    """Pick setup's model from the shared Settings recommender reader."""
+    sections = await ask_recommendations(server_id)
+    return next((model for model in sections.get("best", [])), None)
 
 
 def _record_path() -> Path:

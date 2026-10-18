@@ -12,6 +12,7 @@ from typing import Callable
 from api.network_server_helpers import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
+from llm.local_setup_download import StillDownloading
 
 
 async def _managed_download(report: Callable[[str], None], model: LocalModel) -> tuple[str, bool]:
@@ -60,6 +61,46 @@ async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> Non
         await discover_and_notify(server_id)
 
 
+async def _run_flight(model: LocalModel) -> dict:
+    """Run or resume the sole Settings flight with one reporting and cleanup path."""
+    from llm import local_setup as ls
+
+    events: list[str] = []
+
+    def report(value: str) -> None:
+        ls._flight.stage = value
+        ls._notify_models_changed()
+        events.append(value)
+
+    ls._flight.following = False
+    try:
+        result = await run(report, model)
+    except asyncio.CancelledError:
+        ls._release_operation_lock()
+        raise
+    except StillDownloading:
+        ls._emit("downloading_stopped", model=model.repository)
+        result = {
+            "ok": True, "downloading": True,
+            "message": f"{model.display_name} is still downloading in oMLX; CORSIA stopped following it.",
+            "progress": events,
+        }
+    except Exception as exc:
+        ls.log.exception("Settings model download failed")
+        result = {"ok": False, "message": f"Couldn't download {model.display_name}. Try again.", "detail": str(exc), "progress": events}
+    ls._flight.result = result
+    ls._flight.stage = None
+    ls._flight.following = False
+    if not result.get("ok") and not result.get("downloading"):
+        local_downloads.write(local_downloads.Download(
+            model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
+        ))
+    if not result.get("downloading"):
+        ls.local_setup_operation.clear()
+    ls._release_operation_lock()
+    return result
+
+
 async def begin(model: LocalModel) -> dict:
     """Start the single Settings flight, or report the already-owned operation."""
     from llm import local_setup as ls
@@ -80,32 +121,7 @@ async def begin(model: LocalModel) -> dict:
     ls._flight.stage = "Preparing download"
 
     async def flight() -> dict:
-        events: list[str] = []
-
-        def report(value: str) -> None:
-            ls._flight.stage = value
-            ls._notify_models_changed()
-            events.append(value)
-
-        try:
-            result = await run(report, model)
-        except asyncio.CancelledError:
-            ls._release_operation_lock()
-            raise
-        except Exception as exc:
-            ls.log.exception("Settings model download failed")
-            result = {"ok": False, "message": f"Download of {model.display_name} failed", "detail": str(exc), "progress": events}
-        ls._flight.result = result
-        ls._flight.stage = None
-        ls._flight.following = False
-        if not result.get("ok") and not result.get("downloading"):
-            local_downloads.write(local_downloads.Download(
-                model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
-            ))
-        if not result.get("downloading"):
-            local_setup_operation.clear()
-        ls._release_operation_lock()
-        return result
+        return await _run_flight(model)
 
     ls._flight.task = asyncio.create_task(flight())
     ls._flight.task.add_done_callback(ls._observe_setup_task)
@@ -122,19 +138,7 @@ async def resume(model: LocalModel) -> dict:
     ls._flight.kind = "settings"
     ls._flight.model = model
     ls._flight.stage = "Waiting to resume local model download"
-    try:
-        result = await run(lambda value: setattr(ls._flight, "stage", value), model)
-    except Exception as exc:
-        result = {"ok": False, "message": f"Download of {model.display_name} failed", "detail": str(exc), "progress": []}
-    ls._flight.result = result
-    ls._flight.stage = None
-    if not result.get("ok") and not result.get("downloading"):
-        local_downloads.write(local_downloads.Download(
-            model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
-        ))
-    ls.local_setup_operation.clear()
-    ls._release_operation_lock()
-    return result
+    return await _run_flight(model)
 
 
 async def run(report: Callable[[str], None], model: LocalModel) -> dict:

@@ -35,7 +35,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
 
         return {"state": "low_memory", "message": NO_LOCAL_MODEL, "sections": {}, "downloads": downloads}, {}
     server = await _server()
-    if not omlx_has_recommender(omlx_version()):
+    if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
         return {
             "state": "update_required",
             "message": f"Update oMLX to {OMLX_PIN} or later to add a local model.",
@@ -72,22 +72,38 @@ async def recommendations(_user: dict = Depends(require_user_header_only)) -> di
     return result
 
 
+@router.get("/downloads")
+async def downloads(_user: dict = Depends(require_user_header_only)) -> list[dict[str, Any]]:
+    """Settings' cheap durable download projection; it never calls the recommender."""
+    return [download.view() for download in local_downloads.all()]
+
+
+def _clear_failed_record(model_id: str) -> None:
+    record = local_downloads.get(model_id)
+    if record is not None and record.status == "failed":
+        local_downloads.forget(model_id)
+
+
 @router.post("/downloads")
 async def download_model(body: dict = Body(...), _user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
     repository = body.get("repository") if isinstance(body, dict) and set(body) == {"repository"} else None
     if not isinstance(repository, str) or not repository:
         raise HTTPException(400, "A recommended model repository is required.")
     _view, sections = await _recommendations()
+    model_id = repository.rsplit("/", 1)[-1]
     model = next((item for rows in sections.values() for item in rows if item.repository == repository), None)
     if model is None:
-        raise HTTPException(400, "That model is not currently recommended for this Mac.")
+        _clear_failed_record(model_id)
+        raise HTTPException(400, "That model no longer fits this Mac. Pick another from the list.")
     server = await _server()
     model_dir = await download_dir(str(server["id"]))
     space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
     if space["state"] == "unknown":
-        raise HTTPException(409, "CORSIA could not determine free disk space for this download.")
+        _clear_failed_record(model_id)
+        raise HTTPException(409, "Couldn't check free disk space. Try again.")
     if space["state"] == "insufficient":
-        raise HTTPException(409, "This Mac does not have enough free disk space for this download.")
+        _clear_failed_record(model_id)
+        raise HTTPException(409, "This Mac does not have enough free disk space. Pick another from the list.")
     operation = local_setup_operation.read()
     if operation is not None:
         raise HTTPException(409, f"{operation.model.display_name} is already downloading.")
@@ -116,25 +132,28 @@ async def delete_download(repository: str, _user: dict = Depends(require_user_he
         raise HTTPException(409, "Unload this model before deleting its download.")
     disk_models = await list_disk_models({"server_id": server["id"]})
     if not any(row.get("identifier") == model_id for row in disk_models):
-        raise HTTPException(404, "This oMLX model download is not known to CORSIA.")
-    downloaded = local_downloads.get(repository)
+        if (record := local_downloads.get(model_id)) is not None and record.status == "failed":
+            local_downloads.forget(model_id)
+            return {"ok": True}
+        raise HTTPException(404, "Couldn't find this local model download. Refresh the list and try again.")
+    downloaded = local_downloads.get(model_id)
     from llm.providers.omlx_endpoints import admin_request
     response = await admin_request({"server_id": server["id"]}, "DELETE", f"/hf/models/{model_id}", timeout=30.0)
     if response.status_code != 200:
-        raise HTTPException(502, "oMLX could not delete this model download.")
+        raise HTTPException(502, "Couldn't delete this local model download. Try again.")
     from llm.catalog_network_models import discover_network_models
     refreshed = await discover_network_models(str(server["id"]))
     if not refreshed.get("ok"):
-        raise HTTPException(502, "CORSIA could not refresh the local model catalog after deletion.")
+        raise HTTPException(502, "Couldn't refresh local models after deletion. Try again.")
     confirmed = await admin_request({"server_id": server["id"]}, "GET", "/models", timeout=15.0)
     if confirmed.status_code != 200:
-        raise HTTPException(502, "CORSIA could not confirm the local model was deleted.")
+        raise HTTPException(502, "Couldn't confirm the local model was deleted. Refresh the list and try again.")
     payload = confirmed.json()
     models = payload.get("models") if isinstance(payload, dict) else None
     if any(isinstance(row, dict) and row.get("id") == model_id for row in models or []):
-        raise HTTPException(502, "oMLX did not remove this model download.")
+        raise HTTPException(502, "Couldn't delete this local model download. Try again.")
     if downloaded is not None:
-        local_downloads.remove(repository)
+        local_downloads.forget(model_id)
     from llm.own_omlx_management import forget_model_originals
     forget_model_originals(model_id)
     from infra.state.ws import notify_models_changed

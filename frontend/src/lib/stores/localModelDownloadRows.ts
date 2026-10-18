@@ -1,4 +1,4 @@
-import { fetchLocalModelRecommendations, fetchSources } from '$lib/conductorSources';
+import { fetchLocalModelDownloads, fetchSources } from '$lib/conductorSources';
 
 export type LocalDownloadRows = {
 	active?: boolean;
@@ -10,17 +10,16 @@ export type LocalDownloadRows = {
  * server row. This never creates a row: server models remain the only list owner.
  */
 export async function localDownloadRows(token: string, serverId: string): Promise<LocalDownloadRows> {
-	const [sources, recommendations] = await Promise.allSettled([
+	const [sources, downloads] = await Promise.allSettled([
 		fetchSources(token),
-		fetchLocalModelRecommendations(token),
+		fetchLocalModelDownloads(token),
 	]);
 	const result: LocalDownloadRows = {};
 	if (sources.status === 'fulfilled') {
 		result.active = sources.value.some((source) => source.source === 'omlx' && source.settings_download);
 	}
-	if (recommendations.status === 'fulfilled') {
-		const downloads = recommendations.value.downloads ?? [];
-		const entries = downloads.filter((entry) =>
+	if (downloads.status === 'fulfilled') {
+		const entries = downloads.value.filter((entry) =>
 			entry.status === 'available' && entry.server_id === serverId &&
 			typeof entry.speed === 'number' && Number.isFinite(entry.speed),
 		);

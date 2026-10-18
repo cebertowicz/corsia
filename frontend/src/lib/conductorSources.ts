@@ -149,12 +149,14 @@ export type LocalModelRecommendation = {
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
 };
 
+export type LocalModelDownload = { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null };
+
 export type LocalModelRecommendations = {
 	state?: string;
 	message?: string;
 	sections?: Record<string, LocalModelRecommendation[]>;
-	/** Durable Settings download records from the backend's local_downloads view. */
-	downloads?: { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null }[];
+	/** Durable Settings download records for the add-model sheet. */
+	downloads?: LocalModelDownload[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
 	disk_free_gb?: number;
@@ -172,6 +174,13 @@ export async function fetchLocalModelRecommendations(t: string): Promise<LocalMo
 	return response.json();
 }
 
+/** Settings' cheap durable local-download projection. */
+export async function fetchLocalModelDownloads(t: string): Promise<LocalModelDownload[]> {
+	const response = await fetch('/api/providers/local/downloads', { headers: { Authorization: `Bearer ${t}` } });
+	if (!response.ok) throw await localRouteError(response, "Couldn't read local model downloads. Try again.");
+	return response.json();
+}
+
 /** Start a Settings-selected local model download. */
 export async function startLocalModelDownload(t: string, repository: string): Promise<void> {
 	const response = await fetch('/api/providers/local/downloads', {
@@ -179,7 +188,7 @@ export async function startLocalModelDownload(t: string, repository: string): Pr
 		headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ repository }),
 	});
-	if (!response.ok) throw await localRouteError(response, 'Download could not start.');
+	if (!response.ok) throw await localRouteError(response, "Couldn't start the download. Try again.");
 }
 
 /** Delete a completed Settings-selected local model download. */
@@ -188,7 +197,7 @@ export async function deleteLocalModelDownload(t: string, repository: string): P
 		method: 'DELETE',
 		headers: { Authorization: `Bearer ${t}` },
 	});
-	if (!response.ok) throw await localRouteError(response, 'Download could not be deleted.');
+	if (!response.ok) throw await localRouteError(response, "Couldn't delete the download. Try again.");
 }
 
 export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; cancelled: boolean }> {

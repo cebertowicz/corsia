@@ -102,7 +102,7 @@ async def test_delete_keeps_durable_row_until_catalog_confirms_absence(monkeypat
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
 
-    with pytest.raises(HTTPException, match="did not remove"):
+    with pytest.raises(HTTPException, match="Couldn't delete"):
         await provider_local_models.delete_download(MODEL.repository, {})
 
     assert local_downloads.get(MODEL.repository) is not None

@@ -29,7 +29,7 @@
 		busy = true; error = '';
 		try {
 			await startLocalModelDownload(t, repository);
-		} catch { error = "Couldn't retry the local model download."; }
+		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't retry the local model download. Try again."; }
 		finally { busy = false; await refresh(); }
 	}
 
@@ -38,7 +38,7 @@
 		if (!t || busy) return;
 		busy = true; error = '';
 		try { await cancelLocalDownload(t); }
-		catch { error = "Couldn't cancel the local model download."; }
+		catch { error = "Couldn't cancel the local model download. Try again."; }
 		finally { busy = false; await refresh(); }
 	}
 
@@ -53,7 +53,7 @@
 	<ModelRow
 		name={download.name ?? 'Model'}
 		state={download.failed ? 'error' : 'loading'}
-		meta={download.failed ? 'Download failed' : `Downloading ${download.percent ?? 0}%`}
+		meta={download.failed ? "Couldn't download this model. Try again." : `Downloading ${download.percent ?? 0}%`}
 		progress={download.percent ?? 0}
 		puck={false}
 		onCancel={download.failed ? undefined : cancel}

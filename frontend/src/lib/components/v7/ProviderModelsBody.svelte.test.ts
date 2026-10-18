@@ -82,10 +82,10 @@ describe('Settings model rows and account usage', () => {
 					],
 				}),
 			};
-			if (url.includes('/providers/local/recommendations')) return {
-				ok: true, json: async () => ({ state: 'ready', downloads: [
+			if (url.includes('/providers/local/downloads')) return {
+				ok: true, json: async () => [
 					{ repository: 'org/speedy', model: 'exact-model', status: 'available', server_id: 'local-test', speed: 52 },
-				] }),
+				],
 			};
 			if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
 			return { ok: true, json: async () => ({}) };
