@@ -4,7 +4,7 @@ import parity from '../../../../testdata/focus-visibility-parity.json';
 import { card, human, said, turn, work } from '$lib/__tests__/fixtures/focusRuns';
 import { combineStubs, type RunStub } from '$lib/focusRuns';
 import {
-	buildTranscriptPresentation, type TranscriptEntry, type TranscriptMessage,
+	buildTranscriptPresentation, buildVisibleMessages, type TranscriptEntry, type TranscriptMessage,
 } from './messageListModel';
 import { isFocusVisible, isRunExpanded, rowKind, runTokens, toggleRun } from './transcriptFocusModel';
 import { runLabels, runWeight } from './transcriptRunLabel';
@@ -145,16 +145,19 @@ describe('a seed, which the transcript never draws', () => {
 		created_at: '2026-10-02T10:00:20', activity_weight: 0, metadata: { type: 'context_event' },
 	}) as unknown as TranscriptMessage;
 
+	// As MessageList does: visibility first, then presentation.
+	const present = (rows: TranscriptMessage[]) => build(buildVisibleMessages(rows), []);
+
 	it('makes no block between two visible rows, as the Focus page sends no stub for it', () => {
-		const entries = build([human('ask', 1, '10:00:00', 't1', '10:00:00'), seed(2), said('reply', 3, '10:01:00')], []);
+		const entries = present([human('ask', 1, '10:00:00', 't1', '10:00:00'), seed(2), said('reply', 3, '10:01:00')]);
 
 		expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
 	});
 
 	it('leaves a no-step block of context rows named for its context', () => {
-		const entries = build([
+		const entries = present([
 			human('ask', 1, '10:00:00', 't1', '10:00:00'), context(2), seed(3), said('reply', 4, '10:01:00'),
-		], []);
+		]);
 
 		const [run] = folds(entries);
 		expect(run.items.map((item) => item.message.id)).toEqual(['ctx-2']);
