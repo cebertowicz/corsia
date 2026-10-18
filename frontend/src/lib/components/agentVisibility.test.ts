@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Thread } from '$lib/stores/threads';
-import { selectAgentRows, sortThreadsBySidebarPriority } from './agentVisibility';
+import { createSidebarSortMemo, selectAgentRows, sortThreadsBySidebarPriority, type SidebarStates } from './agentVisibility';
 
 function agent(id: string, title: string): Thread {
 	return {
@@ -35,6 +35,30 @@ describe('sidebar ordering', () => {
 			d: { state: 'needs_input', label_key: null, paused: false, attention_items: [] },
 		};
 		expect(sortThreadsBySidebarPriority(AGENTS.slice(0, 5), states).map((row) => row.id)).toEqual(['d', 'b', 'c', 'a', 'e']);
+	});
+
+	it('reuses the ordered rows when the same thread objects are passed again', () => {
+		const memo = createSidebarSortMemo();
+		const threads = AGENTS.slice(0, 2);
+		const first = memo(threads, {});
+		expect(memo([...threads], {})).toBe(first);
+	});
+
+	it('keeps the cached order but returns current thread objects when a field changes', () => {
+		const memo = createSidebarSortMemo();
+		memo(AGENTS.slice(0, 2), {});
+		const renamed = { ...AGENTS[0], title: 'Renamed' };
+		const next = memo([renamed, AGENTS[1]], {});
+		expect(next[0]).toBe(renamed);
+		expect(next.map((row) => row.id)).toEqual([AGENTS[0].id, AGENTS[1].id]);
+	});
+
+	it('re-sorts when plan priority changes', () => {
+		const memo = createSidebarSortMemo();
+		const threads = AGENTS.slice(0, 2);
+		memo(threads, {});
+		const states = { [threads[1].id]: { state: 'failed', label_key: null, paused: false, attention_items: [] } } as unknown as SidebarStates;
+		expect(memo(threads, states).map((row) => row.id)).toEqual([threads[1].id, threads[0].id]);
 	});
 });
 

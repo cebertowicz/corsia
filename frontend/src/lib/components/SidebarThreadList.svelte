@@ -7,7 +7,7 @@
 	import { pinnedConversations, togglePin } from '$lib/stores/pinnedConversations';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import type { Thread } from '$lib/stores/threads';
-	import { sortThreadsBySidebarPriority } from './agentVisibility';
+	import { createSidebarSortMemo } from './agentVisibility';
 	import { bucketOf, TIME_BUCKETS } from '$lib/time';
 	import { haptic } from '$lib/haptic';
 	import SidebarThreadRow from './SidebarThreadRow.svelte';
@@ -65,10 +65,12 @@
 	let scopedThreads = $derived($threads.filter(s =>
 		($uiScope ? s.project_id === $uiScope.id : !s.project_id) && !isNavAgent(s)
 	));
-	let pinnedThreads = $derived(sortThreadsBySidebarPriority(
+	const sortPinnedThreads = createSidebarSortMemo();
+	const sortUnpinnedThreads = createSidebarSortMemo();
+	let pinnedThreads = $derived(sortPinnedThreads(
 		scopedThreads.filter(s => $pinnedConversations.has(s.id)), $threadPlanStates,
 	));
-	let unpinnedThreads = $derived(sortThreadsBySidebarPriority(
+	let unpinnedThreads = $derived(sortUnpinnedThreads(
 		scopedThreads.filter(s => !$pinnedConversations.has(s.id)), $threadPlanStates,
 	));
 

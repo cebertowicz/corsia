@@ -193,6 +193,8 @@
 <style>
 	.thread-item-wrapper {
 		position: relative; overflow: hidden; border-radius: var(--radius-sm); margin-bottom: 2px;
+		content-visibility: auto;
+		contain-intrinsic-size: auto 40px;
 	}
 	.action-zone {
 		position: absolute; top: 0; bottom: 0;
