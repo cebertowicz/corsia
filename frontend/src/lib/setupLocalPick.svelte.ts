@@ -8,7 +8,9 @@ export type LocalPick = {
 	message: string | null;
 };
 
-export const LOW_MEMORY_LOCAL_MODEL_MESSAGE = 'This computer doesn’t have enough memory to run a local model, so pick at least one above.';
+export const LOW_MEMORY_LOCAL_MODEL_SENTENCE = 'This computer doesn’t have enough memory to run a local model.';
+export const LOW_MEMORY_LOCAL_MODEL_SETUP_CLAUSE = ' so pick at least one above.';
+export const LOW_MEMORY_LOCAL_MODEL_MESSAGE = `${LOW_MEMORY_LOCAL_MODEL_SENTENCE}${LOW_MEMORY_LOCAL_MODEL_SETUP_CLAUSE}`;
 
 const PICK = '/api/setup/local-model';
 const FAILED: LocalPick = { state: 'failed', model: null, message: null };

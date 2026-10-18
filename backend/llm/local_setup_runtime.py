@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 
@@ -181,11 +182,12 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
     # its stale bit/skip fields into this model.
     if filtered.get("turboquant_kv_enabled") is not True:
         filtered = {key: value for key, value in filtered.items() if not key.startswith("turboquant_")}
-    filtered = await _without_uninstalled_drafts(server_id, filtered)
-    if filtered is None:
+    compatible = await _without_uninstalled_drafts(server_id, filtered)
+    if compatible is None:
         return OptimalResult("offline")
-    if not filtered:
+    if not compatible:
         return OptimalResult("not_found")
+    filtered = compatible
     if own_omlx_management.active():
         own_omlx_management.record_originals({}, {model.model: {key: current.get(key) for key in filtered}})
     corsia = {

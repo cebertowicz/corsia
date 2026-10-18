@@ -143,6 +143,9 @@ export type LocalModelRecommendation = {
 	repository: string;
 	download_size_gb: number;
 	context_window: number;
+	/** oMLX recommendation metadata when available. */
+	quantization?: string;
+	relative_speed?: string;
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
 };
 
@@ -150,6 +153,10 @@ export type LocalModelRecommendations = {
 	state?: string;
 	message?: string;
 	sections?: Record<string, LocalModelRecommendation[]>;
+	downloads?: { repository: string; status?: 'available' | 'failed' }[];
+	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
+	memory_gb?: number;
+	disk_free_gb?: number;
 };
 
 async function localRouteError(response: Response, fallback: string): Promise<Error> {

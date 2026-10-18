@@ -148,3 +148,33 @@ async def test_delete_refuses_active_or_recoverable_operation_for_model(monkeypa
         await provider_local_models.delete_download(MODEL.repository, {})
 
     assert raised.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_recommendations_include_memory_and_download_volume_free_disk(monkeypatch, tmp_path) -> None:
+    async def recommended(_server_id):
+        return {"best": [MODEL]}
+
+    async def server():
+        return {"id": "server"}
+
+    async def model_dir(_server_id):
+        return tmp_path
+
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "host_ram_bytes", lambda: 64 * 1024**3)
+    monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: True)
+    monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.1")
+    monkeypatch.setattr(provider_local_models, "_server", server)
+    monkeypatch.setattr(provider_local_models, "ask_recommendations", recommended)
+    monkeypatch.setattr(provider_local_models, "download_dir", model_dir)
+    monkeypatch.setattr(
+        provider_local_models,
+        "download_disk_space",
+        lambda *_args: {"state": "ready", "free_bytes": 20 * 1024**3},
+    )
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert result["memory_gb"] == 64
+    assert result["disk_free_gb"] == 20

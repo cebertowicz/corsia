@@ -13,6 +13,9 @@
 	let loading = $state(true);
 	let error = $state('');
 	let sections = $state<Record<string, LocalModelRecommendation[]>>({});
+	let downloaded = $state(new Set<string>());
+	let memoryGb = $state<number | null>(null);
+	let diskFreeGb = $state<number | null>(null);
 	let starting = $state('');
 
 	async function load() {
@@ -27,6 +30,9 @@
 			const body = await fetchLocalModelRecommendations(t);
 			if (body?.state !== 'ready') throw new Error(body?.message ?? "Couldn't check which models fit this Mac.");
 			sections = body.sections && typeof body.sections === 'object' ? body.sections : {};
+			downloaded = new Set((body.downloads ?? []).filter((entry) => entry.status === 'available').map((entry) => entry.repository));
+			memoryGb = typeof body.memory_gb === 'number' ? body.memory_gb : null;
+			diskFreeGb = typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null;
 		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't check which models fit this Mac."; }
 		finally { loading = false; }
 	}
@@ -43,10 +49,25 @@
 		} catch (caught) { error = caught instanceof Error ? caught.message : 'Download could not start.'; }
 		finally { starting = ''; }
 	}
+	function diskNeed(model: LocalModelRecommendation): string | null {
+		if (model.disk?.state !== 'insufficient') return null;
+		const required = model.disk.required_bytes;
+		return required ? `Needs ${Math.ceil(required / 1024 ** 3)} GB of disk` : 'Needs more disk space';
+	}
+
+	function meta(model: LocalModelRecommendation): string[] {
+		return [
+			`${Math.round(model.context_window / 1024)}K context`,
+			model.quantization,
+			`${model.download_size_gb} GB`,
+			model.relative_speed,
+		].filter((value): value is string => Boolean(value));
+	}
+
 	onMount(load);
 </script>
 
-<Modal title="Add local model" size="sm" {onClose}>
+<Modal title="Add model" size="sm" {onClose}>
 	{#if loading}
 		<div class="notice"><Spinner /> Checking which models fit this Mac…</div>
 	{:else if error}
@@ -54,13 +75,27 @@
 	{:else if Object.values(sections).every((models) => models.length === 0)}
 		<div class="notice">No recommended models fit this Mac.</div>
 	{:else}
+		<div class="section-line">Picked for this Mac{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
 		{#each Object.entries(sections) as [section, models]}
 			{#if models.length}
-				<h3>{section === 'best' ? 'Recommended' : section}</h3>
+				{#if section !== 'best'}<h3>{section}</h3>{/if}
 				{#each models as model, index (model.repository)}
-					<ListRow name={model.name} meta={[`${model.download_size_gb} GB download`, `${Math.round(model.context_window / 1024)}K context`, ...(model.disk?.state === 'insufficient' ? ['Not enough free disk space'] : model.disk?.state === 'unknown' ? ['Disk space unavailable'] : [])]}>
-						{#snippet actions()}<Button size="sm" variant={section === 'best' && index === 0 ? 'primary' : 'secondary'} loading={starting === model.repository} disabled={Boolean(starting) || model.disk?.state !== 'ready'} onclick={() => download(model.repository)}>Download</Button>{/snippet}
+					<div class:insufficient={Boolean(diskNeed(model))}>
+					<ListRow meta={meta(model)}>
+						{#snippet children()}
+							<strong class="model-name">{model.name}</strong>
+							{#if section === 'best' && index === 0}<span class="recommended">Recommended</span>{/if}
+							{#if diskNeed(model)}<span class="disk-need">{diskNeed(model)}</span>{/if}
+						{/snippet}
+						{#snippet actions()}
+							{#if downloaded.has(model.repository)}
+								<span class="downloaded">Downloaded</span>
+							{:else if !diskNeed(model)}
+								<Button size="sm" variant={section === 'best' && index === 0 ? 'primary' : 'ghost'} loading={starting === model.repository} disabled={Boolean(starting)} onclick={() => download(model.repository)}>Download</Button>
+							{/if}
+						{/snippet}
 					</ListRow>
+					</div>
 				{/each}
 			{/if}
 		{/each}
@@ -70,5 +105,11 @@
 <style>
 	.notice { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); padding: var(--space-3) 0; }
 	.notice.error { color: var(--red); justify-content: space-between; }
-	h3 { color: var(--text-tertiary); font-size: var(--text-caption); letter-spacing: .08em; text-transform: uppercase; margin: var(--space-3) 0 var(--space-2); }
+	.section-line { color: var(--text-secondary); font-size: var(--text-footnote); margin: 0 0 var(--space-2); }
+	h3 { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: 600; margin: var(--space-3) 0 var(--space-2); }
+	.model-name { display: block; color: var(--text-primary); font-size: var(--text-subhead); }
+	.recommended { display: inline-block; color: var(--accent-text); font-size: var(--text-footnote); font-weight: 600; margin-top: var(--space-1); }
+	.disk-need { display: block; color: var(--text-tertiary); font-size: var(--text-footnote); margin-top: var(--space-1); }
+	.insufficient { opacity: 0.58; }
+	.downloaded { color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>

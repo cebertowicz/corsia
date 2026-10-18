@@ -36,13 +36,13 @@ describe('AddLocalModelSheet', () => {
 		const downloads = [...host.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.includes('Download'));
 		expect(downloads).toHaveLength(2);
 		expect(downloads[0].classList.contains('primary')).toBe(true);
-		expect(downloads[1].classList.contains('secondary')).toBe(true);
+		expect(downloads[1].classList.contains('ghost')).toBe(true);
 	});
 
-	it('disables a model that lacks the required free disk space', async () => {
+	it('shows the disk requirement without a disabled download button', async () => {
 		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'insufficient' } }] } });
 		const download = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Download'));
-		expect(download?.disabled).toBe(true);
-		expect(host.textContent).toContain('Not enough free disk space');
+		expect(host.textContent).toContain('Needs more disk space');
+		expect(download).toBeUndefined();
 	});
 });

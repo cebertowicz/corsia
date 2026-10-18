@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-from types import ModuleType
-
 import pytest
 
 from llm import own_omlx_management
@@ -178,9 +175,7 @@ async def test_auto_load_only_runs_when_the_memory_gate_allows(monkeypatch) -> N
         loaded.append(model.model)
         return {"ok": True}
 
-    helpers = ModuleType("api.network_server_helpers")
-    helpers.notify_cached_model_loaded = lambda *_args: None
-    monkeypatch.setitem(sys.modules, "api.network_server_helpers", helpers)
+    monkeypatch.setattr(local_settings_download, "notify_cached_model_loaded", lambda *_args: None)
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr("infra.host_resources.check_can_load", cannot_load)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
@@ -210,9 +205,7 @@ async def test_auto_load_uses_existing_loader_when_the_model_fits(monkeypatch) -
     async def discovered(_server_id):
         return None
 
-    helpers = ModuleType("api.network_server_helpers")
-    helpers.notify_cached_model_loaded = lambda *_args: None
-    monkeypatch.setitem(sys.modules, "api.network_server_helpers", helpers)
+    monkeypatch.setattr(local_settings_download, "notify_cached_model_loaded", lambda *_args: None)
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr("infra.host_resources.check_can_load", can_load)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)

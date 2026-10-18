@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Callable
 
+from api.network_server_helpers import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
 
@@ -49,7 +50,6 @@ async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> Non
     from infra.host_resources import check_can_load
     from llm.providers.omlx_lifecycle import load_model
     from llm.network_discovery import discover_and_notify
-    from api.network_server_helpers import notify_cached_model_loaded
 
     decision = await check_can_load(float(size) / 1024**3, "omlx")
     if not decision.get("ok"):

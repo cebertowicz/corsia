@@ -1,12 +1,28 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { HostProvider } from '$lib/stores/providersV7';
+	import { fetchSources } from '$lib/conductorSources';
+	import { get } from 'svelte/store';
+	import { token } from '$lib/stores/auth';
 	interface Props { provider: HostProvider; isExternal: boolean; isHarness: boolean; }
 	const { provider, isExternal, isHarness }: Props = $props();
+	let showLocalEmpty = $state(false);
+
+	onMount(async () => {
+		if (provider.name !== 'omlx') return;
+		const t = get(token);
+		if (!t) return;
+		try {
+			const source = (await fetchSources(t)).find((candidate) => candidate.source === 'omlx');
+			showLocalEmpty = !source?.settings_download && source?.eligible !== false;
+		} catch { showLocalEmpty = true; }
+	});
 </script>
 
-<div class="phase-stub">
+{#if provider.name !== 'omlx' || showLocalEmpty}
+	<div class="phase-stub">
 	{#if provider.name === 'omlx'}
-		oMLX hasn't registered any models yet. Add a model to download one that fits this Mac.
+		No models yet. Add one that fits this Mac.
 	{:else if isExternal}
 		This endpoint hasn't listed any models. Some providers never list them: add their model IDs in the provider settings. Otherwise, check its URL and key there.
 	{:else if isHarness}
@@ -16,4 +32,5 @@
 	{:else}
 		No models discovered yet. Check the provider's logs.
 	{/if}
-</div>
+	</div>
+{/if}

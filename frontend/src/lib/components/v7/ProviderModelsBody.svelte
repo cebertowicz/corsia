@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
+	import { fetchSources } from '$lib/conductorSources';
 	import {
 		providerModels,
 		loadProviderModelsFor,
@@ -27,7 +28,6 @@
 	import LocalModelDeleteDownloadModal from './LocalModelDeleteDownloadModal.svelte';
 	import ProviderModelsActionError from './ProviderModelsActionError.svelte';
 	import ProviderModelsPhase from './ProviderModelsPhase.svelte';
-
 	interface Props {
 		provider: HostProvider;
 		isLocal?: boolean;
@@ -58,6 +58,7 @@
 
 	let showAllAvailable = $state(false);
 	let actionError = $state('');
+	let hasLocalDownload = $state(false);
 
 	const pmState = $derived(modelsForProvider($providerModels, provider.raw, provider.server));
 	const models = $derived(pmState.models);
@@ -123,8 +124,17 @@
 		lastActiveAt = Date.now();
 		pollHandle = setTimeout(_pollTick, POLL_ACTIVE_MS);
 	}
+	async function refreshLocalDownload() {
+		if (provider.name !== 'omlx') return;
+		const t = get(token);
+		if (!t) return;
+		try {
+			hasLocalDownload = (await fetchSources(t)).some((source) => source.source === 'omlx' && source.settings_download);
+		} catch { /* Keep the last known download state until the next source update. */ }
+	}
+
 	onMount(async () => {
-		await loadProviderModelsFor(provider.raw, provider.server);
+		await Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownload()]);
 		if (!catalogOnly) {
 			pollJobsFor(provider.raw, provider.server);
 			_ensurePolling();
@@ -274,16 +284,14 @@
 	/>
 {/if}
 
-{#if provider.name === 'omlx'}<LocalSettingsDownloadStatus />{/if}
-
 {#if pmState.loading && models.length === 0}
 	<ProviderModelsPhase message="Loading models…" />
 {:else if pmState.lastError}
 	<ProviderModelsPhase message={`Failed to load models: ${pmState.lastError}`} error />
-{:else if models.length === 0}
+{:else if models.length === 0 && !hasLocalDownload}
 	<ProviderModelsEmpty {provider} {isExternal} {isHarness} />
 	{#if provider.name === 'omlx'}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); loadModels(); }} {onAddProvider} />
+		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownload(); loadModels(); }} {onAddProvider} empty />
 	{/if}
 {:else}
 	{#if actionError}
@@ -328,17 +336,21 @@
 		{/each}
 	{/if}
 
-	{#if grouped.available.length > 0}
+	{#if grouped.available.length > 0 || (provider.name === 'omlx' && hasLocalDownload)}
 		<div class="section">
 			<span class="section-label">{availableLabel}</span>
 			<span class="section-rule"></span>
 		</div>
+		{#if provider.name === 'omlx'}
+			<LocalSettingsDownloadStatus onStatusChange={(hasDownload) => hasLocalDownload = hasDownload} />
+		{/if}
 		{#each visibleAvailable as m (m.id)}
 			<ModelRow
 				name={m.name}
 				state={m.state}
 				meta={m.meta}
 				caps={m.caps}
+				note={m.meta.includes('tokens/s') ? 'Settings measured on Macs like this one · omlx.ai' : null}
 				toggleOn={false}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
@@ -357,7 +369,7 @@
 		/>
 	{/if}
 	{#if provider.name === 'omlx'}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); loadModels(); }} {onAddProvider} />
+		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownload(); loadModels(); }} {onAddProvider} />
 	{/if}
 {/if}
 

@@ -15,9 +15,14 @@ const provider = {
 };
 const recommendations = {
 	state: 'ready',
+	memory_gb: 64,
+	disk_free_gb: 20,
+	downloads: [{ repository: 'google/gemma-4-31b-it', status: 'available' }],
 	sections: {
-		best: [{ name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', download_size_gb: 16, context_window: 32768, disk: { state: 'ready' } }],
-		'Larger, less room for context': [{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_gb: 31, context_window: 32768, disk: { state: 'insufficient' } }],
+		best: [{ name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', download_size_gb: 16, context_window: 32768, quantization: '4-bit', relative_speed: 'Much faster', disk: { state: 'ready' } }],
+		Faster: [{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_gb: 18, context_window: 32768, quantization: '4-bit', relative_speed: 'Faster', disk: { state: 'ready' } }],
+		'More precise': [{ name: 'Gemma 4 31B IT', repository: 'google/gemma-4-31b-it', download_size_gb: 20, context_window: 32768, quantization: '8-bit', relative_speed: 'A bit slower', disk: { state: 'ready' } }],
+		'Larger, less room for context': [{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_gb: 31, context_window: 32768, quantization: '8-bit', relative_speed: 'Slower', disk: { state: 'insufficient', required_bytes: 31 * 1024 ** 3 } }],
 	},
 };
 
@@ -28,21 +33,24 @@ function sourceFor(state: RenderState) {
 		source: 'omlx', name: 'Local model', state: 'ready',
 		eligible: state === 'under-24gb' ? false : true,
 		settings_download: state === 'downloading'
-			? { repository: 'qwen/qwen3.8-flash-next', name: 'Qwen3.8-Flash-Next', percent: 63, failed: false }
+			? { repository: 'qwen/qwen3.8-flash-next', name: 'Qwen3.8-Flash-Next', percent: 40, failed: false }
 			: null,
 	};
 }
 
 function modelRows(state: RenderState) {
-	if (state === 'complete') {
-		return { loaded: [], available: [{
+	if (state === 'under-24gb') return { loaded: [], available: [] };
+	return {
+		loaded: [{
+			model_id: 'qwen/qwen3.8-27b', display_name: 'Qwen3.8-27B',
+			context_length: 32768, size_bytes: 31 * 1024 ** 3, quantization: '8-bit',
+		}],
+		available: [{
 			model_id: 'qwen/qwen3.8-flash-next', display_name: 'Qwen3.8-Flash-Next',
-			context_length: 32768, size_bytes: 16 * 1024 ** 3,
-			// The API's existing unusable-reason display seam carries the measured speed line in this proof.
-			unusable_reason: '16 GB · 32K context · 52 tokens/s',
-		}] };
-	}
-	return { loaded: [], available: [] };
+			context_length: 32768, size_bytes: 16 * 1024 ** 3, quantization: '4-bit',
+			unusable_reason: state === 'complete' ? '32K context · 4-bit · 16 GB · 52 tokens/s' : undefined,
+		}],
+	};
 }
 
 async function fixtureLocalModelState(page: Page, state: RenderState) {
@@ -55,7 +63,7 @@ async function fixtureLocalModelState(page: Page, state: RenderState) {
 	await page.route('**/api/system/host-resources?**', async (route) => {
 		await route.fulfill({ json: {
 			device_name: 'This Mac', total_gb: state === 'under-24gb' ? 16 : 64,
-			free_gb: 120, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 100,
+			free_gb: state === 'under-24gb' ? 10 : 34, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 8,
 			safe_reserve_gb: 8, by_provider: {},
 		} });
 	});
@@ -111,18 +119,21 @@ test('renders the approved local-model evidence states from intercepted fixtures
 				const card = await openLocalProvider(page);
 				if (state === 'recommendations') {
 					await card.getByRole('button', { name: 'Add model', exact: true }).click();
-					const sheet = page.locator('.modal').filter({ hasText: 'Add local model' });
-					await expect(sheet).toContainText('Qwen3.8-Flash-Next');
-					await expect(sheet).toContainText('Not enough free disk space');
+					const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
+					await expect(sheet).toContainText('Picked for this Mac · 64 GB · 20 GB disk free');
+					await expect(sheet).toContainText('Recommended');
+					await expect(sheet).toContainText('Needs 31 GB of disk');
 				} else if (state === 'downloading') {
-					await expect(card).toContainText('Downloading Qwen3.8-Flash-Next · 63%');
+					await expect(card).toContainText('Downloading 40%');
 					await expect(card.getByRole('button', { name: 'Cancel' })).toBeVisible();
 				} else if (state === 'complete') {
-					await expect(card).toContainText('52 tokens/s');
+					await expect(card).toContainText('32K context · 4-bit · 16 GB · 52 tokens/s');
+					await expect(card).toContainText('Settings measured on Macs like this one · omlx.ai');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toBeVisible();
 				} else {
 					await expect(page.getByText('16 GB memory', { exact: true })).toBeVisible();
-					await expect(card).toContainText('This computer doesn’t have enough memory to run a local model, so pick at least one above.');
+					await expect(card).toContainText('This computer doesn’t have enough memory to run a local model. Connect a subscription or an API key instead.');
+					await expect(card).not.toContainText('No models yet.');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
 					await expect(card.getByRole('button', { name: 'Add provider', exact: true })).toBeVisible();
 				}

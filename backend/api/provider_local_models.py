@@ -12,7 +12,7 @@ from infra.db_async import run_in_db
 from llm import local_downloads, local_setup_operation
 from llm.local_model import OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, omlx_has_recommender
 from llm.local_setup_auth import omlx_version
-from llm.local_setup_gates import local_memory_ok
+from llm.local_setup_gates import host_ram_bytes, local_memory_ok
 from llm.local_setup_download import download_dir
 from llm.local_setup_ownership import download_disk_space
 from llm.network_discovery import get_servers
@@ -51,10 +51,18 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
         return {**model.view(), "disk": space}
 
+    views = {name: [model_view(model) for model in models] for name, models in sections.items()}
+    disk_free_bytes = next(
+        (item["disk"].get("free_bytes") for models in views.values() for item in models
+         if isinstance(item["disk"].get("free_bytes"), int)),
+        None,
+    )
     return {
         "state": "ready",
-        "sections": {name: [model_view(model) for model in models] for name, models in sections.items()},
+        "sections": views,
         "downloads": downloads,
+        "memory_gb": round(host_ram_bytes() / 1024**3),
+        "disk_free_gb": round(disk_free_bytes / 1024**3) if isinstance(disk_free_bytes, int) else None,
     }, sections
 
 

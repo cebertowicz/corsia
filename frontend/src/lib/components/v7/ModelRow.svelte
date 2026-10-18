@@ -15,6 +15,8 @@
 		progress?: number;
 		/** Short line under the row, e.g. why the model is missing from the chat picker. */
 		warning?: string | null;
+		/** Muted model metadata that should sit below the primary row details. */
+		note?: string | null;
 		onToggle?: () => void;
 		onInfo?: () => void;
 		onCancel?: () => void;
@@ -32,6 +34,7 @@
 		toggleLabels = ['Unload', 'Load'],
 		progress = 0,
 		warning = null,
+		note = null,
 		onToggle,
 		onInfo,
 		onCancel,
@@ -65,7 +68,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
-<div class="mr {rowClass}" class:has-warn={!!warning} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
+<div class="mr {rowClass}" class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
 		{#if state === 'loading' || state === 'cache_warming'}
 			<span class="puck" class:warming={state === 'cache_warming'}>
@@ -119,6 +122,8 @@
 
 	{#if warning}
 		<span class="warn" role="status">{warning}</span>
+	{:else if note}
+		<span class="note">{note}</span>
 	{/if}
 </div>
 
@@ -230,6 +235,7 @@
 	.meta.loading { color: var(--amber); font-weight: 500; }
 	.meta.warming { color: var(--sky); font-weight: 500; }
 	.meta.error   { color: var(--red); font-weight: 500; }
+	.note { grid-area: warn; color: var(--text-tertiary); font-size: var(--text-footnote); }
 
 	.caps { display: flex; gap: 4px; align-items: center; }
 
