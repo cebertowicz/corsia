@@ -26,6 +26,9 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
     if internal_event not in REVIEWER_EVENTS:
         return
 
+    if internal_event == "webhook.github.pr_synchronize":
+        _clear_review_label_on_fork_sync(payload)
+
     if guard.is_bot_or_self_authored(payload):
         author = payload.get("sender") or {}
         logger.info(
@@ -53,6 +56,31 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
         pr_number,
         (head_sha or "?")[:8],
     )
+
+
+def _clear_review_label_on_fork_sync(payload: dict[str, Any]) -> None:
+    """Retract a prior fork approval when a synchronize payload names a new head."""
+    pr = payload.get("pull_request") or {}
+    repo = (payload.get("repository") or {}).get("full_name")
+    pr_number = pr.get("number")
+    head_repo = (pr.get("head") or {}).get("repo") or {}
+    head_repo_name = head_repo.get("full_name") if isinstance(head_repo, dict) else None
+    base_repo = (pr.get("base") or {}).get("repo") or {}
+    base_repo_name = base_repo.get("full_name") if isinstance(base_repo, dict) else None
+    if not base_repo_name:
+        base_repo_name = repo
+    is_fork = (
+        not isinstance(head_repo_name, str)
+        or not head_repo_name
+        or not isinstance(base_repo_name, str)
+        or not base_repo_name
+        or head_repo_name.casefold() != base_repo_name.casefold()
+    )
+    if not is_fork or not isinstance(repo, str) or not repo or not isinstance(pr_number, int) or pr_number <= 0:
+        return
+    from reviewer.gh_helpers import remove_review_label
+
+    remove_review_label(repo, pr_number)
 
 
 def check_gate_on_trigger(
@@ -172,7 +200,7 @@ def _check_label_event(
     """Treat the review label as a request to approve the head named in the payload.
 
     The label is only the trigger: the fork hold approves the head the label
-    was added on, and only for a sender with write access.
+    was added on. GitHub only delivers the event after a maintainer applies it.
     """
     from reviewer.reviewer_categories import LABEL_REVIEW
 
@@ -187,13 +215,22 @@ def _check_label_event(
     if (payload.get("label") or {}).get("name") != LABEL_REVIEW:
         return True
 
-    from events.connectors.github_reviewer_fork_hold import approve_labeled_head, payload_is_fork
+    from events.connectors import github_reviewer_gate
+    from events.reviewer_fork_hold import approve_labeled_fork_head, is_fork_pr_info
+    from events.reviewer_gate import on_pull_request_ready_for_review
 
-    if not payload_is_fork(payload):
+    pr_info = github_reviewer_gate.fetch_pr_info(repo, pr_number)
+    if pr_info is None:
+        emit_product_event(
+            "reviewer_gate", "label_pr_info_unreadable",
+            properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]},
+        )
         return True
-    approve_labeled_head(
+    if not is_fork_pr_info(pr_info):
+        return True
+    approve_labeled_fork_head(
         repo, pr_number, head_sha, (payload.get("sender") or {}).get("login"),
-        internal_event, loop,
+        internal_event, loop, pr_info, on_pull_request_ready_for_review,
     )
     return True
 

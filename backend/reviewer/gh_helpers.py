@@ -21,6 +21,7 @@ STATUS_WRITE_STAMP = re.compile(
 )
 
 
+
 def _run_gh(
     args: list[str],
     timeout: float = _GH_TIMEOUT_S,
@@ -338,3 +339,53 @@ def repo_full_name(repo: Any) -> str | None:
     """Return one PR side's ``owner/name``, or None when GitHub gives no repository."""
     name = repo.get("full_name") if isinstance(repo, dict) else None
     return name if isinstance(name, str) and name else None
+
+
+
+def remove_review_label(repo: str, pr_number: int) -> bool:
+    """Remove the consumed review label; an already-absent label is consumed."""
+    from reviewer.reviewer_categories import LABEL_REVIEW
+
+    try:
+        result = run_gh(
+            ["api", "-X", "DELETE", f"repos/{repo}/issues/{pr_number}/labels/{LABEL_REVIEW}"],
+            timeout=_GH_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("reviewer gate: removing review label from %s#%d did not run: %s", repo, pr_number, exc)
+        return False
+    if result.returncode != 0 and "404" not in (result.stderr or ""):
+        log.warning(
+            "reviewer gate: removing review label from %s#%d exited %d: %s",
+            repo, pr_number, result.returncode, (result.stderr or "")[:200],
+        )
+        return False
+    return True
+
+
+def approve_action_required_workflow_runs(repo: str, head_sha: str) -> bool:
+    """Approve every action-required Actions run for one exact fork head.
+
+    GitHub requires a read of ``GET /actions/runs`` before the documented
+    per-run ``POST /approve`` transition. A failed read or approval leaves the
+    review label unapproved so a maintainer can retry by adding it again.
+    """
+    out = _run_gh(
+        [
+            "api", "--method", "GET", f"repos/{repo}/actions/runs",
+            "-f", f"head_sha={head_sha}", "-f", "status=action_required",
+            "--paginate", "--jq", ".workflow_runs[].id",
+        ],
+    )
+    if out is None:
+        return False
+    run_ids = [line.strip() for line in out.splitlines() if line.strip()]
+    if any(not run_id.isdecimal() for run_id in run_ids):
+        log.warning("reviewer gate: invalid Actions run id while approving %s@%s", repo, head_sha[:8])
+        return False
+    for run_id in run_ids:
+        if _run_gh(
+            ["api", "--method", "POST", f"repos/{repo}/actions/runs/{run_id}/approve"],
+        ) is None:
+            return False
+    return True

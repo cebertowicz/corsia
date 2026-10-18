@@ -8,8 +8,8 @@ from typing import Any
 
 from loguru import logger as log
 
-from events.connectors import github_reviewer_fork_hold, github_reviewer_gate, github_reviewer_notifications
-from events import reviewer_gate_retry_log, reviewer_gate_state
+from events.connectors import github_reviewer_gate, github_reviewer_notifications
+from events import reviewer_fork_hold, reviewer_gate_retry_log, reviewer_gate_state
 from infra.product_events import emit_product_event
 
 
@@ -130,6 +130,7 @@ def _presence_unpublished(repo: str, pr_number: int, head_sha: str, reason: str,
     github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
 
 
+
 def on_check_suite_completed(
     repo: str,
     head_sha: str,
@@ -149,7 +150,7 @@ def on_check_suite_completed(
             pr_number, head_sha[:8], conclusion,
         )
         if conclusion == "action_required":
-            github_reviewer_fork_hold.hold_runs_awaiting_approval(repo, pr_number, head_sha)
+            reviewer_fork_hold.hold_fork_runs_awaiting_approval(repo, pr_number, head_sha)
         return
 
     _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop)
@@ -161,13 +162,14 @@ def on_pull_request_ready_for_review(
     pr_number: int,
     internal_event: str,
     loop: asyncio.AbstractEventLoop | None = None,
+    pr_info: dict[str, Any] | None = None,
 ) -> None:
     """Re-evaluate the gate when a draft PR becomes ready or a fork head is approved."""
     if not pr_number or not repo or not head_sha:
         log.debug("reviewer-gate: ready event missing required fields, skipping")
         return
 
-    _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop)
+    _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop, pr_info=pr_info)
 
 
 def _evaluate_review_gate(
@@ -177,6 +179,7 @@ def _evaluate_review_gate(
     internal_event: str,
     loop: asyncio.AbstractEventLoop | None,
     mergeability_retry_attempt: int = 0,
+    pr_info: dict[str, Any] | None = None,
 ) -> None:
     pr_key = reviewer_gate_state.pr_key(repo, pr_number)
     if reviewer_gate_state.get_reviewed_sha(pr_key) == head_sha:
@@ -219,6 +222,7 @@ def _evaluate_review_gate(
         internal_event,
         loop,
         mergeability_retry_attempt,
+        pr_info,
     )
 
 
@@ -229,9 +233,11 @@ def _evaluate_ready_pr(
     internal_event: str,
     loop: asyncio.AbstractEventLoop | None = None,
     mergeability_retry_attempt: int = 0,
+    pr_info: dict[str, Any] | None = None,
 ) -> None:
     """Run the reviewer for a checks-green, non-draft PR."""
-    pr_info = github_reviewer_gate.fetch_pr_info_awaiting_mergeability(repo, pr_number, head_sha)
+    if pr_info is None:
+        pr_info = github_reviewer_gate.fetch_pr_info_awaiting_mergeability(repo, pr_number, head_sha)
     if pr_info is None:
         _report_pr_info_unreadable(repo, pr_number, head_sha, loop)
         return
@@ -253,7 +259,7 @@ def _evaluate_ready_pr(
             return
         _report_mergeability_unresolved(repo, pr_number, head_sha, loop)
         return
-    if github_reviewer_fork_hold.holds_review(repo, pr_number, head_sha, pr_info):
+    if reviewer_fork_hold.holds_fork_review(repo, pr_number, head_sha, pr_info):
         return
     if github_reviewer_gate.hold_pr_until_reviewable(repo, pr_number, head_sha, pr_info):
         return
