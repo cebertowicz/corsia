@@ -264,9 +264,10 @@ def scan(roots: Roots, tools: list[str], workspace: Path) -> list[Candidate]:
 
 
 def offer(row: Candidate) -> dict:
-    """What the agent sees of one skill: never its body."""
+    """What the agent sees of one skill: never its body, and a description only for a new one,
+    so a held-back skill's text (a key in its description included) never reaches it."""
     scripts = sum(1 for name in row.files if name != "SKILL.md" and Path(name).suffix in SCRIPT_SUFFIXES)
-    return {"item_id": row.item_id, "name": row.name, "description": row.description,
+    return {"item_id": row.item_id, "name": row.name, "description": row.description if row.state == NEW else "",
             "tools": row.tools, "scripts": scripts, "state": row.state}
 
 
