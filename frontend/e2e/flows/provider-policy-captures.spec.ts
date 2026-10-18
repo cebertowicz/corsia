@@ -248,7 +248,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 		test.setTimeout(120_000);
 		let accounts = vendorAccounts();
 		let policy = policyFor('W1');
-		let mode: 'success' | 'error' | 'busy' = 'success';
+		let saveAttempt = 0;
 		let releaseBusy: (() => void) | null = null;
 		await serveHarnessCatalog(page);
 		await page.route('**/api/vendor-accounts**', async (route) => {
@@ -263,11 +263,12 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 				return;
 			}
 			if (request.method() === 'PUT') {
-				if (mode === 'busy') await new Promise<void>((resolve) => { releaseBusy = resolve; });
-				if (mode === 'error') {
+				saveAttempt += 1;
+				if (saveAttempt % 2 === 1) {
 					await route.fulfill({ status: 500, json: { detail: 'Could not save subscriptions.' } });
 					return;
 				}
+				await new Promise<void>((resolve) => { releaseBusy = resolve; });
 				const provider = policy.providers.find((entry) => pathname.endsWith(entry.provider_key));
 				await route.fulfill({ json: provider ?? policy });
 				return;
@@ -293,14 +294,21 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			policy = { ...policyFor('W1'), overriding_projects: ['Atlas migration', 'Field notes', 'Release operations', 'Research notebook', 'Customer support'].map((name, index) => ({ id: `project-${index}`, name })) };
 			let modal = await openWorkspace(surface);
 			await expect(modal.getByText('Overridden in 5 projects:')).toBeVisible();
+			await expect(modal.getByRole('button', { name: 'Move Personal account with an intentionally long display name for narrow layouts · sam@example.com up' })).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`long-name-five-projects-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			accounts = vendorAccounts();
+			policy = { ...policyFor('W1'), providers: policyFor('W1').providers.map((provider) => provider.provider_key === 'claude-code' ? { ...provider, rollover: false, order: null } : provider) };
+			modal = await openWorkspace(surface);
+			await expect(modal.getByRole('button', { name: /Move Personal Max/ })).toHaveCount(0);
+			await page.screenshot({ path: testInfo.outputPath(`rollover-off-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			accounts = vendorAccounts().map((account, index) => index === 0
 				? { ...account, usage: { ...account.usage, state: 'limited', usable: false, resets_at: '2026-10-19T00:00:00Z' } }
 				: index === 1 ? { ...account, usage: { ...account.usage, windows: [{ kind: 'five_hour', state: 'unknown', used_percent: null, window_minutes: 300 }] } } : account);
 			policy = policyFor('W1');
 			modal = await openWorkspace(surface);
-			await expect(modal.getByText(/limited/i).first()).toBeVisible();
+			await expect(modal.getByText(/Usage limit reached/).first()).toBeVisible();
 			await expect(modal.getByText(/usage unknown/i)).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`limited-unknown-${surface}.png`), animations: 'disabled', scale: 'css' });
 
@@ -310,13 +318,12 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.screenshot({ path: testInfo.outputPath(`managed-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			accounts = vendorAccounts();
-			mode = 'error';
+			saveAttempt = 0;
 			modal = await openWorkspace(surface);
 			await modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true }).click();
 			await expect(modal.getByText('Could not save subscriptions.')).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
 
-			mode = 'busy';
 			modal = await openWorkspace(surface);
 			const toggle = modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true });
 			await toggle.click();
@@ -324,7 +331,6 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.screenshot({ path: testInfo.outputPath(`busy-${surface}.png`), animations: 'disabled', scale: 'css' });
 			releaseBusy?.();
 			await expect(toggle).toBeEnabled();
-			mode = 'success';
 		}
 	});
 });

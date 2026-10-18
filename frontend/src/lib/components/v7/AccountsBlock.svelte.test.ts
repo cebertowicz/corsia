@@ -82,6 +82,22 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
+		it('keeps a failed workspace policy save visible in the Accounts tab', async () => {
+			token.set('test-token');
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'Could not save subscriptions.' }, 500));
+				return path.startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] }))
+					: Promise.resolve(response({ accounts: [defaultAccount] }));
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
+			document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!.click();
+			await vi.waitFor(() => expect(document.body.textContent).toContain('Could not save subscriptions.'));
+			unmount(component);
+		});
+
 		it('renders limit, checking, and verification messages independently for every usage state', async () => {
 			const cases = [
 				[{ state: 'unknown', usable: false, resets_at: null, windows: [], checking: true, check: null }, ['Checking account…']],

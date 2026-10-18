@@ -53,6 +53,7 @@
 		];
 	});
 	const policyState = createProviderPolicyState();
+	const policyError = $derived(policyState.error);
 	const policyProvider = $derived(policyState.policy?.providers.find((entry) => entry.provider_key === provider.name));
 	const overridingProjects = $derived(policyState.policy?.overriding_projects ?? []);
 	let signin = $state<Record<string, SigninResult>>({});
@@ -268,7 +269,7 @@
 
 <div class="account-manager">
 {#if !showRows && accounts.length === 1}<OverageSwitch account={accounts[0]} />{/if}
-{#if actionError}<Message variant="err">{actionError}</Message>{/if}
+{#if actionError || policyError}<Message variant="err">{actionError || policyError}</Message>{/if}
 
 <div class="accounts" aria-label={`${provider.label} accounts`}>
 	{#if !showRows}
