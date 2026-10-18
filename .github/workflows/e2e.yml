@@ -145,6 +145,8 @@ jobs:
           mkdir -p /tmp/abdiag-www && echo '<title>probe</title>ok' > /tmp/abdiag-www/index.html
           python3 -m http.server 38999 --bind 127.0.0.1 --directory /tmp/abdiag-www > /dev/null 2>&1 &
           sleep 1
+          # The backend's own daemon and browser at failure time: running or not, and with which arguments.
+          ps -eo pid,etime,args | grep -E 'agent-browser|chrome' | grep -v grep | cut -c1-300 >> "$out/summary.txt" || true
           probe stock about:blank FOO=1
           probe sandboxed about:blank -u CI
           probe http http://127.0.0.1:38999/index.html FOO=1
@@ -160,6 +162,18 @@ jobs:
         with:
           name: browser-diagnostics-${{ matrix.run-index }}
           path: ${{ runner.temp }}/browser-diag
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload browser-pane trace
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-pane-trace-${{ matrix.run-index }}
+          path: |
+            frontend/test-results/*browser-pane*/trace.zip
+            frontend/test-results/*browser-pane*/error-context.md
           if-no-files-found: ignore
           retention-days: 7
 
