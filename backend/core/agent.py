@@ -140,21 +140,18 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
 
 
 def _register_project_creation_tools(agent: CORSIAAgent) -> None:
-    """Register project creation and consent-gated local project discovery."""
+    """Register project creation and the consent-gated reads of the person's other tools.
+
+    The registry is shared by every thread, so ``agent_import`` refuses at call
+    time anyone but the CORSIA agent and a first-run thread.
+    """
+    from tools.agent_import import AgentImportTool
     from tools.project_discovery import ProjectDiscoveryListTool
     from tools.projects import CreateProjectTool
 
     agent.tools.register(CreateProjectTool())
     agent.tools.register(ProjectDiscoveryListTool())
-
-
-def _register_project_creation_tools(agent: CORSIAAgent) -> None:
-    """Register project creation and consent-gated local project discovery."""
-    from tools.project_discovery import ProjectDiscoveryListTool
-    from tools.projects import CreateProjectTool
-
-    agent.tools.register(CreateProjectTool())
-    agent.tools.register(ProjectDiscoveryListTool())
+    agent.tools.register(AgentImportTool())
 
 
 def _register_access_tools(agent: CORSIAAgent) -> None:

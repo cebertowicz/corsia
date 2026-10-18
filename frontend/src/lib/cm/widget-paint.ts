@@ -1,5 +1,5 @@
 import { cellElement } from './widget-blocks';
-import { clean, occurrences, tableCells } from './widget-cells';
+import { clean, intersectsCell, occurrences, tableCells } from './widget-cells';
 
 export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending' }
 
@@ -66,7 +66,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 			addCommentId(el, mark);
 			continue;
 		}
-		const hit = cells.filter((span) => span.from < to && span.to > from);
+		const hit = cells.filter((span) => intersectsCell(span, from, to));
 		for (const span of hit) {
 			const cell = cellElement(el, span);
 			if (!cell) continue;
