@@ -85,7 +85,7 @@ def test_invalid_origin_reaches_the_existing_not_loaded_error_block(tmp_path, mo
     ("origin:\n  source: claude-code:~/.claude/skills/imported\n  adopted_at: 2026-10-18T12:00:00Z\n", "sha256"),
     ("origin:\n  source: claude-code:~/.claude/skills/imported\n  sha256: " + "a" * 64 + "\n", "adopted_at"),
     (VALID_ORIGIN.replace("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "not-a-digest"), "sha256"),
-    (VALID_ORIGIN.replace("claude-code:~/.claude/skills/imported", "/Users/person/skill"), "source"),
+    (VALID_ORIGIN.replace("claude-code:~/.claude/skills/imported", "/Users/example/skill"), "source"),
 ])
 def test_invalid_origin_fields_are_validation_errors(sidecar: str, field: str):
     result = _validate(sidecar)
