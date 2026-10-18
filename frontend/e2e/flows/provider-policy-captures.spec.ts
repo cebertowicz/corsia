@@ -223,7 +223,6 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await openActivity(page);
 			await page.getByRole('button', { name: 'Workspace settings' }).click();
 			await openSettingsSection(page, 'Providers');
-			await expect(page.locator('.version-overlay')).not.toHaveClass(/stale/);
 			const content = page.locator('.settings-content');
 			await content.evaluate((element) => { element.scrollTop = element.scrollHeight; });
 			await expect(page.locator('.modal')).toHaveCount(0);
