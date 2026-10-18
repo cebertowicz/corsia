@@ -892,8 +892,8 @@ field (a comment composer). A control whose own wrapper is a `<label>` (the
 decision drawer's Other and Note fields) cannot nest in Field: give it
 `class="text-field"` and import `text-field.css`. Those two have no row of their
 own: the field spans the option width, a hidden label names it, and a chosen
-Other takes the selected-option mark (`--accent` border, `--accent-wash` fill) on
-the field itself; the pick-any Note never does. Multi-line fields use the
+Other takes the selected-option border (`--accent`) on the field itself, with no
+fill, so its background stays the chat composer's; the pick-any Note never does. Multi-line fields use the
 `autosize` action.
 
 Native chrome stripped from selects (custom chevron data-URI inside

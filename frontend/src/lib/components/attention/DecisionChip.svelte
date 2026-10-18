@@ -347,8 +347,8 @@
 	/* The Other and Note fields carry no row of their own: the field spans the option width and is named by its hidden label. */
 	.other-option { display: block; }
 	.sr-only { position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-	/* Other, once chosen, takes the selected-option mark on the field itself; the pick-any Note is never a choice. */
-	.text-field.selected { border-color: var(--accent); background: var(--accent-wash); }
+	/* Other, once chosen, takes the selected-option border on the field itself, with the chat composer's background; the pick-any Note is never a choice. */
+	.text-field.selected { border-color: var(--accent); }
 	.decision-buttons { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--bg-secondary); color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.receipt { flex: 1; min-width: 0; margin: 0; }
