@@ -115,6 +115,9 @@ jobs:
             # ...and a sampler records who is waiting on whom: the client, its daemon, Chrome and their sockets.
             mkdir -p "$RUNNER_TEMP/browser-diag"
             python3 -m pip install --quiet --user py-spy
+            # SIGUSR1 to the backend then writes every pending asyncio task's stack (.github/diag/sitecustomize.py).
+            export CORSIA_DIAG_TASKS_FILE="$RUNNER_TEMP/browser-diag/asyncio-tasks.txt"
+            export PYTHONPATH="$PWD/.github/diag${PYTHONPATH:+:$PYTHONPATH}"
             (
               while true; do
                 {
@@ -131,6 +134,7 @@ jobs:
                   # Worker threads and the loop's current frame show whether the backend is stuck in Python or idle.
                   if api=$(pgrep -f '^/.*python -m uvicorn e2e_app' | head -n 1) && pgrep -f 'agent-browser-linux-x64' > /dev/null; then
                     sudo "$HOME/.local/bin/py-spy" dump --nonblocking --pid "$api" 2>&1 | cut -c1-200
+                    kill -USR1 "$api" || true
                   fi
                 } >> "$RUNNER_TEMP/browser-diag/sampler.txt" 2>&1
                 sleep 3
