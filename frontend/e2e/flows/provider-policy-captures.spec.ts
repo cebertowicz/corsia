@@ -75,7 +75,14 @@ function policyFor(screen: ScreenId) {
 	};
 }
 
+async function serveHarnessCatalog(page: Page) {
+	const model = { id: 'claude-code/sonnet', connection: 'claude-code', provider: 'claude-code', status: 'ready', available: true, backend: 'network' };
+	await page.route('**/api/settings/models**', (route) => route.fulfill({ json: { models: [{ ...model, enabled: 1 }] } }));
+	await page.route('**/api/models**', (route) => route.fulfill({ json: { models: [model] } }));
+}
+
 async function servePolicyStates(page: Page, state: { screen: ScreenId }) {
+	await serveHarnessCatalog(page);
 	await page.route('**/api/vendor-accounts**', async (route) => {
 		if (route.request().method() === 'GET') await route.fulfill({ json: { accounts: vendorAccounts() } });
 		else await route.continue();
@@ -182,6 +189,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 		test.setTimeout(120_000);
 		let policy = policyFor('W1');
 		let saves = 0;
+		await serveHarnessCatalog(page);
 		await page.route('**/api/vendor-accounts**', async (route) => {
 			if (route.request().method() === 'GET') await route.fulfill({ json: { accounts: vendorAccounts() } });
 			else await route.continue();
