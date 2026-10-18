@@ -318,7 +318,7 @@
 		{#if windowed}
 			<!-- Windowed above WINDOW_THRESHOLD rows: only the rows near the viewport (and any row that must
 			     stay mounted) are in the DOM; gaps stand in for the rest. A list of list items so each can
-			     announce its place (WAI-ARIA APG feed pattern: aria-posinset / aria-setsize over a partial set). -->
+			     announce its place (WAI-ARIA 1.2: listitem supports aria-posinset / aria-setsize over a partial set). -->
 			<div
 				class="scope-pane"
 				role="list"
