@@ -15,7 +15,7 @@ from registry import models, registration_events, registration_writer
 from registry.cc_session import notify_cc_session, persist_cc_session
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
-from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
+from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES, written_row
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
@@ -304,9 +304,9 @@ def register_write_strict(
             metadata=artifact_metadata, origin=origin,
             db=_db,
         )
-        merge_identity_metadata(_db, (artifact or existing)["id"], artifact_metadata)
-        current = models.get_artifact((artifact or existing)["id"], db=_db) or artifact
-        artifact = current if artifact else current and {**current, "parent_thread_id": None}
+        artifact_id = (artifact or existing)["id"]
+        merge_identity_metadata(_db, artifact_id, artifact_metadata)
+        artifact = written_row(_db, artifact_id, thread_id)
         if existing is not None:
             from registry.review_edit_journal import journal_reviewed_edit
             journal_reviewed_edit(
@@ -315,7 +315,7 @@ def register_write_strict(
                 actor_thread_id=thread_id if actor_thread_id is None else actor_thread_id,
             )
     if origin is not None and (db is None or not db.in_transaction):
-        emit_committed_origin(db, existing["id"] if existing else artifact["id"], thread_id)
+        emit_committed_origin(db, artifact_id, thread_id)
     if notify:
         notify_changed(artifact)
     return artifact

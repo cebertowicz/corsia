@@ -37,6 +37,10 @@ def _registration_state(db, artifact_id, thread_id):
     return dict(row) if row else None
 
 
+def _written_view(row):
+    return row["parent_thread_id"], row["state"], row["relationship_state"]
+
+
 async def _register(path, thread_id):
     from tools.artifacts import ArtifactRegisterTool
 
@@ -91,9 +95,10 @@ async def test_released_working_document_registration_keeps_it_ownerless(
 
     assert comment["artifact_id"] == registered["id"]
     assert re_registered["id"] == registered["id"]
-    # The reader projects the former owner onto a released file; a write must
-    # not report that projection as the current owner.
-    assert re_registered["parent_thread_id"] is None
+    # Readers project the former owner onto a released file as archived; a
+    # write reports the writer's own active subscriber registration instead.
+    assert models.get_artifact(registered["id"])["state"] == "archived"
+    assert _written_view(re_registered) == (former_owner, "active", "subscriber-recent")
     for requester in (former_owner, commenter):
         api = integration_client.post(
             f"/api/artifacts/register?token={_OWNER}",
@@ -106,7 +111,9 @@ async def test_released_working_document_registration_keeps_it_ownerless(
             },
         )
         assert api.status_code == 200, api.text
-        assert api.json()["artifact"]["parent_thread_id"] is None
+        assert _written_view(api.json()["artifact"]) == (
+            requester, "active", "subscriber-recent"
+        )
         assert api.json()["ownership"] == {
             "ownership_changed": False,
             "conflict": False,
