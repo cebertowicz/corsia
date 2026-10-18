@@ -150,6 +150,26 @@ jobs:
           probe stock about:blank FOO=1
           probe sandboxed about:blank -u CI
           probe http http://127.0.0.1:38999/index.html FOO=1
+          # The backend reads the client's stdout and stderr through pipes: does the client return then?
+          python3 - >> "$out/summary.txt" 2>&1 <<'PY'
+          import os, subprocess, time
+          url = "http://127.0.0.1:38999/index.html"
+          for label, stdin in (("pipes-stdin-null", subprocess.DEVNULL), ("pipes-stdin-inherited", None)):
+              sock = f"/tmp/abdiag-{label}"
+              os.makedirs(sock, mode=0o700, exist_ok=True)
+              env = {**os.environ, "AGENT_BROWSER_SOCKET_DIR": sock}
+              for name in ("AGENT_BROWSER_DAEMON", "AGENT_BROWSER_DASHBOARD", "AGENT_BROWSER_SESSION"):
+                  env.pop(name, None)
+              base = ["agent-browser", "--session", f"diag-{label}"]
+              started = time.time()
+              try:
+                  done = subprocess.run([*base, "--executable-path", os.environ["AGENT_BROWSER_EXECUTABLE_PATH"], "--json", "open", url],
+                                        stdin=stdin, capture_output=True, env=env, timeout=20)
+                  print(f"--- {label}: returned rc={done.returncode} after {time.time() - started:.1f}s {done.stdout[:160]!r}")
+              except subprocess.TimeoutExpired:
+                  print(f"--- {label}: still not returned after 20s with piped output")
+              subprocess.run([*base, "--json", "close"], env=env, timeout=30, capture_output=True, check=False)
+          PY
           kill %1 2>/dev/null || true
           # The backend's own session sockets and daemon sidecars (never the sockets themselves).
           find /tmp -maxdepth 2 -regextype posix-extended -regex '/tmp/[0-9a-f]{16}-[0-9a-f]{24}(/.*)?' -type f -exec cp --parents {} "$out" \; 2>/dev/null || true
