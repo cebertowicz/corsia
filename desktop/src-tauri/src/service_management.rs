@@ -354,15 +354,22 @@ pub fn ensure_service_registered(
         // SMAppService reports NotFound for an agent that was never registered for this
         // user, so only register() can tell whether the bundle really lacks it. A failure
         // after which macOS still finds no agent keeps that cause's own sentence, with
-        // macOS's text in the log; any other failure is reported like NotRegistered's.
+        // macOS's text in the log; any other failure is reported like NotRegistered's,
+        // including one after which the status cannot be read.
         ServiceStatus::NotFound => {
             refuse_foreign_corsia_job(reader, executable)?;
             if let Err(error) = manager.register() {
-                if manager.status()? != ServiceStatus::NotFound {
-                    return Err(error);
-                }
-                log::error!("registering the CORSIA service it reported as not found failed: {error}");
-                return Ok(ServiceStatus::NotFound);
+                return match manager.status() {
+                    Ok(ServiceStatus::NotFound) => {
+                        log::error!("registering the CORSIA service it reported as not found failed: {error}");
+                        Ok(ServiceStatus::NotFound)
+                    }
+                    Ok(_) => Err(error),
+                    Err(status_error) => {
+                        log::error!("could not read the CORSIA service status after its registration failed: {status_error}");
+                        Err(error)
+                    }
+                };
             }
             manager.status()
         }
@@ -529,6 +536,7 @@ mod tests {
         unregistrations: Cell<u8>,
         unregister_error: Cell<Option<&'static str>>,
         register_error: Cell<Option<&'static str>>,
+        status_lost_on_register: Cell<bool>,
     }
 
     impl ServiceManager for FakeManager {
@@ -539,6 +547,9 @@ mod tests {
             self.registrations.set(self.registrations.get() + 1);
             if let Some(status) = self.registered_status.get() {
                 self.status.set(Some(status));
+            }
+            if self.status_lost_on_register.get() {
+                self.status.set(None);
             }
             if let Some(error) = self.register_error.get() {
                 return Err(error.into());
@@ -826,6 +837,16 @@ mod tests {
         refused.register_error.set(Some("Operation not permitted"));
         assert_eq!(
             ensure_unlocked_service_registered(&refused, &reader, &executable),
+            Err("Operation not permitted".into())
+        );
+
+        // The status cannot be read after the failure: the registration's own error is what failed.
+        let unreadable = FakeManager::default();
+        unreadable.status.set(Some(ServiceStatus::NotFound));
+        unreadable.status_lost_on_register.set(true);
+        unreadable.register_error.set(Some("Operation not permitted"));
+        assert_eq!(
+            ensure_unlocked_service_registered(&unreadable, &reader, &executable),
             Err("Operation not permitted".into())
         );
     }

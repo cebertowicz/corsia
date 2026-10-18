@@ -694,6 +694,14 @@ fn local_start_began<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app.state::<RemoteRuntime>().connection.lock().unwrap_or_else(PoisonError::into_inner).local_start_began();
 }
 
+/// A start the window ran answered. Its page draws the answer; a Ready answer also ends a kept failure.
+fn local_start_answered<R: tauri::Runtime, E>(app: &tauri::AppHandle<R>, answer: Result<ServiceStartup, E>) -> Result<ServiceStartup, E> {
+    if matches!(answer, Ok(ServiceStartup::Ready { .. })) {
+        report_remote_state(app, remote::RemoteConnection::service_recovered);
+    }
+    answer
+}
+
 /// Records a state the shell cannot act on. The state is already stored when drawing it fails, and the next page
 /// load draws it, so the failure is logged and never dropped.
 fn report_remote_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>, update: impl FnOnce(&mut remote::RemoteConnection)) {
@@ -1189,7 +1197,8 @@ fn quit_after_adoption(quit_asked: bool, adopted: &Result<(), adoption::Adoption
 #[tauri::command]
 async fn adopt_existing_install(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
     local_start_began(&app);
-    off_main_thread(move || adopt_existing_install_blocking(&app)).await
+    let adopting = app.clone();
+    local_start_answered(&app, off_main_thread(move || adopt_existing_install_blocking(&adopting)).await)
 }
 
 fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
@@ -1314,14 +1323,16 @@ fn reopen_app(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
     local_start_began(&app);
-    off_main_thread(move || {
-        let service = app.state::<AppServiceState>();
-        let app_dir = default_app_dir(&app).map_err(adoption::AdoptionError::switched)?;
-        let port = lifecycle::service_port(&app, &service);
+    let checking = app.clone();
+    let answer = off_main_thread(move || {
+        let service = checking.state::<AppServiceState>();
+        let app_dir = default_app_dir(&checking).map_err(adoption::AdoptionError::switched)?;
+        let port = lifecycle::service_port(&checking, &service);
         wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
         Ok(ServiceStartup::Ready { url: service_url(port) })
     })
-    .await
+    .await;
+    local_start_answered(&app, answer)
 }
 
 #[tauri::command]
@@ -1330,12 +1341,13 @@ async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, St
     // so it never runs on the thread that handles the window's events.
     local_start_began(&app);
     let started_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let answer = tauri::async_runtime::spawn_blocking(move || {
         let service = started_app.state::<AppServiceState>();
         start_service(&started_app, &service)
     })
     .await
-    .map_err(|error| format!("starting CORSIA did not finish: {error}"))?
+    .map_err(|error| format!("starting CORSIA did not finish: {error}"))?;
+    local_start_answered(&app, answer)
 }
 
 #[tauri::command]
@@ -2007,14 +2019,28 @@ mod tests {
 
     #[test]
     fn a_start_the_window_runs_clears_the_launch_answer_so_a_reload_shows_no_stale_offer() {
-        for answer in [Err("did not start".to_string()), Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() })] {
-            let app = launch_app();
-            show_launch_outcome(app.handle(), &answer);
-            assert!(shell_state_script(&launch_state(&app)).is_some());
-            local_start_began(app.handle());
-            assert_eq!(launch_state(&app), remote::LaunchState::Local);
-            assert_eq!(shell_state_script(&launch_state(&app)), None);
-        }
+        let app = launch_app();
+        show_launch_outcome(app.handle(), &Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() }));
+        assert!(shell_state_script(&launch_state(&app)).is_some());
+        local_start_began(app.handle());
+        assert_eq!(launch_state(&app), remote::LaunchState::Local);
+        assert_eq!(shell_state_script(&launch_state(&app)), None);
+    }
+
+    #[test]
+    fn a_failure_card_survives_a_retry_that_fails_and_ends_when_a_start_answers_ready() {
+        let app = launch_app();
+        show_shell_failure(app.handle(), "did not start");
+        local_start_began(app.handle());
+        let _ = local_start_answered(app.handle(), Err::<ServiceStartup, _>("did not start again".to_string()));
+        assert_eq!(
+            shell_state_script(&launch_state(&app)).as_deref(),
+            Some("window.__corsiaShowServiceFailure?.(\"did not start\");"),
+            "a reload after a failed retry must still draw the failure and its Try again"
+        );
+        let ready = ServiceStartup::Ready { url: "http://127.0.0.1:47895".into() };
+        assert_eq!(local_start_answered(app.handle(), Ok::<_, String>(ready.clone())), Ok(ready));
+        assert_eq!(launch_state(&app), remote::LaunchState::Local);
     }
 
     #[test]

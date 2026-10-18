@@ -16,8 +16,9 @@ pub enum LaunchState {
     Disconnecting,
 }
 
-/// The only owner of the native shell's remote-connection state. Transport
-/// modules report outcomes here; they never select shell pages themselves.
+/// The only owner of what the native startup shell draws: the remote connection, and this computer's own service
+/// when its start failed or answered at launch. Transport modules and starts report outcomes here; they never select
+/// shell pages themselves.
 pub struct RemoteConnection {
     state: LaunchState,
 }
@@ -71,10 +72,18 @@ impl RemoteConnection {
         }
     }
 
-    /// The window ran a local start itself. The page that awaits it draws its answer, so an answer kept here is no
-    /// longer what the window shows.
+    /// The window ran a local start itself. The page that awaits it draws its answer, so a launch answer kept here is
+    /// no longer what the window shows. A failure stays until a start answers Ready: if this start fails too, a later
+    /// shell load still draws the failure with its Try again.
     pub fn local_start_began(&mut self) {
-        if self.is_local_start() {
+        if matches!(self.state, LaunchState::LocalStartup { .. }) {
+            self.state = LaunchState::Local;
+        }
+    }
+
+    /// A start the window ran answered Ready, so a kept failure no longer holds.
+    pub fn service_recovered(&mut self) {
+        if matches!(self.state, LaunchState::ServiceFailed { .. }) {
             self.state = LaunchState::Local;
         }
     }
@@ -182,5 +191,19 @@ mod tests {
         assert_eq!(connection.state(), &LaunchState::Pairing, "a late start answer replaced a pairing");
         connection.local_start_began();
         assert_eq!(connection.state(), &LaunchState::Pairing);
+    }
+
+    #[test]
+    fn a_service_failure_outlasts_a_start_the_window_runs_until_one_answers_ready() {
+        let mut connection = RemoteConnection::default();
+        connection.launch_answered(Err("did not start".into()));
+        connection.local_start_began();
+        assert_eq!(
+            connection.state(),
+            &LaunchState::ServiceFailed { reason: "did not start".into() },
+            "a retry cleared the failure, so a reload after it fails again has no card to draw"
+        );
+        connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Local);
     }
 }
