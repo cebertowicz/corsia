@@ -1,11 +1,6 @@
 
 import { expect, type Locator, test } from '@playwright/test';
-import {
-    captureConsoleErrors,
-    createSession,
-    TEST_TOKEN,
-    waitForWsConnected,
-} from '../support/corsia';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
 
@@ -78,16 +73,13 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
                 TEST_TOKEN,
             );
 
-            await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-            await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({
-                timeout: 20_000,
-            });
+            await openAppPastLanding(page);
 
             if ((page.viewportSize()?.width ?? 0) <= 768) {
                 await page.getByRole('button', { name: 'Toggle sidebar' }).click();
             }
 
-            await page.getByText(sessionTitle).click({ timeout: 10_000 });
+            await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
             await waitForWsConnected(page);
 
             const assistantRow = page.locator('.message.assistant').first();

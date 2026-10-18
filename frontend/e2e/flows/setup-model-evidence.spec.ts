@@ -58,6 +58,10 @@ async function serveSetupState(page: Page, state: SetupState | (() => SetupState
 	await page.route('**/api/setup/first-account', async (route) => {
 		await route.fulfill({ json: { token: 'setup-evidence-token', user: { id: 'setup-evidence', name: 'First Person' } } });
 	});
+	// Finishing records completion before the app opens (SetupScreen.finishSetup); the fake session is not a real one.
+	await page.route('**/api/setup/progress', async (route) => {
+		await route.fulfill({ json: { ok: true } });
+	});
 	await page.route('**/api/corsia-agent**', async (route) => {
 		await route.fulfill({ json: { target: { thread_id: 'corsia-agent' } } });
 	});
@@ -477,11 +481,13 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.goto('/');
 		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
 		await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
+		// The first scene is still crossfading in from the checking scene; wait it out so the next crossfade is the only one counted.
+		await expect(page.locator('.pane-scene')).toHaveCount(1);
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
 		await expect.poll(() => page.locator('.pane-scenes').evaluate((scenes) => scenes.querySelectorAll<HTMLElement>('.pane-scene').length)).toBe(2);
-		const crossfades = await page.locator('.pane-scenes').evaluate((scenes) =>
+		const readCrossfades = () => page.locator('.pane-scenes').evaluate((scenes) =>
 			Array.from(scenes.querySelectorAll<HTMLElement>('.pane-scene')).flatMap((scene) =>
 				scene.getAnimations().filter((animation) => animation.playState === 'running').map((animation) => ({
 					duration: Number(animation.effect?.getComputedTiming().duration ?? 0),
@@ -491,7 +497,9 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 				})),
 			),
 		);
-		expect(crossfades.some((animation) => animation.duration > 0)).toBe(true);
+		// A scene is in the DOM a moment before its fade is attached, so wait for the fade rather than the scene.
+		await expect.poll(async () => (await readCrossfades()).some((animation) => animation.duration > 0)).toBe(true);
+		const crossfades = await readCrossfades();
 		for (const animation of crossfades) {
 			expect(animation.properties).not.toContain('transform');
 			expect(animation.properties).not.toContain('height');

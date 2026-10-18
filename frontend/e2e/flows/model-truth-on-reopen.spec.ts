@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
+import { loginByUrl, saveEvidenceScreenshot, sidebarThread, TEST_TOKEN } from '../support/corsia';
 
 test.describe('@flow:model-truth saved model on reopen', () => {
 	test('shows the opened thread model immediately and ignores an older thread load', async ({ page, request }, testInfo) => {
@@ -23,12 +23,17 @@ test.describe('@flow:model-truth saved model on reopen', () => {
 		await route.continue();
 	});
 	await loginByUrl(page, { waitForComposer: false });
+	// On a phone the sidebar is a drawer that closes once a thread opens, so each pick reopens it.
+	const openThread = async (title: string) => {
+		if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await sidebarThread(page, title).click();
+	};
 	await expect(page.getByText(firstTitle).first()).toBeVisible();
 
 	try {
-		await page.getByText(firstTitle).first().click();
+		await openThread(firstTitle);
 		await expect(page.locator('button.model-chip .model-chip-name')).toHaveText('Mock Test Model');
-		await page.getByText(secondTitle).first().click();
+		await openThread(secondTitle);
 		await expect(page.locator('button.model-chip .model-chip-name')).toHaveText('Mock Pressure Model');
 	} finally {
 		releaseFirst();

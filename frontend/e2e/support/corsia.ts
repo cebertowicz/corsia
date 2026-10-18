@@ -25,7 +25,7 @@ export const TEST_TOKEN = requireTestToken();
 export const TEST_SESSION_TOKEN = requireTestSessionToken();
 
 export async function openAppByUrl(page: Page, { timeout = 20_000 }: { timeout?: number } = {}) {
-	await page.goto(`/?token=${TEST_TOKEN}`);
+	await page.goto(`/?token=${TEST_SESSION_TOKEN}`);
 	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout });
 }
 
@@ -33,8 +33,7 @@ export async function loginByUrl(
 	page: Page,
 	{ waitForComposer = true }: { waitForComposer?: boolean } = {},
 ) {
-	await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
+	await openAppPastLanding(page);
 	if (waitForComposer) {
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -68,6 +67,25 @@ export async function loadPastFirstRunLanding(page: Page, load: () => Promise<un
 	await load();
 	if (landed) await landed;
 	else if (firstRunPending) await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
+}
+
+/**
+ * Opens the signed-in shell for a spec that then picks its own thread. The
+ * conductor landing, and with it a composer at the root, exists only while the
+ * workspace's first run is pending. One spec's agent hand-off ends that for every
+ * later spec, so a spec must not read the composer as its ready signal: it waits
+ * for the landing only when one is coming, and the shell is its proof otherwise.
+ */
+export async function openAppPastLanding(page: Page) {
+	await loadPastFirstRunLanding(page, () => openAppByUrl(page));
+}
+
+/**
+ * The sidebar's row for a thread. The Activity landing lists the same title in the main column, so a bare
+ * getByText(title) matches both; a spec that means to open the thread scopes to the rail it opens it from.
+ */
+export function sidebarThread(page: Page, title: string) {
+	return page.locator('aside.sidebar').getByText(title, { exact: true });
 }
 
 export async function openSettings(page: Page) {

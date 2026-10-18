@@ -1,11 +1,5 @@
 import { expect, test } from '@playwright/test';
-import {
-	captureConsoleErrors,
-	createSession,
-	TEST_TOKEN,
-	waitForWsConnected,
-	watchSessionSubscriptions,
-} from '../support/corsia';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, watchSessionSubscriptions, sidebarThread } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 import { injectMessage } from '../support/mock';
 
@@ -37,12 +31,11 @@ test.describe('@flow:markdown-xss @surface:chat renderMarkdown sanitizes chat me
 		const title = `e2e md-xss chat ${Date.now()}`;
 		const sessionId = await createSession(request, title);
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(title).click({ timeout: 10_000 });
+		await sidebarThread(page, title).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 		await subscriptions.waitForSubscribed(sessionId);
 
@@ -75,12 +68,11 @@ test.describe('@flow:markdown-copy @surface:chat code-block copy still works aft
 		const title = `e2e md-copy ${Date.now()}`;
 		const sessionId = await createSession(request, title);
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(title).click({ timeout: 10_000 });
+		await sidebarThread(page, title).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 		await subscriptions.waitForSubscribed(sessionId);
 
@@ -127,12 +119,11 @@ test.describe('@flow:markdown-xss @surface:documents renderMarkdown sanitizes th
 		}
 		expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
 
-		await page.goto(`/?token=${tok}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(title).click({ timeout: 10_000 });
+		await sidebarThread(page, title).click({ timeout: 10_000 });
 		const browseDocuments = page.getByRole('button', { name: 'Browse documents…' });
 		if (!(await browseDocuments.isVisible())) {
 			await page.getByRole('button', { name: 'Toggle panel' }).click();

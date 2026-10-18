@@ -1,12 +1,6 @@
 
 import { expect, test } from '@playwright/test';
-import {
-    captureConsoleErrors,
-    createSession,
-    TEST_TOKEN,
-    waitForWsConnected,
-    watchSessionSubscriptions,
-} from '../support/corsia';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, watchSessionSubscriptions, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
 
@@ -26,16 +20,13 @@ test.describe('@flow:event-chip @surface:chat event_chip renders in conversation
             const sessionId = await createSession(request, sessionTitle);
             await setFocusMode(request, false);
 
-            await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-            await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({
-                timeout: 20_000,
-            });
+            await openAppPastLanding(page);
 
             if ((page.viewportSize()?.width ?? 0) <= 768) {
                 await page.getByRole('button', { name: 'Toggle sidebar' }).click();
             }
 
-            await page.getByText(sessionTitle).click({ timeout: 10_000 });
+            await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
             await waitForWsConnected(page);
             await subscriptions.waitForSubscribed(sessionId);
 
