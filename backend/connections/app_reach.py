@@ -166,16 +166,6 @@ def key_ref_descriptors(app_id: str, config: object, *, db: sqlite3.Connection) 
     return result
 
 
-def with_entry_names(app_id: str, key_refs: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Add each key's managed entry name for the person's Settings; agent projections never call this."""
-    from tools.mcp_secrets import entry_name
-
-    return [
-        {**ref, "entry": entry_name(app_id, "secret_env" if ref["kind"] == "env" else "secret_headers", str(ref["name"]))}
-        for ref in key_refs
-    ]
-
-
 def missing_app_key_refs(app_id: str, *, db: sqlite3.Connection) -> list[str]:
     """Return unset declared key names without resolving their values."""
     app = get_app(app_id, db=db)
