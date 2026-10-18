@@ -34,7 +34,7 @@ def test_the_card_is_appendix_a1_word_for_word():
         "you like to work, the skills you keep in them, and the connected apps that "
         "Claude Code and Codex use, so you don't have to set them up again. I only read: nothing "
         "changes in them, and you choose what I keep. I never read your chats with them, their "
-        "settings, or any key or password. What I read goes to Claude, by Anthropic, the model I run on."
+        "other settings, or any key or password. What I read goes to Claude, by Anthropic, the model I run on."
     )
     assert card["tradeoff"].startswith("It takes about a minute.")
     assert [(o["id"], o["label"]) for o in card["options"]] == [("A", "Read them"), ("B", "Not now")]
@@ -45,9 +45,12 @@ def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here(
     context = setup.agent_import(ImportCard(("OpenClaw",), (), ""))["context"]
     assert context.startswith("OpenClaw is on this Mac. ")
     assert "connected apps" not in context
+    # With no connections clause nothing is read from settings, so none are excepted.
+    assert "with them, their settings, or any key" in context
     assert context.endswith("What I read stays on this Mac: I run on a local model.")
     one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
     assert "the connected apps that Codex uses," in one
+    assert "their other settings" in one
 
 
 def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
@@ -200,6 +203,13 @@ def test_no_id_returns_the_card_to_raise_and_tools_narrow_it(wired):
     assert "raise the import consent decision first" in payload["error"]
     narrowed = json.loads(asyncio.run(_execute(tools=["codex"])))["consent_decision"]
     assert narrowed == _fields(ImportCard(("Codex",), ("Codex",), CARD.provider))
+    # A named tool that isn't here is reported; it never widens the card to every found tool.
+    partly = json.loads(asyncio.run(_execute(tools=["codex", "openclaw"])))
+    assert partly["consent_decision"] == narrowed
+    assert partly["not_found"] == ["OpenClaw"]
+    none_here = json.loads(asyncio.run(_execute(tools=["hermes"])))
+    assert "consent_decision" not in none_here
+    assert none_here["error"].startswith("none of the tools the person named were found on this Mac (found: Claude Code, Codex)")
 
 
 def test_answer_a_allows_one_read_with_a_content_free_receipt(wired):

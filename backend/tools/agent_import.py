@@ -23,6 +23,10 @@ RAISE_FIRST = (
 )
 NO_TOOLS = "no Claude Code, Codex, OpenClaw or Hermes folders were found on this Mac"
 NO_MODEL = "the model this conversation runs on could not be resolved, so the consent cannot name it"
+NONE_NAMED_FOUND = (
+    "none of the tools the person named were found on this Mac (found: {found}); "
+    "tell them, and raise the card for the found tools only if they ask for that"
+)
 NOT_HERE = (
     "agent_import is only for the CORSIA agent; tell the person to ask CORSIA to "
     "bring things over from their other AI tools"
@@ -173,12 +177,19 @@ def _consent_fields(card, tools) -> dict[str, Any]:
     from onboarding.agent_import import LABELS
 
     named = tuple(LABELS[tool] for tool in tools or () if tool in LABELS)
-    if named and set(named) <= set(card.tools):
-        card = replace(card, tools=tuple(t for t in card.tools if t in named),
-                       connections=tuple(t for t in card.connections if t in named))
+    # A named tool that isn't here is reported, never widened to every found tool.
+    missing = [tool for tool in named if tool not in card.tools]
+    if named:
+        kept = tuple(t for t in card.tools if t in named)
+        if not kept:
+            return {"error": NONE_NAMED_FOUND.format(found=", ".join(card.tools))}
+        card = replace(card, tools=kept, connections=tuple(t for t in card.connections if t in named))
     consent = setup_decisions.agent_import(card)
     consent.pop("task_title")
-    return {"error": RAISE_FIRST, "consent_decision": consent}
+    fields = {"error": RAISE_FIRST, "consent_decision": consent}
+    if missing:
+        fields["not_found"] = missing
+    return fields
 
 
 def _actor(thread_id: str, thread: dict[str, Any]):

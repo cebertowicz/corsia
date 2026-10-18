@@ -135,6 +135,7 @@ def agent_import(card: ImportCard | None) -> dict[str, Any] | None:
     connections = text.AGENT_IMPORT_CONNECTIONS.format(
         tools=_join(list(card.connections)), verb="uses" if len(card.connections) == 1 else "use",
     ) if card.connections else ""
+    settings = text.AGENT_IMPORT_OTHER_SETTINGS if card.connections else text.AGENT_IMPORT_SETTINGS
     if not card.provider:
         where = text.AGENT_IMPORT_LOCAL
     elif card.provider in text.AGENT_IMPORT_PROVIDERS.values():
@@ -143,7 +144,8 @@ def agent_import(card: ImportCard | None) -> dict[str, Any] | None:
         where = text.AGENT_IMPORT_OTHER.format(model=_safe(card.provider))
     return _decision(tasks.TASK_START, text.AGENT_IMPORT, options=_lettered(text.AGENT_IMPORT),
                      recommendation="A", tools=_join(list(card.tools)),
-                     verb="is" if len(card.tools) == 1 else "are", connections=connections, where=where)
+                     verb="is" if len(card.tools) == 1 else "are", connections=connections,
+                     settings=settings, where=where)
 
 
 def agent_import_wordings(card: ImportCard | None) -> list[tuple[tuple[str, str, str], tuple[str, ...]]]:
