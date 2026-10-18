@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from onboarding.agent_import import (
-    CLAUDE_CODE, CODEX, HERMES, LABELS, OPENCLAW, checked_root, display_path, tool_roots,
+    CLAUDE_CODE, CODEX, HERMES, LABELS, OPENCLAW, inside, checked_root, display_path, tool_roots,
 )
 from onboarding.project_discovery import Roots
 
@@ -64,17 +64,27 @@ class Candidate:
 
     @property
     def item_id(self) -> str:
-        return f"{self.source}:{self.content_sha}"
+        """Only a ``new`` row's id binds its content hash: a held-back row's (a key in it
+        included) never carries a digest of its bytes to the agent."""
+        return f"{self.source}:{self.content_sha}" if self.state == NEW else self.source
 
     @property
     def skill_md(self) -> bytes:
         return self.files["SKILL.md"]
 
 
-def _dirs(folder: Path) -> list[Path]:
+def _real_folder(folder: Path, root: Path) -> bool:
+    """``folder`` is itself no link and resolves inside ``root``, so no linked parent leads out."""
+    try:
+        return stat.S_ISDIR(os.lstat(folder).st_mode) and inside(Path(os.path.realpath(folder)), root)
+    except OSError:
+        return False
+
+
+def _dirs(folder: Path, root: Path) -> list[Path]:
     """Visible entries of a real folder that may be skills; links are kept to be refused."""
     try:
-        if not stat.S_ISDIR(os.lstat(folder).st_mode):
+        if not _real_folder(folder, root):
             return []
         return sorted(Path(entry.path) for entry in os.scandir(folder)
                       if not entry.name.startswith(".") and not entry.is_file(follow_symlinks=False))
@@ -82,9 +92,11 @@ def _dirs(folder: Path) -> list[Path]:
         return []
 
 
-def _commands(folder: Path) -> list[tuple[Path, str]]:
+def _commands(folder: Path, root: Path) -> list[tuple[Path, str]]:
     """Claude Code command files under ``commands/``, each with its flattened name."""
-    found = []
+    found: list[tuple[Path, str]] = []
+    if not _real_folder(folder, root):
+        return found
     for directory, subfolders, names in os.walk(folder):
         subfolders[:] = sorted(name for name in subfolders if not name.startswith("."))
         for name in sorted(names):
@@ -94,14 +106,14 @@ def _commands(folder: Path) -> list[tuple[Path, str]]:
     return found
 
 
-def _hermes(folder: Path, depth: int = 0) -> list[Path]:
+def _hermes(folder: Path, root: Path, depth: int = 0) -> list[Path]:
     """Hermes skill folders at any depth up to ``HERMES_DEPTH``, never inside a skill."""
     found = []
-    for entry in _dirs(folder):
+    for entry in _dirs(folder, root):
         if os.path.lexists(entry / "SKILL.md") or os.path.islink(entry):
             found.append(entry)
         elif depth + 1 < HERMES_DEPTH:
-            found.extend(_hermes(entry, depth + 1))
+            found.extend(_hermes(entry, root, depth + 1))
     return found
 
 
@@ -111,17 +123,18 @@ def candidates(roots: Roots, tools: list[str]) -> list[Candidate]:
                if tool in tools and (real := checked_root(root)) is not None}
     found: list[Candidate] = []
     if claude := checked.get(CLAUDE_CODE):
-        found += [Candidate(CLAUDE_CODE, path) for path in _dirs(claude / "skills")]
-        found += [Candidate(CLAUDE_CODE, path, command) for path, command in _commands(claude / "commands")]
+        found += [Candidate(CLAUDE_CODE, path) for path in _dirs(claude / "skills", claude)]
+        found += [Candidate(CLAUDE_CODE, path, command)
+                  for path, command in _commands(claude / "commands", claude)]
     if codex := checked.get(CODEX):
-        found += [Candidate(CODEX, path) for path in _dirs(codex / "skills")]
+        found += [Candidate(CODEX, path) for path in _dirs(codex / "skills", codex)]
         if (agents := checked_root(roots.agents)) is not None:
-            found += [Candidate(CODEX, path) for path in _dirs(agents / "skills")]
+            found += [Candidate(CODEX, path) for path in _dirs(agents / "skills", agents)]
     if openclaw := checked.get(OPENCLAW):
         for folder in (openclaw / "workspace" / "skills", openclaw / "skills"):
-            found += [Candidate(OPENCLAW, path) for path in _dirs(folder)]
+            found += [Candidate(OPENCLAW, path) for path in _dirs(folder, openclaw)]
     if hermes := checked.get(HERMES):
-        found += [Candidate(HERMES, path) for path in _hermes(hermes / "skills")]
+        found += [Candidate(HERMES, path) for path in _hermes(hermes / "skills", hermes)]
     return found
 
 
@@ -251,6 +264,10 @@ def scan(roots: Roots, tools: list[str], workspace: Path) -> list[Candidate]:
         by_name.setdefault(candidate.name, []).append(candidate)
         rows.append(candidate)
     for row in rows:
+        if not reserved:
+            # System skill names unknown: any of these could shadow one, so none is offered.
+            row.state = UNREADABLE
+            continue
         if row.state in (TOO_LARGE, UNREADABLE):
             continue
         if row.name in reserved:
@@ -284,7 +301,10 @@ def installed_text(row: Candidate, now: datetime.datetime) -> tuple[str, str]:
 
     meta, body = parse_frontmatter(row.skill_md.decode("utf-8"))
     source_metadata = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
-    metadata = {key: value for key, value in source_metadata.items() if key not in (POINTER_KEY, FORMAT_KEY)}
+    # Nested blocks are another tool's own settings (``openclaw: {install, requires}``):
+    # dropped like ``allowed-tools``, so none can grant anything if a projection loads it.
+    metadata = {key: value for key, value in source_metadata.items()
+                if key not in (POINTER_KEY, FORMAT_KEY) and not isinstance(value, dict)}
     metadata.update({POINTER_KEY: SIDECAR_FILE, FORMAT_KEY: SIDECAR_FORMAT})
     front = {"name": row.name, "description": row.description,
              **{key: meta[key] for key in KEPT_KEYS if key in meta}, "metadata": metadata}
@@ -336,11 +356,18 @@ def install_skills(roots: Roots, tools: list[str], workspace: Path, item_ids: li
                    now: datetime.datetime | None = None) -> list[dict]:
     """Install each picked item that is still ``new`` with the content that was shown."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    rows = {row.item_id: row for row in scan(roots, tools, workspace)}
+    scanned = scan(roots, tools, workspace)
+    rows = {row.item_id: row for row in scanned}
+    held = {row.source: row for row in scanned if row.state != NEW}
     skills = _installed(workspace)[2]
     results = []
     for item_id in dict.fromkeys(item_ids):
+        # An offered id is ``<source>:<hash>``; a row held back since with that content is
+        # known by its source, so its state is reported. Other content is ``changed``.
+        source, _, shown = item_id.rpartition(":")
         row = rows.get(item_id)
+        if row is None and (same := held.get(source)) is not None and same.content_sha == shown:
+            row = same
         if row is None or row.state != NEW:
             outcome = "changed" if row is None else row.state
             results.append({"item_id": item_id, "name": row.name if row else "", "outcome": outcome})

@@ -189,3 +189,48 @@ def test_install_never_overwrites_a_folder_already_there(home):
     (home[1] / "skills" / "rfc-writer").mkdir(parents=True)
     assert _install(home, _ids(offers, "rfc-writer"))[0]["outcome"] == "already_here"
     assert list((home[1] / "skills" / "rfc-writer").iterdir()) == []
+
+
+def test_a_held_back_skill_id_carries_no_digest_of_its_bytes(home):
+    import hashlib
+
+    roots, _workspace = home
+    row = _offers(home)["deploy-helper"]
+    assert row["state"] == "has_secret"
+    assert row["item_id"] == "claude-code:~/.claude/skills/deploy-helper"
+    raw = (roots.claude / "skills" / "deploy-helper" / "SKILL.md").read_bytes()
+    assert hashlib.sha256(raw).hexdigest() not in repr(row)
+    held = [r for r in _offers(home).values() if r["state"] != "new"]
+    assert held and all(":" not in r["item_id"].split(":", 1)[1] for r in held)  # tool:~/path, no hash
+
+
+def test_unknown_system_skill_names_hold_every_skill_back(home, monkeypatch):
+    import core.system_tier
+
+    offers = _offers(home)
+    monkeypatch.setattr(core.system_tier, "system_skill_names", frozenset)
+    assert {row["state"] for row in _offers(home).values()} == {"unreadable"}
+    results = _install(home, _ids(offers, "adr-writer", "github"))
+    assert all(row["outcome"] != "installed" for row in results)
+    assert not (home[1] / "skills" / "adr-writer").exists() and not (home[1] / "skills" / "github").exists()
+
+
+def test_a_linked_parent_folder_is_never_scanned(home, tmp_path):
+    import shutil
+
+    roots, _workspace = home
+    for folder, moved in ((roots.openclaw / "workspace", "moved-claw"), (roots.claude / "commands", "moved-cmds")):
+        shutil.move(folder, tmp_path / moved)
+        folder.symlink_to(tmp_path / moved)
+    offers = _offers(home)
+    assert "runbook-writer" not in offers and "git-tidy" not in offers
+    assert offers["adr-writer"]["state"] == "new"
+
+
+def test_another_tools_metadata_blocks_are_dropped_on_install(home):
+    roots, workspace = home
+    _skill(roots.hermes / "skills" / "meeting-notes", "meeting-notes", "writes meeting notes",
+           metadata={"author": "fixture", "openclaw": {"install": ["brew x"], "requires": {"bins": ["x"]}}})
+    assert _install(home, _ids(_offers(home), "meeting-notes"))[0]["outcome"] == "installed"
+    meta = yaml.safe_load((workspace / "skills" / "meeting-notes" / "SKILL.md").read_text().split("---\n")[1])
+    assert meta["metadata"] == {"author": "fixture", "corsia-data": "corsia.yaml", "corsia-format": "1"}

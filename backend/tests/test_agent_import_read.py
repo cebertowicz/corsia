@@ -243,3 +243,26 @@ def test_an_unreadable_file_marks_the_read_failed(home, monkeypatch):
     read = _read(home, [reader.HERMES])
     assert read.failed is True
     assert read.skipped[0]["reason"] == "couldn't read: Permission denied"
+
+
+def test_an_excerpt_hash_is_over_the_filtered_text_never_the_raw_bytes(home):
+    import hashlib
+
+    read = _read(home, [reader.CLAUDE_CODE])
+    claude_md = next(e for e in read.excerpts if e["file"] == "~/.claude/CLAUDE.md")
+    raw = (home.claude / "CLAUDE.md").read_bytes()
+    assert claude_md["sha256"] == hashlib.sha256(claude_md["text"].encode("utf-8")).hexdigest()
+    raw_digests = {hashlib.sha256(data).hexdigest() for data in (raw, raw.strip(), SECRET_VALUE.encode())}
+    assert claude_md["sha256"] not in raw_digests
+
+
+def test_a_linked_parent_folder_leads_nowhere(home, tmp_path, monkeypatch):
+    import shutil
+
+    moved = tmp_path / "moved-memories"
+    shutil.move(home.hermes / "memories", moved)
+    (home.hermes / "memories").symlink_to(moved)
+    opened = _open_spy(monkeypatch)
+    read = _read(home, [reader.HERMES])
+    assert read.excerpts == [] and opened == []
+    assert {row["reason"] for row in read.skipped} == {"a link outside the tool's folder"}

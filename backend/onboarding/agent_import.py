@@ -55,7 +55,7 @@ EXCERPT_LABEL = (
 )
 
 
-def _inside(path: Path, root: Path) -> bool:
+def inside(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
@@ -84,7 +84,7 @@ def checked_root(path: Path) -> Path | None:
     from tools.host_path_policy import ordinary_host_path_denial
 
     real = Path(os.path.realpath(path))
-    if any(_inside(real, managed) for managed in _managed_homes()):
+    if any(inside(real, managed) for managed in _managed_homes()):
         return None
     if ordinary_host_path_denial(real, for_write=False) is not None:
         return None
@@ -115,7 +115,7 @@ def display_path(path: Path) -> str:
     """
     home = Path(os.path.realpath(os.path.expanduser("~")))
     real = Path(os.path.realpath(path.parent)) / path.name
-    return f"~/{real.relative_to(home)}" if _inside(real, home) and real != home else str(real)
+    return f"~/{real.relative_to(home)}" if inside(real, home) and real != home else str(real)
 
 
 def never_read(path: Path) -> bool:
@@ -139,16 +139,20 @@ class MemoryRead:
 
 
 def unsafe_reason(path: Path, root: Path) -> str | None:
-    """Why ``path`` may not be opened (lstat first, a link only inside ``root``), or None."""
+    """Why ``path`` may not be opened (lstat first, and only inside ``root`` once resolved), or None.
+
+    The resolved path is checked whether or not the file itself is a link, so a
+    linked parent folder cannot lead out of the tool's folder either.
+    """
     from tools.host_path_policy import ordinary_host_path_denial
 
     mode = os.lstat(path).st_mode
     real = Path(os.path.realpath(path))
     if never_read(path) or never_read(real):
         return "never read"
+    if not inside(real, root):
+        return "a link outside the tool's folder"
     if stat.S_ISLNK(mode):
-        if not _inside(real, root):
-            return "a link outside the tool's folder"
         mode = os.stat(real).st_mode
     if not stat.S_ISREG(mode):
         return "not a regular file"
@@ -210,7 +214,8 @@ def _date(path: Path) -> str:
 def _keep(read: MemoryRead, tool: str, path: Path, text: str) -> None:
     from host_access.credential_sanitizer import sanitize_credential_text
 
-    text = text.strip()
+    # The hash is over the filtered text, so it can never confirm a guess at a filtered value.
+    text = sanitize_credential_text(text.strip())
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if not text or digest in read.seen:
         return
@@ -221,7 +226,7 @@ def _keep(read: MemoryRead, tool: str, path: Path, text: str) -> None:
     read.excerpts.append({
         "tool": LABELS[tool], "file": shown, "changed": date, "sha256": digest,
         "label": EXCERPT_LABEL.format(tool=LABELS[tool], file=shown, date=date),
-        "text": sanitize_credential_text(text),
+        "text": text,
     })
 
 
