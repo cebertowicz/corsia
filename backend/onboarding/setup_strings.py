@@ -40,7 +40,7 @@ AGENT_IMPORT = {
     "rationale": "You've already taught them how you work; this saves teaching it again.",
 }
 # Only ready Claude Code or Codex tools hold connections this release can bring over.
-AGENT_IMPORT_CONNECTIONS = ", and the connections to other tools that {tools} {verb}"
+AGENT_IMPORT_CONNECTIONS = ", and the connected apps that {tools} {verb}"
 AGENT_IMPORT_CLOUD = "What I read goes to {provider}, the model I run on."
 AGENT_IMPORT_LOCAL = "What I read stays on this Mac: I run on a local model."
 # Any other model, an External endpoint included: who serves it is not known here.

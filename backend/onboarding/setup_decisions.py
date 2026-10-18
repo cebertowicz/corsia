@@ -133,7 +133,7 @@ def agent_import(card: ImportCard | None) -> dict[str, Any] | None:
     if card is None or not card.tools:
         return None
     connections = text.AGENT_IMPORT_CONNECTIONS.format(
-        tools=_join(list(card.connections)), verb="holds" if len(card.connections) == 1 else "hold",
+        tools=_join(list(card.connections)), verb="uses" if len(card.connections) == 1 else "use",
     ) if card.connections else ""
     if not card.provider:
         where = text.AGENT_IMPORT_LOCAL

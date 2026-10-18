@@ -90,6 +90,25 @@ def test_each_state_is_decided_by_the_server(home):
     assert states["inner-link"] == "unreadable"
 
 
+def test_an_unreadable_skill_names_the_one_thing_to_fix(home, tmp_path):
+    folder = tmp_path / "home" / ".claude" / "skills"
+    (folder / "no-skill-md").mkdir()
+    (folder / "no-skill-md" / "notes.md").write_text("notes")
+    (_skill(folder / "binary", "binary", "has a binary file") / "logo.png").write_bytes(b"\x89PNG\x00")
+    (folder / "bad-header").mkdir()
+    (folder / "bad-header" / "SKILL.md").write_text("---\nname: [unclosed\n---\nBody.\n")
+    _skill(folder / "bad-name", "bad name!", "a name with spaces")
+    _skill(folder / "no-description", "no-description", "")
+    offers = _offers(home)
+    assert {name: offers[name]["reason"] for name in (
+        "linked", "inner-link", "no-skill-md", "binary", "bad-header", "bad-name", "no-description",
+    )} == {
+        "linked": "link", "inner-link": "link", "no-skill-md": "no_skill_md", "binary": "not_text",
+        "bad-header": "bad_header", "bad-name": "bad_name", "no-description": "no_description",
+    }
+    assert "reason" not in offers["adr-writer"] and "reason" not in offers["big"]
+
+
 def test_the_agent_gets_metadata_never_a_body(home):
     offers = _offers(home)
     assert offers["adr-writer"] == {
@@ -225,7 +244,7 @@ def test_unknown_system_skill_names_hold_every_skill_back(home, monkeypatch):
 
     offers = _offers(home)
     monkeypatch.setattr(core.system_tier, "system_skill_names", frozenset)
-    assert {row["state"] for row in _offers(home).values()} == {"unreadable"}
+    assert {(row["state"], row["reason"]) for row in _offers(home).values()} == {("unreadable", "")}
     results = _install(home, _ids(offers, "adr-writer", "github"))
     assert all(row["outcome"] != "installed" for row in results)
     assert not (home[1] / "skills" / "adr-writer").exists() and not (home[1] / "skills" / "github").exists()

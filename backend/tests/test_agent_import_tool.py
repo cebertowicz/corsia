@@ -31,8 +31,8 @@ def test_the_card_is_appendix_a1_word_for_word():
     assert card["title"] == "Bring over what your other AI tools know"
     assert card["context"] == (
         "Claude Code and Codex are on this Mac. I can read what they remember about you and how "
-        "you like to work, the skills you keep in them, and the connections to other tools that "
-        "Claude Code and Codex hold, so you don't have to set them up again. I only read: nothing "
+        "you like to work, the skills you keep in them, and the connected apps that "
+        "Claude Code and Codex use, so you don't have to set them up again. I only read: nothing "
         "changes in them, and you choose what I keep. I never read your chats with them, their "
         "settings, or any key or password. What I read goes to Claude, by Anthropic, the model I run on."
     )
@@ -44,10 +44,10 @@ def test_the_card_is_appendix_a1_word_for_word():
 def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here():
     context = setup.agent_import(ImportCard(("OpenClaw",), (), ""))["context"]
     assert context.startswith("OpenClaw is on this Mac. ")
-    assert "connections" not in context
+    assert "connected apps" not in context
     assert context.endswith("What I read stays on this Mac: I run on a local model.")
     one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
-    assert "the connections to other tools that Codex holds," in one
+    assert "the connected apps that Codex uses," in one
 
 
 def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
@@ -289,18 +289,25 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     guide = (skill / "references/agent-import.md").read_text(encoding="utf-8")
     for line in (
         "Kept [N] things about you and how you work.",
-        "Brought over [installed] skills. They're in Settings › Skills. Tell me if you want any of them removed.",
+        "Brought over [installed] skills. They’re in Settings › Skills. Tell me if you want any of them removed.",
         "Nothing new to bring over.",
-        "I looked, and they don't hold much about you, so I kept nothing.",
+        "I looked, and they don’t hold much about you, so I kept nothing.",
         "Ask me any time to bring things over from them.",
-        "I couldn't read them this time, so I kept nothing. Ask me any time to try again.",
+        "I couldn’t read them this time, so I kept nothing. Ask me any time to try again.",
         "a CORSIA skill already has that name. Rename it in [tool] and ask me again.",
         "it has a key or password in it, so I left it. Remove that and ask me again.",
         # C9: every held-back or failed skill says why and what to do next.
         "too big to bring over. Make it smaller in [tool] and ask me again.",
-        "only text files, no links. Fix that in [tool] and ask me again.",
-        "it changed after I showed it to you. Ask me again to see it as it is now.",
-        "so I left it out. Ask me to write a CORSIA skill that does the same.",
+        # C11: an unreadable skill names its one cause; C3: "symbolic link", not "link".
+        "`link`: `it has a symbolic link in it.",
+        "`not_text`: `it has a file that isn’t text.",
+        "`no_skill_md`: `it has no SKILL.md. Add one in [tool] and ask me again.`",
+        "`bad_header`: `the header at the top of its SKILL.md isn’t valid.",
+        "`bad_name`: `its name has a character a skill name can’t use.",
+        "`no_description`: `its SKILL.md has no description. Add one in [tool] and ask me again.`",
+        "I couldn’t read it this time. Ask me again to try once more.",
+        "is different from the version I showed you. Ask me again to see the current version.",
+        "so I left it out. Ask me to try again, or to write a CORSIA skill that does the same.",
         "`sha256`",
     ):
         assert line in guide

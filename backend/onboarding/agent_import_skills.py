@@ -40,6 +40,9 @@ NAME_CLASH = "name_clash"
 HAS_SECRET = "has_secret"
 TOO_LARGE = "too_large"
 UNREADABLE = "unreadable"
+#: Why a skill is ``unreadable``, so the person hears the one thing to fix; "" when unknown.
+LINK, NOT_TEXT, NO_SKILL_MD, BAD_HEADER, BAD_NAME, NO_DESCRIPTION = (
+    "link", "not_text", "no_skill_md", "bad_header", "bad_name", "no_description")
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -57,6 +60,7 @@ class Candidate:
     files: dict[str, bytes] = field(default_factory=dict)
     content_sha: str = ""
     tools: list[str] = field(default_factory=list)
+    reason: str = ""
 
     @property
     def source(self) -> str:
@@ -138,29 +142,35 @@ def candidates(roots: Roots, tools: list[str]) -> list[Candidate]:
     return found
 
 
+def _unreadable(candidate: Candidate, reason: str) -> str:
+    candidate.reason = reason
+    return UNREADABLE
+
+
 def _listing(candidate: Candidate) -> list[tuple[str, Path]] | str:
     """(relative name, path) of every visible file, or the state that stops the offer."""
+    mode = os.lstat(candidate.path).st_mode
     if candidate.command is not None:
-        if not stat.S_ISREG(os.lstat(candidate.path).st_mode):
-            return UNREADABLE
+        if not stat.S_ISREG(mode):
+            return _unreadable(candidate, LINK if stat.S_ISLNK(mode) else NOT_TEXT)
         return [("SKILL.md", candidate.path)]
-    if not stat.S_ISDIR(os.lstat(candidate.path).st_mode):
-        return UNREADABLE
+    if not stat.S_ISDIR(mode):
+        return _unreadable(candidate, LINK if stat.S_ISLNK(mode) else NOT_TEXT)
     listed: list[tuple[str, Path]] = []
     size = 0
     for directory, subfolders, names in os.walk(candidate.path):
         subfolders[:] = [name for name in subfolders if not name.startswith(".")]
         for name in subfolders:
             if os.path.islink(Path(directory) / name):
-                return UNREADABLE
+                return _unreadable(candidate, LINK)
         for name in names:
             if name.startswith("."):
                 continue
             path = Path(directory) / name
-            mode = os.lstat(path)
-            if not stat.S_ISREG(mode.st_mode):
-                return UNREADABLE
-            size += mode.st_size
+            entry = os.lstat(path)
+            if not stat.S_ISREG(entry.st_mode):
+                return _unreadable(candidate, LINK if stat.S_ISLNK(entry.st_mode) else NOT_TEXT)
+            size += entry.st_size
             listed.append((path.relative_to(candidate.path).as_posix(), path))
             if len(listed) > MAX_FILES or size > MAX_BYTES:
                 return TOO_LARGE
@@ -194,12 +204,12 @@ def _parse(candidate: Candidate) -> str:
         try:
             texts[name] = data.decode("utf-8")
         except UnicodeDecodeError:
-            return UNREADABLE
+            return _unreadable(candidate, NOT_TEXT)
         if "\x00" in texts[name]:
-            return UNREADABLE
+            return _unreadable(candidate, NOT_TEXT)
         candidate.files[name] = data
     if "SKILL.md" not in texts:
-        return UNREADABLE
+        return _unreadable(candidate, NO_SKILL_MD)
     digest = hashlib.sha256()
     for name in sorted(candidate.files):
         digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(candidate.files[name]).digest())
@@ -207,18 +217,18 @@ def _parse(candidate: Candidate) -> str:
     try:
         meta, body = parse_frontmatter(texts["SKILL.md"])
     except (ValueError, yaml.YAMLError):
-        return UNREADABLE
+        return _unreadable(candidate, BAD_HEADER)
     fallback = candidate.command or candidate.path.name
     try:
         candidate.name = validate_skill_dir_name(text_value(meta.get("name")) or fallback)
     except ValueError:
         candidate.name = fallback
-        return UNREADABLE
+        return _unreadable(candidate, BAD_NAME)
     first_line = next((line.lstrip("# ").strip() for line in body.splitlines() if line.strip()), "")
     described = text_value(meta.get("description")) or (first_line if candidate.command else "")
     candidate.description = shown_description(described)
     if not candidate.description:
-        return UNREADABLE
+        return _unreadable(candidate, NO_DESCRIPTION)
     if any(contains_credential(text) for text in texts.values()):
         return HAS_SECRET
     return NEW
@@ -252,7 +262,7 @@ def scan(roots: Roots, tools: list[str], workspace: Path) -> list[Candidate]:
         try:
             candidate.state = _parse(candidate)
         except OSError:
-            candidate.state = UNREADABLE
+            candidate.state, candidate.reason = UNREADABLE, ""
         candidate.name = candidate.name or candidate.command or candidate.path.name
         same = next((row for row in by_name.get(candidate.name, ())
                      if row.content_sha and row.content_sha == candidate.content_sha), None)
@@ -266,7 +276,7 @@ def scan(roots: Roots, tools: list[str], workspace: Path) -> list[Candidate]:
     for row in rows:
         if not reserved:
             # System skill names unknown: any of these could shadow one, so none is offered.
-            row.state = UNREADABLE
+            row.state, row.reason = UNREADABLE, ""
             continue
         # A key outranks a name state: its warning stays, and install never compares its hash.
         if row.state in (HAS_SECRET, TOO_LARGE, UNREADABLE):
@@ -283,10 +293,14 @@ def scan(roots: Roots, tools: list[str], workspace: Path) -> list[Candidate]:
 
 def offer(row: Candidate) -> dict:
     """What the agent sees of one skill: never its body, and a description only for a new one,
-    so a held-back skill's text (a key in its description included) never reaches it."""
+    so a held-back skill's text (a key in its description included) never reaches it. An
+    ``unreadable`` row adds its ``reason``, a fixed word, so the person hears what to fix."""
     scripts = sum(1 for name in row.files if name != "SKILL.md" and Path(name).suffix in SCRIPT_SUFFIXES)
-    return {"item_id": row.item_id, "name": row.name, "description": row.description if row.state == NEW else "",
-            "tools": row.tools, "scripts": scripts, "state": row.state}
+    shown = {"item_id": row.item_id, "name": row.name, "description": row.description if row.state == NEW else "",
+             "tools": row.tools, "scripts": scripts, "state": row.state}
+    if row.state == UNREADABLE:
+        shown["reason"] = row.reason
+    return shown
 
 
 def skill_offers(roots: Roots, tools: list[str], workspace: Path) -> list[dict]:
