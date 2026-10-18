@@ -346,11 +346,20 @@ pub fn ensure_service_registered(
             refuse_foreign_corsia_job(reader, executable)?;
             Ok(status)
         }
-        // SMAppService reports NotFound for an agent that was never registered for this
-        // user, so only register() can tell whether the bundle really lacks it.
-        ServiceStatus::NotRegistered | ServiceStatus::NotFound => {
+        ServiceStatus::NotRegistered => {
             refuse_foreign_corsia_job(reader, executable)?;
             manager.register()?;
+            manager.status()
+        }
+        // SMAppService reports NotFound for an agent that was never registered for this
+        // user, so only register() can tell whether the bundle really lacks it. If it does,
+        // the cause keeps its own sentence; macOS's text goes to the log.
+        ServiceStatus::NotFound => {
+            refuse_foreign_corsia_job(reader, executable)?;
+            if let Err(error) = manager.register() {
+                log::error!("registering the CORSIA service it reported as not found failed: {error}");
+                return Ok(ServiceStatus::NotFound);
+            }
             manager.status()
         }
     }
@@ -515,6 +524,7 @@ mod tests {
         registrations: Cell<u8>,
         unregistrations: Cell<u8>,
         unregister_error: Cell<Option<&'static str>>,
+        register_error: Cell<Option<&'static str>>,
     }
 
     impl ServiceManager for FakeManager {
@@ -523,6 +533,9 @@ mod tests {
         }
         fn register(&self) -> Result<(), String> {
             self.registrations.set(self.registrations.get() + 1);
+            if let Some(error) = self.register_error.get() {
+                return Err(error.into());
+            }
             if let Some(status) = self.registered_status.get() {
                 self.status.set(Some(status));
             }
@@ -791,6 +804,16 @@ mod tests {
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(fresh.registrations.get(), 1);
+
+        let lacking = FakeManager::default();
+        lacking.status.set(Some(ServiceStatus::NotFound));
+        lacking.register_error.set(Some("The operation couldn’t be completed. (SMAppServiceErrorDomain error 3.)"));
+        assert_eq!(
+            ensure_unlocked_service_registered(&lacking, &reader, &executable),
+            Ok(ServiceStatus::NotFound),
+            "a bundle that lacks the agent must keep its named cause, not macOS's text"
+        );
+        assert_eq!(lacking.registrations.get(), 1);
     }
 
     #[test]

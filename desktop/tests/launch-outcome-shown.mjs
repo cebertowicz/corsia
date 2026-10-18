@@ -53,8 +53,8 @@ const drawn = {
 	offered: 'window.__corsiaShowStartup?.({"state":"adoption_offered","workspace":"~/corsia"});',
 	approval: 'window.__corsiaShowStartup?.({"state":"requires_approval"});',
 	ready: 'window.__corsiaShowStartup?.({"state":"ready","url":"http://127.0.0.1:47895/"});',
-	// A Check again that failed, kept so a reload draws it again.
-	switched: 'window.__corsiaShowStartup?.({"state":"adoption_failed","failure":{"message":"no answer on 47895","outcome":"switched","recovery":null,"advice":false}});',
+	// An earlier adoption's undo that did not finish, found by the launch start.
+	undoUnfinished: 'window.__corsiaShowStartup?.({"state":"adoption_failed","failure":{"message":"the old install did not answer","outcome":"unconfirmed","recovery":"start_again","advice":false}});',
 };
 
 try {
@@ -95,11 +95,11 @@ try {
 	}
 	{
 		const page = await open();
-		await page.evaluate(drawn.switched);
+		await page.evaluate(drawn.undoUnfinished);
 		await page.clock.runFor(50);
 		const seen = await read(page);
-		if (seen.spinner || !seen.retry || seen.status === 'Starting CORSIA…') fail(`switched: ${JSON.stringify(seen)}`);
-		else console.log(`ok   a failed check again is drawn with its action (${seen.retry})`);
+		if (seen.spinner || !seen.retry || seen.status === 'Starting CORSIA…') fail(`undo unfinished: ${JSON.stringify(seen)}`);
+		else console.log(`ok   an unfinished undo is drawn with its recovery (${seen.retry})`);
 	}
 	// A service already running answers Ready before the page is up; the load hook's script must still open it.
 	{

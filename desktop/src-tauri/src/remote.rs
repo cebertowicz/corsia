@@ -10,7 +10,7 @@ pub enum LaunchState {
     Failed { name: String, failure: ConnectFailure },
     /// This computer's own service could not be brought back; the shell draws its failure card with the action.
     ServiceFailed { reason: String },
-    /// How this computer's own start last answered (ready, approval, an install to adopt, an undo that did not
+    /// How the app's own start at launch answered (ready, approval, an install to adopt, an undo that did not
     /// finish); the shell draws `startup` like a start it ran itself.
     LocalStartup { startup: crate::ServiceStartup },
     Disconnecting,
@@ -59,9 +59,10 @@ impl RemoteConnection {
         self.state = LaunchState::ServiceFailed { reason: reason.into() };
     }
 
-    /// A local start answered: an answer is `LocalStartup`, a start that failed `ServiceFailed`. It is kept only while
-    /// the window is on this computer's own start; anything begun meanwhile (pairing, a remote) is newer.
-    pub fn local_start_ended(&mut self, outcome: Result<crate::ServiceStartup, String>) {
+    /// The app's own start at launch answered: an answer is `LocalStartup`, a start that failed `ServiceFailed`. No page
+    /// awaits that start, so its answer is kept here for the shell to draw. It is kept only while the window is on this
+    /// computer's own start; anything begun meanwhile (pairing, a remote) is newer.
+    pub fn launch_answered(&mut self, outcome: Result<crate::ServiceStartup, String>) {
         if self.is_local_start() {
             self.state = match outcome {
                 Ok(startup) => LaunchState::LocalStartup { startup },
@@ -70,7 +71,8 @@ impl RemoteConnection {
         }
     }
 
-    /// The person acted on the last answer: the start running now owns the window until it answers.
+    /// The window ran a local start itself. The page that awaits it draws its answer, so an answer kept here is no
+    /// longer what the window shows.
     pub fn local_start_began(&mut self) {
         if self.is_local_start() {
             self.state = LaunchState::Local;
@@ -144,31 +146,31 @@ mod tests {
     }
 
     #[test]
-    fn a_service_failure_survives_the_end_of_a_pairing_until_a_start_answers() {
+    fn a_service_failure_survives_the_end_of_a_pairing_until_the_launch_answers() {
         let mut connection = RemoteConnection::default();
         connection.begin_pairing();
         connection.service_failed("did not start");
         connection.end_pairing();
         assert_eq!(connection.state(), &LaunchState::ServiceFailed { reason: "did not start".into() });
         let ready = crate::ServiceStartup::Ready { url: "http://127.0.0.1:47895".into() };
-        connection.local_start_ended(Ok(ready.clone()));
+        connection.launch_answered(Ok(ready.clone()));
         assert_eq!(connection.state(), &LaunchState::LocalStartup { startup: ready.clone() });
         connection.connected("Studio");
-        connection.local_start_ended(Ok(ready));
+        connection.launch_answered(Ok(ready));
         assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
     }
 
     #[test]
-    fn a_start_answer_lasts_until_the_person_acts_on_it_and_never_replaces_what_they_began_since() {
+    fn a_launch_answer_lasts_until_the_window_runs_a_start_and_never_replaces_what_the_person_began_since() {
         let offered = crate::ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() };
         let mut connection = RemoteConnection::default();
-        connection.local_start_ended(Ok(offered.clone()));
+        connection.launch_answered(Ok(offered.clone()));
         assert_eq!(connection.state(), &LaunchState::LocalStartup { startup: offered });
         connection.local_start_began();
         assert_eq!(connection.state(), &LaunchState::Local, "an adoption offer outlived the adoption it started");
 
         connection.begin_pairing();
-        connection.local_start_ended(Err("refused".into()));
+        connection.launch_answered(Err("refused".into()));
         assert_eq!(connection.state(), &LaunchState::Pairing, "a late start answer replaced a pairing");
         connection.local_start_began();
         assert_eq!(connection.state(), &LaunchState::Pairing);
