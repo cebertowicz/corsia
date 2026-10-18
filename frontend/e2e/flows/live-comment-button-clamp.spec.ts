@@ -4,7 +4,9 @@ import { routeDocumentSaves } from '../support/docSaveCue';
 
 for (const width of [1440, 393]) {
 	test(`@surface:live-document the selection Comment button stays inside the document column and clickable at ${width}`, async ({ page, request, context }) => {
-		await routeDocumentSaves(context, 1500);
+		// Held until measured, not for a fixed time: a busy page can take longer than any delay to show the cue.
+		const saves = await routeDocumentSaves(context);
+		saves.hold();
 		await page.setViewportSize({ width, height: width > 500 ? 960 : 852 });
 		const stamp = `clamp-${Date.now().toString(36)}`;
 		const words = Array.from({ length: 60 }, (_, index) => `word${index}`).join(' ');
@@ -25,6 +27,7 @@ for (const width of [1440, 393]) {
 		await expect(saving).toBeVisible();
 		const [savingBox, commentsPillBox] = await Promise.all([saving.boundingBox(), commentsPill.boundingBox()]);
 		expect(savingBox!.x + savingBox!.width, 'save status ends before the comment pill starts').toBeLessThanOrEqual(commentsPillBox!.x);
+		saves.release();
 		await expect(page.getByText('✓ Saved', { exact: true })).toBeVisible();
 		// A selection that ends just inside the right edge of a full-width visual line puts the
 		// button's natural position beyond the column. Backing off the wrap point keeps the end on
