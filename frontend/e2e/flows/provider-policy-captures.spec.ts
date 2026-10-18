@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { loginByUrl, openSettingsSection } from '../support/corsia';
 
 type ScreenId = 'W1' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
@@ -111,12 +111,18 @@ async function openActivity(page: Page) {
 	await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
 }
 
+async function waitForModalToSettle(modal: Locator) {
+	await expect.poll(async () => modal.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
+	await expect(modal).toBeVisible();
+}
+
 async function openWorkspaceProviderAccounts(page: Page) {
 	const card = page.locator('[data-provider-card="claude-code"]');
 	await card.getByRole('button', { name: 'Settings' }).click();
 	const modal = page.locator('.modal');
 	await expect(modal.getByRole('button', { name: 'Accounts', exact: true })).toBeVisible();
 	await expect(modal.locator('.accounts')).toBeVisible();
+	await waitForModalToSettle(modal);
 	return modal;
 }
 
@@ -183,6 +189,25 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					await expect(page.locator('.settings-content')).toBeVisible();
 				}
 			}
+		}
+	});
+
+	test('captures the workspace Providers page after removing its duplicate policy section', async ({ page }, testInfo) => {
+		test.setTimeout(120_000);
+		const state: { screen: ScreenId } = { screen: 'W1' };
+		await servePolicyStates(page, state);
+		for (const [surface, width, height, colorScheme] of surfacesFor(testInfo.project.name)) {
+			await page.setViewportSize({ width, height });
+			await page.emulateMedia({ colorScheme });
+			await loginByUrl(page, { waitForComposer: false });
+			await openActivity(page);
+			await page.getByRole('button', { name: 'Workspace settings' }).click();
+			await openSettingsSection(page, 'Providers');
+			const content = page.locator('.settings-content');
+			await content.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+			await expect(page.locator('.modal')).toHaveCount(0);
+			await expect(content.getByText('Accounts and rollover', { exact: true })).toHaveCount(0);
+			await page.screenshot({ path: testInfo.outputPath(`workspace-providers-bottom-${surface}.png`), animations: 'disabled', scale: 'css' });
 		}
 	});
 
@@ -300,7 +325,9 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			accounts = vendorAccounts();
 			policy = { ...policyFor('W1'), providers: policyFor('W1').providers.map((provider) => provider.provider_key === 'claude-code' ? { ...provider, rollover: false, order: null } : provider) };
 			modal = await openWorkspace(surface);
+			await expect(modal.getByRole('button', { name: 'Roll over when an account hits its limit' })).toBeVisible();
 			await expect(modal.getByRole('button', { name: /Move Personal Max/ })).toHaveCount(0);
+			await expect(modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true })).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`rollover-off-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			accounts = vendorAccounts().map((account, index) => index === 0
@@ -313,21 +340,32 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.screenshot({ path: testInfo.outputPath(`limited-unknown-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			accounts = vendorAccounts().map((account, index) => index === 0 ? { ...account, state: 'legacy' } : account);
+			policy = policyFor('W1');
 			modal = await openWorkspace(surface);
 			await expect(modal.getByText('Managed by provider')).toBeVisible();
+			await expect(modal.getByRole('button', { name: 'Roll over when an account hits its limit' })).toBeVisible();
+			await expect(modal.getByRole('button', { name: 'Move Personal Max · sam@example.com up' })).toBeVisible();
+			await expect(modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true })).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`managed-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			accounts = vendorAccounts();
 			saveAttempt = 0;
 			modal = await openWorkspace(surface);
-			await modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true }).click();
-			await expect(modal.getByText('Could not save subscriptions.')).toBeVisible();
+			const savedToggle = modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true });
+			await savedToggle.click();
+			await expect(modal.getByText("Couldn't save this change. Try again.")).toBeVisible();
+			await expect(savedToggle).toHaveAttribute('aria-pressed', 'true');
 			await page.screenshot({ path: testInfo.outputPath(`save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			modal = await openWorkspace(surface);
 			const toggle = modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true });
+			const otherToggle = modal.getByRole('button', { name: 'Use Acme (Team) · sam@example.com', exact: true });
+			const rolloverToggle = modal.getByRole('button', { name: 'Roll over when an account hits its limit' });
 			await toggle.click();
 			await expect(toggle).toBeDisabled();
+			await expect(modal.getByText('Saving…')).toBeVisible();
+			await expect(otherToggle).toBeEnabled();
+			await expect(rolloverToggle).toBeEnabled();
 			await page.screenshot({ path: testInfo.outputPath(`busy-${surface}.png`), animations: 'disabled', scale: 'css' });
 			releaseBusy?.();
 			await expect(toggle).toBeEnabled();

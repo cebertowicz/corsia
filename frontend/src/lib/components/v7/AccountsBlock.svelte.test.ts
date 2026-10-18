@@ -82,7 +82,7 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
-		it('keeps a failed workspace policy save visible in the Accounts tab', async () => {
+		it('keeps a failed workspace policy control at its saved value and reports the next action beside it', async () => {
 			token.set('test-token');
 			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
 				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
@@ -93,8 +93,11 @@ describe('rendering and actions', () => {
 			}));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
-			document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!.click();
-			await vi.waitFor(() => expect(document.body.textContent).toContain('Could not save subscriptions.'));
+			const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!;
+			toggle.click();
+			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't save this change. Try again."));
+			expect(toggle.getAttribute('aria-pressed')).toBe('true');
+			expect(document.body.textContent).not.toContain('Could not save subscriptions.');
 			unmount(component);
 		});
 

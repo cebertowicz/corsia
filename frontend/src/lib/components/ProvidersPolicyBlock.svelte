@@ -13,7 +13,8 @@
 	const policy = $derived(policyState.policy);
 	const error = $derived(policyState.error);
 	const loading = $derived(policyState.loading);
-	const busy = $derived(policyState.busy);
+	const hasControlFailure = $derived(policyState.hasControlFailure());
+	const scopeTarget = 'scope';
 	let accountsError = $state('');
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
 
@@ -24,7 +25,7 @@
 		if (!accounts.ok) accountsError = accounts.error ?? 'Could not load accounts.';
 	}
 	async function toggleScope(useWorkspace: boolean) { await policyState.toggleScope(useWorkspace); }
-	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>) { await policyState.save(entry, patch); }
+	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>, target: string) { await policyState.save(entry, patch, target); }
 	function providerName(provider: ProviderEntry) {
 		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';
 	}
@@ -42,7 +43,7 @@
 <section class="providers-policy" aria-label="Project providers" data-settings-anchor="project-provider-policy" use:settingsAnchor={'project-provider-policy'}>
 	<h2>Accounts and rollover</h2>
 	{#if loading}<p role="status">Loading providers…</p>
-	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
+	{:else if error && !hasControlFailure}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
 		<div class="scope-setting">
@@ -51,7 +52,7 @@
 					<p>Use the workspace's account order and rollover.</p>
 					<span class="workspace-link"><Button variant="ghost" size="sm" onclick={openWorkspaceProviders}>Open workspace providers</Button></span>
 				</div>
-				<Toggle checked={policy.use_workspace ?? true} disabled={busy} ariaLabel="Use workspace settings" onchange={toggleScope} />
+				<span class="policy-control"><Toggle checked={policy.use_workspace ?? true} disabled={policyState.isPending(scopeTarget)} ariaLabel="Use workspace settings" describedBy={policyState.isPending(scopeTarget) || policyState.hasFailure(scopeTarget) ? 'scope-policy-status' : undefined} onchange={toggleScope} />{#if policyState.isPending(scopeTarget)}<span class="policy-status" id="scope-policy-status" role="status">Saving…</span>{/if}{#if policyState.hasFailure(scopeTarget)}<span class="policy-status error" id="scope-policy-status" role="status">Couldn't save this change. Try again.</span>{/if}</span>
 			</div>
 		{#if !policy.use_workspace}
 			{#each accountProviders as provider (provider.provider_key)}
@@ -64,14 +65,14 @@
 						{@const unit = provider.units[0]}
 						{#if accountFor(unit.id)}
 							<AccountUsageRow account={accountFor(unit.id)!} compact>
-								<ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} disabled={busy} ontoggle={(value) => setEnabled(provider, unit.id, value)} />
+								<ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} />
 							</AccountUsageRow>
 						{:else}
-							<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} disabled={busy} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
+							<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 						{/if}
 					{:else}
 						{#if provider.capabilities.rollover}
-							<div class="line"><span>Roll over when an account hits its limit</span><Toggle checked={provider.rollover} disabled={busy} ariaLabel="Roll over when an account hits its limit" onchange={(value) => save(provider, { rollover: value })} /></div>
+							<div class="line"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={provider.rollover} disabled={policyState.isPending(`rollover:${provider.provider_key}`)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(`rollover:${provider.provider_key}`) || policyState.hasFailure(`rollover:${provider.provider_key}`) ? `rollover-${provider.provider_key}-policy-status` : undefined} onchange={(value) => save(provider, { rollover: value }, `rollover:${provider.provider_key}`)} />{#if policyState.isPending(`rollover:${provider.provider_key}`)}<span class="policy-status" id={`rollover-${provider.provider_key}-policy-status`} role="status">Saving…</span>{/if}{#if policyState.hasFailure(`rollover:${provider.provider_key}`)}<span class="policy-status error" id={`rollover-${provider.provider_key}-policy-status`} role="status">Couldn't save this change. Try again.</span>{/if}</span></div>
 						{/if}
 						{#each provider.units as unit, index (unit.id)}
 							{#if accountFor(unit.id)}
@@ -79,7 +80,10 @@
 									<ProviderAccountPolicyControls
 										accountName={unit.label}
 										enabled={unit.enabled}
-										disabled={busy}
+										toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)}
+										moveDisabled={policyState.isPending(`order:${provider.provider_key}:${unit.id}`)}
+										pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`) || policyState.isPending(`order:${provider.provider_key}:${unit.id}`)}
+										failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`) || policyState.hasFailure(`order:${provider.provider_key}:${unit.id}`)}
 										position={provider.rollover ? index : null}
 										total={provider.units.length}
 										onmove={(direction) => move(provider, unit.id, direction)}
@@ -87,7 +91,7 @@
 									/>
 								</AccountUsageRow>
 							{:else}
-								<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} disabled={busy} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
+								<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 							{/if}
 						{/each}
 					{/if}
@@ -118,4 +122,7 @@
 	.workspace-link :global(.btn.ghost) { padding-inline: 0; }
 	p { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.error { color: var(--red-text); }
+	.policy-control { display: grid; justify-items: end; gap: var(--space-1); }
+	.policy-status { color: var(--text-secondary); font-size: var(--text-footnote); }
+	.policy-status.error { color: var(--red-text); }
 </style>

@@ -104,7 +104,7 @@
 	.compact { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--list-row-min-height); }
 	.compact strong { min-width: 0; font-size: var(--text-subhead); font-weight: 400; }
 	.compact .usage { margin: 0 0 0 auto; text-align: right; white-space: nowrap; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-	.order { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; }
+	.order { flex: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; text-align: center; }
 	.controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
@@ -145,7 +145,7 @@
 		.compact.ordered { grid-template-columns: auto minmax(0, 1fr) auto; }
 		.compact > strong, .compact > .usage { grid-column: -3 / -2; }
 		.compact .usage { margin: 0; text-align: left; white-space: normal; }
-		.compact > .order { grid-column: 1; grid-row: 1 / span 2; }
+		.compact > .order { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
 		.compact > .controls { grid-column: -2 / -1; grid-row: 1 / span 2; }
 		.compact strong { display: flex; flex-wrap: wrap; align-items: baseline; }
 		.compact strong .email { flex-basis: 100%; }

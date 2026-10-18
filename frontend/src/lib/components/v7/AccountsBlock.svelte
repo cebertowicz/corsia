@@ -56,6 +56,7 @@
 	const policyState = createProviderPolicyState();
 	const policyError = $derived(policyState.error);
 	const policyProvider = $derived(policyState.policy?.providers.find((entry) => entry.provider_key === provider.name));
+	const rolloverTarget = $derived(`rollover:${provider.name}`);
 	const overridingProjects = $derived(policyState.policy?.overriding_projects ?? []);
 	let signin = $state<Record<string, SigninResult>>({});
 
@@ -270,7 +271,7 @@
 
 <div class="account-manager">
 {#if !showRows && accounts.length === 1}<OverageSwitch account={accounts[0]} />{/if}
-{#if actionError || policyError}<Message variant="err">{actionError || policyError}</Message>{/if}
+{#if actionError || (policyError && !policyState.hasControlFailure())}<Message variant="err">{actionError || policyError}</Message>{/if}
 
 <div class="accounts" aria-label={`${provider.label} accounts`}>
 	{#if !showRows}
@@ -280,13 +281,13 @@
 		</div>
 	{:else}
 		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
-			<div class="rollover-row"><span>Roll over when an account hits its limit</span><Toggle checked={policyProvider.rollover} disabled={policyState.busy} ariaLabel="Roll over when an account hits its limit" onchange={(value) => policyState.save(policyProvider, { rollover: value })} /></div>
+			<div class="rollover-row"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={policyProvider.rollover} disabled={policyState.isPending(rolloverTarget)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(rolloverTarget) || policyState.hasFailure(rolloverTarget) ? 'rollover-policy-status' : undefined} onchange={(value) => policyState.save(policyProvider, { rollover: value }, rolloverTarget)} />{#if policyState.isPending(rolloverTarget)}<span class="policy-status" id="rollover-policy-status" role="status">Saving…</span>{/if}{#if policyState.hasFailure(rolloverTarget)}<span class="policy-status error" id="rollover-policy-status" role="status">Couldn't save this change. Try again.</span>{/if}</span></div>
 		{/if}
 		{#each accounts as account, index (account.id)}
 			{@const unit = policyProvider?.units.find((candidate) => candidate.id === account.id)}
 			{@const signIn = signin[account.id]}
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-			<section class="account" id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
+			<section class="account" class:ordered={policyProvider?.rollover && policyProvider.units.length >= 2} id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
 				{#if editingId === account.id && account.state !== 'removed'}
 					<Field label="Name" error={editError}>
 						{#snippet trailing()}
@@ -310,7 +311,10 @@
 									<ProviderAccountPolicyControls
 										accountName={displayName(account)}
 										enabled={unit.enabled}
-										disabled={policyState.busy}
+										toggleDisabled={policyState.isPending(`unit:${provider.name}:${account.id}`)}
+										moveDisabled={policyState.isPending(`order:${provider.name}:${account.id}`)}
+										pending={policyState.isPending(`unit:${provider.name}:${account.id}`) || policyState.isPending(`order:${provider.name}:${account.id}`)}
+										failed={policyState.hasFailure(`unit:${provider.name}:${account.id}`) || policyState.hasFailure(`order:${provider.name}:${account.id}`)}
 										position={policyProvider?.rollover && policyProvider.units.length >= 2 ? index : null}
 										total={policyProvider?.units.length ?? 0}
 										onmove={(direction) => policyState.move(policyProvider!, account.id, direction)}
