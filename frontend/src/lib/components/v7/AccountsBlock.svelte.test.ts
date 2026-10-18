@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import AccountsBlock from './AccountsBlock.svelte';
 import { checkVendorSignin, loadVendorAccounts, removeVendorAccount, renameVendorAccount, signOutVendorAccount, type VendorAccount, vendorAccounts } from '$lib/stores/vendorAccounts';
 import { get } from 'svelte/store';
+import { token } from '$lib/stores/auth';
 
 describe('rendering and actions', () => {
 	const provider = {
@@ -35,13 +36,14 @@ describe('rendering and actions', () => {
 	}
 
 	async function openAccountMenu(label: string): Promise<void> {
-		const row = document.querySelector<HTMLElement>(`[aria-label="More actions for ${label}"]`);
+		const row = [...document.querySelectorAll<HTMLElement>('[id^="vendor-account-"]')].find((candidate) => candidate.textContent?.includes(label));
 		if (!row) throw new Error(`No account row for ${label}`);
 		row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 }));
 		await settle();
 	}
 
 	afterEach(() => {
+		token.set(null);
 		vendorAccounts.set([]);
 		vi.unstubAllGlobals();
 		document.body.innerHTML = '';
@@ -52,10 +54,31 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			expect(document.body.textContent).toContain('Accounts');
+			expect(document.body.textContent).not.toContain('Accounts');
 			expect(document.body.textContent).toContain('Plus account 1');
 			expect(document.body.textContent).not.toContain('Default');
 			expect(document.body.textContent).toContain('Add account');
+			unmount(component);
+		});
+
+		it('keeps the account row a plain menu trigger while exposing its policy toggle by account name', async () => {
+			token.set('test-token');
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+				return path.startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] }))
+					: Promise.resolve(response({ accounts: [defaultAccount] }));
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			const row = document.querySelector<HTMLElement>('#vendor-account-default')!;
+			expect(row.getAttribute('role')).toBeNull();
+			expect(row.getAttribute('aria-label')).toBeNull();
+			await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Plus account 1"]')).not.toBeNull());
+			row.focus();
+			row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
+			await settle();
+			expect(document.querySelector('[role="menu"]')?.textContent).toContain('Rename');
 			unmount(component);
 		});
 
@@ -128,7 +151,8 @@ describe('rendering and actions', () => {
 			] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			expect(document.body.textContent).toContain('Personal · person@example.test');
+			expect(document.querySelector('.account-usage-row .name')?.textContent).toBe('Personal');
+			expect(document.querySelector('.account-usage-row .email')?.textContent).toBe('person@example.test');
 			expect(document.body.textContent).toContain('Plus account 2');
 			unmount(component);
 		});
@@ -298,7 +322,7 @@ describe('lifecycle', () => {
 	function list(account = out) { return res({ accounts: [ambient, account] }); }
 	function button(name: string) { const el = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name); if (!el) throw new Error(`Missing ${name}`); return el; }
 	async function settle() { await new Promise((r) => setTimeout(r, 0)); flushSync(); }
-	async function more() { const row = document.querySelector<HTMLElement>('[aria-label="More actions for Work"]')!; row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle(); }
+	async function more() { const row = document.querySelector<HTMLElement>('#vendor-account-work')!; row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle(); }
 	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 	describe('account lifecycle truth', () => {
@@ -323,7 +347,7 @@ describe('lifecycle', () => {
 			expect(get(vendorAccounts).find((a) => a.id === 'work')).toMatchObject({ state: 'signed_in', revision: 1 });
 			expect(document.querySelector('#vendor-account-work')?.textContent).not.toContain('Signed out');
 			expect(document.querySelector('#vendor-account-work .signin-state[role="status"]')).toBeNull();
-			expect(document.querySelector('#vendor-account-work .account-meta')?.textContent?.trim()).toBe('Signed in');
+			expect(document.querySelector('#vendor-account-work .account-meta')).toBeNull();
 			await more(); button('Rename').click(); await settle();
 			const input = document.querySelector('[aria-label="Rename Work"]') as HTMLInputElement;
 			input.value = 'Renamed'; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
@@ -344,7 +368,7 @@ describe('lifecycle', () => {
 			expect(document.body.textContent).toContain('Signed in, but the account list could not be reloaded.');
 			expect(document.querySelector('#vendor-account-work')?.textContent).not.toContain('Signed out');
 			expect(document.querySelector('#vendor-account-work .signin-state[role="status"]')).toBeNull();
-			expect(document.querySelector('#vendor-account-work .account-meta')?.textContent?.trim()).toBe('Signed in');
+			expect(document.querySelector('#vendor-account-work .account-meta')).toBeNull();
 			expect(get(vendorAccounts).find((a) => a.id === 'work')).toMatchObject({ state: 'signed_in', revision: 0, details_stale: true });
 			await more(); expect(button('Sign out').disabled).toBe(true); expect(button('Rename').disabled).toBe(true); expect(button('Remove').disabled).toBe(true);
 			button('Reload').click(); await settle();
@@ -476,7 +500,7 @@ describe('billing in the account row', () => {
 		await settle();
 		expect(document.body.textContent).toContain('Billing Price not recorded');
 		expect(document.body.textContent).not.toContain('Billing history');
-		(document.querySelector<HTMLElement>('[aria-label="More actions for Work"]')!).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle();
+		(document.querySelector<HTMLElement>('#vendor-account-work')!).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle();
 		expect(document.body.textContent).not.toContain('Billing history');
 		button('Set price').click(); flushSync();
 		const price = document.querySelector('input[inputmode="decimal"]') as HTMLInputElement;

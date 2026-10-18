@@ -2,13 +2,13 @@
 	import { onMount, tick } from 'svelte';
 	import { Button, Field, Message } from '$lib/components/ui';
 	import Toggle from '../ui/Toggle.svelte';
-	import IconButton from '../ui/IconButton.svelte';
 	import Menu, { type MenuItem } from '../ui/Menu.svelte';
 	import { createRowMenu } from '../ui/rowMenu.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import OverageSwitch from './OverageSwitch.svelte';
 	import AccountUsageRow from './AccountUsageRow.svelte';
 	import AccountBillingRow from './AccountBillingRow.svelte';
+	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { openProjectSettings } from '$lib/stores/settingsNavigation';
@@ -95,12 +95,11 @@
 		return account ? displayName(account) : null;
 	}
 
-	function stateLabel(account: VendorAccount): string {
+	function stateLabel(account: VendorAccount): string | null {
 		if (account.state === 'signed_out') return 'Signed out';
 		if (account.state === 'legacy') return 'Managed by provider';
-		if (account.state === 'signed_in') return 'Signed in';
 		if (account.state === 'removed') return 'Removed';
-		return account.state;
+		return null;
 	}
 
 	function readableCause(cause: string | null): string {
@@ -275,8 +274,7 @@
 	{#if !showRows}
 		<Button size="sm" variant="primary" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 	{:else}
-		<div class="account-heading">
-			<span>Accounts</span>
+		<div class="account-toolbar">
 			<Button size="sm" variant="primary" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 		</div>
 		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
@@ -285,7 +283,8 @@
 		{#each accounts as account, index (account.id)}
 			{@const unit = policyProvider?.units.find((candidate) => candidate.id === account.id)}
 			{@const signIn = signin[account.id]}
-			<section class="account" id={`vendor-account-${account.id}`} role="button" aria-haspopup="menu" tabindex="0" aria-label={`More actions for ${displayName(account)}`} {...accountMenu.rowHandlers(account)}>
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<section class="account" id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
 				{#if editingId === account.id && account.state !== 'removed'}
 					<Field label="Name" error={editError}>
 						{#snippet trailing()}
@@ -304,29 +303,26 @@
 				{:else}
 					<div class="account-main">
 						<div class="account-copy">
-							<AccountUsageRow {account} compact order={policyProvider?.rollover && policyProvider.units.length >= 2 ? index + 1 : null}>
+							<AccountUsageRow {account} compact marker={account.is_default ? 'Workspace account' : null} order={policyProvider?.rollover && policyProvider.units.length >= 2 ? index + 1 : null}>
 								{#if unit}
-									{#if policyProvider?.rollover && policyProvider.units.length >= 2}
-										<span class="order-controls" aria-label={`${displayName(account)} rollover order`}>
-											<IconButton size="sm" ariaLabel={`Move ${displayName(account)} up`} disabled={policyState.busy || index === 0} onclick={() => policyState.move(policyProvider!, account.id, -1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6" /></svg></IconButton>
-											<IconButton size="sm" ariaLabel={`Move ${displayName(account)} down`} disabled={policyState.busy || index === policyProvider.units.length - 1} onclick={() => policyState.move(policyProvider!, account.id, 1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6-6 6" /></svg></IconButton>
-										</span>
-									{/if}
-									<Toggle checked={unit.enabled} disabled={policyState.busy} ariaLabel={displayName(account)} onchange={(value) => policyState.setEnabled(policyProvider!, account.id, value)} />
+									<ProviderAccountPolicyControls
+										accountName={displayName(account)}
+										enabled={unit.enabled}
+										disabled={policyState.busy}
+										position={policyProvider?.rollover && policyProvider.units.length >= 2 ? index : null}
+										total={policyProvider?.units.length ?? 0}
+										onmove={(direction) => policyState.move(policyProvider!, account.id, direction)}
+										ontoggle={(value) => policyState.setEnabled(policyProvider!, account.id, value)}
+									/>
 								{/if}
 							</AccountUsageRow>
-							<div class="account-meta">
-								<span>{stateLabel(account)}</span>
-								{#if account.is_default}<span>Workspace account</span>{/if}
-							</div>
+							{#if stateLabel(account)}<div class="account-meta"><span>{stateLabel(account)}</span></div>{/if}
 						</div>
-						<div class="account-actions">
-							{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
-								<Button size="sm" variant="primary" loading={!!pending[account.id]} onclick={() => startSignin(account.id)}>Sign in</Button>
-							{/if}
-							<!-- Row actions open with right-click, long-press, or the context-menu key. -->
-						</div>
+						<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 					</div>
+					{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
+						<Button size="sm" variant="ghost" loading={!!pending[account.id]} onclick={() => startSignin(account.id)}>Sign in</Button>
+					{/if}
 					{#if account.state !== 'removed'}<OverageSwitch {account} inline />{/if}
 					<AccountBillingRow {account} />
 					<!-- The shared Menu below owns positioning, focus, and escape. -->
@@ -352,10 +348,10 @@
 	{/if}
 
 	{#if overridingProjects.length}
-		<p class="override-summary">Overridden in {overridingProjects.length} {overridingProjects.length === 1 ? 'project' : 'projects'}: {#each overridingProjects as project, index}{#if index > 0}, {/if}<button class="project-link" onclick={() => openProjectSettings(project.id, 'project-provider-policy')}>{project.name}</button>{/each}</p>
+		<p class="override-summary">Overridden in {overridingProjects.length} {overridingProjects.length === 1 ? 'project' : 'projects'}: {#each overridingProjects as project, index}{#if index > 0}{', '}{/if}<button class="project-link" onclick={() => openProjectSettings(project.id, 'project-provider-policy')}>{project.name}</button>{/each}</p>
 	{/if}
 
-	{#if !showHistorical}<Button size="sm" variant="secondary" onclick={openHistoricalAccounts}>Open historical accounts</Button>{/if}
+	{#if !showHistorical}<Button size="sm" variant="ghost" onclick={openHistoricalAccounts}>Open historical accounts</Button>{/if}
 	{#if adding}
 		<Field label="Account name" error={actionError}>
 			{#snippet trailing()}
@@ -394,21 +390,18 @@
 	.account-manager :global(.btn.ghost) { color: var(--text-secondary); }
 	.account-manager :global(.btn.primary:hover:not(:disabled)) { background: var(--accent-wash); }
 	.accounts { display: grid; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); }
-	.account-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: var(--text-footnote); font-weight: 600; }
+	.account-toolbar { display: flex; justify-content: flex-end; }
 	.rollover-row { display: flex; align-items: center; justify-content: space-between; min-height: var(--list-row-min-height); gap: var(--space-2); font-size: var(--text-subhead); color: var(--text-primary); }
-	.order-controls { display: flex; align-items: center; gap: var(--space-1); }
+	/* ProviderAccountPolicyControls owns account ordering and enablement controls. */
 	.override-summary { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.project-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 	.account { position: relative; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); outline: none; }
 	.account:focus { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
 	.account-main { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-	.account-copy { min-width: 0; }
-	/* The sign-in action keeps its natural width while the account copy wraps. */
-	.account-actions { flex-shrink: 0; }
+	.account-copy { flex: 1; min-width: 0; }
 
 	.account-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
-	.account-meta span + span::before { content: '·'; margin-right: 8px; color: var(--text-tertiary); }
-	.account-actions, .inline-actions, .signin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+	.inline-actions, .signin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 	/* The shared Menu component owns row-menu styling. */
 	.signin-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.signin-state { min-width: 0; }

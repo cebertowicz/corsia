@@ -8,13 +8,13 @@ const SCREENS: readonly ScreenId[] = ['W1', 'R1', 'R2', 'R3', 'R4', 'R5'];
 function surfacesFor(projectName: string) {
 	if (projectName === 'chromium-desktop') {
 		return [
-			['desktop-light', 1440, 900, 'light'],
-			['desktop-dark', 1440, 900, 'dark'],
+			['desktop-light', 1920, 1080, 'light'],
+			['desktop-dark', 1920, 1080, 'dark'],
 		] as const;
 	}
 	return [
-		['phone-light', 390, 844, 'light'],
-		['phone-dark', 390, 844, 'dark'],
+		['phone-light', 393, 852, 'light'],
+		['phone-dark', 393, 852, 'dark'],
 	] as const;
 }
 
@@ -167,12 +167,12 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 						await expect(region.getByText("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.")).toBeVisible();
 						await expect(region.getByRole('button', { name: 'Open workspace providers' })).toBeVisible();
 					}
-					if (screen === 'R3') await expect(region.getByRole('button', { name: 'Personal Max', exact: true })).toHaveAttribute('aria-pressed', 'false');
+					if (screen === 'R3') await expect(region.getByRole('button', { name: 'Use Personal Max', exact: true })).toHaveAttribute('aria-pressed', 'false');
 					if (screen === 'R4') await expect(region.getByRole('button', { name: 'Sign in' })).toBeVisible();
 					await region.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 					if (screen === 'R5') {
-						await expect(region.getByRole('button', { name: 'Acme (Team)' })).toBeVisible();
-						await expect(region.getByRole('button', { name: 'Pro', exact: true })).toBeVisible();
+						await expect(region.getByRole('button', { name: 'Use Acme (Team)' })).toBeVisible();
+						await expect(region.getByRole('button', { name: 'Use Pro', exact: true })).toBeVisible();
 						await expect(region.getByRole('button', { name: 'Roll over when an account hits its limit' })).toHaveCount(0);
 						await expect(region.getByRole('button', { name: /Move / })).toHaveCount(0);
 					}
@@ -230,8 +230,8 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.getByRole('button', { name: 'Workspace settings' }).click();
 			await openSettingsSection(page, 'Providers');
 			const accounts = await openWorkspaceProviderAccounts(page);
-			const first = accounts.getByRole('button', { name: 'Personal Max · sam@example.com', exact: true });
-			const second = accounts.getByRole('button', { name: 'Acme (Team) · sam@example.com', exact: true });
+			const first = accounts.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true });
+			const second = accounts.getByRole('button', { name: 'Use Acme (Team) · sam@example.com', exact: true });
 			await expect(first).toBeEnabled();
 			await expect(second).toBeEnabled();
 			await first.click();

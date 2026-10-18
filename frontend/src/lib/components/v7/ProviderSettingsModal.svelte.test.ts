@@ -118,7 +118,8 @@ describe('ProviderSettingsModal remove', () => {
 				raw: { name: 'codex', label: 'Codex', type: 'harness' },
 			} as never, onClose: vi.fn() },
 		});
-		await vi.waitFor(() => expect(document.body.textContent).toContain('Personal · person@example.test'));
+		await vi.waitFor(() => expect(document.querySelector('.account-usage-row .name')?.textContent).toBe('Personal'));
+		expect(document.querySelector('.account-usage-row .email')?.textContent).toBe('person@example.test');
 		expect(document.body.textContent).toContain('Add account');
 	});
 

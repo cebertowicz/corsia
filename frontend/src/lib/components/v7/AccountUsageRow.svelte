@@ -19,6 +19,8 @@
 		compact?: boolean;
 		/** Rollover position, shown only while rollover is on. */
 		order?: number | null;
+		/** A short account marker that stays with the account name. */
+		marker?: string | null;
 		/** Settings: controls beside the row. */
 		children?: Snippet;
 		/** Picker: the account the next turn runs on. */
@@ -30,7 +32,7 @@
 		onselect?: () => void;
 	}
 
-	const { account, variant = 'settings', compact = false, order = null, children, marked = false, choosable = true, pending = false, onselect }: Props = $props();
+	const { account, variant = 'settings', compact = false, order = null, marker = null, children, marked = false, choosable = true, pending = false, onselect }: Props = $props();
 	const label = $derived(account.label);
 	const hasEmail = $derived(!!label.email && label.email !== label.name);
 	const usageLimit = $derived(account.usage?.state === 'limited' ? formatUsageLimit(account.usage) : null);
@@ -72,7 +74,7 @@
 {:else}
 	<div class="account-usage-row" class:compact class:ordered={order !== null}>
 		{#if order !== null}<span class="order" aria-label={`Rollover order ${order}`}>{order}</span>{/if}
-		<strong>{label.name}{#if hasEmail}{' · '}<span class="email">{label.email}</span>{/if}</strong>
+		<strong><span class="name">{label.name}</span>{#if marker}<span class="separator" aria-hidden="true">{' · '}</span><span class="marker">{marker}</span>{/if}{#if hasEmail}<span class="separator" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}</strong>
 		{#if usageLimit}
 			<!-- A limited account cannot run a turn: red, as the picker shows it. -->
 			<p class="usage" aria-label="Account usage"><span class="red">{usageLimit}</span></p>
@@ -94,6 +96,7 @@
 	.account-usage-row { min-width: 0; }
 	strong { display: block; color: var(--text-primary); font-size: var(--text-subhead); overflow-wrap: anywhere; }
 	.email { color: var(--text-secondary); font-weight: 400; }
+	.marker { margin-left: var(--space-1); color: var(--text-secondary); font-size: var(--text-caption); font-weight: 400; }
 	.usage { margin: 3px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.usage .amber { color: var(--amber-text); }
 	.usage .red { color: var(--red-text); }
@@ -144,5 +147,9 @@
 		.compact .usage { margin: 0; text-align: left; white-space: normal; }
 		.compact > .order { grid-column: 1; grid-row: 1 / span 2; }
 		.compact > .controls { grid-column: -2 / -1; grid-row: 1 / span 2; }
+		.compact strong { display: flex; flex-wrap: wrap; align-items: baseline; }
+		.compact strong .email { flex-basis: 100%; }
+		.compact strong .separator { display: none; }
+		.compact strong .marker { flex: 0 0 auto; }
 	}
 </style>

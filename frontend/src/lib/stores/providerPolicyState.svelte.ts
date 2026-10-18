@@ -7,7 +7,8 @@ import {
 } from '$lib/api/providerPolicy';
 
 /** One policy owner for both workspace account controls and project overrides. */
-export function createProviderPolicyState(projectId?: string) {
+export function createProviderPolicyState(projectId?: string | (() => string | undefined)) {
+	const currentProjectId = () => typeof projectId === 'function' ? projectId() : projectId;
 	let policy = $state<ProviderPolicy | null>(null);
 	let error = $state('');
 	let loading = $state(true);
@@ -17,7 +18,7 @@ export function createProviderPolicyState(projectId?: string) {
 		loading = true;
 		error = '';
 		try {
-			const result = await loadProviderPolicy(projectId);
+			const result = await loadProviderPolicy(currentProjectId());
 			if (result.ok && Array.isArray(result.value?.providers)) policy = result.value;
 			else error = result.ok ? 'Could not load providers.' : result.error;
 		} finally {
@@ -30,7 +31,7 @@ export function createProviderPolicyState(projectId?: string) {
 		busy = true;
 		error = '';
 		try {
-			const result = await saveProviderPolicy({ ...entry, ...patch }, projectId);
+			const result = await saveProviderPolicy({ ...entry, ...patch }, currentProjectId());
 			if (result.ok && policy) {
 				policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === entry.provider_key ? result.value : item) };
 			} else if (!result.ok) error = result.error;
@@ -40,10 +41,11 @@ export function createProviderPolicyState(projectId?: string) {
 	}
 
 	async function toggleScope(useWorkspace: boolean) {
-		if (!projectId || !policy || busy) return;
+		const current = currentProjectId();
+		if (!current || !policy || busy) return;
 		busy = true;
 		try {
-			const result = await saveUseWorkspace(projectId, useWorkspace, policy.override_revision ?? 0);
+			const result = await saveUseWorkspace(current, useWorkspace, policy.override_revision ?? 0);
 			if (result.ok) policy = result.value;
 			else error = result.error;
 		} finally {

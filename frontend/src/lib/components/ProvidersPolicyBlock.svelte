@@ -1,15 +1,15 @@
 <script lang="ts">
 	import Toggle from './ui/Toggle.svelte';
 	import Button from './ui/Button.svelte';
-	import IconButton from './ui/IconButton.svelte';
+	import ProviderAccountPolicyControls from './v7/ProviderAccountPolicyControls.svelte';
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
 	import type { ProviderEntry } from '$lib/api/providerPolicy';
-	import { createProviderPolicyState, providerOverrideSummary } from '$lib/stores/providerPolicyState.svelte';
+	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 
-	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
-	const policyState = createProviderPolicyState(projectId);
+	const { projectId, onSignIn }: { projectId: string; onSignIn?: (provider: string) => void } = $props();
+	const policyState = createProviderPolicyState(() => projectId);
 	const policy = $derived(policyState.policy);
 	const error = $derived(policyState.error);
 	const loading = $derived(policyState.loading);
@@ -31,8 +31,7 @@
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);
 	}
-	function overrideSummary() { return providerOverrideSummary(policy); }
-	// The workspace's order sits under Providers, above every project's override.
+	// Project policy stays with its project; workspace account policy lives in the provider Accounts tab.
 	function openWorkspaceProviders() {
 		requestSettingsSection('providers');
 	}
@@ -46,8 +45,7 @@
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
-		{#if projectId}
-			<div class="scope-setting">
+		<div class="scope-setting">
 				<div>
 					<span class="scope-label">Use workspace settings</span>
 					{#if policy.use_workspace ?? true}
@@ -59,23 +57,21 @@
 				</div>
 				<Toggle checked={policy.use_workspace ?? true} disabled={busy} ariaLabel="Use workspace settings" onchange={toggleScope} />
 			</div>
-		{/if}
-		{#if !projectId || !policy.use_workspace}
+		{#if !policy.use_workspace}
 			{#each accountProviders as provider (provider.provider_key)}
 				<div class="provider">
 					<h3>{providerName(provider)}</h3>
-					{#if !projectId}<p>{overrideSummary()}</p>{/if}
 					{#if provider.units.length === 0}
 						<p>No {providerName(provider)} account signed in</p>
-						{#if onSignIn}<Button size="sm" onclick={() => onSignIn?.(provider.provider_key)}>Sign in</Button>{/if}
+						{#if onSignIn}<Button size="sm" variant="ghost" onclick={() => onSignIn?.(provider.provider_key)}>Sign in</Button>{/if}
 					{:else if provider.units.length === 1}
 						{@const unit = provider.units[0]}
 						{#if accountFor(unit.id)}
 							<AccountUsageRow account={accountFor(unit.id)!} compact>
-								<Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} />
+								<ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} disabled={busy} ontoggle={(value) => setEnabled(provider, unit.id, value)} />
 							</AccountUsageRow>
 						{:else}
-							<div class="account-row"><span>{unit.label}</span><Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} /></div>
+							<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} disabled={busy} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 						{/if}
 					{:else}
 						{#if provider.capabilities.rollover}
@@ -84,16 +80,18 @@
 						{#each provider.units as unit, index (unit.id)}
 							{#if accountFor(unit.id)}
 								<AccountUsageRow account={accountFor(unit.id)!} compact order={provider.rollover ? index + 1 : null}>
-									{#if provider.rollover}
-										<span class="order-controls" aria-label={`${unit.label} rollover order`}>
-											<IconButton size="sm" ariaLabel={`Move ${unit.label} up`} disabled={busy || index === 0} onclick={() => move(provider, unit.id, -1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6" /></svg></IconButton>
-											<IconButton size="sm" ariaLabel={`Move ${unit.label} down`} disabled={busy || index === provider.units.length - 1} onclick={() => move(provider, unit.id, 1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6" /></svg></IconButton>
-										</span>
-									{/if}
-									<Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} />
+									<ProviderAccountPolicyControls
+										accountName={unit.label}
+										enabled={unit.enabled}
+										disabled={busy}
+										position={provider.rollover ? index : null}
+										total={provider.units.length}
+										onmove={(direction) => move(provider, unit.id, direction)}
+										ontoggle={(value) => setEnabled(provider, unit.id, value)}
+									/>
 								</AccountUsageRow>
 							{:else}
-								<div class="account-row"><span>{unit.label}</span><Toggle checked={unit.enabled} disabled={busy} ariaLabel={unit.label} onchange={(value) => setEnabled(provider, unit.id, value)} /></div>
+								<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} disabled={busy} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 							{/if}
 						{/each}
 					{/if}
@@ -110,11 +108,10 @@
 	h3 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.provider { display: flex; flex-direction: column; gap: var(--space-1); }
 	.provider > p { margin-bottom: var(--space-1); }
-	.scope-setting, .line, .account-row, .order-controls { display: flex; align-items: center; gap: var(--space-2); }
+	.scope-setting, .line, .account-row { display: flex; align-items: center; gap: var(--space-2); }
 	.line, .account-row { min-height: var(--list-row-min-height); }
 	.account-row > span { font-size: var(--text-subhead); color: var(--text-primary); }
 	.scope-setting, .line, .account-row { justify-content: space-between; }
-	.order-controls :global(.ico-btn) { width: 24px; height: 24px; }
 	.scope-setting > div { min-width: 0; }
 	/* A narrow project policy line must wrap its copy, never shrink the switch track. */
 	.scope-setting :global(.tg) { flex: 0 0 auto; }
