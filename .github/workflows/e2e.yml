@@ -115,6 +115,46 @@ jobs:
             bash scripts/e2e-local
           fi
 
+      # browser-pane waits on the first native browser open; when the suite fails, record why the browser does
+      # or does not start on this runner (kernel sandbox policy, launch output, backend session logs).
+      - name: Diagnose native browser launch
+        if: failure()
+        continue-on-error: true
+        run: |
+          out="$RUNNER_TEMP/browser-diag"
+          mkdir -p "$out"
+          probe() {
+            local label="$1"; shift
+            local dir="/tmp/abdiag-$label"
+            rm -rf "$dir"; mkdir -m 700 "$dir"
+            echo "--- probe $label: $*" >> "$out/summary.txt"
+            start=$(date +%s)
+            env "$@" AGENT_BROWSER_SOCKET_DIR="$dir" timeout 60 agent-browser --session "diag-$label" --debug --json open about:blank >> "$out/summary.txt" 2>&1
+            echo "exit=$? seconds=$(( $(date +%s) - start ))" >> "$out/summary.txt"
+            cp "$dir"/*.log "$out/probe-$label.log" 2>/dev/null || true
+            env AGENT_BROWSER_SOCKET_DIR="$dir" timeout 30 agent-browser --session "diag-$label" --json close >> "$out/summary.txt" 2>&1 || true
+          }
+          {
+            echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>&1)"
+            echo "CI=${CI:-} AGENT_BROWSER_EXECUTABLE_PATH=${AGENT_BROWSER_EXECUTABLE_PATH:-} AGENT_BROWSER_ARGS=${AGENT_BROWSER_ARGS:-}"
+            sudo dmesg 2>&1 | grep -i -E "apparmor|userns|chrome" | tail -n 40 || true
+          } > "$out/summary.txt" 2>&1
+          probe stock FOO=1
+          probe sandboxed -u CI
+          # The backend's own session sockets and daemon sidecars (never the sockets themselves).
+          find /tmp -maxdepth 2 -regextype posix-extended -regex '/tmp/[0-9a-f]{16}-[0-9a-f]{24}(/.*)?' -type f -exec cp --parents {} "$out" \; 2>/dev/null || true
+          cat "$out/summary.txt"
+
+      - name: Upload browser diagnostics
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-diagnostics-${{ matrix.run-index }}
+          path: ${{ runner.temp }}/browser-diag
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload browser cleanup screenshots
         if: always()
         # Diagnostics only: a failed upload must not turn a passing job red.
