@@ -146,7 +146,7 @@ jobs:
           python3 -m http.server 38999 --bind 127.0.0.1 --directory /tmp/abdiag-www > /dev/null 2>&1 &
           sleep 1
           # The backend's own daemon and browser at failure time: running or not, and with which arguments.
-          ps -eo pid,etime,args | grep -E 'agent-browser|chrome' | grep -v grep | cut -c1-300 >> "$out/summary.txt" || true
+          pgrep -a -f 'agent-browser|chrome' | cut -c1-300 >> "$out/summary.txt" || true
           probe stock about:blank FOO=1
           probe sandboxed about:blank -u CI
           probe http http://127.0.0.1:38999/index.html FOO=1
