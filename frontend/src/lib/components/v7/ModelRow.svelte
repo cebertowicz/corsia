@@ -1,5 +1,8 @@
 <script lang="ts">
 	import type { ModelCapability, ModelState } from '$lib/stores/providerModels';
+	import Menu from '$lib/components/ui/Menu.svelte';
+	import { createRowMenu } from '$lib/components/ui/rowMenu.svelte';
+	import ModelRowActions from './ModelRowActions.svelte';
 
 	interface Props {
 		name: string;
@@ -16,6 +19,8 @@
 		onInfo?: () => void;
 		onCancel?: () => void;
 		onRetry?: () => void;
+		/** Settings-owned local downloads can be removed from this row's action menu. */
+		onDeleteDownload?: () => void;
 	}
 
 	const {
@@ -31,11 +36,19 @@
 		onInfo,
 		onCancel,
 		onRetry,
+		onDeleteDownload,
 	}: Props = $props();
 
 	const showCancel = $derived(state === 'loading' || state === 'cache_warming' || state === 'queued');
 	const showRetry = $derived(state === 'error');
 	const showInfo = $derived(!showCancel && !showRetry);
+	const menu = createRowMenu<string>(() => !!onDeleteDownload);
+	const menuItems = $derived(onDeleteDownload ? [{ id: 'delete-download', label: 'Delete download' }] : []);
+
+	function selectMenuItem(id: string) {
+		menu.close();
+		if (id === 'delete-download') onDeleteDownload?.();
+	}
 	const metaClass = $derived(
 		state === 'loading' ? 'loading' :
 		state === 'cache_warming' ? 'warming' :
@@ -51,7 +64,8 @@
 	);
 </script>
 
-<div class="mr {rowClass}" class:has-warn={!!warning} style="--p: {progress}%">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
+<div class="mr {rowClass}" class:has-warn={!!warning} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
 		{#if state === 'loading' || state === 'cache_warming'}
 			<span class="puck" class:warming={state === 'cache_warming'}>
@@ -101,39 +115,23 @@
 		{/each}
 	</span>
 
-	<span class="action">
-		{#if showInfo}
-			<button
-				type="button"
-				class="ico-btn sm"
-				aria-label="Info"
-				onclick={(e) => { e.stopPropagation(); onInfo?.(); }}
-			>
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-					<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
-					<path d="M12 11v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-					<circle cx="12" cy="8" r="1" fill="currentColor"/>
-				</svg>
-			</button>
-		{:else if showCancel}
-			<button
-				type="button"
-				class="row-btn"
-				onclick={(e) => { e.stopPropagation(); onCancel?.(); }}
-			>Cancel</button>
-		{:else if showRetry}
-			<button
-				type="button"
-				class="row-btn danger"
-				onclick={(e) => { e.stopPropagation(); onRetry?.(); }}
-			>Retry</button>
-		{/if}
-	</span>
+	<ModelRowActions {showInfo} {showCancel} {showRetry} {onInfo} {onCancel} {onRetry} />
 
 	{#if warning}
 		<span class="warn" role="status">{warning}</span>
 	{/if}
 </div>
+
+{#if menu.open}
+	<Menu
+		ariaLabel={`Actions for ${name}`}
+		items={menuItems}
+		x={menu.open.x}
+		y={menu.open.y}
+		onSelect={selectMenuItem}
+		onClose={menu.close}
+	/>
+{/if}
 
 <style>
 	.mr {
@@ -151,7 +149,7 @@
 	.mname { grid-area: name; }
 	.meta { grid-area: meta; }
 	.caps { grid-area: caps; }
-	.action { grid-area: action; display: inline-flex; }
+
 	.mr.has-warn {
 		grid-template-areas:
 			"toggle name meta caps action"
@@ -330,32 +328,6 @@
 		color: var(--red);
 	}
 
-	.ico-btn {
-		display: inline-flex; align-items: center; justify-content: center;
-		border-radius: var(--radius-xs);
-		color: var(--text-tertiary);
-		transition: all var(--dur-tight) var(--ease-snap);
-		background: transparent;
-		border: 0;
-		cursor: pointer;
-	}
-	.ico-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-	.ico-btn.sm { width: 28px; height: 28px; }
-
-	.row-btn {
-		display: inline-flex; align-items: center; gap: 4px;
-		padding: 4px 10px;
-		border-radius: var(--radius-xs);
-		background: transparent;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote); font-weight: 500;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
-		border: 0;
-		cursor: pointer;
-	}
-	.row-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-	.row-btn.danger:hover { color: var(--red); }
 
 	@media (max-width: 480px) {
 		.mr {
@@ -371,7 +343,7 @@
 		.mname { font-size: var(--text-subhead); line-height: 1.3; padding-top: 2px; }
 		.meta  { font-size: var(--text-footnote); }
 		.caps  { padding-top: 2px; }
-		.action { align-self: center; }
+
 		.mr.has-warn {
 			grid-template-areas:
 				"toggle name action"

@@ -30,10 +30,13 @@ describe('AddLocalModelSheet', () => {
 		expect(host.textContent).not.toContain('Download');
 	});
 
-	it('uses the recommended row as the only download action', async () => {
-		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'ready' } }] } });
+	it('uses the first recommended row as the primary download action', async () => {
+		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'ready' } }], alternatives: [{ name: 'Other', repository: 'Jundot/Other', download_size_gb: 16, context_window: 32768, disk: { state: 'ready' } }] } });
 		expect(host.textContent).toContain('Recommended');
-		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('Download'))).toBe(true);
+		const downloads = [...host.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.includes('Download'));
+		expect(downloads).toHaveLength(2);
+		expect(downloads[0].classList.contains('primary')).toBe(true);
+		expect(downloads[1].classList.contains('secondary')).toBe(true);
 	});
 
 	it('disables a model that lacks the required free disk space', async () => {

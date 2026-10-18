@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { cancelLocalDownload, fetchSources, type ModelSource } from '$lib/conductorSources';
+	import { cancelLocalDownload, fetchSources, startLocalModelDownload, type ModelSource } from '$lib/conductorSources';
 	import { token } from '$lib/stores/auth';
 	import { on } from '$lib/ws/events';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -24,11 +24,7 @@
 		if (!repository || !t || busy) return;
 		busy = true; error = '';
 		try {
-			const response = await fetch('/api/providers/local/downloads', {
-				method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-				body: JSON.stringify({ repository }),
-			});
-			if (!response.ok) throw new Error();
+			await startLocalModelDownload(t, repository);
 		} catch { error = "Couldn't retry the local model download."; }
 		finally { busy = false; await refresh(); }
 	}

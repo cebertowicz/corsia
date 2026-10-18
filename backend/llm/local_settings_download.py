@@ -118,12 +118,7 @@ async def resume(model: LocalModel) -> dict:
     """Re-follow a persisted Settings download after restart without adopting setup."""
     from llm import local_setup as ls
 
-    while ls._flight.operation_lock is None:
-        lock = ls.local_setup_operation.try_lock()
-        if lock is not None:
-            ls._flight.operation_lock = lock
-            break
-        await asyncio.sleep(0.25)
+    await ls.local_setup_operation.wait_for_lock(ls._flight)
     ls._flight.kind = "settings"
     ls._flight.model = model
     ls._flight.stage = "Waiting to resume local model download"

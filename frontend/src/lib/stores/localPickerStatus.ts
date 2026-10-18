@@ -1,5 +1,5 @@
 import { derived, get, writable } from 'svelte/store';
-import { fetchSources, localPickerStatus, setupLocalSource, type LocalPickerRetry, type ModelSource } from '$lib/conductorSources';
+import { fetchSources, localPickerStatus, setupLocalSource, startLocalModelDownload, type LocalPickerRetry, type ModelSource } from '$lib/conductorSources';
 import { addStarterModel } from '$lib/conductorSourcesApi';
 import { on } from '$lib/ws/events';
 import { token } from './auth';
@@ -34,12 +34,8 @@ export async function retryLocalSetup(kind: LocalPickerRetry, consentExisting = 
 			const repository = get(localSource)?.settings_download?.repository;
 			if (!repository) result = { ok: false };
 			else {
-				const response = await fetch('/api/providers/local/downloads', {
-					method: 'POST',
-					headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-					body: JSON.stringify({ repository }),
-				});
-				result = { ok: response.ok };
+				await startLocalModelDownload(t, repository);
+				result = { ok: true };
 			}
 		} else {
 			const response = await setupLocalSource(t, consentExisting);

@@ -238,7 +238,7 @@ export function groupByHost(
 
 function _thisMacSubname(r: HostResources | null): string {
 	if (!r) return 'localhost';
-	return `${r.total_gb.toFixed(0)} GB total · ${r.free_gb.toFixed(0)} GB free`;
+	return `${r.total_gb.toFixed(0)} GB memory`;
 }
 
 function _remoteHostSubname(s: NetworkServer): string {

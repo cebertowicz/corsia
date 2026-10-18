@@ -90,23 +90,28 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
 
 @router.delete("/downloads/{repository:path}")
 async def delete_download(repository: str, _user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
-    downloaded = local_downloads.get(repository)
-    if downloaded is None:
-        raise HTTPException(404, "This Settings download is not known to CORSIA.")
+    # oMLX identifies models by the final repository segment (LocalModel.model).
+    # local_downloads is only CORSIA's Settings metadata, not a registry of all
+    # models that oMLX has downloaded.
+    model_id = repository.rsplit("/", 1)[-1]
     operation = local_setup_operation.read()
-    if operation is not None and operation.repository == repository:
-        raise HTTPException(409, "This model has an active download.")
+    if operation is not None and operation.model.model == model_id:
+        raise HTTPException(409, "This model has an active or recoverable download.")
     from llm.local_model import set_up_model
     setup = set_up_model()
-    if setup is not None and setup.repository == repository:
-        raise HTTPException(409, "The model set up by CORSIA cannot be deleted here.")
+    if setup is not None and setup.model == model_id:
+        raise HTTPException(409, "CORSIA runs this model when nothing else is available.")
     server = await _server()
-    from llm.providers.omlx_lifecycle import list_loaded
+    from llm.providers.omlx_lifecycle import list_disk_models, list_loaded
     loaded = await list_loaded({"server_id": server["id"]})
-    if any(row.get("identifier") == downloaded.model.model for row in loaded):
+    if any(row.get("identifier") == model_id for row in loaded):
         raise HTTPException(409, "Unload this model before deleting its download.")
+    disk_models = await list_disk_models({"server_id": server["id"]})
+    if not any(row.get("identifier") == model_id for row in disk_models):
+        raise HTTPException(404, "This oMLX model download is not known to CORSIA.")
+    downloaded = local_downloads.get(repository)
     from llm.providers.omlx_endpoints import admin_request
-    response = await admin_request({"server_id": server["id"]}, "DELETE", f"/hf/models/{downloaded.model.model}", timeout=30.0)
+    response = await admin_request({"server_id": server["id"]}, "DELETE", f"/hf/models/{model_id}", timeout=30.0)
     if response.status_code != 200:
         raise HTTPException(502, "oMLX could not delete this model download.")
     from llm.catalog_network_models import discover_network_models
@@ -118,11 +123,12 @@ async def delete_download(repository: str, _user: dict = Depends(require_user_he
         raise HTTPException(502, "CORSIA could not confirm the local model was deleted.")
     payload = confirmed.json()
     models = payload.get("models") if isinstance(payload, dict) else None
-    if any(isinstance(row, dict) and row.get("id") == downloaded.model.model for row in models or []):
+    if any(isinstance(row, dict) and row.get("id") == model_id for row in models or []):
         raise HTTPException(502, "oMLX did not remove this model download.")
-    local_downloads.remove(repository)
+    if downloaded is not None:
+        local_downloads.remove(repository)
     from llm.own_omlx_management import forget_model_originals
-    forget_model_originals(downloaded.model.model)
+    forget_model_originals(model_id)
     from infra.state.ws import notify_models_changed
     notify_models_changed()
     return {"ok": True}

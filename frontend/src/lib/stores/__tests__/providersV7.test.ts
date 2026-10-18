@@ -185,8 +185,17 @@ describe('groupByHost', () => {
 			},
 		);
 		expect(groups[0].resources?.total_gb).toBe(256);
-		expect(groups[0].subname).toContain('256');
-		expect(groups[0].subname).toContain('128');
+		expect(groups[0].subname).toBe('256 GB memory');
+
+		const lowMemory = groupByHost(
+			[p({ name: 'omlx', type: 'network' })],
+			[s({
+				provider: 'omlx',
+				endpoints: [{ id: 'e-low', server_id: 'srv-low', host: '127.0.0.1', kind: 'local', last_ok_at: null, last_latency_ms: null }],
+			})],
+			{ total_gb: 16, free_gb: 4, models_used_gb: 0, other_used_gb: 12, safe_free_gb: 8, safe_reserve_gb: 4, by_provider: {} },
+		);
+		expect(lowMemory[0].subname).toBe('16 GB memory');
 	});
 
 	it('subline for an offline network server includes port', () => {

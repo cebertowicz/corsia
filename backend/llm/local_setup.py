@@ -138,10 +138,12 @@ def _claim_operation(kind: str, model: LocalModel | None = None) -> bool:
     _flight.model = model
     return True
 
+
 def _record_model(model: LocalModel) -> None:
     """Persist the picked model so a restarted backend resumes this flight's download."""
     local_setup_operation.write(local_setup_operation.Operation.for_model(model, _flight.kind or "setup"))
     _flight.model = model
+
 
 def _record_download_task(model: LocalModel, task_id: str) -> None:
     operation = local_setup_operation.read()
@@ -328,12 +330,7 @@ async def resume_pending_setup() -> bool:
             from llm.local_settings_download import resume as resume_settings_download
 
             return await resume_settings_download(model)
-        while _flight.operation_lock is None:
-            lock = local_setup_operation.try_lock()
-            if lock is not None:
-                _flight.operation_lock = lock
-                break
-            await asyncio.sleep(0.25)
+        await local_setup_operation.wait_for_lock(_flight)
         return await _run_flight(model=model, into_own_omlx=operation.kind == "starter")
 
     _flight.task = asyncio.create_task(resume())

@@ -7,13 +7,14 @@ advisory lock makes a second backend wait rather than issue another download.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import fcntl
 import json
 import logging
 import os
 from pathlib import Path
-from typing import IO
+from typing import Any, IO
 
 from llm.local_model import LocalModel, from_recommendation, to_record
 
@@ -116,6 +117,16 @@ def try_lock() -> IO[str] | None:
         handle.close()
         return None
     return handle
+
+
+async def wait_for_lock(flight: Any) -> None:
+    """Wait for the durable local-operation lock and retain it on ``flight``."""
+    while flight.operation_lock is None:
+        handle = try_lock()
+        if handle is not None:
+            flight.operation_lock = handle
+            return
+        await asyncio.sleep(0.25)
 
 
 def unlock(handle: IO[str] | None) -> None:

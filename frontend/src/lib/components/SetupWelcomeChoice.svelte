@@ -3,7 +3,7 @@
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { onMount } from 'svelte';
 	import SetupSubscriptionQuestion, { type SetupPicks } from './SetupSubscriptionQuestion.svelte';
-	import { needsSpace, noLocalModel, type LocalPick } from '$lib/setupLocalPick.svelte';
+	import { LOW_MEMORY_LOCAL_MODEL_MESSAGE, needsSpace, noLocalModel, type LocalPick } from '$lib/setupLocalPick.svelte';
 	import { welcomeModelMeta } from '$lib/setupLocalPresentation';
 	import { MANAGE_DISCLOSURE, MANAGE_DISCLOSURE_LEAD, MANAGE_LABEL, MANAGE_META, OWN_OMLX_FOUND, TERMS_LABEL, USE_MINE_LABEL, USE_MINE_META } from '$lib/ownOmlxCopy';
 
@@ -96,7 +96,7 @@
 <div class="welcome-copy" class:tight={ownOmlx && short}>
 	<SetupSubscriptionQuestion {picks} onToggle={onTogglePick} {ready} {detecting} />
 	{#if noModel}
-		{#if !hasSource && !detecting}<p>This computer doesn’t have enough memory to run a local model, so pick at least one above.</p>{/if}
+		{#if !hasSource && !detecting}<p>{LOW_MEMORY_LOCAL_MODEL_MESSAGE}</p>{/if}
 	{:else if needsSpace(pick, freeDiskGb)}
 		<p>Needs {modelSize} free; {freeDiskGb} GB is free.</p>
 		<Button variant="chip" onclick={onRecheck}>Free up space, then check again</Button>

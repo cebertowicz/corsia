@@ -21,16 +21,20 @@
 	import PreLoadCheckModal from './PreLoadCheckModal.svelte';
 	import ModelDetailsModal from './ModelDetailsModal.svelte';
 	import ProviderModelsEmpty from './ProviderModelsEmpty.svelte';
-	import AddLocalModelSheet from './AddLocalModelSheet.svelte';
 	import LocalSettingsDownloadStatus from './LocalSettingsDownloadStatus.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
+	import ProviderLocalModelControls from './ProviderLocalModelControls.svelte';
+	import ProviderModelsAvailableControls from './ProviderModelsAvailableControls.svelte';
+	import LocalModelDeleteDownloadModal from './LocalModelDeleteDownloadModal.svelte';
+	import ProviderModelsActionError from './ProviderModelsActionError.svelte';
+	import ProviderModelsPhase from './ProviderModelsPhase.svelte';
 
 	interface Props {
 		provider: HostProvider;
 		isLocal?: boolean;
+		onAddProvider?: () => void;
 	}
 
-	const { provider, isLocal = false }: Props = $props();
+	const { provider, isLocal = false, onAddProvider = () => {} }: Props = $props();
 
 	type PreloadInfo = {
 		modelName: string;
@@ -43,6 +47,7 @@
 	};
 	let preloadInfo = $state<PreloadInfo | null>(null);
 	let detailsFor = $state<ProviderModel | null>(null);
+	let deleteCandidate = $state<ProviderModel | null>(null);
 
 	const POLL_ACTIVE_MS = 250;
 	const POLL_IDLE_MS = 5000;
@@ -53,7 +58,6 @@
 
 	let showAllAvailable = $state(false);
 	let actionError = $state('');
-	let showAddLocal = $state(false);
 
 	const pmState = $derived(modelsForProvider($providerModels, provider.raw, provider.server));
 	const models = $derived(pmState.models);
@@ -79,7 +83,7 @@
 
 	// A registered endpoint, cloud API or CLI runs its own models: nothing loads, a model is on or off.
 	const isExternal = $derived(provider.server?.kind === 'external');
-	const adminUrl = $derived(provider.name === 'omlx' ? omlxAdminUrl(provider.server?.mgmt_base) : undefined);
+	const adminUrl = $derived(provider.name === 'omlx' ? omlxAdminUrl(provider.server?.mgmt_base ?? undefined) : undefined);
 	const catalogOnly = $derived(provider.type === 'cloud' || isExternal || isHarness);
 	// A harness section names the switch, not picker delivery; the row warning says when the picker can't offer it.
 	const loadedLabel = $derived(isHarness ? 'Shown' : catalogOnly ? 'Active' : 'Loaded');
@@ -224,6 +228,15 @@
 		actionError = '';
 		await _checkAndLoad(m);
 	}
+
+	function requestDownloadDeletion(model: ProviderModel) {
+		deleteCandidate = model;
+	}
+
+	async function refreshAfterDownloadDeletion() {
+		await loadProviderModelsFor(provider.raw, provider.server);
+		loadModels();
+	}
 </script>
 
 {#if preloadInfo}
@@ -253,20 +266,28 @@
 	/>
 {/if}
 
+{#if deleteCandidate}
+	<LocalModelDeleteDownloadModal
+		model={deleteCandidate}
+		onClose={() => deleteCandidate = null}
+		onDeleted={refreshAfterDownloadDeletion}
+	/>
+{/if}
+
 {#if provider.name === 'omlx'}<LocalSettingsDownloadStatus />{/if}
 
 {#if pmState.loading && models.length === 0}
-	<div class="phase-stub">Loading models…</div>
+	<ProviderModelsPhase message="Loading models…" />
 {:else if pmState.lastError}
-	<div class="phase-stub err">Failed to load models: {pmState.lastError}</div>
+	<ProviderModelsPhase message={`Failed to load models: ${pmState.lastError}`} error />
 {:else if models.length === 0}
 	<ProviderModelsEmpty {provider} {isExternal} {isHarness} />
 	{#if provider.name === 'omlx'}
-		<div class="add-local"><Button size="sm" variant="ghost" onclick={() => showAddLocal = true}>Add model</Button></div>
+		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); loadModels(); }} {onAddProvider} />
 	{/if}
 {:else}
 	{#if actionError}
-		<div class="row-msg">{actionError}</div>
+		<ProviderModelsActionError message={actionError} />
 	{/if}
 
 	{#if grouped.loaded.length > 0}
@@ -285,6 +306,7 @@
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
 				onInfo={() => detailsFor = m}
+				onDeleteDownload={provider.name === 'omlx' ? () => requestDownloadDeletion(m) : undefined}
 			/>
 		{/each}
 	{/if}
@@ -322,26 +344,23 @@
 				onToggle={() => handleToggleModel(m)}
 				onInfo={() => detailsFor = m}
 				onRetry={m.state === 'error' ? () => handleRetry(m) : undefined}
+				onDeleteDownload={provider.name === 'omlx' ? () => requestDownloadDeletion(m) : undefined}
 			/>
 		{/each}
-		{#if hiddenAvailableCount > 0}
-			<button type="button" class="show-more" onclick={() => showAllAvailable = true}>
-				Show {hiddenAvailableCount} {visibleAvailable.length === 0 ? 'available' : 'more'}
-			</button>
-		{:else if showAllAvailable && grouped.available.length > availableInitialShow}
-			<button type="button" class="show-more" onclick={() => showAllAvailable = false}>
-				Show fewer
-			</button>
-		{/if}
+		<ProviderModelsAvailableControls
+			hiddenCount={hiddenAvailableCount}
+			visibleCount={visibleAvailable.length}
+			availableCount={grouped.available.length}
+			showAll={showAllAvailable}
+			onShowAll={() => showAllAvailable = true}
+			onShowFewer={() => showAllAvailable = false}
+		/>
 	{/if}
 	{#if provider.name === 'omlx'}
-		<div class="add-local"><Button size="sm" variant="ghost" onclick={() => showAddLocal = true}>Add model</Button></div>
+		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); loadModels(); }} {onAddProvider} />
 	{/if}
 {/if}
 
-{#if showAddLocal}
-	<AddLocalModelSheet onClose={() => showAddLocal = false} onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); loadModels(); }} />
-{/if}
 
 <style>
 	.section {
@@ -359,42 +378,10 @@
 	.section.loaded .section-label  { color: var(--accent-text); }
 	.section.loading .section-label { color: var(--amber); }
 
-	.show-more {
-		display: block; width: 100%;
-		text-align: center;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-		padding: 10px;
-		border-top: 1px solid var(--border-subtle);
-		background: transparent;
-		border-left: 0; border-right: 0; border-bottom: 0;
-		cursor: pointer;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
-	}
-	.show-more:hover { color: var(--text-secondary); background: var(--bg-secondary); }
-
-	.phase-stub {
-		padding: 14px 18px;
-		font-size: var(--text-footnote);
-		color: var(--text-tertiary);
-	}
 
 	@media (max-width: 480px) {
 		.section { padding: 10px 12px 6px; }
-		.phase-stub { padding: 10px 12px; }
 	}
-	.phase-stub.err { color: var(--red); }
-	.add-local { padding: var(--space-2) var(--space-3); }
 	/* LocalSettingsDownloadStatus owns its styles. */
 
-	.row-msg {
-		margin: 8px 18px;
-		padding: 6px 10px;
-		font-size: var(--text-footnote);
-		color: var(--red);
-		background: var(--red-bg);
-		border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
-		border-radius: var(--radius-xs);
-	}
 </style>

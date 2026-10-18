@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+from types import ModuleType
+
 import pytest
 
 from llm import own_omlx_management
@@ -8,7 +11,7 @@ from llm import local_setup_auth, local_setup_runtime
 
 
 @pytest.mark.asyncio
-async def test_use_mine_returns_without_touching_omlx(monkeypatch) -> None:
+async def test_use_mine_keeps_omlx_settings_byte_identical(monkeypatch) -> None:
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
     monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: True)
 
@@ -31,6 +34,45 @@ async def test_old_omlx_returns_unsupported_without_a_writer(monkeypatch) -> Non
     result = await local_setup_runtime.apply_optimal_settings("server", model)
 
     assert result.status == "unsupported"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status_code", "expected"), [(404, "not_found"), (503, "offline")])
+async def test_missing_or_unavailable_candidate_never_writes(monkeypatch, status_code, expected) -> None:
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: False)
+    monkeypatch.setattr(local_setup_auth, "omlx_version", lambda: "0.7.1rc1")
+
+    async def admin_request(_cfg, method, path, **_kwargs):
+        calls.append((method, path))
+        return _Response(status_code, {})
+
+    from llm.providers import omlx_endpoints
+    monkeypatch.setattr(omlx_endpoints, "admin_request", admin_request)
+
+    result = await local_setup_runtime.apply_optimal_settings("server", model)
+
+    assert result.status == expected
+    assert calls == [("GET", f"/models/{model.model}/settings/optimal")]
+
+
+@pytest.mark.asyncio
+async def test_unreachable_omlx_returns_no_omlx_without_a_writer(monkeypatch) -> None:
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: False)
+    monkeypatch.setattr(local_setup_auth, "omlx_version", lambda: "0.7.1rc1")
+
+    async def unreachable(*_args, **_kwargs):
+        from llm.providers.omlx_endpoints import OmlxAdminError
+        raise OmlxAdminError("offline")
+
+    from llm.providers import omlx_endpoints
+    monkeypatch.setattr(omlx_endpoints, "admin_request", unreachable)
+
+    result = await local_setup_runtime.apply_optimal_settings("server", model)
+
+    assert result.status == "no_omlx"
 
 
 class _Response:
@@ -116,6 +158,101 @@ async def test_settings_download_does_not_retry_after_an_optimal_writer_failure(
     result = await local_settings_download.run(lambda _stage: None, model)
 
     assert result["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_auto_load_only_runs_when_the_memory_gate_allows(monkeypatch) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    loaded: list[str] = []
+
+    async def admin_request(_cfg, method, path, **_kwargs):
+        assert (method, path) == ("GET", "/models")
+        return _Response(200, {"models": [{"id": model.model, "estimated_size": 4 * 1024**3}]})
+
+    async def cannot_load(*_args, **_kwargs):
+        return {"ok": False}
+
+    async def load_model(*_args, **_kwargs):
+        loaded.append(model.model)
+        return {"ok": True}
+
+    helpers = ModuleType("api.network_server_helpers")
+    helpers.notify_cached_model_loaded = lambda *_args: None
+    monkeypatch.setitem(sys.modules, "api.network_server_helpers", helpers)
+    monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
+    monkeypatch.setattr("infra.host_resources.check_can_load", cannot_load)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
+
+    await local_settings_download._auto_load("server", model, allowed=True)
+
+    assert loaded == []
+
+
+@pytest.mark.asyncio
+async def test_auto_load_uses_existing_loader_when_the_model_fits(monkeypatch) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    loaded: list[str] = []
+
+    async def admin_request(_cfg, _method, _path, **_kwargs):
+        return _Response(200, {"models": [{"id": model.model, "estimated_size": 4 * 1024**3}]})
+
+    async def can_load(*_args, **_kwargs):
+        return {"ok": True}
+
+    async def load_model(_config, model_id):
+        loaded.append(model_id)
+        return {"ok": True}
+
+    async def discovered(_server_id):
+        return None
+
+    helpers = ModuleType("api.network_server_helpers")
+    helpers.notify_cached_model_loaded = lambda *_args: None
+    monkeypatch.setitem(sys.modules, "api.network_server_helpers", helpers)
+    monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
+    monkeypatch.setattr("infra.host_resources.check_can_load", can_load)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
+    monkeypatch.setattr("llm.network_discovery.discover_and_notify", discovered)
+
+    await local_settings_download._auto_load("server", model, allowed=True)
+
+    assert loaded == [model.model]
+
+
+@pytest.mark.asyncio
+async def test_settings_download_never_auto_loads_under_use_mine(monkeypatch) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    auto_load_calls: list[bool] = []
+
+    async def managed_download(*_args, **_kwargs):
+        return "server", True
+
+    async def optimal(*_args, **_kwargs):
+        return local_setup_runtime.OptimalResult("applied")
+
+    async def discovered(*_args, **_kwargs):
+        return {"ok": True}
+
+    async def auto_load(_server_id, _model, *, allowed):
+        auto_load_calls.append(allowed)
+
+    monkeypatch.setattr(local_settings_download, "_managed_download", managed_download)
+    monkeypatch.setattr(local_setup_runtime, "apply_optimal_settings", optimal)
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
+    monkeypatch.setattr(local_settings_download, "_auto_load", auto_load)
+    monkeypatch.setattr(local_settings_download.local_downloads, "write", lambda _download: None)
+    monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: True)
+
+    result = await local_settings_download.run(lambda _stage: None, model)
+
+    assert result["ok"] is True
+    assert auto_load_calls == [False]
 
 
 async def _empty_settings() -> dict:

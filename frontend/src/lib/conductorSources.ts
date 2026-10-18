@@ -138,6 +138,51 @@ export type LocalSetupResult = {
 	code?: 'consent_required';
 };
 
+export type LocalModelRecommendation = {
+	name: string;
+	repository: string;
+	download_size_gb: number;
+	context_window: number;
+	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
+};
+
+export type LocalModelRecommendations = {
+	state?: string;
+	message?: string;
+	sections?: Record<string, LocalModelRecommendation[]>;
+};
+
+async function localRouteError(response: Response, fallback: string): Promise<Error> {
+	const body = await response.json().catch(() => null);
+	return new Error(typeof body?.detail === 'string' ? body.detail : fallback);
+}
+
+/** Settings' local-model recommendations, checked by oMLX for this Mac. */
+export async function fetchLocalModelRecommendations(t: string): Promise<LocalModelRecommendations> {
+	const response = await fetch('/api/providers/local/recommendations', { headers: { Authorization: `Bearer ${t}` } });
+	if (!response.ok) throw await localRouteError(response, "Couldn't check which models fit this Mac.");
+	return response.json();
+}
+
+/** Start a Settings-selected local model download. */
+export async function startLocalModelDownload(t: string, repository: string): Promise<void> {
+	const response = await fetch('/api/providers/local/downloads', {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ repository }),
+	});
+	if (!response.ok) throw await localRouteError(response, 'Download could not start.');
+}
+
+/** Delete a completed Settings-selected local model download. */
+export async function deleteLocalModelDownload(t: string, repository: string): Promise<void> {
+	const response = await fetch(`/api/providers/local/downloads/${encodeURIComponent(repository)}`, {
+		method: 'DELETE',
+		headers: { Authorization: `Bearer ${t}` },
+	});
+	if (!response.ok) throw await localRouteError(response, 'Download could not be deleted.');
+}
+
 export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; cancelled: boolean }> {
 	const response = await fetch('/api/providers/local/cancel', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}` },
