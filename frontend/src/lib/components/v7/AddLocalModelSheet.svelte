@@ -56,11 +56,14 @@
 		return required ? `Needs ${Math.ceil(required / 1000 ** 3)} GB of disk` : 'Needs more disk space';
 	}
 
+	// oMLX recommender section keys; `unlock` (models needing more memory) is not offered.
+	const SECTION_HEADINGS: Record<string, string | null> = {
+		best: null, faster: 'Faster', precise: 'More precise', bigger: 'Larger, less room for context',
+	};
+	const shownSections = $derived(Object.entries(sections).filter(([section, models]) => section !== 'unlock' && models.length));
+
 	function sectionHeading(section: string): string | null {
-		const headings: Record<string, string | null> = {
-			best: null, alternatives: 'Other models', bigger: 'Larger, less room for context',
-		};
-		return headings[section] ?? 'More models';
+		return section in SECTION_HEADINGS ? SECTION_HEADINGS[section] : 'More models';
 	}
 
 	function meta(model: LocalModelRecommendation): string[] {
@@ -80,11 +83,11 @@
 		<div class="notice"><Spinner /> Checking which models fit this computer…</div>
 	{:else if error}
 		<div class="notice error">{error}<Button size="sm" variant="secondary" onclick={load}>Try again</Button></div>
-	{:else if Object.values(sections).every((models) => models.length === 0)}
+	{:else if shownSections.length === 0}
 		<div class="notice">No recommended models fit this computer.</div>
 	{:else}
 		<div class="section-line">Picked for this computer{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
-		{#each Object.entries(sections) as [section, models]}
+		{#each shownSections as [section, models]}
 			{#if models.length}
 				{#if sectionHeading(section)}<h3>{sectionHeading(section)}</h3>{/if}
 				{#each models as model, index (model.repository)}

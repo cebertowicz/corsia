@@ -31,7 +31,7 @@ describe('AddLocalModelSheet', () => {
 	});
 
 	it('uses the first recommended row as the primary download action', async () => {
-		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'ready' } }], alternatives: [{ name: 'Other', repository: 'Jundot/Other', download_size_gb: 16, context_window: 32768, disk: { state: 'ready' } }] } });
+		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'ready' } }], faster: [{ name: 'Other', repository: 'Jundot/Other', download_size_gb: 16, context_window: 32768, disk: { state: 'ready' } }] } });
 		expect(host.textContent).toContain('Recommended');
 		const downloads = [...host.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.includes('Download'));
 		expect(downloads).toHaveLength(2);
@@ -57,12 +57,21 @@ describe('AddLocalModelSheet', () => {
 	it('maps recommender sections to product labels and hides unknown keys', async () => {
 		await render({ state: 'ready', sections: {
 			best: [{ name: 'Best', repository: 'Jundot/Best', disk: { state: 'ready' } }],
+			faster: [{ name: 'Quick', repository: 'Jundot/Quick', disk: { state: 'ready' } }],
+			precise: [{ name: 'Careful', repository: 'Jundot/Careful', disk: { state: 'ready' } }],
 			bigger: [{ name: 'Large', repository: 'Jundot/Large', disk: { state: 'ready' } }],
+			unlock: [{ name: 'Huge', repository: 'Jundot/Huge', disk: { state: 'ready' } }],
 			unrecognized_section: [{ name: 'Unknown', repository: 'Jundot/Unknown', disk: { state: 'ready' } }],
 		} });
-		expect(host.textContent).toContain('Larger, less room for context');
-		expect(host.textContent).toContain('More models');
+		const headings = [...host.querySelectorAll('h3')].map((heading) => heading.textContent);
+		expect(headings).toEqual(['Faster', 'More precise', 'Larger, less room for context', 'More models']);
+		expect(host.textContent).not.toContain('Huge');
 		expect(host.textContent).not.toContain('unrecognized_section');
+	});
+
+	it('shows the empty state when only hidden sections have rows', async () => {
+		await render({ state: 'ready', sections: { unlock: [{ name: 'Huge', repository: 'Jundot/Huge', disk: { state: 'ready' } }] } });
+		expect(host.textContent).toContain('No recommended models fit this computer.');
 	});
 
 	it('tells the person how to retry a download that cannot start', async () => {

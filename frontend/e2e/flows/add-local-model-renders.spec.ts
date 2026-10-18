@@ -20,9 +20,9 @@ const recommendations = {
 	downloads: [],
 	sections: {
 		best: [{ name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', download_size_bytes: 16 * 1000 ** 3, download_size_gb: 16, context_window: 262144, quantization_bits: 4, relative_speed: 1.0, disk: { state: 'ready' } }],
-		Faster: [{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_bytes: 18 * 1000 ** 3, download_size_gb: 18, context_window: 262144, quantization_bits: 4, relative_speed: 1.44, disk: { state: 'ready' } }],
-		'More precise': [{ name: 'Gemma 4 31B IT', repository: 'google/gemma-4-31b-it', download_size_bytes: 20 * 1000 ** 3, download_size_gb: 20, context_window: 262144, quantization_bits: 4, relative_speed: 0.85, disk: { state: 'ready' } }],
-		'Larger, less room for context': [{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_bytes: 31 * 1000 ** 3, download_size_gb: 31, context_window: 262144, disk: { state: 'insufficient', required_bytes: 31 * 1024 ** 3 } }],
+		faster: [{ name: 'Qwen3.8-14B', repository: 'qwen/qwen3.8-14b', download_size_bytes: 18 * 1000 ** 3, download_size_gb: 18, context_window: 262144, quantization_bits: 4, relative_speed: 1.44, disk: { state: 'ready' } }],
+		precise: [{ name: 'Gemma 4 31B IT', repository: 'google/gemma-4-31b-it', download_size_bytes: 20 * 1000 ** 3, download_size_gb: 20, context_window: 262144, quantization_bits: 4, relative_speed: 0.85, disk: { state: 'ready' } }],
+		bigger: [{ name: 'Qwen3.8-27B', repository: 'qwen/qwen3.8-27b', download_size_bytes: 31 * 1000 ** 3, download_size_gb: 31, context_window: 262144, disk: { state: 'insufficient', required_bytes: 31 * 1000 ** 3 } }],
 	},
 };
 
@@ -137,6 +137,7 @@ test('renders the approved local-model evidence states from intercepted fixtures
 					await expect(sheet).toContainText('262k context · 4-bit · 18 GB · Faster');
 					await expect(sheet).toContainText('262k context · 4-bit · 20 GB · A bit slower');
 					await expect(sheet).toContainText('Needs 31 GB of disk');
+					await expect(sheet.locator('h3')).toHaveText(['Faster', 'More precise', 'Larger, less room for context']);
 				} else if (state === 'downloading') {
 					const downloadingRow = card.locator('.mr').filter({ hasText: 'Qwen3.8-27B' });
 					await expect(card).toContainText('Downloading 40%');
