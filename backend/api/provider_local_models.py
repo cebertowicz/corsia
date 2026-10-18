@@ -62,7 +62,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         "sections": views,
         "downloads": downloads,
         "memory_gb": round(host_ram_bytes() / 1024**3),
-        "disk_free_gb": round(disk_free_bytes / 1024**3) if isinstance(disk_free_bytes, int) else None,
+        "disk_free_gb": round(disk_free_bytes / 1000**3) if isinstance(disk_free_bytes, int) else None,
     }, sections
 
 
@@ -105,31 +105,31 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
         _clear_failed_record(model_id)
         raise HTTPException(409, "This computer does not have enough free disk space. Pick another from the list.")
     operation = local_setup_operation.read()
-    if operation is not None:
+    if operation is not None and operation.model.model != model_id:
         raise HTTPException(409, f"{operation.model.display_name} is already downloading.")
     from llm.local_setup import begin_settings_download
 
     return await begin_settings_download(model)
 
 
-@router.delete("/downloads/{repository:path}")
-async def delete_download(repository: str, _user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
+@router.delete("/downloads/{model_id:path}")
+async def delete_download(model_id: str, _user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
     # oMLX identifies models by the final repository segment (LocalModel.model).
     # local_downloads is only CORSIA's Settings metadata, not a registry of all
     # models that oMLX has downloaded.
-    model_id = repository.rsplit("/", 1)[-1]
+    model_id = model_id.rsplit("/", 1)[-1]
     operation = local_setup_operation.read()
     if operation is not None and operation.model.model == model_id:
-        raise HTTPException(409, "This model has an active or recoverable download.")
+        raise HTTPException(409, "Couldn't delete this model while it is downloading. Cancel the download first, then try again.")
     from llm.local_model import set_up_model
     setup = set_up_model()
     if setup is not None and setup.model == model_id:
-        raise HTTPException(409, "CORSIA runs this model when nothing else is available.")
+        raise HTTPException(409, "Couldn't delete this model: CORSIA keeps it to run when no other model is available.")
     server = await _server()
     from llm.providers.omlx_lifecycle import list_disk_models, list_loaded
     loaded = await list_loaded({"server_id": server["id"]})
     if any(row.get("identifier") == model_id for row in loaded):
-        raise HTTPException(409, "Unload this model before deleting its download.")
+        raise HTTPException(409, "Couldn't delete this model while it is loaded. Unload it first, then try again.")
     disk_models = await list_disk_models({"server_id": server["id"]})
     if not any(row.get("identifier") == model_id for row in disk_models):
         if (record := local_downloads.get(model_id)) is not None and record.status == "failed":

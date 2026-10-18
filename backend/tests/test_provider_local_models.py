@@ -117,7 +117,7 @@ async def test_delete_refuses_loaded_model(monkeypatch) -> None:
 
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_loaded", loaded)
 
-    with pytest.raises(HTTPException, match="Unload this model") as raised:
+    with pytest.raises(HTTPException, match="Couldn't delete this model while it is loaded") as raised:
         await provider_local_models.delete_download(MODEL.repository, {})
 
     assert raised.value.status_code == 409
@@ -132,7 +132,7 @@ async def test_delete_refuses_actual_corsia_setup_model(monkeypatch) -> None:
         await provider_local_models.delete_download(MODEL.repository, {})
 
     assert raised.value.status_code == 409
-    assert raised.value.detail == "CORSIA runs this model when nothing else is available."
+    assert raised.value.detail == "Couldn't delete this model: CORSIA keeps it to run when no other model is available."
 
 
 @pytest.mark.asyncio
@@ -144,7 +144,7 @@ async def test_delete_refuses_active_or_recoverable_operation_for_model(monkeypa
         lambda: local_setup_operation.Operation.for_model(MODEL, "settings", "resume-task"),
     )
 
-    with pytest.raises(HTTPException, match="active or recoverable") as raised:
+    with pytest.raises(HTTPException, match="Couldn't delete this model while it is downloading") as raised:
         await provider_local_models.delete_download(MODEL.repository, {})
 
     assert raised.value.status_code == 409
@@ -171,7 +171,7 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     monkeypatch.setattr(
         provider_local_models,
         "download_disk_space",
-        lambda *_args: {"state": "ready", "free_bytes": 20 * 1024**3},
+        lambda *_args: {"state": "ready", "free_bytes": 20 * 1000**3},
     )
 
     result, _sections = await provider_local_models._recommendations()
@@ -179,5 +179,56 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     assert result["memory_gb"] == 64
     assert result["disk_free_gb"] == 20
     assert result["sections"]["best"] == [{
-        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1024**3},
+        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3},
     }]
+
+
+@pytest.mark.asyncio
+async def test_download_resumes_the_same_model_operation(monkeypatch) -> None:
+    operation = local_setup_operation.Operation.for_model(MODEL, "settings", "resume-task")
+    monkeypatch.setattr(provider_local_models, "_recommendations", lambda: _recommendations_for(MODEL))
+    monkeypatch.setattr(provider_local_models, "_server", lambda: _model_server())
+    monkeypatch.setattr(provider_local_models, "download_dir", lambda _server_id: _model_dir())
+    monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "ready"})
+    monkeypatch.setattr(provider_local_models.local_setup_operation, "read", lambda: operation)
+    resumed: list[LocalModel] = []
+
+    async def begin(model):
+        resumed.append(model)
+        return {"ok": True, "resumed": True}
+
+    monkeypatch.setattr("llm.local_setup.begin_settings_download", begin)
+
+    assert await provider_local_models.download_model({"repository": MODEL.repository}, {}) == {"ok": True, "resumed": True}
+    assert resumed == [MODEL]
+
+
+@pytest.mark.asyncio
+async def test_download_refuses_another_model_operation(monkeypatch) -> None:
+    other = LocalModel("Jundot/Other", 1_000_000, 32_768)
+    monkeypatch.setattr(provider_local_models, "_recommendations", lambda: _recommendations_for(MODEL))
+    monkeypatch.setattr(provider_local_models, "_server", lambda: _model_server())
+    monkeypatch.setattr(provider_local_models, "download_dir", lambda _server_id: _model_dir())
+    monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "ready"})
+    monkeypatch.setattr(
+        provider_local_models.local_setup_operation,
+        "read",
+        lambda: local_setup_operation.Operation.for_model(other, "settings", "other-task"),
+    )
+
+    with pytest.raises(HTTPException, match="Other is already downloading"):
+        await provider_local_models.download_model({"repository": MODEL.repository}, {})
+
+
+async def _recommendations_for(model: LocalModel):
+    return {}, {"best": [model]}
+
+
+async def _model_server():
+    return {"id": "server"}
+
+
+async def _model_dir():
+    from pathlib import Path
+
+    return Path("/tmp")

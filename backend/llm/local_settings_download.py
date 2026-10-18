@@ -70,16 +70,22 @@ async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> Non
     from llm.providers.omlx_lifecycle import load_model
     from llm.network_discovery import discover_and_notify
 
-    decision = await check_can_load(float(size) / 1024**3, "omlx")
-    if not decision.get("ok"):
-        log.warning("Skipping automatic local-model load: not enough free memory")
-        return
-    result = await load_model({"server_id": server_id}, model.model)
-    if not result.get("ok"):
-        log.warning("Couldn't automatically load downloaded local model")
-        return
-    notify_cached_model_loaded(server_id, model.model)
-    await discover_and_notify(server_id)
+    step = "memory check"
+    try:
+        decision = await check_can_load(float(size) / 1024**3, "omlx")
+        if not decision.get("ok"):
+            log.warning("Skipping automatic local-model load: not enough free memory")
+            return
+        step = "model load"
+        result = await load_model({"server_id": server_id}, model.model)
+        if not result.get("ok"):
+            log.warning("Couldn't automatically load downloaded local model")
+            return
+        notify_cached_model_loaded(server_id, model.model)
+        step = "catalog refresh"
+        await discover_and_notify(server_id)
+    except Exception:
+        log.warning("Skipping automatic local-model load after %s failed", step, exc_info=True)
 
 
 async def _run_flight(model: LocalModel) -> dict:

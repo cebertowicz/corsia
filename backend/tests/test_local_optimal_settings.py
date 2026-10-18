@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from llm import own_omlx_management
@@ -130,6 +131,51 @@ async def test_applied_optimal_settings_use_one_filtered_writer(monkeypatch, tur
 
 
 @pytest.mark.asyncio
+async def test_draft_lookup_failure_is_offline_and_does_not_fail_the_download(monkeypatch) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    configured: list[str] = []
+    monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: False)
+    monkeypatch.setattr(local_setup_auth, "omlx_version", lambda: "0.7.1rc1")
+    monkeypatch.setattr(
+        local_setup_runtime,
+        "_read_optimal_inputs",
+        lambda *_args: _optimal_inputs(),
+    )
+
+    async def unavailable_drafts(*_args):
+        raise httpx.ConnectError("offline")
+
+    async def managed_download(*_args, **_kwargs):
+        return "server", True
+
+    async def configure(server_id, _model):
+        configured.append(server_id)
+
+    async def discovered(_server_id):
+        return {"ok": True}
+
+    async def no_auto_load(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(local_setup_runtime, "_without_uninstalled_drafts", unavailable_drafts)
+    monkeypatch.setattr(local_settings_download, "_managed_download", managed_download)
+    monkeypatch.setattr(local_setup_runtime, "configure_model_settings", configure)
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
+    monkeypatch.setattr(local_settings_download, "_auto_load", no_auto_load)
+    monkeypatch.setattr(local_settings_download.local_downloads, "write", lambda _download: None)
+
+    assert (await local_setup_runtime.apply_optimal_settings("server", model)).status == "offline"
+    assert (await local_settings_download.run(lambda _stage: None, model))["ok"] is True
+    assert configured == ["server"]
+
+
+async def _optimal_inputs():
+    return ({"tg_tps": 52.0}, {"model_settings": {"dflash_draft_model": "draft"}}, {"model_specific": ["dflash_draft_model"]}, {})
+
+
+@pytest.mark.asyncio
 async def test_settings_download_does_not_retry_after_an_optimal_writer_failure(monkeypatch) -> None:
     from llm import local_settings_download
 
@@ -251,6 +297,46 @@ async def test_auto_load_uses_existing_loader_when_the_model_fits(monkeypatch) -
     await local_settings_download._auto_load("server", model, allowed=True)
 
     assert loaded == [model.model]
+
+
+@pytest.mark.asyncio
+async def test_auto_load_failure_keeps_the_completed_download_available(monkeypatch, caplog) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    downloads: list[Download] = []
+
+    async def managed_download(*_args, **_kwargs):
+        return "server", True
+
+    async def optimal(*_args, **_kwargs):
+        return local_setup_runtime.OptimalResult("applied")
+
+    async def discovered(_server_id):
+        return {"ok": True}
+
+    async def admin_request(*_args, **_kwargs):
+        return _Response(200, {"models": [{"id": model.model, "estimated_size": 4 * 1024**3}]})
+
+    async def can_load(*_args, **_kwargs):
+        return {"ok": True}
+
+    async def failed_load(*_args, **_kwargs):
+        raise RuntimeError("load failed")
+
+    monkeypatch.setattr(local_settings_download, "_managed_download", managed_download)
+    monkeypatch.setattr(local_setup_runtime, "apply_optimal_settings", optimal)
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
+    monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
+    monkeypatch.setattr("infra.host_resources.check_can_load", can_load)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", failed_load)
+    monkeypatch.setattr(local_settings_download, "notify_cached_model_loaded", lambda *_args: None)
+    monkeypatch.setattr(local_settings_download.local_downloads, "write", downloads.append)
+    monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: False)
+
+    assert (await local_settings_download.run(lambda _stage: None, model))["ok"] is True
+    assert downloads[0].status == "available"
+    assert "model load failed" in caplog.text
 
 
 @pytest.mark.asyncio

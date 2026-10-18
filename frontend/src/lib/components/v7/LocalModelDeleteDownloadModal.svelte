@@ -14,7 +14,7 @@
 	const { model, onClose, onDeleted }: Props = $props();
 	let deleting = $state(false);
 	let error = $state('');
-	const size = $derived(model.sizeBytes ? `${(model.sizeBytes / (1024 ** 3)).toFixed(1)} GiB` : model.meta);
+	const size = $derived(model.sizeBytes ? `${(model.sizeBytes / (1000 ** 3)).toFixed(1)} GB` : null);
 
 	async function deleteDownload() {
 		const t = get(token);
@@ -43,7 +43,7 @@
 	onClose={() => { if (!deleting) onClose(); }}
 >
 	<p class="copy">
-		Delete the {size} download of <strong>{model.name}</strong> from this computer? You can download it again later.
+		Delete{size ? ` the ${size} download` : ' the download'} of <strong>{model.name}</strong> from this computer? You can download it again later.
 	</p>
 	{#if error}<p class="error">{error}</p>{/if}
 	{#snippet foot()}

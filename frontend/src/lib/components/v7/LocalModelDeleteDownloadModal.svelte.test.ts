@@ -29,12 +29,25 @@ describe('LocalModelDeleteDownloadModal', () => {
 		});
 		flushSync();
 
-		expect(host.textContent).toContain('8.0 GiB');
+		expect(host.textContent).toContain('8.6 GB');
 		expect(fetchMock).not.toHaveBeenCalled();
 		[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Delete download')!.click();
 		await tick(); await tick();
 		expect(fetchMock).toHaveBeenCalledWith('/api/providers/local/downloads/org%2Fmodel', expect.objectContaining({ method: 'DELETE' }));
 		expect(onDeleted).toHaveBeenCalledOnce();
 		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('omits the size when the model does not provide it', () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(LocalModelDeleteDownloadModal, {
+			target: host,
+			props: { model: { id: 'org/model', name: 'Qwen', state: 'default', meta: '8 GB', caps: [] }, onDeleted: vi.fn(), onClose: vi.fn() },
+		});
+		flushSync();
+
+		expect(host.textContent).toContain('Delete the download of Qwen');
+		expect(host.textContent).not.toContain('8 GB');
 	});
 });

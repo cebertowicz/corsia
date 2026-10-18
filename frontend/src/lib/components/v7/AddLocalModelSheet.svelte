@@ -40,20 +40,27 @@
 	async function download(repository: string) {
 		const t = get(token);
 		if (!t) {
-			error = 'Download could not start.';
+			error = "Couldn't start the download. Try again.";
 			return;
 		}
 		starting = repository;
 		try {
 			await startLocalModelDownload(t, repository);
 			onStarted?.(); onClose();
-		} catch (caught) { error = caught instanceof Error ? caught.message : 'Download could not start.'; }
+		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't start the download. Try again."; }
 		finally { starting = ''; }
 	}
 	function diskNeed(model: LocalModelRecommendation): string | null {
 		if (model.disk?.state !== 'insufficient') return null;
 		const required = model.disk.required_bytes;
-		return required ? `Needs ${Math.ceil(required / 1024 ** 3)} GB of disk` : 'Needs more disk space';
+		return required ? `Needs ${Math.ceil(required / 1000 ** 3)} GB of disk` : 'Needs more disk space';
+	}
+
+	function sectionHeading(section: string): string | null {
+		const headings: Record<string, string | null> = {
+			best: null, alternatives: 'Other models', bigger: 'Larger, less room for context',
+		};
+		return headings[section] ?? 'More models';
 	}
 
 	function meta(model: LocalModelRecommendation): string[] {
@@ -79,7 +86,7 @@
 		<div class="section-line">Picked for this computer{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
 		{#each Object.entries(sections) as [section, models]}
 			{#if models.length}
-				{#if section !== 'best'}<h3>{section}</h3>{/if}
+				{#if sectionHeading(section)}<h3>{sectionHeading(section)}</h3>{/if}
 				{#each models as model, index (model.repository)}
 					<div class:insufficient={Boolean(diskNeed(model))}>
 					<ListRow meta={joinedMeta(model)}>

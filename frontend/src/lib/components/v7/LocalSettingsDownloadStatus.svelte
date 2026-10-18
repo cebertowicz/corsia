@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { cancelLocalDownload, fetchSources, startLocalModelDownload, type ModelSource } from '$lib/conductorSources';
+	import { cancelLocalDownload, deleteLocalModelDownload, fetchSources, startLocalModelDownload, type ModelSource } from '$lib/conductorSources';
 	import { token } from '$lib/stores/auth';
 	import { on } from '$lib/ws/events';
 	import ModelRow from './ModelRow.svelte';
@@ -42,6 +42,16 @@
 		finally { busy = false; await refresh(); }
 	}
 
+	async function deleteFailedDownload() {
+		const repository = download?.repository;
+		const t = get(token);
+		if (!repository || !t || busy) return;
+		busy = true; error = '';
+		try { await deleteLocalModelDownload(t, repository); }
+		catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't delete the local model download. Try again."; }
+		finally { busy = false; await refresh(); }
+	}
+
 	onMount(() => {
 		void refresh();
 		stop = on('models_updated', () => { void refresh(); });
@@ -58,6 +68,7 @@
 		puck={false}
 		onCancel={download.failed ? undefined : cancel}
 		onRetry={download.failed ? retry : undefined}
+		onDeleteDownload={download.failed ? deleteFailedDownload : undefined}
 	/>
 {/if}
 {#if error}<div class="error">{error}</div>{/if}

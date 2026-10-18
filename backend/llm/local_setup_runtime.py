@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +14,8 @@ from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
 from llm.local_setup_auth import SKIP_AUTH_SETTING
 from llm.local_setup_ownership import omlx_log_detail
+
+log = logging.getLogger(__name__)
 
 LOCAL_HOST = "127.0.0.1"
 HEALTH_WAIT_SECONDS = 120.0
@@ -169,53 +172,58 @@ async def _read_optimal_inputs(server_id: str, model: LocalModel) -> tuple[dict[
 
 async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalResult:
     """Apply only compatible benchmark performance fields in one model-settings write."""
-    from llm import own_omlx_management
-    from llm.local_model import omlx_has_recommender
-    from llm.local_setup_auth import omlx_version
-    from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
+    writer_attempted = False
+    try:
+        from llm import own_omlx_management
+        from llm.local_model import omlx_has_recommender
+        from llm.local_setup_auth import omlx_version
+        from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
 
-    if own_omlx_management.uses_mine():
-        return OptimalResult("no_omlx")
-    if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
-        return OptimalResult("unsupported")
-    inputs = await _read_optimal_inputs(server_id, model)
-    if isinstance(inputs, OptimalResult):
-        return inputs
-    row, snapshot, fields, current = inputs
-    settings = snapshot.get("model_settings") if isinstance(snapshot, dict) else None
-    allowed = _model_specific_fields(fields)
-    if not isinstance(settings, dict) or not isinstance(current, dict):
-        return OptimalResult("offline")
-    filtered = {key: value for key, value in settings.items() if key in allowed}
-    # TurboQuant is an all-or-nothing feature; a disabled snapshot must not carry
-    # its stale bit/skip fields into this model.
-    if filtered.get("turboquant_kv_enabled") is not True:
-        filtered = {key: value for key, value in filtered.items() if not key.startswith("turboquant_")}
-    compatible = await _without_uninstalled_drafts(server_id, filtered)
-    if compatible is None:
-        return OptimalResult("offline")
-    if not compatible:
-        return OptimalResult("not_found")
-    filtered = compatible
-    if own_omlx_management.active():
-        own_omlx_management.record_originals({}, {model.model: {key: current.get(key) for key in filtered}})
-    try:
-        # The benchmark decides TurboQuant here, so CORSIA's default must not switch it on.
-        corsia = {key: value for key, value in (await model_settings_payload(server_id, model)).items()
-                  if not key.startswith("turboquant_")}
-    except RuntimeError:
-        return OptimalResult("offline")
-    try:
-        response = await admin_request(
-            {"server_id": server_id}, "PUT", f"/models/{model.model}/settings",
-            json={**corsia, **filtered}, timeout=15.0,
-        )
-    except (httpx.HTTPError, OmlxAdminError):
-        return OptimalResult("offline", writer_attempted=True)
-    if response.status_code != 200:
-        return OptimalResult("offline", writer_attempted=True)
-    speed = row.get("tg_tps") if isinstance(row, dict) else None
-    return OptimalResult("applied", float(speed) if isinstance(speed, (int, float)) else None)
+        if own_omlx_management.uses_mine():
+            return OptimalResult("no_omlx")
+        if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
+            return OptimalResult("unsupported")
+        inputs = await _read_optimal_inputs(server_id, model)
+        if isinstance(inputs, OptimalResult):
+            return inputs
+        row, snapshot, fields, current = inputs
+        settings = snapshot.get("model_settings") if isinstance(snapshot, dict) else None
+        allowed = _model_specific_fields(fields)
+        if not isinstance(settings, dict) or not isinstance(current, dict):
+            return OptimalResult("offline")
+        filtered = {key: value for key, value in settings.items() if key in allowed}
+        # TurboQuant is an all-or-nothing feature; a disabled snapshot must not carry
+        # its stale bit/skip fields into this model.
+        if filtered.get("turboquant_kv_enabled") is not True:
+            filtered = {key: value for key, value in filtered.items() if not key.startswith("turboquant_")}
+        compatible = await _without_uninstalled_drafts(server_id, filtered)
+        if compatible is None:
+            return OptimalResult("offline")
+        if not compatible:
+            return OptimalResult("not_found")
+        if own_omlx_management.active():
+            own_omlx_management.record_originals({}, {model.model: {key: current.get(key) for key in compatible}})
+        try:
+            # The benchmark decides TurboQuant here, so CORSIA's default must not switch it on.
+            corsia = {key: value for key, value in (await model_settings_payload(server_id, model)).items()
+                      if not key.startswith("turboquant_")}
+        except RuntimeError:
+            return OptimalResult("offline")
+        writer_attempted = True
+        try:
+            response = await admin_request(
+                {"server_id": server_id}, "PUT", f"/models/{model.model}/settings",
+                json={**corsia, **compatible}, timeout=15.0,
+            )
+        except (httpx.HTTPError, OmlxAdminError):
+            return OptimalResult("offline", writer_attempted=True)
+        if response.status_code != 200:
+            return OptimalResult("offline", writer_attempted=True)
+        speed = row.get("tg_tps") if isinstance(row, dict) else None
+        return OptimalResult("applied", float(speed) if isinstance(speed, (int, float)) else None)
+    except Exception:
+        log.exception("Couldn't apply optimal local-model settings")
+        return OptimalResult("offline", writer_attempted=writer_attempted)
 
 
 async def configure_model_settings(server_id: str, model: LocalModel) -> None:
