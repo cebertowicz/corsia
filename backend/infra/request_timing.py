@@ -51,17 +51,21 @@ class Aggregate:
     count: int = 0
     sum_ms: float = 0.0
     max_ms: float = 0.0
-    sum_bytes: int = 0
-    max_bytes: int = 0
+    sum_bytes: int | None = 0
+    max_bytes: int | None = 0
     buckets: list[int] = field(default_factory=lambda: [0] * len(_BUCKET_UPPERS))
 
-    def add(self, duration_ms: float, response_bytes: int = 0) -> None:
+    def add(self, duration_ms: float, response_bytes: int | None = None) -> None:
         """Add one completed request's duration and emitted body length."""
         self.count += 1
         self.sum_ms += duration_ms
         self.max_ms = max(self.max_ms, duration_ms)
-        self.sum_bytes += response_bytes
-        self.max_bytes = max(self.max_bytes, response_bytes)
+        if response_bytes is None:
+            self.sum_bytes = None
+            self.max_bytes = None
+        elif self.sum_bytes is not None:
+            self.sum_bytes += response_bytes
+            self.max_bytes = max(self.max_bytes or 0, response_bytes)
         for index, upper in enumerate(_BUCKET_UPPERS):
             if duration_ms <= upper:
                 self.buckets[index] += 1
@@ -80,7 +84,7 @@ class SlowRequest:
     duration_ms: float
     dbq_ms: float
     db_ms: float
-    response_bytes: int = 0
+    response_bytes: int | None = None
     dbq_read_ms: float | None = None
     db_read_ms: float | None = None
     dbq_bulk_ms: float | None = None
@@ -202,7 +206,7 @@ class RequestTimingMiddleware:
             _request_db_timing.reset(token)
 
     @staticmethod
-    def _record(scope: dict, started_at: float, status: int, timing: DbTiming, response_bytes: int = 0) -> None:
+    def _record(scope: dict, started_at: float, status: int, timing: DbTiming, response_bytes: int | None = None) -> None:
         duration_ms = (time.perf_counter() - started_at) * 1_000
         route = route_template(scope)
         day = datetime.now(UTC).date().isoformat()
@@ -254,8 +258,10 @@ def write_batch(aggregates: dict[tuple[str, str, str, str], Aggregate],
                 "count = request_timing_daily.count + excluded.count, "
                 "sum_ms = request_timing_daily.sum_ms + excluded.sum_ms, "
                 "max_ms = GREATEST(request_timing_daily.max_ms, excluded.max_ms), "
-                "sum_bytes = COALESCE(request_timing_daily.sum_bytes, 0) + excluded.sum_bytes, "
-                "max_bytes = GREATEST(COALESCE(request_timing_daily.max_bytes, 0), excluded.max_bytes), "
+                "sum_bytes = CASE WHEN request_timing_daily.sum_bytes IS NULL OR excluded.sum_bytes IS NULL "
+                "THEN NULL ELSE request_timing_daily.sum_bytes + excluded.sum_bytes END, "
+                "max_bytes = CASE WHEN request_timing_daily.max_bytes IS NULL OR excluded.max_bytes IS NULL "
+                "THEN NULL ELSE GREATEST(request_timing_daily.max_bytes, excluded.max_bytes) END, "
                 "buckets = list_transform(list_zip(request_timing_daily.buckets, excluded.buckets), "
                 "bucket -> bucket[1] + bucket[2])",
                 params,

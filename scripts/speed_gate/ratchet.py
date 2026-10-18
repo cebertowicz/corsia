@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .routes import FOCUS_MESSAGES_ROUTE
+
 METRICS = ("steps", "statements", "bytes")
 #: A route may not cost more than this share above its baseline, per metric...
 GROWTH = 0.25
@@ -22,7 +24,7 @@ CEILINGS = {"steps": 500_000, "statements": 500, "bytes": 1_048_576}
 #: thread. Keep a twofold margin for ordinary variation while making a seed
 #: payload regression fail even though its SQLite walk still exceeds the step cap.
 ROUTE_CEILINGS = {
-    "/api/threads/{thread_id}/messages?limit=50&view=focus": {"bytes": 131_072},
+    FOCUS_MESSAGES_ROUTE: {"bytes": 131_072},
 }
 #: Two runs of one tree must agree exactly on steps and statements (the SQLite build is pinned, one pooled
 #: connection serves each lane and background work is drained), and on response bytes except on the routes

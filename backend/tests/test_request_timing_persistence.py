@@ -27,7 +27,7 @@ def analytics(tmp_path, monkeypatch):
     analytics_db._reset_for_tests()
 
 
-def _aggregate(*durations: float, response_bytes: int = 0) -> request_timing.Aggregate:
+def _aggregate(*durations: float, response_bytes: int | None = 0) -> request_timing.Aggregate:
     aggregate = request_timing.Aggregate()
     for duration in durations:
         aggregate.add(duration, response_bytes)
@@ -60,7 +60,7 @@ def test_write_batch_inserts_slow_rows(analytics):
     request_timing.write_batch({}, [_slow("/a"), _slow("/b")])
 
     rows = analytics.execute("SELECT route, status, dur_ms, dbq_ms, db_ms, response_bytes FROM request_slow ORDER BY route").fetchall()
-    assert rows == [("/a", 200, 1_200, 2, 3, 0), ("/b", 200, 1_200, 2, 3, 0)]
+    assert rows == [("/a", 200, 1_200, 2, 3, None), ("/b", 200, 1_200, 2, 3, None)]
 
 
 def test_write_batch_persists_per_lane_columns_and_leaves_unmeasured_null(analytics):
@@ -73,7 +73,7 @@ def test_write_batch_persists_per_lane_columns_and_leaves_unmeasured_null(analyt
     rows = analytics.execute(
         "SELECT route, response_bytes, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms FROM request_slow ORDER BY route"
     ).fetchall()
-    assert rows == [("/laned", 4, 3, 2, 1, 0), ("/unlaned", 0, None, None, None, None)]
+    assert rows == [("/laned", 4, 3, 2, 1, 0), ("/unlaned", None, None, None, None, None)]
 
 
 def test_bootstrap_adds_lane_columns_to_an_existing_file_as_unknown(tmp_path, monkeypatch):
@@ -101,7 +101,7 @@ def test_bootstrap_adds_lane_columns_to_an_existing_file_as_unknown(tmp_path, mo
     assert row == ("/before", None, None, None, None, None)
 
 
-def test_bootstrap_adds_nullable_byte_columns_and_merges_old_daily_row(tmp_path, monkeypatch):
+def test_bootstrap_keeps_bytes_unknown_when_merging_an_old_daily_row(tmp_path, monkeypatch):
     import duckdb
 
     path = tmp_path / "old-timing.duckdb"
@@ -128,7 +128,7 @@ def test_bootstrap_adds_nullable_byte_columns_and_merges_old_daily_row(tmp_path,
         request_timing.write_batch({_KEY: _aggregate(3, response_bytes=500)}, [])
         assert analytics.execute(
             "SELECT count, sum_bytes, max_bytes FROM request_timing_daily WHERE route = '/x'"
-        ).fetchone() == (2, 500, 500)
+        ).fetchone() == (2, None, None)
     finally:
         request_timing._reset_for_tests()
         analytics_db._reset_for_tests()

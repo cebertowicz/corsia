@@ -134,12 +134,14 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
     return Target(template, url + ("?" + "&".join(query) if query else ""))
 
 
+#: The exact client route whose Focus response has its own byte budget.
+FOCUS_MESSAGES_ROUTE = "/api/threads/{thread_id}/messages?limit=50&view=focus"
 #: Reads whose client query shape and selected fixture record change the response
 #: substantially. The generic paged read already targets the persistent-agent
 #: thread, so only the distinct Focus query needs an explicit measurement.
 CLIENT_QUERY_VARIANTS = {
     "/api/threads/{thread_id}/messages": (
-        ("?limit=50&view=focus", "view=focus"),
+        (FOCUS_MESSAGES_ROUTE, "view=focus"),
     ),
 }
 
@@ -151,13 +153,6 @@ def build_targets(template: str, route, ids: dict[str, str], extra: dict[str, st
     if primary.url is None:
         return [primary]
     variants = [primary]
-    for suffix, extra_query in CLIENT_QUERY_VARIANTS.get(template, ()):
-        variant = build_target(template, route, ids, extra, token)
-        assert variant.url is not None  # the primary and variant share the same route contract
-        if extra_query:
-            separator = "&" if "?" in variant.url else "?"
-            variant_url = variant.url + separator + extra_query
-        else:
-            variant_url = variant.url
-        variants.append(Target(template + suffix, variant_url))
+    for route_key, extra_query in CLIENT_QUERY_VARIANTS.get(template, ()):
+        variants.append(Target(route_key, primary.url + "&" + extra_query))
     return variants
