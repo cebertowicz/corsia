@@ -63,7 +63,7 @@ function stopped(headline: string, body: string): FailureCopy {
 
 function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
-	const body = disk ? `Needs ${disk.neededGb} GB free; this Mac has ${disk.freeGb} GB. ${RAN_ON}` : RAN_ON;
+	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. ${RAN_ON}` : RAN_ON;
 	return {
 		title: "Update didn't start",
 		headline: 'Not enough disk space for a safety backup.',

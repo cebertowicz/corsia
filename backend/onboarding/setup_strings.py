@@ -26,7 +26,7 @@ from __future__ import annotations
 AGENT_IMPORT = {
     "title": "Bring over what your other AI tools know",
     "context": (
-        "{tools} {verb} on this Mac. I can read what they remember about you and how you like to "
+        "{tools} {verb} on this computer. I can read what they remember about you and how you like to "
         "work, the skills you keep in them{connections}, so you don't have to set them up again. "
         "I only read: nothing changes in them, and you choose what I keep. I never read your chats "
         "with them, {settings}, or any key or password. {where}"
@@ -46,9 +46,9 @@ AGENT_IMPORT_CONNECTIONS = ", and the connected apps that {tools} {verb}"
 AGENT_IMPORT_SETTINGS = "their settings"
 AGENT_IMPORT_OTHER_SETTINGS = "their other settings"
 AGENT_IMPORT_CLOUD = "What I read goes to {provider}, the model I run on."
-AGENT_IMPORT_LOCAL = "What I read stays on this Mac: I run on a local model."
+AGENT_IMPORT_LOCAL = "What I read stays on this computer: I run on a local model."
 # Any other model, an External endpoint included: who serves it is not known here.
-AGENT_IMPORT_OTHER = "What I read goes to {model}, the model I run on, and may leave this Mac."
+AGENT_IMPORT_OTHER = "What I read goes to {model}, the model I run on, and may leave this computer."
 # The provider each cloud harness or API names, by catalog provider.
 AGENT_IMPORT_PROVIDERS = {
     "claude-code": "Claude, by Anthropic",
@@ -83,7 +83,7 @@ FIND_PROJECTS = {
 OMLX = {
     "title": "Change one oMLX setting for CORSIA?",
     "context": (
-        "Your oMLX runs the local models on this Mac. It's set to work on {current} requests at "
+        "Your oMLX runs the local models on this computer. It's set to work on {current} requests at "
         "once. At {recommended}, oMLX finishes one request before it starts the next, so each one "
         "gets the model's full speed and memory instead of sharing them. I'd change only this "
         "one setting."
