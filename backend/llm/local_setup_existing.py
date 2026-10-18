@@ -18,9 +18,9 @@ from llm import local_setup as ls
 from llm.local_model import LocalModel, omlx_has_recommender
 from llm.local_setup_ownership import own_omlx_admin_key, own_omlx_port
 
-# The data-defined starter for an oMLX CORSIA does not manage, unchanged until #817
-# decides that journey; CORSIA's own oMLX picks through its recommender instead.
-OWN_OMLX_STARTER = local_profiles.OWN_OMLX_STARTER
+# The data-defined starter: what an oMLX CORSIA does not manage downloads, and the
+# fallback a managed oMLX gets when its recommender offers no model.
+STARTER_MODEL = local_profiles.STARTER_MODEL
 
 
 async def _managed_key(port: int) -> str | None:
@@ -53,7 +53,7 @@ async def _managed_download(server_id: str, report: Callable[[str], None], liste
     if fallback:
         if not await asyncio.to_thread(ls.local_memory_ok):
             return False
-        pick = OWN_OMLX_STARTER
+        pick = STARTER_MODEL
     record = await asyncio.to_thread(own_omlx_management.read)
     ours = record is not None and record.model is not None and record.model.model == pick.model
     if pick.model in listed and not ours:
@@ -151,12 +151,12 @@ async def begin_add_starter_model() -> dict:
     if not await asyncio.to_thread(ls.local_memory_ok):
         ls._emit("skipped", reason="ineligible", existing_omlx=True)
         return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
-    if not ls._claim_operation("starter", OWN_OMLX_STARTER):
+    if not ls._claim_operation("starter", STARTER_MODEL):
         await ls.resume_pending_setup()
         return ls._in_progress_result()
     ls._flight.result = None
     ls._flight.stage = "Checking your oMLX"
-    ls._flight.task = asyncio.create_task(ls._run_flight(model=OWN_OMLX_STARTER, into_own_omlx=True))
+    ls._flight.task = asyncio.create_task(ls._run_flight(model=STARTER_MODEL, into_own_omlx=True))
     ls._flight.task.add_done_callback(ls._observe_setup_task)
     ls._flight.task.add_done_callback(lambda _task: ls._notify_models_changed())
     ls._emit("started", existing_omlx=True)

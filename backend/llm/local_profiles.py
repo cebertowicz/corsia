@@ -12,7 +12,7 @@ _TOP_KEYS = {"omlx_global_settings", "model_settings", "starter_model"}
 
 
 def load_settings(path: Path = _PATH) -> tuple[dict, dict, LocalModel]:
-    """Read shared settings and the fixed starter for an unmanaged oMLX."""
+    """Read shared settings and the starter model: an unmanaged oMLX's download, and the fallback when a recommender offers none."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -27,7 +27,7 @@ def load_settings(path: Path = _PATH) -> tuple[dict, dict, LocalModel]:
     return globals_, model, starter
 
 
-OMLX_GLOBAL_SETTINGS, MODEL_SETTINGS, OWN_OMLX_STARTER = load_settings()
+OMLX_GLOBAL_SETTINGS, MODEL_SETTINGS, STARTER_MODEL = load_settings()
 
 
 def thinking_recommendation(thinking_default: object) -> dict[str, bool]:

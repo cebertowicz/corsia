@@ -110,7 +110,7 @@ def test_a_key_already_stored_is_kept_and_not_forgotten_on_stop(own, monkeypatch
 
 # ---- oMLX has no pick: the starter model, said so, only under management ----
 
-STARTER = local_setup_existing.OWN_OMLX_STARTER
+STARTER = local_setup_existing.STARTER_MODEL
 NOTE = "oMLX didn’t recommend a model for this computer, so CORSIA chose Ternary Bonsai 2."
 
 

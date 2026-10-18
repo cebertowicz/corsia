@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from llm import local_model
 from llm.local_model import LocalModel, PickUnavailable
-from llm.local_profiles import OWN_OMLX_STARTER
+from llm.local_profiles import STARTER_MODEL
 from llm.local_setup_results import failure_message
 
 log = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ def _settle(state: str, model: LocalModel | None = None, message: str | None = N
 def _view(state: str, model: LocalModel | None = None, message: str | None = None) -> dict:
     if state == LOW_MEMORY:
         message = NO_LOCAL_MODEL
-    elif state == PICKED and model is not None and _prepare.fallback and model == OWN_OMLX_STARTER:
+    elif state == PICKED and model is not None and _prepare.fallback and model == STARTER_MODEL:
         message = fallback_note(model)
     return {"state": state, "model": model.view() if model is not None else None, "message": message}
 
@@ -238,7 +238,7 @@ async def ask(server_id: str, port: int) -> LocalModel:
         _settle(FAILED, message=failure_message(exc))
         raise
     fallback = model is None
-    model = model or OWN_OMLX_STARTER
+    model = model or STARTER_MODEL
     _settle(PICKED, model, fallback=fallback)
     return model
 

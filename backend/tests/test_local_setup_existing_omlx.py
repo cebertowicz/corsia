@@ -18,7 +18,7 @@ from vendor_account_fixtures import isolated_shutdown_tasks  # noqa: F401
 
 # The model CORSIA's own oMLX picked for the Mac under test.
 PICK = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 40960)
-STARTER = local_setup_existing.OWN_OMLX_STARTER
+STARTER = local_setup_existing.STARTER_MODEL
 
 
 @pytest.fixture(autouse=True)
