@@ -5,7 +5,7 @@ import {
 	createSession,
 	loginByUrl,
 	openSettings,
-	TEST_TOKEN,
+	TEST_SESSION_TOKEN,
 } from '../support/corsia';
 
 type LeaseState = 'awaiting_user' | 'active' | 'blocked' | 'revoked';
@@ -190,7 +190,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 		await page.route('**/api/settings', async (route) => {
 			const request = route.request();
-			expect(request.headers().authorization).toBe(`Bearer ${TEST_TOKEN}`);
+			expect(request.headers().authorization).toBe(`Bearer ${TEST_SESSION_TOKEN}`);
 
 			if (request.method() === 'PATCH') {
 				const body = request.postDataJSON();
@@ -230,7 +230,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 		await page.route('**/api/host-access/leases**', async (route) => {
 			const request = route.request();
-			expect(request.headers().authorization).toBe(`Bearer ${TEST_TOKEN}`);
+			expect(request.headers().authorization).toBe(`Bearer ${TEST_SESSION_TOKEN}`);
 			const url = new URL(request.url());
 			const action = url.pathname.match(/\/(approve|reject|revoke)$/)?.[1];
 

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createSession, loginByUrl, saveEvidenceScreenshot } from '../support/corsia';
+import { createSession, loginByUrl, saveEvidenceScreenshot, sidebarThread } from '../support/corsia';
 import type { Locator } from '@playwright/test';
 
 // Frames are JPEG, so a drawn color is matched within a small tolerance.
@@ -23,7 +23,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 			socket.on('framereceived', frame => browserFrames.push(`${socket.url()}:${String(frame.payload)}`));
 		});
 		await loginByUrl(page);
-		await page.getByText(title).first().click();
+		await sidebarThread(page, title).click();
 		await page.getByRole('button', { name: 'Open browser', exact: true }).click();
 		const address = page.getByRole('textbox', { name: 'Browser address' });
 		await expect(address).toBeVisible();
