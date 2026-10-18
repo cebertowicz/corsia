@@ -114,6 +114,7 @@ jobs:
             export AGENT_BROWSER_DEBUG=1
             # ...and a sampler records who is waiting on whom: the client, its daemon, Chrome and their sockets.
             mkdir -p "$RUNNER_TEMP/browser-diag"
+            python3 -m pip install --quiet --user py-spy
             (
               while true; do
                 {
@@ -122,6 +123,10 @@ jobs:
                     ps -o pid,ppid,etimes,stat,wchan:22,args -p "$pids" | cut -c1-220
                   fi
                   ss -tanp 2>/dev/null | grep -E 'agent-browser|uvicorn' | cut -c1-200
+                  # Worker threads and the loop's current frame show whether the backend is stuck in Python or idle.
+                  if api=$(pgrep -f '^/.*python -m uvicorn e2e_app' | head -n 1) && pgrep -f 'agent-browser-linux-x64' > /dev/null; then
+                    sudo "$HOME/.local/bin/py-spy" dump --nonblocking --pid "$api" 2>&1 | cut -c1-200
+                  fi
                 } >> "$RUNNER_TEMP/browser-diag/sampler.txt" 2>&1
                 sleep 3
               done
