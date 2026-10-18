@@ -5,7 +5,7 @@
 	import { ConnectAppError, connectedAppStateLine, createConnectedApp, needsTokenBody, type ConnectedApp } from '$lib/api/connectedApps';
 	import { SIGN_IN_LEDE } from '$lib/appSignIn';
 	import { requestCorsiaMessage } from '$lib/corsiaRequest';
-	import { requestConnectedAppKey, requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import { requestAppKey } from '$lib/stores/settingsNavigation';
 
 	let { onClose, onConnected, onSignIn }: { onClose: () => void; onConnected: (app: ConnectedApp) => void; onSignIn: (app: ConnectedApp) => void } = $props();
 	type AppKind = 'local' | 'web' | 'google';
@@ -142,10 +142,7 @@
 	}
 
 	function openResultKey(): void {
-		const refs = result?.key_refs ?? [];
-		const ref = refs.find((candidate) => !candidate.set) ?? refs[0];
-		if (result && ref) requestConnectedAppKey(result.name, ref.entry, refs);
-		else requestSettingsSection('keys');
+		if (result) requestAppKey(result);
 		onClose();
 	}
 </script>

@@ -1,9 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requestCorsiaMessage, requestSettingsSection, requestConnectedAppKey } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn(), requestSettingsSection: vi.fn(), requestConnectedAppKey: vi.fn() }));
+const { requestCorsiaMessage, requestAppKey } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn(), requestAppKey: vi.fn() }));
 vi.mock('$lib/corsiaRequest', () => ({ requestCorsiaMessage }));
-vi.mock('$lib/stores/settingsNavigation', () => ({ requestSettingsSection, requestConnectedAppKey }));
+vi.mock('$lib/stores/settingsNavigation', () => ({ requestAppKey }));
 
 import ConnectAppFlow from './ConnectAppFlow.svelte';
 import { token } from '$lib/stores/auth';
@@ -26,7 +26,7 @@ afterEach(() => {
 	host.remove();
 	vi.restoreAllMocks();
 	requestCorsiaMessage.mockReset();
-	requestSettingsSection.mockReset();
+	requestAppKey.mockReset();
 	token.set(null);
 });
 
@@ -157,16 +157,7 @@ describe('ConnectAppFlow', () => {
 		expect(host.textContent).toContain('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.');
 		expect(host.textContent).toContain('Done');
 		press('Set key');
-		expect(requestSettingsSection).toHaveBeenCalledWith('keys');
-		expect(onClose).toHaveBeenCalledOnce();
-	});
-
-	it('opens the exact key card when the app declares its key', async () => {
-		const refs = [{ name: 'FILES_TOKEN', kind: 'env', entry: 'files-token', set: false }];
-		const { onClose } = await connectResult('needs_token', { key_refs: refs });
-		press('Set key');
-		expect(requestConnectedAppKey).toHaveBeenCalledWith('Files', 'files-token', refs);
-		expect(requestSettingsSection).not.toHaveBeenCalled();
+		expect(requestAppKey).toHaveBeenCalledWith(expect.objectContaining({ name: 'Files', state: 'needs_token' }));
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 

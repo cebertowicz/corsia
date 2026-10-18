@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
-	import { requestConnectedAppKey, settingsAnchor } from '$lib/stores/settingsNavigation';
+	import { requestAppKey, settingsAnchor } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
@@ -88,11 +88,6 @@
 		replace(next);
 		if (next.state === 'needs_sign_in') signInAfterApprove = next.id;
 	}
-	function openKey(app: ConnectedApp): void {
-		const refs = app.key_refs ?? [];
-		const ref = refs.find((candidate) => !candidate.set) ?? refs[0];
-		if (ref) requestConnectedAppKey(app.name, ref.entry, refs);
-	}
 	onMount(() => { void loadProjects(); void load(); });
 </script>
 
@@ -139,8 +134,8 @@
 					<SettingsRow name={app.name} subTone={tone(app)} chevron expanded={isOpen(app)} stackActions onOpen={() => openId = openId === app.id ? null : app.id}>
 						{#snippet sub()}{@render secondLine(app)}{/snippet}
 						{#snippet actions()}
-							{#if !isOpen(app) && app.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => openKey(app)}>Set key</Button>
-							{:else if !isOpen(app) && app.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => openKey(app)}>Replace key</Button>{/if}
+							{#if !isOpen(app) && app.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Set key</Button>
+							{:else if !isOpen(app) && app.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Replace key</Button>{/if}
 						{/snippet}
 					</SettingsRow>
 					{#if isOpen(app)}
@@ -155,8 +150,8 @@
 									<!-- A request that ran out can't be placed, reconnected or approved; Dismiss runs Decline's cleanup (copy sheet). -->
 									<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'decline')}>Dismiss</Button>
 								{:else}
-									{#if app.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => openKey(app)}>Set key</Button>
-									{:else if app.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => openKey(app)}>Replace key</Button>{/if}
+									{#if app.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Set key</Button>
+									{:else if app.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Replace key</Button>{/if}
 									<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereApp = app; }}>Where it works…</Button>
 									{#if app.state !== 'needs_token' && app.state !== 'token_rejected'}<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>{/if}
 									{#if app.sign_in?.signed_in && confirmingOut !== app.id}<Button variant="ghost" size="sm" onclick={() => confirmingOut = app.id}>Sign out</Button>{/if}

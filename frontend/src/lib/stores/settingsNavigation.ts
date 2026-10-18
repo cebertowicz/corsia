@@ -85,6 +85,14 @@ export function requestConnectedAppKey(app: string, entry: string, refs: { entry
 	}));
 }
 
+/** Set or replace an app's key: its first unset (else first) declared key's card, or the Keys section when it declares none. */
+export function requestAppKey(app: { name: string; key_refs?: { entry: string; name: string; set: boolean }[] }) {
+	const refs = app.key_refs ?? [];
+	const ref = refs.find((candidate) => !candidate.set) ?? refs[0];
+	if (ref) requestConnectedAppKey(app.name, ref.entry, refs);
+	else requestSettingsSection('keys');
+}
+
 /** Return from a focused app key card to the list that opened it. */
 export function returnToConnectedApps() {
 	change(() => ({ section: 'connected-apps', anchor: null, connectedAppKey: null }));

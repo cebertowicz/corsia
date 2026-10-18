@@ -6,6 +6,7 @@ import {
 	openProjectSettings,
 	recordSettingsHomeThread,
 	requestSettingsSection,
+	requestAppKey,
 	requestConnectedAppKey,
 	resetSettingsNavigation,
 	returnToProjectPage,
@@ -40,6 +41,19 @@ describe('settings navigation transitions', () => {
 		requestConnectedAppKey('Stripe', 'stripe-key', [{ entry: 'stripe-key', name: 'API key' }]);
 		selectSettingsSection('skills');
 		expect(get(settingsNavigation)).toMatchObject({ section: 'skills', connectedAppKey: null, anchor: null });
+	});
+
+	it('requestAppKey opens the first unset key card, else the first, else the Keys section', () => {
+		const refs = [
+			{ entry: 'k1', name: 'ONE', set: true },
+			{ entry: 'k2', name: 'TWO', set: false },
+		];
+		requestAppKey({ name: 'Linear', key_refs: refs });
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: 'key-k2', connectedAppKey: { app: 'Linear', entry: 'k2' } });
+		requestAppKey({ name: 'Linear', key_refs: [refs[0]] });
+		expect(get(settingsNavigation)).toMatchObject({ anchor: 'key-k1' });
+		requestAppKey({ name: 'Files' });
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null, connectedAppKey: null });
 	});
 
 	describe('the thread Settings opened over', () => {

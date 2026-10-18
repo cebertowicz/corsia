@@ -89,7 +89,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         }
     config = app["config"]
     assert isinstance(config, dict)
-    from connections.app_reach import key_ref_descriptors
+    from connections.app_reach import key_ref_descriptors, with_entry_names
 
     key_refs = key_ref_descriptors(app["id"], config, db=db)
     from api.connected_app_signin_rows import sign_in_view
@@ -106,7 +106,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "next_step": _agent_next_step(
             app["name"], live["state"], live["failure_class"], key_refs, on_here=on_here,
         ),
-        "key_refs": key_refs,
+        "key_refs": with_entry_names(app["id"], key_refs) if person else key_refs,
         "config": {key: value for key, value in config.items() if key != "key_refs"},
         "pending_config": app["pending_config"],
         "pending_actor_thread_id": app["pending_actor_thread_id"],
