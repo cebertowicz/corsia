@@ -6,6 +6,7 @@
 	import type { ProviderEntry } from '$lib/api/providerPolicy';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
+	import { HARNESSES } from '$lib/stores/harnessMembership';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const { projectId, onSignIn }: { projectId: string; onSignIn?: (provider: string) => void } = $props();
@@ -27,7 +28,7 @@
 	async function toggleScope(useWorkspace: boolean) { await policyState.toggleScope(useWorkspace); }
 	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>, target: string) { await policyState.save(entry, patch, target); }
 	function providerName(provider: ProviderEntry) {
-		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';
+		return HARNESSES.find((harness) => harness.name === provider.provider_key)?.label ?? provider.provider_key;
 	}
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);

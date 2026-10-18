@@ -122,9 +122,3 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		move,
 	};
 }
-
-export function providerOverrideSummary(policy: ProviderPolicy | null): string {
-	const projects = policy?.overriding_projects ?? [];
-	if (!projects.length) return 'Every project uses these settings';
-	return `Overridden in ${projects.length} ${projects.length === 1 ? 'project' : 'projects'}: ${projects.map((project) => project.name).join(', ')}`;
-}
