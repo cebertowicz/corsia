@@ -276,7 +276,9 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     steps = app.split("## The steps, in this order", 1)
     assert "raise it first" in steps[0] and "`references/agent-import.md`" in steps[0]
     assert "or what the person confirmed earlier in this conversation" in steps[1]
-    assert "The import card answered A already said yes" in steps[1]
+    assert "already said yes for the tools its connections clause named" in steps[1]
+    assert "OpenClaw and Hermes Agent included" in steps[1]
+    assert 'On "not now" to that shorter question, list only the card\'s tools.' in steps[1]
     guide = (skill / "references/agent-import.md").read_text(encoding="utf-8")
     for line in (
         "Kept [N] things about you and how you work.",
