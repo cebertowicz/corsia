@@ -282,7 +282,7 @@ for (const theme of ['light', 'dark']) {
 		await page.click('#retry');
 		await page.waitForFunction((last) => window.__calls.includes(last), calls[calls.length - 1], { timeout: 3000 }).catch(() => {});
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'launch_outcome'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(calls)) fail(`${theme} ${name}: ran ${JSON.stringify(made)}, expected ${JSON.stringify(calls)}`);
 		if (hash && (await page.evaluate(() => window.location.hash)) !== hash) fail(`${theme} ${name}: did not continue to the service`);
 		if (after) compare(`${theme} ${name}`, await read(page), after);
@@ -335,7 +335,7 @@ for (const theme of ['light', 'dark']) {
 		const before = failed;
 		await page.click('#quit');
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'adopt_existing_install'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'adopt_existing_install', 'launch_outcome'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(['quit_app'])) fail(`${theme} quit: ran ${JSON.stringify(made)}, expected ["quit_app"]`);
 		if (failed === before) console.log(`ok   ${theme} quit`);
 		await page.close();

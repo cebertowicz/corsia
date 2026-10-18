@@ -62,6 +62,9 @@ struct AppServiceState {
     adoption_cancel_requested: AtomicBool,
     /// What the adoption in progress is doing now, for the window to show.
     adoption_phase: Mutex<Option<adoption::Phase>>,
+    /// How the launch-time start ended, kept until the startup page reads it. A launch that ends before the page has
+    /// loaded can't be pushed to it, so the page reads this on load as well as when told it is in.
+    launch_outcome: Mutex<Option<Result<serde_json::Value, String>>>,
 }
 
 #[derive(Default)]
@@ -1117,6 +1120,26 @@ fn set_adoption_phase(service: &AppServiceState, phase: Option<adoption::Phase>)
     }
 }
 
+fn record_launch_outcome(slot: &Mutex<Option<Result<serde_json::Value, String>>>, outcome: &Result<ServiceStartup, String>) {
+    let value = outcome.as_ref().map_err(Clone::clone).and_then(|startup| {
+        serde_json::to_value(startup).map_err(|error| format!("could not report how CORSIA started: {error}"))
+    });
+    *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
+}
+
+/// Hands the outcome over once: a later visit to the startup page (a remote that failed, say) must not act on how
+/// the launch went long ago.
+fn take_launch_outcome(slot: &Mutex<Option<Result<serde_json::Value, String>>>) -> Result<Option<serde_json::Value>, String> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner).take().transpose()
+}
+
+/// How the launch-time start ended, answered like start_local_service; nothing while it is still running or once
+/// the page has read it.
+#[tauri::command]
+fn launch_outcome(service: tauri::State<'_, AppServiceState>) -> Result<Option<serde_json::Value>, String> {
+    take_launch_outcome(&service.launch_outcome)
+}
+
 /// What adoption is doing now: the window picks the line from the phase, never from text.
 #[tauri::command]
 fn adoption_progress(service: tauri::State<'_, AppServiceState>) -> Option<AdoptionProgress> {
@@ -1525,6 +1548,7 @@ pub fn run() {
             quit_app,
             check_service_started,
             adoption_progress,
+            launch_outcome,
             remote_discovered,
             remote_pair,
             disconnect_remote,
@@ -1622,41 +1646,17 @@ pub fn run() {
             let app_handle = app.handle().clone();
             thread::spawn(move || {
                 let service = app_handle.state::<AppServiceState>();
-                match start_service(&app_handle, &service) {
-                    Ok(ServiceStartup::Ready { url }) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            if let Err(error) = window.eval(format!("window.location.replace('{url}');")) {
-                                log::error!(
-                                    "could not navigate to the local CORSIA service: {error}"
-                                );
-                            }
-                        }
-                    }
-                    Ok(ServiceStartup::RequiresApproval) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.eval("window.__corsiaShowBackgroundApproval?.();");
-                        }
-                    }
-                    Ok(ServiceStartup::AdoptionOffered { workspace }) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let workspace = serde_json::to_string(&workspace).unwrap_or_default();
-                            let _ = window.eval(format!("window.__corsiaShowExistingInstall?.({workspace});"));
-                        }
-                    }
-                    Ok(ServiceStartup::AdoptionFailed { failure }) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let failure = serde_json::to_string(&failure).unwrap_or_default();
-                            let _ = window.eval(format!("window.__corsiaShowAdoptionFailure?.({failure});"));
-                        }
-                    }
-                    Err(error) => {
-                        log::error!("bundled CORSIA service did not start: {error}");
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let reason = serde_json::to_string(&error).unwrap_or_default();
-                            let _ = window.eval(format!(
-                                "window.__corsiaShowServiceFailure?.({reason});"
-                            ));
-                        }
+                let outcome = start_service(&app_handle, &service);
+                if let Err(error) = &outcome {
+                    log::error!("bundled CORSIA service did not start: {error}");
+                }
+                // A refusal can be decided before the page has loaded, and a script
+                // sent then is lost: the outcome is stored first, and the page reads
+                // it on load or when this tells it the outcome is in.
+                record_launch_outcome(&service.launch_outcome, &outcome);
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    if let Err(error) = window.eval("window.__corsiaShowLaunchOutcome?.();") {
+                        log::error!("could not tell the window how CORSIA started: {error}");
                     }
                 }
             });
@@ -1699,6 +1699,7 @@ mod tests {
         "start_local_service",
         "adopt_existing_install",
         "adoption_progress",
+        "launch_outcome",
         "check_service_started",
         "quit_app",
         "reopen_app",
@@ -1742,6 +1743,27 @@ mod tests {
             headers: Default::default(),
             invoke_key: tauri::test::INVOKE_KEY.to_string(),
         })
+    }
+
+    #[test]
+    fn a_launch_outcome_decided_before_the_page_loads_waits_for_the_page_to_read_it_once() {
+        let slot = Mutex::new(None);
+        assert_eq!(take_launch_outcome(&slot), Ok(None), "a launch still running has no outcome yet");
+
+        record_launch_outcome(&slot, &Err("A file named ~/Corsia is in the way. Nothing was changed.".into()));
+        assert_eq!(take_launch_outcome(&slot), Err("A file named ~/Corsia is in the way. Nothing was changed.".into()));
+        assert_eq!(take_launch_outcome(&slot), Ok(None), "a later page acted on a launch outcome already shown");
+
+        record_launch_outcome(&slot, &Ok(ServiceStartup::AdoptionOffered { workspace: "/Users/you/corsia".into() }));
+        assert_eq!(
+            take_launch_outcome(&slot),
+            Ok(Some(serde_json::json!({ "state": "adoption_offered", "workspace": "/Users/you/corsia" })))
+        );
+        record_launch_outcome(&slot, &Ok(ServiceStartup::Ready { url: service_url(47_895) }));
+        assert_eq!(
+            take_launch_outcome(&slot),
+            Ok(Some(serde_json::json!({ "state": "ready", "url": "http://127.0.0.1:47895" })))
+        );
     }
 
     #[test]
