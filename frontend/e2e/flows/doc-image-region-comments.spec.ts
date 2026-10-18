@@ -311,12 +311,13 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 
 		// Send now in the drawer's footer closes the document's batch, and nothing is left to send in either place.
 		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
-		const sent = await sendFromDrawerByKeyboard(page, testInfo, docImage(page), 'doc-1440-06c-drawer-sent-focus');
+		const sent = await sendFromDrawerByKeyboard(page, testInfo, docImage(page), 'doc-1440-06c-drawer-sent-focus', async () => {
+			// The document's row says what was sent, and says it for 1.5 s only: check it as the footer goes.
+			await expect(docDelivery(page)).toContainText(/1 comment sent/);
+			await saveEvidenceScreenshot(page, testInfo, 'doc-1440-07-drawer-sent-confirmed-dark', { fullPage: false });
+		});
 		const body = sent.postDataJSON() as { artifact_id?: string } | null;
 		if (body?.artifact_id) expect(body.artifact_id).toBe(seeded.artifactId);
-		// Back in the document, its row says what was sent.
-		await expect(docDelivery(page)).toContainText(/1 comment sent/);
-		await saveEvidenceScreenshot(page, testInfo, 'doc-1440-07-drawer-sent-confirmed-dark', { fullPage: false });
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
 		await shoot(page, testInfo, 'doc-1440-08-document-sent', true);
 	});
