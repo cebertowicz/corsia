@@ -5,19 +5,21 @@
 		name?: string;
 		children?: Snippet;
 		meta?: string[];
+		detail?: Snippet;
 		actions?: Snippet;
 		truncate?: boolean;
 		centered?: boolean;
 		onclick?: () => void;
 	}
 
-	const { name, children, meta = [], actions, centered = false, truncate = false, onclick }: Props = $props();
+	const { name, children, meta = [], detail, actions, centered = false, truncate = false, onclick }: Props = $props();
 </script>
 
 {#snippet content()}
 	<div class="row-copy">
 		{#if children}{@render children()}{:else if name}<strong class="row-name">{name}</strong>{/if}
 		{#if meta.length}<div class="row-meta">{#each meta as part}<span>{part}</span>{/each}</div>{/if}
+		{#if detail}<div class="row-detail">{@render detail()}</div>{/if}
 	</div>
 	{#if actions}<div class="row-actions">{@render actions()}</div>{/if}
 {/snippet}
@@ -38,4 +40,5 @@
 	.row-actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 	.row-meta { display: flex; flex-wrap: wrap; column-gap: 0; row-gap: var(--space-1); margin-top: var(--space-1); color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	.row-meta span:not(:last-child)::after { content: '·'; margin: 0 var(--space-2); color: var(--text-tertiary); }
+	.row-detail { margin-top: var(--space-1); }
 </style>

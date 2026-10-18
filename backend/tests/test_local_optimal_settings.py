@@ -222,6 +222,7 @@ async def test_settings_download_never_auto_loads_under_use_mine(monkeypatch) ->
 
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
     auto_load_calls: list[bool] = []
+    downloads = []
 
     async def managed_download(*_args, **_kwargs):
         return "server", True
@@ -239,13 +240,15 @@ async def test_settings_download_never_auto_loads_under_use_mine(monkeypatch) ->
     monkeypatch.setattr(local_setup_runtime, "apply_optimal_settings", optimal)
     monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
     monkeypatch.setattr(local_settings_download, "_auto_load", auto_load)
-    monkeypatch.setattr(local_settings_download.local_downloads, "write", lambda _download: None)
+    monkeypatch.setattr(local_settings_download.local_downloads, "write", downloads.append)
     monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: True)
 
     result = await local_settings_download.run(lambda _stage: None, model)
 
     assert result["ok"] is True
     assert auto_load_calls == [False]
+    assert len(downloads) == 1
+    assert downloads[0].server_id == "server"
 
 
 async def _empty_settings() -> dict:

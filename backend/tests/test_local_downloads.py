@@ -8,12 +8,18 @@ def test_settings_downloads_are_separate_from_setup_marker(monkeypatch, tmp_path
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
 
-    local_downloads.write(local_downloads.Download(model, speed=52.0))
+    local_downloads.write(local_downloads.Download(model, speed=52.0, server_id="local-server"))
 
     stored = local_downloads.get(model.repository)
     assert stored is not None
     assert stored.model == model
     assert stored.speed == 52.0
+    assert stored.view() == {
+        "name": "Qwen 3.8 27B", "repository": model.repository,
+        "download_size_bytes": 1_000_000, "download_size_gb": 0.0,
+        "context_window": 32_768, "status": "available", "speed": 52.0,
+        "detail": None, "server_id": "local-server",
+    }
     local_downloads.write(local_downloads.Download(model, status="failed", detail="network unavailable"))
     failed = local_downloads.get(model.repository)
     assert failed is not None and failed.status == "failed" and failed.detail == "network unavailable"

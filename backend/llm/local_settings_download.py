@@ -168,6 +168,7 @@ async def run(report: Callable[[str], None], model: LocalModel) -> dict:
     refreshed = await discover_network_models(server_id)
     if not refreshed.get("ok"):
         raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
-    local_downloads.write(local_downloads.Download(model, speed=speed))
+    # The durable record belongs to this exact local server; UI metadata never crosses servers.
+    local_downloads.write(local_downloads.Download(model, speed=speed, server_id=server_id))
     await _auto_load(server_id, model, allowed=may_configure and not await asyncio.to_thread(own_omlx_management.uses_mine))
     return {"ok": True, "server_id": server_id, "model": model.model, "progress": events, "speed": speed}

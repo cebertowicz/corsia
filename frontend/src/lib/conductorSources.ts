@@ -153,7 +153,8 @@ export type LocalModelRecommendations = {
 	state?: string;
 	message?: string;
 	sections?: Record<string, LocalModelRecommendation[]>;
-	downloads?: { repository: string; status?: 'available' | 'failed' }[];
+	/** Durable Settings download records from the backend's local_downloads view. */
+	downloads?: { repository: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null }[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
 	disk_free_gb?: number;

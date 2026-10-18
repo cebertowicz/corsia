@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
-	import { fetchSources } from '$lib/conductorSources';
+	import { fetchLocalModelRecommendations, fetchSources } from '$lib/conductorSources';
 	import {
 		providerModels,
 		loadProviderModelsFor,
@@ -17,6 +17,7 @@
 	import { loadModels, workspaceModels as catalogModels } from '$lib/stores/models';
 	import { chatPickerWarning } from './modelWarning';
 	import { omlxAdminUrl } from '$lib/stores/providerModelUtils';
+	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import ModelRow from './ModelRow.svelte';
 	import PreLoadCheckModal from './PreLoadCheckModal.svelte';
@@ -53,12 +54,14 @@
 	const POLL_IDLE_MS = 5000;
 	const POLL_QUIET_TIMEOUT_MS = 30_000;
 	let pollHandle: ReturnType<typeof setTimeout> | null = null;
+	let stopLocalUpdates: (() => void) | null = null;
 	let lastActiveAt = Date.now();
 	let polling = false;
 
 	let showAllAvailable = $state(false);
 	let actionError = $state('');
 	let hasLocalDownload = $state(false);
+	let downloadSpeeds = $state(new Map<string, number>());
 
 	const pmState = $derived(modelsForProvider($providerModels, provider.raw, provider.server));
 	const models = $derived(pmState.models);
@@ -133,17 +136,49 @@
 		} catch { /* Keep the last known download state until the next source update. */ }
 	}
 
-	onMount(async () => {
-		await Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownload()]);
-		if (!catalogOnly) {
-			pollJobsFor(provider.raw, provider.server);
-			_ensurePolling();
+	async function refreshLocalDownloadSpeeds() {
+		if (provider.name !== 'omlx' || !provider.server?.id) return;
+		const t = get(token);
+		if (!t) return;
+		try {
+			const body = await fetchLocalModelRecommendations(t);
+			const entries = (body.downloads ?? []).filter((entry) =>
+				entry.status === 'available' && entry.server_id === provider.server?.id &&
+				typeof entry.speed === 'number' && Number.isFinite(entry.speed),
+			);
+			downloadSpeeds = new Map(entries.map((entry) => [entry.repository.split('/').at(-1)!, entry.speed!]));
+		} catch { /* The canonical server rows remain useful without optional measured speed. */ }
+	}
+
+	function downloadSpeed(model: ProviderModel): number | null {
+		return downloadSpeeds.get(model.id) ?? null;
+	}
+
+	function displayMeta(model: ProviderModel): string {
+		const speed = downloadSpeed(model);
+		if (speed === null) return model.meta;
+		const shown = Number.isInteger(speed) ? String(speed) : String(Number(speed.toFixed(1)));
+		return [model.meta, `${shown} tokens/s`].filter(Boolean).join(' · ');
+	}
+
+	onMount(() => {
+		void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownload(), refreshLocalDownloadSpeeds()]).then(() => {
+			if (!catalogOnly) {
+				void pollJobsFor(provider.raw, provider.server);
+				_ensurePolling();
+			}
+		});
+		if (provider.name === 'omlx') {
+			stopLocalUpdates = on('models_updated', () => {
+				void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownload(), refreshLocalDownloadSpeeds()]);
+			});
 		}
 	});
 
 	onDestroy(() => {
 		polling = false;
 		if (pollHandle) clearTimeout(pollHandle);
+		stopLocalUpdates?.();
 		// The extracted Settings download status cleans up its own subscription.
 	});
 
@@ -307,7 +342,7 @@
 			<ModelRow
 				name={m.name}
 				state={m.state}
-				meta={m.meta}
+				meta={displayMeta(m)}
 				caps={m.caps}
 				warning={chatPickerWarning($catalogModels, m.dbId, isExternal)}
 				toggleOn={true}
@@ -328,7 +363,7 @@
 			<ModelRow
 				name={m.name}
 				state={m.state}
-				meta={m.meta}
+				meta={displayMeta(m)}
 				caps={m.caps}
 				progress={m.progress}
 				onCancel={() => handleCancel(m)}
@@ -348,9 +383,9 @@
 			<ModelRow
 				name={m.name}
 				state={m.state}
-				meta={m.meta}
+				meta={displayMeta(m)}
 				caps={m.caps}
-				note={m.meta.includes('tokens/s') ? 'Settings measured on Macs like this one · omlx.ai' : null}
+				note={downloadSpeed(m) !== null ? 'Settings measured on Macs like this one · omlx.ai' : null}
 				toggleOn={false}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}

@@ -5,6 +5,7 @@ import ProviderModelsBody from './ProviderModelsBody.svelte';
 import { workspaceModels, type Model } from '$lib/stores/models';
 import { groupModels } from '$lib/stores/modelGroups';
 import { withAccountTurn } from '$lib/stores/modelFixtures';
+import { token } from '$lib/stores/auth';
 import type { HostProvider } from '$lib/stores/providersV7';
 
 vi.mock('$lib/stores/harnessProviders', async (importOriginal) => ({
@@ -62,5 +63,41 @@ describe('Settings model rows and account usage', () => {
 		const text = await render();
 
 		expect(text).toContain('this harness isn’t connected');
+	});
+
+	it('adds a recorded local download speed and note only to its matching server row', async () => {
+		const localProvider = {
+			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: 'Local',
+			raw: { name: 'omlx', label: 'oMLX', type: 'network' },
+			server: { id: 'local-test', provider: 'omlx', kind: 'managed', instance_name: 'Local', endpoints: [] },
+		} as unknown as HostProvider;
+		token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (url.includes('/network-servers/local-test/models')) return {
+				ok: true, json: async () => ({
+					loaded: [],
+					available: [
+						{ id: 'speedy', model_id: 'speedy', repo_id: 'speedy', display_name: 'Measured model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+						{ id: 'plain', model_id: 'plain', repo_id: 'plain', display_name: 'Plain model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+					],
+				}),
+			};
+			if (url.includes('/providers/local/recommendations')) return {
+				ok: true, json: async () => ({ state: 'ready', downloads: [
+					{ repository: 'org/speedy', status: 'available', server_id: 'local-test', speed: 52 },
+				] }),
+			};
+			if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };
+			return { ok: true, json: async () => ({}) };
+		}));
+
+		component = mount(ProviderModelsBody, { target: document.body, props: { provider: localProvider, isLocal: true } });
+		flushSync();
+		await tick(); await tick(); await tick();
+
+		expect(document.body.textContent).toContain('52 tokens/s');
+		expect(document.body.textContent).toContain('Settings measured on Macs like this one · omlx.ai');
+		expect(document.body.textContent).toContain('Plain model');
+		expect(document.body.textContent?.match(/Settings measured on Macs like this one · omlx\.ai/g)).toHaveLength(1);
 	});
 });

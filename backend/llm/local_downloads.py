@@ -23,9 +23,14 @@ class Download:
     status: str = "available"
     speed: float | None = None
     detail: str | None = None
+    # The local server that completed the download; absent for legacy records.
+    server_id: str | None = None
 
     def view(self) -> dict:
-        return {**self.model.view(), "status": self.status, "speed": self.speed, "detail": self.detail}
+        return {
+            **self.model.view(), "status": self.status, "speed": self.speed,
+            "detail": self.detail, "server_id": self.server_id,
+        }
 
 
 def _path() -> Path:
@@ -51,11 +56,13 @@ def all() -> list[Download]:
         status = item.get("status")
         speed = item.get("speed")
         detail = item.get("detail")
+        server_id = item.get("server_id")
         if model is None or status not in {"available", "failed"}:
             continue
         result.append(Download(
             model, status, speed if isinstance(speed, (int, float)) else None,
             detail if isinstance(detail, str) else None,
+            server_id if isinstance(server_id, str) else None,
         ))
     return sorted(result, key=lambda entry: entry.model.repository)
 
@@ -69,6 +76,7 @@ def write(download: Download) -> None:
     values[download.model.repository] = {
         "model": to_record(download.model), "status": download.status,
         "speed": download.speed, "detail": download.detail,
+        "server_id": download.server_id,
     }
     target = _path()
     target.parent.mkdir(parents=True, exist_ok=True)

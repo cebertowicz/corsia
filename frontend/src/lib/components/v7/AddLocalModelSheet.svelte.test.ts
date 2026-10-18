@@ -36,7 +36,7 @@ describe('AddLocalModelSheet', () => {
 		const downloads = [...host.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.includes('Download'));
 		expect(downloads).toHaveLength(2);
 		expect(downloads[0].classList.contains('primary')).toBe(true);
-		expect(downloads[1].classList.contains('ghost')).toBe(true);
+		expect(downloads[1].classList.contains('chip')).toBe(true);
 	});
 
 	it('shows the disk requirement without a disabled download button', async () => {
@@ -44,5 +44,13 @@ describe('AddLocalModelSheet', () => {
 		const download = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Download'));
 		expect(host.textContent).toContain('Needs more disk space');
 		expect(download).toBeUndefined();
+	});
+
+	it('uses the shared context formatter and keeps the disk line below metadata', async () => {
+		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 16, context_window: 262144, disk: { state: 'insufficient', required_bytes: 31 * 1024 ** 3 } }] } });
+		const text = host.textContent ?? '';
+		expect(text).toContain('262k context');
+		expect(text.indexOf('262k context')).toBeLessThan(text.indexOf('Needs 31 GB of disk'));
+		expect(host.querySelector('.model-name')?.tagName).toBe('SPAN');
 	});
 });
