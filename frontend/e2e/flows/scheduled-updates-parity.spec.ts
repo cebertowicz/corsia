@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 
 import { chatComposer, createSession, openAppPastLanding, openSettings, saveEvidenceScreenshot, sidebarThread } from '../support/corsia';
 

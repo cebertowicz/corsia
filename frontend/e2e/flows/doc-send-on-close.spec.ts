@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
 

@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, openAppByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 const decision = {

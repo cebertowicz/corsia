@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl, openSettings } from '../support/corsia';
 
 // Synthetic accounts only: the disposable backend has no vendor CLI, so the

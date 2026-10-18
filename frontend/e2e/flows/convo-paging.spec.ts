@@ -1,5 +1,6 @@
 
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { captureConsoleErrors, createSession, openAppPastLanding, saveEvidenceScreenshot, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { focusSetting } from '../support/focusOutcomeProof';
 import { setFocusMode } from '../support/focusMode';

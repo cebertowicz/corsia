@@ -1,5 +1,6 @@
 
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { assistantMessages, chatComposer, e2eModel, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TEST_TOKEN, userMessages, waitForWsConnected, sidebarThread } from '../support/corsia';
 
 const TRIM_FIX_LANDED = process.env.CORSIA_E2E_TRIM_FIX === '1';

@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { loginByUrl, openSettings, saveEvidenceScreenshot } from '../support/corsia';
 
 // Settings › Context lists the workspace's files first, under "All projects" (SettingsContext.svelte).

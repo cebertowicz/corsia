@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, saveEvidenceScreenshot, sidebarThread, TEST_TOKEN } from '../support/corsia';
 
 test.describe('@flow:model-truth saved model on reopen', () => {

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, sidebarThread } from '../support/corsia';
 
 // Regression for the doc-viewer table bug: a GFM table that sits BELOW CodeMirror's

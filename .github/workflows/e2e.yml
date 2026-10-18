@@ -33,8 +33,8 @@ jobs:
   e2e:
     name: Playwright UI-E2E (mock)
     runs-on: ubuntu-24.04
-    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. Measured on run 39076476997: the single job took 181 min for the full suite (about 3 h), so 240 leaves about 60 min of headroom.
-    timeout-minutes: 240
+    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. Interim 300 min while the suite is being made green: red runs took 181 and 205 min (mostly failing tests running to their timeouts); set this from a green run's measured duration plus headroom.
+    timeout-minutes: 300
 
     strategy:
       fail-fast: false

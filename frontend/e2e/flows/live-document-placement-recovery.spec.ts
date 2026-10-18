@@ -1,5 +1,6 @@
 import { replyField } from '../support/commentDrawer';
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type BrowserContext } from '@playwright/test';
 import {
 	createComment,
 	deleteRenderedLine,
