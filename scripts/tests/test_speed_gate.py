@@ -129,7 +129,7 @@ def test_counting_records_steps_and_statements_and_ignores_time(monkeypatch):
         assert statements == 1 and steps >= 20_000
         again = counters.snapshot()
         db.execute("SELECT COUNT(*) FROM t WHERE x % 7 = 0").fetchone()
-        assert abs((counters.snapshot()[0] - again[0]) - steps) <= 2 * harness.PROGRESS_EVERY
+        assert counters.snapshot()[0] - again[0] == steps  # exact: preparing it the first time is not counted
     finally:
         sqlite3.connect = real_connect
 
@@ -212,6 +212,57 @@ def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
     common = ["portal: SELECT 1", "db_0: SELECT 2"]
     lines = cli._trace_difference([run(common + ["db_0: SELECT 3"]), run(common)], "/a")
     assert lines == ["    only in run 1: db_0: SELECT 3 (x1)"]
+
+
+def test_a_difference_between_runs_names_statements_that_ran_in_another_order():
+    def run(trace):
+        return {"routes": {"/a": {"info": {"trace": trace}}}}
+    first = ["portal: SELECT 1", "db_0: SELECT 2", "db_0: SELECT 3", "db_0: ROLLBACK"]
+    moved = ["portal: SELECT 1", "db_0: SELECT 3", "db_0: SELECT 2", "db_0: ROLLBACK"]
+    lines = cli._trace_difference([run(first), run(first), run(moved)], "/a")
+    assert lines == ["    order differs in run 3 at 2 of 4 statements, from statement 2: "
+                     "run 1 ran db_0: SELECT 2; run 3 ran db_0: SELECT 3"]
+
+
+def test_a_cached_statement_counts_the_same_whatever_ran_it_before(counted):
+    """The same work counts the same however often its cached prepared statement ran before.
+
+    SQLite starts a statement's handler interval from that statement's lifetime instruction count, so a
+    counter called every N instructions counts one execution differently by up to N with its history.
+    """
+    counters, connect = counted
+    db = connect()
+    db.execute("CREATE TABLE t(x)")
+    db.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(37)])
+    counts = []
+    for _ in range(6):
+        before = counters.steps
+        db.execute("SELECT SUM(x) FROM t").fetchone()
+        counts.append(counters.steps - before)
+    assert counts[0] > 0 and counts == [counts[0]] * 6
+
+
+def test_preparing_a_statement_is_not_counted(counted):
+    """SQLite calls the progress handler while it plans a statement, so counting it would make a statement's
+    first run on a connection (or its first after the statement cache evicted it) count more than a reuse;
+    which pooled connection prepares it first depends on how concurrent jobs interleaved."""
+    counters, connect = counted
+    db = connect()
+    db.execute("CREATE TABLE t(x)")
+    db.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(50)])
+
+    def run(sql: str) -> int:
+        before = counters.steps
+        db.execute(sql).fetchall()
+        return counters.steps - before
+
+    first, reuse = run("SELECT x FROM t WHERE x % 7 = 0"), run("SELECT x FROM t WHERE x % 7 = 0")
+    assert first == reuse > 0
+    for number in range(300):  # each used more often than the statement above, so the default cache evicts it
+        for _ in range(3):
+            run(f"SELECT x FROM t WHERE x = {number}")
+    assert run("SELECT x FROM t WHERE x % 7 = 0") == reuse
+
 
 
 MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}, "short": {}}
@@ -420,6 +471,7 @@ def run_heavy(counters, db):
 def test_an_application_progress_handler_neither_replaces_nor_clears_the_count(counted):
     counters, connect = counted
     db = connect()
+    run_heavy(counters, db)  # a new connection's first statement also reads the schema
     baseline = run_heavy(counters, db)
     assert baseline > 100_000
     calls: list[int] = []

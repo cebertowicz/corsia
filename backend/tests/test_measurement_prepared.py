@@ -201,6 +201,79 @@ def test_leader_without_waiters_takes_no_snapshot(isolated_db, monkeypatch):
     assert taken == []
 
 
+def _steps(db, sql: str) -> int:
+    """SQLite VM instructions ``sql`` takes on ``db``, counted exactly."""
+    steps = []
+    db.set_progress_handler(lambda: steps.append(1), 1)
+    try:
+        db.execute(sql).fetchall()
+    finally:
+        db.set_progress_handler(None, 0)
+    return len(steps)
+
+
+def _assert_job_left_schema(db, tables) -> None:
+    """The prepared tables survived the job's closing rollback, and the connection kept its parsed schema.
+
+    DDL run after a job's first write is inside the transaction the pooled connection's close rolls back.
+    Rolling back DDL drops the table again and makes SQLite discard the connection's whole parsed schema,
+    so the next statement on it, whatever job sends it, re-reads every table, index and trigger.
+    """
+    assert not db.in_transaction
+    first = _steps(db, "SELECT COUNT(*) FROM projects")  # the first statement after the job pays any re-read
+    assert first == _steps(db, "SELECT COUNT(*) FROM projects"), "the job's rollback discarded the parsed schema"
+    names = {row[0] for row in db.execute("SELECT name FROM sqlite_temp_master WHERE type='table'")}
+    assert set(tables) <= names
+
+
+@pytest.mark.parametrize("roots", [False, True])
+def test_prepared_tables_outlive_the_jobs_rollback(isolated_db, roots):
+    from api.measurement_prepared import _ROOT_TABLES, _SCOPE_TABLES
+    from infra.database import get_db
+
+    _seeded().close()
+    _prepare(roots=roots)
+    db = get_db()  # the same pooled connection the job used, after its close
+    try:
+        _assert_job_left_schema(db, _ROOT_TABLES if roots else _SCOPE_TABLES)
+    finally:
+        db.close()
+
+
+def test_restored_tables_outlive_the_jobs_rollback(isolated_db):
+    from api.measurement_prepared import _ROOT_TABLES, _restore, _snapshot
+    from api.measurement_queries import _materialize_outcome_periods
+    from infra.database import get_db
+
+    db = _seeded()
+    try:
+        _materialize_outcome_periods(db, PARAMS, roots=True)
+        snapshot = _snapshot(db, True)
+    finally:
+        db.close()
+    errors: list[BaseException] = []
+
+    def waiter() -> None:  # a waiter's own thread, so its pooled connection has none of the tables yet
+        try:
+            db = get_db()
+            try:
+                _restore(db, snapshot)
+            finally:
+                db.close()
+            db = get_db()
+            try:
+                _assert_job_left_schema(db, _ROOT_TABLES)
+            finally:
+                db.close()
+        except BaseException as error:  # reported to the test
+            errors.append(error)
+
+    thread = threading.Thread(target=waiter)
+    thread.start()
+    thread.join()
+    assert errors == []
+
+
 def test_different_keys_do_not_collide(isolated_db, monkeypatch):
     _seeded().close()
     gate = threading.Event()

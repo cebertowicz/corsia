@@ -45,7 +45,7 @@ def chain_costs(db, scope_params: dict[str, Any], grain: Grain) -> dict[str, Any
         cost_rows = query_model_costs(db, params, IdentityResolver(db), chain_rows=chain)
         gaps = query_recording_gaps(db, params, chain_rows=chain)
     finally:
-        db.execute(f"DROP TABLE IF EXISTS {chain}")  # the pooled connection outlives the request
+        db.execute(f"DELETE FROM {chain}")  # the pooled connection outlives the request
     return {"cost_rows": cost_rows, "gaps": sorted(gaps)}
 
 
