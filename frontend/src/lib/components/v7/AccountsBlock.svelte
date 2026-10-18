@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import './AccountsBlock.css';
 	import { Button, Field, Message } from '$lib/components/ui';
 	import Toggle from '../ui/Toggle.svelte';
 	import Menu, { type MenuItem } from '../ui/Menu.svelte';
@@ -390,31 +391,3 @@
 />
 </div>
 
-<style>
-	.account-manager { display: contents; }
-	.account-manager :global(.field .err), .account-manager :global(.msg.err), .account-manager :global(.btn.danger) { color: var(--red-text); }
-	.account-manager :global(.btn.ghost) { color: var(--text-secondary); }
-	.account-manager :global(.btn.primary:hover:not(:disabled)) { background: var(--accent-wash); }
-	.accounts { display: grid; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
-	.empty-row, .account-actions { display: flex; align-items: center; gap: var(--space-2); min-height: var(--list-row-min-height); }
-	.empty-row { justify-content: space-between; color: var(--text-secondary); font-size: var(--text-caption); }
-	.account-actions { flex-wrap: wrap; }
-	.rollover-row { display: flex; align-items: center; justify-content: space-between; min-height: var(--list-row-min-height); gap: var(--space-2); font-size: var(--text-subhead); color: var(--text-primary); }
-	/* ProviderAccountPolicyControls owns account ordering and enablement controls. */
-	.override-summary { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
-	.project-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
-	.account { position: relative; padding: var(--space-1) 0; outline: none; }
-	.account:focus { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
-	.account-main { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-	.account-copy { flex: 1; min-width: 0; }
-
-	.account-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
-	.inline-actions, .signin-actions { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
-	/* Text actions start on the account copy column; Button retains the touch target on phones. */
-	.accounts :global(.btn.ghost) { padding-inline: 0; }
-	/* The shared Menu component owns row-menu styling. */
-	.signin-state { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--text-footnote); }
-	.signin-state { min-width: 0; }
-	/* Account copy wraps on narrow screens while its sign-in action stays aligned. */
-	@media (max-width: 480px) { .accounts { padding: var(--space-2) var(--space-3); } }
-</style>
