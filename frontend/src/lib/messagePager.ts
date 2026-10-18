@@ -37,6 +37,19 @@ export interface PagerPort {
 	afterRender: () => Promise<void>;
 }
 
+/** One read at a time: starting the next aborts the one it supersedes. */
+export function supersedingRead(): { start: () => AbortSignal; abort: () => void } {
+	let current: AbortController | null = null;
+	return {
+		start() {
+			current?.abort();
+			current = new AbortController();
+			return current.signal;
+		},
+		abort: () => current?.abort(),
+	};
+}
+
 export const LOAD_OLDER_TRIGGER_PX = 200;
 /** A Focus-mode request may inspect at most 1,000 messages (20 API pages). */
 export const MAX_PAGER_CHAIN = 20;

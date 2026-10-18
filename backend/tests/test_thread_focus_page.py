@@ -175,6 +175,21 @@ class TestStubsAndCounts:
         assert stub["kinds"] == ["account_move", "error_recovered", "other", "subagent_finished"]
         assert stub["weight"] == 0
 
+    def test_a_seed_stays_inside_the_run_and_its_body_is_not_sent(self):
+        conn = _db()
+        t = _Thread(conn)
+        first = t.add("u")
+        t.add("w", "T1")
+        t.add("c", meta={"cc": True, "type": "seed"}, content="starting context " * 4096)
+        t.add("w", "T2")
+        said = t.add("s", "T2")
+        conn.commit()
+        page = page_focus(conn, _SID, 10, None)
+        assert [m["id"] for m in page["messages"]] == [first, said]
+        (stub,) = page["runs"]
+        assert (stub["count"], stub["weight"], stub["kinds"]) == (3, 2, ["other", "steps"])
+        assert "starting context" not in json.dumps(page)
+
     def test_an_unrecovered_error_splits_the_run_and_a_recovered_one_does_not(self):
         conn = _db()
         t = _Thread(conn)

@@ -16,9 +16,11 @@ import json
 
 # System rows that only record activity. Every other system row is a notice
 # (an error, interrupt, sandbox denial, or a type added later) and stays visible.
+# A `seed` is a session's starting context: the transcript never draws it, so it
+# sits inside a run and its body is never sent with a Focus page.
 ACTIVITY_SYSTEM_TYPES = (
     "context_event", "activity_receipt", "subagent_ref", "subagent_done", "send_ref",
-    "artifact_removed", "model_switch", "account_switch",
+    "artifact_removed", "model_switch", "account_switch", "seed",
 )
 # Rows that end a turn with an error. One stays visible until the agent's next turn
 # starts with nothing to read in between; that start writes `recovered: true` on it.

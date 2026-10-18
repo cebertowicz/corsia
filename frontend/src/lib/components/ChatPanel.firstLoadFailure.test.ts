@@ -179,6 +179,44 @@ describe('ChatPanel first-page failure', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'));
 	});
 
+	it('aborts the first page of the thread the user left, without an error state', async () => {
+		threads.set([{ id: 'thread-a', title: 'Thread A' }, { id: 'thread-b', title: 'Thread B' }] as never);
+		const signals = new Map<string, AbortSignal>();
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.includes('/thread-a/messages?')) {
+				const signal = init?.signal as AbortSignal;
+				signals.set('thread-a', signal);
+				// A slow link: nothing arrives until the read is abandoned.
+				return new Promise((_, reject) => signal.addEventListener('abort', () => (
+					reject(new DOMException('The operation was aborted.', 'AbortError'))
+				)));
+			}
+			if (url.includes('/thread-b/messages?')) {
+				signals.set('thread-b', init?.signal as AbortSignal);
+				return { ok: true, status: 200, json: async () => ({
+					messages: [{ id: 'b1', thread_id: 'thread-b', role: 'user', content: 'hello b', created_at: '2026-08-01T00:00:00Z' }],
+					has_more: false, oldest_id: 'b1', turn_summaries: {},
+				}) };
+			}
+			return { ok: true, status: 200, json: async () => ({ thread_kind: 'chat' }) };
+		}) as unknown as typeof fetch;
+
+		mountChatPanel();
+		flushSync();
+		const leaving = (component as Record<string, any>).selectThread('thread-a');
+		await vi.waitFor(() => expect(signals.has('thread-a')).toBe(true));
+		await (component as Record<string, any>).selectThread('thread-b');
+		await leaving;
+		flushSync();
+
+		expect(signals.get('thread-a')?.aborted).toBe(true);
+		expect(signals.get('thread-b')?.aborted).toBe(false);
+		expect(host.textContent).toContain('hello b');
+		expect(host.textContent).not.toContain("Couldn't load this thread");
+		expect(vi.mocked(console.error).mock.calls.some(([text]) => String(text).includes('thread-a'))).toBe(false);
+	});
+
 	it('keeps this thread rows when a refresh of the SAME thread fails', async () => {
 		messages.set([
 			{

@@ -7,10 +7,11 @@ export function isHumanMessage(message: TranscriptMessage): boolean {
 
 // System rows that only record activity. Every other system row is a notice
 // (an error, interrupt, sandbox denial, or a type added later) and stays
-// visible, so Focus never buries something the user must act on.
+// visible, so Focus never buries something the user must act on. A `seed` is a
+// session's starting context, which the transcript never draws.
 const ACTIVITY_SYSTEM_TYPES = new Set([
 	'context_event', 'activity_receipt', 'subagent_ref', 'subagent_done', 'send_ref',
-	'artifact_removed', 'model_switch', 'account_switch',
+	'artifact_removed', 'model_switch', 'account_switch', 'seed',
 ]);
 
 // Rows that end a turn with an error. One stays a notice until the agent's next turn

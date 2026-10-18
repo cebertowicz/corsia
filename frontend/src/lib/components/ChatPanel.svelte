@@ -35,6 +35,7 @@
 		adoptFirstPage,
 		loadOlder,
 		makeGuardedPort,
+		supersedingRead,
 		PAGER_ABORT,
 		type MessagePage,
 		type TurnSummary,
@@ -87,21 +88,15 @@
 	const hasMoreMessages = $derived(!!$activeThreadId && pager.hasMore); // New chat has no history to page
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
-	export function scrollToBottom() {
-		messageListRef?.scrollToBottom();
-	}
+	export const scrollToBottom = () => messageListRef?.scrollToBottom();
 	function openPlanSubagent(nodeId: string, childThreadId: string, title: string, stepId?: string): void {
 		openPlanSubagentLeaf($activeThreadId, nodeId, childThreadId, title, stepId);
 	}
 	function openPlanDiscussion(artifactId: string, title: string): void {
 		openPlanDiscussionLeaf($activeThreadId, artifactId, title);
 	}
-	export function captureBottomOffset() {
-		messageListRef?.captureBottomOffset();
-	}
-	export function restoreBottomOffset() {
-		messageListRef?.restoreBottomOffset();
-	}
+	export const captureBottomOffset = () => messageListRef?.captureBottomOffset();
+	export const restoreBottomOffset = () => messageListRef?.restoreBottomOffset();
 	/** Warm the active thread's cache. Lives in `$lib/chatWarm`. */
 	export const triggerWarm = warmActiveThread;
 	export async function selectThread(
@@ -224,6 +219,9 @@
 	function isCurrentFirstPageRequest(threadId: string, gen: number): boolean {
 		return pagerGeneration === gen && get(activeThreadId) === threadId;
 	}
+	// A newer first-page read makes the older one stale: abort it, never download both.
+	const firstPageRead = supersedingRead();
+	onDestroy(firstPageRead.abort);
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -239,8 +237,9 @@
 			firstLoadFailed = false;
 			firstLoadPending = true;
 		}
+		const signal = firstPageRead.start();
 		try {
-			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`);
+			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
 			if (!res.ok) {
 				console.error(`loadFirstPage ${res.status} for thread ${threadId}`);
 				if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
@@ -258,6 +257,7 @@
 			// The first page is in the DOM now; this is what the user waits for.
 			if (isCurrentFirstPageRequest(threadId, gen)) markFirstPageRendered(threadId, hydrated.length);
 		} catch (e) {
+			if (signal.aborted) return; // replaced by a newer read, not a failure on screen
 			console.error(`loadFirstPage network error for thread ${threadId}:`, e);
 			if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
 		} finally {
