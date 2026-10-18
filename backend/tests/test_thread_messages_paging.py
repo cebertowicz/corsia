@@ -94,6 +94,32 @@ class TestFirstPage:
         for msg in msgs2:
             assert "rowid" not in msg, f"rowid leaked on cursor page for id={msg.get('id')}"
 
+    def test_a_seed_is_never_sent_and_never_counted(self):
+        conn = _db()
+        _insert(conn, "seed-old", "system", "starting context", ts="2026-06-12T00:00:0000",
+                metadata=json.dumps({"type": "seed"}), seq=1)
+        ids = [f"m{i}" for i in range(2, 6)]
+        for seq, mid in enumerate(ids, start=2):
+            _insert(conn, mid, "user" if seq % 2 else "assistant", f"msg {seq}",
+                    ts=f"2026-06-12T00:00:{seq:04d}", seq=seq)
+        _insert(conn, "seed-mid", "system", "starting context", ts="2026-06-12T00:00:0006",
+                metadata=json.dumps({"cc": True, "type": "seed"}), seq=6)
+        _insert(conn, "late", "user", "msg 7", ts="2026-06-12T00:00:0007", seq=7)
+        conn.commit()
+
+        # Positioned rows only, then with an unpositioned seed (the wall-clock read).
+        for unpositioned in (False, True):
+            if unpositioned:
+                _insert(conn, "queued-seed", "system", "starting context",
+                        ts="2026-06-12T00:00:0008", metadata=json.dumps({"type": "seed"}))
+                conn.commit()
+            msgs, has_more, oldest_id = page_messages(conn, _SID, limit=5, before=None)
+            assert [m["id"] for m in msgs] == [*ids, "late"]
+            assert (has_more, oldest_id) == (False, "m2")
+            everything, _, _ = page_messages(conn, _SID, limit=None, before=None)
+            assert [m["id"] for m in everything] == [*ids, "late"]
+            assert "starting context" not in json.dumps([*msgs, *everything])
+
     def test_returns_last_n_display_messages(self):
         conn = _db()
         _seed_plain(conn, 10)

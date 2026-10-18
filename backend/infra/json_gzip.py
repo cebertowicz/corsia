@@ -12,6 +12,29 @@ _MINIMUM_SIZE = 1_000
 _COMPRESS_LEVEL = 6
 
 
+def accepts_gzip(header: str) -> bool:
+    """Whether an ``Accept-Encoding`` value allows gzip (RFC 9110 12.5.3).
+
+    Codings are case-insensitive and ``q=0`` refuses one; ``*`` covers gzip only
+    when gzip is not named itself.
+    """
+    weights: dict[str, float] = {}
+    for item in header.split(","):
+        coding, *params = (part.strip() for part in item.split(";"))
+        if not coding:
+            continue
+        weight = 1.0
+        for param in params:
+            name, _, value = param.partition("=")
+            if name.strip().lower() == "q":
+                try:
+                    weight = float(value)
+                except ValueError:
+                    weight = 0.0
+        weights[coding.lower()] = weight
+    return weights.get("gzip", weights.get("*", 0.0)) > 0
+
+
 class JsonGZipMiddleware:
     """Compress complete ``application/json`` bodies; pass streams through as written.
 
@@ -27,7 +50,8 @@ class JsonGZipMiddleware:
         self.compresslevel = compresslevel
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or "gzip" not in Headers(scope=scope).get("accept-encoding", ""):
+        if scope["type"] != "http" or not accepts_gzip(
+                Headers(scope=scope).get("accept-encoding", "")):
             await self.app(scope, receive, send)
             return
 

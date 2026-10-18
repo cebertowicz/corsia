@@ -59,6 +59,24 @@ async def test_json_stays_plain_without_gzip_or_below_minimum(payload, accept):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("accept", "gzipped"), [
+    ("GZIP", True),
+    ("br, Gzip;q=0.5", True),
+    ("gzip ; Q=1.0", True),
+    ("*", True),
+    ("gzip;q=0", False),
+    ("gzip;q=0.000, br", False),
+    ("*;q=1, gzip;q=0", False),
+    ("identity", False),
+    ("", False),
+])
+async def test_accept_encoding_is_read_by_coding_and_quality(accept, gzipped):
+    app, _ = _json_app(_BIG)
+    start, _ = await _run(app, _scope(accept))
+    assert (dict(start["headers"]).get(b"content-encoding") == b"gzip") is gzipped
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("content_type", [b"text/event-stream", b"text/plain", b"application/json"])
 async def test_streams_pass_through_and_flush_per_write(content_type):
     """Each write reaches the client before the app produces the next one."""
