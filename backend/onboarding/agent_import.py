@@ -27,7 +27,7 @@ CODEX = "codex"
 OPENCLAW = "openclaw"
 HERMES = "hermes"
 TOOLS = (CLAUDE_CODE, CODEX, OPENCLAW, HERMES)
-LABELS = {CLAUDE_CODE: "Claude Code", CODEX: "Codex", OPENCLAW: "OpenClaw", HERMES: "Hermes"}
+LABELS = {CLAUDE_CODE: "Claude Code", CODEX: "Codex", OPENCLAW: "OpenClaw", HERMES: "Hermes Agent"}
 
 FILE_BYTES = 8 * 1024
 TOTAL_BYTES = 40 * 1024

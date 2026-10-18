@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import builtins
 import datetime
+import hashlib
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -181,6 +183,21 @@ def test_install_writes_the_skill_data_form_and_nothing_tool_granting(home):
 
     assert validate_skill_file(target / "SKILL.md").ok
     assert validate_skill_file(workspace / "skills" / "git-tidy" / "SKILL.md").ok
+    history = subprocess.run(
+        ["git", "-C", str(workspace), "log", "-1", "--format=%B"], capture_output=True, check=True, text=True
+    ).stdout
+    assert "Reason: consented skill import from agent_import" in history
+
+
+def test_install_preserves_an_upstream_workflow_and_records_origin(home):
+    roots, workspace = home
+    folder = _skill(roots.codex / "skills" / "with-workflow", "with-workflow", "keeps its workflow")
+    (folder / "corsia.yaml").write_text("workflow:\n  steps: []\n")
+
+    assert _install(home, _ids(_offers(home), "with-workflow"))[0]["outcome"] == "installed"
+    sidecar = yaml.safe_load((workspace / "skills" / "with-workflow" / "corsia.yaml").read_text())
+    assert sidecar["workflow"] == {"steps": []}
+    assert sidecar["origin"]["sha256"] == hashlib.sha256((folder / "SKILL.md").read_bytes()).hexdigest()
 
 
 def test_a_rerun_offers_nothing_twice(home):
