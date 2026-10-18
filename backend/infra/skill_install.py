@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from pathlib import Path
 from typing import Mapping
 
@@ -45,23 +46,22 @@ def _skill_text(name: str, upstream: bytes, description: str) -> str | None:
     return "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n" + body
 
 
-def _sidecar(files: Mapping[str, bytes], origin: Mapping[str, str]) -> str | None:
-    """Preserve an upstream workflow while adding the CORSIA import origin."""
+def _sidecar(origin: Mapping[str, str]) -> str:
+    """The installed sidecar holds only the import origin; an upstream one could carry a handler."""
+    return yaml.safe_dump({"origin": dict(origin)}, sort_keys=False, allow_unicode=True)
+
+
+def _holds(path: Path, data: bytes) -> bool:
     try:
-        existing = yaml.safe_load(files.get(SIDECAR_FILE, b"").decode("utf-8")) or {}
-    except (UnicodeDecodeError, yaml.YAMLError):
-        return None
-    if not isinstance(existing, dict):
-        return None
-    existing["origin"] = dict(origin)
-    return yaml.safe_dump(existing, sort_keys=False, allow_unicode=True)
+        return not path.is_symlink() and path.is_file() and path.read_bytes() == data
+    except OSError:
+        return False
 
 
-def _outcome(result: str) -> str:
-    if result in {"written", "unchanged", "history-off", "ordinary"}:
-        return INSTALLED
-    if result == "stale":
-        return ALREADY_HERE
+def _discard(target: Path, name: str) -> str:
+    """Remove a bundle this install left incomplete, so a re-run can offer it again."""
+    logger.warning("skill install failed at guidance save for {}", name)
+    shutil.rmtree(target, ignore_errors=True)
     return FAILED
 
 
@@ -81,10 +81,7 @@ def install_skill_bundle(
     if skill_md is None:
         logger.warning("skill install failed at frontmatter rewrite for {}", name)
         return FAILED
-    sidecar = _sidecar(other_files, origin)
-    if sidecar is None:
-        logger.warning("skill install failed at sidecar merge for {}", name)
-        return FAILED
+    sidecar = _sidecar(origin)
     try:
         workspace.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -122,12 +119,15 @@ def install_skill_bundle(
             expected={path: None for path in writes},
         )
     except OSError:
-        logger.warning("skill install failed at guidance save for {}", name)
-        return FAILED
-    outcome = _outcome(saved.outcome)
-    if outcome == FAILED:
-        logger.warning("skill install failed at guidance save for {}", name)
-    return outcome
+        return _discard(target, name)
+    if saved.outcome == "stale":
+        return ALREADY_HERE
+    # A save without history still writes every file; what is on disk decides the outcome.
+    if not all(_holds(path, data) for path, data in writes.items()):
+        return _discard(target, name)
+    if saved.outcome not in {"written", "unchanged"}:
+        logger.info("skill {} installed without guidance history: {}", name, saved.outcome)
+    return INSTALLED
 
 
 def origin_metadata(source: str, upstream_skill_md: bytes, adopted_at: str) -> dict[str, str]:

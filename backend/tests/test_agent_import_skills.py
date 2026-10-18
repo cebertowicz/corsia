@@ -200,15 +200,54 @@ def test_install_writes_the_description_that_was_shown(home):
     assert len(shown) <= 500
 
 
-def test_install_preserves_an_upstream_workflow_and_records_origin(home):
+def test_an_upstream_sidecar_is_dropped_and_only_origin_is_written(home):
     roots, workspace = home
-    folder = _skill(roots.codex / "skills" / "with-workflow", "with-workflow", "keeps its workflow")
-    (folder / "corsia.yaml").write_text("workflow:\n  steps: []\n")
+    folder = _skill(roots.codex / "skills" / "with-handler", "with-handler", "carries a handler")
+    (folder / "corsia.yaml").write_text("handler:\n  kind: cli\n  command: rm\nworkflow:\n  steps: []\n")
 
-    assert _install(home, _ids(_offers(home), "with-workflow"))[0]["outcome"] == "installed"
-    sidecar = yaml.safe_load((workspace / "skills" / "with-workflow" / "corsia.yaml").read_text())
-    assert sidecar["workflow"] == {"steps": []}
+    assert _install(home, _ids(_offers(home), "with-handler"))[0]["outcome"] == "installed"
+    sidecar = yaml.safe_load((workspace / "skills" / "with-handler" / "corsia.yaml").read_text())
+    assert list(sidecar) == ["origin"]
     assert sidecar["origin"]["sha256"] == hashlib.sha256((folder / "SKILL.md").read_bytes()).hexdigest()
+
+
+def test_a_save_that_stops_partway_leaves_nothing_and_can_be_retried(home, monkeypatch):
+    from infra import skill_install
+
+    def partial(writes, **_kwargs):
+        path, data = next(iter(writes.items()))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        raise OSError("disk full")
+
+    offers = _offers(home)
+    monkeypatch.setattr(skill_install, "save_guidance", partial)
+    assert _install(home, _ids(offers, "rfc-writer"))[0]["outcome"] == "failed"
+    assert not (home[1] / "skills" / "rfc-writer").exists()
+    monkeypatch.undo()
+    assert _offers(home)["rfc-writer"]["state"] == "new"
+
+
+@pytest.mark.parametrize("outcome", ["deferred", "failed"])
+def test_a_save_without_history_reports_what_is_on_disk(home, monkeypatch, outcome):
+    from infra import skill_install
+    from infra.guidance_git import SaveResult
+
+    def unrecorded(writes, **_kwargs):
+        for path, data in writes.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return SaveResult(outcome, "history fault", line=None)
+
+    def nothing(_writes, **_kwargs):
+        return SaveResult(outcome, "history fault", line=None)
+
+    offers = _offers(home)
+    monkeypatch.setattr(skill_install, "save_guidance", unrecorded)
+    assert _install(home, _ids(offers, "rfc-writer"))[0]["outcome"] == "installed"
+    monkeypatch.setattr(skill_install, "save_guidance", nothing)
+    assert _install(home, _ids(offers, "runbook-writer"))[0]["outcome"] == "failed"
+    assert not (home[1] / "skills" / "runbook-writer").exists()
 
 
 def test_a_rerun_offers_nothing_twice(home):
