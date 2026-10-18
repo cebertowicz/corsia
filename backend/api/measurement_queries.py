@@ -12,7 +12,7 @@ from typing import Any
 from api.cost_identity import IDENTITY_GROUP, identity_columns, identity_join
 from api.measurement_prepared import (  # noqa: F401 -- the prepared-table names are re-exported
     DDL as _DDL, PREPARED_OUTCOME_NODES, PREPARED_OUTCOMES, PREPARED_ROOT_DIFFICULTIES,
-    PREPARED_ROOT_OUTCOMES, PREPARED_ROOTS, PREPARED_SCOPE, shared_prepare,
+    PREPARED_ROOT_OUTCOMES, PREPARED_ROOTS, PREPARED_SCOPE, create_tables, shared_prepare,
 )
 from api.measurement_presence import active_family_sql, presence_family_sql
 from api.presence_rollup import rollup_binds
@@ -121,27 +121,23 @@ def _materialize_outcome_periods(db, params: dict[str, Any], *, roots: bool) -> 
     totals agree because they are one population, not several runs of one statement.
     Only the rejection counts come from their own statement: they are not outcomes.
     """
+    create_tables(db, roots)
     prepare_scope_threads(db, params)
-    db.execute(_DDL[PREPARED_OUTCOMES])
     db.execute("DELETE FROM measurement_outcome_periods")
     if roots:
-        db.execute(_DDL[PREPARED_ROOTS])
         db.execute("DELETE FROM measurement_scope_roots")
         db.execute(scope_cte() + "INSERT INTO measurement_scope_roots(id) SELECT id FROM scope_roots", query_params(params))
-    db.execute(_DDL[PREPARED_OUTCOME_NODES])
     db.execute("DELETE FROM measurement_outcome_nodes")
     db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
         INSERT INTO measurement_outcome_nodes(node_id,root_id,period,first_try,difficulty)
         SELECT id,root_id,period,first_try,difficulty FROM outcome_rows
     """, query_params(params))
     if roots:
-        db.execute(_DDL[PREPARED_ROOT_OUTCOMES])
         db.execute("DELETE FROM measurement_root_outcome_periods")
         db.execute("""
             INSERT INTO measurement_root_outcome_periods(root_id,period,outcomes,first_try)
             SELECT root_id,period,COUNT(*),SUM(first_try) FROM measurement_outcome_nodes GROUP BY root_id,period
         """)
-        db.execute(_DDL[PREPARED_ROOT_DIFFICULTIES])
         db.execute("DELETE FROM measurement_root_difficulty_periods")
         db.execute("""
             INSERT INTO measurement_root_difficulty_periods(root_id,period,difficulty,count)
