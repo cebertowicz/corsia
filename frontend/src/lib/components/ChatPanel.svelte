@@ -230,13 +230,11 @@
 	}
 	async function loadFirstPage(threadId: string, gen: number): Promise<void> {
 		const t = $token;
-		if (!t) return;
-		const mine = isCurrentFirstPageRequest(threadId, gen);
-		if (mine) {
-			lastFirstPageThreadId = threadId;
-			firstLoadFailed = false;
-			firstLoadPending = true;
-		}
+		// A stale call's page is always discarded: it must not start, and so abort, the current read.
+		if (!t || !isCurrentFirstPageRequest(threadId, gen)) return;
+		lastFirstPageThreadId = threadId;
+		firstLoadFailed = false;
+		firstLoadPending = true;
 		const signal = firstPageRead.start();
 		try {
 			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
