@@ -29,7 +29,6 @@ MAX_BYTES = 512 * 1024
 DESCRIPTION_CHARS = 500
 HERMES_DEPTH = 3
 SCRIPT_SUFFIXES = frozenset({".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".ps1"})
-# Imported skill rewriting and guidance saves live in ``infra.skill_install``.
 
 NEW = "new"
 ALREADY_HERE = "already_here"
