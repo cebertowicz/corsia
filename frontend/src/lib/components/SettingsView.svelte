@@ -211,7 +211,6 @@
 		padding: 0 var(--space-2);
 		font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary);
 	}
-	.policy { margin-top: var(--space-6); padding: 0 var(--space-2); }
 	.mobile-root { display: none; }
 
 	@media (max-width: 768px) {
