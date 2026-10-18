@@ -15,7 +15,9 @@
 	import { openProjectSettings, requestProviderCard, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import PickerLocalStatus from './PickerLocalStatus.svelte';
-	import { localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
+	import { canAddLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 
@@ -26,6 +28,8 @@
 	let accountOpened = $state<Record<string, boolean>>({});
 	let accountChoiceBusy = false;
 	let usageShown = $state<Record<string, boolean>>({});
+	let showAddLocal = $state(false);
+	let settingsRetrying = $state(false);
 	let { onclose = () => {} }: { onclose?: () => void } = $props();
 	const isOpen = (group: ModelGroup, hasAccounts: boolean) => opened[group.key] ?? (group.state === 'ready' || hasAccounts);
 	// A collapsed group nobody can pick from still shows the thread's current model, disabled.
@@ -49,11 +53,11 @@
 		void loadPickerPolicy(activeThread?.project_id);
 	});
 
-	// A starter download, or a failed setup, shows in the Local group while the picker is open.
+	// Starter, setup, and Settings download states show in the Local group while the picker is open.
 	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
 	const hasLocalGroup = $derived(groups.some(isLocalGroup));
 	$effect(() => watchLocalStatus());
-	async function retryLocal(kind: 'starter' | 'setup') {
+	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
 		if (result.code === 'consent_required') {
 			toasts.showAction(
@@ -64,8 +68,14 @@
 				} },
 			);
 		} else if (!result.ok) {
-			toasts.show("Couldn't set up the local model.", 'error');
+			toasts.show(kind === 'settings' ? "Couldn't retry the local model download." : "Couldn't set up the local model.", 'error');
 		}
+	}
+
+	async function retrySettingsDownload() {
+		if (settingsRetrying) return;
+		settingsRetrying = true;
+		try { await retryLocal('settings'); } finally { settingsRetrying = false; }
 	}
 
 	async function chooseAccount(row: PickerAccount) {
@@ -212,7 +222,13 @@
 
 
 							{/if}
-						{#if $localStatus && isLocalGroup(group)}<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />{/if}
+						{#if $localStatus && isLocalGroup(group)}
+								{#if $localStatus.retry === 'settings'}
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+								{:else}
+									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+								{/if}
+							{/if}
 						{#if shown.length > 0}
 							<div class="model-group-rows" id={`model-group-${group.key}`}>
 								{#each shown as model (model.id)}
@@ -264,16 +280,26 @@
 						{/if}
 					</section>
 				{/each}
-				{#if $localStatus && !hasLocalGroup}
+				{#if !hasLocalGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
-						<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+						{#if $localStatus}
+								{#if $localStatus.retry === 'settings'}
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+								{:else}
+									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+								{/if}
+							{:else}<button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Add a local model</button>{/if}
 					</section>
 				{/if}
 			{/if}
 		</div>
 	</div>
 </div>
+
+{#if showAddLocal}
+	<AddLocalModelSheet onClose={() => showAddLocal = false} />
+{/if}
 
 <style>
 	.cached-marker {
@@ -302,6 +328,11 @@
 		max-width: 100%;
 	}
 
+	.add-local-link { padding: var(--space-2) var(--space-3); color: var(--accent-text); background: transparent; border: 0; font: inherit; cursor: pointer; }
+	.local-settings-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-8); color: var(--text-tertiary); font-size: var(--text-caption); }
+	.local-settings-status .text { min-width: 0; overflow-wrap: anywhere; }
+	.local-settings-status button { border: 0; border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); color: var(--text-primary); background: var(--bg-secondary); font: inherit; cursor: pointer; }
+	.local-settings-status button:disabled { cursor: default; opacity: .6; }
 	.model-group + .model-group {
 		margin-top: 4px;
 	}

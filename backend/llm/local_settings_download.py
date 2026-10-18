@@ -1,0 +1,178 @@
+"""Settings-owned local-model download flight.
+
+The flight borrows setup's sole operation record and oMLX task follower while
+keeping its terminal state out of setup's marker and fallback semantics.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Callable
+
+from llm import local_downloads
+from llm.local_model import LocalModel
+
+
+async def _managed_download(report: Callable[[str], None], model: LocalModel) -> tuple[str, bool]:
+    """Download to the appropriate oMLX and report whether CORSIA may configure it."""
+    from llm import local_setup as ls
+    from llm.local_setup_new_omlx import start_managed_omlx
+    from llm.local_setup_existing import download_into_own_omlx
+    from llm.local_setup_ownership import existing_install_is_foreign
+    from llm import own_omlx_management
+
+    if await asyncio.to_thread(existing_install_is_foreign):
+        result = await download_into_own_omlx(report, [], model)
+        return str(result["server_id"]), await asyncio.to_thread(own_omlx_management.active)
+    server_id, _port = await start_managed_omlx(report)
+    await ls._download(server_id, report, model)
+    return server_id, True
+
+
+async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> None:
+    """Load only a downloaded CORSIA-managed model that the existing memory gate permits."""
+    if not allowed:
+        return
+    from llm.providers.omlx_endpoints import admin_request
+
+    response = await admin_request({"server_id": server_id}, "GET", "/models", timeout=15.0)
+    if response.status_code != 200:
+        return
+    try:
+        rows = response.json().get("models")
+    except ValueError:
+        return
+    row = next((item for item in rows or [] if isinstance(item, dict) and item.get("id") == model.model), None)
+    size = row.get("estimated_size") if isinstance(row, dict) else None
+    if not isinstance(size, (int, float)) or size <= 0:
+        return
+    from infra.host_resources import check_can_load
+    from llm.providers.omlx_lifecycle import load_model
+    from llm.network_discovery import discover_and_notify
+    from api.network_server_helpers import notify_cached_model_loaded
+
+    decision = await check_can_load(float(size) / 1024**3, "omlx")
+    if not decision.get("ok"):
+        return
+    result = await load_model({"server_id": server_id}, model.model)
+    if result.get("ok"):
+        notify_cached_model_loaded(server_id, model.model)
+        await discover_and_notify(server_id)
+
+
+async def begin(model: LocalModel) -> dict:
+    """Start the single Settings flight, or report the already-owned operation."""
+    from llm import local_setup as ls
+    from llm import local_setup_operation
+
+    if ls._running():
+        return ls._in_progress_result()
+    if local_setup_operation.read() is not None:
+        if await ls.resume_pending_setup():
+            return ls._in_progress_result()
+        return {"ok": False, "reason": "recovery_failed", "message": "CORSIA could not resume the local model download safely."}
+    if not await asyncio.to_thread(ls.local_memory_ok):
+        return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
+    if not ls._claim_operation("settings", model):
+        await ls.resume_pending_setup()
+        return ls._in_progress_result()
+    ls._flight.result = None
+    ls._flight.stage = "Preparing download"
+
+    async def flight() -> dict:
+        events: list[str] = []
+
+        def report(value: str) -> None:
+            ls._flight.stage = value
+            ls._notify_models_changed()
+            events.append(value)
+
+        try:
+            result = await run(report, model)
+        except asyncio.CancelledError:
+            ls._release_operation_lock()
+            raise
+        except Exception as exc:
+            ls.log.exception("Settings model download failed")
+            result = {"ok": False, "message": f"Download of {model.display_name} failed", "detail": str(exc), "progress": events}
+        ls._flight.result = result
+        ls._flight.stage = None
+        ls._flight.following = False
+        if not result.get("ok") and not result.get("downloading"):
+            local_downloads.write(local_downloads.Download(
+                model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
+            ))
+        if not result.get("downloading"):
+            local_setup_operation.clear()
+        ls._release_operation_lock()
+        return result
+
+    ls._flight.task = asyncio.create_task(flight())
+    ls._flight.task.add_done_callback(ls._observe_setup_task)
+    ls._flight.task.add_done_callback(lambda _task: ls._notify_models_changed())
+    ls._emit("started", model=model.repository, kind="settings")
+    return ls._in_progress_result()
+
+
+async def resume(model: LocalModel) -> dict:
+    """Re-follow a persisted Settings download after restart without adopting setup."""
+    from llm import local_setup as ls
+
+    while ls._flight.operation_lock is None:
+        lock = ls.local_setup_operation.try_lock()
+        if lock is not None:
+            ls._flight.operation_lock = lock
+            break
+        await asyncio.sleep(0.25)
+    ls._flight.kind = "settings"
+    ls._flight.model = model
+    ls._flight.stage = "Waiting to resume local model download"
+    try:
+        result = await run(lambda value: setattr(ls._flight, "stage", value), model)
+    except Exception as exc:
+        result = {"ok": False, "message": f"Download of {model.display_name} failed", "detail": str(exc), "progress": []}
+    ls._flight.result = result
+    ls._flight.stage = None
+    if not result.get("ok") and not result.get("downloading"):
+        local_downloads.write(local_downloads.Download(
+            model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
+        ))
+    ls.local_setup_operation.clear()
+    ls._release_operation_lock()
+    return result
+
+
+async def run(report: Callable[[str], None], model: LocalModel) -> dict:
+    """Complete a Settings download and preserve a separate terminal result."""
+    from llm import local_setup as ls
+    from llm import own_omlx_management
+    from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings
+    from llm.catalog_network_models import discover_network_models
+
+    events: list[str] = []
+
+    def stage(value: str) -> None:
+        report(value)
+        events.append(value)
+
+    server_id, may_configure = await _managed_download(stage, model)
+    if may_configure:
+        # An applied benchmark owns the one settings PUT and carries CORSIA's
+        # required fields first.  A missing/offline benchmark falls back to the
+        # ordinary per-model writer without treating that best-effort step as a
+        # download failure.
+        optimal = await apply_optimal_settings(server_id, model)
+        # A failed optimal PUT has already consumed this model's single settings
+        # write.  Do not turn an unavailable oMLX into a second mutation.
+        if optimal.status != "applied" and not optimal.writer_attempted:
+            await configure_model_settings(server_id, model)
+        speed = optimal.speed if optimal.status == "applied" else None
+    else:
+        speed = None
+    stage("Refreshing model catalog")
+    refreshed = await discover_network_models(server_id)
+    if not refreshed.get("ok"):
+        raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
+    local_downloads.write(local_downloads.Download(model, speed=speed))
+    await _auto_load(server_id, model, allowed=may_configure and not await asyncio.to_thread(own_omlx_management.uses_mine))
+    return {"ok": True, "server_id": server_id, "model": model.model, "progress": events, "speed": speed}

@@ -138,12 +138,10 @@ def _claim_operation(kind: str, model: LocalModel | None = None) -> bool:
     _flight.model = model
     return True
 
-
 def _record_model(model: LocalModel) -> None:
     """Persist the picked model so a restarted backend resumes this flight's download."""
     local_setup_operation.write(local_setup_operation.Operation.for_model(model, _flight.kind or "setup"))
     _flight.model = model
-
 
 def _record_download_task(model: LocalModel, task_id: str) -> None:
     operation = local_setup_operation.read()
@@ -310,7 +308,7 @@ async def resume_pending_setup() -> bool:
     operation = local_setup_operation.read()
     if operation is None:
         return False
-    if operation.kind not in {"setup", "starter"}:
+    if operation.kind not in {"setup", "starter", "settings"}:
         log.warning("discarding unreadable local setup recovery record")
         local_setup_operation.clear()
         return False
@@ -326,6 +324,10 @@ async def resume_pending_setup() -> bool:
     _flight.stage = "Waiting to resume local model setup"
 
     async def resume() -> dict:
+        if operation.kind == "settings":
+            from llm.local_settings_download import resume as resume_settings_download
+
+            return await resume_settings_download(model)
         while _flight.operation_lock is None:
             lock = local_setup_operation.try_lock()
             if lock is not None:
@@ -394,4 +396,5 @@ async def begin_local_setup(
 from llm.local_setup_existing import (  # noqa: E402  (reads this module's names at call time)
     adopt_existing_omlx, begin_add_starter_model, download_into_own_omlx,
 )
+from llm.local_settings_download import begin as begin_settings_download  # noqa: E402
 from llm.local_setup_new_omlx import _setup_new_omlx  # noqa: E402  (reads this module's names at call time)

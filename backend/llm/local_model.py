@@ -132,6 +132,31 @@ class PickUnavailable(RuntimeError):
     """The recommender could not answer: oMLX not up yet, Hugging Face unreachable, or no recommender."""
 
 
+async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
+    """Return every usable named recommender section from one oMLX request."""
+    import httpx
+
+    from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
+
+    try:
+        response = await admin_request({"server_id": server_id}, "GET", "/hf/recommendations", timeout=45.0)
+    except (OmlxAdminError, httpx.HTTPError) as exc:
+        raise PickUnavailable(f"oMLX could not be reached ({type(exc).__name__}).") from exc
+    if response.status_code != 200:
+        raise PickUnavailable(f"oMLX could not check model recommendations (HTTP {response.status_code}).")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise PickUnavailable("oMLX returned unreadable model recommendations.") from exc
+    sections = payload.get("sections") if isinstance(payload, dict) else None
+    if not isinstance(sections, dict):
+        raise PickUnavailable("oMLX returned unreadable model recommendations.")
+    return {
+        name: [model for row in rows if (model := from_recommendation(row)) is not None]
+        for name, rows in sections.items() if isinstance(name, str) and isinstance(rows, list)
+    }
+
+
 async def ask_recommender(server_id: str) -> LocalModel | None:
     """Ask the managed oMLX once; None when nothing fits, ``PickUnavailable`` when it can't answer.
 

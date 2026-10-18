@@ -18,6 +18,7 @@ let host: HTMLElement;
 let component: ReturnType<typeof mount> | null = null;
 let omlx: Partial<ModelSource> = {};
 let calls: string[] = [];
+let downloadBodies: unknown[] = [];
 let setupBodies: unknown[] = [];
 let setupResponses: Array<'consent' | 'failure' | 'ok'> = [];
 
@@ -30,6 +31,7 @@ beforeEach(() => {
 	threads.set([]);
 	models.set([claude]);
 	calls = [];
+	downloadBodies = [];
 	setupBodies = [];
 	setupResponses = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,6 +39,9 @@ beforeEach(() => {
 		calls.push(key);
 		if (key === 'GET /api/providers/sources') {
 			return { ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...omlx }] }) };
+		}
+		if (key === 'POST /api/providers/local/downloads') {
+			downloadBodies.push(JSON.parse(String(init?.body)));
 		}
 		if (key === 'POST /api/providers/local/setup') {
 			setupBodies.push(JSON.parse(String(init?.body)));
@@ -70,6 +75,12 @@ async function render() {
 const button = (label: string) => [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
 describe('the picker\'s Local group', () => {
+	it('offers the shared add-model sheet on an eligible Mac with no local rows', async () => {
+		omlx = { eligible: true };
+		await render();
+		expect(button('Add a local model')).toBeDefined();
+	});
+
 	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
 		omlx = { setup_stage: 'downloading', download_percent: 40 };
 		await render();
@@ -111,6 +122,24 @@ describe('the picker\'s Local group', () => {
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/starter'));
 		expect(calls).not.toContain('POST /api/providers/local/setup');
+	});
+
+	it('shows a Settings download progress line with its model name and percent', async () => {
+		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: false } };
+		await render();
+		expect(host.textContent).toContain('Downloading Qwen 3.8 27B · 42%');
+		expect(button('Try again')).toBeUndefined();
+	});
+
+	it('retries a durable Settings download failure with its stored repository', async () => {
+		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: true } };
+		await render();
+		expect(host.textContent).toContain('Download of Qwen 3.8 27B failed');
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/downloads'));
+		expect(downloadBodies).toEqual([{ repository: 'Jundot/Qwen3.8-27B-oQ4e' }]);
+		expect(calls).not.toContain('POST /api/providers/local/setup');
+		expect(calls).not.toContain('POST /api/providers/local/starter');
 	});
 
 	it('offers informed consent in the picker and retries setup with it', async () => {

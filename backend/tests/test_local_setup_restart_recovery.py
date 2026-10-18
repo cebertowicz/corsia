@@ -67,6 +67,25 @@ def test_restart_resumes_the_recorded_model_and_kind_under_the_operation_lock(mo
     assert observed["locked"] is not None
 
 
+def test_restart_dispatches_a_settings_record_to_its_own_completion_path(monkeypatch):
+    local_setup_operation.write(local_setup_operation.Operation.for_model(MODEL, "settings", "task-1"))
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: True)
+    observed: list[LocalModel] = []
+
+    async def resume_settings(model):
+        observed.append(model)
+        return {"ok": True}
+
+    monkeypatch.setattr("llm.local_settings_download.resume", resume_settings)
+
+    async def scenario():
+        assert await local_setup.resume_pending_setup() is True
+        await local_setup._flight.task
+
+    asyncio.run(scenario())
+    assert observed == [MODEL]
+
+
 def test_a_record_on_a_mac_now_below_24_gib_is_discarded(monkeypatch):
     local_setup_operation.write(local_setup_operation.Operation.for_model(MODEL, "setup", "task-1"))
     monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: False)

@@ -32,7 +32,9 @@ export interface ModelSource {
 	/** A download is running (the starter model for the person's own oMLX, or the full setup). */
 	setup_downloading?: boolean;
 	/** Which download is running or failed: the starter model for the person's own oMLX, or the full setup. */
-	setup_kind?: 'starter' | 'setup';
+	setup_kind?: 'starter' | 'setup' | 'settings';
+	/** A Settings-initiated local download; its repository is retained so a durable failure can retry the same recommendation. */
+	settings_download?: { name: string; repository: string | null; percent: number | null; failed: boolean };
 	/** The starter download's last reported percent; absent before one is known. */
 	download_percent?: number | null;
 	/** Remaining transfer time from measured throughput; absent until there is a sample. */
@@ -91,15 +93,25 @@ export function anyReady(sources: ModelSource[]): boolean {
 	return sources.some(sourceIsReady);
 }
 
+export type LocalPickerRetry = 'starter' | 'setup' | 'settings';
+
 /** What the model picker's Local group says about a download in progress or a failed setup; null when neither. */
-export function localPickerStatus(source: ModelSource | undefined): { line: string; retry: 'starter' | 'setup' | null } | null {
+export function localPickerStatus(source: ModelSource | undefined): { line: string; retry: LocalPickerRetry | null } | null {
 	if (!source) return null;
+	const settings = source.settings_download;
+	if (settings && !settings.failed) {
+		return { line: `Downloading ${settings.name} · ${settings.percent ?? 0}%`, retry: null };
+	}
+	if (settings?.failed) return {
+		line: `Download of ${settings.name} failed`,
+		retry: settings.repository ? 'settings' : null,
+	};
 	if (source.setup_stage || source.setup_downloading) {
 		const percent = source.download_percent ?? null;
 		if (source.download_stalled) return { line: percent === null ? 'Download paused' : `Download paused at ${percent}%`, retry: null };
 		return { line: percent === null ? 'Downloading' : `Downloading ${percent}%`, retry: null };
 	}
-	if (source.setup_error) return { line: 'Setup failed', retry: source.setup_kind ?? null };
+	if (source.setup_error) return { line: 'Setup failed', retry: source.setup_kind === 'settings' ? null : source.setup_kind ?? null };
 	return null;
 }
 

@@ -1,0 +1,45 @@
+import { flushSync, mount, tick, unmount } from 'svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import AddLocalModelSheet from './AddLocalModelSheet.svelte';
+import { token } from '$lib/stores/auth';
+
+let component: ReturnType<typeof mount> | null = null;
+let host: HTMLElement;
+
+afterEach(async () => {
+	if (component) await unmount(component);
+	component = null;
+	host?.remove();
+	vi.unstubAllGlobals();
+	token.set(null);
+});
+
+async function render(body: object) {
+	host = document.createElement('div');
+	document.body.appendChild(host);
+	token.set('test-token');
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => body })));
+	component = mount(AddLocalModelSheet, { target: host, props: { onClose: vi.fn() } });
+	await tick(); await tick(); flushSync();
+}
+
+describe('AddLocalModelSheet', () => {
+	it('shows the no-starter empty state when the recommender has no model', async () => {
+		await render({ state: 'ready', sections: {} });
+		expect(host.textContent).toContain('No recommended models fit this Mac.');
+		expect(host.textContent).not.toContain('Download');
+	});
+
+	it('uses the recommended row as the only download action', async () => {
+		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'ready' } }] } });
+		expect(host.textContent).toContain('Recommended');
+		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('Download'))).toBe(true);
+	});
+
+	it('disables a model that lacks the required free disk space', async () => {
+		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 12, context_window: 32768, disk: { state: 'insufficient' } }] } });
+		const download = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Download'));
+		expect(download?.disabled).toBe(true);
+		expect(host.textContent).toContain('Not enough free disk space');
+	});
+});

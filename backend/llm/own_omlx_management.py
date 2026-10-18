@@ -180,6 +180,16 @@ def record_originals(global_values: dict[str, Any], model_values: dict[str, dict
         ))
 
 
+def forget_model_originals(model_id: str) -> None:
+    """Remove restored-model bookkeeping after its Settings-owned download is deleted."""
+    with _LOCK:
+        record = read()
+        if record is None or model_id not in record.originals_models:
+            return
+        originals = {key: value for key, value in record.originals_models.items() if key != model_id}
+        _write(replace(record, originals_models=originals))
+
+
 def begin_stop() -> Management | None:
     """Stop managing now: no further change is offered or sent. Returns what to restore."""
     with _LOCK:

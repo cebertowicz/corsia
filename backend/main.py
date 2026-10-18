@@ -37,6 +37,7 @@ from api import (
     project_repos_router,
     fs_browse_router,
     provider_sources_router,
+    provider_local_models_router,
     provider_cli_link_router,
     providers_router,
     provider_policy_router,
@@ -138,6 +139,7 @@ app.include_router(providers_router)
 app.include_router(vendor_accounts_router)
 app.include_router(provider_policy_router)
 app.include_router(provider_sources_router)
+app.include_router(provider_local_models_router)
 app.include_router(provider_cli_link_router)
 app.include_router(cli_install_router)
 app.include_router(discovered_models_router)

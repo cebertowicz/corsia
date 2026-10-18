@@ -20,6 +20,10 @@
 	import ModelRow from './ModelRow.svelte';
 	import PreLoadCheckModal from './PreLoadCheckModal.svelte';
 	import ModelDetailsModal from './ModelDetailsModal.svelte';
+	import ProviderModelsEmpty from './ProviderModelsEmpty.svelte';
+	import AddLocalModelSheet from './AddLocalModelSheet.svelte';
+	import LocalSettingsDownloadStatus from './LocalSettingsDownloadStatus.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	interface Props {
 		provider: HostProvider;
@@ -49,6 +53,7 @@
 
 	let showAllAvailable = $state(false);
 	let actionError = $state('');
+	let showAddLocal = $state(false);
 
 	const pmState = $derived(modelsForProvider($providerModels, provider.raw, provider.server));
 	const models = $derived(pmState.models);
@@ -114,7 +119,6 @@
 		lastActiveAt = Date.now();
 		pollHandle = setTimeout(_pollTick, POLL_ACTIVE_MS);
 	}
-
 	onMount(async () => {
 		await loadProviderModelsFor(provider.raw, provider.server);
 		if (!catalogOnly) {
@@ -126,6 +130,7 @@
 	onDestroy(() => {
 		polling = false;
 		if (pollHandle) clearTimeout(pollHandle);
+		// The extracted Settings download status cleans up its own subscription.
 	});
 
 	// A saved checkpoint window can make a row usable; show the new window at once.
@@ -248,27 +253,17 @@
 	/>
 {/if}
 
+{#if provider.name === 'omlx'}<LocalSettingsDownloadStatus />{/if}
+
 {#if pmState.loading && models.length === 0}
 	<div class="phase-stub">Loading models…</div>
 {:else if pmState.lastError}
 	<div class="phase-stub err">Failed to load models: {pmState.lastError}</div>
 {:else if models.length === 0}
-	<div class="phase-stub">
-		{#if provider.name === 'omlx'}
-			oMLX hasn't registered any models yet. Drop weights into
-			<code>~/.omlx/&lt;model-id&gt;</code> and click <em>Reload models</em>.
-		{:else if isExternal}
-			This endpoint hasn't listed any models. Some providers never list them (Alibaba's
-			Token Plan and Coding Plan): add their model IDs in the provider settings. Otherwise,
-			check its URL and key there.
-		{:else if isHarness}
-			{provider.label} hasn't reported any models. Check that its CLI is installed and signed in.
-		{:else if provider.type === 'cloud'}
-			No models exposed by this provider yet. Try <em>Refresh models</em> in the provider settings.
-		{:else}
-			No models discovered yet. Check the provider's logs.
-		{/if}
-	</div>
+	<ProviderModelsEmpty {provider} {isExternal} {isHarness} />
+	{#if provider.name === 'omlx'}
+		<div class="add-local"><Button size="sm" variant="ghost" onclick={() => showAddLocal = true}>Add model</Button></div>
+	{/if}
 {:else}
 	{#if actionError}
 		<div class="row-msg">{actionError}</div>
@@ -339,6 +334,13 @@
 			</button>
 		{/if}
 	{/if}
+	{#if provider.name === 'omlx'}
+		<div class="add-local"><Button size="sm" variant="ghost" onclick={() => showAddLocal = true}>Add model</Button></div>
+	{/if}
+{/if}
+
+{#if showAddLocal}
+	<AddLocalModelSheet onClose={() => showAddLocal = false} onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); loadModels(); }} />
 {/if}
 
 <style>
@@ -383,6 +385,8 @@
 		.phase-stub { padding: 10px 12px; }
 	}
 	.phase-stub.err { color: var(--red); }
+	.add-local { padding: var(--space-2) var(--space-3); }
+	/* LocalSettingsDownloadStatus owns its styles. */
 
 	.row-msg {
 		margin: 8px 18px;
