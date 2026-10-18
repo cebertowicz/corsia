@@ -74,12 +74,12 @@ def _agent_next_step(
     return None
 
 
-def _with_entry_names(app_id: str, key_refs: list[dict[str, object]]) -> list[dict[str, object]]:
+def _with_entry_names(app_id: object, key_refs: list[dict[str, object]]) -> list[dict[str, object]]:
     """Add each key's managed entry name for the person's Settings; an agent's row never carries it."""
     from tools.mcp_secrets import entry_name
 
     return [
-        {**ref, "entry": entry_name(app_id, "secret_env" if ref["kind"] == "env" else "secret_headers", str(ref["name"]))}
+        {**ref, "entry": entry_name(str(app_id), "secret_env" if ref["kind"] == "env" else "secret_headers", str(ref["name"]))}
         for ref in key_refs
     ]
 
