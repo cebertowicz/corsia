@@ -164,7 +164,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					await expect(region).toBeVisible();
 					if (screen === 'R1') await expect(region.getByRole('button', { name: 'Use workspace settings' })).toHaveAttribute('aria-pressed', 'true');
 					if (screen === 'R2') {
-						await expect(region.getByText("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.")).toBeVisible();
+						await expect(region.getByText("Use the workspace's account order and rollover.")).toBeVisible();
 						await expect(region.getByRole('button', { name: 'Open workspace providers' })).toBeVisible();
 					}
 					if (screen === 'R3') await expect(region.getByRole('button', { name: 'Use Personal Max', exact: true })).toHaveAttribute('aria-pressed', 'false');
@@ -241,6 +241,90 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await expect.poll(() => saves).toBe(2);
 			await expect(second).toBeEnabled();
 			await page.screenshot({ path: testInfo.outputPath(`post-second-toggle-${surface}.png`), animations: 'disabled', scale: 'css' });
+		}
+	});
+
+	test('captures long-name, usage, managed, error, and pending account-policy states', async ({ page }, testInfo) => {
+		test.setTimeout(120_000);
+		let accounts = vendorAccounts();
+		let policy = policyFor('W1');
+		let mode: 'success' | 'error' | 'busy' = 'success';
+		let releaseBusy: (() => void) | null = null;
+		await serveHarnessCatalog(page);
+		await page.route('**/api/vendor-accounts**', async (route) => {
+			if (route.request().method() === 'GET') await route.fulfill({ json: { accounts } });
+			else await route.continue();
+		});
+		await page.route('**/api/provider-policy**', async (route) => {
+			const request = route.request();
+			const pathname = new URL(request.url()).pathname;
+			if (request.method() === 'GET' && pathname === '/api/provider-policy') {
+				await route.fulfill({ json: policy });
+				return;
+			}
+			if (request.method() === 'PUT') {
+				if (mode === 'busy') await new Promise<void>((resolve) => { releaseBusy = resolve; });
+				if (mode === 'error') {
+					await route.fulfill({ status: 500, json: { detail: 'Could not save subscriptions.' } });
+					return;
+				}
+				const provider = policy.providers.find((entry) => pathname.endsWith(entry.provider_key));
+				await route.fulfill({ json: provider ?? policy });
+				return;
+			}
+			await route.continue();
+		});
+
+		async function openWorkspace(surface: string) {
+			await loginByUrl(page, { waitForComposer: false });
+			await openActivity(page);
+			await page.getByRole('button', { name: 'Workspace settings' }).click();
+			await openSettingsSection(page, 'Providers');
+			return openWorkspaceProviderAccounts(page);
+		}
+
+		for (const [surface, width, height, colorScheme] of surfacesFor(testInfo.project.name)) {
+			await page.setViewportSize({ width, height });
+			await page.emulateMedia({ colorScheme });
+
+			accounts = vendorAccounts().map((account, index) => index === 0
+				? { ...account, name: 'Personal account with an intentionally long display name for narrow layouts', label: { ...account.label, name: 'Personal account with an intentionally long display name for narrow layouts', text: 'Personal account with an intentionally long display name for narrow layouts · sam@example.com' } }
+				: account);
+			policy = { ...policyFor('W1'), overriding_projects: ['Atlas migration', 'Field notes', 'Release operations', 'Research notebook', 'Customer support'].map((name, index) => ({ id: `project-${index}`, name })) };
+			let modal = await openWorkspace(surface);
+			await expect(modal.getByText('Overridden in 5 projects:')).toBeVisible();
+			await page.screenshot({ path: testInfo.outputPath(`long-name-five-projects-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			accounts = vendorAccounts().map((account, index) => index === 0
+				? { ...account, usage: { ...account.usage, state: 'limited', usable: false, resets_at: '2026-10-19T00:00:00Z' } }
+				: index === 1 ? { ...account, usage: { ...account.usage, windows: [{ kind: 'five_hour', state: 'unknown', used_percent: null, window_minutes: 300 }] } } : account);
+			policy = policyFor('W1');
+			modal = await openWorkspace(surface);
+			await expect(modal.getByText(/limited/i).first()).toBeVisible();
+			await expect(modal.getByText(/usage unknown/i)).toBeVisible();
+			await page.screenshot({ path: testInfo.outputPath(`limited-unknown-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			accounts = vendorAccounts().map((account, index) => index === 0 ? { ...account, state: 'legacy' } : account);
+			modal = await openWorkspace(surface);
+			await expect(modal.getByText('Managed by provider')).toBeVisible();
+			await page.screenshot({ path: testInfo.outputPath(`managed-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			accounts = vendorAccounts();
+			mode = 'error';
+			modal = await openWorkspace(surface);
+			await modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true }).click();
+			await expect(modal.getByText('Could not save subscriptions.')).toBeVisible();
+			await page.screenshot({ path: testInfo.outputPath(`save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			mode = 'busy';
+			modal = await openWorkspace(surface);
+			const toggle = modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true });
+			await toggle.click();
+			await expect(toggle).toBeDisabled();
+			await page.screenshot({ path: testInfo.outputPath(`busy-${surface}.png`), animations: 'disabled', scale: 'css' });
+			releaseBusy?.();
+			await expect(toggle).toBeEnabled();
+			mode = 'success';
 		}
 	});
 });

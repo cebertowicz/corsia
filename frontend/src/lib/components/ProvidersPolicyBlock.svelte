@@ -48,11 +48,7 @@
 		<div class="scope-setting">
 				<div>
 					<span class="scope-label">Use workspace settings</span>
-					{#if policy.use_workspace ?? true}
-						<p>Use the workspace's provider order and rollover settings for this project.</p>
-					{:else}
-						<p>Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.</p>
-					{/if}
+					<p>Use the workspace's account order and rollover.</p>
 					<span class="workspace-link"><Button variant="ghost" size="sm" onclick={openWorkspaceProviders}>Open workspace providers</Button></span>
 				</div>
 				<Toggle checked={policy.use_workspace ?? true} disabled={busy} ariaLabel="Use workspace settings" onchange={toggleScope} />
@@ -104,8 +100,9 @@
 <style>
 	/* The group label, then one sub-group per vendor: its name, a caption, then its rows. */
 	.providers-policy { display: flex; flex-direction: column; gap: var(--space-4); }
-	h2 { margin: 0; font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary); }
-	h3 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	/* The project policy is the section; provider names are its subordinate group labels. */
+	h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	h3 { margin: 0; font-size: var(--text-caption); font-weight: var(--fw-regular, 400); color: var(--text-tertiary); }
 	.provider { display: flex; flex-direction: column; gap: var(--space-1); }
 	.provider > p { margin-bottom: var(--space-1); }
 	.scope-setting, .line, .account-row { display: flex; align-items: center; gap: var(--space-2); }
@@ -116,8 +113,9 @@
 	/* A narrow project policy line must wrap its copy, never shrink the switch track. */
 	.scope-setting :global(.tg) { flex: 0 0 auto; }
 	.scope-label, .line > span { color: var(--text-primary); font-size: var(--text-subhead); }
-	/* Going to another Settings page is a ghost action here, as in Keys; its fill starts at the row edge. */
-	.workspace-link { display: block; margin: var(--space-1) 0 0 calc(-1 * var(--space-2)); }
+	/* Going to another Settings page is a text action on the same content column. */
+	.workspace-link { display: block; margin-top: var(--space-1); }
+	.workspace-link :global(.btn.ghost) { padding-inline: 0; }
 	p { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.error { color: var(--red-text); }
 </style>

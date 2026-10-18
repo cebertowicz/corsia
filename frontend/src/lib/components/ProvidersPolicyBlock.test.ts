@@ -63,13 +63,23 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project', onSignIn: openProviders } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values."));
+		await vi.waitFor(() => expect(host.textContent).toContain("Use the workspace's account order and rollover."));
 		expect(host.textContent).toContain('No Claude Code account signed in');
+		expect(host.textContent).not.toContain('Turning this on replaces');
 		const signIn = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Sign in') as HTMLButtonElement;
 		signIn.click();
 		expect(openProviders).toHaveBeenCalledWith('claude-code');
 		expect(host.textContent).toContain('Pro');
 		expect(host.querySelector('[aria-label="Use Pro"]')).not.toBeNull();
+	});
+
+	it('uses the same workspace-setting description while inheriting', async () => {
+		stubPolicy({ scope: 'project', use_workspace: true, override_revision: 1, providers: [] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Use the workspace's account order and rollover."));
+		expect(host.textContent).not.toContain('Turning this on replaces');
 	});
 
 	it('lets a one-account Claude provider be disabled without rollover or order controls', async () => {
