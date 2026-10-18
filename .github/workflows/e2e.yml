@@ -112,6 +112,22 @@ jobs:
           if [ -n "$E2E_GREP" ]; then
             # A filtered dispatch is a diagnosis run: the browser daemon writes its debug log into the session dir.
             export AGENT_BROWSER_DEBUG=1
+            # ...and a sampler records who is waiting on whom: the client, its daemon, Chrome and their sockets.
+            mkdir -p "$RUNNER_TEMP/browser-diag"
+            (
+              while true; do
+                {
+                  date +%T
+                  if pids=$(pgrep -d, -f 'agent-browser|chrome --remote|uvicorn'); then
+                    ps -o pid,ppid,etimes,stat,wchan:22,args -p "$pids" | cut -c1-220
+                  fi
+                  ss -tanp 2>/dev/null | grep -E 'agent-browser|uvicorn' | cut -c1-200
+                } >> "$RUNNER_TEMP/browser-diag/sampler.txt" 2>&1
+                sleep 3
+              done
+            ) &
+            sampler=$!
+            trap 'kill $sampler 2>/dev/null || true' EXIT
             bash scripts/e2e-local --grep "$E2E_GREP"
           else
             bash scripts/e2e-local
