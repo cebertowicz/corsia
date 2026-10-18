@@ -358,12 +358,14 @@ def install_skills(roots: Roots, tools: list[str], workspace: Path, item_ids: li
     now = now or datetime.datetime.now(datetime.timezone.utc)
     scanned = scan(roots, tools, workspace)
     rows = {row.item_id: row for row in scanned}
-    held = {row.source: row for row in scanned if row.state != NEW}
+    # Only rows whose bytes passed the key and parse checks are compared with an offered hash;
+    # comparing any other row's would confirm a guess at bytes the agent was never shown.
+    held = {row.source: row for row in scanned if row.state in (ALREADY_HERE, NAME_RESERVED, NAME_CLASH)}
     skills = _installed(workspace)[2]
     results = []
     for item_id in dict.fromkeys(item_ids):
         # An offered id is ``<source>:<hash>``; a row held back since with that content is
-        # known by its source, so its state is reported. Other content is ``changed``.
+        # known by its source, so its state is reported. Anything else is ``changed``.
         source, _, shown = item_id.rpartition(":")
         row = rows.get(item_id)
         if row is None and (same := held.get(source)) is not None and same.content_sha == shown:

@@ -202,6 +202,9 @@ def test_a_held_back_skill_id_carries_no_digest_of_its_bytes(home):
     assert hashlib.sha256(raw).hexdigest() not in repr(row)
     held = [r for r in _offers(home).values() if r["state"] != "new"]
     assert held and all(":" not in r["item_id"].split(":", 1)[1] for r in held)  # tool:~/path, no hash
+    [true_sha] = [r.content_sha for r in skills.scan(roots, ALL, home[1]) if r.name == "deploy-helper"]
+    right, wrong = (f"{row['item_id']}:{sha}" for sha in (true_sha, "0" * 64))
+    assert [r["outcome"] for r in _install(home, [right, wrong])] == ["changed", "changed"]  # no guess confirmed
 
 
 def test_unknown_system_skill_names_hold_every_skill_back(home, monkeypatch):
