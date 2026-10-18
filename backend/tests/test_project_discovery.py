@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from onboarding import consent
 from onboarding import project_discovery as discovery
 from onboarding import setup_decisions as setup
 from plans import service
@@ -327,7 +328,7 @@ def _decision(db, *, raise_it=True, base=None, **overrides):
     return decision
 
 
-def _answer(db, decision, option_id=discovery.CONSENT_OPTION_ID, other_text=None):
+def _answer(db, decision, option_id=consent.CONSENT_OPTION_ID, other_text=None):
     from plans import decisions
 
     answered = decisions.answer(
@@ -355,12 +356,12 @@ def test_the_hash_binds_the_full_rendered_wording_of_the_consent():
     """Title, whole context and option A label, as the user read them."""
     find = _find_projects()
     assert WORDINGS == [(find["title"], find["context"], "Find my projects")]
-    assert [discovery.consent_wording_hash(*wording) for wording in WORDINGS] == [
+    assert [consent.wording_hash(*wording) for wording in WORDINGS] == [
         "7715101439283cd301c4c765fdbce7c7389a3ea788c820d96f4280cca09654be",
     ]
     assert find["title"] == "Look for the projects you already work on?"
     assert "(the start of each session file)" in find["context"]
-    assert discovery.CONSENT_OPTION_ID == find["options"][0]["id"] == "A"
+    assert consent.CONSENT_OPTION_ID == find["options"][0]["id"] == "A"
 
 
 def test_no_session_folder_means_no_consent_wording():
@@ -394,7 +395,7 @@ def test_a_human_answer_a_allows_exactly_one_listing(db, monkeypatch):
     ).fetchone()
     assert receipt["operation"] == "project_discovery_consent"
     assert json.loads(receipt["result_json"]) == {"consumed": True}
-    with pytest.raises(discovery.ConsentRefused, match="already used"):
+    with pytest.raises(consent.ConsentRefused, match="already used"):
         _consume(db, decision["id"])
 
 
@@ -424,7 +425,7 @@ def test_a_different_receipt_actor_reusing_consent_refuses_cleanly(db, monkeypat
         return plan, body, source, PlanActor("different", "user-1", "project-1")
 
     monkeypatch.setattr(public, "resolve_decision", resolve_as_different_actor)
-    with pytest.raises(discovery.ConsentRefused, match="already used"):
+    with pytest.raises(consent.ConsentRefused, match="already used"):
         _consume(db, decision["id"])
 
 
@@ -446,7 +447,7 @@ def test_latest_decision_answer_breaks_equal_timestamps_by_insertion_order(db):
 def test_the_describe_it_option_refuses_and_records_nothing(db):
     decision = _answer(db, _decision(db), option_id="B")
 
-    with pytest.raises(discovery.ConsentRefused, match="did not choose"):
+    with pytest.raises(consent.ConsentRefused, match="did not choose"):
         _consume(db, decision["id"])
     assert _receipts(db) == 0
 
@@ -455,7 +456,7 @@ def test_a_consent_raised_before_the_facts_changed_refuses(db):
     """The apps found now differ from the ones the user read about."""
     decision = _answer(db, _decision(db))
 
-    with pytest.raises(discovery.ConsentRefused, match="fixed discovery consent wording"):
+    with pytest.raises(consent.ConsentRefused, match="fixed discovery consent wording"):
         _consume(db, decision["id"], wordings=setup.consent_wordings(("Codex",)))
     assert _receipts(db) == 0
 
@@ -465,7 +466,7 @@ def test_another_setup_decision_never_authorizes(db):
                           if d["task_title"] == "Set up GitHub"))
     decision = _answer(db, _decision(db, base=github))
 
-    with pytest.raises(discovery.ConsentRefused, match="fixed discovery consent wording"):
+    with pytest.raises(consent.ConsentRefused, match="fixed discovery consent wording"):
         _consume(db, decision["id"])
 
 
@@ -473,14 +474,14 @@ def test_a_pick_any_shaped_answer_never_allows_a_listing(db):
     """The consent stays pick one: a set answer fails closed, even for the consent option alone."""
     from plans import decisions
 
-    decision = _decision(db, pick="any", recommendation=[discovery.CONSENT_OPTION_ID])
+    decision = _decision(db, pick="any", recommendation=[consent.CONSENT_OPTION_ID])
     answered = decisions.answer(
-        decision["id"], option_ids=[discovery.CONSENT_OPTION_ID], expected_revision=decision["revision"],
+        decision["id"], option_ids=[consent.CONSENT_OPTION_ID], expected_revision=decision["revision"],
         mutation_id=_mid(), actor=_human(), provenance="api.plans.decision", db=db,
     ).result["decision"]
     db.commit()
 
-    with pytest.raises(discovery.ConsentRefused, match="did not choose"):
+    with pytest.raises(consent.ConsentRefused, match="did not choose"):
         _consume(db, answered["id"])
 
 
@@ -488,17 +489,17 @@ def test_other_text_refuses(db):
     decision = _answer(db, _decision(db), option_id="other",
                        other_text="Look for my projects")
 
-    with pytest.raises(discovery.ConsentRefused, match="did not choose"):
+    with pytest.raises(consent.ConsentRefused, match="did not choose"):
         _consume(db, decision["id"])
 
 
 def test_an_unanswered_decision_refuses(db):
-    with pytest.raises(discovery.ConsentRefused, match="not answered that decision"):
+    with pytest.raises(consent.ConsentRefused, match="not answered that decision"):
         _consume(db, _decision(db)["id"])
 
 
 def test_a_decision_never_raised_refuses(db):
-    with pytest.raises(discovery.ConsentRefused, match="not been raised"):
+    with pytest.raises(consent.ConsentRefused, match="not been raised"):
         _consume(db, _decision(db, raise_it=False)["id"])
 
 
@@ -512,7 +513,7 @@ def test_an_invalidated_decision_refuses(db):
     )
     db.commit()
 
-    with pytest.raises(discovery.ConsentRefused, match="withdrawn"):
+    with pytest.raises(consent.ConsentRefused, match="withdrawn"):
         _consume(db, decision["id"])
 
 
@@ -528,7 +529,7 @@ def test_an_invalidated_decision_refuses(db):
 def test_reworded_consent_refuses(db, field, value):
     decision = _answer(db, _decision(db, **{field: value}))
 
-    with pytest.raises(discovery.ConsentRefused, match="fixed discovery consent wording"):
+    with pytest.raises(consent.ConsentRefused, match="fixed discovery consent wording"):
         _consume(db, decision["id"])
 
 
@@ -542,22 +543,22 @@ def test_an_answer_the_user_did_not_record_refuses(db):
         (decision["id"],),
     ).fetchone()
     body = json.loads(row["metadata"])["plan_decision"]
-    body.update(state="answered", answer={"option_id": discovery.CONSENT_OPTION_ID, "text": None})
+    body.update(state="answered", answer={"option_id": consent.CONSENT_OPTION_ID, "text": None})
     models.update_metadata(
         "local", "plan-decision", decision["id"], {"plan_decision": body}, db=db,
     )
     db.commit()
 
-    with pytest.raises(discovery.ConsentRefused, match="not answered by the user"):
+    with pytest.raises(consent.ConsentRefused, match="not answered by the user"):
         _consume(db, decision["id"])
 
 
 def test_a_decision_outside_the_callers_plan_refuses(db):
     decision = _answer(db, _decision(db))
 
-    with pytest.raises(discovery.ConsentRefused, match="not in your plan"):
+    with pytest.raises(consent.ConsentRefused, match="not in your plan"):
         _consume(db, decision["id"], actor=_actor("worker"))
-    with pytest.raises(discovery.ConsentRefused, match="not in your plan"):
+    with pytest.raises(consent.ConsentRefused, match="not in your plan"):
         _consume(db, "no-such-decision")
 
 

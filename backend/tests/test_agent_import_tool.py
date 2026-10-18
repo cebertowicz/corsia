@@ -34,7 +34,7 @@ def test_the_card_is_appendix_a1_word_for_word():
         "you like to work, the skills you keep in them, and the connections to other tools that "
         "Claude Code and Codex hold, so you don't have to set them up again. I only read: nothing "
         "changes in them, and you choose what I keep. I never read your chats with them, their "
-        "settings, or any key or password. What I read goes to Claude, by Anthropic, the AI I run on."
+        "settings, or any key or password. What I read goes to Claude, by Anthropic, the model I run on."
     )
     assert card["tradeoff"].startswith("It takes about a minute.")
     assert [(o["id"], o["label"]) for o in card["options"]] == [("A", "Read them"), ("B", "Not now")]
@@ -45,9 +45,14 @@ def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here(
     context = setup.agent_import(ImportCard(("OpenClaw",), (), ""))["context"]
     assert context.startswith("OpenClaw is on this Mac. ")
     assert "connections" not in context
-    assert context.endswith("What I read stays on this Mac: I run on a local AI.")
+    assert context.endswith("What I read stays on this Mac: I run on a local model.")
     one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
     assert "the connections to other tools that Codex holds," in one
+
+
+def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
+    context = setup.agent_import(ImportCard(("Codex",), (), "Some Model"))["context"]
+    assert context.endswith("What I read goes to Some Model, the model I run on, and may leave this Mac.")
 
 
 def test_no_tool_found_means_no_card_and_the_card_goes_first(monkeypatch):
@@ -57,17 +62,19 @@ def test_no_tool_found_means_no_card_and_the_card_goes_first(monkeypatch):
     assert setup.build_decisions(setup.Facts())[0]["title"] != decisions[0]["title"]
 
 
-@pytest.mark.parametrize(("target", "expected"), [
-    (SimpleNamespace(provider="omlx", harness="", display_name="Local"), ""),
-    (SimpleNamespace(provider="anthropic", harness="claude-code", display_name="Opus"), "Claude, by Anthropic"),
-    (SimpleNamespace(provider="openai", harness="codex", display_name="Terra"), "GPT, by OpenAI"),
-    (SimpleNamespace(provider="other", harness="", display_name="Some Model"), "Some Model"),
+@pytest.mark.parametrize(("model", "target", "expected"), [
+    ("omlx@s/q", SimpleNamespace(provider="omlx", harness="", display_name="Local"), ""),
+    ("claude-code/opus", SimpleNamespace(provider="anthropic", harness="claude-code", display_name="Opus"),
+     "Claude, by Anthropic"),
+    ("codex/terra", SimpleNamespace(provider="openai", harness="codex", display_name="Terra"), "GPT, by OpenAI"),
+    # An External endpoint may front a cloud API, so it is never read as local.
+    ("external@s/m", SimpleNamespace(provider="external", harness="", display_name="Some Model"), "Some Model"),
 ])
-def test_the_model_sentence_names_who_receives_the_read(monkeypatch, target, expected):
+def test_the_model_sentence_names_who_receives_the_read(monkeypatch, model, target, expected):
     from llm import resolution
 
     monkeypatch.setattr(resolution, "resolve_execution_target", lambda _model: target)
-    assert setup.model_provider("m") == expected
+    assert setup.model_provider(model) == expected
 
 
 def test_an_unresolvable_model_means_no_card(monkeypatch, tmp_path):
@@ -289,6 +296,11 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
         "I couldn't read them this time, so I kept nothing. Ask me any time to try again.",
         "a CORSIA skill already has that name. Rename it in [tool] and ask me again.",
         "it has a key or password in it, so I left it. Remove that and ask me again.",
+        # C9: every held-back or failed skill says why and what to do next.
+        "too big to bring over. Make it smaller in [tool] and ask me again.",
+        "only text files, no links. Fix that in [tool] and ask me again.",
+        "it changed after I showed it to you. Ask me again to see it as it is now.",
+        "so I left it out. Ask me to write a CORSIA skill that does the same.",
         "`sha256`",
     ):
         assert line in guide

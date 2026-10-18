@@ -20,7 +20,7 @@ from __future__ import annotations
 # (onboarding.agent_import); its consent hash binds the rendered title, context and
 # option A label like FIND_PROJECTS'. {tools} names the found tools, {verb} is
 # "is" for one and "are" for several, {connections} is AGENT_IMPORT_CONNECTIONS
-# or empty, {where} one of AGENT_IMPORT_CLOUD and AGENT_IMPORT_LOCAL.
+# or empty, {where} one of AGENT_IMPORT_CLOUD, AGENT_IMPORT_LOCAL and AGENT_IMPORT_OTHER.
 AGENT_IMPORT = {
     "title": "Bring over what your other AI tools know",
     "context": (
@@ -41,8 +41,10 @@ AGENT_IMPORT = {
 }
 # Only ready Claude Code or Codex tools hold connections this release can bring over.
 AGENT_IMPORT_CONNECTIONS = ", and the connections to other tools that {tools} {verb}"
-AGENT_IMPORT_CLOUD = "What I read goes to {provider}, the AI I run on."
-AGENT_IMPORT_LOCAL = "What I read stays on this Mac: I run on a local AI."
+AGENT_IMPORT_CLOUD = "What I read goes to {provider}, the model I run on."
+AGENT_IMPORT_LOCAL = "What I read stays on this Mac: I run on a local model."
+# Any other model, an External endpoint included: who serves it is not known here.
+AGENT_IMPORT_OTHER = "What I read goes to {model}, the model I run on, and may leave this Mac."
 # The provider each cloud harness or API names, by catalog provider.
 AGENT_IMPORT_PROVIDERS = {
     "claude-code": "Claude, by Anthropic",

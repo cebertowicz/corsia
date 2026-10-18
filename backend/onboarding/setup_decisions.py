@@ -59,7 +59,7 @@ class Facts:
 @dataclass(frozen=True)
 class ImportCard:
     """The import card's inputs: found tools, the ready Claude Code or Codex among them,
-    and the provider of the model the CORSIA agent runs on (empty when it is local)."""
+    and who receives the read: a known provider's name, else the model's name (empty when local)."""
 
     tools: tuple[str, ...]
     connections: tuple[str, ...] = ()
@@ -135,8 +135,12 @@ def agent_import(card: ImportCard | None) -> dict[str, Any] | None:
     connections = text.AGENT_IMPORT_CONNECTIONS.format(
         tools=_join(list(card.connections)), verb="holds" if len(card.connections) == 1 else "hold",
     ) if card.connections else ""
-    where = (text.AGENT_IMPORT_CLOUD.format(provider=_safe(card.provider)) if card.provider
-             else text.AGENT_IMPORT_LOCAL)
+    if not card.provider:
+        where = text.AGENT_IMPORT_LOCAL
+    elif card.provider in text.AGENT_IMPORT_PROVIDERS.values():
+        where = text.AGENT_IMPORT_CLOUD.format(provider=card.provider)
+    else:
+        where = text.AGENT_IMPORT_OTHER.format(model=_safe(card.provider))
     return _decision(tasks.TASK_START, text.AGENT_IMPORT, options=_lettered(text.AGENT_IMPORT),
                      recommendation="A", tools=_join(list(card.tools)),
                      verb="is" if len(card.tools) == 1 else "are", connections=connections, where=where)
@@ -261,15 +265,17 @@ def _saved_email() -> str:
 
 
 def model_provider(model: str) -> str | None:
-    """Who receives what the CORSIA agent reads on ``model``: '' when it is local,
-    else the provider's name; None when the model cannot be resolved."""
+    """Who receives what the CORSIA agent reads on ``model``: '' when it is local, else
+    a known provider's name or the model's own; None when the model cannot be resolved.
+    An External endpoint is not local: it may front a cloud API."""
+    from llm.pricing import is_local_model
     from llm.resolution import ModelUnavailableError, resolve_execution_target
 
     try:
         target = resolve_execution_target(model)
     except (ModelUnavailableError, ValueError):
         return None
-    if target.provider == "omlx":
+    if is_local_model(model):
         return ""
     return (text.AGENT_IMPORT_PROVIDERS.get(target.provider)
             or text.AGENT_IMPORT_PROVIDERS.get(target.harness) or target.display_name)

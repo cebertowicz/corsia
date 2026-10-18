@@ -46,8 +46,9 @@ With one tool, the lead line names it; with several, group rows under `From [too
 - `name_reserved`: `**[name]**: a CORSIA skill already has that name. Rename it in [tool] and ask me again.`
 - `name_clash`: `**[name]**: [tool] and [tool] both have a skill with that name. Rename one and ask me again.`
 - `has_secret`: `**[name]**: it has a key or password in it, so I left it. Remove that and ask me again.`
-- `too_large` or `unreadable`: `**[name]**: I couldn't bring it over.`
+- `too_large`: `**[name]**: it's over 512 KB or 100 files, too big to bring over. Make it smaller in [tool] and ask me again.`
+- `unreadable`: `**[name]**: I couldn't read it. It needs a SKILL.md with a name and description, and only text files, no links. Fix that in [tool] and ask me again.`
 
 With no `new` row, post the held-back lines alone, or `Nothing new to bring over.` when there are none.
 
-On their pick, call `agent_import` mode `install` with the same `consent_decision_id` and the picked `item_ids`, before `install_by`. Post `Brought over [installed] skills. They're in Settings › Skills. Tell me if you want any of them removed.`, then `**[name]**: I couldn't bring it over.` for each other result.
+On their pick, call `agent_import` mode `install` with the same `consent_decision_id` and the picked `item_ids`, before `install_by`. Post `Brought over [installed] skills. They're in Settings › Skills. Tell me if you want any of them removed.`, then one line per other result: its state's line above, or for `changed` `**[name]**: it changed after I showed it to you. Ask me again to see it as it is now.`, for `failed` `**[name]**: it didn't pass CORSIA's skill check, so I left it out. Ask me to write a CORSIA skill that does the same.`

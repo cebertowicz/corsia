@@ -31,8 +31,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from onboarding import consent
-from onboarding.consent import CONSENT_OPTION_ID, ConsentRefused  # noqa: F401 - public names
-from onboarding.consent import wording_hash as consent_wording_hash  # noqa: F401
 
 HEAD_BYTES = 64 * 1024
 MAX_RESULTS = 50
