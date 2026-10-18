@@ -10,6 +10,9 @@ pub enum LaunchState {
     Failed { name: String, failure: ConnectFailure },
     /// This computer's own service could not be brought back; the shell draws its failure card with the action.
     ServiceFailed { reason: String },
+    /// This computer's own service stopped at a screen the person answers (approval, an install to adopt, an undo
+    /// that did not finish); `startup` is how it answered, and the shell draws it like a start it ran itself.
+    LocalStartup { startup: serde_json::Value },
     Disconnecting,
 }
 
@@ -56,9 +59,17 @@ impl RemoteConnection {
         self.state = LaunchState::ServiceFailed { reason: reason.into() };
     }
 
-    /// A service that came up ends its failure; any other state is left as it is.
+    /// The launch-time start ended on a failure or a screen the person answers. Only a shell still showing the start
+    /// takes it; anything begun meanwhile (pairing, say) is newer.
+    pub fn launch_ended(&mut self, ended: LaunchState) {
+        if self.state == LaunchState::Local {
+            self.state = ended;
+        }
+    }
+
+    /// A service that came up ends its failure or the screen it was waiting on; any other state is left as it is.
     pub fn service_recovered(&mut self) {
-        if matches!(self.state, LaunchState::ServiceFailed { .. }) {
+        if matches!(self.state, LaunchState::ServiceFailed { .. } | LaunchState::LocalStartup { .. }) {
             self.state = LaunchState::Local;
         }
     }
@@ -139,6 +150,23 @@ mod tests {
         assert_eq!(connection.state(), &LaunchState::Local);
         connection.connected("Studio");
         connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
+    }
+
+    #[test]
+    fn a_launch_outcome_lasts_until_the_service_comes_back_and_never_replaces_what_the_person_began_since() {
+        let offered = LaunchState::LocalStartup { startup: serde_json::json!({ "state": "requires_approval" }) };
+        let mut connection = RemoteConnection::default();
+        connection.launch_ended(offered.clone());
+        assert_eq!(connection.state(), &offered);
+        connection.service_recovered();
+        assert_eq!(connection.state(), &LaunchState::Local);
+
+        connection.begin_pairing();
+        connection.launch_ended(LaunchState::ServiceFailed { reason: "refused".into() });
+        assert_eq!(connection.state(), &LaunchState::Pairing, "a late launch outcome replaced a pairing");
+        connection.connected("Studio");
+        connection.launch_ended(offered);
         assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
     }
 }

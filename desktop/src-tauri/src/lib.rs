@@ -12,8 +12,8 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc, Mutex, PoisonError, TryLockError,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -50,6 +50,11 @@ const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// The longest a local start may go without finishing or reporting a phase. Its one long wait, the health check,
+/// gives up at HEALTH_TIMEOUT; a start silent for twice that is stuck in a step with no bound of its own (git init,
+/// the login-item registration), so it ends on the failure card and its Try again.
+const START_STALL_LIMIT: Duration = Duration::from_secs(60);
+const START_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Default)]
 struct AppServiceState {
@@ -62,9 +67,10 @@ struct AppServiceState {
     adoption_cancel_requested: AtomicBool,
     /// What the adoption in progress is doing now, for the window to show.
     adoption_phase: Mutex<Option<adoption::Phase>>,
-    /// How the launch-time start ended, kept until the startup page reads it. A launch that ends before the page has
-    /// loaded can't be pushed to it, so the page reads this on load as well as when told it is in.
-    launch_outcome: Mutex<Option<Result<serde_json::Value, String>>>,
+    /// Counts the phases reported, so a wait on a start can tell a slow start from a stuck one.
+    progress_reports: AtomicU64,
+    /// Held for the whole of a local start, so a Try again waits for the launch start instead of running beside it.
+    start_running: Mutex<()>,
 }
 
 #[derive(Default)]
@@ -458,6 +464,31 @@ fn start_service(
     app: &tauri::AppHandle,
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
+    one_start_at_a_time(&service.start_running, START_STALL_LIMIT, || start_service_alone(app, service))
+}
+
+/// Runs `start` once no other start is running, waiting up to `wait` for one that is. A start still running after
+/// that is stuck, and this one ends as a failure the person can retry rather than waiting on it for good.
+fn one_start_at_a_time<T>(lock: &Mutex<()>, wait: Duration, start: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let deadline = Instant::now() + wait;
+    let _running = loop {
+        match lock.try_lock() {
+            Ok(running) => break running,
+            Err(TryLockError::Poisoned(running)) => break running.into_inner(),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => thread::sleep(START_LOCK_POLL_INTERVAL),
+            Err(TryLockError::WouldBlock) => {
+                log::error!("an earlier CORSIA start was still running after {wait:?}; this one did not start");
+                return Err(String::new());
+            }
+        }
+    };
+    start()
+}
+
+fn start_service_alone(
+    app: &tauri::AppHandle,
+    service: &AppServiceState,
+) -> Result<ServiceStartup, String> {
     let app_dir = default_app_dir(app)?;
     // The undo finishes before anything else, then launch goes on as if
     // nothing had been tried: the restored install is offered for adoption again.
@@ -644,6 +675,7 @@ fn failure_shell_state(name: &str, failure: &classify::ConnectFailure) -> serde_
 fn shell_state_script(state: &remote::LaunchState) -> Option<String> {
     match state {
         remote::LaunchState::ServiceFailed { reason } => Some(format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(reason).unwrap_or_default())),
+        remote::LaunchState::LocalStartup { startup } => Some(format!("window.__corsiaShowStartup?.({startup});")),
         other => remote_startup_state(other).map(|payload| format!("window.__corsiaShowRemoteState?.({payload});")),
     }
 }
@@ -1115,29 +1147,82 @@ impl AdoptionProgress {
 }
 
 fn set_adoption_phase(service: &AppServiceState, phase: Option<adoption::Phase>) {
+    if phase.is_some() {
+        service.progress_reports.fetch_add(1, Ordering::Relaxed);
+    }
     if let Ok(mut shown) = service.adoption_phase.lock() {
         *shown = phase;
     }
 }
 
-fn record_launch_outcome(slot: &Mutex<Option<Result<serde_json::Value, String>>>, outcome: &Result<ServiceStartup, String>) {
-    let value = outcome.as_ref().map_err(Clone::clone).and_then(|startup| {
-        serde_json::to_value(startup).map_err(|error| format!("could not report how CORSIA started: {error}"))
+/// Runs the launch-time start and hands its outcome to the shell-state owner, which draws it now and on every later
+/// shell load: an outcome reached before the page has loaded is drawn once it has.
+fn run_launch_start(app: &tauri::AppHandle) {
+    let (sender, outcome) = mpsc::channel();
+    let start_app = app.clone();
+    thread::spawn(move || {
+        let service = start_app.state::<AppServiceState>();
+        // Nobody is listening once the wait below gave up on this start.
+        let _ = sender.send(start_service(&start_app, &service));
     });
-    *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
+    let service = app.state::<AppServiceState>();
+    let outcome = await_start(&outcome, || service.progress_reports.load(Ordering::Relaxed), START_STALL_LIMIT);
+    show_launch_outcome(app, outcome);
 }
 
-/// Hands the outcome over once: a later visit to the startup page (a remote that failed, say) must not act on how
-/// the launch went long ago.
-fn take_launch_outcome(slot: &Mutex<Option<Result<serde_json::Value, String>>>) -> Result<Option<serde_json::Value>, String> {
-    slot.lock().unwrap_or_else(PoisonError::into_inner).take().transpose()
+/// Waits for a start, telling a slow one from a stuck one: each `limit` without an answer or a new phase report ends
+/// the wait as a failure; one that reported a phase meanwhile is still working and is waited for again.
+fn await_start(
+    outcome: &mpsc::Receiver<Result<ServiceStartup, String>>,
+    progress_reports: impl Fn() -> u64,
+    limit: Duration,
+) -> Result<ServiceStartup, String> {
+    let mut seen = progress_reports();
+    loop {
+        match outcome.recv_timeout(limit) {
+            Ok(outcome) => return outcome,
+            Err(mpsc::RecvTimeoutError::Timeout) if progress_reports() != seen => seen = progress_reports(),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                log::error!("the CORSIA start neither finished nor reported progress in {limit:?}");
+                return Err(String::new());
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                log::error!("the CORSIA start ended without an outcome");
+                return Err(String::new());
+            }
+        }
+    }
 }
 
-/// How the launch-time start ended, answered like start_local_service; nothing while it is still running or once
-/// the page has read it.
-#[tauri::command]
-fn launch_outcome(service: tauri::State<'_, AppServiceState>) -> Result<Option<serde_json::Value>, String> {
-    take_launch_outcome(&service.launch_outcome)
+/// A launch outcome is drawn only on a shell still showing the start: anything the person began meanwhile, such as
+/// pairing with another computer, is newer and keeps the window.
+fn show_launch_outcome<R: tauri::Runtime>(app: &tauri::AppHandle<R>, outcome: Result<ServiceStartup, String>) {
+    let ended = match outcome {
+        Ok(ServiceStartup::Ready { url }) => {
+            let starting = app.state::<RemoteRuntime>().connection.lock().unwrap_or_else(PoisonError::into_inner).state()
+                == &remote::LaunchState::Local;
+            if let (true, Some(window)) = (starting, app.get_webview_window("main")) {
+                if let Err(error) = window.eval(format!("window.location.replace('{url}');")) {
+                    log::error!("could not navigate to the local CORSIA service: {error}");
+                }
+            }
+            return;
+        }
+        Ok(startup) => match serde_json::to_value(&startup) {
+            Ok(startup) => remote::LaunchState::LocalStartup { startup },
+            Err(error) => {
+                log::error!("could not hand the launch outcome to the window: {error}");
+                remote::LaunchState::ServiceFailed { reason: String::new() }
+            }
+        },
+        Err(reason) => {
+            if !reason.is_empty() {
+                log::error!("bundled CORSIA service did not start: {reason}");
+            }
+            remote::LaunchState::ServiceFailed { reason }
+        }
+    };
+    report_remote_state(app, |connection| connection.launch_ended(ended));
 }
 
 /// What adoption is doing now: the window picks the line from the phase, never from text.
@@ -1548,7 +1633,6 @@ pub fn run() {
             quit_app,
             check_service_started,
             adoption_progress,
-            launch_outcome,
             remote_discovered,
             remote_pair,
             disconnect_remote,
@@ -1644,22 +1728,7 @@ pub fn run() {
             // owns the first service launch. Retrying after a visible failure
             // stays available through start_local_service.
             let app_handle = app.handle().clone();
-            thread::spawn(move || {
-                let service = app_handle.state::<AppServiceState>();
-                let outcome = start_service(&app_handle, &service);
-                if let Err(error) = &outcome {
-                    log::error!("bundled CORSIA service did not start: {error}");
-                }
-                // A refusal can be decided before the page has loaded, and a script
-                // sent then is lost: the outcome is stored first, and the page reads
-                // it on load or when this tells it the outcome is in.
-                record_launch_outcome(&service.launch_outcome, &outcome);
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    if let Err(error) = window.eval("window.__corsiaShowLaunchOutcome?.();") {
-                        log::error!("could not tell the window how CORSIA started: {error}");
-                    }
-                }
-            });
+            thread::spawn(move || run_launch_start(&app_handle));
             Ok(())
         })
         .build(context)
@@ -1693,13 +1762,12 @@ pub fn run() {
 mod tests {
     use super::*;
     use base64::Engine;
-    use std::fs;
+    use std::{fs, sync::Arc};
 
     const SHELL_COMMANDS: &[&str] = &[
         "start_local_service",
         "adopt_existing_install",
         "adoption_progress",
-        "launch_outcome",
         "check_service_started",
         "quit_app",
         "reopen_app",
@@ -1746,24 +1814,76 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_outcome_decided_before_the_page_loads_waits_for_the_page_to_read_it_once() {
-        let slot = Mutex::new(None);
-        assert_eq!(take_launch_outcome(&slot), Ok(None), "a launch still running has no outcome yet");
+    fn a_launch_outcome_is_kept_by_the_shell_state_so_every_shell_load_draws_it_with_its_reason() {
+        let app = launch_app();
+        let refusal = "A file named ~/Corsia is in the way. Nothing was changed.";
+        show_launch_outcome(app.handle(), Err(refusal.into()));
+        let failure = Some(format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(refusal).unwrap()));
+        assert_eq!(shell_state_script(&launch_state(&app)), failure);
+        assert_eq!(shell_state_script(&launch_state(&app)), failure, "a reload no longer drew the refusal");
 
-        record_launch_outcome(&slot, &Err("A file named ~/Corsia is in the way. Nothing was changed.".into()));
-        assert_eq!(take_launch_outcome(&slot), Err("A file named ~/Corsia is in the way. Nothing was changed.".into()));
-        assert_eq!(take_launch_outcome(&slot), Ok(None), "a later page acted on a launch outcome already shown");
+        let app = launch_app();
+        show_launch_outcome(app.handle(), Ok(ServiceStartup::AdoptionOffered { workspace: "/Users/you/corsia".into() }));
+        assert_eq!(
+            shell_state_script(&launch_state(&app)).as_deref(),
+            Some(r#"window.__corsiaShowStartup?.({"state":"adoption_offered","workspace":"/Users/you/corsia"});"#)
+        );
+    }
 
-        record_launch_outcome(&slot, &Ok(ServiceStartup::AdoptionOffered { workspace: "/Users/you/corsia".into() }));
-        assert_eq!(
-            take_launch_outcome(&slot),
-            Ok(Some(serde_json::json!({ "state": "adoption_offered", "workspace": "/Users/you/corsia" })))
+    #[test]
+    fn a_start_is_waited_for_while_it_works_and_given_up_on_once_it_goes_silent() {
+        let limit = Duration::from_millis(20);
+        let (_sender, silent) = mpsc::channel();
+        assert_eq!(await_start(&silent, || 0, limit).err(), Some(String::new()), "a silent start was waited on");
+
+        // Each look finds a new phase report, and the start answers after the third: a working start is waited for.
+        let (sender, working) = mpsc::channel();
+        let looks = AtomicU64::new(0);
+        let outcome = await_start(
+            &working,
+            || {
+                let look = looks.fetch_add(1, Ordering::SeqCst) + 1;
+                if look == 3 {
+                    sender.send(Ok(ServiceStartup::RequiresApproval)).unwrap();
+                }
+                look
+            },
+            limit,
         );
-        record_launch_outcome(&slot, &Ok(ServiceStartup::Ready { url: service_url(47_895) }));
-        assert_eq!(
-            take_launch_outcome(&slot),
-            Ok(Some(serde_json::json!({ "state": "ready", "url": "http://127.0.0.1:47895" })))
-        );
+        assert!(matches!(outcome, Ok(ServiceStartup::RequiresApproval)), "a start reporting progress was given up on: {:?}", outcome.err());
+    }
+
+    #[test]
+    fn a_try_again_during_the_launch_start_waits_for_it_instead_of_running_beside_it() {
+        let lock = Arc::new(Mutex::new(()));
+        let running = Arc::new(AtomicBool::new(false));
+        let (release, released) = mpsc::channel::<()>();
+        let (first_started, started) = mpsc::channel();
+        let launch = {
+            let (lock, running) = (Arc::clone(&lock), Arc::clone(&running));
+            thread::spawn(move || {
+                one_start_at_a_time(&lock, Duration::from_secs(5), || {
+                    running.store(true, Ordering::SeqCst);
+                    first_started.send(()).unwrap();
+                    released.recv().unwrap();
+                    running.store(false, Ordering::SeqCst);
+                    Ok(())
+                })
+            })
+        };
+        started.recv().unwrap();
+        let retry = {
+            let (lock, running) = (Arc::clone(&lock), Arc::clone(&running));
+            thread::spawn(move || one_start_at_a_time(&lock, Duration::from_secs(5), || Ok(running.load(Ordering::SeqCst))))
+        };
+        thread::sleep(Duration::from_millis(150));
+        assert!(!retry.is_finished(), "Try again ran while the launch start was still running");
+        release.send(()).unwrap();
+        launch.join().unwrap().unwrap();
+        assert_eq!(retry.join().unwrap(), Ok(false), "Try again overlapped the launch start");
+
+        let _stuck = lock.lock().unwrap();
+        assert_eq!(one_start_at_a_time(&lock, Duration::from_millis(50), || Ok(())), Err(String::new()), "Try again waited on a stuck start for good");
     }
 
     #[test]

@@ -264,25 +264,6 @@
 			let approvalPoll;
 			let approvalPollInFlight = false;
 			let continuationStarted = false;
-			// The longest a start may show the spinner with no answer and no progress: twice the shell's own 30-second
-			// wait for the service. Past it the failure screen and its actions replace the spinner.
-			const LAUNCH_WAIT_LIMIT_MS = 60000;
-			let launchWait = null;
-			let launchWaitAgain = null;
-
-			function waitForLaunch(again) {
-				clearTimeout(launchWait);
-				launchWaitAgain = again;
-				launchWait = setTimeout(() => {
-					launchWait = null;
-					showFailure(undefined, false, again);
-				}, LAUNCH_WAIT_LIMIT_MS);
-			}
-
-			function launchSettled() {
-				clearTimeout(launchWait);
-				launchWait = null;
-			}
 
 			function showStarting() {
 				quitFailure = false;
@@ -302,7 +283,6 @@
 			}
 
 			function showExistingInstall(workDir) {
-				launchSettled();
 				clearInterval(approvalPoll);
 				adoptionPrompt = true;
 				adoptionRecovery = null;
@@ -326,8 +306,6 @@
 			// display only: one that could not be read is `null`, which shows no line, never "0 tasks".
 			function showAdoptionProgress(progress) {
 				if (!progress) return;
-				// A start that reports its phase is still working, so its wait starts over.
-				if (launchWait !== null) waitForLaunch(launchWaitAgain);
 				line.hidden = true;
 				// A Quit that is waiting on the switch says so, for the three phases it waits through.
 				note.textContent = progress.quit_pending === true ? ADOPTION_COPY.quitPending : '';
@@ -352,7 +330,6 @@
 			// `failure` is the backend's { message, outcome, recovery, advice }; a plain string claims
 			// nothing about the existing install, so it offers the relaunch that is always safe.
 			async function showAdoptionFailure(failure) {
-				launchSettled();
 				const given = failure && typeof failure === 'object' ? failure : {};
 				const reason = typeof failure === 'string' ? failure : given.message;
 				const detail = typeof reason === 'string' && reason ? reason : 'CORSIA couldn’t switch over.';
@@ -419,7 +396,6 @@
 			}
 
 			async function showFailure(why, quitting = false, again = null) {
-				launchSettled();
 				clearInterval(approvalPoll);
 				quitFailure = quitting;
 				adoptionRecovery = null;
@@ -450,7 +426,6 @@
 			}
 
 			function continueToService(startup, showApproval) {
-				launchSettled();
 				if (continuationStarted) return;
 				continuationStarted = true;
 				clearInterval(approvalPoll);
@@ -465,7 +440,6 @@
 			}
 
 			async function showBackgroundApproval() {
-				launchSettled();
 				quitFailure = false;
 				adoptionRecovery = null;
 				retryAction = null;
@@ -505,7 +479,6 @@
 					await showFailure(undefined, false, again);
 					return;
 				}
-				waitForLaunch(again);
 				// A relaunch may be waiting for the stop an earlier run left draining; the window shows it.
 				const stopFollowing = followProgress();
 				try {
@@ -517,6 +490,7 @@
 				}
 			}
 
+			// Draws how a local start answered; the app's own start at launch is drawn through here too.
 			async function showStartup(startup) {
 				if (startup.state === 'ready') {
 					continueToService(startup);
@@ -527,20 +501,6 @@
 				} else {
 					await showBackgroundApproval();
 				}
-			}
-
-			// The start the app runs at launch can end before this page has loaded, when nothing could be shown on it,
-			// so its outcome waits in the app: read on load, and again when the app says it is in.
-			async function showLaunchOutcome() {
-				if (!invoke || continuationStarted) return;
-				let startup;
-				try {
-					startup = await invoke('launch_outcome');
-				} catch (error) {
-					await showFailure(error);
-					return;
-				}
-				if (startup) await showStartup(startup);
 			}
 
 			// Shows the backend's phase once a second until the returned function is called.
@@ -614,7 +574,6 @@
 			}
 
 			function showRemoteState(state) {
-				launchSettled();
 				clearInterval(approvalPoll);
 				quitFailure = false;
 				adoptionPrompt = false;
@@ -657,21 +616,14 @@
 			window.__corsiaShowRemoteState = showRemoteState;
 			window.__corsiaShowServiceFailure = showFailure;
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
-			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
-			window.__corsiaShowExistingInstall = showExistingInstall;
-			window.__corsiaShowAdoptionFailure = showAdoptionFailure;
-			window.__corsiaShowLaunchOutcome = showLaunchOutcome;
+			window.__corsiaShowStartup = showStartup;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			quit.addEventListener('click', () => invoke?.('quit_app'));
 			retry.addEventListener('click', retryFailure);
 			setUpLocal.addEventListener('click', setUpThisComputer);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
-			else if (window.location.hash === '#quit-failure') showFailure(undefined, true);
-			else {
-				waitForLaunch(null);
-				showLaunchOutcome();
-			}
+			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();
 	</script>
 </body>

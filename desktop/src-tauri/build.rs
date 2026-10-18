@@ -9,7 +9,6 @@ fn main() {
                 "configure_work_folder",
                 "disconnect_remote",
                 "get_service_log_path",
-                "launch_outcome",
                 "open_login_items",
                 "quit_app",
                 "remote_discovered",

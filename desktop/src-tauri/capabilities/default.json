@@ -14,7 +14,6 @@
     "allow-configure-work-folder",
     "allow-disconnect-remote",
     "allow-get-service-log-path",
-    "allow-launch-outcome",
     "allow-open-login-items",
     "allow-quit-app",
     "allow-remote-discovered",

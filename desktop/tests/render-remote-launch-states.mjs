@@ -72,14 +72,13 @@ try {
 			status: document.getElementById('status').textContent,
 			retry: document.getElementById('actions').hidden ? null : document.getElementById('retry').textContent,
 		}));
-		return { page, ...seen, calls: seen.calls.filter((command) => command !== 'launch_outcome') };
+		return { page, ...seen };
 	}
 	const expectCalls = (label, seen, calls) => {
 		if (JSON.stringify(seen.calls) !== JSON.stringify(calls)) throw new Error(`${label}: invoked ${JSON.stringify(seen.calls)}, expected ${JSON.stringify(calls)}`);
 	};
-	// The failure card looks up the service log's location, and the page reads the launch outcome when it loads, on
-	// their own; neither is one of the actions under test.
-	const notLogLookup = (command) => command !== 'get_service_log_path' && command !== 'launch_outcome';
+	// The failure card looks up the service log's location on its own; it is not one of the actions under test.
+	const notLogLookup = (command) => command !== 'get_service_log_path';
 	let clicks = 0;
 	for (const kind of ['unreachable', 'incompatible', 'too_old', 'key_changed']) {
 		const state = { kind, name: 'Studio', cause: 'network' };

@@ -197,7 +197,7 @@ async function open(theme, failure, script = {}) {
 		} } };
 	}, [failure, script]);
 	await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
-	await page.evaluate(() => window.__corsiaShowExistingInstall('~/work'));
+	await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/work' }));
 	await page.click('#retry');
 	await page.waitForFunction(() => document.getElementById('status').textContent.includes('switch'));
 	return page;
@@ -264,11 +264,11 @@ for (const theme of ['light', 'dark']) {
 		}, failure);
 		await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
 		const before = failed;
-		await page.evaluate((shown) => window.__corsiaShowAdoptionFailure(shown), failure);
+		await page.evaluate((shown) => window.__corsiaShowStartup({ state: 'adoption_failed', failure: shown }), failure);
 		compare(`${theme} ${name} at launch`, await read(page), expected);
 		if (name === 'launch-undo-reopen') {
 			// Try again after a settled failure starts the service, which finds the failed undo again.
-			await page.evaluate((shown) => window.__corsiaShowAdoptionFailure({ ...shown, outcome: 'restored', recovery: null }), failure);
+			await page.evaluate((shown) => window.__corsiaShowStartup({ state: 'adoption_failed', failure: { ...shown, outcome: 'restored', recovery: null } }), failure);
 			await page.click('#retry');
 			await page.waitForFunction((text) => document.getElementById('retry').textContent === text, 'Reopen CORSIA');
 			compare(`${theme} ${name} after Try again`, await read(page), expected);
@@ -282,7 +282,7 @@ for (const theme of ['light', 'dark']) {
 		await page.click('#retry');
 		await page.waitForFunction((last) => window.__calls.includes(last), calls[calls.length - 1], { timeout: 3000 }).catch(() => {});
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'launch_outcome'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(calls)) fail(`${theme} ${name}: ran ${JSON.stringify(made)}, expected ${JSON.stringify(calls)}`);
 		if (hash && (await page.evaluate(() => window.location.hash)) !== hash) fail(`${theme} ${name}: did not continue to the service`);
 		if (after) compare(`${theme} ${name}`, await read(page), after);
@@ -317,7 +317,7 @@ for (const theme of ['light', 'dark']) {
 			} } };
 		}, progress);
 		await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
-		await page.evaluate(() => window.__corsiaShowExistingInstall('~/work'));
+		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/work' }));
 		await page.click('#retry');
 		// The window polls once a second; wait for a reading to land.
 		await page.waitForFunction(() => window.__calls.includes('adoption_progress'), null, { timeout: 4000 });
@@ -335,7 +335,7 @@ for (const theme of ['light', 'dark']) {
 		const before = failed;
 		await page.click('#quit');
 		await page.waitForTimeout(150);
-		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'adopt_existing_install', 'launch_outcome'].includes(command));
+		const made = (await page.evaluate(() => window.__calls)).filter((command) => !['get_service_log_path', 'adoption_progress', 'adopt_existing_install'].includes(command));
 		if (JSON.stringify(made) !== JSON.stringify(['quit_app'])) fail(`${theme} quit: ran ${JSON.stringify(made)}, expected ["quit_app"]`);
 		if (failed === before) console.log(`ok   ${theme} quit`);
 		await page.close();
