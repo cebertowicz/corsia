@@ -10,8 +10,8 @@ pub enum LaunchState {
     Failed { name: String, failure: ConnectFailure },
     /// This computer's own service could not be brought back; the shell draws its failure card with the action.
     ServiceFailed { reason: String },
-    /// This computer's own service stopped at a screen the person answers (approval, an install to adopt, an undo
-    /// that did not finish); `startup` is how it answered, and the shell draws it like a start it ran itself.
+    /// How this computer's own start last answered (ready, approval, an install to adopt, an undo that did not
+    /// finish); the shell draws `startup` like a start it ran itself.
     LocalStartup { startup: serde_json::Value },
     Disconnecting,
 }
@@ -59,19 +59,23 @@ impl RemoteConnection {
         self.state = LaunchState::ServiceFailed { reason: reason.into() };
     }
 
-    /// The launch-time start ended on a failure or a screen the person answers. Only a shell still showing the start
-    /// takes it; anything begun meanwhile (pairing, say) is newer.
-    pub fn launch_ended(&mut self, ended: LaunchState) {
-        if self.state == LaunchState::Local {
+    /// A local start ended with `ended` (`ServiceFailed` or `LocalStartup`). It is kept only while the window is on
+    /// this computer's own start; anything begun meanwhile (pairing, a remote) is newer.
+    pub fn local_start_ended(&mut self, ended: LaunchState) {
+        if self.is_local_start() {
             self.state = ended;
         }
     }
 
-    /// A service that came up ends its failure or the screen it was waiting on; any other state is left as it is.
-    pub fn service_recovered(&mut self) {
-        if matches!(self.state, LaunchState::ServiceFailed { .. } | LaunchState::LocalStartup { .. }) {
+    /// The person acted on the last answer: the start running now owns the window until it answers.
+    pub fn local_start_began(&mut self) {
+        if self.is_local_start() {
             self.state = LaunchState::Local;
         }
+    }
+
+    fn is_local_start(&self) -> bool {
+        matches!(self.state, LaunchState::Local | LaunchState::ServiceFailed { .. } | LaunchState::LocalStartup { .. })
     }
 
     /// A pairing that did not connect returns to local; a failure recorded meanwhile stays.
@@ -137,36 +141,33 @@ mod tests {
     }
 
     #[test]
-    fn a_service_failure_survives_the_end_of_a_pairing_until_the_service_comes_back() {
+    fn a_service_failure_survives_the_end_of_a_pairing_until_a_start_answers() {
         let mut connection = RemoteConnection::default();
         connection.begin_pairing();
         connection.service_failed("did not start");
         connection.end_pairing();
         assert_eq!(connection.state(), &LaunchState::ServiceFailed { reason: "did not start".into() });
-        connection.service_recovered();
-        assert_eq!(connection.state(), &LaunchState::Local);
-        connection.begin_pairing();
-        connection.end_pairing();
-        assert_eq!(connection.state(), &LaunchState::Local);
+        let ready = LaunchState::LocalStartup { startup: serde_json::json!({ "state": "ready", "url": "http://127.0.0.1:47895" }) };
+        connection.local_start_ended(ready.clone());
+        assert_eq!(connection.state(), &ready);
         connection.connected("Studio");
-        connection.service_recovered();
+        connection.local_start_ended(ready);
         assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
     }
 
     #[test]
-    fn a_launch_outcome_lasts_until_the_service_comes_back_and_never_replaces_what_the_person_began_since() {
-        let offered = LaunchState::LocalStartup { startup: serde_json::json!({ "state": "requires_approval" }) };
+    fn a_start_answer_lasts_until_the_person_acts_on_it_and_never_replaces_what_they_began_since() {
+        let offered = LaunchState::LocalStartup { startup: serde_json::json!({ "state": "adoption_offered", "workspace": "~/corsia" }) };
         let mut connection = RemoteConnection::default();
-        connection.launch_ended(offered.clone());
+        connection.local_start_ended(offered.clone());
         assert_eq!(connection.state(), &offered);
-        connection.service_recovered();
-        assert_eq!(connection.state(), &LaunchState::Local);
+        connection.local_start_began();
+        assert_eq!(connection.state(), &LaunchState::Local, "an adoption offer outlived the adoption it started");
 
         connection.begin_pairing();
-        connection.launch_ended(LaunchState::ServiceFailed { reason: "refused".into() });
-        assert_eq!(connection.state(), &LaunchState::Pairing, "a late launch outcome replaced a pairing");
-        connection.connected("Studio");
-        connection.launch_ended(offered);
-        assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
+        connection.local_start_ended(LaunchState::ServiceFailed { reason: "refused".into() });
+        assert_eq!(connection.state(), &LaunchState::Pairing, "a late start answer replaced a pairing");
+        connection.local_start_began();
+        assert_eq!(connection.state(), &LaunchState::Pairing);
     }
 }

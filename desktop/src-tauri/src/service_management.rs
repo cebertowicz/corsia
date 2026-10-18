@@ -346,12 +346,13 @@ pub fn ensure_service_registered(
             refuse_foreign_corsia_job(reader, executable)?;
             Ok(status)
         }
-        ServiceStatus::NotRegistered => {
+        // SMAppService reports NotFound for an agent that was never registered for this
+        // user, so only register() can tell whether the bundle really lacks it.
+        ServiceStatus::NotRegistered | ServiceStatus::NotFound => {
             refuse_foreign_corsia_job(reader, executable)?;
             manager.register()?;
             manager.status()
         }
-        ServiceStatus::NotFound => Ok(status),
     }
 }
 
@@ -776,6 +777,20 @@ mod tests {
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(absent.registrations.get(), 1);
+    }
+
+    #[test]
+    fn a_service_never_registered_for_this_user_is_registered_even_when_reported_not_found() {
+        let (executable, _root) = bundle_executable();
+        let reader = FakeLaunchctl { jobs: String::new(), details: String::new() };
+        let fresh = FakeManager::default();
+        fresh.status.set(Some(ServiceStatus::NotFound));
+        fresh.registered_status.set(Some(ServiceStatus::Enabled));
+        assert_eq!(
+            ensure_unlocked_service_registered(&fresh, &reader, &executable),
+            Ok(ServiceStatus::Enabled)
+        );
+        assert_eq!(fresh.registrations.get(), 1);
     }
 
     #[test]
