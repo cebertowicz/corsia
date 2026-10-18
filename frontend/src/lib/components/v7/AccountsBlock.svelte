@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { Button, Field, Message } from '$lib/components/ui';
+	import Toggle from '../ui/Toggle.svelte';
+	import IconButton from '../ui/IconButton.svelte';
+	import Menu, { type MenuItem } from '../ui/Menu.svelte';
+	import { createRowMenu } from '../ui/rowMenu.svelte';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import OverageSwitch from './OverageSwitch.svelte';
 	import AccountUsageRow from './AccountUsageRow.svelte';
 	import AccountBillingRow from './AccountBillingRow.svelte';
 	import type { HostProvider } from '$lib/stores/providersV7';
+	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
+	import { openProjectSettings } from '$lib/stores/settingsNavigation';
 	import {
 		addVendorAccount,
 		cancelVendorSignin,
@@ -32,8 +38,23 @@
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editError = $state('');
-	let menuId = $state<string | null>(null);
 	let removeTarget = $state<VendorAccount | null>(null);
+	const accountMenu = createRowMenu<VendorAccount>((account) => account.state !== 'removed' && !pending[account.id]);
+	const menuItems = $derived.by<MenuItem[]>(() => {
+		const account = accountMenu.open?.item;
+		if (!account) return [];
+		const disabled = account.details_stale || !!pending[account.id];
+		return [
+			{ id: 'rename', label: 'Rename', disabled },
+			...(account.state === 'legacy' ? [] : [
+				{ id: 'sign-out', label: 'Sign out', disabled },
+				{ id: 'remove', label: 'Remove', danger: true, disabled },
+			]),
+		];
+	});
+	const policyState = createProviderPolicyState();
+	const policyProvider = $derived(policyState.policy?.providers.find((entry) => entry.provider_key === provider.name));
+	const overridingProjects = $derived(policyState.policy?.overriding_projects ?? []);
 	let signin = $state<Record<string, SigninResult>>({});
 
 	// The historical view owns its removed accounts, so a later plain reload of the shared list cannot strand it.
@@ -45,6 +66,7 @@
 	const showRows = $derived(accounts.length > 0 || Object.keys(signin).length > 0);
 
 	onMount(async () => {
+		void policyState.load();
 		const result = await loadVendorAccounts();
 		if (!result.ok) {
 			if (!result.superseded) actionError = result.error ?? 'Could not load accounts.';
@@ -190,7 +212,7 @@
 
 	function beginRename(account: VendorAccount) {
 		if (account.details_stale || pending[account.id] || (editingId && pending[editingId])) return;
-		menuId = null; editingId = account.id;
+		accountMenu.close(); editingId = account.id;
 		editName = account.label.custom ?? '';
 		editError = '';
 	}
@@ -215,7 +237,7 @@
 
 	async function signOut(account: VendorAccount) {
 		if (!beginAction(account.id)) return;
-		menuId = null; actionError = '';
+		accountMenu.close(); actionError = '';
 		const result = await signOutVendorAccount(account);
 		endAction(account.id);
 		if (!result.ok) { actionError = result.error ?? 'Could not sign out.'; return; }
@@ -227,13 +249,21 @@
 		if (!removeTarget) return;
 		const account = removeTarget;
 		if (!beginAction(account.id)) return;
-		removeTarget = null; menuId = null; actionError = '';
+		removeTarget = null; accountMenu.close(); actionError = '';
 		const result = await removeVendorAccount(account);
 		endAction(account.id);
 		if (!result.ok) { actionError = result.error ?? 'Could not remove account.'; return; }
 		clearSignin(account.id);
 		if (result.error) actionError = result.error;
 		if (showHistorical) await openHistoricalAccounts();
+	}
+
+	function selectAccountMenu(id: string) {
+		const account = accountMenu.open?.item;
+		if (!account) return;
+		if (id === 'rename') beginRename(account);
+		else if (id === 'sign-out') void signOut(account);
+		else if (id === 'remove') { accountMenu.close(); removeTarget = account; }
 	}
 </script>
 
@@ -246,12 +276,15 @@
 		<Button size="sm" variant="primary" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 	{:else}
 		<div class="account-heading">
-			<span>Accounts</span>
 			<Button size="sm" variant="primary" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 		</div>
-		{#each accounts as account (account.id)}
+		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
+			<div class="rollover-row"><span>Roll over when an account hits its limit</span><Toggle checked={policyProvider.rollover} disabled={policyState.busy} ariaLabel="Roll over when an account hits its limit" onchange={(value) => policyState.save(policyProvider, { rollover: value })} /></div>
+		{/if}
+		{#each accounts as account, index (account.id)}
+			{@const unit = policyProvider?.units.find((candidate) => candidate.id === account.id)}
 			{@const signIn = signin[account.id]}
-			<section class="account" id={`vendor-account-${account.id}`} tabindex="-1" aria-label={`${displayName(account)}, ${stateLabel(account)}`}>
+			<section class="account" id={`vendor-account-${account.id}`} role="button" aria-haspopup="menu" tabindex="0" aria-label={`${displayName(account)}, ${stateLabel(account)}`} {...accountMenu.rowHandlers(account)}>
 				{#if editingId === account.id && account.state !== 'removed'}
 					<Field label="Name" error={editError}>
 						{#snippet trailing()}
@@ -270,7 +303,17 @@
 				{:else}
 					<div class="account-main">
 						<div class="account-copy">
-							<AccountUsageRow {account} />
+							<AccountUsageRow {account} compact order={policyProvider?.rollover && policyProvider.units.length >= 2 ? index + 1 : null}>
+								{#if unit}
+									{#if policyProvider?.rollover && policyProvider.units.length >= 2}
+										<span class="order-controls" aria-label={`${displayName(account)} rollover order`}>
+											<IconButton size="sm" ariaLabel={`Move ${displayName(account)} up`} disabled={policyState.busy || index === 0} onclick={() => policyState.move(policyProvider!, account.id, -1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6" /></svg></IconButton>
+											<IconButton size="sm" ariaLabel={`Move ${displayName(account)} down`} disabled={policyState.busy || index === policyProvider.units.length - 1} onclick={() => policyState.move(policyProvider!, account.id, 1)}><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6-6 6" /></svg></IconButton>
+										</span>
+									{/if}
+									<Toggle checked={unit.enabled} disabled={policyState.busy} ariaLabel={displayName(account)} onchange={(value) => policyState.setEnabled(policyProvider!, account.id, value)} />
+								{/if}
+							</AccountUsageRow>
 							<div class="account-meta">
 								<span>{stateLabel(account)}</span>
 								{#if account.is_default}<span>Workspace account</span>{/if}
@@ -280,24 +323,12 @@
 							{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
 								<Button size="sm" variant="primary" loading={!!pending[account.id]} onclick={() => startSignin(account.id)}>Sign in</Button>
 							{/if}
-							{#if account.state !== 'removed'}
-								<button class="more" disabled={!!pending[account.id]} aria-label={`More actions for ${displayName(account)}`} aria-expanded={menuId === account.id} onclick={() => menuId = menuId === account.id ? null : account.id}>
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
-								</button>
-							{/if}
+							<!-- Row actions open with right-click, long-press, or the context-menu key. -->
 						</div>
 					</div>
 					{#if account.state !== 'removed'}<OverageSwitch {account} inline />{/if}
 					<AccountBillingRow {account} />
-					{#if account.state !== 'removed' && menuId === account.id}
-						<div class="menu" role="menu">
-							<button role="menuitem" disabled={account.details_stale || !!pending[account.id]} onclick={() => beginRename(account)}>Rename</button>
-							{#if account.state !== 'legacy'}
-								<button role="menuitem" disabled={account.details_stale || !!pending[account.id]} onclick={() => signOut(account)}>Sign out</button>
-								<button role="menuitem" class="remove" disabled={account.details_stale || !!pending[account.id]} onclick={() => { menuId = null; removeTarget = account; }}>Remove</button>
-							{/if}
-						</div>
-					{/if}
+					<!-- The shared Menu below owns positioning, focus, and escape. -->
 				{/if}
 				{#if account.state !== 'removed' && account.details_stale && editingId !== account.id}
 					<div class="signin-state"><span>Account details need to be reloaded.</span><Button size="sm" disabled={!!pending[account.id]} onclick={() => reloadAccount(account.id)}>Reload</Button></div>
@@ -319,6 +350,10 @@
 		{/each}
 	{/if}
 
+	{#if overridingProjects.length}
+		<p class="override-summary">Overridden in {overridingProjects.length} {overridingProjects.length === 1 ? 'project' : 'projects'}: {#each overridingProjects as project, index}{#if index > 0}, {/if}<button class="project-link" onclick={() => openProjectSettings(project.id, 'project-provider-policy')}>{project.name}</button>{/each}</p>
+	{/if}
+
 	{#if !showHistorical}<Button size="sm" variant="secondary" onclick={openHistoricalAccounts}>Open historical accounts</Button>{/if}
 	{#if adding}
 		<Field label="Account name" error={actionError}>
@@ -336,6 +371,10 @@
 		</Field>
 	{/if}
 </div>
+
+{#if accountMenu.open}
+	<Menu ariaLabel={`Actions for ${displayName(accountMenu.open.item)}`} items={menuItems} x={accountMenu.open.x} y={accountMenu.open.y} onSelect={selectAccountMenu} onClose={accountMenu.close} />
+{/if}
 
 <ConfirmDialog
 	open={!!removeTarget}
@@ -355,6 +394,10 @@
 	.account-manager :global(.btn.primary:hover:not(:disabled)) { background: var(--accent-wash); }
 	.accounts { display: grid; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); }
 	.account-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: var(--text-footnote); font-weight: 600; }
+	.rollover-row { display: flex; align-items: center; justify-content: space-between; min-height: var(--list-row-min-height); gap: var(--space-2); font-size: var(--text-subhead); color: var(--text-primary); }
+	.order-controls { display: flex; align-items: center; gap: var(--space-1); }
+	.override-summary { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
+	.project-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 	.account { position: relative; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); outline: none; }
 	.account:focus { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
 	.account-main { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
@@ -367,17 +410,12 @@
 	.account-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	.account-meta span + span::before { content: '·'; margin-right: 8px; color: var(--text-tertiary); }
 	.account-actions, .inline-actions, .signin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-	.more { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); background: var(--bg-secondary); cursor: pointer; }
-	.more:hover { color: var(--text-primary); background: var(--bg-tertiary); }
-	.menu { position: absolute; z-index: 2; right: 0; top: 42px; display: grid; min-width: 132px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); box-shadow: var(--glass-elevation-2); }
-	.menu button { border: 0; border-radius: var(--radius-xs); padding: 7px 9px; background: transparent; color: var(--text-primary); font: inherit; font-size: var(--text-footnote); text-align: left; cursor: pointer; }
-	.menu button:hover { background: var(--bg-tertiary); }
-	.menu .remove { color: var(--red-text); }
+	/* The shared Menu component owns row-menu styling. */
 	.signin-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.signin-state { min-width: 0; }
 	/* The row keeps its desktop shape on narrow screens: the account name wraps
 	   inside .account-copy (min-width: 0) and the overflow button stays on the
 	   same line, right-aligned. Stacking the row pushed that lone 28px control
 	   onto its own line, left-aligned, and made every row 46px taller. */
-	@media (max-width: 480px) { .accounts { padding: 10px 12px; } .menu { top: auto; bottom: 4px; } }
+	@media (max-width: 480px) { .accounts { padding: 10px 12px; } }
 </style>

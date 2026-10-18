@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { get, writable } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 const removeNetworkServer = vi.fn(async (_id: string) => ({ ok: true }));
 vi.mock('$lib/stores/networkServers', () => ({
@@ -13,7 +13,7 @@ vi.mock('$lib/stores/providersV7', () => ({
 }));
 
 import ProviderSettingsModal from './ProviderSettingsModal.svelte';
-import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { resetSettingsNavigation } from '$lib/stores/settingsNavigation';
 
 const server = {
 	id: 'ns-plan', provider: 'external', instance_id: 'token-plan.example/v1',
@@ -88,28 +88,21 @@ describe('ProviderSettingsModal remove', () => {
 		expect(window.confirm).not.toHaveBeenCalled();
 	});
 
-	it('opens Workspace settings from the Accounts policy pointer', async () => {
+	it('keeps account policy in the Accounts tab', async () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ accounts: [{
 				id: 'codex-default', provider: 'codex', name: 'Default', is_default: true,
 				state: 'legacy', revision: 1, identity: {},
 				label: { name: 'Plus account 1', email: null, text: 'Plus account 1' },
 			}] })));
-			const onClose = vi.fn();
 			component = mount(ProviderSettingsModal, {
 				target: document.body,
 				props: { provider: {
 					name: 'codex', label: 'Codex', type: 'harness', statusDot: 'online', subline: '1 account · 3 models',
 					raw: { name: 'codex', label: 'Codex', type: 'harness' },
-				} as never, onClose },
+				} as never, onClose: vi.fn() },
 			});
 			await vi.waitFor(() => expect(document.body.textContent).toContain('Plus account 1'));
-			const before = get(settingsNavigation).openRequest;
-			button('Accounts and rollover').click();
-			flushSync();
-			expect(get(settingsNavigation).openRequest).toBe(before + 1);
-			expect(get(settingsNavigation).section).toBe('providers');
-			expect(get(settingsNavigation).anchor).toBe('workspace-provider-policy');
-			expect(onClose).toHaveBeenCalledOnce();
+			expect(document.body.textContent).not.toContain('Rollover and account order are set in Accounts and rollover.');
 		});
 
 	it('opens a harness provider on Accounts with its canonical name and email label', async () => {
@@ -126,7 +119,7 @@ describe('ProviderSettingsModal remove', () => {
 			} as never, onClose: vi.fn() },
 		});
 		await vi.waitFor(() => expect(document.body.textContent).toContain('Personal · person@example.test'));
-		expect(document.body.textContent).toContain('Rollover and account order are set in Accounts and rollover.');
+		expect(document.body.textContent).toContain('Add account');
 	});
 
 	it.each([

@@ -164,7 +164,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 				await page.screenshot({ path: testInfo.outputPath(`${screen}-${surface}.png`), animations: 'disabled', scale: 'css' });
 				if (screen === 'R4') {
 					await page.getByRole('button', { name: 'Sign in' }).click();
-					await expect(page.getByRole('heading', { name: 'Accounts and rollover', exact: true })).toBeVisible();
+					await expect(page.locator('.settings-content')).toBeVisible();
 				}
 			}
 		}

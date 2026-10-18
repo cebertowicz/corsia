@@ -3,77 +3,44 @@
 	import Button from './ui/Button.svelte';
 	import IconButton from './ui/IconButton.svelte';
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
-	import { loadProviderPolicy, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
+	import type { ProviderEntry } from '$lib/api/providerPolicy';
+	import { createProviderPolicyState, providerOverrideSummary } from '$lib/stores/providerPolicyState.svelte';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
-	let policy = $state<ProviderPolicy | null>(null);
-	let error = $state('');
+	const policyState = createProviderPolicyState(projectId);
+	const policy = $derived(policyState.policy);
+	const error = $derived(policyState.error);
+	const loading = $derived(policyState.loading);
+	const busy = $derived(policyState.busy);
 	let accountsError = $state('');
-	let loading = $state(true);
-	let busy = $state(false);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
 
 	$effect(() => { void load(); });
 	async function load() {
-		loading = true; error = ''; accountsError = '';
-		const [result, accounts] = await Promise.all([loadProviderPolicy(projectId), loadVendorAccounts()]);
-		if (result.ok && Array.isArray(result.value?.providers)) policy = result.value;
-		else error = result.ok ? 'Could not load providers.' : result.error;
+		accountsError = '';
+		const [, accounts] = await Promise.all([policyState.load(), loadVendorAccounts()]);
 		if (!accounts.ok) accountsError = accounts.error ?? 'Could not load accounts.';
-		loading = false;
 	}
-	async function toggleScope(useWorkspace: boolean) {
-		if (!projectId || !policy || busy) return;
-		busy = true;
-		try {
-			const result = await saveUseWorkspace(projectId, useWorkspace, policy.override_revision ?? 0);
-			if (result.ok) policy = result.value; else error = result.error;
-		} finally {
-			busy = false;
-		}
-	}
-	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>) {
-		if (busy) return;
-		busy = true; error = '';
-		try {
-			const result = await saveProviderPolicy({ ...entry, ...patch }, projectId);
-			if (result.ok && policy) policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === entry.provider_key ? result.value : item) };
-			else if (!result.ok) error = result.error;
-		} finally {
-			busy = false;
-		}
-	}
+	async function toggleScope(useWorkspace: boolean) { await policyState.toggleScope(useWorkspace); }
+	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>) { await policyState.save(entry, patch); }
 	function providerName(provider: ProviderEntry) {
 		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';
 	}
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);
 	}
-	function overrideSummary() {
-		const projects = policy?.overriding_projects ?? [];
-		if (!projects.length) return 'Every project uses these settings';
-		return `Overridden in ${projects.length} ${projects.length === 1 ? 'project' : 'projects'}: ${projects.map((project) => project.name).join(', ')}`;
-	}
+	function overrideSummary() { return providerOverrideSummary(policy); }
 	// The workspace's order sits under Providers, above every project's override.
 	function openWorkspaceProviders() {
-		requestSettingsSection('providers', 'workspace-provider-policy');
+		requestSettingsSection('providers');
 	}
-	function setEnabled(provider: ProviderEntry, unitId: string, enabled: boolean) {
-		void save(provider, { disabled: enabled ? provider.disabled.filter((id) => id !== unitId) : [...provider.disabled, unitId] });
-	}
-	function move(entry: ProviderEntry, unitId: string, direction: -1 | 1) {
-		const order = [...(entry.order ?? entry.units.map((unit) => unit.id))];
-		const index = order.indexOf(unitId);
-		const destination = index + direction;
-		if (index < 0 || destination < 0 || destination >= order.length) return;
-		[order[index], order[destination]] = [order[destination], order[index]];
-		void save(entry, { order });
-	}
+	function setEnabled(provider: ProviderEntry, unitId: string, enabled: boolean) { policyState.setEnabled(provider, unitId, enabled); }
+	function move(entry: ProviderEntry, unitId: string, direction: -1 | 1) { policyState.move(entry, unitId, direction); }
 </script>
 
-<section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
+<section class="providers-policy" aria-label="Project providers" data-settings-anchor="project-provider-policy" use:settingsAnchor={'project-provider-policy'}>
 	<h2>Accounts and rollover</h2>
 	{#if loading}<p role="status">Loading providers…</p>
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
