@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from llm import own_omlx_management
+from llm.local_downloads import Download
 from llm.local_model import LocalModel
 from llm import local_setup_auth, local_setup_runtime
 
@@ -253,7 +254,7 @@ async def test_settings_download_never_auto_loads_under_use_mine(monkeypatch) ->
 
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
     auto_load_calls: list[bool] = []
-    downloads = []
+    downloads: list[Download] = []
 
     async def managed_download(*_args, **_kwargs):
         return "server", True
