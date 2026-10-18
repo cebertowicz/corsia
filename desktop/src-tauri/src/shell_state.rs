@@ -19,16 +19,16 @@ pub enum LaunchState {
 /// The only owner of what the native startup shell draws: the remote connection, and this computer's own service
 /// when its start failed or answered at launch. Transport modules and starts report outcomes here; they never select
 /// shell pages themselves.
-pub struct RemoteConnection {
+pub struct ShellState {
     state: LaunchState,
 }
 
-impl Default for RemoteConnection {
+impl Default for ShellState {
     fn default() -> Self {
         Self::launch(None)
     }
 }
-impl RemoteConnection {
+impl ShellState {
     pub fn launch(saved: Option<&RemoteRecord>) -> Self {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
             name: remote.name.clone(),
@@ -73,15 +73,15 @@ impl RemoteConnection {
     }
 
     /// The window ran a local start itself. The page that awaits it draws its answer, so a launch answer kept here is
-    /// no longer what the window shows. A failure stays until a start answers Ready: if this start fails too, a later
-    /// shell load still draws the failure with its Try again.
+    /// no longer what the window shows. A failure stays until the start answers: if it fails too, a later shell load
+    /// still draws the failure with its Try again.
     pub fn local_start_began(&mut self) {
         if matches!(self.state, LaunchState::LocalStartup { .. }) {
             self.state = LaunchState::Local;
         }
     }
 
-    /// A start the window ran answered Ready, so a kept failure no longer holds.
+    /// A start the window ran answered, and its page draws that answer, so a kept failure no longer holds.
     pub fn service_recovered(&mut self) {
         if matches!(self.state, LaunchState::ServiceFailed { .. }) {
             self.state = LaunchState::Local;
@@ -132,20 +132,20 @@ mod tests {
 
     #[test]
     fn launch_without_a_saved_remote_starts_local() {
-        assert_eq!(RemoteConnection::launch(None).state(), &LaunchState::Local);
+        assert_eq!(ShellState::launch(None).state(), &LaunchState::Local);
     }
 
     #[test]
     fn launch_with_saved_remote_connects_before_any_local_service_starts() {
         assert_eq!(
-            RemoteConnection::launch(Some(&record())).state(),
+            ShellState::launch(Some(&record())).state(),
             &LaunchState::Connecting { name: "Studio".into() }
         );
     }
 
     #[test]
     fn launch_failures_keep_the_paired_name_and_recovery_transition() {
-        let mut connection = RemoteConnection::launch(Some(&record()));
+        let mut connection = ShellState::launch(Some(&record()));
         connection.failed("Studio", ConnectFailure::Network);
         assert_eq!(
             connection.state(),
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn a_service_failure_survives_the_end_of_a_pairing_until_the_launch_answers() {
-        let mut connection = RemoteConnection::default();
+        let mut connection = ShellState::default();
         connection.begin_pairing();
         connection.service_failed("did not start");
         connection.end_pairing();
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn a_launch_answer_lasts_until_the_window_runs_a_start_and_never_replaces_what_the_person_began_since() {
         let offered = crate::ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() };
-        let mut connection = RemoteConnection::default();
+        let mut connection = ShellState::default();
         connection.launch_answered(Ok(offered.clone()));
         assert_eq!(connection.state(), &LaunchState::LocalStartup { startup: offered });
         connection.local_start_began();
@@ -194,8 +194,8 @@ mod tests {
     }
 
     #[test]
-    fn a_service_failure_outlasts_a_start_the_window_runs_until_one_answers_ready() {
-        let mut connection = RemoteConnection::default();
+    fn a_service_failure_outlasts_a_start_the_window_runs_until_one_answers() {
+        let mut connection = ShellState::default();
         connection.launch_answered(Err("did not start".into()));
         connection.local_start_began();
         assert_eq!(

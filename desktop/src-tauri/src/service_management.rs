@@ -322,6 +322,9 @@ fn unregister_if_registered(manager: &impl ServiceManager) -> Result<(), String>
     })
 }
 
+/// What the person sees when registering the service failed and macOS then would not say its state; the cause is logged.
+const REGISTRATION_FAILED: &str = "CORSIA could not register its service";
+
 pub fn ensure_service_registered(
     manager: &impl ServiceManager,
     reader: &impl LaunchctlReader,
@@ -352,24 +355,18 @@ pub fn ensure_service_registered(
             manager.status()
         }
         // SMAppService reports NotFound for an agent that was never registered for this
-        // user, so only register() can tell whether the bundle really lacks it. A failure
-        // after which macOS still finds no agent keeps that cause's own sentence, with
-        // macOS's text in the log; any other failure is reported like NotRegistered's,
-        // including one after which the status cannot be read.
+        // user, so only register() can tell whether the bundle really lacks it. After a
+        // failure, macOS's text goes to the log and the status macOS then reports picks
+        // the sentence the person sees (still not found: the missing agent; not
+        // registered: the registration that did not persist).
         ServiceStatus::NotFound => {
             refuse_foreign_corsia_job(reader, executable)?;
             if let Err(error) = manager.register() {
-                return match manager.status() {
-                    Ok(ServiceStatus::NotFound) => {
-                        log::error!("registering the CORSIA service it reported as not found failed: {error}");
-                        Ok(ServiceStatus::NotFound)
-                    }
-                    Ok(_) => Err(error),
-                    Err(status_error) => {
-                        log::error!("could not read the CORSIA service status after its registration failed: {status_error}");
-                        Err(error)
-                    }
-                };
+                log::error!("registering the CORSIA service it reported as not found failed: {error}");
+                return manager.status().map_err(|status_error| {
+                    log::error!("could not read the CORSIA service status after its registration failed: {status_error}");
+                    REGISTRATION_FAILED.to_owned()
+                });
             }
             manager.status()
         }
@@ -830,24 +827,25 @@ mod tests {
         );
         assert_eq!(lacking.registrations.get(), 1);
 
-        // macOS found the agent but would not register it: not the missing-agent cause.
+        // macOS found the agent but would not register it: not the missing-agent cause, and
+        // never macOS's own text.
         let refused = FakeManager::default();
         refused.status.set(Some(ServiceStatus::NotFound));
         refused.registered_status.set(Some(ServiceStatus::NotRegistered));
         refused.register_error.set(Some("Operation not permitted"));
         assert_eq!(
             ensure_unlocked_service_registered(&refused, &reader, &executable),
-            Err("Operation not permitted".into())
+            Ok(ServiceStatus::NotRegistered)
         );
 
-        // The status cannot be read after the failure: the registration's own error is what failed.
+        // The status cannot be read after the failure: a named sentence, not macOS's text.
         let unreadable = FakeManager::default();
         unreadable.status.set(Some(ServiceStatus::NotFound));
         unreadable.status_lost_on_register.set(true);
         unreadable.register_error.set(Some("Operation not permitted"));
         assert_eq!(
             ensure_unlocked_service_registered(&unreadable, &reader, &executable),
-            Err("Operation not permitted".into())
+            Err(REGISTRATION_FAILED.into())
         );
     }
 
