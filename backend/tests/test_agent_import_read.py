@@ -113,11 +113,17 @@ def test_a_root_inside_corsias_own_homes_counts_as_not_found(home, monkeypatch, 
     assert "codex" in found  # the person's default folder is theirs, not a managed home
 
 
-def test_a_root_under_corsia_state_counts_as_not_found(home, monkeypatch):
+def test_a_root_under_corsia_state_counts_as_not_found(home, tmp_path):
+    import shutil
+
     from infra import config
 
-    monkeypatch.setattr(config, "STATE_ROOT", home.hermes.parent)
-    assert reader.found_tools(home) == []
+    inside = Path(config.STATE_ROOT) / f"hermes-{tmp_path.name}"
+    shutil.copytree(home.hermes, inside)
+    try:
+        assert reader.found_tools(Roots.for_user(hermes=inside)) == ["claude-code", "codex", "openclaw"]
+    finally:
+        shutil.rmtree(inside)
 
 
 def _read(home, tools=reader.TOOLS):

@@ -33,6 +33,13 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+def _workspace():
+    """The workspace whose ``skills/`` the offers compare against and installs write to."""
+    from infra import config
+
+    return config.WORKSPACE
+
+
 def _texts():
     from onboarding.consent import ConsentTexts
 
@@ -203,7 +210,6 @@ def _tool_keys(labels) -> list[str]:
 
 
 async def _read(thread_id, thread, decision_id, card) -> dict[str, Any]:
-    from infra import config
     from onboarding import agent_import, agent_import_skills, consent, setup_decisions
     from onboarding.project_discovery import Roots
 
@@ -216,7 +222,7 @@ async def _read(thread_id, thread, decision_id, card) -> dict[str, Any]:
     tools = _tool_keys(wordings[used.wording])
     roots = Roots.for_user()
     memory = await run_off_db(agent_import.read_memory, roots, tools)
-    skills = await run_off_db(agent_import_skills.skill_offers, roots, tools, config.WORKSPACE)
+    skills = await run_off_db(agent_import_skills.skill_offers, roots, tools, _workspace())
     offered = [row["item_id"] for row in skills if row["state"] == agent_import_skills.NEW]
     await _in_plan(lambda db: consent.record_receipt(db, used, READ_OPERATION, {
         "tools": tools, "opened": memory.opened, "skipped": memory.skipped, "offers": offered,
@@ -255,7 +261,6 @@ def _authorize_install(db, used, item_ids, now):
 
 
 async def _install(thread_id, thread, decision_id, card, item_ids) -> dict[str, Any]:
-    from infra import config
     from onboarding import agent_import_skills, consent, setup_decisions
     from onboarding.project_discovery import Roots
 
@@ -270,7 +275,7 @@ async def _install(thread_id, thread, decision_id, card, item_ids) -> dict[str, 
 
     used, tools = await _in_plan(authorize)
     results = await run_off_db(agent_import_skills.install_skills, Roots.for_user(), tools,
-                               config.WORKSPACE, item_ids, now=now)
+                               _workspace(), item_ids, now=now)
     await _in_plan(lambda db: consent.record_receipt(db, used, INSTALL_OPERATION, {
         "items": [{key: row[key] for key in ("item_id", "sha256", "outcome") if key in row} for row in results],
     }, {"item_ids": sorted(item_ids)}))

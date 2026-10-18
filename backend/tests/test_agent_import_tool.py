@@ -139,8 +139,11 @@ async def _execute(thread_id="owner", project_id="project-1", **kwargs):
 
 @pytest.fixture
 def wired(db, tmp_path, monkeypatch):  # noqa: F811 - the shared fixture
-    """The tool on the test plan database, with fixture homes for Claude Code and Codex."""
-    from infra import config
+    """The tool on the test plan database, with fixture homes for Claude Code and Codex.
+
+    The workspace is swapped through the tool's own seam, never ``infra.config.WORKSPACE``:
+    modules imported later (``tools.sandbox_config``) snapshot that global for the process.
+    """
     from plans import public
 
     home = tmp_path / "home"
@@ -148,7 +151,7 @@ def wired(db, tmp_path, monkeypatch):  # noqa: F811 - the shared fixture
     (home / ".claude").mkdir(parents=True)
     (home / ".claude" / "CLAUDE.md").write_text("Maya Chen prefers short answers")
     _skill(home / ".codex" / "skills" / "rfc-writer", "rfc-writer", "drafts RFCs")
-    monkeypatch.setattr(config, "WORKSPACE", tmp_path / "workspace")
+    monkeypatch.setattr(tool_module, "_workspace", lambda: tmp_path / "workspace")
     monkeypatch.setattr(tool_module, "_allowed", lambda _tid, _project: True)
     monkeypatch.setattr(tool_module, "_card_facts", lambda _tid: CARD)
 
