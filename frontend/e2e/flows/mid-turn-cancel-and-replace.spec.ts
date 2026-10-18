@@ -167,7 +167,15 @@ test.describe('@flow:chat @surface:chat same-boundary mid-turn Send', () => {
 			&& receipt.messages.every(message => message.delivery_state === 'delivered'),
 		);
 		await releaseMockGate(request, completionGate);
-		await expect.poll(matchingReceipts).toHaveLength(1);
+		try {
+			await expect.poll(matchingReceipts).toHaveLength(1);
+		} catch (error) {
+			// Name every batch this page received, so a missing settled receipt shows what arrived instead.
+			const seen = messagesAddedReceipts
+				.filter(receipt => receipt.sessionId === sessionId)
+				.map(receipt => receipt.messages.map(message => `${String(message.content).slice(0, 24)}:${String(message.delivery_state)}:${String(message.seq)}`));
+			throw new Error(`${(error as Error).message}\nmessages_added batches received for this session: ${JSON.stringify(seen)}`);
+		}
 		const [batchReceipt] = matchingReceipts();
 		if (!batchReceipt) throw new Error('Missing B/C messages_added receipt after release');
 		expect(batchReceipt.messages.map(message => message.content)).toEqual([messageB, messageC]);
