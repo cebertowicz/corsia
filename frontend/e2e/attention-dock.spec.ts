@@ -171,7 +171,7 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
     // Other → listed option: the head defect. The draft clears and Answer arms.
     const other = showcase.locator(".other-option textarea").first();
     await other.fill("Actually, split this into two.");
-    await expect(showcase.locator(".other-option").first()).toHaveClass(
+    await expect(showcase.locator(".other-option textarea").first()).toHaveClass(
       /selected/,
     );
     await showcase

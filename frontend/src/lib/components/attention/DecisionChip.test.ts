@@ -71,13 +71,22 @@ describe('DecisionChip — Other field', () => {
 		expect(el.querySelector('.other-option input')).toBeNull();
 	});
 
+	it('names the field Other for assistive tech and shows no visible label', () => {
+		const el = renderChip(makeDecision());
+		const textarea = el.querySelector('.other-option textarea')!;
+		const label = textarea.closest('label')!;
+		expect(label.textContent).toContain('Other');
+		expect(label.querySelector('.sr-only')?.textContent).toBe('Other');
+		expect(textarea.getAttribute('placeholder')).toBe('Type your own response');
+	});
+
 	it('does not select Other merely by focusing the field', () => {
 		const el = renderChip(makeDecision());
 		const textarea = el.querySelector('textarea')!;
 		textarea.focus();
 		textarea.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 		flushSync();
-		expect(el.querySelector('.other-option')!.classList.contains('selected')).toBe(false);
+		expect(el.querySelector('.other-option textarea')!.classList.contains('selected')).toBe(false);
 		const answerBtn = el.querySelector('.decision-actions button') as HTMLButtonElement;
 		expect(answerBtn.disabled).toBe(true);
 	});
@@ -88,7 +97,7 @@ describe('DecisionChip — Other field', () => {
 		textarea.value = 'a considered, multi-sentence answer.';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		expect(el.querySelector('.other-option')!.classList.contains('selected')).toBe(true);
+		expect(el.querySelector('.other-option textarea')!.classList.contains('selected')).toBe(true);
 	});
 
 	it('does not submit on Enter — no form wraps it and nothing intercepts the key', () => {
