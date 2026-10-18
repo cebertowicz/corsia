@@ -253,10 +253,24 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 
 });
 
+
+async function swipe(page: Page, a: { x: number; y: number }, b: { x: number; y: number }, variant: string) {
+	if (variant !== 'slowdrag') { await touchDrag(page, a, b); if (variant === 'waitlong') await page.waitForTimeout(2500); return; }
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x, y: a.y, id: 0 }] });
+	for (let step = 1; step <= 8; step++) {
+		await page.waitForTimeout(24);
+		await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x + ((b.x - a.x) * step) / 8, y: a.y + ((b.y - a.y) * step) / 8, id: 0 }] });
+	}
+	await page.waitForTimeout(150);
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+	await cdp.detach();
+}
+
 test.describe('@flow:image-region-comments @surface:documents comments on parts of an image, by touch', () => {
 	test.use({ hasTouch: true });
 
-	for (const variant of ['control', 'wait600', 'nopan'] as const) test(`phone: the Comment button draws one box with one finger, in a bottom sheet (393) [${variant}]`, async ({ page, request }, testInfo) => {
+	for (const variant of ['control', 'slowdrag', 'waitlong'] as const) test(`phone: the Comment button draws one box with one finger, in a bottom sheet (393) [${variant}]`, async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 		await page.setViewportSize({ width: 393, height: 852 });
 		await page.emulateMedia({ colorScheme: 'dark' });
@@ -276,7 +290,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await commentButton(page).tap();
 			await expect(commentButton(page)).toHaveAttribute('aria-pressed', 'true');
 			await shoot(page, testInfo, '393-02-box-mode', true);
-			await touchDrag(page, await at(page, 0.2, 0.3), await at(page, 0.6, 0.6));
+			await swipe(page, await at(page, 0.2, 0.3), await at(page, 0.6, 0.6), variant);
 			await expect(sheet(page)).toBeVisible();
 			await expect(sheet(page).locator('textarea')).toBeVisible();
 			await sheet(page).locator('textarea').fill('Too much padding on phones');
@@ -292,9 +306,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(sheet(page)).toHaveCount(0);
 
 			// Outside box mode one finger pans again: nothing is drawn.
-			if (variant !== 'nopan') await touchDrag(page, await at(page, 0.7, 0.7), await at(page, 0.5, 0.5));
+			await swipe(page, await at(page, 0.7, 0.7), await at(page, 0.5, 0.5), variant);
 			await expect(composer(page)).toHaveCount(0);
-			if (variant === 'wait600') await page.waitForTimeout(600);
 
 			// The tag's touch target is 44 px around its number.
 			const disc = (await tag(page, 1).locator('.disc').boundingBox())!;
