@@ -374,5 +374,44 @@ async def test_settings_download_never_auto_loads_under_use_mine(monkeypatch) ->
     assert downloads[0].server_id == "server"
 
 
+@pytest.mark.asyncio
+async def test_settings_flight_emits_completed_event(monkeypatch) -> None:
+    from llm import local_settings_download, local_setup
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    emitted: list[tuple[str, dict]] = []
+
+    async def completed(_report, _model):
+        return {"ok": True}
+
+    monkeypatch.setattr(local_settings_download, "run", completed)
+    monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: emitted.append((action, properties)))
+    monkeypatch.setattr(local_setup.local_setup_operation, "finish", lambda _flight, result: result)
+
+    assert await local_settings_download._run_flight(model) == {"ok": True}
+    assert emitted == [("completed", {"kind": "settings", "model": model.repository})]
+
+
+@pytest.mark.asyncio
+async def test_settings_flight_emits_failed_event(monkeypatch) -> None:
+    from llm import local_settings_download, local_setup
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    emitted: list[tuple[str, dict]] = []
+
+    async def failed(_report, _model):
+        raise ValueError("oMLX unavailable")
+
+    monkeypatch.setattr(local_settings_download, "run", failed)
+    monkeypatch.setattr(local_settings_download.local_downloads, "write", lambda _download: None)
+    monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: emitted.append((action, properties)))
+    monkeypatch.setattr(local_setup.local_setup_operation, "finish", lambda _flight, result: result)
+
+    result = await local_settings_download._run_flight(model)
+
+    assert result["ok"] is False
+    assert emitted == [("failed", {"kind": "settings", "model": model.repository, "error_type": "ValueError"})]
+
+
 async def _empty_settings() -> dict:
     return {}

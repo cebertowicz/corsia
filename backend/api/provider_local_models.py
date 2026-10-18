@@ -29,12 +29,22 @@ async def _server() -> dict[str, Any]:
 
 
 async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]]]:
-    downloads = [item.view() for item in local_downloads.all()]
     if not await asyncio.to_thread(local_memory_ok):
         from llm.local_setup_prepare import NO_LOCAL_MODEL
 
+        downloads = [item.view() for item in local_downloads.all()]
         return {"state": "low_memory", "message": NO_LOCAL_MODEL, "sections": {}, "downloads": downloads}, {}
     server = await _server()
+    from llm.providers.omlx_lifecycle import list_disk_models
+
+    try:
+        disk_models = await list_disk_models({"server_id": server["id"]})
+    except Exception:
+        disk_models = None
+    if isinstance(disk_models, list):
+        local_downloads.reconcile({row["identifier"] for row in disk_models
+                                   if isinstance(row, dict) and isinstance(row.get("identifier"), str)})
+    downloads = [item.view() for item in local_downloads.all()]
     if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
         return {
             "state": "update_required",
@@ -94,7 +104,7 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
     model = next((item for rows in sections.values() for item in rows if item.repository == repository), None)
     if model is None:
         _clear_failed_record(model_id)
-        raise HTTPException(400, "That model no longer fits this computer. Pick another from the list.")
+        raise HTTPException(400, "Couldn't download that model: it isn't in the list for this computer right now. Pick another from the list.")
     server = await _server()
     model_dir = await download_dir(str(server["id"]))
     space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
@@ -132,8 +142,13 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
         raise HTTPException(409, "Couldn't delete this model while it is loaded. Unload it first, then try again.")
     disk_models = await list_disk_models({"server_id": server["id"]})
     if not any(row.get("identifier") == model_id for row in disk_models):
-        if (record := local_downloads.get(model_id)) is not None and record.status == "failed":
+        if local_downloads.get(model_id) is not None:
             local_downloads.forget(model_id)
+            from llm.own_omlx_management import forget_model_originals
+            from infra.state.ws import notify_models_changed
+
+            forget_model_originals(model_id)
+            notify_models_changed()
             return {"ok": True}
         raise HTTPException(404, "Couldn't find this local model download. Refresh the list and try again.")
     downloaded = local_downloads.get(model_id)
@@ -155,7 +170,10 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
     if downloaded is not None:
         local_downloads.forget(model_id)
     from llm.own_omlx_management import forget_model_originals
-    forget_model_originals(model_id)
+    from llm.local_setup import _emit
     from infra.state.ws import notify_models_changed
+
+    forget_model_originals(model_id)
+    _emit("deleted", kind="settings", model=model_id)
     notify_models_changed()
     return {"ok": True}

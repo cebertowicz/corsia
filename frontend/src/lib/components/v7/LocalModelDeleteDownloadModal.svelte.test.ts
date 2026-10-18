@@ -30,6 +30,7 @@ describe('LocalModelDeleteDownloadModal', () => {
 		flushSync();
 
 		expect(host.textContent).toContain('8.6 GB');
+		expect(host.textContent).not.toContain('You can download it again later.');
 		expect(fetchMock).not.toHaveBeenCalled();
 		[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Delete download')!.click();
 		await tick(); await tick();

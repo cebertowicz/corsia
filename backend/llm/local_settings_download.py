@@ -109,7 +109,11 @@ async def _run_flight(model: LocalModel) -> dict:
         result = ls._stopped_following(model, events)
     except Exception as exc:
         ls.log.exception("Settings model download failed")
+        ls._emit("failed", kind="settings", model=model.repository, error_type=type(exc).__name__)
         result = {"ok": False, "message": f"Couldn't download {model.display_name}. Try again.", "detail": str(exc), "progress": events}
+    else:
+        if result.get("ok") and not result.get("downloading"):
+            ls._emit("completed", kind="settings", model=model.repository)
     if not result.get("ok") and not result.get("downloading"):
         local_downloads.write(local_downloads.Download(
             model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),

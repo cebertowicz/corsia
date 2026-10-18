@@ -316,7 +316,6 @@
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
 				onInfo={() => detailsFor = m}
-				onDeleteDownload={provider.name === 'omlx' ? () => requestDownloadDeletion(m) : undefined}
 			/>
 		{/each}
 	{/if}
@@ -352,7 +351,7 @@
 				state={m.state}
 				meta={localDownloadMeta(m.meta, downloadSpeed(m))}
 				caps={m.caps}
-				note={downloadSpeed(m) !== undefined ? 'Settings measured on Macs like this one · omlx.ai' : null}
+				note={downloadSpeed(m) !== undefined ? 'Settings measured on computers like this one · omlx.ai' : null}
 				toggleOn={false}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}

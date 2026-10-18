@@ -43,7 +43,7 @@
 	onClose={() => { if (!deleting) onClose(); }}
 >
 	<p class="copy">
-		Delete{size ? ` the ${size} download` : ' the download'} of <strong>{model.name}</strong> from this computer? You can download it again later.
+		Delete{size ? ` the ${size} download` : ' the download'} of <strong>{model.name}</strong> from this computer?
 	</p>
 	{#if error}<p class="error">{error}</p>{/if}
 	{#snippet foot()}

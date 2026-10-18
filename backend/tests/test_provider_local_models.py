@@ -55,13 +55,37 @@ async def test_delete_known_omlx_model_without_settings_record(monkeypatch, tmp_
 
     forgotten: list[str] = []
     changed: list[bool] = []
+    emitted: list[tuple[str, dict]] = []
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
     monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", forgotten.append)
+    monkeypatch.setattr("llm.local_setup._emit", lambda action, **properties: emitted.append((action, properties)))
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: changed.append(True))
 
     assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
     assert requests == [("DELETE", f"/hf/models/{MODEL.model}"), ("GET", "/models")]
+    assert forgotten == [MODEL.model]
+    assert emitted == [("deleted", {"kind": "settings", "model": MODEL.model})]
+    assert changed == [True]
+
+
+@pytest.mark.asyncio
+async def test_delete_clears_an_available_record_missing_from_disk(monkeypatch, tmp_path) -> None:
+    _route_with_known_model(monkeypatch)
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    local_downloads.write(local_downloads.Download(MODEL))
+
+    async def missing_from_disk(_config):
+        return []
+
+    forgotten: list[str] = []
+    changed: list[bool] = []
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", missing_from_disk)
+    monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", forgotten.append)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: changed.append(True))
+
+    assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
+    assert local_downloads.get(MODEL.model) is None
     assert forgotten == [MODEL.model]
     assert changed == [True]
 
@@ -151,6 +175,56 @@ async def test_delete_refuses_active_or_recoverable_operation_for_model(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_recommendations_remove_available_records_missing_from_disk(monkeypatch, tmp_path) -> None:
+    async def server():
+        return {"id": "server"}
+
+    async def missing_from_disk(_config):
+        return []
+
+    forgotten: list[str] = []
+    failed_model = LocalModel("Jundot/Other", 1_000_000, 32_768)
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    local_downloads.write(local_downloads.Download(MODEL))
+    local_downloads.write(local_downloads.Download(failed_model, status="failed"))
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "_server", server)
+    monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
+    monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", missing_from_disk)
+    monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", forgotten.append)
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert result["downloads"] == [local_downloads.Download(failed_model, status="failed").view()]
+    assert local_downloads.get(MODEL.model) is None
+    assert local_downloads.get(failed_model.model) is not None
+    assert forgotten == [MODEL.model]
+
+
+@pytest.mark.asyncio
+async def test_recommendations_leave_records_when_disk_listing_fails(monkeypatch, tmp_path) -> None:
+    async def server():
+        return {"id": "server"}
+
+    async def unavailable_disk_listing(_config):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    local_downloads.write(local_downloads.Download(MODEL))
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "_server", server)
+    monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
+    monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", unavailable_disk_listing)
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert result["downloads"] == [local_downloads.Download(MODEL).view()]
+    assert local_downloads.get(MODEL.model) is not None
+
+
+@pytest.mark.asyncio
 async def test_recommendations_include_memory_and_download_volume_free_disk(monkeypatch, tmp_path) -> None:
     async def recommended(_server_id):
         return {"best": [MODEL]}
@@ -161,11 +235,15 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     async def model_dir(_server_id):
         return tmp_path
 
+    async def no_disk_models(_config):
+        return []
+
     monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "host_ram_bytes", lambda: 64 * 1024**3)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: True)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.1")
     monkeypatch.setattr(provider_local_models, "_server", server)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", no_disk_models)
     monkeypatch.setattr(provider_local_models, "ask_recommendations", recommended)
     monkeypatch.setattr(provider_local_models, "download_dir", model_dir)
     monkeypatch.setattr(
@@ -181,6 +259,21 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
     assert result["sections"]["best"] == [{
         **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3},
     }]
+
+
+@pytest.mark.asyncio
+async def test_download_names_a_model_missing_from_recommendations(monkeypatch) -> None:
+    async def no_recommendations():
+        return {}, {"best": []}
+
+    monkeypatch.setattr(provider_local_models, "_recommendations", no_recommendations)
+    monkeypatch.setattr(provider_local_models, "_clear_failed_record", lambda _model_id: None)
+
+    with pytest.raises(HTTPException) as raised:
+        await provider_local_models.download_model({"repository": MODEL.repository}, {})
+
+    assert raised.value.status_code == 400
+    assert raised.value.detail == "Couldn't download that model: it isn't in the list for this computer right now. Pick another from the list."
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from llm import own_omlx_management
 from llm.local_model import LocalModel, from_recommendation, to_record
 
 _RECORD_NAME = "local-downloads.json"
@@ -95,6 +96,14 @@ def forget(model_id: str) -> None:
     values = _read_raw()
     if values.pop(model_id, None) is not None:
         _write_raw(values)
+
+
+def reconcile(on_disk: set[str]) -> None:
+    """Forget completed Settings downloads that oMLX no longer has on disk."""
+    for download in all():
+        if download.status == "available" and download.model.model not in on_disk:
+            forget(download.model.model)
+            own_omlx_management.forget_model_originals(download.model.model)
 
 
 def write(download: Download) -> None:
