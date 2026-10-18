@@ -78,21 +78,22 @@ async function fixtureLocalModelState(page: Page, state: RenderState) {
 	await page.route('**/api/providers/sources', async (route) => {
 		await route.fulfill({ json: { sources: [sourceFor(state)] } });
 	});
+	const downloads = state === 'complete' ? [{
+		name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', model: 'qwen3.8-flash-next',
+		download_size_bytes: 16 * 1000 ** 3, download_size_gb: 16, context_window: 262144,
+		status: 'available', speed: 52, detail: null, server_id: 'omlx-local',
+	}] : recommendations.downloads;
 	await page.route('**/api/providers/local/recommendations', async (route) => {
-		await route.fulfill({ json: {
-			...recommendations,
-			downloads: state === 'complete' ? [{
-				name: 'Qwen3.8-Flash-Next', repository: 'qwen/qwen3.8-flash-next', model: 'qwen3.8-flash-next',
-				download_size_bytes: 16 * 1000 ** 3, download_size_gb: 16, context_window: 262144,
-				status: 'available', speed: 52, detail: null, server_id: 'omlx-local',
-			}] : recommendations.downloads,
-		} });
+		await route.fulfill({ json: { ...recommendations, downloads } });
 	});
 	await page.route('**/api/providers/local/downloads', async (route) => {
 		if (route.request().method() === 'POST') {
 			expect(route.request().postDataJSON()).toEqual({ repository: 'qwen/qwen3.8-flash-next' });
+			await route.fulfill({ json: { ok: true } });
+			return;
 		}
-		await route.fulfill({ json: { ok: true } });
+		// Settings rows read the durable records from this route, never the recommender.
+		await route.fulfill({ json: downloads });
 	});
 	// The app may request these unrelated catalog projections while Settings mounts.
 	await page.route('**/api/vendor-accounts**', async (route) => route.fulfill({ json: { accounts: [] } }));
