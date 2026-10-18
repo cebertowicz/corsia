@@ -16,19 +16,23 @@ the roots: it never lists, counts or opens anything in them.
 
 Consent is option A of one answered find-projects decision (``setup_decisions``)
 whose wording matches what CORSIA renders now, used once. ``consume_consent``
-checks and records that use; ``discover`` reads.
+checks and records that use through the shared ``onboarding.consent``;
+``discover`` reads.
 """
 
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import os
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from onboarding import consent
+from onboarding.consent import CONSENT_OPTION_ID, ConsentRefused  # noqa: F401 - public names
+from onboarding.consent import wording_hash as consent_wording_hash  # noqa: F401
 
 HEAD_BYTES = 64 * 1024
 MAX_RESULTS = 50
@@ -38,9 +42,6 @@ CLAUDE_CODE = "claude-code"
 CODEX = "codex"
 
 # --- consent contract -------------------------------------------------------
-
-#: The option that authorizes reading session folders, in the consent decision.
-CONSENT_OPTION_ID = "A"
 
 #: Operation and mutation-id prefix of the receipt that marks a consent used.
 CONSENT_RECEIPT_OPERATION = "project_discovery_consent"
@@ -53,18 +54,21 @@ RAISE_FIRST = (
 )
 NO_SESSIONS = "no Claude Code or Codex session folders were found on this Mac"
 
+CONSENT_TEXTS = consent.ConsentTexts(
+    raise_first=RAISE_FIRST,
+    wrong_wording=(
+        "that decision does not carry the fixed discovery consent wording; " + RAISE_FIRST
+    ),
+    declined=(
+        "the user did not choose to look for projects; do not list them "
+        "and do not ask again unasked"
+    ),
+    used=(
+        "that consent was already used for one listing; raise a new "
+        "discovery consent decision to list again"
+    ),
+)
 
-def consent_wording_hash(title: str, context: str, option_label: str) -> str:
-    """Hash the three strings the user read when consenting."""
-    payload = json.dumps([title, context, option_label], separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-class ConsentRefused(Exception):
-    """The consent decision cannot authorize a listing; the message says why."""
-
-
-# Plan-table reads remain owned by the narrow public Plans interface below.
 
 def consume_consent(db, decision_id: str, actor, wordings) -> None:
     """Accept one answered consent decision once, or raise ``ConsentRefused``.
@@ -72,78 +76,11 @@ def consume_consent(db, decision_id: str, actor, wordings) -> None:
     ``actor`` is the calling thread's ``PlanActor``. ``wordings`` are the
     (title, context, option A label) triples CORSIA renders now
     (``setup_decisions.consent_wordings``); the decision must carry one of them.
-    Use is recorded in the caller's transaction before anything is read, so a
-    crash mid-listing still spends the consent rather than leaving it replayable.
+    The checks and the receipt are ``onboarding.consent``'s.
     """
-    from plans import public
-
-    try:
-        plan, decision, _source, bound = public.resolve_decision(
-            db, decision_id, actor, settled_source_ok=True,
-        )
-    except (PermissionError, public.PlanError) as exc:
-        raise ConsentRefused(
-            f"that decision is not in your plan; {RAISE_FIRST}"
-        ) from exc
-    if plan["owner_id"] != actor.thread_id:
-        raise ConsentRefused(f"that decision is not in your plan; {RAISE_FIRST}")
-    state = decision["state"]
-    if state in ("draft", "parent_reviewed"):
-        raise ConsentRefused(
-            "that decision has not been raised to the user; raise it and wait "
-            "for the user's answer"
-        )
-    if state == "raised":
-        raise ConsentRefused(
-            "the user has not answered that decision yet; wait for the answer"
-        )
-    if state != "answered":
-        raise ConsentRefused(f"that decision was withdrawn; {RAISE_FIRST}")
-    consent_option = next(
-        (o for o in decision["options"] if o["id"] == CONSENT_OPTION_ID), None,
-    )
-    wording = consent_wording_hash(
-        decision["title"], decision["context"],
-        consent_option["label"] if consent_option else "",
-    )
-    if wording not in {consent_wording_hash(*expected) for expected in wordings}:
-        raise ConsentRefused(
-            "that decision does not carry the fixed discovery consent wording; "
-            + RAISE_FIRST
-        )
-    answered_by = public.decision_answer_actor(db, node_id=decision["node_id"])
-    if not (answered_by or "").startswith("user:"):
-        raise ConsentRefused("that decision was not answered by the user")
-    chosen = public.chosen_ids(decision, decision.get("answer"))
-    if public.pick_of(decision) == public.PICK_ANY or chosen != [CONSENT_OPTION_ID]:
-        raise ConsentRefused(
-            "the user did not choose to look for projects; do not list them "
-            "and do not ask again unasked"
-        )
-    mutation_id = f"{CONSENT_RECEIPT_OPERATION}:{decision['id']}"
-    fingerprint = public.request_fingerprint(
-        CONSENT_RECEIPT_OPERATION, {"decision_id": decision["id"]},
-    )
-    try:
-        used = public.load_mutation_receipt(
-            db, plan_id=plan["id"], mutation_id=mutation_id,
-            actor_id=bound.audit_id, operation=CONSENT_RECEIPT_OPERATION,
-            fingerprint=fingerprint,
-        )
-    except public.PlanError as exc:
-        raise ConsentRefused(
-            "that consent was already used for one listing; raise a new "
-            "discovery consent decision to list again"
-        ) from exc
-    if used is not None:
-        raise ConsentRefused(
-            "that consent was already used for one listing; raise a new "
-            "discovery consent decision to list again"
-        )
-    public.record_mutation_receipt(
-        db, plan_id=plan["id"], mutation_id=mutation_id,
-        actor_id=bound.audit_id, operation=CONSENT_RECEIPT_OPERATION,
-        fingerprint=fingerprint, result={"consumed": True},
+    consent.consume(
+        db, decision_id, actor, wordings, CONSENT_TEXTS,
+        operation=CONSENT_RECEIPT_OPERATION, result={"consumed": True},
     )
 
 
@@ -153,21 +90,40 @@ CLAUDE_CODE_APP = "Claude Code"
 CODEX_APP = "Codex"
 
 
+def _home(folder: str):
+    return lambda: Path(os.path.expanduser("~")) / folder
+
+
 @dataclass(frozen=True)
 class Roots:
-    """The user's own history roots. Defaults ignore the process environment."""
+    """The user's own tool roots. Defaults ignore the process environment.
+
+    Discovery reads ``claude`` and ``codex``; ``agent_import`` also reads
+    OpenClaw, Hermes (its default profile) and ``~/.agents``, Codex's shared
+    skills folder.
+    """
 
     claude: Path
     codex: Path
+    openclaw: Path = field(default_factory=_home(".openclaw"))
+    hermes: Path = field(default_factory=_home(".hermes"))
+    agents: Path = field(default_factory=_home(".agents"))
 
     @classmethod
     def for_user(
-        cls, claude: str | Path | None = None, codex: str | Path | None = None,
+        cls, claude: str | Path | None = None, codex: str | Path | None = None, *,
+        openclaw: str | Path | None = None, hermes: str | Path | None = None,
+        agents: str | Path | None = None,
     ) -> "Roots":
         home = Path(os.path.expanduser("~"))
+
+        def root(named: str | Path | None, folder: str) -> Path:
+            return Path(named).expanduser() if named else home / folder
+
         return cls(
-            claude=Path(claude).expanduser() if claude else home / ".claude",
-            codex=Path(codex).expanduser() if codex else home / ".codex",
+            claude=root(claude, ".claude"), codex=root(codex, ".codex"),
+            openclaw=root(openclaw, ".openclaw"), hermes=root(hermes, ".hermes"),
+            agents=root(agents, ".agents"),
         )
 
 
