@@ -1,0 +1,99 @@
+/*
+ * The one text field: shape, focus, error and disabled rules for every free-text control.
+ * Field's `chip` (on a pane, glass fill) and `nested` (inside a card or sheet, plain outline) variants
+ * and the `.text-field` class share these rules. Use the class where a control cannot sit inside Field
+ * (a control whose own wrapper is already a label). Field.svelte imports this file; so must any
+ * component that uses the class on its own.
+ */
+.text-field,
+.field.chip .c :is(input, select, textarea),
+.field.nested .c :is(input, select, textarea) {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	height: var(--space-7);
+	padding: 0 var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-primary);
+	font-family: inherit;
+	font-size: var(--text-input);
+	line-height: 1;
+	appearance: none;
+	-webkit-appearance: none;
+	transition: border-color var(--dur-tight);
+}
+
+/* A touch screen gets the 44px target on every consumer. */
+@media (pointer: coarse) {
+	.text-field,
+	.field.chip .c :is(input, select, textarea),
+	.field.nested .c :is(input, select, textarea) {
+		min-height: var(--touch-target);
+	}
+}
+
+/* A multi-line field grows from one line to about six, then scrolls (the autosize action sets the height). */
+textarea.text-field,
+.field.chip .c textarea,
+.field.nested .c textarea {
+	height: auto;
+	--tf-pad-y: var(--space-1);
+	min-height: var(--space-7);
+	max-height: calc(6lh + 2 * var(--tf-pad-y) + 0.125rem);
+	padding: var(--tf-pad-y) var(--space-4);
+	line-height: var(--lh-snug);
+	resize: none;
+	overflow-y: auto;
+	transition: border-color var(--dur-tight), height var(--dur-tight) var(--ease-snap);
+}
+
+/* On touch the one-line height is the touch target: the padding centres the line, so the cap stays six lines. */
+@media (pointer: coarse) {
+	textarea.text-field,
+	.field.chip .c textarea,
+	.field.nested .c textarea {
+		--tf-pad-y: calc((var(--touch-target) - 1lh - 0.125rem) / 2);
+		height: auto;
+		min-height: var(--touch-target);
+	}
+}
+
+/* On a pane: the composer chip's glass fill. Inside a card or sheet there is none (glass-in-glass, shadow-in-card). */
+.field.chip .c :is(input, select, textarea) {
+	background: var(--glass-thin);
+	box-shadow: var(--glass-rim), var(--shadow-chip);
+}
+
+.text-field::placeholder,
+.field.chip .c :is(input, textarea)::placeholder,
+.field.nested .c :is(input, textarea)::placeholder {
+	color: var(--text-tertiary);
+}
+
+.text-field:focus,
+.field.nested .c :is(input, select, textarea):focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: var(--focus-ring);
+}
+.field.chip .c :is(input, select, textarea):focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: var(--glass-rim), var(--shadow-chip), var(--focus-ring);
+}
+
+.text-field[aria-invalid='true'],
+.field.chip.has-error .c :is(input, select, textarea),
+.field.nested.has-error .c :is(input, select, textarea) {
+	border-color: var(--red-text);
+}
+
+.text-field:disabled,
+.field.chip .c :is(input, select, textarea):disabled,
+.field.nested .c :is(input, select, textarea):disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
