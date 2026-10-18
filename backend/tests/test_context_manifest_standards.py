@@ -328,7 +328,7 @@ class TestStandardsResolution:
 class TestStandardsCategories:
     @pytest.mark.parametrize(
         "category",
-        ["standards/eng-arch", "standards/product", "standards/ux-ia"],
+        ["standards/eng-arch", "standards/product", "standards/ux-ia", "standards/copy"],
     )
     def test_standards_categories_are_valid(self, category):
         from reviewer.reviewer_categories import VALID_CATEGORIES_SET
