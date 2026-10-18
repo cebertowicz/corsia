@@ -152,7 +152,8 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await shoot(page, testInfo, '1440-18-drawer-13', true);
 			const textCard = drawerList(page).locator('.ct').filter({ hasText: 'Text comment beside the image comments' });
 			await textCard.scrollIntoViewIfNeeded();
-			await expect(textCard).toBeInViewport({ ratio: 1 });
+			// Scrolled to the end, the list's integer scroll range leaves the card's fractional bottom edge up to a pixel past it.
+			await expect(textCard).toBeInViewport({ ratio: 0.98 });
 			await shoot(page, testInfo, '1440-18b-drawer-text-comment', true);
 			await drawerList(page).evaluate((el) => { el.scrollTop = 0; });
 

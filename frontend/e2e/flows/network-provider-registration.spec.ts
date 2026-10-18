@@ -28,7 +28,8 @@ test('@flow:settings @surface:settings network registration shows its endpoint a
 		await loginByUrl(page, { waitForComposer: false });
 		await openSettings(page);
 		await openSettingsSection(page, 'Providers'); // the phone opens Settings on its section list
-		await page.getByRole('button', { name: 'Add your first provider', exact: true }).click();
+		// The header button exists whether or not an earlier spec left a provider; the empty state's own button does not.
+		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
 		await page.getByRole('button', { name: /Add remote provider by IP/ }).click();
 		const dialog = page.getByRole('dialog').last();
 		await dialog.getByPlaceholder('100.64.1.5  ·  macbook-m4.local').fill('127.0.0.1');

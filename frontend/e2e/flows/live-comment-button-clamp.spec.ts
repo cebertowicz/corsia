@@ -21,6 +21,7 @@ for (const width of [1440, 393]) {
 		const saving = page.getByText('Saving…', { exact: true });
 		const commentsPill = page.getByRole('button', { name: /^1 open thread\b/ });
 		await expect(saving).toBeVisible();
+		await expect(commentsPill).toBeVisible(); // the pill mounts after the comment thread loads; boundingBox() does not wait
 		const [savingBox, commentsPillBox] = await Promise.all([saving.boundingBox(), commentsPill.boundingBox()]);
 		expect(savingBox!.x + savingBox!.width, 'save status ends before the comment pill starts').toBeLessThanOrEqual(commentsPillBox!.x);
 		await expect(page.getByText('✓ Saved', { exact: true })).toBeVisible();
