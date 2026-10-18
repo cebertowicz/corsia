@@ -30,7 +30,7 @@ def test_the_card_is_appendix_a1_word_for_word():
     card = setup.agent_import(CARD)
     assert card["title"] == "Bring over what your other AI tools know"
     assert card["context"] == (
-        "Claude Code and Codex are on this Mac. I can read what they remember about you and how "
+        "Claude Code and Codex are on this computer. I can read what they remember about you and how "
         "you like to work, the skills you keep in them, and the connected apps that "
         "Claude Code and Codex use, so you don't have to set them up again. I only read: nothing "
         "changes in them, and you choose what I keep. I never read your chats with them, their "
@@ -43,11 +43,11 @@ def test_the_card_is_appendix_a1_word_for_word():
 
 def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here():
     context = setup.agent_import(ImportCard(("OpenClaw",), (), ""))["context"]
-    assert context.startswith("OpenClaw is on this Mac. ")
+    assert context.startswith("OpenClaw is on this computer. ")
     assert "connected apps" not in context
     # With no connections clause nothing is read from settings, so none are excepted.
     assert "with them, their settings, or any key" in context
-    assert context.endswith("What I read stays on this Mac: I run on a local model.")
+    assert context.endswith("What I read stays on this computer: I run on a local model.")
     one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
     assert "the connected apps that Codex uses," in one
     assert "their other settings" in one
@@ -55,7 +55,7 @@ def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here(
 
 def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
     context = setup.agent_import(ImportCard(("Codex",), (), "Some Model"))["context"]
-    assert context.endswith("What I read goes to Some Model, the model I run on, and may leave this Mac.")
+    assert context.endswith("What I read goes to Some Model, the model I run on, and may leave this computer.")
 
 
 def test_no_tool_found_means_no_card_and_the_card_goes_first(monkeypatch):
