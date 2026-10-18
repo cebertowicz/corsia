@@ -23,18 +23,18 @@
 		loading = true; error = '';
 		const t = get(token);
 		if (!t) {
-			error = "Couldn't check which models fit this Mac.";
+			error = "Couldn't check which models fit this computer.";
 			loading = false;
 			return;
 		}
 		try {
 			const body = await fetchLocalModelRecommendations(t);
-			if (body?.state !== 'ready') throw new Error(body?.message ?? "Couldn't check which models fit this Mac.");
+			if (body?.state !== 'ready') throw new Error(body?.message ?? "Couldn't check which models fit this computer.");
 			sections = body.sections && typeof body.sections === 'object' ? body.sections : {};
 			downloaded = new Set((body.downloads ?? []).filter((entry) => entry.status === 'available').map((entry) => entry.repository));
 			memoryGb = typeof body.memory_gb === 'number' ? body.memory_gb : null;
 			diskFreeGb = typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null;
-		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't check which models fit this Mac."; }
+		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't check which models fit this computer."; }
 		finally { loading = false; }
 	}
 	async function download(repository: string) {

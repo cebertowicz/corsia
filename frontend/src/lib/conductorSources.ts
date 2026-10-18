@@ -170,7 +170,7 @@ async function localRouteError(response: Response, fallback: string): Promise<Er
 /** Settings' local-model recommendations, checked by oMLX for this Mac. */
 export async function fetchLocalModelRecommendations(t: string): Promise<LocalModelRecommendations> {
 	const response = await fetch('/api/providers/local/recommendations', { headers: { Authorization: `Bearer ${t}` } });
-	if (!response.ok) throw await localRouteError(response, "Couldn't check which models fit this Mac.");
+	if (!response.ok) throw await localRouteError(response, "Couldn't check which models fit this computer.");
 	return response.json();
 }
 

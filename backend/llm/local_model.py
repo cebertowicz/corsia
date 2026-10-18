@@ -166,19 +166,19 @@ async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
         response = await admin_request({"server_id": server_id}, "GET", "/hf/recommendations", timeout=45.0)
     except (OmlxAdminError, httpx.HTTPError) as exc:
         log.exception("oMLX recommender request failed")
-        raise PickUnavailable("Couldn't check which models fit this Mac. Check that oMLX is running, then try again.") from exc
+        raise PickUnavailable("Couldn't check which models fit this computer. Check that oMLX is running, then try again.") from exc
     if response.status_code != 200:
         log.warning("oMLX recommender returned status %s", response.status_code)
-        raise PickUnavailable("Couldn't check which models fit this Mac. Check that oMLX is running, then try again.")
+        raise PickUnavailable("Couldn't check which models fit this computer. Check that oMLX is running, then try again.")
     try:
         payload = response.json()
     except ValueError as exc:
         log.warning("oMLX recommender returned unreadable data")
-        raise PickUnavailable("Couldn't check which models fit this Mac. Try again.") from exc
+        raise PickUnavailable("Couldn't check which models fit this computer. Try again.") from exc
     sections = payload.get("sections") if isinstance(payload, dict) else None
     if not isinstance(sections, dict):
         log.warning("oMLX recommender returned an invalid payload")
-        raise PickUnavailable("Couldn't check which models fit this Mac. Try again.")
+        raise PickUnavailable("Couldn't check which models fit this computer. Try again.")
     return {
         name: [model for row in rows if (model := from_recommendation(row)) is not None]
         for name, rows in sections.items() if isinstance(name, str) and isinstance(rows, list)
