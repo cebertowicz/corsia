@@ -207,6 +207,19 @@ def test_a_held_back_skill_id_carries_no_digest_of_its_bytes(home):
     assert [r["outcome"] for r in _install(home, [right, wrong])] == ["changed", "changed"]  # no guess confirmed
 
 
+def test_a_key_outranks_a_reserved_or_clashing_name_and_confirms_no_guess(home):
+    roots, workspace = home
+    _skill(roots.codex / "skills" / "github", "github", "reserved name", body=SECRET_LINE + "\n")
+    _skill(roots.hermes / "skills" / "ops" / "deploy", "deploy", "clashing name", body=SECRET_LINE + "\n")
+    keyed = [row for row in skills.scan(roots, ALL, workspace)
+             if row.source.startswith(("codex:~/.codex/skills/github", "hermes:"))
+             and row.name in ("github", "deploy")]
+    assert sorted(row.name for row in keyed) == ["deploy", "github"]
+    assert {row.state for row in keyed} == {"has_secret"}
+    guesses = [f"{row.source}:{row.content_sha}" for row in keyed]
+    assert [r["outcome"] for r in _install(home, guesses)] == ["changed", "changed"]
+
+
 def test_unknown_system_skill_names_hold_every_skill_back(home, monkeypatch):
     import core.system_tier
 
@@ -237,3 +250,8 @@ def test_another_tools_metadata_blocks_are_dropped_on_install(home):
     assert _install(home, _ids(_offers(home), "meeting-notes"))[0]["outcome"] == "installed"
     meta = yaml.safe_load((workspace / "skills" / "meeting-notes" / "SKILL.md").read_text().split("---\n")[1])
     assert meta["metadata"] == {"author": "fixture", "corsia-data": "corsia.yaml", "corsia-format": "1"}
+    _skill(roots.hermes / "skills" / "standup", "standup", "runs standups",
+           metadata={"tags": ["team"], "requires": [{"bins": ["x"]}]})
+    assert _install(home, _ids(_offers(home), "standup"))[0]["outcome"] == "installed"
+    meta = yaml.safe_load((workspace / "skills" / "standup" / "SKILL.md").read_text().split("---\n")[1])
+    assert meta["metadata"] == {"tags": ["team"], "corsia-data": "corsia.yaml", "corsia-format": "1"}

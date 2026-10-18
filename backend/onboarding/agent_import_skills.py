@@ -268,7 +268,8 @@ def scan(roots: Roots, tools: list[str], workspace: Path) -> list[Candidate]:
             # System skill names unknown: any of these could shadow one, so none is offered.
             row.state = UNREADABLE
             continue
-        if row.state in (TOO_LARGE, UNREADABLE):
+        # A key outranks a name state: its warning stays, and install never compares its hash.
+        if row.state in (HAS_SECRET, TOO_LARGE, UNREADABLE):
             continue
         if row.name in reserved:
             row.state = NAME_RESERVED
@@ -292,6 +293,10 @@ def skill_offers(roots: Roots, tools: list[str], workspace: Path) -> list[dict]:
     return [offer(row) for row in scan(roots, tools, workspace)]
 
 
+def _nested(value: object) -> bool:
+    return isinstance(value, dict) or (isinstance(value, list) and any(isinstance(item, dict) for item in value))
+
+
 def installed_text(row: Candidate, now: datetime.datetime) -> tuple[str, str]:
     """The ``SKILL.md`` and ``corsia.yaml`` an install writes for ``row``."""
     import yaml
@@ -304,7 +309,7 @@ def installed_text(row: Candidate, now: datetime.datetime) -> tuple[str, str]:
     # Nested blocks are another tool's own settings (``openclaw: {install, requires}``):
     # dropped like ``allowed-tools``, so none can grant anything if a projection loads it.
     metadata = {key: value for key, value in source_metadata.items()
-                if key not in (POINTER_KEY, FORMAT_KEY) and not isinstance(value, dict)}
+                if key not in (POINTER_KEY, FORMAT_KEY) and not _nested(value)}
     metadata.update({POINTER_KEY: SIDECAR_FILE, FORMAT_KEY: SIDECAR_FORMAT})
     front = {"name": row.name, "description": row.description,
              **{key: meta[key] for key in KEPT_KEYS if key in meta}, "metadata": metadata}
