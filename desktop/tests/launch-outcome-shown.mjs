@@ -52,6 +52,7 @@ const drawn = {
 	refused: `window.__corsiaShowServiceFailure?.(${JSON.stringify(refusal)});`,
 	offered: 'window.__corsiaShowStartup?.({"state":"adoption_offered","workspace":"~/corsia"});',
 	approval: 'window.__corsiaShowStartup?.({"state":"requires_approval"});',
+	ready: 'window.__corsiaShowStartup?.({"state":"ready","url":"http://127.0.0.1:47895/"});',
 };
 
 try {
@@ -89,6 +90,16 @@ try {
 		const seen = await read(page);
 		if (seen.status !== 'Keep CORSIA running' || seen.spinner) fail(`approval: ${JSON.stringify(seen)}`);
 		else console.log('ok   approval needed is asked for');
+	}
+	// A service already running answers Ready before the page is up; the load hook's script must still open it.
+	{
+		const page = await open();
+		await page.route('http://127.0.0.1:47895/**', (route) => route.fulfill({ contentType: 'text/html', body: '<title>service</title>' }));
+		const opened = page.waitForURL('http://127.0.0.1:47895/', { timeout: 5_000 }).then(() => true, () => false);
+		await page.evaluate(drawn.ready);
+		await page.clock.runFor(1_000);
+		if (!(await opened)) fail(`ready: the page stayed on ${page.url()}`);
+		else console.log('ok   ready launch opens the service');
 	}
 } finally {
 	await browser.close();
