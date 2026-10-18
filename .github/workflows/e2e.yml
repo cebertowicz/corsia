@@ -123,6 +123,11 @@ jobs:
                     ps -o pid,ppid,etimes,stat,wchan:22,args -p "$pids" | cut -c1-220
                   fi
                   ss -tanp 2>/dev/null | grep -E 'agent-browser|uvicorn' | cut -c1-200
+                  # Where each browser process's stdout and stderr point: a daemon holding the backend's pipes open
+                  # keeps a pipe-reading client from ever seeing end of output.
+                  for pid in $(pgrep -f 'agent-browser-linux-x64'); do
+                    echo "fd $pid: $(readlink /proc/"$pid"/fd/1 2>&1) $(readlink /proc/"$pid"/fd/2 2>&1)"
+                  done
                   # Worker threads and the loop's current frame show whether the backend is stuck in Python or idle.
                   if api=$(pgrep -f '^/.*python -m uvicorn e2e_app' | head -n 1) && pgrep -f 'agent-browser-linux-x64' > /dev/null; then
                     sudo "$HOME/.local/bin/py-spy" dump --nonblocking --pid "$api" 2>&1 | cut -c1-200
@@ -168,6 +173,10 @@ jobs:
           sleep 1
           # The backend's own daemon and browser at failure time: running or not, and with which arguments.
           pgrep -a -f 'agent-browser|chrome' | cut -c1-300 >> "$out/summary.txt" || true
+          # Probe a cold start: the backend's own daemon would otherwise be reused by every probe below.
+          pkill -f 'agent-browser-linux-x64' || true
+          pkill -f 'google-chrome --remote-debugging-port' || true
+          sleep 1
           probe stock about:blank FOO=1
           probe sandboxed about:blank -u CI
           probe http http://127.0.0.1:38999/index.html FOO=1
