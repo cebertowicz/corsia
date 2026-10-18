@@ -352,11 +352,15 @@ pub fn ensure_service_registered(
             manager.status()
         }
         // SMAppService reports NotFound for an agent that was never registered for this
-        // user, so only register() can tell whether the bundle really lacks it. If it does,
-        // the cause keeps its own sentence; macOS's text goes to the log.
+        // user, so only register() can tell whether the bundle really lacks it. A failure
+        // after which macOS still finds no agent keeps that cause's own sentence, with
+        // macOS's text in the log; any other failure is reported like NotRegistered's.
         ServiceStatus::NotFound => {
             refuse_foreign_corsia_job(reader, executable)?;
             if let Err(error) = manager.register() {
+                if manager.status()? != ServiceStatus::NotFound {
+                    return Err(error);
+                }
                 log::error!("registering the CORSIA service it reported as not found failed: {error}");
                 return Ok(ServiceStatus::NotFound);
             }
@@ -533,11 +537,11 @@ mod tests {
         }
         fn register(&self) -> Result<(), String> {
             self.registrations.set(self.registrations.get() + 1);
-            if let Some(error) = self.register_error.get() {
-                return Err(error.into());
-            }
             if let Some(status) = self.registered_status.get() {
                 self.status.set(Some(status));
+            }
+            if let Some(error) = self.register_error.get() {
+                return Err(error.into());
             }
             Ok(())
         }
@@ -814,6 +818,16 @@ mod tests {
             "a bundle that lacks the agent must keep its named cause, not macOS's text"
         );
         assert_eq!(lacking.registrations.get(), 1);
+
+        // macOS found the agent but would not register it: not the missing-agent cause.
+        let refused = FakeManager::default();
+        refused.status.set(Some(ServiceStatus::NotFound));
+        refused.registered_status.set(Some(ServiceStatus::NotRegistered));
+        refused.register_error.set(Some("Operation not permitted"));
+        assert_eq!(
+            ensure_unlocked_service_registered(&refused, &reader, &executable),
+            Err("Operation not permitted".into())
+        );
     }
 
     #[test]

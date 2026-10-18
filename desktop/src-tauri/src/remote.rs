@@ -79,6 +79,14 @@ impl RemoteConnection {
         }
     }
 
+    /// The window finished loading a page other than the startup shell. A Ready launch answer has then been followed,
+    /// so a later shell load (a quit failure, a return to the shell) must not follow it again.
+    pub fn left_shell(&mut self) {
+        if matches!(self.state, LaunchState::LocalStartup { startup: crate::ServiceStartup::Ready { .. } }) {
+            self.state = LaunchState::Local;
+        }
+    }
+
     fn is_local_start(&self) -> bool {
         matches!(self.state, LaunchState::Local | LaunchState::ServiceFailed { .. } | LaunchState::LocalStartup { .. })
     }

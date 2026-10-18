@@ -617,6 +617,15 @@ fn remote_shell_context(connection: &remote::RemoteConnection) -> serde_json::Va
     }
 }
 
+/// What a page load hands the window: the shell context, and the script drawing the shell state. A finished load of
+/// any page but the startup shell means a Ready launch answer was followed, so it is not followed again.
+fn page_load_state(connection: &mut remote::RemoteConnection, url: &str, finished: bool) -> (serde_json::Value, Option<String>) {
+    if finished && !is_shell_origin(url) {
+        connection.left_shell();
+    }
+    (remote_shell_context(connection), shell_state_script(connection.state()))
+}
+
 fn remote_startup_state(state: &remote::LaunchState) -> Option<serde_json::Value> {
     match state {
         remote::LaunchState::Connecting { name } => Some(serde_json::json!({ "kind": "connecting", "name": name })),
@@ -1566,12 +1575,13 @@ pub fn run() {
             // Inject the drag handler on every page load. Idempotent —
             // the script self-guards via __corsia_drag_handler_installed
             // so multiple injections don't double-bind.
+            let finished = matches!(payload.event(), tauri::webview::PageLoadEvent::Finished);
             let (shell_context, startup_state) = webview
                 .app_handle()
                 .state::<RemoteRuntime>()
                 .connection
                 .lock()
-                .map(|connection| (remote_shell_context(&connection), shell_state_script(connection.state())))
+                .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished))
                 .unwrap_or_else(|_| (serde_json::json!({ "mode": "local" }), None));
             let show_state = startup_state.unwrap_or_default();
             let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
@@ -1976,6 +1986,23 @@ mod tests {
         app.state::<RemoteRuntime>().connection.lock().unwrap().begin_pairing();
         show_launch_outcome(app.handle(), &Ok(ServiceStartup::RequiresApproval));
         assert_eq!(launch_state(&app), remote::LaunchState::Pairing, "a late launch outcome replaced a pairing");
+    }
+
+    #[test]
+    fn a_ready_launch_answer_is_followed_once_and_never_replayed_by_a_later_shell_load() {
+        let app = launch_app();
+        show_launch_outcome(app.handle(), &Ok(ServiceStartup::Ready { url: service_url(47_895) }));
+        let runtime = app.state::<RemoteRuntime>();
+        let mut connection = runtime.connection.lock().unwrap();
+        // The shell loads after the answer: it is drawn, and the window follows it to the service.
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html", true);
+        assert!(script.is_some_and(|script| script.contains(r#""state":"ready""#)));
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", false);
+        assert!(shell_state_script(connection.state()).is_some(), "a load still starting has not reached the service");
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", true);
+        // A quit failure later sends the window back to the shell, which must stay on its own screen.
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html#quit-failure", true);
+        assert_eq!(script, None);
     }
 
     #[test]
