@@ -110,6 +110,8 @@ jobs:
           E2E_GREP: ${{ inputs.grep }}
         run: |
           if [ -n "$E2E_GREP" ]; then
+            # A filtered dispatch is a diagnosis run: the browser daemon writes its debug log into the session dir.
+            export AGENT_BROWSER_DEBUG=1
             bash scripts/e2e-local --grep "$E2E_GREP"
           else
             bash scripts/e2e-local
@@ -124,12 +126,12 @@ jobs:
           out="$RUNNER_TEMP/browser-diag"
           mkdir -p "$out"
           probe() {
-            local label="$1"; shift
+            local label="$1" url="$2"; shift 2
             local dir="/tmp/abdiag-$label"
             rm -rf "$dir"; mkdir -m 700 "$dir"
             echo "--- probe $label: $*" >> "$out/summary.txt"
             start=$(date +%s)
-            env "$@" AGENT_BROWSER_SOCKET_DIR="$dir" timeout 60 agent-browser --session "diag-$label" --debug --json open about:blank >> "$out/summary.txt" 2>&1
+            env "$@" AGENT_BROWSER_SOCKET_DIR="$dir" timeout 60 agent-browser --session "diag-$label" --debug --json open "$url" >> "$out/summary.txt" 2>&1
             echo "exit=$? seconds=$(( $(date +%s) - start ))" >> "$out/summary.txt"
             cp "$dir"/*.log "$out/probe-$label.log" 2>/dev/null || true
             env AGENT_BROWSER_SOCKET_DIR="$dir" timeout 30 agent-browser --session "diag-$label" --json close >> "$out/summary.txt" 2>&1 || true
@@ -139,8 +141,14 @@ jobs:
             echo "CI=${CI:-} AGENT_BROWSER_EXECUTABLE_PATH=${AGENT_BROWSER_EXECUTABLE_PATH:-} AGENT_BROWSER_ARGS=${AGENT_BROWSER_ARGS:-}"
             sudo dmesg 2>&1 | grep -i -E "apparmor|userns|chrome" | tail -n 40 || true
           } > "$out/summary.txt" 2>&1
-          probe stock FOO=1
-          probe sandboxed -u CI
+          # The test opens an http page on loopback, so probe that too, not only about:blank.
+          mkdir -p /tmp/abdiag-www && echo '<title>probe</title>ok' > /tmp/abdiag-www/index.html
+          python3 -m http.server 38999 --bind 127.0.0.1 --directory /tmp/abdiag-www > /dev/null 2>&1 &
+          sleep 1
+          probe stock about:blank FOO=1
+          probe sandboxed about:blank -u CI
+          probe http http://127.0.0.1:38999/index.html FOO=1
+          kill %1 2>/dev/null || true
           # The backend's own session sockets and daemon sidecars (never the sockets themselves).
           find /tmp -maxdepth 2 -regextype posix-extended -regex '/tmp/[0-9a-f]{16}-[0-9a-f]{24}(/.*)?' -type f -exec cp --parents {} "$out" \; 2>/dev/null || true
           cat "$out/summary.txt"
