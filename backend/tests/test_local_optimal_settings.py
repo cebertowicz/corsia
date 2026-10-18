@@ -158,7 +158,7 @@ async def test_settings_download_does_not_retry_after_an_optimal_writer_failure(
 
 
 @pytest.mark.asyncio
-async def test_auto_load_only_runs_when_the_memory_gate_allows(monkeypatch) -> None:
+async def test_auto_load_only_runs_when_the_memory_gate_allows(monkeypatch, caplog) -> None:
     from llm import local_settings_download
 
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
@@ -183,6 +183,37 @@ async def test_auto_load_only_runs_when_the_memory_gate_allows(monkeypatch) -> N
     await local_settings_download._auto_load("server", model, allowed=True)
 
     assert loaded == []
+    assert "not enough free memory" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_auto_load_logs_when_management_disallows_it(monkeypatch, caplog) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+    await local_settings_download._auto_load("server", model, allowed=False)
+
+    assert "does not manage this oMLX" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("response", "expected"), [
+    (_Response(503, {}), "models request returned 503"),
+    (_Response(200, {"models": []}), "downloaded model is missing"),
+    (_Response(200, {"models": [{"id": "Qwen3.8-27B-oQ4e", "estimated_size": 0}]}), "no usable size"),
+])
+async def test_auto_load_logs_unusable_model_state(monkeypatch, caplog, response, expected) -> None:
+    from llm import local_settings_download
+
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+
+    async def admin_request(*_args, **_kwargs):
+        return response
+
+    monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
+    await local_settings_download._auto_load("server", model, allowed=True)
+
+    assert expected in caplog.text
 
 
 @pytest.mark.asyncio

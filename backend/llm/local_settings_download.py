@@ -7,12 +7,15 @@ keeping its terminal state out of setup's marker and fallback semantics.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Callable
 
 from api.network_server_helpers import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
 from llm.local_setup_download import StillDownloading
+
+log = logging.getLogger(__name__)
 
 
 async def _managed_download(report: Callable[[str], None], model: LocalModel) -> tuple[str, bool]:
@@ -34,19 +37,34 @@ async def _managed_download(report: Callable[[str], None], model: LocalModel) ->
 async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> None:
     """Load only a downloaded CORSIA-managed model that the existing memory gate permits."""
     if not allowed:
+        log.warning("Skipping automatic local-model load: CORSIA does not manage this oMLX")
         return
-    from llm.providers.omlx_endpoints import admin_request
+    from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
 
-    response = await admin_request({"server_id": server_id}, "GET", "/models", timeout=15.0)
+    try:
+        response = await admin_request({"server_id": server_id}, "GET", "/models", timeout=15.0)
+    except OmlxAdminError:
+        log.warning("Skipping automatic local-model load: oMLX models request failed")
+        return
     if response.status_code != 200:
+        log.warning("Skipping automatic local-model load: oMLX models request returned %s", response.status_code)
         return
     try:
-        rows = response.json().get("models")
+        payload = response.json()
     except ValueError:
+        log.warning("Skipping automatic local-model load: oMLX returned malformed models data")
         return
-    row = next((item for item in rows or [] if isinstance(item, dict) and item.get("id") == model.model), None)
-    size = row.get("estimated_size") if isinstance(row, dict) else None
+    rows = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        log.warning("Skipping automatic local-model load: oMLX returned malformed models data")
+        return
+    row = next((item for item in rows if isinstance(item, dict) and item.get("id") == model.model), None)
+    if row is None:
+        log.warning("Skipping automatic local-model load: downloaded model is missing from oMLX")
+        return
+    size = row.get("estimated_size")
     if not isinstance(size, (int, float)) or size <= 0:
+        log.warning("Skipping automatic local-model load: downloaded model has no usable size")
         return
     from infra.host_resources import check_can_load
     from llm.providers.omlx_lifecycle import load_model
@@ -54,11 +72,14 @@ async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> Non
 
     decision = await check_can_load(float(size) / 1024**3, "omlx")
     if not decision.get("ok"):
+        log.warning("Skipping automatic local-model load: not enough free memory")
         return
     result = await load_model({"server_id": server_id}, model.model)
-    if result.get("ok"):
-        notify_cached_model_loaded(server_id, model.model)
-        await discover_and_notify(server_id)
+    if not result.get("ok"):
+        log.warning("Couldn't automatically load downloaded local model")
+        return
+    notify_cached_model_loaded(server_id, model.model)
+    await discover_and_notify(server_id)
 
 
 async def _run_flight(model: LocalModel) -> dict:
