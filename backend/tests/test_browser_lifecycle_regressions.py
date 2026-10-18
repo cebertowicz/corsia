@@ -46,17 +46,16 @@ async def test_actual_client_communicate_failure_keeps_safe_diagnostic(
     original = asyncio.create_subprocess_exec
     clients = []
 
-    async def broken_spawn(*args, **kwargs):
+    async def recording_spawn(*args, **kwargs):
         process = await original(*args, **kwargs)
         clients.append(process)
-
-        async def broken_communicate():
-            raise OSError('private path /secret and session value')
-
-        monkeypatch.setattr(process, 'communicate', broken_communicate)
         return process
 
-    monkeypatch.setattr(asyncio, 'create_subprocess_exec', broken_spawn)
+    async def broken_communicate(process):
+        raise OSError('private path /secret and session value')
+
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', recording_spawn)
+    monkeypatch.setattr(cli, '_communicate', broken_communicate)
     result = await cli.invoke(
         (sys.executable, '-c', 'import time; time.sleep(20)'),
         socket_dir=tmp_path, timeout=3,
