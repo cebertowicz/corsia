@@ -307,7 +307,7 @@ def skill_offers(roots: Roots, tools: list[str], workspace: Path) -> list[dict]:
 
 
 def _install(row: Candidate, workspace: Path, now: datetime.datetime, *, author_thread_id: str,
-             consent_decision_id: str | None) -> str:
+             consent_decision_id: str | None) -> dict[str, str]:
     """Install one offered skill through the shared guidance-history writer."""
     from infra.skill_install import install_skill_bundle, origin_metadata
 
@@ -346,6 +346,6 @@ def install_skills(roots: Roots, tools: list[str], workspace: Path, item_ids: li
             results.append({"item_id": item_id, "name": row.name if row else "", "outcome": outcome})
             continue
         results.append({"item_id": item_id, "name": row.name, "sha256": row.content_sha,
-                        "outcome": _install(row, workspace, now, author_thread_id=author_thread_id,
-                                            consent_decision_id=consent_decision_id)})
+                        **_install(row, workspace, now, author_thread_id=author_thread_id,
+                                   consent_decision_id=consent_decision_id)})
     return results

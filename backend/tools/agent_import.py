@@ -251,7 +251,7 @@ async def _read(thread_id, thread, decision_id, card) -> dict[str, Any]:
         result = "read"
     else:
         result = "read_failed" if memory.failed else "nothing_found"
-    skipped = sorted({str(row["path"]).rsplit("/", 1)[-1] for row in memory.skipped})
+    skipped = sorted({str(row["path"]) for row in memory.skipped})
     _emit_event(thread_id, result, excerpts_count=len(memory.excerpts), skills_count=len(skills), skipped_count=len(skipped))
     return {"result": result, "excerpts": memory.excerpts, "skills": skills, "skipped_files": skipped,
             "install_by": (datetime.datetime.fromisoformat(read_at) + INSTALL_WINDOW).isoformat()}

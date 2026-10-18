@@ -11,14 +11,15 @@ import yaml
 from loguru import logger
 
 from core.skill_sidecar import FORMAT_KEY, POINTER_KEY, SIDECAR_FILE, SIDECAR_FORMAT
-from core.skill_validation import parse_frontmatter, validate_skill_bundle
-from infra.guidance_git import GuidanceTarget, save_guidance
+from core.skill_validation import parse_frontmatter
+from infra.guidance_git import GuidanceTarget, SaveResult, save_guidance
 from infra.guidance_messages import saver_author
 
 ALREADY_HERE = "already_here"
 INSTALLED = "installed"
 FAILED = "failed"
 _TOOL_GRANTS = frozenset({"allowed-tools", "hooks"})
+_RECORDED = frozenset({"written", "unchanged"})
 
 
 def _nested(value: object) -> bool:
@@ -58,11 +59,18 @@ def _holds(path: Path, data: bytes) -> bool:
         return False
 
 
-def _discard(target: Path, name: str) -> str:
-    """Remove a bundle this install left incomplete, so a re-run can offer it again."""
+def _discard(target: Path, name: str) -> dict[str, str]:
+    """Remove a bundle this install left incomplete and uncommitted, so a re-run can offer it again."""
     logger.warning("skill install failed at guidance save for {}", name)
     shutil.rmtree(target, ignore_errors=True)
-    return FAILED
+    return {"outcome": FAILED}
+
+
+def _installed(saved: SaveResult) -> dict[str, str]:
+    """Installed; a save history did not fully record carries its outcome and line for the caller to show."""
+    if saved.outcome in _RECORDED and not saved.unsynced:
+        return {"outcome": INSTALLED}
+    return {"outcome": INSTALLED, "history_outcome": saved.outcome, "guidance_history": saved.line or saved.reason}
 
 
 def install_skill_bundle(
@@ -75,38 +83,44 @@ def install_skill_bundle(
     *,
     author_thread_id: str,
     consent_decision_id: str | None = None,
-) -> str:
-    """Install one imported skill with no overwrite and a single guidance save."""
+) -> dict[str, str]:
+    """Install one imported skill with no overwrite and a single guidance save; ``outcome`` is
+    installed, already_here or failed, plus ``history_outcome`` and ``guidance_history`` when history
+    did not fully record the install."""
     skill_md = _skill_text(name, upstream_skill_md, description)
     if skill_md is None:
         logger.warning("skill install failed at frontmatter rewrite for {}", name)
-        return FAILED
-    sidecar = _sidecar(origin)
+        return {"outcome": FAILED}
+    from core.skill_resolution import skill_scope_root
+
     try:
         workspace.mkdir(parents=True, exist_ok=True)
+        root = skill_scope_root(scope="workspace", workspace=workspace, db=None)
     except OSError:
+        root = None
+    if root is None:
         logger.warning("skill install failed at workspace setup for {}", name)
-        return FAILED
-    skills = workspace / "skills"
+        return {"outcome": FAILED}
+    skills = root / "skills"
     target = skills / name
     if not name or Path(name).name != name or skills.is_symlink():
         logger.warning("skill install failed at destination validation for {}", name)
-        return FAILED
+        return {"outcome": FAILED}
     if target.exists() or target.is_symlink():
-        return ALREADY_HERE
-    files = {"SKILL.md": skill_md.encode("utf-8"), SIDECAR_FILE: sidecar.encode("utf-8")}
+        return {"outcome": ALREADY_HERE}
+    files = {"SKILL.md": skill_md.encode("utf-8"), SIDECAR_FILE: _sidecar(origin).encode("utf-8")}
+    # Names are compared case-folded: on a case-insensitive volume ``Corsia.yaml`` is the sidecar.
+    taken = {relative.casefold() for relative in files}
     for relative, data in other_files.items():
-        if relative == SIDECAR_FILE:
+        if relative.casefold() == SIDECAR_FILE:
             continue
         path = Path(relative)
-        if relative in files or path.is_absolute() or ".." in path.parts:
+        if relative.casefold() in taken or path.is_absolute() or ".." in path.parts:
             logger.warning("skill install failed at bundle path validation for {}", name)
-            return FAILED
+            return {"outcome": FAILED}
+        taken.add(relative.casefold())
         files[relative] = data
     writes = {target / relative: data for relative, data in files.items()}
-    if not validate_skill_bundle(skill_md, {SIDECAR_FILE: sidecar}).ok:
-        logger.warning("skill install failed at bundle validation for {}", name)
-        return FAILED
     target_info = GuidanceTarget("skill, workspace scope")
     try:
         saved = save_guidance(
@@ -121,13 +135,17 @@ def install_skill_bundle(
     except OSError:
         return _discard(target, name)
     if saved.outcome == "stale":
-        return ALREADY_HERE
-    # A save without history still writes every file; what is on disk decides the outcome.
-    if not all(_holds(path, data) for path, data in writes.items()):
+        return {"outcome": ALREADY_HERE}
+    if saved.outcome == "refused":
+        logger.warning("skill install failed at bundle validation for {}: {}", name, saved.errors)
+        return {"outcome": FAILED}
+    # A committed bundle is never removed outside history. A save without history still writes
+    # every file, so what is on disk decides that outcome.
+    if saved.outcome not in _RECORDED and not all(_holds(path, data) for path, data in writes.items()):
         return _discard(target, name)
-    if saved.outcome not in {"written", "unchanged"}:
-        logger.info("skill {} installed without guidance history: {}", name, saved.outcome)
-    return INSTALLED
+    if saved.outcome not in _RECORDED or saved.unsynced:
+        logger.warning("skill {} installed without full guidance history: {}", name, saved.outcome)
+    return _installed(saved)
 
 
 def origin_metadata(source: str, upstream_skill_md: bytes, adopted_at: str) -> dict[str, str]:

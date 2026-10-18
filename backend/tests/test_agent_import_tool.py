@@ -243,7 +243,7 @@ def test_read_reports_skipped_display_names_without_their_content(wired, monkeyp
     result = json.loads(asyncio.run(_execute(consent_decision_id=_consent(wired))))
 
     assert result["result"] == "read"
-    assert result["skipped_files"] == ["CLAUDE.md"]
+    assert result["skipped_files"] == ["~/.claude/CLAUDE.md"]
     assert "Permission denied" not in json.dumps(result)
 
 

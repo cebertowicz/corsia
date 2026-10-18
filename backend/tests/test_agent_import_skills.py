@@ -228,8 +228,8 @@ def test_a_save_that_stops_partway_leaves_nothing_and_can_be_retried(home, monke
     assert _offers(home)["rfc-writer"]["state"] == "new"
 
 
-@pytest.mark.parametrize("outcome", ["deferred", "failed"])
-def test_a_save_without_history_reports_what_is_on_disk(home, monkeypatch, outcome):
+@pytest.mark.parametrize("outcome", ["deferred", "failed", "history-off"])
+def test_a_save_without_history_reports_what_is_on_disk_and_the_missing_history(home, monkeypatch, outcome):
     from infra import skill_install
     from infra.guidance_git import SaveResult
 
@@ -237,17 +237,57 @@ def test_a_save_without_history_reports_what_is_on_disk(home, monkeypatch, outco
         for path, data in writes.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-        return SaveResult(outcome, "history fault", line=None)
+        return SaveResult(outcome, "history fault", line="The change is on disk and not in history.")
 
     def nothing(_writes, **_kwargs):
         return SaveResult(outcome, "history fault", line=None)
 
     offers = _offers(home)
     monkeypatch.setattr(skill_install, "save_guidance", unrecorded)
-    assert _install(home, _ids(offers, "rfc-writer"))[0]["outcome"] == "installed"
+    installed = _install(home, _ids(offers, "rfc-writer"))[0]
+    assert installed["outcome"] == "installed"
+    assert installed["history_outcome"] == outcome
+    assert installed["guidance_history"] == "The change is on disk and not in history."
     monkeypatch.setattr(skill_install, "save_guidance", nothing)
     assert _install(home, _ids(offers, "runbook-writer"))[0]["outcome"] == "failed"
     assert not (home[1] / "skills" / "runbook-writer").exists()
+
+
+def test_a_commit_with_an_unsynced_index_is_shown_and_never_removed(home, monkeypatch):
+    from infra import skill_install
+    from infra.guidance_git import SaveResult
+
+    def landed(writes, **_kwargs):
+        for path, data in writes.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"other bytes")
+        return SaveResult("written", "index-unsynced", sha="a" * 40, line="index sync failed",
+                          unsynced=("skills/rfc-writer/SKILL.md",))
+
+    monkeypatch.setattr(skill_install, "save_guidance", landed)
+    result = _install(home, _ids(_offers(home), "rfc-writer"))[0]
+    assert (result["outcome"], result["history_outcome"], result["guidance_history"]) == (
+        "installed", "written", "index sync failed")
+    assert (home[1] / "skills" / "rfc-writer" / "SKILL.md").exists()
+
+
+def test_an_upstream_sidecar_in_another_case_is_dropped_and_a_case_clash_fails(home):
+    roots, workspace = home
+    folder = _skill(roots.codex / "skills" / "cased", "cased", "carries a cased sidecar")
+    (folder / "Corsia.yaml").write_text("handler:\n  kind: cli\n  command: rm\n")
+    assert _install(home, _ids(_offers(home), "cased"))[0]["outcome"] == "installed"
+    sidecar = yaml.safe_load((workspace / "skills" / "cased" / "corsia.yaml").read_text())
+    assert list(sidecar) == ["origin"]
+
+    from infra.skill_install import install_skill_bundle
+
+    clash = install_skill_bundle(
+        workspace, "clash", (folder / "SKILL.md").read_bytes(), {"notes.md": b"a", "NOTES.md": b"b"},
+        "clashes", {"source": "codex:~/.codex/skills/clash", "sha256": "0", "adopted_at": "now"},
+        author_thread_id="t",
+    )
+    assert clash == {"outcome": "failed"}
+    assert not (workspace / "skills" / "clash").exists()
 
 
 def test_a_rerun_offers_nothing_twice(home):
