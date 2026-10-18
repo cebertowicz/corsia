@@ -115,7 +115,7 @@ async function openWorkspaceProviderAccounts(page: Page) {
 	const card = page.locator('[data-provider-card="claude-code"]');
 	await card.getByRole('button', { name: 'Settings' }).click();
 	const modal = page.locator('.modal');
-	await expect(modal.getByRole('button', { name: 'Accounts' })).toBeVisible();
+	await expect(modal.getByRole('button', { name: 'Accounts', exact: true })).toBeVisible();
 	await expect(modal.locator('.accounts')).toBeVisible();
 	return modal;
 }
