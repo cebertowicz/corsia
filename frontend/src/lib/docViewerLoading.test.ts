@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writable } from 'svelte/store';
 import { DocOpenError } from '$lib/docOpenRefusal';
 import { clearDraft, seedDraft } from '$lib/stores/docSaveQueue';
+import { liveDocumentBindings, openLiveDocument } from '$lib/stores/liveDocuments';
 import { loadViewerContent, openFromDraft } from './docViewerLoading';
 
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), writeContent: vi.fn() }));
@@ -54,6 +55,36 @@ describe('a tab whose document relocated before its draft followed', () => {
 
 		expect(api.fetchContent).toHaveBeenCalledExactlyOnceWith(relocated.path, expect.anything());
 		expect(onReady).toHaveBeenCalledWith(expect.objectContaining({ text: '# Relocated', artifactId: 'artifact' }));
+	});
+});
+
+describe('a live reopen that replayed a device copy', () => {
+	const fileText = '# Doc\nfirst';
+	const openWith = async (liveText: string, unwritten: boolean) => {
+		const flush = vi.fn().mockResolvedValue({});
+		const live = { text: { toString: () => liveText }, artifactId: 'artifact', writable: true, flush,
+			durability: { clean: true, unwritten }, connection: 'connected' };
+		api.fetchContent.mockResolvedValue({ text: fileText, writable: true, freshness: null, revision: 'r1', artifact: { id: 'artifact' } });
+		vi.mocked(openLiveDocument).mockResolvedValue(live as never);
+		liveDocumentBindings.set({ [target.instanceId]: live } as never);
+		seedDraft(target, liveText);
+		await loadViewerContent({ target, isCurrent: () => true, onReady: vi.fn(), onSnapshot: vi.fn(), onUnavailable: vi.fn() });
+		await new Promise(resolve => setTimeout(resolve, 0));
+		return flush;
+	};
+	afterEach(() => { liveDocumentBindings.set({}); });
+
+	it('asks for the file write when the replay left the file behind the live text', async () => {
+		const flush = await openWith('# Doc\nfirst\nsecond', true);
+		expect(flush).toHaveBeenCalledOnce();
+	});
+
+	it('writes nothing when the replay added nothing to the file text', async () => {
+		expect(await openWith(fileText, true)).not.toHaveBeenCalled();
+	});
+
+	it('writes nothing on a plain reopen with no local transactions to write', async () => {
+		expect(await openWith('# Doc\nfirst\nremote edit', false)).not.toHaveBeenCalled();
 	});
 });
 
