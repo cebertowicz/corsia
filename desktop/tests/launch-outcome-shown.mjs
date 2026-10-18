@@ -53,10 +53,12 @@ const drawn = {
 	offered: 'window.__corsiaShowStartup?.({"state":"adoption_offered","workspace":"~/corsia"});',
 	approval: 'window.__corsiaShowStartup?.({"state":"requires_approval"});',
 	ready: 'window.__corsiaShowStartup?.({"state":"ready","url":"http://127.0.0.1:47895/"});',
+	// A Check again that failed, kept so a reload draws it again.
+	switched: 'window.__corsiaShowStartup?.({"state":"adoption_failed","failure":{"message":"no answer on 47895","outcome":"switched","recovery":null,"advice":false}});',
 };
 
 try {
-	// A start still working well past a minute is not the page's to call failed: the app bounds it.
+	// A start still working well past a minute is not the page's to call failed: the page draws only what the app answers.
 	{
 		const page = await open();
 		await page.clock.runFor(120_000);
@@ -90,6 +92,14 @@ try {
 		const seen = await read(page);
 		if (seen.status !== 'Keep CORSIA running' || seen.spinner) fail(`approval: ${JSON.stringify(seen)}`);
 		else console.log('ok   approval needed is asked for');
+	}
+	{
+		const page = await open();
+		await page.evaluate(drawn.switched);
+		await page.clock.runFor(50);
+		const seen = await read(page);
+		if (seen.spinner || !seen.retry || seen.status === 'Starting CORSIA…') fail(`switched: ${JSON.stringify(seen)}`);
+		else console.log(`ok   a failed check again is drawn with its action (${seen.retry})`);
 	}
 	// A service already running answers Ready before the page is up; the load hook's script must still open it.
 	{

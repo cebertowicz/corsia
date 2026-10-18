@@ -107,7 +107,7 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
     })
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 enum ServiceStartup {
     Ready { url: String },
@@ -641,7 +641,13 @@ fn failure_shell_state(name: &str, failure: &classify::ConnectFailure) -> serde_
 fn shell_state_script(state: &remote::LaunchState) -> Option<String> {
     match state {
         remote::LaunchState::ServiceFailed { reason } => Some(format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(reason).unwrap_or_default())),
-        remote::LaunchState::LocalStartup { startup } => Some(format!("window.__corsiaShowStartup?.({startup});")),
+        remote::LaunchState::LocalStartup { startup } => match serde_json::to_string(startup) {
+            Ok(startup) => Some(format!("window.__corsiaShowStartup?.({startup});")),
+            Err(error) => {
+                log::error!("could not hand the answer of the start to the window: {error}");
+                None
+            }
+        },
         other => remote_startup_state(other).map(|payload| format!("window.__corsiaShowRemoteState?.({payload});")),
     }
 }
@@ -664,26 +670,13 @@ fn update_remote_state<R: tauri::Runtime>(
 }
 
 /// The shell state for how a local start answered.
-fn local_start_state(outcome: &Result<ServiceStartup, String>) -> remote::LaunchState {
-    match outcome {
-        Ok(startup) => match serde_json::to_value(startup) {
-            Ok(startup) => remote::LaunchState::LocalStartup { startup },
-            Err(error) => {
-                log::error!("could not hand the outcome of the start to the window: {error}");
-                remote::LaunchState::ServiceFailed { reason: String::new() }
-            }
-        },
-        Err(reason) => remote::LaunchState::ServiceFailed { reason: reason.clone() },
-    }
-}
-
 /// The launch-time start can answer before the shell page has loaded, when a script sent to it is lost. Its outcome is
 /// shell state, so it is drawn now if the page is up and by the page-load hook if not.
 fn show_launch_outcome<R: tauri::Runtime>(app: &tauri::AppHandle<R>, outcome: &Result<ServiceStartup, String>) {
     if let Err(error) = outcome {
         log::error!("bundled CORSIA service did not start: {error}");
     }
-    report_remote_state(app, |connection| connection.local_start_ended(local_start_state(outcome)));
+    report_remote_state(app, |connection| connection.local_start_ended(outcome.clone()));
 }
 
 /// Records how a start the window ran itself stands, without drawing it: the window draws the command's answer, and
@@ -1186,8 +1179,32 @@ fn quit_after_adoption(quit_asked: bool, adopted: &Result<(), adoption::Adoption
 
 #[tauri::command]
 async fn adopt_existing_install(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
-    record_local_start(&app, remote::RemoteConnection::local_start_began);
-    off_main_thread(move || adopt_existing_install_blocking(&app)).await
+    let worker = app.clone();
+    run_adoption_action(&app, move || adopt_existing_install_blocking(&worker)).await
+}
+
+/// Runs an action the window took on an adoption screen. Its answer is shell state like any local start's, a failure
+/// as the recovery screen the window draws from it, so a reload draws that screen rather than a bare spinner.
+async fn run_adoption_action<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    action: impl FnOnce() -> Result<ServiceStartup, adoption::AdoptionError> + Send + 'static,
+) -> Result<ServiceStartup, adoption::AdoptionError> {
+    record_local_start(app, remote::RemoteConnection::local_start_began);
+    let outcome = off_main_thread(action).await;
+    let answer = match &outcome {
+        Ok(startup) => startup.clone(),
+        Err(failure) => ServiceStartup::AdoptionFailed { failure: failure.clone() },
+    };
+    record_local_start(app, |connection| connection.local_start_ended(Ok(answer)));
+    outcome
+}
+
+/// The detail of the adoption failure the window shows now, which a recovery that put the install back repeats.
+fn shown_adoption_failure<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    match app.state::<RemoteRuntime>().connection.lock().unwrap_or_else(PoisonError::into_inner).state() {
+        remote::LaunchState::LocalStartup { startup: ServiceStartup::AdoptionFailed { failure } } => failure.message.clone(),
+        _ => String::new(),
+    }
 }
 
 fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
@@ -1232,8 +1249,14 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
 /// if it is stopped and release its exact hold. Never repeats the adoption.
 #[tauri::command]
 async fn start_existing_again(app: tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
-    record_local_start(&app, remote::RemoteConnection::local_start_began);
-    off_main_thread(move || start_existing_again_blocking(&app)).await
+    // Once the install runs again the window says it was put back, under the detail it showed before.
+    let restored = adoption::AdoptionError::restored(shown_adoption_failure(&app));
+    let worker = app.clone();
+    run_adoption_action(&app, move || {
+        start_existing_again_blocking(&worker).map(|()| ServiceStartup::AdoptionFailed { failure: restored })
+    })
+    .await
+    .map(|_| ())
 }
 
 fn start_existing_again_blocking(app: &tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
@@ -1311,11 +1334,11 @@ fn reopen_app(app: tauri::AppHandle) -> Result<(), String> {
 /// "Check again": the app's service is registered; wait for it to answer.
 #[tauri::command]
 async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
-    record_local_start(&app, remote::RemoteConnection::local_start_began);
-    off_main_thread(move || {
-        let service = app.state::<AppServiceState>();
-        let app_dir = default_app_dir(&app).map_err(adoption::AdoptionError::switched)?;
-        let port = lifecycle::service_port(&app, &service);
+    let worker = app.clone();
+    run_adoption_action(&app, move || {
+        let service = worker.state::<AppServiceState>();
+        let app_dir = default_app_dir(&worker).map_err(adoption::AdoptionError::switched)?;
+        let port = lifecycle::service_port(&worker, &service);
         wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
         Ok(ServiceStartup::Ready { url: service_url(port) })
     })
@@ -1335,7 +1358,7 @@ async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, St
     .await
     .map_err(|error| format!("starting CORSIA did not finish: {error}"))
     .and_then(|outcome| outcome);
-    record_local_start(&app, |connection| connection.local_start_ended(local_start_state(&outcome)));
+    record_local_start(&app, |connection| connection.local_start_ended(outcome.clone()));
     outcome
 }
 
@@ -1997,8 +2020,34 @@ mod tests {
         assert_eq!(shell_state_script(&launch_state(&app)), None);
 
         let ended = Ok(ServiceStartup::Ready { url: service_url(47_895) });
-        record_local_start(app.handle(), |connection| connection.local_start_ended(local_start_state(&ended)));
+        record_local_start(app.handle(), |connection| connection.local_start_ended(ended));
         assert!(shell_state_script(&launch_state(&app)).is_some_and(|script| script.contains(r#""state":"ready""#)));
+    }
+
+    #[test]
+    fn an_adoption_action_that_fails_is_redrawn_by_a_reload_rather_than_a_bare_spinner() {
+        let drawn = |failure: &adoption::AdoptionError| {
+            let startup = serde_json::to_string(&ServiceStartup::AdoptionFailed { failure: failure.clone() }).unwrap();
+            format!("window.__corsiaShowStartup?.({startup});")
+        };
+        // Adopt or Check again: the failure the command answers with is the screen a reload draws.
+        for failure in [adoption::AdoptionError::reopen("the step did not finish"), adoption::AdoptionError::switched("no answer on 47895")] {
+            let app = launch_app();
+            show_launch_outcome(app.handle(), &Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() }));
+            let answered = failure.clone();
+            let outcome = tauri::async_runtime::block_on(run_adoption_action(app.handle(), move || Err(answered)));
+            assert_eq!(outcome, Err(failure.clone()));
+            assert_eq!(shell_state_script(&launch_state(&app)), Some(drawn(&failure)));
+        }
+        // Start it again that worked: the screen says the install was put back, under the detail shown before.
+        let app = launch_app();
+        let shown = adoption::AdoptionError::start_again("the old install did not answer");
+        record_local_start(app.handle(), |connection| connection.local_start_ended(Ok(ServiceStartup::AdoptionFailed { failure: shown })));
+        let restored = adoption::AdoptionError::restored(shown_adoption_failure(app.handle()));
+        let answer = ServiceStartup::AdoptionFailed { failure: restored.clone() };
+        tauri::async_runtime::block_on(run_adoption_action(app.handle(), move || Ok(answer))).unwrap();
+        assert_eq!(restored, adoption::AdoptionError::restored("the old install did not answer"));
+        assert_eq!(shell_state_script(&launch_state(&app)), Some(drawn(&restored)));
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub enum LaunchState {
     ServiceFailed { reason: String },
     /// How this computer's own start last answered (ready, approval, an install to adopt, an undo that did not
     /// finish); the shell draws `startup` like a start it ran itself.
-    LocalStartup { startup: serde_json::Value },
+    LocalStartup { startup: crate::ServiceStartup },
     Disconnecting,
 }
 
@@ -59,11 +59,14 @@ impl RemoteConnection {
         self.state = LaunchState::ServiceFailed { reason: reason.into() };
     }
 
-    /// A local start ended with `ended` (`ServiceFailed` or `LocalStartup`). It is kept only while the window is on
-    /// this computer's own start; anything begun meanwhile (pairing, a remote) is newer.
-    pub fn local_start_ended(&mut self, ended: LaunchState) {
+    /// A local start answered: an answer is `LocalStartup`, a start that failed `ServiceFailed`. It is kept only while
+    /// the window is on this computer's own start; anything begun meanwhile (pairing, a remote) is newer.
+    pub fn local_start_ended(&mut self, outcome: Result<crate::ServiceStartup, String>) {
         if self.is_local_start() {
-            self.state = ended;
+            self.state = match outcome {
+                Ok(startup) => LaunchState::LocalStartup { startup },
+                Err(reason) => LaunchState::ServiceFailed { reason },
+            };
         }
     }
 
@@ -147,25 +150,25 @@ mod tests {
         connection.service_failed("did not start");
         connection.end_pairing();
         assert_eq!(connection.state(), &LaunchState::ServiceFailed { reason: "did not start".into() });
-        let ready = LaunchState::LocalStartup { startup: serde_json::json!({ "state": "ready", "url": "http://127.0.0.1:47895" }) };
-        connection.local_start_ended(ready.clone());
-        assert_eq!(connection.state(), &ready);
+        let ready = crate::ServiceStartup::Ready { url: "http://127.0.0.1:47895".into() };
+        connection.local_start_ended(Ok(ready.clone()));
+        assert_eq!(connection.state(), &LaunchState::LocalStartup { startup: ready.clone() });
         connection.connected("Studio");
-        connection.local_start_ended(ready);
+        connection.local_start_ended(Ok(ready));
         assert_eq!(connection.state(), &LaunchState::Remote { name: "Studio".into() });
     }
 
     #[test]
     fn a_start_answer_lasts_until_the_person_acts_on_it_and_never_replaces_what_they_began_since() {
-        let offered = LaunchState::LocalStartup { startup: serde_json::json!({ "state": "adoption_offered", "workspace": "~/corsia" }) };
+        let offered = crate::ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() };
         let mut connection = RemoteConnection::default();
-        connection.local_start_ended(offered.clone());
-        assert_eq!(connection.state(), &offered);
+        connection.local_start_ended(Ok(offered.clone()));
+        assert_eq!(connection.state(), &LaunchState::LocalStartup { startup: offered });
         connection.local_start_began();
         assert_eq!(connection.state(), &LaunchState::Local, "an adoption offer outlived the adoption it started");
 
         connection.begin_pairing();
-        connection.local_start_ended(LaunchState::ServiceFailed { reason: "refused".into() });
+        connection.local_start_ended(Err("refused".into()));
         assert_eq!(connection.state(), &LaunchState::Pairing, "a late start answer replaced a pairing");
         connection.local_start_began();
         assert_eq!(connection.state(), &LaunchState::Pairing);
