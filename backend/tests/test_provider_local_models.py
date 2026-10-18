@@ -8,7 +8,7 @@ from llm import local_downloads, local_setup_operation
 from llm.local_model import LocalModel
 
 
-MODEL = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
+MODEL = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, level=4.0, fp16=False, relative_speed=0.85)
 
 
 class _Response:
@@ -178,3 +178,6 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
 
     assert result["memory_gb"] == 64
     assert result["disk_free_gb"] == 20
+    assert result["sections"]["best"] == [{
+        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1024**3},
+    }]

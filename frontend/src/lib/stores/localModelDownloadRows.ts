@@ -24,7 +24,7 @@ export async function localDownloadRows(token: string, serverId: string): Promis
 			entry.status === 'available' && entry.server_id === serverId &&
 			typeof entry.speed === 'number' && Number.isFinite(entry.speed),
 		);
-		result.speeds = new Map(entries.map((entry) => [entry.repository.split('/').at(-1)!, entry.speed!]));
+		result.speeds = new Map(entries.map((entry) => [entry.model, entry.speed!]));
 	}
 	return result;
 }

@@ -33,14 +33,23 @@ class Operation:
     kind: str
     task_id: str | None = None
     name: str | None = None
+    level: float | None = None
+    fp16: bool | None = None
+    relative_speed: float | None = None
 
     @classmethod
     def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None) -> Operation:
-        return cls(model.repository, model.download_size_bytes, model.context_window, kind, task_id, model.name)
+        return cls(
+            model.repository, model.download_size_bytes, model.context_window, kind, task_id,
+            model.name, model.level, model.fp16, model.relative_speed,
+        )
 
     @property
     def model(self) -> LocalModel:
-        return LocalModel(self.repository, self.download_size_bytes, self.context_window, self.name)
+        return LocalModel(
+            self.repository, self.download_size_bytes, self.context_window, self.name,
+            self.level, self.fp16, self.relative_speed,
+        )
 
 
 def _state_root() -> Path:

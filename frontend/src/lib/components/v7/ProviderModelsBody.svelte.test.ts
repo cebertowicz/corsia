@@ -77,14 +77,14 @@ describe('Settings model rows and account usage', () => {
 				ok: true, json: async () => ({
 					loaded: [],
 					available: [
-						{ id: 'speedy', model_id: 'speedy', repo_id: 'speedy', display_name: 'Measured model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+						{ id: 'exact-model', model_id: 'exact-model', repo_id: 'renamed-model', display_name: 'Measured model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
 						{ id: 'plain', model_id: 'plain', repo_id: 'plain', display_name: 'Plain model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
 					],
 				}),
 			};
 			if (url.includes('/providers/local/recommendations')) return {
 				ok: true, json: async () => ({ state: 'ready', downloads: [
-					{ repository: 'org/speedy', status: 'available', server_id: 'local-test', speed: 52 },
+					{ repository: 'org/speedy', model: 'exact-model', status: 'available', server_id: 'local-test', speed: 52 },
 				] }),
 			};
 			if (url.includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [] }) };

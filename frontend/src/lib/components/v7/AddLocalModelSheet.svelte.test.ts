@@ -46,10 +46,10 @@ describe('AddLocalModelSheet', () => {
 		expect(download).toBeUndefined();
 	});
 
-	it('uses the shared context formatter and keeps the disk line below metadata', async () => {
-		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 16, context_window: 262144, disk: { state: 'insufficient', required_bytes: 31 * 1024 ** 3 } }] } });
+	it('formats structured recommender facts and keeps the disk line below metadata', async () => {
+		await render({ state: 'ready', sections: { best: [{ name: 'Qwen', repository: 'Jundot/Qwen', download_size_gb: 16, context_window: 262144, quantization_bits: 4, relative_speed: 0.85, disk: { state: 'insufficient', required_bytes: 31 * 1024 ** 3 } }] } });
 		const text = host.textContent ?? '';
-		expect(text).toContain('262k context');
+		expect(text).toContain('262k context · 4-bit · 16 GB · A bit slower');
 		expect(text.indexOf('262k context')).toBeLessThan(text.indexOf('Needs 31 GB of disk'));
 		expect(host.querySelector('.model-name')?.tagName).toBe('SPAN');
 	});

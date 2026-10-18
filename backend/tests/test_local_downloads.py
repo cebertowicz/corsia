@@ -15,7 +15,7 @@ def test_settings_downloads_are_separate_from_setup_marker(monkeypatch, tmp_path
     assert stored.model == model
     assert stored.speed == 52.0
     assert stored.view() == {
-        "name": "Qwen 3.8 27B", "repository": model.repository,
+        "name": "Qwen 3.8 27B", "repository": model.repository, "model": model.model,
         "download_size_bytes": 1_000_000, "download_size_gb": 0.0,
         "context_window": 32_768, "status": "available", "speed": 52.0,
         "detail": None, "server_id": "local-server",

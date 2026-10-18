@@ -143,9 +143,9 @@ export type LocalModelRecommendation = {
 	repository: string;
 	download_size_gb: number;
 	context_window: number;
-	/** oMLX recommendation metadata when available. */
-	quantization?: string;
-	relative_speed?: string;
+	/** Structured oMLX recommender facts; display wording belongs to localModelRecommendationMeta. */
+	quantization_bits?: number;
+	relative_speed?: number;
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
 };
 
@@ -154,7 +154,7 @@ export type LocalModelRecommendations = {
 	message?: string;
 	sections?: Record<string, LocalModelRecommendation[]>;
 	/** Durable Settings download records from the backend's local_downloads view. */
-	downloads?: { repository: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null }[];
+	downloads?: { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null }[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
 	disk_free_gb?: number;

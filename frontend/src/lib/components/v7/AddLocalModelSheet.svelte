@@ -3,7 +3,7 @@
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { fetchLocalModelRecommendations, startLocalModelDownload, type LocalModelRecommendation } from '$lib/conductorSources';
-	import { humanCtx } from '$lib/stores/providerModelUtils';
+	import { localModelRecommendationMeta } from '$lib/stores/localModelRecommendationMeta';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import ListRow from '$lib/components/ui/ListRow.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -57,12 +57,7 @@
 	}
 
 	function meta(model: LocalModelRecommendation): string[] {
-		return [
-			`${humanCtx(model.context_window)} context`,
-			model.quantization,
-			`${model.download_size_gb} GB`,
-			model.relative_speed,
-		].filter((value): value is string => Boolean(value));
+		return localModelRecommendationMeta(model);
 	}
 
 	function joinedMeta(model: LocalModelRecommendation): string[] {
