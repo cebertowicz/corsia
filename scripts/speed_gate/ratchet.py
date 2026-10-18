@@ -18,6 +18,12 @@ GROWTH = 0.25
 MIN_RISE = {"steps": 10_000, "statements": 5, "bytes": 16_384}
 #: Fresh-route ceilings: a route above one is a would-fail unless grandfathered.
 CEILINGS = {"steps": 500_000, "statements": 500, "bytes": 1_048_576}
+#: The fixed Focus page measures 63,783 bytes with a production-shaped agent
+#: thread. Keep a twofold margin for ordinary variation while making a seed
+#: payload regression fail even though its SQLite walk still exceeds the step cap.
+ROUTE_CEILINGS = {
+    "/api/threads/{thread_id}/messages?limit=50&view=focus": {"bytes": 131_072},
+}
 #: Two runs of one tree must agree exactly on steps and statements (the SQLite build is pinned, one pooled
 #: connection serves each lane and background work is drained), and on response bytes except on the routes
 #: below. A route listed here reports the host's own live readings, so its payload changes by a few digits
@@ -58,6 +64,11 @@ def measured(result: dict) -> dict[str, dict]:
     return {route: cost for route, cost in result["routes"].items() if cost.get("status", 200) < 400}
 
 
+def route_ceilings(route: str, ceilings: dict, custom: dict[str, dict]) -> dict:
+    """Merge the global caps with any evidence-backed cap for one query shape."""
+    return {**ceilings, **custom.get(route, {})}
+
+
 def over_ceiling(cost: dict, ceilings: dict) -> list[str]:
     return [metric for metric in METRICS if cost.get(metric, 0) > ceilings[metric]]
 
@@ -75,18 +86,20 @@ def compare(current: dict, baseline: dict) -> Verdict:
                      f"{current.get('sqlite_version')}: step counts are not comparable, so there is no verdict and the run is not a pass. "
                      "Regenerate the baseline on the new version with the update-baseline command."))
     ceilings = baseline.get("ceilings", CEILINGS)
+    custom_ceilings = baseline.get("route_ceilings", {})
     grandfathered = set(baseline.get("grandfathered", ()))
     recorded = baseline.get("routes", {})
     not_called = current.get("not_called", {})
     findings: list[Finding] = []
     for route, cost in sorted(measured(current).items()):
         before = recorded.get(route)
+        route_ceiling = route_ceilings(route, ceilings, custom_ceilings)
         if before is None:
             kind = "new"
-            for metric in over_ceiling(cost, ceilings):
+            for metric in over_ceiling(cost, route_ceiling):
                 findings.append(Finding(route, "ceiling", metric, None, cost[metric],
-                                        f"new route exceeds the {metric} ceiling of {ceilings[metric]:,}"))
-            if not over_ceiling(cost, ceilings):
+                                        f"new route exceeds the {metric} ceiling of {route_ceiling[metric]:,}"))
+            if not over_ceiling(cost, route_ceiling):
                 findings.append(Finding(route, kind, "steps", None, cost["steps"], "new route within every ceiling"))
             continue
         for metric in METRICS:
@@ -96,10 +109,13 @@ def compare(current: dict, baseline: dict) -> Verdict:
             elif cost[metric] < before[metric] * (1 - GROWTH) and before[metric] - cost[metric] >= MIN_RISE[metric]:
                 findings.append(Finding(route, "improved", metric, before[metric], cost[metric],
                                         f"{metric} fell more than {GROWTH:.0%}: lower the baseline"))
-        if route not in grandfathered:
-            for metric in over_ceiling(cost, ceilings):
+        for metric in over_ceiling(cost, route_ceiling):
+            # Legacy routes over a global ceiling remain grandfathered. A custom
+            # cap is deliberate fresh evidence for this query shape and always
+            # applies, even if another metric (Focus steps) stays grandfathered.
+            if route not in grandfathered or metric in custom_ceilings.get(route, {}):
                 findings.append(Finding(route, "ceiling", metric, before[metric], cost[metric],
-                                        f"{metric} is over the ceiling of {ceilings[metric]:,}"))
+                                        f"{metric} is over the ceiling of {route_ceiling[metric]:,}"))
     for route in sorted(set(recorded) - set(measured(current))):
         status = current["routes"].get(route, {}).get("status")
         if status is not None:  # the route answered with an error: its read is no longer measured
@@ -119,9 +135,10 @@ def new_baseline(current: dict, reason: str, ceilings: dict | None = None) -> di
     """A baseline recording every measured route; routes already over a ceiling are grandfathered."""
     ceilings = ceilings or CEILINGS
     routes = {route: {metric: cost[metric] for metric in METRICS} for route, cost in sorted(measured(current).items())}
+    custom_ceilings = {route: ROUTE_CEILINGS[route] for route in routes if route in ROUTE_CEILINGS}
     return {
         "sqlite_version": current["sqlite_version"], "progress_every": current["progress_every"],
-        "ceilings": ceilings, "reason": reason, "routes": routes,
+        "ceilings": ceilings, "route_ceilings": custom_ceilings, "reason": reason, "routes": routes,
         "grandfathered": [route for route, cost in routes.items() if over_ceiling(cost, ceilings)],
     }
 

@@ -6,6 +6,7 @@ it in the report, it is never skipped silently.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -58,7 +59,11 @@ def fixture_ids(db_path: str) -> dict[str, str]:
         return None if row is None else str(row[0])
 
     ids = {
-        "thread_id": "thread-00000", "parent_thread_id": "thread-00000", "project_id": "project-00",
+        # Generic thread reads use an ordinary thread. The Focus first-page
+        # variant below targets a persistent agent whose newest turns include
+        # production-shaped seed/tool/assistant rows.
+        "thread_id": "thread-00018", "agent_thread_id": "thread-00000",
+        "parent_thread_id": "thread-00000", "project_id": "project-00",
         "node_id": "node-project-00-0001", "user_id": "steve", "metric": "messages",
         "artifact_id": first("SELECT artifact_id FROM artifact_registrations ORDER BY rowid LIMIT 1")
         or first("SELECT id FROM artifact_identities ORDER BY rowid LIMIT 1"),
@@ -94,6 +99,18 @@ def query_params(route) -> list[tuple[str, bool]]:
     return found
 
 
+def runtime_query_values() -> dict[str, str]:
+    """Client query values that only exist after the target app has loaded."""
+    from infra import config
+
+    values = {"path": str(config.WORKSPACE / "README.md")}
+    if importlib.util.find_spec("api.measurement_registry") is None:
+        return values
+    from api.measurement_registry import REGISTRY
+    values["ids"] = ",".join(sorted(name for name, item in REGISTRY.items() if item.available))
+    return values
+
+
 def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str],
                  token: str) -> Target:
     if template in NOT_A_READ:
@@ -116,3 +133,27 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
         if value is not None:
             query.append(f"{name}={quote(value, safe=',')}")
     return Target(template, url + ("?" + "&".join(query) if query else ""))
+
+
+#: Reads whose client query shape changes the response substantially. The default
+#: page is the ordinary route target above; Focus gets its own identity because
+#: the same path has different server-side projection and payload size.
+CLIENT_QUERY_VARIANTS = {
+    "/api/threads/{thread_id}/messages": (("?limit=50&view=focus", "view=focus"),),
+}
+
+
+def build_targets(template: str, route, ids: dict[str, str], extra: dict[str, str],
+                  token: str) -> list[Target]:
+    """Return the generic client read plus explicitly distinct query variants."""
+    primary = build_target(template, route, ids, extra, token)
+    if primary.url is None:
+        return [primary]
+    variants = [primary]
+    for suffix, extra_query in CLIENT_QUERY_VARIANTS.get(template, ()):
+        variant_ids = {**ids, "thread_id": ids.get("agent_thread_id", ids["thread_id"])}
+        variant = build_target(template, route, variant_ids, extra, token)
+        assert variant.url is not None  # the primary and variant share the same route contract
+        separator = "&" if "?" in variant.url else "?"
+        variants.append(Target(template + suffix, variant.url + separator + extra_query))
+    return variants

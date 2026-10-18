@@ -7,6 +7,7 @@ plan) and include exactly one thread, and one plan, at the production maximum.
 
 from __future__ import annotations
 
+import json
 import random
 from collections.abc import Iterator
 from datetime import timedelta
@@ -15,19 +16,34 @@ from .sqlite_pin import sqlite3
 from . import fixture_spec as spec
 from .fixture_rows import END, START, Pools, timestamp
 
-THREAD_COUNT = round(spec.PRODUCTION_ROWS["threads"] * spec.SCALE)
+# The sidebar currently renders about 830 visible threads. Keep that list-sized
+# even though the general table census is sampled, because it is a cold-load read.
+THREAD_COUNT = 830
 PROJECT_COUNT = spec.SMALL_ROWS["projects"]
 AGENT_THREADS = 18
+# The newest Focus page of each persistent-agent fixture thread has 25 turns:
+# a seed system row, a tool step, and a user-visible assistant result. This
+# recreates the production row-type mix which made one page several megabytes.
+NEWEST_AGENT_TURNS = 25
+SEED_CONTENT_BYTES = 145 * 1024
+TOOL_CONTENT_BYTES = 10 * 1024
+ASSISTANT_CONTENT_BYTES = 360
 MODELS = ("claude-code/opus", "claude-code/sonnet", "codex/gpt-6.1-sol", "codex/gpt-5.6-terra",
           "external@fixture/qwen3.8-flash", "omlx@local/fixture-local")
 ROLES = ("user", "assistant", "assistant", "tool", "assistant", "system")
 
 
 def _blocks(rng: random.Random) -> list[str]:
-    """Reusable message bodies of mixed size (most short, a tail of long tool output)."""
+    """Reusable ordinary message bodies (most short, a tail of tool-sized content)."""
     words = [f"w{n:03d}" for n in range(400)]
     sizes = [40] * 14 + [180] * 5 + [900] * 1
     return [" ".join(rng.choices(words, k=rng.choice(sizes))) for _ in range(2_048)]
+
+
+def _synthetic_content(size: int, label: str, sequence: int) -> str:
+    """Deterministic filler with production-shaped byte counts and no source text."""
+    suffix = f" {label}-{sequence:06d}"
+    return (label * ((size // len(label)) + 1))[:size - len(suffix)] + suffix
 
 
 def _parent_counts(knots, parents: int, rng: random.Random, maximum: int) -> list[int]:
@@ -92,26 +108,47 @@ def seed_threads(db: sqlite3.Connection, rng: random.Random, pools: Pools,
 
 def _message_rows(rng: random.Random, counts: list[int], blocks: list[str]) -> Iterator[tuple]:
     lead = int((END - START).total_seconds() * 0.1)
+    newest_rows = NEWEST_AGENT_TURNS * 3
     for index, count in enumerate(counts):
         begin = START + timedelta(seconds=rng.randrange(lead))
         step = (END - begin).total_seconds() / (count + 1)
         user_order = 0
         for k in range(count):
             role = ROLES[(k + index) % len(ROLES)] if k else "user"
+            metadata = None
+            content = f"{blocks[rng.randrange(len(blocks))]} #{k}"
+            # Persistent-agent threads reproduce a page's newest turns. The
+            # seed is visible in the pre-fix Focus projection; the tool step is
+            # hidden, and the assistant result is visible alongside it.
+            if index < AGENT_THREADS and k >= count - newest_rows:
+                turn = (k - (count - newest_rows)) // 3
+                position = (k - (count - newest_rows)) % 3
+                turn_id = f"fixture-turn-{index:05d}-{turn:03d}"
+                if position == 0:
+                    role = "system"
+                    metadata = json.dumps({"type": "seed", "turn_id": turn_id}, separators=(",", ":"))
+                    content = _synthetic_content(SEED_CONTENT_BYTES, "seed", k)
+                elif position == 1:
+                    role = "tool"
+                    metadata = json.dumps({"turn_id": turn_id}, separators=(",", ":"))
+                    content = _synthetic_content(TOOL_CONTENT_BYTES, "tool", k)
+                else:
+                    role = "assistant"
+                    metadata = json.dumps({"turn_id": turn_id, "for_user": True}, separators=(",", ":"))
+                    content = _synthetic_content(ASSISTANT_CONTENT_BYTES, "assistant", k)
             order = None
             if role == "user":
                 user_order += 1
                 order = user_order
-            yield (f"msg-{index:05d}-{k:06d}", f"thread-{index:05d}", role,
-                   f"{blocks[rng.randrange(len(blocks))]} #{k}",
+            yield (f"msg-{index:05d}-{k:06d}", f"thread-{index:05d}", role, content, metadata,
                    (begin + timedelta(seconds=step * (k + 1))).isoformat(), k + 1, order)
 
 
 def seed_messages(db: sqlite3.Connection, rng: random.Random, counts: list[int]) -> int:
     blocks = _blocks(rng)
     cursor = db.executemany(
-        "INSERT INTO messages (id,thread_id,role,content,created_at,seq,input_order)"
-        " VALUES (?,?,?,?,?,?,?)", _message_rows(rng, counts, blocks))
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,input_order)"
+        " VALUES (?,?,?,?,?,?,?,?)", _message_rows(rng, counts, blocks))
     return cursor.rowcount
 
 

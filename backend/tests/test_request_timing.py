@@ -53,7 +53,7 @@ async def test_middleware_preserves_streaming_and_adds_server_timing(monkeypatch
     )
     assert [item["body"] for item in sent[1:]] == [b"one", b"two"]
     assert any(name == b"server-timing" for name, _ in sent[0]["headers"])
-    assert len(recorded) == 1
+    assert len(recorded) == 1 and recorded[0][-1] == 6
 
 
 def test_real_app_records_route_template_and_unhandled_errors():
@@ -77,6 +77,8 @@ def test_real_app_records_route_template_and_unhandled_errors():
 
     keys = {key[1:] for key in request_timing._aggregates}
     assert keys == {("GET", "/items/{item_id}", "2xx"), ("GET", "/boom", "5xx")}
+    item = next(value for key, value in request_timing._aggregates.items() if key[2] == "/items/{item_id}")
+    assert item.sum_bytes > 0 and item.max_bytes == item.sum_bytes
 
 
 @pytest.mark.asyncio

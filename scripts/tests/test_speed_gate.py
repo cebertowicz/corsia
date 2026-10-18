@@ -86,6 +86,14 @@ def test_a_route_that_crosses_the_ceiling_without_being_grandfathered_fails():
     assert ("/a", "ceiling", "steps") in kinds(verdict)
 
 
+def test_focus_byte_cap_applies_when_its_step_cost_is_grandfathered():
+    focus = "/api/threads/{thread_id}/messages?limit=50&view=focus"
+    base = baseline_for({focus: cost(900_000, size=131_000)})
+    assert focus in base["grandfathered"]
+    verdict = ratchet.compare(result({focus: cost(900_000, size=131_100)}), base)
+    assert (focus, "ceiling", "bytes") in kinds(verdict)
+
+
 def test_improvement_is_reported_but_never_fails():
     base = baseline_for({"/a": cost(1_000_000)})
     verdict = ratchet.compare(result({"/a": cost(100_000)}), base)
@@ -142,6 +150,19 @@ def test_route_target_fills_path_and_required_query_and_reports_the_unfillable()
     assert missing.url is None and "thing_id" in missing.reason
     static = routes.build_target("/docs", route, {}, {}, "tok")
     assert static.url is None and "no application read" in static.reason
+
+
+def test_message_targets_measure_default_and_focus_client_query_shapes():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))
+    targets = routes.build_targets(
+        "/api/threads/{thread_id}/messages", route, {"thread_id": "thread-1"}, {}, "tok",
+    )
+    assert [(target.template, target.url) for target in targets] == [
+        ("/api/threads/{thread_id}/messages", "/api/threads/thread-1/messages?token=tok&limit=50"),
+        ("/api/threads/{thread_id}/messages?limit=50&view=focus",
+         "/api/threads/thread-1/messages?token=tok&limit=50&view=focus"),
+    ]
 
 
 def test_update_baseline_needs_a_reason_and_grandfathers_over_ceiling_routes(tmp_path):

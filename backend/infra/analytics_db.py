@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS request_timing_daily (
     count BIGINT NOT NULL,
     sum_ms DOUBLE NOT NULL,
     max_ms DOUBLE NOT NULL,
+    sum_bytes BIGINT NOT NULL DEFAULT 0,
+    max_bytes BIGINT NOT NULL DEFAULT 0,
     buckets INTEGER[] NOT NULL,
     PRIMARY KEY (day, method, route, status_class)
 );
@@ -50,10 +52,14 @@ CREATE TABLE IF NOT EXISTS request_slow (
     status INTEGER NOT NULL,
     dur_ms DOUBLE NOT NULL,
     dbq_ms DOUBLE NOT NULL,
-    db_ms DOUBLE NOT NULL
+    db_ms DOUBLE NOT NULL,
+    response_bytes BIGINT
 );
 -- Per-lane DB wait and work. Nullable with no default: a row written before the
 -- lanes existed did not measure them, so it reads as unknown, never as zero.
+ALTER TABLE request_timing_daily ADD COLUMN IF NOT EXISTS sum_bytes BIGINT;
+ALTER TABLE request_timing_daily ADD COLUMN IF NOT EXISTS max_bytes BIGINT;
+ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS response_bytes BIGINT;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS db_read_ms DOUBLE;
 ALTER TABLE request_slow ADD COLUMN IF NOT EXISTS dbq_bulk_ms DOUBLE;
