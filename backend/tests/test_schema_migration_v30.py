@@ -59,7 +59,7 @@ def test_startup_migration_adds_the_tables_to_an_existing_database(tmp_path):
         indexes = {
             row[0] for row in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='index' "
-                "AND name LIKE 'idx_%presence%'"
+                "AND name LIKE 'idx_%presence%' AND name NOT LIKE 'idx_presence_focus%'"  # the 125->126 rollup is not this step's
             )
         }
         assert indexes == {
