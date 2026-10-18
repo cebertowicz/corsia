@@ -256,11 +256,11 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 test.describe('@flow:image-region-comments @surface:documents comments on parts of an image, by touch', () => {
 	test.use({ hasTouch: true });
 
-	test('phone: the Comment button draws one box with one finger, in a bottom sheet (393)', async ({ page, request }, testInfo) => {
+	for (const variant of ['control', 'wait600', 'nopan'] as const) test(`phone: the Comment button draws one box with one finger, in a bottom sheet (393) [${variant}]`, async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 		await page.setViewportSize({ width: 393, height: 852 });
 		await page.emulateMedia({ colorScheme: 'dark' });
-		const seeded = await seedImage(page, request, 'region-393');
+		const seeded = await seedImage(page, request, `region-393-${variant}`);
 		const timeline = async () => page.evaluate(() => ((window as any).__ev as string[]).slice(-45).join(' ; '));
 		try {
 			await openThread(page, seeded.sessionTitle, 393);
@@ -292,8 +292,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(sheet(page)).toHaveCount(0);
 
 			// Outside box mode one finger pans again: nothing is drawn.
-			await touchDrag(page, await at(page, 0.7, 0.7), await at(page, 0.5, 0.5));
+			if (variant !== 'nopan') await touchDrag(page, await at(page, 0.7, 0.7), await at(page, 0.5, 0.5));
 			await expect(composer(page)).toHaveCount(0);
+			if (variant === 'wait600') await page.waitForTimeout(600);
 
 			// The tag's touch target is 44 px around its number.
 			const disc = (await tag(page, 1).locator('.disc').boundingBox())!;
