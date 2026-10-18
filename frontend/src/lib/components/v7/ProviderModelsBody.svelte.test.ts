@@ -96,9 +96,9 @@ describe('Settings model rows and account usage', () => {
 		await tick(); await tick(); await tick();
 
 		expect(document.body.textContent).toContain('52 tokens/s');
-		expect(document.body.textContent).toContain('Settings measured on computers like this one · omlx.ai');
+		expect(document.body.textContent).toContain('Settings measured on Macs like this one · omlx.ai');
 		expect(document.body.textContent).toContain('Plain model');
-		expect(document.body.textContent?.match(/Settings measured on computers like this one · omlx\.ai/g)).toHaveLength(1);
+		expect(document.body.textContent?.match(/Settings measured on Macs like this one · omlx\.ai/g)).toHaveLength(1);
 	});
 
 	it('offers download deletion only for an available oMLX model', async () => {
