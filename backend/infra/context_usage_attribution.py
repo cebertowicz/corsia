@@ -293,6 +293,22 @@ def _attach_snapshot_projection(
     attach_lesson_estimates(usage)
 
 
+def _settle_measured_total(usage: dict[str, Any], sections: dict[str, int], measured_total: int,
+                           harness: str, provider_history_opaque: bool, tool_estimate_failed: bool) -> None:
+    """Keep the provider's total and attribute what the snapshot rows miss."""
+    usage["total_used"] = measured_total
+    remainder = measured_total - _snapshot_attribution_total(sections)
+    if provider_history_opaque and remainder > 0 and not tool_estimate_failed:
+        # A resumed session got only this turn's input; the rest is the conversation the
+        # harness kept: History, by the preview's rule (context_preview_estimate._count_retained_once).
+        usage["history_tokens"] = sections["history_tokens"] + remainder
+        usage["attribution_delta_tokens"] = 0
+        usage.pop("attribution_delta_reason", None)
+        return
+    usage["attribution_delta_tokens"] = remainder
+    usage["attribution_delta_reason"] = _attribution_delta_reason(harness, tool_estimate_failed)
+
+
 def merge_context_usage_with_snapshot(
     context_usage: dict[str, Any] | None,
     *,
@@ -354,12 +370,9 @@ def merge_context_usage_with_snapshot(
 
     usage["model_context_window"] = _resolve_model_context_window(snapshot, usage)
     snapshot_total = _snapshot_attribution_total(sections)
-    if measured:
-        usage["total_used"] = measured_total
-        usage["attribution_delta_tokens"] = measured_total - snapshot_total
-        usage["attribution_delta_reason"] = _attribution_delta_reason(
-            harness, mcp_tool_definition_estimate_failed,
-        )
+    if measured_total is not None:
+        _settle_measured_total(usage, sections, measured_total, harness,
+                               provider_history_opaque, mcp_tool_definition_estimate_failed)
     elif explicitly_stale or provider_history_opaque:
         usage["total_used"] = None
         usage.pop("attribution_delta_tokens", None)

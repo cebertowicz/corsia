@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 
 def _quiet_startup(monkeypatch, calls: list) -> None:
-    from core import skill_key_conversion, system_projection
+    from core import skill_data_conversion, skill_key_conversion, system_projection
     from infra import guidance_git
     from registry import shared_ownership_assignment
 
@@ -13,6 +13,9 @@ def _quiet_startup(monkeypatch, calls: list) -> None:
     )
     monkeypatch.setattr(
         skill_key_conversion, "convert_legacy_skill_keys", lambda path: calls.append(("skill_keys", path)),
+    )
+    monkeypatch.setattr(
+        skill_data_conversion, "convert_legacy_skill_data", lambda path: calls.append(("skill_data", path)),
     )
     monkeypatch.setattr(
         guidance_git, "startup_sweep", lambda path: calls.append(("sweep", path)),
@@ -24,7 +27,7 @@ def _quiet_startup(monkeypatch, calls: list) -> None:
     )
 
 
-def test_workspace_startup_runs_projection_skill_keys_sweep_then_assignment(tmp_path, monkeypatch):
+def test_workspace_startup_runs_projection_skill_keys_skill_data_sweep_then_assignment(tmp_path, monkeypatch):
     from app_startup_workspace import initialize_workspace
 
     calls: list = []
@@ -33,6 +36,7 @@ def test_workspace_startup_runs_projection_skill_keys_sweep_then_assignment(tmp_
     assert calls == [
         ("projection", tmp_path),
         ("skill_keys", tmp_path),
+        ("skill_data", tmp_path),
         ("sweep", tmp_path),
         ("assignment", tmp_path),
     ]
@@ -52,7 +56,24 @@ def test_workspace_startup_logs_skill_key_failure_and_still_sweeps(tmp_path, mon
     monkeypatch.setattr(skill_key_conversion, "convert_legacy_skill_keys", fail)
     initialize_workspace(tmp_path, SimpleNamespace(exception=messages.append))
     assert messages == ["skill frontmatter key conversion failed; retrying next start"]
-    assert [name for name, _path in calls] == ["projection", "sweep", "assignment"]
+    assert [name for name, _path in calls] == ["projection", "skill_data", "sweep", "assignment"]
+
+
+def test_workspace_startup_logs_skill_data_failure_and_still_sweeps(tmp_path, monkeypatch):
+    from core import skill_data_conversion
+    from app_startup_workspace import initialize_workspace
+
+    calls: list = []
+    messages: list = []
+    _quiet_startup(monkeypatch, calls)
+
+    def fail(_path):
+        raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(skill_data_conversion, "convert_legacy_skill_data", fail)
+    initialize_workspace(tmp_path, SimpleNamespace(exception=messages.append))
+    assert messages == ["skill CORSIA data conversion failed; retrying next start"]
+    assert [name for name, _path in calls] == ["projection", "skill_keys", "sweep", "assignment"]
 
 
 def test_workspace_startup_logs_assignment_failure_without_blocking(tmp_path, monkeypatch):

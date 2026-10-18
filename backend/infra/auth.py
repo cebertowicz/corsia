@@ -45,6 +45,23 @@ def token_from_request(token: str | None, authorization: str | None) -> str | No
     return None
 
 
+def narrow_to_listener(ws, user: dict | None) -> dict | None:
+    """Narrow a WebSocket's first-frame user by the listener it arrived on.
+
+    A socket on the Devices (LAN) listener accepts a person session only;
+    every other listener keeps the full ``authenticate`` rule.
+    """
+    scope = getattr(ws, "scope", None)
+    if (
+        user is not None
+        and isinstance(scope, dict)
+        and scope.get("corsia_listener") == "devices"
+        and not is_person_session(user)
+    ):
+        return None
+    return user
+
+
 def require_user(
     token: str | None = Query(None),
     authorization: str | None = Header(None),

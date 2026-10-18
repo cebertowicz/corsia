@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from core.skill_validation import validate_skill_bundle, validate_skill_file, validate_skill_text
-from tests.skill_sidecar_helpers import POINTER, to_sidecar_form
+from tests.skill_sidecar_helpers import POINTER
 
 _WORKFLOW = {
     "handler": {"kind": "instruction"},
@@ -23,6 +23,10 @@ def _skill(pointer: str = POINTER, block: str = "") -> str:
 
 def _legacy_block() -> str:
     return "corsia:\n" + "".join(f"  {line}\n" for line in _SIDECAR.splitlines())
+
+
+def _lesson_block() -> str:
+    return "corsia:\n  handler: {kind: cli}\n  lesson: {state: trial}\n"
 
 
 def test_pointer_reads_the_sidecar_unwrapped():
@@ -95,14 +99,22 @@ def test_sidecar_data_gets_the_existing_handler_and_workflow_checks():
     assert any("references unknown step" in e for e in result.errors)
 
 
-def test_the_legacy_block_is_still_accepted_without_a_pointer():
+def test_a_block_without_a_pointer_is_retired_and_names_the_sidecar():
     text = _skill(pointer="", block=_legacy_block())
 
-    result = validate_skill_bundle(text, None)
+    for result in (validate_skill_bundle(text, None), validate_skill_text(text)):
+        assert not result.ok
+        assert result.corsia is None
+        assert [e for e in result.errors if "is retired" in e and "corsia.yaml" in e and "corsia-data" in e]
 
-    assert result.ok, result.errors
-    assert result.corsia == _WORKFLOW == result.metadata["corsia"]
-    assert validate_skill_text(text).corsia == _WORKFLOW
+
+def test_a_lesson_block_still_resolves_as_the_skills_data_without_a_sidecar():
+    text = _skill(pointer="", block=_lesson_block())
+
+    for result in (validate_skill_bundle(text, None), validate_skill_text(text)):
+        assert not any("retired" in e or "pointer" in e for e in result.errors), result.errors
+        assert result.corsia == {"handler": {"kind": "cli"}, "lesson": {"state": "trial"}}
+        assert result.corsia == result.metadata["corsia"]
 
 
 def test_a_skill_with_no_corsia_data_has_none():
@@ -110,22 +122,22 @@ def test_a_skill_with_no_corsia_data_has_none():
     assert validate_skill_bundle(_skill(pointer=""), {"corsia.yaml": _SIDECAR}).corsia is None
 
 
-def test_block_and_pointer_together_are_an_error_when_they_differ():
-    text = _skill(block="corsia:\n  handler: {kind: cli}\n")
-
-    result = validate_skill_bundle(text, {"corsia.yaml": _SIDECAR})
+@pytest.mark.parametrize("block", [_legacy_block(), "corsia:\n  handler: {kind: cli}\n"])
+def test_block_and_pointer_together_are_always_an_error_even_with_identical_data(block):
+    result = validate_skill_bundle(_skill(block=block), {"corsia.yaml": _SIDECAR})
 
     assert not result.ok
-    assert any("both declare CORSIA data, and they differ" in e for e in result.errors)
+    assert any("a top-level corsia block and a metadata.corsia-data pointer both declare" in e for e in result.errors)
+    assert validate_skill_text(_skill(block=block)).errors == [
+        e for e in result.errors if "pointer both declare" in e
+    ]
 
 
-def test_block_and_pointer_with_identical_data_is_an_interrupted_conversion():
-    text = _skill(block=_legacy_block())
+def test_a_lesson_block_and_a_pointer_together_are_an_error():
+    result = validate_skill_bundle(_skill(block=_lesson_block()), {"corsia.yaml": _SIDECAR})
 
-    result = validate_skill_bundle(text, {"corsia.yaml": _SIDECAR})
-
-    assert result.ok, result.errors
-    assert result.corsia == _WORKFLOW
+    assert not result.ok
+    assert any("holding lesson data cannot also have a metadata.corsia-data pointer" in e for e in result.errors)
 
 
 def test_validate_skill_text_never_consults_a_sidecar():
@@ -185,10 +197,3 @@ def test_a_symlinked_sidecar_is_ignored_when_nothing_points_at_it(tmp_path):
     os.symlink(tmp_path, folder / "corsia.yaml")
 
     assert validate_skill_file(folder / "SKILL.md").ok
-
-
-def test_to_sidecar_form_round_trips_a_legacy_skill():
-    legacy = _skill(pointer="", block=_legacy_block())
-    skill_md, sidecar = to_sidecar_form(legacy, validate_skill_text(legacy).corsia)
-
-    assert validate_skill_bundle(skill_md, {"corsia.yaml": sidecar}).corsia == _WORKFLOW

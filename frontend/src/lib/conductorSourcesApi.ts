@@ -55,7 +55,7 @@ export async function linkCli(t: string, vendor: string): Promise<{ ok: boolean;
 	return { ok: response.ok && body?.ok === true, outcome: body?.outcome ?? null };
 }
 
-export type CliInstallState = 'idle' | 'running' | 'done' | 'failed';
+export type CliInstallState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface CliInstall { state: CliInstallState; reason: string | null; path_shadowed_by: string | null }
 
 function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
@@ -98,6 +98,13 @@ export function startCliUpdate(t: string, vendor: string): Promise<CliInstallRef
 export async function getCliInstall(t: string, vendor: string): Promise<CliInstall> {
 	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { headers: headers(t) });
 	if (!response.ok) throw new Error(`CLI install ${response.status}`);
+	return cliInstallOf(await response.json().catch(() => null));
+}
+
+/** Stop a running vendor CLI installation; the answer is the state it settled in ('done' when it had just finished). */
+export async function cancelCliInstall(t: string, vendor: string): Promise<CliInstall> {
+	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { method: 'DELETE', headers: headers(t) });
+	if (!response.ok) throw new Error(`CLI install cancel ${response.status}`);
 	return cliInstallOf(await response.json().catch(() => null));
 }
 

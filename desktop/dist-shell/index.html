@@ -175,6 +175,7 @@
 		<div id="actions" class="actions" hidden>
 			<button id="failure-login-items" class="secondary" type="button" hidden>Open Login Items</button>
 			<button id="retry" class="primary" type="button">Try again</button>
+			<button id="set-up-local" class="secondary" type="button" hidden>Set up this computer instead</button>
 		</div>
 	</div>
 
@@ -192,14 +193,20 @@
 			const approvalState = document.getElementById('approval-state');
 			const openLoginItems = document.getElementById('open-login-items');
 			const retry = document.getElementById('retry');
+			const setUpLocal = document.getElementById('set-up-local');
 			const failureLoginItems = document.getElementById('failure-login-items');
 			let quitFailure = false;
+			// What the primary button does on the card that is showing: the failed launch of a saved remote, or the
+			// failed attempt to set this computer up. Null is the plain "start the local service" retry.
+			let retryAction = null;
 			let approvalPoll;
 			let approvalPollInFlight = false;
 			let continuationStarted = false;
 
 			function showStarting() {
 				quitFailure = false;
+				retryAction = null;
+				setUpLocal.hidden = true;
 				status.textContent = 'Starting CORSIA…';
 				line.hidden = true;
 				log.hidden = true;
@@ -208,9 +215,12 @@
 				backgroundApproval.hidden = true;
 			}
 
-			async function showFailure(why, quitting = false) {
+			async function showFailure(why, quitting = false, again = null) {
 				clearInterval(approvalPoll);
 				quitFailure = quitting;
+				retryAction = quitting ? null : again;
+				setUpLocal.hidden = true;
+				retry.textContent = 'Try again';
 				backgroundApproval.hidden = true;
 				status.textContent = quitting ? 'CORSIA couldn’t quit' : 'CORSIA couldn’t start';
 				line.textContent = quitting ? 'CORSIA couldn’t stop its background service.' : typeof why === 'string' ? why : '';
@@ -246,6 +256,7 @@
 
 			async function showBackgroundApproval() {
 				quitFailure = false;
+				retryAction = null;
 				line.textContent = 'Turn this on so your agents keep working when you close this window.';
 				line.hidden = false;
 				log.hidden = true;
@@ -271,27 +282,53 @@
 				}, 1000);
 			}
 
-			async function start() {
+			// Runs a command that answers like start_local_service: the local service is ready, or needs approval.
+			async function startLocal(command, again) {
 				if (continuationStarted) return;
 				showStarting();
 				retry.disabled = true;
 				if (!invoke) {
-					await showFailure();
+					await showFailure(undefined, false, again);
 					return;
 				}
 				try {
-					const startup = await invoke('start_local_service');
+					const startup = await invoke(command);
 					if (startup.state === 'ready') {
 						continueToService(startup);
 					} else {
 						await showBackgroundApproval();
 					}
 				} catch (error) {
-					await showFailure(error);
+					await showFailure(error, false, again);
+				}
+			}
+
+			const start = () => startLocal('start_local_service', null);
+
+			// Set up this computer instead, and Pair again: the saved remote is forgotten, then this computer's own
+			// CORSIA starts. The pairing flow is the one Welcome and Settings already offer from there.
+			const setUpThisComputer = () => startLocal('disconnect_remote', setUpThisComputer);
+
+			// Try again on a failed remote: the saved remote is connected once more, and the outcome arrives as the
+			// same state pushes as at launch.
+			async function retrySavedRemote() {
+				if (!invoke) {
+					await showFailure(undefined, false, start);
+					return;
+				}
+				retry.disabled = true;
+				setUpLocal.disabled = true;
+				try {
+					await invoke('retry_saved_remote');
+				} catch (error) {
+					await showFailure(error, false, start);
+				} finally {
+					setUpLocal.disabled = false;
 				}
 			}
 
 			async function retryFailure() {
+				if (retryAction) return retryAction();
 				if (!quitFailure) return start();
 				retry.disabled = true;
 				status.textContent = 'Stopping CORSIA…';
@@ -302,12 +339,49 @@
 				}
 			}
 
+			function showRemoteState(state) {
+				clearInterval(approvalPoll);
+				quitFailure = false;
+				retryAction = state.kind === 'key_changed' ? setUpThisComputer : retrySavedRemote;
+				backgroundApproval.hidden = true;
+				log.hidden = true;
+				failureLoginItems.hidden = true;
+				spinner.hidden = state.kind !== 'connecting';
+				setUpLocal.hidden = !['unreachable', 'incompatible', 'too_old', 'key_changed'].includes(state.kind);
+				if (state.kind === 'connecting') {
+					status.textContent = `Connecting to ${state.name}…`;
+					line.hidden = true;
+					actions.hidden = true;
+					return;
+				}
+				status.textContent = state.kind === 'key_changed' ? `${state.name} has changed` : `Can’t open ${state.name}`;
+				if (state.kind === 'unreachable') {
+					line.textContent = {
+						server: 'CORSIA is not listening there. Open CORSIA › Settings › System on that computer.',
+						local: `This computer couldn’t finish opening ${state.name}. Try again. If it keeps failing, quit and reopen CORSIA, or set up this computer instead.`
+					}[state.cause] ?? 'This computer can’t reach it right now. Check your network, then try again.';
+				} else if (state.kind === 'incompatible') {
+					line.textContent = state.host ? `This computer has CORSIA ${state.app} and ${state.name} has ${state.host}. Update the older one, then try again.` : `${state.name} has an older CORSIA. Update it, then try again.`;
+				} else if (state.kind === 'key_changed') {
+					line.textContent = `It isn’t the computer this app paired with. That happens when CORSIA is reset or reinstalled there. If nobody did that, check ${state.name} before you pair again.`;
+				} else {
+					line.textContent = `${state.name} has an older CORSIA. Update it, then try again.`;
+				}
+				line.hidden = false;
+				retry.className = 'primary';
+				retry.textContent = state.kind === 'key_changed' ? 'Pair again' : 'Try again';
+				retry.disabled = false;
+				actions.hidden = false;
+			}
+
+			window.__corsiaShowRemoteState = showRemoteState;
 			window.__corsiaShowServiceFailure = showFailure;
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
 			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			retry.addEventListener('click', retryFailure);
+			setUpLocal.addEventListener('click', setUpThisComputer);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);
 		})();

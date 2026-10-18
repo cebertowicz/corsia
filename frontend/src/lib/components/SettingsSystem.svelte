@@ -3,6 +3,7 @@
 
 	import { readSystemVersion, restartSystem, waitForSystemRestart } from '$lib/stores/settingsSystemRestart';
 	import { logout } from '$lib/stores/auth';
+	import { toasts } from '$lib/stores/toast';
 	import { themeSetting, type ThemeSetting } from '$lib/stores/theme';
 	import { Button } from '$lib/components/ui';
 	import FocusModeSetting from './FocusModeSetting.svelte';
@@ -11,6 +12,9 @@
 	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
+	import SettingsDevices from './SettingsDevices.svelte';
+	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
+	import { connectOpen } from '$lib/stores/remoteConnect';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
 		{ v: 'light', l: 'Light' },
@@ -79,8 +83,25 @@
 		}
 	}
 
-	let accountConfirm = $state<'logout' | null>(null);
+	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
+	const shell = shellInfo();
+	const remoteName = shell?.mode === 'remote' ? shell.name : null;
+
+	async function disconnect() {
+		accountInProgress = true;
+		try {
+			await logout();
+			await disconnectRemote();
+		} catch {
+			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
+			settingsError = message;
+			toasts.show(message, 'error', 8000);
+		} finally {
+			accountConfirm = null;
+			accountInProgress = false;
+		}
+	}
 
 	async function signOut() {
 		accountInProgress = true;
@@ -153,7 +174,26 @@
 			{/if}
 		{/snippet}
 	</SettingsRow>
+	{#if remoteName}
+		<SettingsRow name="Computer" sub={`Connected to ${remoteName}`} wrap>
+			{#snippet actions()}
+				{#if accountConfirm !== 'disconnect'}
+					<Button variant="ghost" size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
+				{:else}
+					<span class="confirm-text">Disconnect from {remoteName}?</span>
+					<Button variant="ghost" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
+					<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
+				{/if}
+			{/snippet}
+		</SettingsRow>
+	{:else if shell}
+		<SettingsRow name="Computer" sub="This computer">
+			{#snippet actions()}<Button variant="ghost" size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button>{/snippet}
+		</SettingsRow>
+	{/if}
 </SettingsGroup>
+
+<SettingsDevices />
 
 {#if systemStatus?.memory}
 	<SettingsGroup label="Resources">

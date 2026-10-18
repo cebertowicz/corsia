@@ -123,6 +123,7 @@ def _save(workspace: Path, path: Path, text: str, **kwargs):
 @pytest.mark.parametrize(("relative", "scope"), [
     ("skills/demo/SKILL.md", "skill, workspace scope"),
     ("skills/demo/evals/cases.json", "skill, workspace scope"),
+    ("skills/demo/corsia.yaml", "skill, workspace scope"),
     ("projects/alpha/skills/demo/SKILL.md", "skill, project scope"),
     (".threads/t1/skills/demo/SKILL.md", "skill, agent scope"),
     ("projects/alpha/.threads/t2/skills/demo/evals/a.json", "skill, agent scope"),
@@ -139,7 +140,8 @@ def test_system_and_ordinary_paths_are_not_guidance(isolated_db, tmp_path):
 
     cases = [
         ".corsia/skills/demo/SKILL.md", ".corsia/context/10-INTENT-AUTHORITY.md",
-        "skills/demo/NOTES.md", "skills/demo/assets/draft.md", "shared/planning/plan.md",
+        "skills/demo/NOTES.md", "skills/demo/assets/draft.md", "skills/demo/scripts/corsia.yaml",
+        "shared/planning/plan.md",
         ".threads/t1/working/scratch.md", "README.md", "../outside/skills/demo/SKILL.md",
     ]
     db = get_db()

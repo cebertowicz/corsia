@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from fastapi import FastAPI, Request
+from starlette.requests import HTTPConnection
 
 from infra.local_connection import is_direct_loopback
 
@@ -46,3 +47,15 @@ async def test_non_loopback_peer_is_not_local():
 )
 async def test_forwarded_loopback_request_is_never_local(headers):
     assert await _probe("127.0.0.1", headers) is False
+
+
+@pytest.mark.parametrize("scope_type", ["http", "websocket"])
+def test_devices_listener_scope_never_has_local_trust(scope_type):
+    scope = {
+        "type": scope_type,
+        "headers": [],
+        "client": ("127.0.0.1", 9000),
+        "corsia_listener": "devices",
+    }
+
+    assert is_direct_loopback(HTTPConnection(scope)) is False

@@ -1,9 +1,6 @@
 ---
 name: time-to-agent
 description: Use as CORSIA (the workspace agent) or a project conductor when it is time for the weekly review of where the person's time goes (CORSIA runs it on the daily health-check wake, a conductor at its next turn, once seven days have passed since the last), when the person asks where their time goes or asks you to take a kind of recurring work off them, when they answer a suggestion from this review, and when CORSIA sends a project conductor a recurring-work finding — spot recurring work that eats their time, suggest taking it over once per kind, investigate with them to an approved charter, choose between doing it yourself, an agent or a project, and check it worked. Not for an agent that got worse for the person (skill `attention-watch`), one-off tasks, or any other agent.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Time to agent

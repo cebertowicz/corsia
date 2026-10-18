@@ -12,6 +12,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 const LOCAL = { source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null };
 const CODEX_SIGNED_OUT = { source: 'codex', name: 'Codex', state: 'needs_auth', accounts: [{ state: 'needs_auth' }] };
+const CLAUDE_MISSING = { source: 'claude-code', name: 'Claude Code', state: 'not_installed', accounts: [] };
 const CODEX_READY = { source: 'codex', name: 'Codex', state: 'ready', accounts: [{ state: 'ready' }] };
 
 let host: HTMLDivElement;
@@ -86,6 +87,26 @@ describe('SetupScreen resume', () => {
 			expect(rowNames()).toContain('This computer');
 			expect(rowNames()).toContain('Codex');
 		}
+	});
+
+	it('puts back what was checked on Welcome, so a reload shows only those tools', async () => {
+		sources = [LOCAL, CLAUDE_MISSING, CODEX_SIGNED_OUT];
+		progress = { ...progress!, picks: { claude: false, chatgpt: true, key: false } };
+		await reload();
+
+		expect(rowNames()).toContain('Codex');
+		expect(rowNames()).not.toContain('Claude Code');
+		expect(host.querySelector('input[aria-label="API key"]')).toBeNull();
+	});
+
+	it('puts back a checked API key as an open key row after a reload', async () => {
+		sources = [LOCAL, CLAUDE_MISSING, CODEX_SIGNED_OUT];
+		progress = { ...progress!, picks: { claude: false, chatgpt: false, key: true } };
+		await reload();
+
+		expect(host.querySelector('input[aria-label="API key"]')).not.toBeNull();
+		expect(rowNames()).not.toContain('Claude Code');
+		expect(rowNames()).not.toContain('Codex');
 	});
 
 	it('reopens the oMLX question where it was left', async () => {

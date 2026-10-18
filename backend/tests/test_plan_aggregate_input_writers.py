@@ -210,6 +210,12 @@ KNOWN_INDIRECT: dict[str, str] = {
     "api/measurement_recent.py::measurement_key_figures.query": (
         "table is PREPARED_SCOPE, the measurement scope temp table"
     ),
+    "api/measurement_model_cost.py::materialize_chain": (
+        "table is CHAIN_TABLE, the measurement task-chain temp table"
+    ),
+    "api/measurement_chain_costs.py::chain_costs": (
+        "table is materialize_chain's return value, CHAIN_TABLE"
+    ),
 }
 
 #: Files whose indirect writes are accepted must never mention the plan table.

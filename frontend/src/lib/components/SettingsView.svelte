@@ -122,6 +122,9 @@
 	</nav>
 
 	<div class="settings-content" class:mobile-section={mobileOpen} use:toastAnchorSurface>
+		<!-- A phone hides this content until a section is open, so the section mounts only then: an anchored element
+			 consumes its request at mount, and a mount in hidden content has no box to scroll to. -->
+		{#if !$isMobile || mobileOpen}
 		<div class="section-host">
 			{#if section === 'providers'}
 				<ProviderManager />
@@ -149,6 +152,7 @@
 				<SettingsDebug />
 			{/if}
 		</div>
+		{/if}
 	</div>
 
 	<div class="mobile-root" class:hidden={mobileOpen}>

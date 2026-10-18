@@ -31,12 +31,14 @@ from . import fixture_core as core
 from . import fixture_excluded as excluded
 from . import fixture_hosts as hosts
 from . import fixture_plans as plans
+from . import fixture_presence as presence
 from . import fixture_rows as rows
 from . import fixture_spec as spec
 
 #: Tables built by hand; the generic pass skips them.
 HAND_BUILT = frozenset({"projects", "threads", "messages", "llm_usage", "plans", "plan_nodes",
-                        "plan_node_attempts", "plan_node_events"})
+                        "plan_node_attempts", "plan_node_events",
+                        "presence_visits", "thread_presence"})
 #: Generic tables whose rows other generic tables reference, in dependency order.
 FIRST = ("artifact_identities", "active_turns", "checkpoints")
 
@@ -167,6 +169,10 @@ def build_into(db: sqlite3.Connection) -> dict:
     plans.attribute_usage(db)
     manifest["tables"]["plan_node_events"] = {"target": spec.target_rows("plan_node_events"),
                                               "rows": plans.seed_node_events(db, rng)}
+    manifest["tables"]["presence_visits"] = {"target": spec.target_rows("presence_visits"),
+                                             "rows": presence.seed_visits(db, rng)}
+    manifest["tables"]["thread_presence"] = {"target": spec.target_rows("thread_presence"),
+                                             "rows": presence.seed_open_visits(db, rng)}
     _seed_generic(db, rng, pools, manifest)
     _account_for_empty_tables(manifest)
     _check_row_targets(db, manifest)

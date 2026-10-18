@@ -1,9 +1,6 @@
 ---
 name: movement-review
 description: Use when a `measurement.movement_digest` note or wake arrives, listing series that moved outside their normal range with the changes made before each. For the CORSIA agent (all series) and a project conductor (its own project's series only). Not for pulling dashboards on your own, or for reviewing a single agent's work.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Movement review

@@ -7,7 +7,7 @@ from fastapi import WebSocket
 from loguru import logger
 
 from infra import state
-from infra.auth import authenticate
+from infra.auth import authenticate, narrow_to_listener
 from core.turn_core import TurnIdentity
 from core.turn_core import active_turn_thread_ids, active_turns_for_owner
 from infra.database import get_db
@@ -29,7 +29,7 @@ async def authenticate_ws(ws: WebSocket) -> dict | None:
     try:
         auth_msg = await asyncio_wait_for_json(ws, timeout=10)
         tok = auth_msg.get("token", "")
-        user = authenticate(tok)
+        user = narrow_to_listener(ws, authenticate(tok))
         if not user:
             await state.send_to_client(
                 ws, {"type": "error", "message": "Invalid or expired session"}

@@ -1,9 +1,6 @@
 ---
 name: prioritization
 description: Use when ranking candidate work — backlog or issue review, sprint or roadmap planning, "what next", accepting a new request, sequencing owners — score each item against the objectives with evidence, draw an explicit cut line, and recommend via skill `decision-brief`. Not for ordering steps inside one task.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Prioritization

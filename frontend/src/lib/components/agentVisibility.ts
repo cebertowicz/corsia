@@ -28,6 +28,29 @@ export function sortThreadsBySidebarPriority(threads: Thread[], states: SidebarS
 		.map(({ thread }) => thread);
 }
 
+/**
+ * Skip the sort when thread membership, caller order, and plan priority are unchanged.
+ * The cached order is a permutation of input indices, so rows always carry the current
+ * thread objects; the previous array is returned only when every row is the same object.
+ */
+export function createSidebarSortMemo(): (threads: Thread[], states: SidebarStates) => Thread[] {
+	let key = '';
+	let order: number[] = [];
+	let ordered: Thread[] = [];
+	return (threads, states) => {
+		const nextKey = threads.map((thread) => `${thread.id}:${sidebarPriority(states[thread.id])}`).join('|');
+		if (nextKey !== key) {
+			const index = new Map(threads.map((thread, i) => [thread, i]));
+			key = nextKey;
+			order = sortThreadsBySidebarPriority(threads, states).map((thread) => index.get(thread) as number);
+		}
+		const next = order.map((i) => threads[i]);
+		if (next.length === ordered.length && next.every((thread, i) => thread === ordered[i])) return ordered;
+		ordered = next;
+		return ordered;
+	};
+}
+
 /** Select a bounded Agent drawer by slot-3 priority while retaining ties and the selected row. */
 export function selectAgentRows(
 	agents: Thread[],

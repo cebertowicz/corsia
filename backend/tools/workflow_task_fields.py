@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.skill_sidecar import SIDECAR_FILE
+from core.skill_validation import declares_sidecar
 from core.skills_registry import resolve_effective_skills
 from infra import config
 from infra.database import get_db
@@ -236,9 +237,9 @@ def _workflow_version(skill) -> str | None:
 def _editable_workflow_version(path) -> str | None:
     """Return the last Git commit for one editable skill, marking local edits.
 
-    A skill with a ``corsia.yaml`` sidecar carries both files' versions, so a step edit
-    changes it. Any Git fault records null (never a clean SHA), through the guidance
-    runner.
+    A skill whose frontmatter points at its ``corsia.yaml`` carries both files' versions,
+    so a step edit changes it; a stray ``corsia.yaml`` nothing points at does not. Any Git
+    fault records null (never a clean SHA), through the guidance runner.
     """
 
     repo, _why = workspace_repository(Path(config.WORKSPACE))
@@ -247,7 +248,7 @@ def _editable_workflow_version(path) -> str | None:
     sidecar = Path(path).parent / SIDECAR_FILE
     try:
         version = file_version(repo, Path(path))
-        if version is None or not sidecar.is_file():
+        if version is None or not _points_at_sidecar(Path(path), sidecar):
             return version
         sidecar_version = file_version(repo, sidecar)
     except (GitFault, ValueError):
@@ -255,10 +256,19 @@ def _editable_workflow_version(path) -> str | None:
     return None if sidecar_version is None else f"{version}+{sidecar_version}"
 
 
+def _points_at_sidecar(skill_md: Path, sidecar: Path) -> bool:
+    """True when ``SKILL.md`` declares a ``corsia.yaml`` pointer and the file is there."""
+    try:
+        return sidecar.is_file() and declares_sidecar(skill_md.read_text(encoding="utf-8"))
+    except OSError:
+        return False
+
+
 def _system_workflow_version(skill) -> str | None:
     """Return the System source id plus manifest-recorded raw file digest.
 
-    A System skill with a ``corsia.yaml`` sidecar appends the sidecar's manifest digest.
+    A System skill whose frontmatter points at its ``corsia.yaml`` appends the sidecar's
+    manifest digest when the manifest lists it.
     """
 
     from core.system_tier import system_tier_manifest
@@ -269,10 +279,11 @@ def _system_workflow_version(skill) -> str | None:
         return None
     try:
         manifest = system_tier_manifest()
+        declared = declares_sidecar((system_package_dir() / relative).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     wanted = [relative]
-    if (system_package_dir() / sidecar).exists():
+    if declared and any(item.path == sidecar for item in manifest.files):
         wanted.append(sidecar)
     digests = []
     for item_path in wanted:

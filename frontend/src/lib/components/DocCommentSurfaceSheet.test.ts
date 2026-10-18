@@ -25,11 +25,12 @@ function editorIn(surface: HTMLElement) {
 }
 
 /** The new-comment sheet at phone width (or a popover beside it) over a document; jsdom has no layout, so the sheet is given one. */
-function openSheet(state: { kind: 'draft' } | { kind: 'list' }, narrow = true, onRevealDraft = vi.fn()) {
+function openSheet(state: { kind: 'draft' } | { kind: 'list' }, narrow = true, onRevealDraft = vi.fn(), canvasWidth = 0) {
 	host = document.body.appendChild(document.createElement('div'));
 	bounds = document.body.appendChild(document.createElement('div'));
 	const view = editorIn(bounds);
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+		if (this === bounds) return new DOMRect(0, 0, canvasWidth, SCREEN);
 		return (this.hasAttribute('data-adaptive-drawer') ? new DOMRect(0, 0, 390, SCREEN) : new DOMRect()) as DOMRect;
 	});
 	vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
@@ -94,5 +95,18 @@ describe('the phone composer sheet over a commented cell', () => {
 		const { view } = openSheet({ kind: 'list' });
 		expect(document.querySelector('[data-adaptive-drawer] [data-doc-comments-drawer]')).not.toBeNull();
 		expect(visibleRegion(view).band.bottom).toBe(SCREEN - SHEET_HEIGHT);
+	});
+
+	it('draws the list as a modal sheet on a canvas under 900 px and inline, with no scrim, from 900 px', () => {
+		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+		openSheet({ kind: 'list' }, false, vi.fn(), 899);
+		expect(document.querySelector('[data-adaptive-drawer]')?.classList.contains('nonmodal')).toBe(false);
+		expect(document.querySelector('.drawer-panel')?.getAttribute('aria-modal')).toBe('true');
+		unmount(component!);
+		component = null;
+		document.body.replaceChildren();
+		openSheet({ kind: 'list' }, false, vi.fn(), 900);
+		expect(document.querySelector('[data-adaptive-drawer]')).toBeNull();
+		expect(document.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
 	});
 });

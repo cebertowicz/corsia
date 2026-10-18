@@ -1,9 +1,6 @@
 ---
 name: memory-placement
 description: Use when the user corrects your work or states a rule, preference, or fact that should outlive this turn, when you infer a reusable rule of your own to try, and when a checkpoint review keeps or retires a continuity entry; pick the one existing destination whose audience will have it in time. Not for live task state (use the plan) or for editing files another owner writes.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Memory placement
@@ -44,7 +41,7 @@ Apply the core causal-lesson check. Preserve incident evidence in the reference,
 
 ## 4. Triage a correction
 
-When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply.
+When a person corrects you, or a correction note arrives in your turn: fix the work first. The triage is working state, not part of your reply. A note usually arrives a turn after the correction itself: if you already fixed and triaged that correction, do nothing more, and never place its lesson twice.
 
 **Tier.** Set one. You may raise a proposed tier, never lower a Serious one.
 - **Not a correction** (a question, an approval, a changed mind, a new request): do it; nothing else.
