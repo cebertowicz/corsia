@@ -273,26 +273,34 @@ async def _run_flight(*, model: LocalModel | None = None, into_own_omlx: bool = 
         _release_operation_lock()
         raise
     except StillDownloading:
-        name = _flight.model.display_name if _flight.model else "The local model"
-        _emit("downloading_stopped", model=_flight.model.repository if _flight.model else None)
-        result = {
-            "ok": True, "downloading": True,
-            "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.",
-            "next_action": f"Run `{SETUP_COMMAND}` to follow it again.",
-            "progress": events,
-        }
+        result = {**_stopped_following(_flight.model, events), "next_action": f"Run `{SETUP_COMMAND}` to follow it again."}
     except Exception as exc:
         log.exception("Local setup failed")
         result = {**local_setup_error(_failure_message(exc)), "progress": events}
         _emit("failed", error_type=type(exc).__name__)
+    return _finish_flight(result)
+
+
+def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
+    """The result when the follow window ended while oMLX keeps downloading (setup and Settings)."""
+    _emit("downloading_stopped", model=model.repository if model else None)
+    name = model.display_name if model else "The local model"
+    return {
+        "ok": True, "downloading": True,
+        "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.",
+        "progress": events,
+    }
+
+
+def _finish_flight(result: dict) -> dict:
+    """Record a flight's terminal result and release it (setup and Settings)."""
     _flight.result = result
     _flight.stage = None
     _flight.following = False
-    if result.get("ok") and not result.get("downloading"):
-        local_setup_operation.clear()
-    elif not result.get("downloading"):
-        # A terminal oMLX error cannot be followed. Removing its stale task id
-        # lets an explicit retry create one new task instead of replaying it.
+    if not result.get("downloading"):
+        # A finished task needs no follow, and a terminal oMLX error cannot be
+        # followed: removing its task id lets an explicit retry create one new
+        # task instead of replaying it. A still-downloading task keeps its id.
         local_setup_operation.clear()
     _release_operation_lock()
     return result

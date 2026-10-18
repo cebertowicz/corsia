@@ -48,19 +48,21 @@ def _read_raw() -> dict[str, object]:
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as exc:
-        log.warning("Couldn't read Settings local-download state: %s", exc)
-        corrupt = target.with_name(f"{target.name}.corrupt")
-        try:
-            os.replace(target, corrupt)
-        except OSError as move_exc:
-            log.warning("Couldn't preserve corrupt Settings local-download state: %s", move_exc)
-            raise
-        return {}
+        return _set_aside(target, str(exc))
     if not isinstance(raw, dict):
-        log.warning("Couldn't read Settings local-download state: expected an object")
-        os.replace(target, target.with_name(f"{target.name}.corrupt"))
-        return {}
+        return _set_aside(target, "expected an object")
     return raw
+
+
+def _set_aside(target: Path, reason: str) -> dict[str, object]:
+    """Keep an unreadable record as ``.corrupt`` so the next write cannot overwrite it."""
+    log.warning("Couldn't read Settings local-download state: %s", reason)
+    try:
+        os.replace(target, target.with_name(f"{target.name}.corrupt"))
+    except OSError as exc:
+        log.warning("Couldn't preserve corrupt Settings local-download state: %s", exc)
+        raise
+    return {}
 
 
 def all() -> list[Download]:
@@ -84,36 +86,19 @@ def all() -> list[Download]:
 
 
 def get(model_id: str) -> Download | None:
-    """Return a Settings record by oMLX model id (legacy repository callers still read)."""
-    return next((entry for entry in all() if entry.model.model == model_id or entry.model.repository == model_id), None)
+    """Return the Settings record keyed by this oMLX model id."""
+    return next((entry for entry in all() if entry.model.model == model_id), None)
 
 
 def forget(model_id: str) -> None:
-    """Remove the one Settings record owned by this oMLX model id."""
+    """Remove the Settings record keyed by this oMLX model id."""
     values = _read_raw()
-    keys = [key for key, item in values.items()
-            if key == model_id or (isinstance(item, dict)
-            and (model := from_recommendation(item.get("model"))) is not None and model.model == model_id)]
-    if not keys:
-        return
-    for key in keys:
-        del values[key]
-    _write_raw(values)
-
-
-def remove(model_id: str) -> None:
-    """Compatibility alias for callers still naming a Settings record by repository."""
-    record = get(model_id)
-    if record is not None:
-        forget(record.model.model)
+    if values.pop(model_id, None) is not None:
+        _write_raw(values)
 
 
 def write(download: Download) -> None:
     values = _read_raw()
-    # Migrate a legacy repository key when this model is written again.
-    for key, item in list(values.items()):
-        if isinstance(item, dict) and (model := from_recommendation(item.get("model"))) is not None and model.model == download.model.model:
-            del values[key]
     values[download.model.model] = {
         "model": to_record(download.model), "status": download.status,
         "speed": download.speed, "detail": download.detail,

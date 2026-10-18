@@ -10,7 +10,7 @@ def test_settings_downloads_are_separate_from_setup_marker(monkeypatch, tmp_path
 
     local_downloads.write(local_downloads.Download(model, speed=52.0, server_id="local-server"))
 
-    stored = local_downloads.get(model.repository)
+    stored = local_downloads.get(model.model)
     assert stored is not None
     assert stored.model == model
     assert stored.speed == 52.0
@@ -21,10 +21,23 @@ def test_settings_downloads_are_separate_from_setup_marker(monkeypatch, tmp_path
         "detail": None, "server_id": "local-server",
     }
     local_downloads.write(local_downloads.Download(model, status="failed", detail="network unavailable"))
-    failed = local_downloads.get(model.repository)
+    failed = local_downloads.get(model.model)
     assert failed is not None and failed.status == "failed" and failed.detail == "network unavailable"
-    local_downloads.remove(model.repository)
+    local_downloads.forget(model.model)
     assert local_downloads.all() == []
+
+
+def test_unreadable_record_is_kept_aside_and_not_overwritten(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "local-downloads.json"
+    monkeypatch.setattr(local_downloads, "_path", lambda: target)
+    target.write_text("{not json", encoding="utf-8")
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
+
+    assert local_downloads.all() == []
+    local_downloads.write(local_downloads.Download(model, server_id="local-server"))
+
+    assert (tmp_path / "local-downloads.json.corrupt").read_text(encoding="utf-8") == "{not json"
+    assert [entry.model for entry in local_downloads.all()] == [model]
 
 
 def test_failed_settings_download_projects_a_durable_retry_target(monkeypatch, tmp_path) -> None:

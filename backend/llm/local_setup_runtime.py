@@ -200,7 +200,9 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
     if own_omlx_management.active():
         own_omlx_management.record_originals({}, {model.model: {key: current.get(key) for key in filtered}})
     try:
-        corsia = await model_settings_payload(server_id, model)
+        # The benchmark decides TurboQuant here, so CORSIA's default must not switch it on.
+        corsia = {key: value for key, value in (await model_settings_payload(server_id, model)).items()
+                  if not key.startswith("turboquant_")}
     except RuntimeError:
         return OptimalResult("offline")
     try:

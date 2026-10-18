@@ -143,16 +143,15 @@ def test_recommender_metadata_survives_in_the_structured_settings_view():
     assert local_setup_operation.Operation.for_model(model, "settings").model.view() == model.view()
 
 
-def test_the_pick_skips_rows_below_32k_and_caps_the_window_at_256k():
+def test_recommendation_rows_below_32k_are_unusable_and_the_window_caps_at_256k():
     rows = [
         {"repo_id": "org/short-oQ4e", "download_bytes": 10, "max_context": 32_767},
         {"repo_id": "org/broken", "download_bytes": True, "max_context": 65_536},
         {"repo_id": "no-owner", "download_bytes": 10, "max_context": 65_536},
         {"repo_id": "org/Long-Model-oQ4e-mtp", "download_bytes": 10, "max_context": 1_048_576},
     ]
-    assert local_model.pick({"sections": {"best": rows}}) == LocalModel("org/Long-Model-oQ4e-mtp", 10, 262_144)
-    assert local_model.pick({"sections": {"best": rows[:3]}}) is None
-    assert local_model.pick({"sections": {}}) is None and local_model.pick([]) is None
+    usable = [model for row in rows if (model := local_model.from_recommendation(row)) is not None]
+    assert usable == [LocalModel("org/Long-Model-oQ4e-mtp", 10, 262_144)]
 
 
 def _no_row_reaches_32k(monkeypatch):

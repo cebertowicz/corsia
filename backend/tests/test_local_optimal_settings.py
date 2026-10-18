@@ -83,7 +83,12 @@ class _Response:
 
 
 @pytest.mark.asyncio
-async def test_applied_optimal_settings_use_one_filtered_writer(monkeypatch) -> None:
+@pytest.mark.parametrize("turboquant, expected", [
+    ({"turboquant_kv_enabled": True, "turboquant_kv_bits": 4}, {"turboquant_kv_enabled": True, "turboquant_kv_bits": 4}),
+    # A benchmark that ran without TurboQuant keeps it off: CORSIA's default must not switch it on.
+    ({"turboquant_kv_enabled": False, "turboquant_kv_bits": 4}, {}),
+])
+async def test_applied_optimal_settings_use_one_filtered_writer(monkeypatch, turboquant, expected) -> None:
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768)
     writes: list[dict] = []
     monkeypatch.setattr(own_omlx_management, "uses_mine", lambda: False)
@@ -98,7 +103,7 @@ async def test_applied_optimal_settings_use_one_filtered_writer(monkeypatch) -> 
         if path.endswith("/optimal"):
             return _Response(200, {"by_tg": [{"benchmark_id": "benchmark", "tg_tps": 52.0}]})
         if path == "/profile-fields":
-            return _Response(200, {"model_specific": ["turboquant_kv_enabled", "turboquant_kv_bits", "dflash_draft_model"]})
+            return _Response(200, {"model_specific": ["turboquant_kv_enabled", "turboquant_kv_bits", "dflash_draft_model", "prefill_step_size"]})
         if path == "/models":
             return _Response(200, {"models": [{"id": model.model}]})
         return _Response(200, {})
@@ -107,7 +112,7 @@ async def test_applied_optimal_settings_use_one_filtered_writer(monkeypatch) -> 
         async def __aenter__(self): return self
         async def __aexit__(self, *_args): return None
         async def get(self, _url):
-            return _Response(200, {"model_settings": {"turboquant_kv_enabled": True, "turboquant_kv_bits": 4, "dflash_draft_model": "missing", "temperature": 0.7}})
+            return _Response(200, {"model_settings": {**turboquant, "prefill_step_size": 1024, "dflash_draft_model": "missing", "temperature": 0.7}})
 
     from llm.providers import omlx_endpoints
     monkeypatch.setattr(omlx_endpoints, "admin_request", admin_request)
@@ -118,8 +123,8 @@ async def test_applied_optimal_settings_use_one_filtered_writer(monkeypatch) -> 
     assert result.status == "applied"
     assert result.speed == 52.0
     assert len(writes) == 1
-    assert writes[0]["turboquant_kv_enabled"] is True
-    assert writes[0]["turboquant_kv_bits"] == 4
+    assert {key: value for key, value in writes[0].items() if key.startswith("turboquant_")} == expected
+    assert writes[0]["prefill_step_size"] == 1024
     assert "dflash_draft_model" not in writes[0]
     assert "temperature" not in writes[0]
 

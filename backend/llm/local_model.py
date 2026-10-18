@@ -147,21 +147,17 @@ def to_record(model: LocalModel) -> dict:
     return record
 
 
-def pick(payload: object) -> LocalModel | None:
-    """The first row of the recommender's ``best`` section that reaches 32K, else None."""
-    sections = payload.get("sections") if isinstance(payload, dict) else None
-    rows = sections.get("best") if isinstance(sections, dict) else None
-    if not isinstance(rows, list):
-        return None
-    return next((model for row in rows if (model := from_recommendation(row)) is not None), None)
-
-
 class PickUnavailable(RuntimeError):
     """The recommender could not answer: oMLX not up yet, Hugging Face unreachable, or no recommender."""
 
 
 async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
-    """Return every usable named recommender section from one oMLX request."""
+    """Return every usable named recommender section from one oMLX request.
+
+    oMLX answers 503 before its downloader is up, 504 on a Hub timeout and 502 on
+    any other failure; its own Hub reads wait up to 30 seconds, so this waits a
+    little longer than that.
+    """
     import httpx
 
     from llm.providers.omlx_endpoints import OmlxAdminError, admin_request

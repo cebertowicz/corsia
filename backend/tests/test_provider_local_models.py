@@ -84,7 +84,7 @@ async def test_delete_removes_durable_settings_record_after_catalog_confirms_abs
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
 
     assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
-    assert local_downloads.get(MODEL.repository) is None
+    assert local_downloads.get(MODEL.model) is None
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_delete_keeps_durable_row_until_catalog_confirms_absence(monkeypat
     with pytest.raises(HTTPException, match="Couldn't delete"):
         await provider_local_models.delete_download(MODEL.repository, {})
 
-    assert local_downloads.get(MODEL.repository) is not None
+    assert local_downloads.get(MODEL.model) is not None
 
 
 @pytest.mark.asyncio

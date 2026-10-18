@@ -100,26 +100,15 @@ async def _run_flight(model: LocalModel) -> dict:
         ls._release_operation_lock()
         raise
     except StillDownloading:
-        ls._emit("downloading_stopped", model=model.repository)
-        result = {
-            "ok": True, "downloading": True,
-            "message": f"{model.display_name} is still downloading in oMLX; CORSIA stopped following it.",
-            "progress": events,
-        }
+        result = ls._stopped_following(model, events)
     except Exception as exc:
         ls.log.exception("Settings model download failed")
         result = {"ok": False, "message": f"Couldn't download {model.display_name}. Try again.", "detail": str(exc), "progress": events}
-    ls._flight.result = result
-    ls._flight.stage = None
-    ls._flight.following = False
     if not result.get("ok") and not result.get("downloading"):
         local_downloads.write(local_downloads.Download(
             model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
         ))
-    if not result.get("downloading"):
-        ls.local_setup_operation.clear()
-    ls._release_operation_lock()
-    return result
+    return ls._finish_flight(result)
 
 
 async def begin(model: LocalModel) -> dict:
