@@ -13,6 +13,8 @@
 		/** What the switch does, as [label when on, label when off]: Unload/Load for a local engine. */
 		toggleLabels?: [string, string];
 		progress?: number;
+		/** Whether a loading row shows its progress puck; a download has nothing to switch yet. */
+		puck?: boolean;
 		/** Short line under the row, e.g. why the model is missing from the chat picker. */
 		warning?: string | null;
 		/** Muted model metadata that should sit below the primary row details. */
@@ -33,6 +35,7 @@
 		toggleOn = false,
 		toggleLabels = ['Unload', 'Load'],
 		progress = 0,
+		puck = true,
 		warning = null,
 		note = null,
 		onToggle,
@@ -70,7 +73,9 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
 <div class="mr {rowClass}" class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
-		{#if state === 'loading' || state === 'cache_warming'}
+		{#if (state === 'loading' || state === 'cache_warming') && !puck}
+			<!-- Keeps the grid column so the name stays aligned with its neighbours. -->
+		{:else if state === 'loading' || state === 'cache_warming'}
 			<span class="puck" class:warming={state === 'cache_warming'}>
 				<span class="fill" style="width: {progress}%"></span>
 			</span>

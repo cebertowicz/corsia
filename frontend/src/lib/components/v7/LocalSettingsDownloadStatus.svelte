@@ -55,6 +55,7 @@
 		state={download.failed ? 'error' : 'loading'}
 		meta={download.failed ? 'Download failed' : `Downloading ${download.percent ?? 0}%`}
 		progress={download.percent ?? 0}
+		puck={false}
 		onCancel={download.failed ? undefined : cancel}
 		onRetry={download.failed ? retry : undefined}
 	/>

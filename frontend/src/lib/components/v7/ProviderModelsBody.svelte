@@ -293,7 +293,7 @@
 {:else if models.length === 0 && !hasLocalDownload}
 	<ProviderModelsEmpty {provider} {isExternal} {isHarness} />
 	{#if provider.name === 'omlx'}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownload(); loadModels(); }} {onAddProvider} empty />
+		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} {onAddProvider} empty />
 	{/if}
 {:else}
 	{#if actionError}
@@ -371,7 +371,7 @@
 		/>
 	{/if}
 	{#if provider.name === 'omlx'}
-		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownload(); loadModels(); }} {onAddProvider} />
+		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownloads(); loadModels(); }} {onAddProvider} />
 	{/if}
 {/if}
 

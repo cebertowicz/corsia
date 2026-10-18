@@ -66,4 +66,17 @@ describe('ModelRow switch label', () => {
 		expect(onDeleteDownload).toHaveBeenCalledOnce();
 		unmount(component);
 	});
+
+	it('shows no control at all on a download in flight, only the loading puck elsewhere', () => {
+		const loading = mount(ModelRow, { target: document.body, props: { name: 'Qwen', state: 'loading', progress: 40 } });
+		flushSync();
+		expect(document.querySelector('.puck')).not.toBeNull();
+		unmount(loading);
+		const download = mount(ModelRow, { target: document.body, props: { name: 'Qwen', state: 'loading', progress: 40, puck: false } });
+		flushSync();
+		expect(document.querySelector('.puck')).toBeNull();
+		expect(document.querySelector('button.tg')).toBeNull();
+		expect(document.querySelector('.mr-toggle-wrap')).not.toBeNull();
+		unmount(download);
+	});
 });
