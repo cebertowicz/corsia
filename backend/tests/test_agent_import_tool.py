@@ -48,7 +48,7 @@ def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here(
     # With no connections clause nothing is read from settings, so none are excepted.
     assert "with them, their settings, or any key" in context
     assert context.endswith("What I read stays on this Mac: I run on a local model.")
-    one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
+    one = setup.agent_import(ImportCard(("Codex", "Hermes Agent"), ("Codex",), "GPT, by OpenAI"))["context"]
     assert "the connected apps that Codex uses," in one
     assert "their other settings" in one
 
