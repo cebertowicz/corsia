@@ -27,8 +27,8 @@ enum SwapError {
 }
 
 pub fn run(_operation_id: &str) -> i32 {
-    let state_dir = match app_paths::app_dir() {
-        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+    let state_dir = match app_paths::state_dir() {
+        Ok(state_dir) => state_dir,
         Err(reason) => {
             eprintln!("update swap failed: {reason}");
             return SWAP_FAILED;
@@ -73,8 +73,8 @@ pub fn run(_operation_id: &str) -> i32 {
 /// The failed update remains at `.previous` until its caller proves the old
 /// service is healthy and deletes it.
 pub fn rollback(_operation_id: &str) -> i32 {
-    let state_dir = match app_paths::app_dir() {
-        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+    let state_dir = match app_paths::state_dir() {
+        Ok(state_dir) => state_dir,
         Err(reason) => {
             eprintln!("update rollback failed: {reason}");
             return SWAP_FAILED;
