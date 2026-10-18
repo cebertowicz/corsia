@@ -408,7 +408,7 @@ def test_migration_preserves_reopened_rows_and_admits_rejected_rows(isolated_db)
         db.commit()
 
         assert migrate_to_current(db, SCHEMA_VERSION).migrated
-        assert SCHEMA_VERSION == 125
+        assert SCHEMA_VERSION == 126
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert db.execute(
             "SELECT event FROM doc_feedback_batch_items WHERE comment_id=?", (comment["id"],)

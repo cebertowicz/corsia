@@ -172,6 +172,7 @@ describe("pick any — what the person sees", () => {
     await openChip();
     typeNote("later this week");
     await settle();
+    expect(note().classList.contains("selected")).toBe(false);
     expect(boxes().map((item) => item.checked)).toEqual([true, true, false]);
     expect(receipt()).toBe("2 of 3 chosen · as recommended");
 

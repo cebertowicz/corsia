@@ -21,6 +21,8 @@
   --ls-cap:    0.08em;
   --ls-title: -0.01em;
 
+  --focus-ring: 0 0 0 3px var(--accent-wash);
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -28,6 +30,7 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-7: 32px;
+  --touch-target: 44px;
   --space-8: 48px;
 
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);

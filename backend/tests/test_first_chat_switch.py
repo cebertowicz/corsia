@@ -1,7 +1,7 @@
 """Setup's first chat moves to Claude Code or Codex when the person's sign-in finishes.
 
 Three guards keep it narrow: only the first chat setup created, only if the person has not
-picked a model in it since, and only once per sign-in operation.
+picked a model in it since, and only while no first-chat switch is in flight.
 """
 
 from __future__ import annotations
@@ -15,20 +15,24 @@ from onboarding import first_chat_switch as hook
 
 LOCAL = "omlx@srv/Qwen-Test"
 CLOUD = "claude-code/claude-test-default"
+CLOUD_READY = "claude-code/claude-test-ready"
 
 
 def _make_agent(model: str | None) -> str:
     """The CORSIA agent, created with ``model`` (None: it has no model yet), with a local and a Claude Code model listed."""
+    from connections.models import upsert_connection
     from infra.database import get_db
 
+    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"})
     db = get_db()
     try:
+        db.execute("UPDATE models SET enabled=0 WHERE harness='claude-code'")
         db.execute(
             "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,backend,source,"
-            "enabled,available,metadata_json,created_at,updated_at) VALUES "
-            "('vmlx-qwen-test','native','omlx','Qwen-Test',?,'Qwen','network','discovered',1,1,'{}','t','t'),"
-            "(?,'claude-code','claude-code','claude-test-default',?,'Default','harness','discovered',1,1,"
-            "'{\"is_default\": true}','t','t')",
+            "enabled,available,context_window,metadata_json,created_at,updated_at) VALUES "
+            "('vmlx-qwen-test','native','omlx','Qwen-Test',?,'Qwen','network','discovered',1,1,200000,'{}','t','t'),"
+            "(?,'claude-code','claude-code','claude-test-default',?,'Default','harness','discovered',1,1,200000,"
+            "'{\"is_default\": true, \"discovery_order\": 0}','t','t')",
             (LOCAL, CLOUD, CLOUD),
         )
         thread_id = ensure_corsia_agent("u1", model=model, db=db)
@@ -55,12 +59,18 @@ def modelless_agent(isolated_db, monkeypatch):
     return _make_agent(None)
 
 
+def _account_id(provider: str = "claude-code") -> str:
+    from connections.vendor_accounts import default_account
+
+    return str(default_account(provider)["id"])
+
+
 def _run_claim(operation: str, provider: str = "claude-code"):
     from infra.database import get_db
 
     db = get_db()
     try:
-        return hook.claim_switch(provider, operation, db=db)
+        return hook.claim_switch(provider, operation, account_id=_account_id(), db=db)
     finally:
         db.close()
 
@@ -128,15 +138,58 @@ class TestGuards:
         _thread(agent, pending_model="opus")
         assert _run_claim("account-1:1") is None
 
-    def test_guard_3_the_same_operation_asks_once(self, agent):
+    def test_guard_3_a_second_claim_is_refused_while_the_first_is_in_flight(self, agent):
         hook.record_first_model(agent, LOCAL)
         assert _run_claim("account-1:1") == (agent, CLOUD)
-        assert _run_claim("account-1:1") is None
+        assert _run_claim("account-2:1") is None
 
     def test_no_listed_model_for_the_tool_means_no_switch_and_nothing_claimed(self, agent):
         hook.record_first_model(agent, LOCAL)
         assert _run_claim("account-1:1", "codex-none") is None
         assert _run_claim("account-1:1") == (agent, CLOUD)
+
+    def test_a_usage_limited_default_is_skipped_for_a_ready_sibling(self, agent):
+        from connections.account_receipts import capture_receipt
+        from connections import harness_usage
+        from infra.database import get_db
+
+        db = get_db()
+        try:
+            db.execute(
+                "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,backend,source,"
+                "enabled,available,context_window,metadata_json,created_at,updated_at) VALUES "
+                "('claude-ready','claude-code','claude-code','claude-test-ready',?,'Ready','harness','discovered',1,1,200000,"
+                "'{\"discovery_order\": 1}','t','t')",
+                (CLOUD_READY,),
+            )
+            db.commit()
+            harness_usage.record_limited(
+                provider="claude-code", scope_model=CLOUD, reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00",
+                source="test", receipt=capture_receipt("claude-code", account_id=_account_id(), db=db), db=db,
+            )
+        finally:
+            db.close()
+
+        hook.record_first_model(agent, LOCAL)
+        assert _run_claim("account-1:1") == (agent, CLOUD_READY)
+
+    def test_an_account_without_a_ready_model_is_not_claimed(self, agent):
+        from connections.account_receipts import capture_receipt
+        from connections import harness_usage
+        from infra.database import get_db
+        from infra.settings import get_setting
+
+        db = get_db()
+        try:
+            harness_usage.record_limited(
+                provider="claude-code", scope_model=CLOUD, reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00",
+                source="test", receipt=capture_receipt("claude-code", account_id=_account_id(), db=db), db=db,
+            )
+            hook.record_first_model(agent, LOCAL)
+            assert hook.claim_switch("claude-code", "account-1:1", account_id=_account_id(), db=db) is None
+            assert get_setting(hook.SETTINGS_KEY, db=db)["claimed"] is None
+        finally:
+            db.close()
 
 
 class TestSwitch:
@@ -145,7 +198,7 @@ class TestSwitch:
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
 
-        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
 
         assert asked is True
         door.assert_awaited_once()
@@ -153,15 +206,16 @@ class TestSwitch:
         assert door.await_args.kwargs["actor_kind"] == "system"
         assert door.await_args.kwargs["reason"] == "setup_first_chat_ready"
         assert door.await_args.kwargs["checkpoint_override"] == "target"
-        assert door.await_args.kwargs["account_id"] == "account-1"
+        assert door.await_args.kwargs["account_id"] == _account_id()
 
-    async def test_a_repeated_ready_signal_is_a_no_op(self, agent, monkeypatch):
+    async def test_a_later_completion_after_success_is_a_no_op(self, agent, monkeypatch):
         hook.record_first_model(agent, LOCAL)
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
 
-        await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
-        again = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+        assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id()) is True
+        _thread(agent, model=CLOUD, execution_epoch=1)
+        again = await hook.switch_when_ready("claude-code", "account-2:1", user_id="u1", account_id=_account_id())
 
         assert again is False
         door.assert_awaited_once()
@@ -170,7 +224,19 @@ class TestSwitch:
         hook.record_first_model(agent, LOCAL)
         monkeypatch.setattr("thread.model.switch_model", AsyncMock(side_effect=RuntimeError("refused")))
 
-        assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1") is False
+        assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id()) is False
+
+    async def test_a_failed_switch_releases_the_claim_for_a_different_completion(self, agent, monkeypatch):
+        hook.record_first_model(agent, LOCAL)
+        monkeypatch.setattr("thread.model.switch_model", AsyncMock(side_effect=RuntimeError("refused")))
+        assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id()) is False
+
+        door = AsyncMock()
+        monkeypatch.setattr("thread.model.switch_model", door)
+        retried = await hook.switch_when_ready("claude-code", "account-2:1", user_id="u1", account_id=_account_id())
+
+        assert retried is True
+        door.assert_awaited_once()
 
 
 class TestSigninSeam:
@@ -242,7 +308,7 @@ class TestOnlySetupsOwnFirstModelIsRecorded:
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
 
-        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
 
         assert asked is False
         door.assert_not_awaited()
@@ -253,7 +319,7 @@ class TestOnlySetupsOwnFirstModelIsRecorded:
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
 
-        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id="account-1")
+        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
 
         assert asked is True
         assert door.await_args.args == (modelless_agent, CLOUD)

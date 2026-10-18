@@ -110,7 +110,7 @@ def test_a_key_already_stored_is_kept_and_not_forgotten_on_stop(own, monkeypatch
 
 # ---- oMLX has no pick: the starter model, said so, only under management ----
 
-STARTER = local_setup_existing.OWN_OMLX_STARTER
+STARTER = local_setup_existing.STARTER_MODEL
 NOTE = "oMLX didn’t recommend a model for this computer, so CORSIA chose Ternary Bonsai 2."
 
 
@@ -128,9 +128,8 @@ def _downloads(own):
     return [call for call in own if isinstance(call, tuple) and call[0] == "download"]
 
 
-@pytest.mark.parametrize("answer", [None, PickUnavailable("oMLX could not be reached")], ids=["none", "unavailable"])
-def test_managed_with_no_pick_downloads_the_starter_and_records_it_as_the_fallback(own, monkeypatch, answer):
-    _recommends(monkeypatch, own, answer)
+def test_managed_with_no_pick_downloads_the_starter_and_records_it_as_the_fallback(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
     local_setup_ownership.record_existing_omlx_consent(manage=True)
 
     result = asyncio.run(_finished())
@@ -142,6 +141,21 @@ def test_managed_with_no_pick_downloads_the_starter_and_records_it_as_the_fallba
     assert record.model == STARTER and record.fallback is True and record.key_registered
     assert local_sources.omlx_management()["starter_note"] == NOTE
     assert local_sources.omlx_management()["starter_name"] == "Ternary Bonsai 2"
+
+
+def test_managed_when_oMLX_cannot_answer_fails_the_check_and_installs_nothing(own, monkeypatch):
+    _recommends(monkeypatch, own, PickUnavailable("oMLX could not be reached (ConnectError)."))
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    result = asyncio.run(_finished())
+
+    assert result["ok"] is False
+    assert result["message"] == "oMLX could not be reached (ConnectError)."
+    assert _downloads(own) == [] and "record_model" not in own
+    record = own_omlx_management.read()
+    assert record.model is None and record.fallback is False
+    assert local_sources.omlx_management()["starter_note"] is None
+    assert local_setup.setup_failure()["message"] == result["message"]
 
 
 def test_a_pick_has_no_starter_note(own):

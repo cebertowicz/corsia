@@ -23,10 +23,12 @@ test.describe('@surface:settings scheduled updates', () => {
 		const scheduleToggle = page.getByRole('button', { name: 'Automatically install updates overnight' });
 		await expect(scheduleToggle).toHaveAttribute('aria-pressed', 'false');
 		await expect(page.getByText('Keep CORSIA up to date automatically')).toBeVisible();
-		await expect(page.getByText('Installs at 3:00 AM.')).toBeVisible();
+		// The install-time line belongs to the enabled state (SettingsUpdate.svelte shows it only when automatic).
+		await expect(page.getByText(/^Installs at /)).toHaveCount(0);
 
 		await scheduleToggle.click();
 		await expect(scheduleToggle).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.getByText('Installs at 3:00 AM.')).toBeVisible();
 		const time = page.getByLabel('Automatic update time');
 		await expect(time).toBeVisible();
 		await time.fill('03:30');

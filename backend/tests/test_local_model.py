@@ -16,7 +16,7 @@ import pytest
 from llm import local_model, local_setup, local_setup_operation, local_sources
 from llm import local_setup_prepare as prepare
 from llm.local_model import LocalModel
-from llm.local_profiles import MODEL_SETTINGS, OWN_OMLX_STARTER
+from llm.local_profiles import MODEL_SETTINGS, STARTER_MODEL
 from omlx_recommender_fixtures import FIXTURE, THINKING, best_rows as _best, mac_with as _mac
 from omlx_recommender_fixtures import fresh_local_setup  # noqa: F401
 
@@ -145,45 +145,45 @@ def test_when_oMLX_recommends_nothing_welcome_offers_the_starter_model_and_says_
 
     view = asyncio.run(_prepared())
 
-    assert view["state"] == "picked" and view["model"]["repository"] == OWN_OMLX_STARTER.repository
+    assert view["state"] == "picked" and view["model"]["repository"] == STARTER_MODEL.repository
     assert view["model"]["name"] == "Ternary Bonsai 2"
     assert view["message"] == "oMLX didn’t recommend a model for this computer, so CORSIA chose Ternary Bonsai 2."
 
 
 def test_the_starter_names_itself_from_its_profile_and_keeps_the_name_through_its_records():
-    assert OWN_OMLX_STARTER.name == "Ternary Bonsai 2" and OWN_OMLX_STARTER.display_name == "Ternary Bonsai 2"
+    assert STARTER_MODEL.name == "Ternary Bonsai 2" and STARTER_MODEL.display_name == "Ternary Bonsai 2"
     # The name is the profile's, never the repository id's, and the records that carry the model keep it.
-    assert LocalModel(OWN_OMLX_STARTER.repository, 1, 32_768).display_name == "Ternary Bonsai 2 27B"
-    assert local_model.from_recommendation(local_model.to_record(OWN_OMLX_STARTER)).display_name == "Ternary Bonsai 2"
-    operation = local_setup_operation.Operation.for_model(OWN_OMLX_STARTER, "starter")
+    assert LocalModel(STARTER_MODEL.repository, 1, 32_768).display_name == "Ternary Bonsai 2 27B"
+    assert local_model.from_recommendation(local_model.to_record(STARTER_MODEL)).display_name == "Ternary Bonsai 2"
+    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "starter")
     assert operation.model.display_name == "Ternary Bonsai 2"
 
 
 def test_a_recommender_with_no_usable_row_downloads_the_starter_and_writes_no_effort_level(monkeypatch):
     mac = _no_row_reaches_32k(monkeypatch)
-    monkeypatch.setitem(THINKING, OWN_OMLX_STARTER.model, True)
+    monkeypatch.setitem(THINKING, STARTER_MODEL.model, True)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
     asyncio.run(_prepared())
 
     result = asyncio.run(_flown())
 
     assert result["ok"] is True and "skipped" not in result
-    assert [model.repository for model in mac.downloads] == [OWN_OMLX_STARTER.repository]
+    assert [model.repository for model in mac.downloads] == [STARTER_MODEL.repository]
     [(path, settings)] = mac.omlx.puts()
-    assert path == f"/models/{OWN_OMLX_STARTER.model}/settings"
-    assert settings["max_context_window"] == OWN_OMLX_STARTER.context_window
+    assert path == f"/models/{STARTER_MODEL.model}/settings"
+    assert settings["max_context_window"] == STARTER_MODEL.context_window
     # Bonsai thinks by default and has an on/off toggle only: nothing is written to turn it on, and no effort level.
     assert not {"enable_thinking", "reasoning_effort"} & set(settings)
-    assert local_model.set_up_model() == OWN_OMLX_STARTER
+    assert local_model.set_up_model() == STARTER_MODEL
 
 
 def test_a_flight_that_found_no_row_itself_downloads_the_starter(monkeypatch):
     mac = _no_row_reaches_32k(monkeypatch)
-    monkeypatch.setitem(THINKING, OWN_OMLX_STARTER.model, True)
+    monkeypatch.setitem(THINKING, STARTER_MODEL.model, True)
 
     result = asyncio.run(_flown())
 
-    assert result["ok"] is True and [model.repository for model in mac.downloads] == [OWN_OMLX_STARTER.repository]
+    assert result["ok"] is True and [model.repository for model in mac.downloads] == [STARTER_MODEL.repository]
 
 
 def test_a_pick_the_recommender_made_carries_no_starter_note(monkeypatch):
@@ -201,7 +201,7 @@ def test_a_recommender_that_cannot_answer_is_couldnt_check_never_the_starter(mon
     view = asyncio.run(_prepared())
 
     assert view["state"] == "failed" and view["model"] is None
-    assert prepare.fallback_note(OWN_OMLX_STARTER) not in str(view["message"])
+    assert prepare.fallback_note(STARTER_MODEL) not in str(view["message"])
     assert mac.downloads == [] and prepare._prepare.fallback is False
 
 

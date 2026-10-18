@@ -201,20 +201,20 @@ def backfill_legacy_record() -> LocalModel | None:
     Blocking: run it off the event loop.
     """
     from llm import local_setup_operation
-    from llm.local_profiles import OWN_OMLX_STARTER
+    from llm.local_profiles import STARTER_MODEL
     from llm.local_setup_ownership import existing_install_is_foreign, installed_omlx, marker_path
 
     if _record_path().exists() or local_setup_operation.record_path().exists() or not marker_path().exists():
         return None
-    if installed_omlx() is None or existing_install_is_foreign() or not _starter_installed(OWN_OMLX_STARTER):
+    if installed_omlx() is None or existing_install_is_foreign() or not _starter_installed(STARTER_MODEL):
         return None
     try:
-        record_set_up(OWN_OMLX_STARTER)
+        record_set_up(STARTER_MODEL)
     except OSError as error:
         log.warning("could not record the earlier setup's starter model: %s", error)
         return None
     log.info("recorded the starter model a finished earlier setup installed")
-    return OWN_OMLX_STARTER
+    return STARTER_MODEL
 
 
 def set_up_model() -> LocalModel | None:

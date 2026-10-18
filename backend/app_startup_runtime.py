@@ -91,6 +91,57 @@ def _apply_saved_cpu_profiler() -> None:
     apply_cpu_profiler(bool(get_feature_flags().get("cpu_profiler", False)))
 
 
+def _report_classifier_download_failure(state: dict) -> None:
+    """Tell the owner, through the existing classifier failure notice, when a startup download ends with nothing installed.
+
+    An installed version keeps serving and is noticed by the worker if it is damaged, so a failure then stays a warning.
+    """
+    import infra.app_loop as app_loop
+    from automation.update_failure_notice import tell_conductor_about_corrections_classifier_failure
+    from core.corrections_asset_files import newest_pin
+    from jobs.corrections_assets import installed
+
+    if installed():
+        return
+    try:
+        app_loop.submit(tell_conductor_about_corrections_classifier_failure(
+            newest_pin(), str(state.get("code") or "download failed"), str(state.get("reason") or "The download failed."),
+        ))
+    except app_loop.AppLoopUnavailable:
+        from loguru import logger
+
+        logger.warning("Corrections classifier failure notice not sent: no live event loop")
+
+
+def _start_current_corrections_classifier() -> None:
+    """Carry on a download setup asked for, and adopt a missing pinned classifier once the first account exists.
+
+    Disposable test runs fetch nothing unless they point the flight at their own release host.
+    """
+    import os
+
+    from core.corrections_asset_download import BASE_URL_ENV
+    from core.corrections_asset_download import FLIGHT as classifier_download
+    from core.corrections_asset_files import current_asset_verified
+    from infra import accounts
+
+    if os.environ.get("CORSIA_TEST_MODE") == "1" and not os.environ.get(BASE_URL_ENV):
+        return
+    classifier_download.resume(on_failure=_report_classifier_download_failure)
+    if accounts.has_users() and not current_asset_verified():
+        classifier_download.start(on_failure=_report_classifier_download_failure)
+
+
+def _schedule_current_corrections_classifier() -> None:
+    """Reconcile off the startup path: verifying the installed asset hashes its files, and nothing waits on the result."""
+    import infra.app_loop as app_loop
+
+    async def reconcile() -> None:
+        await asyncio.to_thread(_start_current_corrections_classifier)
+
+    app_loop.submit(reconcile())
+
+
 async def _start_runtime_services() -> None:
     # The database is initialized by now; diagnostics and capture start before
     # the services below so their startup lines reach the conductor log store.
@@ -116,14 +167,13 @@ async def _start_runtime_services() -> None:
     placement_worker.poke()
     state._idle_recovery_task = asyncio.create_task(rearm_idle_checkpoints())
     state._nightly_job_task = asyncio.create_task(nightly_job_loop())
-    from core.corrections_asset_download import FLIGHT as classifier_download
     from core.corrections_asset_download import recover_interrupted_install
     from core.corrections_asset_signals import set_corrections_waker
     from jobs.corrections_realtime import startup_scan
 
     set_corrections_waker(startup_scan)
     recover_interrupted_install()
-    classifier_download.resume()
+    _schedule_current_corrections_classifier()
     startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 

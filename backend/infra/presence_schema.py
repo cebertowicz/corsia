@@ -4,10 +4,15 @@
 Plans read and the agent's ``User presence`` line use. ``presence_visits`` is
 the raw history, one row per finished visit, for measuring where the user's
 time goes; the row also holds the user's Mark read/unread seen state.
-``infra.presence`` is the only writer of both.
+``infra.presence`` owns both and ``infra.presence_records`` writes them. Both
+rows also carry the visit's focus spans for Measurement attention (a NULL
+``focus_spans`` predates focus tracking and counts the whole visit). The attention
+rollup Measurement reads in place of those spans is defined in ``presence_rollup_schema``.
 """
 
 from __future__ import annotations
+
+from infra.presence_rollup_schema import PRESENCE_ROLLUP_SQL
 
 PRESENCE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS thread_presence (
@@ -36,6 +41,11 @@ PRESENCE_SCHEMA_SQL = """
         -- to this time; Mark unread keeps the dot on until a visit opens.
         marked_read_at TEXT,
         marked_unread_at TEXT,
+        -- The visit's closed focus spans, a JSON array of [start, end] pairs,
+        -- and the start of the open one. NULL spans: the visit predates focus
+        -- tracking and counts whole.
+        focus_spans TEXT,
+        focus_since TEXT,
         PRIMARY KEY (user_id, thread_id)
     );
     CREATE INDEX IF NOT EXISTS idx_thread_presence_thread
@@ -53,10 +63,11 @@ PRESENCE_SCHEMA_SQL = """
         sessions INTEGER NOT NULL CHECK (sessions > 0),
         exit_reason TEXT NOT NULL CHECK (exit_reason IN (
             'navigated', 'hidden', 'idle', 'disconnected', 'restart'
-        ))
+        )),
+        focus_spans TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_presence_visits_user_time
         ON presence_visits(user_id, entered_at);
     CREATE INDEX IF NOT EXISTS idx_presence_visits_thread
         ON presence_visits(thread_id, entered_at);
-"""
+""" + PRESENCE_ROLLUP_SQL
