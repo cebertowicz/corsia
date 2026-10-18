@@ -88,6 +88,14 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # The app's font stack (--font-sans) names Inter, and a bare runner has no face from it, so text falls back to DejaVu
+      # Sans, which is wider and wraps lines the layout specs measure. Install Inter so the runner resolves the face the stack asks for.
+      - name: Install Inter font
+        run: |
+          set -e
+          sudo apt-get install -y --no-install-recommends fonts-inter
+          fc-match 'Inter' | tee /dev/stderr | grep -qi inter
+
       # browser-pane drives the real native agent-browser, which the backend resolves from PATH
       # (backend/host_access/browser_cli.py). Same pinned install as browser-native.yml.
       - name: Install native agent-browser
@@ -228,6 +236,20 @@ jobs:
           path: |
             frontend/test-results/*browser-pane*/trace.zip
             frontend/test-results/*browser-pane*/error-context.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Every failing test keeps its trace (playwright.config.ts retain-on-failure); a failure that does not reproduce
+      # locally is rooted in these, not guessed at.
+      - name: Upload failing-test traces
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-traces-${{ matrix.run-index }}
+          path: |
+            frontend/test-results/**/trace.zip
+            frontend/test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 7
 
