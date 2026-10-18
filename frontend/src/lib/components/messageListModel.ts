@@ -11,6 +11,7 @@ import {
 	presentContextDigest,
 	summarizeContextEvents,
 } from './contextEventModel';
+import { isNeverDrawn } from './transcriptRowKinds';
 
 export {
 	buildPendingContextDigest,
@@ -198,7 +199,7 @@ export function buildVisibleMessages(
 		return [...visible, ...buildVisibleMessages(part)];
 	}
 	const rows = groupArtifactRemovalEvents(allMessages.filter((m) => (
-		m.metadata?.type !== 'seed'
+		!isNeverDrawn(m)
 		&& !(m.role === 'user' && m.metadata?.routed_event)
 	)));
 	const next: TranscriptMessage[] = [];

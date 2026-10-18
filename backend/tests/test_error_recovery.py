@@ -167,6 +167,29 @@ def test_the_claim_that_starts_a_turn_writes_the_stamp(db, monkeypatch):
     assert _recovered(db, other) is None
 
 
+def _error_then_seed(db) -> tuple[_Rows, str]:
+    rows = _Rows(db)
+    rows.work()
+    error = rows.error()
+    rows.add("system", {"cc": True, "type": "seed"}, "starting context")  # never drawn: nothing to read
+    return rows, error
+
+
+def test_a_seed_between_an_error_and_the_next_turn_does_not_hold_it_open(db):
+    _, error = _error_then_seed(db)
+
+    assert error_recovery.stamp_at_turn_start(db, "t", _claim(db, type="context_event")) == [error]
+    assert _recovered(db, error) is True
+
+
+def test_the_backfill_gives_the_same_answer_for_a_seed_after_an_error(db):
+    rows, error = _error_then_seed(db)
+    rows.work()  # the turn that started past it
+
+    assert error_recovery.backfill(db) == 1
+    assert _recovered(db, error) is True
+
+
 def _backfill_history(db) -> dict[str, str]:
     rows = _Rows(db)
     ids = {}
@@ -209,7 +232,7 @@ def test_the_backfill_keeps_an_error_a_reply_for_the_user_follows(db):
 
 
 def test_the_migration_is_registered_and_runs_the_backfill(db):
-    assert SCHEMA_VERSION == 126 and MIGRATIONS[102] is migrate_102_to_103
+    assert SCHEMA_VERSION == 127 and MIGRATIONS[102] is migrate_102_to_103
     ids = _backfill_history(db)
 
     migrate_102_to_103(db)

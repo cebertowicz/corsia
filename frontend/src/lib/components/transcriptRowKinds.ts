@@ -27,7 +27,7 @@ export function systemType(message: TranscriptMessage): string {
 	return String(message.metadata?.type ?? '');
 }
 
-/** The twin of the backend's `NEVER_DRAWN_FILTER`. */
+/** The one frontend test for a never-drawn row; the twin of the backend's `NEVER_DRAWN_FILTER`. */
 export function isNeverDrawn(message: TranscriptMessage): boolean {
 	return message.role === 'system' && NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message));
 }
