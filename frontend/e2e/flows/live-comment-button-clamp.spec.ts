@@ -13,15 +13,16 @@ for (const width of [1440, 393]) {
 		// An existing comment opens the comments pane beside the document.
 		await createComment(request, seeded, 'word50', `Existing ${stamp}`);
 		await openLiveDocument(page, seeded, `# Clamp ${stamp}`);
+		const commentsPill = page.getByRole('button', { name: /^1 open thread\b/ });
+		// The pill mounts after the comment thread loads; start the held save only once it is there, or the cue can end first.
+		await expect(commentsPill).toBeVisible();
 		const editor = page.locator('.cm-content');
 		await editor.click();
 		await page.keyboard.press('End');
 		await page.keyboard.type(' saved');
 		await page.keyboard.press('ControlOrMeta+S');
 		const saving = page.getByText('Saving…', { exact: true });
-		const commentsPill = page.getByRole('button', { name: /^1 open thread\b/ });
 		await expect(saving).toBeVisible();
-		await expect(commentsPill).toBeVisible(); // the pill mounts after the comment thread loads; boundingBox() does not wait
 		const [savingBox, commentsPillBox] = await Promise.all([saving.boundingBox(), commentsPill.boundingBox()]);
 		expect(savingBox!.x + savingBox!.width, 'save status ends before the comment pill starts').toBeLessThanOrEqual(commentsPillBox!.x);
 		await expect(page.getByText('✓ Saved', { exact: true })).toBeVisible();
