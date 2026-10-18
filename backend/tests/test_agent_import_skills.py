@@ -189,6 +189,17 @@ def test_install_writes_the_skill_data_form_and_nothing_tool_granting(home):
     assert "Reason: consented skill import from agent_import" in history
 
 
+def test_install_writes_the_description_that_was_shown(home):
+    roots, workspace = home
+    _skill(roots.codex / "skills" / "long-said", "long-said", "word " * 200)
+    shown = _offers(home)["long-said"]["description"]
+
+    assert _install(home, _ids(_offers(home), "long-said"))[0]["outcome"] == "installed"
+    meta = yaml.safe_load((workspace / "skills" / "long-said" / "SKILL.md").read_text().split("---\n")[1])
+    assert meta["description"] == shown
+    assert len(shown) <= 500
+
+
 def test_install_preserves_an_upstream_workflow_and_records_origin(home):
     roots, workspace = home
     folder = _skill(roots.codex / "skills" / "with-workflow", "with-workflow", "keeps its workflow")

@@ -38,7 +38,7 @@ def _skill_text(name: str, upstream: bytes, description: str) -> str | None:
     safe_metadata.update({POINTER_KEY: SIDECAR_FILE, FORMAT_KEY: SIDECAR_FORMAT})
     front = {
         "name": name,
-        "description": metadata.get("description", description),
+        "description": description,
         **{key: metadata[key] for key in ("license", "compatibility") if key in metadata},
         "metadata": safe_metadata,
     }
