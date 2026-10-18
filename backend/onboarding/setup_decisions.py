@@ -156,7 +156,8 @@ def agent_import_wordings(card: ImportCard | None) -> list[tuple[tuple[str, str,
             rendered = agent_import(replace(
                 card, tools=tools, connections=tuple(name for name in card.connections if name in tools),
             ))
-            wordings.append(((rendered["title"], rendered["context"], rendered["options"][0]["label"]), tools))
+            if rendered is not None:
+                wordings.append(((rendered["title"], rendered["context"], rendered["options"][0]["label"]), tools))
     return wordings
 
 
@@ -292,7 +293,7 @@ def import_card(model: str, ready_sources: set[str]) -> ImportCard | None:
 
 
 def ready_sources(rows: list[dict[str, Any]]) -> set[str]:
-    return {row.get("source") for row in rows if row.get("state") == "ready"}
+    return {str(row["source"]) for row in rows if row.get("state") == "ready" and row.get("source")}
 
 
 async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool = True,

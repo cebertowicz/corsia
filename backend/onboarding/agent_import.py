@@ -316,12 +316,15 @@ def read_memory(roots: Roots, tools: list[str], *, now: datetime.datetime | None
     }
     claude, codex = checked.get(CLAUDE_CODE), checked.get(CODEX)
     openclaw, hermes = checked.get(OPENCLAW), checked.get(HERMES)
-    claw = {name: _openclaw_file(openclaw, name) if openclaw else None for name in ("USER.md", "MEMORY.md", "memory")}
+
+    def claw(name: str) -> None:
+        if openclaw and (path := _openclaw_file(openclaw, name)):
+            _read(read, OPENCLAW, openclaw, path)
+
     if codex:
         _read(read, CODEX, codex, codex / "memories" / "memory_summary.md",
               lambda text: sections(text, _CODEX_SUMMARY))
-    if claw["USER.md"]:
-        _read(read, OPENCLAW, openclaw, claw["USER.md"])
+    claw("USER.md")
     if hermes:
         _read(read, HERMES, hermes, hermes / "memories" / "USER.md")
     if claude:
@@ -330,12 +333,11 @@ def read_memory(roots: Roots, tools: list[str], *, now: datetime.datetime | None
         _read(read, CODEX, codex, codex / "AGENTS.md")
     if claude:
         _claude_auto_memory(read, claude)
-    if claw["MEMORY.md"]:
-        _read(read, OPENCLAW, openclaw, claw["MEMORY.md"])
+    claw("MEMORY.md")
     if hermes:
         _read(read, HERMES, hermes, hermes / "memories" / "MEMORY.md")
-    if claw["memory"]:
-        for note in _daily_notes(claw["memory"], now):
+    if openclaw and (notes := _openclaw_file(openclaw, "memory")):
+        for note in _daily_notes(notes, now):
             _read(read, OPENCLAW, openclaw, note)
     if codex:
         _read(read, CODEX, codex, codex / "memories" / "MEMORY.md",
