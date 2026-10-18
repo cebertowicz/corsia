@@ -134,7 +134,7 @@ describe('the picker\'s Local group', () => {
 	it('retries a durable Settings download failure with its stored repository', async () => {
 		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: true } };
 		await render();
-		expect(host.textContent).toContain('Download of Qwen 3.8 27B failed');
+		expect(host.textContent).toContain("Couldn't download Qwen 3.8 27B.");
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/downloads'));
 		expect(downloadBodies).toEqual([{ repository: 'Jundot/Qwen3.8-27B-oQ4e' }]);

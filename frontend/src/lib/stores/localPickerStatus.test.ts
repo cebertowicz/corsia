@@ -46,4 +46,14 @@ describe('retryLocalSetup', () => {
 		expect(startLocalModelDownload).toHaveBeenCalledWith('token', 'org/model');
 		stop();
 	});
+
+	it('keeps the backend refusal when a Settings retry is refused', async () => {
+		vi.mocked(fetchSources).mockResolvedValue([{ source: 'omlx', name: 'Local model', state: 'ready', settings_download: { name: 'Qwen', repository: 'org/model', percent: null, failed: true } }]);
+		vi.mocked(startLocalModelDownload).mockRejectedValue(new Error('That model no longer fits this Mac. Pick another from the list.'));
+		const stop = watchLocalStatus();
+		await vi.waitFor(() => expect(fetchSources).toHaveBeenCalledWith('token'));
+
+		expect(await retryLocalSetup('settings')).toEqual({ ok: false, message: 'That model no longer fits this Mac. Pick another from the list.' });
+		stop();
+	});
 });

@@ -68,7 +68,7 @@
 				} },
 			);
 		} else if (!result.ok) {
-			toasts.show(kind === 'settings' ? "Couldn't retry the local model download." : "Couldn't set up the local model.", 'error');
+			toasts.show(kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
 		}
 	}
 

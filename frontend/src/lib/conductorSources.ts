@@ -103,7 +103,7 @@ export function localPickerStatus(source: ModelSource | undefined): { line: stri
 		return { line: `Downloading ${settings.name} · ${settings.percent ?? 0}%`, retry: null };
 	}
 	if (settings?.failed) return {
-		line: `Download of ${settings.name} failed`,
+		line: `Couldn't download ${settings.name}.`,
 		retry: settings.repository ? 'settings' : null,
 	};
 	if (source.setup_stage || source.setup_downloading) {

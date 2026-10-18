@@ -24,7 +24,7 @@ async def _server() -> dict[str, Any]:
     servers = [server for server in await run_in_db(get_servers, provider="omlx")
                if server.get("kind") != "external" and server.get("status") == "online"]
     if len(servers) != 1:
-        raise HTTPException(409, "CORSIA could not reach one local model server.")
+        raise HTTPException(409, "Couldn't reach the local model server. Check that oMLX is running, then try again.")
     return servers[0]
 
 

@@ -20,7 +20,8 @@ async function read(): Promise<void> {
 	} catch { /* the line stays as it was */ }
 }
 
-export type LocalSetupRetry = { ok: boolean; code?: 'consent_required' };
+/** ``message`` is the backend's specific refusal when it gave one. */
+export type LocalSetupRetry = { ok: boolean; code?: 'consent_required'; message?: string };
 
 /** Try again: preserve each download's owner route; Settings retries its durable repository. */
 export async function retryLocalSetup(kind: LocalPickerRetry, consentExisting = false): Promise<LocalSetupRetry> {
@@ -41,7 +42,7 @@ export async function retryLocalSetup(kind: LocalPickerRetry, consentExisting = 
 			const response = await setupLocalSource(t, consentExisting);
 			result = { ok: response.ok, code: response.code };
 		}
-	} catch { result = { ok: false }; }
+	} catch (caught) { result = { ok: false, message: caught instanceof Error ? caught.message : undefined }; }
 	await read();
 	return result;
 }
