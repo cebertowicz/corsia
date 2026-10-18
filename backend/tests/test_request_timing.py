@@ -78,7 +78,9 @@ def test_real_app_records_route_template_and_unhandled_errors():
     keys = {key[1:] for key in request_timing._aggregates}
     assert keys == {("GET", "/items/{item_id}", "2xx"), ("GET", "/boom", "5xx")}
     item = next(value for key, value in request_timing._aggregates.items() if key[2] == "/items/{item_id}")
+    boom = next(value for key, value in request_timing._aggregates.items() if key[2] == "/boom")
     assert item.sum_bytes > 0 and item.max_bytes == item.sum_bytes
+    assert boom.sum_bytes is None and boom.max_bytes is None
 
 
 @pytest.mark.asyncio

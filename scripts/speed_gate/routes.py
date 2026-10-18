@@ -98,19 +98,23 @@ def query_params(route) -> list[tuple[str, bool]]:
     return found
 
 
-def runtime_query_values() -> dict[str, str]:
-    """Client query values that only exist after the target app has loaded."""
+def runtime_query_values() -> dict[str, dict[str, str]]:
+    """Client query fixtures keyed by route, with ``*`` for shared values."""
     from infra import config
 
-    values = {"path": str(config.WORKSPACE / "README.md")}
+    values = {
+        "/api/files/content": {"path": str(config.WORKSPACE / "README.md")},
+        "/api/fs/browse": {"path": str(config.WORKSPACE)},
+        "*": {},
+    }
     if importlib.util.find_spec("api.measurement_registry") is None:
         return values
     from api.measurement_registry import REGISTRY
-    values["ids"] = ",".join(sorted(name for name, item in REGISTRY.items() if item.available))
+    values["*"]["ids"] = ",".join(sorted(name for name, item in REGISTRY.items() if item.available))
     return values
 
 
-def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str],
+def build_target(template: str, route, ids: dict[str, str], extra: dict[str, dict[str, str]],
                  token: str) -> Target:
     if template in NOT_A_READ:
         return Target(template, None, reason=NOT_A_READ[template])
@@ -121,11 +125,13 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
         values[name] = quote(ids[name], safe="")
     url = _PATH_PARAM.sub(lambda m: values[m.group(1)], template)
     query = []
+    route_extra = extra.get(template, {})
+    shared_extra = extra.get("*", {})
     for name, required in query_params(route):
         if name == "token":
             query.append(f"token={quote(token, safe='')}")  # some routes read only the query token
             continue
-        value = extra.get(name) or (QUERY_FILL.get(name) if required else None) or CLIENT_PAGING.get(name)
+        value = route_extra.get(name) or shared_extra.get(name) or (QUERY_FILL.get(name) if required else None) or CLIENT_PAGING.get(name)
         value = value or (ids.get(name) if required else None)
         if value is None and required:
             return Target(template, None, reason=f"no fixture value for required query parameter '{name}'")

@@ -152,6 +152,19 @@ def test_route_target_fills_path_and_required_query_and_reports_the_unfillable()
     assert static.url is None and "no application read" in static.reason
 
 
+def test_path_query_fixture_matches_each_route_semantics():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("path")]))
+    extra = {
+        "/api/files/content": {"path": "/workspace/README.md"},
+        "/api/fs/browse": {"path": "/workspace"},
+    }
+    content = routes.build_target("/api/files/content", route, {}, extra, "tok")
+    browse = routes.build_target("/api/fs/browse", route, {}, extra, "tok")
+    assert content.url == "/api/files/content?path=%2Fworkspace%2FREADME.md"
+    assert browse.url == "/api/fs/browse?path=%2Fworkspace"
+
+
 def test_message_targets_measure_default_and_focus_client_query_shapes():
     optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
     route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))

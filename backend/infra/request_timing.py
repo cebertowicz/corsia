@@ -200,7 +200,7 @@ class RequestTimingMiddleware:
             # Unhandled errors reach ServerErrorMiddleware outside this one, so
             # its 500 response never passes through timed_send; count it here.
             if not recorded:
-                self._record(scope, started_at, status, timing, response_bytes)
+                self._record(scope, started_at, status, timing, None)
             raise
         finally:
             _request_db_timing.reset(token)
