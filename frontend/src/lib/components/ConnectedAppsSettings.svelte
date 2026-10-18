@@ -160,7 +160,7 @@
 </section>
 
 {#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { if (whereApprove) approved(app); else replace(app); whereApp = null; }} />{/if}
-{#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { apps = [...apps, app]; }} onSignIn={(app) => openId = app.id} />{/if}
+{#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { apps = [...apps, app]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }

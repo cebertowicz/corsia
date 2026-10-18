@@ -201,9 +201,9 @@
 			{:else if step === 'where'}
 				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Try again' : 'Connect'}</Button>
 			{:else if result?.state === 'needs_token'}
-				<Button variant="primary" onclick={() => { requestSettingsSection('keys'); onClose(); }}>Set key</Button>
+				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={() => { requestSettingsSection('keys'); onClose(); }}>Set key</Button>
 			{:else if result?.state === 'needs_sign_in'}
-				<Button variant="primary" onclick={() => { onClose(); onSignIn(result); }}>Sign in</Button>
+				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={() => { onClose(); onSignIn(result); }}>Sign in</Button>
 			{:else}
 				<Button variant="primary" onclick={onClose}>Done</Button>
 			{/if}

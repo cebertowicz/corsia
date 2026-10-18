@@ -28,6 +28,7 @@ for (const viewport of viewports) {
 	for (const theme of themes) {
 		test(`Connect an app captures the reviewed states at ${viewport.name} ${theme}`, async ({ page }, testInfo) => {
 			let pendingConnect: Route | null = null;
+			let signInStarts = 0;
 			const messages: Record<string, unknown>[] = [];
 			const corsiaThreadId = await createSession(page.request, `CORSIA Google connect ${viewport.name} ${theme}`);
 			// Designation is a person decision. The disposable harness provisions a
@@ -44,11 +45,16 @@ for (const viewport of viewports) {
 			await page.emulateMedia({ colorScheme: theme });
 			await page.setViewportSize({ width: viewport.width, height: viewport.height });
 			await page.route('**/api/mcp/servers**', async (route) => {
-				if (route.request().method() === 'POST') {
+				if (route.request().method() === 'POST' && new URL(route.request().url()).pathname === '/api/mcp/servers') {
 					pendingConnect = route;
 					return;
 				}
-				await route.fulfill({ json: { servers: [] } });
+				await route.fulfill({ json: { servers: [], sign_in_here: true } });
+			});
+			await page.route('**/api/mcp/servers/*/sign-in**', async (route) => {
+				expect(route.request().method()).toBe('POST');
+				signInStarts += 1;
+				await route.fulfill({ json: { authorization_url: 'https://auth.example.test/authorize?state=abc', expires_at: '2030-01-01T00:00:00Z', reopened: false } });
 			});
 			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }] } }));
 			// The real designation above makes this the actual CORSIA thread.
@@ -129,8 +135,11 @@ for (const viewport of viewports) {
 			await expect(dialog.getByRole('heading', { name: 'Files: Needs a key' })).toBeVisible();
 			await expect(dialog.getByText('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.')).toBeVisible();
 			await expect(dialog.getByRole('button', { name: 'Set key', exact: true })).toBeVisible();
+			await expect(dialog.getByRole('button', { name: 'Done', exact: true })).toBeVisible();
 			await capture(page, testInfo, `needs-token-${viewport.name}-${theme}`);
 			await dialog.getByRole('button', { name: 'Set key', exact: true }).click();
+			if (viewport.name === '1440') await expect(page.locator('.desktop-nav [data-settings-section="keys"][aria-current="page"]')).toBeVisible();
+			else await expect(page.locator('.shell-header .h-title')).toHaveText('Keys');
 			await openSettingsSection(page, 'Connected apps');
 			await page.getByRole('button', { name: 'Connect an app', exact: true }).click();
 			const signInDialog = page.getByRole('dialog');
@@ -142,15 +151,21 @@ for (const viewport of viewports) {
 			await signInDialog.getByRole('button', { name: 'Connect', exact: true }).click();
 			await expect.poll(() => pendingConnect).not.toBeNull();
 			await pendingConnect!.fulfill({ json: {
-				id: 'files-needs-sign-in', name: 'Files', state: 'needs_sign_in', revision: 1,
+				id: 'files-needs-sign-in', name: 'Files', state: 'needs_sign_in', revision: 1, transport: 'http',
+				sign_in: { status: 'idle', signed_in: false },
 				reach: { mode: 'all', project_ids: [], outside_projects: true },
 			} });
 			await expect(signInDialog.getByRole('heading', { name: 'Files: Needs you to sign in' })).toBeVisible();
 			await expect(signInDialog.getByText("Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.")).toBeVisible();
 			await expect(signInDialog.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+			await expect(signInDialog.getByRole('button', { name: 'Done', exact: true })).toBeVisible();
 			await capture(page, testInfo, `needs-sign-in-${viewport.name}-${theme}`);
 			await signInDialog.getByRole('button', { name: 'Sign in', exact: true }).click();
 			await expect(signInDialog).toBeHidden();
+			await expect(page.getByText("Files's sign-in page is open in your browser. Allow CORSIA there, then come back.")).toBeVisible();
+			await expect(page.getByText('Waiting for you in your browser')).toBeVisible();
+			await expect.poll(() => signInStarts).toBe(1);
+			await capture(page, testInfo, `sign-in-started-${viewport.name}-${theme}`);
 			await expect(page.getByRole('button', { name: 'Connect an app', exact: true })).toBeVisible();
 			await page.getByRole('button', { name: 'Connect an app', exact: true }).click();
 			const googleDialog = page.getByRole('dialog');

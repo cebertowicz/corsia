@@ -155,6 +155,7 @@ describe('ConnectAppFlow', () => {
 	it('explains the key requirement and takes the person to Keys', async () => {
 		const { onClose } = await connectResult('needs_token');
 		expect(host.textContent).toContain('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.');
+		expect(host.textContent).toContain('Done');
 		press('Set key');
 		expect(requestSettingsSection).toHaveBeenCalledWith('keys');
 		expect(onClose).toHaveBeenCalledOnce();
@@ -163,6 +164,7 @@ describe('ConnectAppFlow', () => {
 	it('explains sign-in and opens the connected app after closing', async () => {
 		const { created, onClose, onSignIn } = await connectResult('needs_sign_in');
 		expect(host.textContent).toContain("Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.");
+		expect(host.textContent).toContain('Done');
 		press('Sign in');
 		expect(onClose).toHaveBeenCalledOnce();
 		expect(onSignIn).toHaveBeenCalledWith(created);
