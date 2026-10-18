@@ -299,11 +299,11 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
         # C9: every held-back or failed skill says why and what to do next.
         "too big to bring over. Make it smaller in [tool] and ask me again.",
         # C11: an unreadable skill names its one cause; C3: "symbolic link", not "link".
-        "`link`: `it has a symbolic link in it.",
+        "`link`: `it has a symbolic link in it. Replace the link with the file itself in [tool]",
         "`not_text`: `it has a file that isn’t text.",
         "`no_skill_md`: `it has no SKILL.md. Add one in [tool] and ask me again.`",
-        "`bad_header`: `the header at the top of its SKILL.md isn’t valid.",
-        "`bad_name`: `its name has a character a skill name can’t use.",
+        "`bad_header`: `the header at the top of its SKILL.md has a formatting error.",
+        "`bad_name`: `its name can’t be used as a skill name. Start it with a letter or number,",
         "`no_description`: `its SKILL.md has no description. Add one in [tool] and ask me again.`",
         "I couldn’t read it this time. Ask me again to try once more.",
         "is different from the version I showed you. Ask me again to see the current version.",

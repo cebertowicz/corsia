@@ -208,12 +208,15 @@ def _parse(candidate: Candidate) -> str:
         if "\x00" in texts[name]:
             return _unreadable(candidate, NOT_TEXT)
         candidate.files[name] = data
-    if "SKILL.md" not in texts:
-        return _unreadable(candidate, NO_SKILL_MD)
     digest = hashlib.sha256()
     for name in sorted(candidate.files):
         digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(candidate.files[name]).digest())
     candidate.content_sha = digest.hexdigest()
+    # A key is reported before any layout problem, so fixing the layout never comes first.
+    if any(contains_credential(text) for text in texts.values()):
+        return HAS_SECRET
+    if "SKILL.md" not in texts:
+        return _unreadable(candidate, NO_SKILL_MD)
     try:
         meta, body = parse_frontmatter(texts["SKILL.md"])
     except (ValueError, yaml.YAMLError):
@@ -229,8 +232,6 @@ def _parse(candidate: Candidate) -> str:
     candidate.description = shown_description(described)
     if not candidate.description:
         return _unreadable(candidate, NO_DESCRIPTION)
-    if any(contains_credential(text) for text in texts.values()):
-        return HAS_SECRET
     return NEW
 
 

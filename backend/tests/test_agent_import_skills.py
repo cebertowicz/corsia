@@ -109,6 +109,15 @@ def test_an_unreadable_skill_names_the_one_thing_to_fix(home, tmp_path):
     assert "reason" not in offers["adr-writer"] and "reason" not in offers["big"]
 
 
+def test_a_key_is_reported_before_a_layout_problem(home, tmp_path):
+    folder = tmp_path / "home" / ".claude" / "skills" / "keyed-no-description"
+    _skill(folder, "keyed-no-description", "", body=SECRET_LINE + "\n")
+    (folder.parent / "keyed-no-skill-md").mkdir()
+    (folder.parent / "keyed-no-skill-md" / "notes.md").write_text(SECRET_LINE + "\n")
+    offers = _offers(home)
+    assert {offers[name]["state"] for name in ("keyed-no-description", "keyed-no-skill-md")} == {"has_secret"}
+
+
 def test_the_agent_gets_metadata_never_a_body(home):
     offers = _offers(home)
     assert offers["adr-writer"] == {

@@ -48,11 +48,11 @@ With one tool, the lead line names it; with several, group rows under `From [too
 - `has_secret`: `**[name]**: it has a key or password in it, so I left it. Remove that and ask me again.`
 - `too_large`: `**[name]**: it’s over 512 KB or 100 files, too big to bring over. Make it smaller in [tool] and ask me again.`
 - `unreadable`, by `reason`: `**[name]**: I couldn’t read it because ` and then
-  - `link`: `it has a symbolic link in it. Put the file itself there in [tool] and ask me again.`
+  - `link`: `it has a symbolic link in it. Replace the link with the file itself in [tool] and ask me again.`
   - `not_text`: `it has a file that isn’t text. Remove that file in [tool] and ask me again.`
   - `no_skill_md`: `it has no SKILL.md. Add one in [tool] and ask me again.`
-  - `bad_header`: `the header at the top of its SKILL.md isn’t valid. Fix it in [tool] and ask me again.`
-  - `bad_name`: `its name has a character a skill name can’t use. Use only letters, numbers, dots, dashes or underscores in [tool] and ask me again.`
+  - `bad_header`: `the header at the top of its SKILL.md has a formatting error. Fix it in [tool] and ask me again.`
+  - `bad_name`: `its name can’t be used as a skill name. Start it with a letter or number, use only letters, numbers, dots, dashes or underscores, keep it to 80 characters, and ask me again.`
   - `no_description`: `its SKILL.md has no description. Add one in [tool] and ask me again.`
   - empty: `**[name]**: I couldn’t read it this time. Ask me again to try once more.`
 
