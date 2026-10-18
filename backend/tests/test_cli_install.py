@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from email.message import Message
+import os
 from pathlib import Path
 import subprocess
 import threading
+import time
 import urllib.error
 
 import pytest
@@ -36,6 +38,27 @@ class _Response:
 
     def read(self, _size):
         return self.content
+
+
+class _FakePopen:
+    """A launched installer that answers `communicate` the way `subprocess.Popen` does, with no process behind it."""
+
+    def __init__(self, command, observed, *, returncode=0, output=(b"", b""), timeout=False, on_communicate=None):
+        self.args, self.pid, self.returncode = command, 0, None
+        self._observed, self._final, self._output = observed, returncode, output
+        self._timeout, self._on_communicate = timeout, on_communicate
+
+    def communicate(self, timeout=None):
+        self._observed["timeout"] = timeout
+        if self._timeout and timeout is not None:
+            raise subprocess.TimeoutExpired("bash", timeout)
+        if self._on_communicate:
+            self._on_communicate()
+        self.returncode = self._final
+        return self._output
+
+    def poll(self):
+        return self.returncode
 
 
 def _client() -> TestClient:
@@ -78,25 +101,26 @@ def test_success_runs_bash_with_the_service_environment(monkeypatch, tmp_path):
     observed = {}
     monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
 
-    def run(command, **kwargs):
+    def popen(command, **kwargs):
         observed.update(command=command, **kwargs)
-        return subprocess.CompletedProcess(command, 0, b"", b"")
+        return _FakePopen(command, observed)
 
-    monkeypatch.setattr(cli_install.subprocess, "run", run)
-    assert cli_install._run_installer("codex") is None
+    monkeypatch.setattr(cli_install.subprocess, "Popen", popen)
+    assert cli_install._run_installer("codex", cli_install.InstallJob()) is None
     assert observed["command"] == ["bash", str(script)]
     assert observed["env"]["PATH"] == cli_install.service_path()
     assert observed["env"]["CODEX_NON_INTERACTIVE"] == "1"
     assert observed["timeout"] == 180 and observed["stdin"] is subprocess.DEVNULL
+    assert observed["start_new_session"] is True
     assert not script.exists()
 
 
 @pytest.mark.parametrize(("vendor", "result", "reason"), [
-    ("codex", subprocess.TimeoutExpired("bash", 180), "it took too long"),
-    ("codex", subprocess.CompletedProcess([], 1, b"installer output", b"failed"), "the installer stopped"),
-    ("claude-code", subprocess.CompletedProcess([], 1, b"Checksum verification failed", b""), "the download didn't verify"),
-    ("claude-code", subprocess.CompletedProcess([], 1, b"Failed to get a valid version", b""), "the download service didn't answer"),
-    ("codex", subprocess.CompletedProcess([], 1, b"Could not fetch installer", b""), "no internet connection"),
+    ("codex", {"timeout": True}, "it took too long"),
+    ("codex", {"returncode": 1, "output": (b"installer output", b"failed")}, "the installer stopped"),
+    ("claude-code", {"returncode": 1, "output": (b"Checksum verification failed", b"")}, "the download didn't verify"),
+    ("claude-code", {"returncode": 1, "output": (b"Failed to get a valid version", b"")}, "the download service didn't answer"),
+    ("codex", {"returncode": 1, "output": (b"Could not fetch installer", b"")}, "no internet connection"),
 ])
 def test_installer_failures_have_safe_reasons(monkeypatch, tmp_path, vendor, result, reason):
     from api import cli_install
@@ -105,13 +129,9 @@ def test_installer_failures_have_safe_reasons(monkeypatch, tmp_path, vendor, res
     script.write_text("#!/bin/bash\n")
     monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
 
-    def run(*_args, **_kwargs):
-        if isinstance(result, BaseException):
-            raise result
-        return result
-
-    monkeypatch.setattr(cli_install.subprocess, "run", run)
-    assert cli_install._run_installer(vendor) == reason
+    monkeypatch.setattr(cli_install, "_stop_group", lambda _process: None)
+    monkeypatch.setattr(cli_install.subprocess, "Popen", lambda command, **_kwargs: _FakePopen(command, {}, **result))
+    assert cli_install._run_installer(vendor, cli_install.InstallJob()) == reason
     assert not script.exists()
 
 
@@ -124,7 +144,7 @@ async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
     async def refresh():
         refreshed.append(True)
 
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", refresh)
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: notified.append(True))
@@ -139,7 +159,7 @@ async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
 async def test_location_check_failure_does_not_break_a_successful_install(monkeypatch, caplog):
     from api import cli_install
 
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
     monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: (_ for _ in ()).throw(OSError("unreadable")))
     _nothing_installed(monkeypatch)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
@@ -158,7 +178,7 @@ async def test_second_post_returns_the_existing_running_job(monkeypatch):
 
     release = threading.Event()
 
-    def run(_vendor):
+    def run(_vendor, _job):
         release.wait()
         return None
 
@@ -180,7 +200,7 @@ async def test_update_reuses_the_installer_unless_a_package_manager_owns_the_cli
     monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: "/usr/local/bin/codex")
     monkeypatch.setattr(cli_install, "package_manager_for", lambda *_args: None)
     monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: refreshed.append(True) or asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
 
@@ -244,7 +264,7 @@ async def test_guard_treats_a_hung_login_shell_as_not_found(monkeypatch):
 
     monkeypatch.setattr(cli_install, "service_binary", lambda _vendor: None)
     monkeypatch.setattr(cli_install, "login_shell_binary", hang)
-    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
     assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
@@ -273,7 +293,7 @@ async def test_a_tempfile_error_settles_the_job_failed(monkeypatch):
 async def test_any_unexpected_error_settles_the_job_failed_and_is_logged(monkeypatch, caplog):
     from api import cli_install
 
-    def explode(_vendor):
+    def explode(_vendor, _job):
         raise RuntimeError("unexpected")
 
     monkeypatch.setattr(cli_install, "_run_installer", explode)
@@ -317,3 +337,194 @@ def test_get_is_exact_and_unknown_vendor_is_not_found():
         assert response.json() == {"state": "idle", "reason": None, "path_shadowed_by": None}
     with pytest.raises(HTTPException, match="CLI vendor not found"):
         asyncio.run(cli_install.get_install("unknown", {}))
+
+
+# Cancel. The first three run a real installer process: a script that starts a child and waits on it.
+
+_STUBBORN_INSTALLER = """#!/bin/bash
+{trap}
+echo $$ > "{pids}/installer"
+sleep 60 &
+echo $! > "{pids}/child"
+wait
+"""
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _gone_soon(pid: int) -> bool:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if not _alive(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+async def _start_real_installer(monkeypatch, tmp_path, *, trap: str = ""):
+    """Start a job whose installer is a real shell script; returns the script path and the pid directory."""
+    from api import cli_install
+
+    script = tmp_path / "installer.sh"
+    script.write_text(_STUBBORN_INSTALLER.format(trap=trap, pids=tmp_path))
+    monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+    _nothing_installed(monkeypatch)
+    await cli_install.start_install("claude-code", {})
+    deadline = time.monotonic() + 5
+    while not (tmp_path / "child").exists() or not (tmp_path / "child").read_text().strip():
+        assert time.monotonic() < deadline, "the installer never started"
+        await asyncio.sleep(0.05)
+    return script, tmp_path
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_running_stops_the_installer_tree_and_settles_cancelled(monkeypatch, tmp_path):
+    from api import cli_install
+
+    script, pids = await _start_real_installer(monkeypatch, tmp_path)
+    installer, child = int((pids / "installer").read_text()), int((pids / "child").read_text())
+    assert _alive(installer) and _alive(child)
+
+    assert await cli_install.cancel_install("claude-code", {}) == {"state": "cancelled", "reason": None, "path_shadowed_by": None}
+    await cli_install._jobs["claude-code"].task
+
+    assert _gone_soon(installer) and _gone_soon(child)
+    assert not script.exists()
+    assert await cli_install.get_install("claude-code", {}) == {"state": "cancelled", "reason": None, "path_shadowed_by": None}
+
+
+@pytest.mark.asyncio
+async def test_cancel_kills_an_installer_that_ignores_the_first_signal(monkeypatch, tmp_path):
+    from api import cli_install
+
+    monkeypatch.setattr(cli_install, "_CANCEL_GRACE_SECONDS", 0.3)
+    script, pids = await _start_real_installer(monkeypatch, tmp_path, trap="trap '' TERM")
+    installer, child = int((pids / "installer").read_text()), int((pids / "child").read_text())
+
+    assert (await cli_install.cancel_install("claude-code", {}))["state"] == "cancelled"
+    await cli_install._jobs["claude-code"].task
+
+    assert _gone_soon(installer) and _gone_soon(child)
+    assert not script.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_new_install_can_start_after_a_cancel(monkeypatch, tmp_path):
+    from api import cli_install
+
+    await _start_real_installer(monkeypatch, tmp_path)
+    await cli_install.cancel_install("claude-code", {})
+    await cli_install._jobs["claude-code"].task
+    assert cli_install._jobs["claude-code"].state == "cancelled"
+
+    (tmp_path / "child").unlink()
+    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    await cli_install.cancel_install("claude-code", {})
+    await cli_install._jobs["claude-code"].task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["done", "failed", "cancelled"])
+async def test_cancel_leaves_a_settled_job_alone(state):
+    from api import cli_install
+
+    job = cli_install.InstallJob(state=state, reason="it took too long" if state == "failed" else None, path_shadowed_by="/usr/bin/codex" if state == "done" else None)
+    cli_install._jobs["codex"] = job
+    before = cli_install._status("codex")
+    assert await cli_install.cancel_install("codex", {}) == before
+    assert job.state == state and not job.cancel_requested
+
+
+def test_cancel_when_nothing_ran_is_a_no_op_over_http_and_unknown_vendors_are_not_found():
+    from api import cli_install
+
+    with _client() as client:
+        response = client.delete("/api/providers/cli/codex/install")
+        assert response.status_code == 200
+        assert response.json() == {"state": "idle", "reason": None, "path_shadowed_by": None}
+        assert client.delete("/api/providers/cli/unknown/install").status_code == 404
+
+
+def test_a_cancel_before_the_installer_launches_means_it_never_launches(monkeypatch, tmp_path):
+    from api import cli_install
+
+    script = tmp_path / "installer.sh"
+    script.write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
+
+    def launched(*_args, **_kwargs):
+        raise AssertionError("a cancelled job must not launch the installer")
+
+    monkeypatch.setattr(cli_install.subprocess, "Popen", launched)
+    job = cli_install.InstallJob()
+    cli_install._request_cancel(job)
+    assert cli_install._run_installer("codex", job) is None
+    assert job.cancelled and not script.exists()
+
+
+def test_a_cancel_that_arrives_after_a_successful_install_leaves_it_done(monkeypatch, tmp_path):
+    """The installer finished: the CLI is there, so the one final state is done, not cancelled."""
+    from api import cli_install
+
+    script = tmp_path / "installer.sh"
+    script.write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
+    job = cli_install.InstallJob()
+
+    def cancel_now():
+        job.cancel_requested = True
+
+    monkeypatch.setattr(cli_install.subprocess, "Popen", lambda command, **_kwargs: _FakePopen(command, {}, returncode=0, on_communicate=cancel_now))
+    assert cli_install._run_installer("codex", job) is None
+    assert not job.cancelled and not script.exists()
+
+
+def test_a_cancel_that_arrives_while_the_installer_runs_settles_cancelled_not_failed(monkeypatch, tmp_path):
+    from api import cli_install
+
+    script = tmp_path / "installer.sh"
+    script.write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli_install, "_download_script", lambda _vendor: script)
+    job = cli_install.InstallJob()
+
+    def cancel_now():
+        job.cancel_requested = True
+
+    monkeypatch.setattr(cli_install.subprocess, "Popen", lambda command, **_kwargs: _FakePopen(command, {}, returncode=-15, output=(b"", b"Terminated"), on_communicate=cancel_now))
+    assert cli_install._run_installer("codex", job) is None
+    assert job.cancelled
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_racing_completion_returns_the_single_state_the_job_settled_in(monkeypatch):
+    from api import cli_install
+
+    entered, release = threading.Event(), threading.Event()
+
+    def finish_first(_vendor, _job):
+        entered.set()
+        release.wait()
+        return None
+
+    monkeypatch.setattr(cli_install, "_run_installer", finish_first)
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+    _nothing_installed(monkeypatch)
+    await cli_install.start_install("codex", {})
+    assert await asyncio.to_thread(entered.wait, 5)
+
+    cancelling = asyncio.create_task(cli_install.cancel_install("codex", {}))
+    await asyncio.sleep(0.05)
+    release.set()
+    assert await cancelling == {"state": "done", "reason": None, "path_shadowed_by": None}
+    await cli_install._jobs["codex"].task
+    assert cli_install._status("codex")["state"] == "done"

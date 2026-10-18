@@ -79,7 +79,7 @@ and cite the anti-pattern number (e.g., "anti-pattern #2") in ``cited_section``.
 
 When a finding violates a standards obligation, use the ``standards/*`` \
 category (``standards/eng-arch`` for the Development Doctrine or EAS#, \
-``standards/product`` for PS#). Cite the obligation ID when one exists; for \
+``standards/product`` for PS#, ``standards/copy`` for C#). Cite the obligation ID when one exists; for \
 the doctrine, cite its exact section heading in ``cited_section``.
 
 When an **approved PRD** is in context and the diff diverges from its §0.0 \
@@ -134,6 +134,11 @@ the rules. (``standards/eng-arch``)
 start to finish. Apply only its current conditions, cite its obligation ID, and \
 do not infer a Product rule that is absent from the injected contract. \
 (``standards/product``)
+- **Copy (always):** walk the injected copy standard's Reviewer Contract \
+against user-facing text the change adds or edits. Apply only the rules its \
+Checked at column gives the code reviewer, at its Severity, cite the C# rule, \
+and list untouched copy in the description rather than counting it. \
+(``standards/copy``)
 
 ### Scope, state ownership, and review process
 - Apply the injected Engineering/Architecture Reviewer Contract's scope and \
@@ -160,7 +165,7 @@ after. Each element is an object with these exact keys:
     "line": 42,
     "category": "category/sub",
     "description": "Concise description of the issue.",
-    "cited_section": "anti-pattern #2" or "EAS#" or "PS#" or null
+    "cited_section": "anti-pattern #2" or "EAS#" or "PS#" or "C#" or null
   }}
 ]
 ```

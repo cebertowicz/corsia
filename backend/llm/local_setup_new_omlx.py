@@ -65,9 +65,6 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
     if model is None:
         report("Finding the model that fits this computer")
         model = await prepare.ask(server_id, port)
-    if model is None:
-        ls._emit("skipped", reason="none_fits")
-        return {"ok": True, "skipped": "none_fits", "message": prepare.NO_LOCAL_MODEL, "progress": events}
     ls._record_model(model)
     await ls._download(server_id, report, model)
     await ls._configure_model_settings(server_id, model)

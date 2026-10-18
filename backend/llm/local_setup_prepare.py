@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 from llm import local_model
 from llm.local_model import LocalModel, PickUnavailable
+from llm.local_profiles import STARTER_MODEL
 from llm.local_setup_results import failure_message
 
 log = logging.getLogger(__name__)
@@ -31,13 +32,16 @@ OWN_OMLX = "own_omlx"
 NOT_CHECKED = "not_checked"
 CHECKING = "checking"
 PICKED = "picked"
-#: The recommender has no row with CORSIA's 32K context minimum.
-NONE_FITS = "none_fits"
 #: The recommender could not answer, even once more after oMLX reported ready.
 FAILED = "failed"
 
-#: The one message for both too little memory and nothing fitting.
+#: Under 24 GiB there is no local model, so the one message says to connect something else.
 NO_LOCAL_MODEL = "This computer can't run a local model well. Connect a subscription or an API key in the app."
+
+
+def fallback_note(model: LocalModel) -> str:
+    """Why this computer got the starter model: oMLX's recommender had no row to offer. The name is the profile's."""
+    return f"oMLX didn’t recommend a model for this computer, so CORSIA chose {model.display_name}."
 
 
 @dataclass
@@ -46,6 +50,8 @@ class _Prepare:
     state: str = NOT_CHECKED
     model: LocalModel | None = None
     message: str | None = None
+    # The pick is the starter model because the recommender had no usable row.
+    fallback: bool = False
     # Whether prepare started the oMLX it set up, so turning the switch off stops it.
     started_omlx: bool = False
     # Requests waiting for the pick to leave checking; ``_settle`` wakes them.
@@ -60,8 +66,8 @@ def _running() -> bool:
     return _prepare.task is not None and not _prepare.task.done()
 
 
-def _settle(state: str, model: LocalModel | None = None, message: str | None = None) -> None:
-    _prepare.state, _prepare.model, _prepare.message = state, model, message
+def _settle(state: str, model: LocalModel | None = None, message: str | None = None, fallback: bool = False) -> None:
+    _prepare.state, _prepare.model, _prepare.message, _prepare.fallback = state, model, message, fallback
     if state != CHECKING:
         while _prepare.waiters:
             waiter = _prepare.waiters.pop()
@@ -70,11 +76,11 @@ def _settle(state: str, model: LocalModel | None = None, message: str | None = N
 
 
 def _view(state: str, model: LocalModel | None = None, message: str | None = None) -> dict:
-    return {
-        "state": state,
-        "model": model.view() if model is not None else None,
-        "message": NO_LOCAL_MODEL if state in {LOW_MEMORY, NONE_FITS} else message,
-    }
+    if state == LOW_MEMORY:
+        message = NO_LOCAL_MODEL
+    elif state == PICKED and model is not None and _prepare.fallback and model == STARTER_MODEL:
+        message = fallback_note(model)
+    return {"state": state, "model": model.view() if model is not None else None, "message": message}
 
 
 def picked_model() -> LocalModel | None:
@@ -208,11 +214,12 @@ async def join() -> None:
         await asyncio.wait({task})
 
 
-async def ask(server_id: str, port: int) -> LocalModel | None:
+async def ask(server_id: str, port: int) -> LocalModel:
     """Ask the recommender, once more after oMLX reports ready; record and return the pick.
 
-    None when nothing fits; ``PickUnavailable`` (or oMLX's health failure) when it
-    could not answer.
+    When it answers with no usable row, the pick is the starter model from
+    ``local_profiles.json`` (the one list CORSIA keeps) and the view says so.
+    ``PickUnavailable`` (or oMLX's health failure) means it could not answer.
     """
     from llm import local_setup as ls
 
@@ -230,7 +237,9 @@ async def ask(server_id: str, port: int) -> LocalModel | None:
     except Exception as exc:
         _settle(FAILED, message=failure_message(exc))
         raise
-    _settle(PICKED if model is not None else NONE_FITS, model)
+    fallback = model is None
+    model = model or STARTER_MODEL
+    _settle(PICKED, model, fallback=fallback)
     return model
 
 

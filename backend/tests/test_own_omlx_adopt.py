@@ -6,8 +6,10 @@ import asyncio
 
 import pytest
 
-from llm import local_setup, local_setup_existing, local_setup_ownership, own_omlx_management
-from llm.local_model import LocalModel
+from llm import (
+    local_setup, local_setup_existing, local_setup_ownership, local_setup_prepare, local_sources, own_omlx_management,
+)
+from llm.local_model import LocalModel, PickUnavailable
 from tests.test_local_setup_existing_omlx import _finished, _models, calls, fresh_flight  # noqa: F401
 
 PICK = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 65_536)
@@ -104,3 +106,132 @@ def test_a_key_already_stored_is_kept_and_not_forgotten_on_stop(own, monkeypatch
 
     assert ("register", None) in own
     assert own_omlx_management.read().key_registered is False
+
+
+# ---- oMLX has no pick: the starter model, said so, only under management ----
+
+STARTER = local_setup_existing.STARTER_MODEL
+NOTE = "oMLX didn’t recommend a model for this computer, so CORSIA chose Ternary Bonsai 2."
+
+
+def _recommends(monkeypatch, own, answer):
+    async def recommend(server_id):
+        own.append("recommend")
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr("llm.local_model.ask_recommender", recommend)
+
+
+def _downloads(own):
+    return [call for call in own if isinstance(call, tuple) and call[0] == "download"]
+
+
+def test_managed_with_no_pick_downloads_the_starter_and_records_it_as_the_fallback(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    result = asyncio.run(_finished())
+
+    assert result["ok"] is True
+    assert own == ["health", "read_key", ("register", THEIR_KEY), "discover", "recommend", "record_model",
+                   ("download", STARTER.model), "discover", "rearm"]
+    record = own_omlx_management.read()
+    assert record.model == STARTER and record.fallback is True and record.key_registered
+    assert local_sources.omlx_management()["starter_note"] == NOTE
+    assert local_sources.omlx_management()["starter_name"] == "Ternary Bonsai 2"
+
+
+def test_managed_when_oMLX_cannot_answer_fails_the_check_and_installs_nothing(own, monkeypatch):
+    _recommends(monkeypatch, own, PickUnavailable("oMLX could not be reached (ConnectError)."))
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    result = asyncio.run(_finished())
+
+    assert result["ok"] is False
+    assert result["message"] == "oMLX could not be reached (ConnectError)."
+    assert _downloads(own) == [] and "record_model" not in own
+    record = own_omlx_management.read()
+    assert record.model is None and record.fallback is False
+    assert local_sources.omlx_management()["starter_note"] is None
+    assert local_setup.setup_failure()["message"] == result["message"]
+
+
+def test_a_pick_has_no_starter_note(own):
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    asyncio.run(_finished())
+
+    assert own_omlx_management.read().fallback is False
+    assert local_sources.omlx_management()["starter_note"] is None
+    assert local_sources.omlx_management()["starter_name"] is None
+
+
+def test_the_starter_note_goes_when_management_stops(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+    asyncio.run(_finished())
+
+    own_omlx_management.begin_stop()
+
+    assert local_sources.omlx_management()["starter_note"] is None
+    assert local_sources.omlx_management()["starter_name"] is None
+
+
+def test_managed_with_no_pick_leaves_a_starter_they_already_hold_theirs(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    _models(monkeypatch, [*THEIRS, {"litellm_model": f"omlx@local-server/{STARTER.model}"}])
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    asyncio.run(_finished())
+
+    assert not _downloads(own) and "record_model" not in own
+    record = own_omlx_management.read()
+    assert record.model is None and record.fallback is False
+    assert local_sources.omlx_management()["starter_note"] is None
+
+
+def test_managed_with_no_pick_still_adds_the_starter_beside_other_models_they_hold(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    asyncio.run(_finished())
+
+    assert _downloads(own) == [("download", STARTER.model)]
+
+
+def test_use_mine_with_no_pick_downloads_nothing_and_never_asks(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    local_setup_ownership.record_existing_omlx_consent(manage=False)
+
+    result = asyncio.run(_finished())
+
+    assert result["ok"] is True
+    assert own == ["health", ("register", None), "discover"]
+    assert own_omlx_management.read() is None
+
+
+def test_a_computer_under_24_gib_gets_no_starter_and_no_note(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: False)
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    asyncio.run(_finished())
+
+    assert not _downloads(own) and "record_model" not in own
+    record = own_omlx_management.read()
+    assert record.model is None and record.fallback is False
+    assert local_sources.omlx_management()["starter_note"] is None
+
+
+def test_setup_refuses_a_computer_under_24_gib_before_asking_oMLX_anything(own, monkeypatch):
+    _recommends(monkeypatch, own, None)
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: False)
+    local_setup_ownership.record_existing_omlx_consent(manage=True)
+
+    result = asyncio.run(local_setup.begin_local_setup())
+
+    assert result["ok"] is False
+    assert result["message"] == local_setup_prepare.NO_LOCAL_MODEL
+    assert own == []

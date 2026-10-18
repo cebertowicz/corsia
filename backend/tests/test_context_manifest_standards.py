@@ -2,7 +2,8 @@
 
 Covers reviewer-context standards resolution, Reviewer-Contract section
 extraction, the new ``standards/*`` finding categories, and the reviewer
-``_build_context`` wiring that selects doctrine + Eng/Arch + Product for code PRs.
+``_build_context`` wiring that selects doctrine + Eng/Arch + Product + Copy for
+code PRs.
 """
 
 from __future__ import annotations
@@ -50,6 +51,31 @@ maintainable?**
 
 ## Complexity is allowed. It has to pay for itself.
 If you cannot name what got simpler, it did not pay for itself.
+"""
+
+_COPY_FIXTURE = """\
+# CORSIA copy standard
+
+## Scope
+- SCOPE_BODY that must not leak into the extracted injection.
+
+## Reviewer Contract
+COPY_CONTRACT_INTRO
+
+### Rules
+| C1 | RULES_ROW |
+
+### Checked at
+CHECKED_AT_BODY
+
+### Severity
+SEVERITY_BODY
+
+### Glossary
+GLOSSARY_BODY
+
+## Reference
+- REFERENCE_BODY after the contract that must be excluded.
 """
 
 _NO_CONTRACT_FIXTURE = """\
@@ -243,6 +269,32 @@ class TestStandardsResolution:
         assert "TRAILING_SECTION" not in content  # section after contract excluded
         assert "EAS1_BODY" not in content  # section before contract excluded
 
+    def test_copy_contract_keeps_subsections_and_stops_at_next_h2(self, tmp_path):
+        """Copy's contract spans its ### subsections and ends at ## Reference."""
+        from reviewer.reviewer_context import (
+            ReviewerContextManifest,
+            resolve_reviewer_context,
+        )
+
+        ws = _make_workspace(tmp_path, {"COPY-STANDARD.md": _COPY_FIXTURE})
+
+        resolved = resolve_reviewer_context(
+            ReviewerContextManifest(standards=["copy"]), workspace_root=ws
+        )
+        content = next(c for p, c in resolved if "COPY-STANDARD" in p)
+
+        assert content.startswith("# CORSIA copy standard")
+        for kept in (
+            "COPY_CONTRACT_INTRO",
+            "RULES_ROW",
+            "CHECKED_AT_BODY",
+            "SEVERITY_BODY",
+            "GLOSSARY_BODY",
+        ):
+            assert kept in content
+        assert "SCOPE_BODY" not in content
+        assert "REFERENCE_BODY" not in content
+
     def test_missing_contract_section_falls_back_to_whole_doc(self, tmp_path):
         from reviewer.reviewer_context import (
             ReviewerContextManifest,
@@ -276,7 +328,7 @@ class TestStandardsResolution:
 class TestStandardsCategories:
     @pytest.mark.parametrize(
         "category",
-        ["standards/eng-arch", "standards/product", "standards/ux-ia"],
+        ["standards/eng-arch", "standards/product", "standards/ux-ia", "standards/copy"],
     )
     def test_standards_categories_are_valid(self, category):
         from reviewer.reviewer_categories import VALID_CATEGORIES_SET
@@ -292,16 +344,17 @@ class TestBuildContextStandards:
                 "DEVELOPMENT-DOCTRINE.md": _DEVELOPMENT_DOCTRINE_FIXTURE,
                 "PRD-ENGINEERING-ARCHITECTURE-STANDARDS.md": _ENG_ARCH_FIXTURE,
                 "PRODUCT-STANDARDS.md": _PRODUCT_FIXTURE,
+                "COPY-STANDARD.md": _COPY_FIXTURE,
                 "llm-anti-patterns.md": "# LLM anti-pattern catalog\n",
                 # exists, but must NOT be injected into the code reviewer
                 "PRD-UX-IA-STANDARDS.md": _NO_CONTRACT_FIXTURE,
             },
         )
 
-    def test_code_review_injects_doctrine_eng_arch_and_product_not_ux(
+    def test_code_review_injects_doctrine_eng_arch_product_and_copy_not_ux(
         self, tmp_path, monkeypatch
     ):
-        """Code PRs get doctrine + Eng/Arch + Product; UX/IA stays separate."""
+        """Code PRs get doctrine + Eng/Arch + Product + Copy; UX/IA stays separate."""
         from reviewer import on_pr_review
 
         ws = self._ws_with_standards(tmp_path)
@@ -313,6 +366,8 @@ class TestBuildContextStandards:
         assert "DEVELOPMENT-DOCTRINE" in text
         assert "ENGINEERING-ARCHITECTURE" in text
         assert "PRODUCT-STANDARDS" in text
+        assert "COPY-STANDARD" in text
+        assert "GLOSSARY_BODY" in text
         assert "UX-IA" not in text
 
     def test_context_manifest_has_no_subsystem_spec_surface(self, monkeypatch):
@@ -363,12 +418,32 @@ class TestBuildContextStandards:
                 "DEVELOPMENT-DOCTRINE.md": _DEVELOPMENT_DOCTRINE_FIXTURE,
                 "PRD-ENGINEERING-ARCHITECTURE-STANDARDS.md": _ENG_ARCH_FIXTURE,
                 "PRODUCT-STANDARDS.md": _PRODUCT_FIXTURE,
+                "COPY-STANDARD.md": _COPY_FIXTURE,
             },
         )
         monkeypatch.setattr(on_pr_review, "_WORKSPACE_ROOT", str(ws))
         monkeypatch.setattr(on_pr_review, "_PROJECT_ROOT", str(ws))
 
         with pytest.raises(RuntimeError, match="anti-patterns|catalog|missing|empty"):
+            on_pr_review._build_context(diff="", pr_number=1, repo="owner/repo")
+
+    def test_missing_copy_standard_fails_loud(self, tmp_path, monkeypatch):
+        """Copy is required: its absence stops review rather than skipping it."""
+        from reviewer import on_pr_review
+
+        ws = _make_workspace(
+            tmp_path,
+            {
+                "DEVELOPMENT-DOCTRINE.md": _DEVELOPMENT_DOCTRINE_FIXTURE,
+                "PRD-ENGINEERING-ARCHITECTURE-STANDARDS.md": _ENG_ARCH_FIXTURE,
+                "PRODUCT-STANDARDS.md": _PRODUCT_FIXTURE,
+                "llm-anti-patterns.md": "# LLM anti-pattern catalog\n",
+            },
+        )
+        monkeypatch.setattr(on_pr_review, "_WORKSPACE_ROOT", str(ws))
+        monkeypatch.setattr(on_pr_review, "_PROJECT_ROOT", str(ws))
+
+        with pytest.raises(RuntimeError, match="COPY-STANDARD"):
             on_pr_review._build_context(diff="", pr_number=1, repo="owner/repo")
 
     def test_empty_standard_file_fails_loud(self, tmp_path, monkeypatch):

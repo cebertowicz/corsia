@@ -61,7 +61,7 @@ _PROJECT_ROOT = str(WORKSPACE / "projects" / "corsia" / "source" / "corsia")
 
 
 # UX/IA remains a separate screenshot-based vision-audit modality.
-_CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product"]
+_CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product", "copy"]
 
 
 class ReviewerVerdict(TypedDict):

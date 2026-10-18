@@ -65,6 +65,7 @@ class ProjectDiscoveryListTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from onboarding import project_discovery
+        from onboarding.consent import ConsentRefused
         from tools.delegation import _require_context
 
         context = _require_context(kwargs)
@@ -107,7 +108,7 @@ class ProjectDiscoveryListTool(Tool):
             try:
                 with public.plan_transaction(db):
                     project_discovery.consume_consent(db, decision_id, actor, wordings)
-            except project_discovery.ConsentRefused as refusal:
+            except ConsentRefused as refusal:
                 return str(refusal)
             finally:
                 db.close()

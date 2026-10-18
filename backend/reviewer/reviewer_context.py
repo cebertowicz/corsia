@@ -25,6 +25,7 @@ _STANDARDS_REGISTRY = {
     ),
     "eng-arch": "projects/corsia/shared/standards/PRD-ENGINEERING-ARCHITECTURE-STANDARDS.md",
     "product": "projects/corsia/shared/standards/PRODUCT-STANDARDS.md",
+    "copy": "projects/corsia/shared/standards/COPY-STANDARD.md",
     "ux-ia": "projects/corsia/shared/standards/PRD-UX-IA-STANDARDS.md",
     "anti-patterns": "projects/corsia/shared/standards/llm-anti-patterns.md",
 }

@@ -9,6 +9,7 @@ from pathlib import Path
 
 _STD_ENG = "# Eng & Arch Standards\n\n## Reviewer Contract\n- **Block:** EAS10.\n"
 _STD_PROD = "# Product Standards\n\n## Reviewer Contract\n- **Block:** PS7.\n"
+_STD_COPY = "# Copy standard\n\n## Reviewer Contract\n- **C1.** Plain words.\n"
 _DOCTRINE = (
     "# Development doctrine: maintainability is the test\n\n"
     "## The question to ask of every change\n"
@@ -87,6 +88,7 @@ def _workspace(tmp_path: Path, *, with_prd: bool, with_map: bool) -> Path:
     (standards / "DEVELOPMENT-DOCTRINE.md").write_text(_DOCTRINE)
     (standards / "PRD-ENGINEERING-ARCHITECTURE-STANDARDS.md").write_text(_STD_ENG)
     (standards / "PRODUCT-STANDARDS.md").write_text(_STD_PROD)
+    (standards / "COPY-STANDARD.md").write_text(_STD_COPY)
     (standards / "llm-anti-patterns.md").write_text(_ANTI_PATTERNS)
     planning = tmp_path / "projects" / "corsia" / "shared" / "planning"
     planning.mkdir(parents=True)

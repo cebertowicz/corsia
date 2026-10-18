@@ -4,9 +4,9 @@ import { codeTextAt, diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
-export interface CellSpan { row: number; col: number; from: number; to: number }
+export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number }
 
-/** The cells of a GFM table's source, as offsets into it: trimmed content spans, the delimiter row skipped. */
+/** The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty cells; the delimiter row is skipped. */
 export function tableCells(src: string): CellSpan[] {
 	const cells: CellSpan[] = [];
 	let lineStart = 0;
@@ -26,9 +26,13 @@ export function tableCells(src: string): CellSpan[] {
 		let col = 0;
 		for (let i = 0; i < edges.length - 1; i++) {
 			if ((i === 0 && lead) || (i === edges.length - 2 && tail)) continue;
-			const raw = line.slice(edges[i] + 1, edges[i + 1]);
-			const from = edges[i] + 1 + (raw.length - raw.trimStart().length);
-			cells.push({ row, col: col++, from: start + from, to: start + from + raw.trim().length });
+			const rawStart = edges[i] + 1, rawEnd = edges[i + 1], raw = line.slice(rawStart, rawEnd);
+			const from = rawStart + (raw.length - raw.trimStart().length), to = from + raw.trim().length;
+			// An empty rendered cell has no DOM text to select. Its source whitespace is a stable anchor; when it has none,
+			// its left delimiter is the smallest non-empty source span that still belongs uniquely to this cell.
+			const anchorFrom = from === to ? (rawStart < rawEnd ? rawStart : Math.max(0, rawStart - 1)) : from;
+			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
+			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo });
 		}
 	});
 	return cells;
@@ -36,6 +40,10 @@ export function tableCells(src: string): CellSpan[] {
 
 export const snippet = (value: string) => value.length > SNIPPET ? `${value.slice(0, SNIPPET)}…` : value;
 export const clean = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+/** Whether a source range touches the visible cell, including an empty cell's structural source anchor. */
+export const intersectsCell = (span: CellSpan, from: number, to: number) =>
+	span.anchorFrom < to && span.anchorTo > from;
 const cellName = (value: string) => {
 	const text = plainQuote(clean(value));
 	return text.length > 24 ? `${text.slice(0, 23)}…` : text;
@@ -47,9 +55,10 @@ export function tableCellLabel(src: string, cell: CellSpan, quote: string): stri
 	const header = cells.find((span) => span.row === 0 && span.col === cell.col);
 	const first = cells.find((span) => span.row === cell.row && span.col === 0);
 	const column = cellName(header ? src.slice(header.from, header.to) : `column ${cell.col + 1}`);
-	if (cell.col === 0) return `“${plainQuote(quote)}” · ${column}`;
+	const selected = plainQuote(cell.from === cell.to ? 'Empty cell' : quote.trim() || 'Empty cell');
+	if (cell.col === 0) return `“${selected}” · ${column}`;
 	const row = cellName(first ? src.slice(first.from, first.to) : '') || `row ${cell.row}`;
-	return `“${plainQuote(quote)}” · ${row}, ${column}`;
+	return `“${selected}” · ${row}, ${column}`;
 }
 
 /**
@@ -65,9 +74,9 @@ export function widgetCommentLabel(state: EditorState, from: number | undefined,
 	if (!table) return null;
 	if (from < table.from || to > table.to) return null;
 	const src = state.sliceDoc(table.from, table.to), cells = tableCells(src);
-	const hit = cells.filter((span) => span.to > span.from && span.from < to - table.from && span.to > from - table.from);
+	const hit = cells.filter((span) => intersectsCell(span, from - table.from, to - table.from));
 	if (hit.length === 0) return null;
-	if (hit.length === cells.filter((span) => span.to > span.from).length) return 'The whole table';
+	if (hit.length === cells.length) return 'The whole table';
 	const rows = new Set(hit.map((span) => span.row)).size;
 	const named = (span: CellSpan) => snippet(clean(plainQuote(src.slice(span.from, span.to))));
 	if (rows > 1) return `${rows} rows, from “${named(cells.find((span) => span.row === hit[0].row && span.col === 0) ?? hit[0])}”`;

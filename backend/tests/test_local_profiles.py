@@ -38,7 +38,7 @@ def test_the_settings_file_holds_the_unmanaged_starter_and_model_independent_set
     assert set(raw) == {"omlx_global_settings", "model_settings", "starter_model"}
     assert local_profiles.OMLX_GLOBAL_SETTINGS == raw["omlx_global_settings"]
     assert local_profiles.MODEL_SETTINGS == raw["model_settings"]
-    assert local_profiles.OWN_OMLX_STARTER == LocalModel(
+    assert local_profiles.STARTER_MODEL == LocalModel(
         raw["starter_model"]["repo_id"], raw["starter_model"]["download_bytes"], raw["starter_model"]["max_context"])
 
 
@@ -50,7 +50,7 @@ def test_loader_rejects_malformed_settings_files(tmp_path):
         path.write_text(json.dumps(payload))
         return local_profiles.load_settings(path)
 
-    assert load(good) == (good["omlx_global_settings"], good["model_settings"], local_profiles.OWN_OMLX_STARTER)
+    assert load(good) == (good["omlx_global_settings"], good["model_settings"], local_profiles.STARTER_MODEL)
     for bad in ([], {**good, "profiles": []}, {"model_settings": {}}, {**good, "model_settings": []},
                 {**good, "starter_model": {}}):
         with pytest.raises(RuntimeError):
@@ -67,10 +67,10 @@ def legacy(monkeypatch, tmp_path):
     state = tmp_path / "state"
     settings = tmp_path / "omlx" / "settings.json"
     model_dir = tmp_path / "models"
-    starter = model_dir / local_profiles.OWN_OMLX_STARTER.repository
+    starter = model_dir / local_profiles.STARTER_MODEL.repository
     starter.mkdir(parents=True)
     with open(starter / "model.safetensors", "wb") as weights:  # sparse: full size, no disk
-        weights.truncate(local_profiles.OWN_OMLX_STARTER.download_size_bytes)
+        weights.truncate(local_profiles.STARTER_MODEL.download_size_bytes)
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"model": {"model_dir": str(model_dir)}}))
     state.mkdir()
@@ -89,10 +89,10 @@ def test_startup_backfills_the_starter_a_finished_legacy_setup_installed(legacy)
     local_model, state, _model_dir, _env = legacy
 
     assert local_model.set_up_model() is None
-    assert local_model.backfill_legacy_record() == local_profiles.OWN_OMLX_STARTER
-    assert local_model.set_up_model() == local_profiles.OWN_OMLX_STARTER
+    assert local_model.backfill_legacy_record() == local_profiles.STARTER_MODEL
+    assert local_model.set_up_model() == local_profiles.STARTER_MODEL
     assert json.loads((state / "local-model.json").read_text()) == local_model.to_record(
-        local_profiles.OWN_OMLX_STARTER)
+        local_profiles.STARTER_MODEL)
     assert local_model.backfill_legacy_record() is None
 
 
@@ -108,14 +108,14 @@ def test_startup_backfill_never_fires_without_proof_of_a_finished_setup(legacy, 
     elif case == "foreign":
         env["foreign"] = True
     elif case == "no_starter":
-        shutil.rmtree(model_dir / local_profiles.OWN_OMLX_STARTER.repository)
+        shutil.rmtree(model_dir / local_profiles.STARTER_MODEL.repository)
     elif case == "download_short":
         # A cancelled or failed download: setup cleared its record, the folder stays.
-        weights = model_dir / local_profiles.OWN_OMLX_STARTER.repository / "model.safetensors"
+        weights = model_dir / local_profiles.STARTER_MODEL.repository / "model.safetensors"
         with open(weights, "r+b") as handle:
-            handle.truncate(local_profiles.OWN_OMLX_STARTER.download_size_bytes - 1)
+            handle.truncate(local_profiles.STARTER_MODEL.download_size_bytes - 1)
     elif case == "download_partial":
-        (model_dir / local_profiles.OWN_OMLX_STARTER.repository / "tokenizer.json.incomplete").write_text("{")
+        (model_dir / local_profiles.STARTER_MODEL.repository / "tokenizer.json.incomplete").write_text("{")
     else:
         (state / "operation.json").write_text(json.dumps({"profile": "legacy-mid-download"}))
 

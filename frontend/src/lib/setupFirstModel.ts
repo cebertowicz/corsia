@@ -1,4 +1,4 @@
-import { sourceIsReady, type ModelSource } from '$lib/conductorSources';
+import { isHarness, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 import {
 	getModelDispatchId,
 	modelAvailability,
@@ -27,17 +27,22 @@ async function readyModelForSetupSource(
 	}
 }
 
-/** Select the first ready setup source on the existing CORSIA-agent model path. */
+/** Claude Code or Codex first, any other cloud source or key next, the local model only when nothing else is ready. */
+function sourceRank(source: ModelSource): number {
+	return isHarness(source) ? 0 : source.source === 'omlx' ? 2 : 1;
+}
+
+/** Select the best ready setup source, whatever order they became ready in, on the existing CORSIA-agent model path. */
 export async function selectSetupFirstModel(token: string | null, sources: ModelSource[]): Promise<boolean> {
 	if (!token) return false;
-	const source = sources.find(sourceIsReady);
+	const source = sources.filter(sourceIsReady).sort((a, b) => sourceRank(a) - sourceRank(b))[0];
 	if (!source) return false;
 	const lookup = await fetchCorsiaAgent(token);
 	if (lookup.kind !== 'target') return false;
 	const model = await readyModelForSetupSource(token, source, lookup.target.thread_id);
 	if (!model) return false;
 	try {
-		await saveThreadModel(lookup.target.thread_id, getModelDispatchId(model), token);
+		await saveThreadModel(lookup.target.thread_id, getModelDispatchId(model), token, 'setup');
 		return true;
 	} catch {
 		return false;

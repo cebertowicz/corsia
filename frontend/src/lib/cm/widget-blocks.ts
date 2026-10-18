@@ -24,6 +24,14 @@ export function isMermaidFence(node: SyntaxNodeRef, doc: Text): boolean {
 	return !!info && doc.sliceString(info.from, info.to).trim().toLowerCase() === 'mermaid';
 }
 
+/**
+ * The editor's syntax tree parsed at least to `pos`. These lookups must be right, so they finish the parse rather than stop at a time
+ * budget: a partly parsed tree would silently answer "no block here" on a slower machine. Callers include comment-card labels, which
+ * run when a document opens, so the first label near the end of a long document parses up to it synchronously; later reads reuse it.
+ */
+const treeTo = (state: EditorState, pos: number) =>
+	ensureSyntaxTree(state, Math.min(pos, state.doc.length), Infinity) ?? syntaxTree(state);
+
 /** The end of the run of non-blank lines holding `pos`: a table ends at a blank line, so parsing to here completes the one holding `pos`. */
 function runEnd(doc: Text, pos: number): number {
 	let line = doc.lineAt(Math.min(pos, doc.length));
@@ -37,7 +45,7 @@ function runEnd(doc: Text, pos: number): number {
  */
 export function tableAt(state: EditorState, from: number, to: number): { from: number; to: number } | null {
 	let found: { from: number; to: number } | null = null;
-	(ensureSyntaxTree(state, runEnd(state.doc, to), 100) ?? syntaxTree(state)).iterate({ from, to, enter: (node) => {
+	treeTo(state, runEnd(state.doc, to)).iterate({ from, to, enter: (node) => {
 		if (found) return false;
 		if (node.name !== 'Table') return;
 		found = blockSource(state.doc, node);
@@ -52,7 +60,7 @@ export function tableAt(state: EditorState, from: number, to: number): { from: n
  */
 export function diagramAt(state: EditorState, from: number, to: number): { from: number; to: number } | null {
 	let found: { from: number; to: number } | null = null;
-	(ensureSyntaxTree(state, Math.min(to, state.doc.length), 100) ?? syntaxTree(state)).iterate({ from, to, enter: (node) => {
+	treeTo(state, to).iterate({ from, to, enter: (node) => {
 		if (found) return false;
 		if (node.name !== 'FencedCode') return;
 		if (isMermaidFence(node, state.doc)) found = blockSource(state.doc, node);
@@ -64,7 +72,7 @@ export function diagramAt(state: EditorState, from: number, to: number): { from:
 
 /** Whether the range lies inside the text of one code span or block, which is drawn as written: it has no inline marks to drop. */
 export function codeTextAt(state: EditorState, from: number, to: number): boolean {
-	const tree = ensureSyntaxTree(state, Math.min(to, state.doc.length), 100) ?? syntaxTree(state);
+	const tree = treeTo(state, to);
 	for (let node: SyntaxNode | null = tree.resolveInner(from, 1); node; node = node.parent) {
 		if (node.name === 'CodeText') return from >= node.from && to <= node.to;
 		if (node.name === 'InlineCode') {

@@ -253,13 +253,17 @@ def test_agents_are_told_to_ask_the_person_to_sign_in():  # C-R7
 
 def test_same_mac_check_unit():  # C-R8
     class Req:
-        def __init__(self, host, peer, headers=()):
+        def __init__(self, host, peer, headers=(), scope=None):
             self.headers = {"host": host, **{name.lower(): value for name, value in headers}}
             self.client = type("C", (), {"host": peer})()
+            # A real request always carries an ASGI scope, which the loopback
+            # check reads to refuse requests that arrived on the devices listener.
+            self.scope = scope or {}
 
     assert routes.sign_in_here(Req("127.0.0.1:3001", "127.0.0.1"))
     assert routes.sign_in_here(Req("localhost:3001", "::1"))
     assert routes.sign_in_here(Req("[::1]:3001", "::1"))
     assert not routes.sign_in_here(Req("localhost.evil.example:3001", "127.0.0.1"))
+    assert not routes.sign_in_here(Req("127.0.0.1:3001", "127.0.0.1", scope={"corsia_listener": "devices"}))
     assert not routes.sign_in_here(Req("127.0.0.1:3001", "10.0.0.5"))
     assert not routes.sign_in_here(Req("127.0.0.1:3001", "127.0.0.1", [("X-Real-IP", "203.0.113.9")]))

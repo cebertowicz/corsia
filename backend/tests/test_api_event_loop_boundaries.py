@@ -263,6 +263,7 @@ async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
         ("log", "-1", "--format=%cI", "HEAD"): "2026-09-10T15:00:00-07:00",
         ("log", "-1", "--format=%s", "HEAD"): "subject",
         ("status", "--porcelain"): " M backend/api/version.py",
+        ("describe", "--tags", "--match", "v[0-9]*"): "v0.4.1-12-gabc1234",
     }
 
     def _slow_git(args):
@@ -294,6 +295,7 @@ async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
         "commit_subject": "subject",
         "dirty": True,
     }
+    assert result["app"]["version"] == "0.4.1-12-gabc1234"
 
 
 @pytest.mark.asyncio

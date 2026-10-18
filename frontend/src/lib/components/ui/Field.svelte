@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import './text-field.css';
 
 	interface Props {
 		label: string;
@@ -9,21 +10,23 @@
 		required?: boolean;
 		layout?: 'row' | 'stacked';
 		/**
-		 * `chip` is approved for setup only: the control drawn as the composer's chip
-		 * (hairline border, large radius, soft shadow, no filled box), label above and no divider. Only setup uses it.
+		 * `chip`: the control drawn as the composer's chip (glass fill, large radius), label above and no divider, for a
+		 * field sitting straight on a pane. `nested`: the same shape with a plain outline and no fill, for a field inside a card or sheet.
 		 */
-		variant?: 'default' | 'chip';
+		variant?: 'default' | 'chip' | 'nested';
+		/** Keep the label as the control's accessible name but do not draw it. */
+		hideLabel?: boolean;
 		trailing?: Snippet;
 		children: Snippet;
 	}
 
 	const {
 		label, labelFor, hint, error, required = false,
-		layout = 'row', variant = 'default', trailing, children,
+		layout = 'row', variant = 'default', hideLabel = false, trailing, children,
 	}: Props = $props();
 </script>
 
-<div class="field {layout}" class:chip={variant === 'chip'} class:has-error={!!error}>
+<div class="field {layout}" class:chip={variant === 'chip'} class:nested={variant === 'nested'} class:hide-label={hideLabel} class:has-error={!!error}>
 	{#if labelFor}
 		<label class="l" for={labelFor}>{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</label>
 	{:else}
@@ -144,16 +147,14 @@
 		font-size: var(--text-footnote); color: var(--red-text);
 	}
 
-	/* Approved for setup-only use: the composer chip's look for a text control or a select. A shared rollout needs a Product Experience decision. */
-	.field.chip { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }
-	.field.chip .t { display: none; }
-	.field.chip .l { font-size: var(--text-footnote); color: var(--text-secondary); padding-left: var(--space-1); }
-	.field.chip .c :global(input),
-	.field.chip .c :global(select) {
-		height: var(--space-7); padding: 0 var(--space-4);
-		background: var(--glass-thin); border: 1px solid var(--border); border-radius: var(--radius-lg);
-		box-shadow: var(--glass-rim), var(--shadow-chip);
-		font-size: var(--text-input); transition: border-color var(--dur-tight);
+	/* chip and nested: label above, no divider; the control's own look is in text-field.css. */
+	.field.chip, .field.nested { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }
+	.field.chip.hide-label, .field.nested.hide-label { grid-template-areas: 'control' 'msg'; }
+	.field.chip .t, .field.nested .t { display: none; }
+	.field.chip .l, .field.nested .l { font-size: var(--text-footnote); color: var(--text-secondary); padding-left: var(--space-1); }
+	.field.hide-label .l {
+		position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0; overflow: hidden;
+		clip-path: inset(50%); white-space: nowrap;
 	}
 	.field.chip .c :global(select) { width: auto; flex: none; padding-right: calc(var(--space-6) + var(--space-3)); background-position: right var(--space-4) center; }
 	.field.chip .c :global(input::placeholder) { color: var(--text-tertiary); }
@@ -162,7 +163,7 @@
 		border-color: var(--accent); box-shadow: var(--glass-rim), var(--shadow-chip), var(--shadow-focus);
 	}
 	.field.chip.has-error .c :global(input) { border-color: var(--red-text); }
-	.field.chip .hint, .field.chip .err { padding-left: var(--space-1); }
+	.field.chip .hint, .field.chip .err, .field.nested .hint, .field.nested .err { padding-left: var(--space-1); }
 
 	@media (max-width: 720px) {
 		.field {

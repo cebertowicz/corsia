@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
 
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
@@ -51,12 +51,13 @@ class LocalDownloadRequest(BaseModel):
 
 
 class SetupProgressUpdate(BaseModel):
-    """One change to the setup record: a step, the local-AI choice, or completion."""
+    """One change to the setup record: a step, the local-AI choice, what was checked on Welcome, or completion."""
 
     model_config = ConfigDict(extra="forbid")
 
     step: str | None = None
     local_ai: bool | None = None
+    picks: dict[str, StrictBool] | None = None
     completed: bool = False
 
 
@@ -183,6 +184,18 @@ def _ready_ai() -> str | None:
     return None
 
 
+def _ai_check_pending() -> bool:
+    """Whether the startup check has not yet recorded a result for Claude Code or Codex.
+
+    Welcome waits briefly on this before it asks which subscription the person has, so a
+    tool that is already installed is found first rather than asked about.
+    """
+    from connections.models import get_connection
+    from connections.source_state import HARNESS_PROVIDERS, row_state
+
+    return any(row_state(get_connection(provider))["checked_at"] is None for provider in HARNESS_PROVIDERS)
+
+
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
     from llm.local_setup_gates import local_memory_ok
@@ -207,6 +220,7 @@ def _setup_status() -> dict:
         "existing_omlx": existing_omlx_requires_consent(),
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
+        "ai_check_pending": _ai_check_pending(),
     }
 
 
@@ -233,10 +247,10 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
 
 @router.put("/progress", response_model=None)
 async def setup_progress_update(request: Request, authorization: str | None = Header(None)) -> dict | Response:
-    """Record a setup step, the local-AI choice or completion.
+    """Record a setup step, the local-AI choice, Welcome's picks or completion.
 
-    Before the first account only the local-AI choice is taken, on the same loopback boundary as the
-    other pre-account routes; after it, any signed-in session may record all three.
+    Before the first account only the local-AI choice and Welcome's picks are taken, on the same loopback boundary as the
+    other pre-account routes; after it, any signed-in session may record all of them.
     """
     signed_in = await run_in_db(accounts.has_users)
     if signed_in:
@@ -251,7 +265,8 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     if not signed_in and (body.step is not None or body.completed):
         return Response(status_code=422)
     try:
-        await run_in_db(lambda: setup_progress.update(step=body.step, local_ai=body.local_ai, completed=body.completed))
+        await run_in_db(lambda: setup_progress.update(
+            step=body.step, local_ai=body.local_ai, picks=body.picks, completed=body.completed))
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
     return {"ok": True}

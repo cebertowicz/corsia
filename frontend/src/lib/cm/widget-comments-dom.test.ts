@@ -7,7 +7,7 @@ import { commentRanges, setCommentRanges, type CommentRange } from './comment-ma
 import { pendingCommentMark } from './pending-comment-mark';
 import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
 
-const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |';
+const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |\n| Charlie ||';
 const DOC = `intro\n\n${TABLE}\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
 const TABLE_FROM = DOC.indexOf('| Item');
 const FENCE_FROM = DOC.indexOf('```mermaid');
@@ -24,7 +24,7 @@ function drawnTable(view: EditorView) {
 	const el = document.createElement('div');
 	el.className = 'cm-md-table';
 	el.dataset.srcLength = String(TABLE.length);
-	el.innerHTML = '<table><thead><tr><th>Item</th><th>Note</th></tr></thead><tbody><tr><td>Alpha</td><td>ab ab</td></tr><tr><td>Bravo</td><td>Eli</td></tr></tbody></table>';
+	el.innerHTML = '<table><thead><tr><th>Item</th><th>Note</th></tr></thead><tbody><tr><td>Alpha</td><td>ab ab</td></tr><tr><td>Bravo</td><td>Eli</td></tr><tr><td>Charlie</td><td></td></tr></tbody></table>';
 	view.posAtDOM = () => TABLE_FROM;
 	return el;
 }
@@ -91,6 +91,14 @@ describe('selectionIn a table', () => {
 		range.setStart(cell(el, 1, 0).firstChild!, 2);
 		range.setEnd(cell(el, 1, 0).firstChild!, 2);
 		expect(selectionIn(view, el, range)).toBeNull();
+	});
+
+	it('maps a collapsed press in an empty cell to its structural source anchor', () => {
+		const view = open(), el = drawnTable(view), range = document.createRange(), empty = cell(el, 3, 1);
+		range.selectNodeContents(empty);
+		const start = TABLE_FROM + TABLE.indexOf('||', TABLE.indexOf('Charlie'));
+		expect(selectionIn(view, el, range)).toMatchObject({ from: start, to: start + 1, text: '|', inWidget: true });
+		expect(label(selectionIn(view, el, range))).toBe('“Empty cell” · Charlie, Note');
 	});
 });
 

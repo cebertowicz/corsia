@@ -20,6 +20,8 @@ use std::{
 
 use serde::Serialize;
 
+use crate::adoption;
+
 pub const SERVICE_FILE: &str = "service.json";
 const WORKSPACE_FOLDER: &str = "corsia";
 const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
@@ -33,8 +35,11 @@ pub enum FirstRun {
     Configured,
     /// Nothing from an earlier install: create this workspace and record it.
     Fresh { workspace: PathBuf },
-    /// An earlier install is present: write nothing and show this reason.
+    /// An earlier install is present but does not meet the source-service
+    /// contract required for adoption: write nothing and show this reason.
     ExistingInstall { reason: String },
+    /// A rendered source service plist identifies a moveable source install.
+    Adoptable { source: adoption::SourceInstall },
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -210,6 +215,17 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
         return Ok(FirstRun::Configured);
     }
 
+    let source_plist = home.join("Library").join("LaunchAgents").join("com.corsia.prod.plist");
+    if present(&source_plist)? {
+        // A plist this app cannot trust is not adopted, and no other path is tried.
+        return match adoption::source_from_plist(home, &source_plist) {
+            Ok(source) => Ok(FirstRun::Adoptable { source }),
+            Err(reason) => existing_install(format!(
+                "CORSIA found an existing install on this computer, and this app can’t take it over yet ({reason})."
+            )),
+        };
+    }
+
     if present(&home.join(".corsia").join("config.json"))? {
         return existing_install(
             "CORSIA found an existing install on this computer (~/.corsia). \
@@ -326,7 +342,9 @@ fn write_service_file(app_dir: &Path, workspace: &Path, port: u16) -> Result<(),
     let workspace = workspace
         .to_str()
         .ok_or("the workspace path is not valid UTF-8")?;
+    let state_dir = app_dir.join("state").to_str().ok_or("the state path is not valid UTF-8")?.to_owned();
     let body = serde_json::to_vec_pretty(&serde_json::json!({
+        "state_dir": state_dir,
         "workspace": workspace,
         "port": port,
     }))
@@ -485,12 +503,13 @@ mod tests {
         assert!(workspace.is_dir());
         let recorded: serde_json::Value =
             serde_json::from_slice(&fs::read(home.app_dir().join(SERVICE_FILE)).unwrap()).unwrap();
+        assert_eq!(recorded["state_dir"], home.app_dir().join("state").to_str().unwrap());
         assert_eq!(recorded["workspace"], workspace.to_str().unwrap());
         assert_eq!(recorded["port"], 47_895);
         assert_eq!(
             recorded.as_object().unwrap().len(),
-            2,
-            "only workspace and port are recorded"
+            3,
+            "only state_dir, workspace and port are recorded"
         );
         assert_eq!(recorded_port(&home.app_dir()), Some(47_895));
         assert!(!home.app_dir().join("service.json.tmp").exists());
@@ -570,6 +589,26 @@ mod tests {
         fs::write(home.0.join(".corsia").join("config.json"), "{}").unwrap();
 
         assert_refused(&home, "~/.corsia");
+    }
+
+    #[test]
+    fn a_source_plist_that_cannot_be_adopted_is_refused_with_nothing_changed() {
+        let home = Home::new("bad-plist");
+        let plist = home.0.join("Library/LaunchAgents/com.corsia.prod.plist");
+        fs::create_dir_all(plist.parent().unwrap()).unwrap();
+        fs::write(&plist, "not a plist").unwrap();
+        assert_refused(&home, "can’t take it over yet");
+
+        // A readable plist whose checkout has no lifecycle owner is refused the same way.
+        fs::write(
+            &plist,
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>WorkingDirectory</key><string>{}</string><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>/work</string><key>CORSIA_STATE_DIR</key><string>/state</string><key>BACKEND_PORT</key><string>47895</string></dict></dict></plist>"#,
+                home.0.join("checkout/backend").display()
+            ),
+        )
+        .unwrap();
+        assert_refused(&home, "scripts/corsia");
     }
 
     #[test]

@@ -34,8 +34,8 @@ const STAGING_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024;
 pub fn run(mut context: tauri::Context<tauri::Wry>, operation_id: String) -> i32 {
     // The lock comes before anything else, so a second update never touches
     // the first one's staged copy.
-    let state_dir = match app_paths::app_dir() {
-        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+    let state_dir = match app_paths::state_dir() {
+        Ok(state_dir) => state_dir,
         Err(reason) => {
             eprintln!("update staging failed: {reason}");
             return BUILD_FAILED;

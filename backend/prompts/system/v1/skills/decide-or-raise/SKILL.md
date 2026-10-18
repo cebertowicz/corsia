@@ -1,9 +1,6 @@
 ---
 name: decide-or-raise
 description: Use whenever a choice, tradeoff, conflicting finding, or possible re-scope arises mid-work, and before raising any decision to the user — trace the choice to its objective, widen to the product, other objectives, and past decisions, test whether the objective itself needs reframing, then decide or raise with a recommendation. Not for message shape (skill `decision-brief`).
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Decide or raise

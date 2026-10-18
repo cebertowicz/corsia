@@ -1,0 +1,12 @@
+# One table of service.json state_dir values, read by the backend test
+# (backend/tests/test_platform_paths.py) and the app shell test
+# (desktop/src-tauri/src/app_paths.rs), so both sides apply one rule.
+# Format: valid|invalid <TAB> value. \u0007 stands for the BEL control character.
+valid	/Users/someone/Library/Application Support/com.cebertowicz.corsia/state
+valid	/tmp/state with spaces
+valid	/tmp/adopted-état
+invalid	relative/path
+invalid	
+invalid	~/state
+invalid	/tmp/bad\u0007name
+invalid	/tmp/bad\nname

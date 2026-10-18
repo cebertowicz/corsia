@@ -41,6 +41,15 @@ class TestReviewerPrompt:
         assert "approved PRD" in prompt
         assert "recent decisions" not in prompt
 
+    def test_prompt_routes_copy_findings_to_their_own_category(self):
+        """The injected copy contract has an instruction and a category to file under."""
+        from prompts.reviewer import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(diff="", context_text="")
+
+        assert "``standards/copy`` for C#" in prompt
+        assert "**Copy (always):**" in prompt
+
     def test_prompt_contains_all_categories(self):
         """Prompt includes every category from the taxonomy."""
         from reviewer.reviewer_categories import VALID_CATEGORIES

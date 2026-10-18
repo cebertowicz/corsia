@@ -179,7 +179,8 @@ async def get_local_setup(_user: dict = Depends(require_user)) -> dict[str, Any]
     ``omlx_is_persons_own`` is true when the oMLX here is one CORSIA did not install;
     setup adds no models to it. ``local_model`` is Welcome's pick state: its
     ``model`` is set only once CORSIA's own oMLX has picked (``state`` ``picked``);
-    ``low_memory`` and ``none_fits`` mean this Mac gets no local model.
+    ``low_memory`` means this Mac gets no local model. A ``picked`` model carries a
+    ``message`` when it is the starter model, chosen because oMLX recommended none.
     """
     from llm.local_setup import setup_status
     from llm.local_setup_ownership import existing_install_is_foreign

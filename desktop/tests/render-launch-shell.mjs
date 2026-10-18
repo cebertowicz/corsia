@@ -73,7 +73,7 @@ function nativeShellStub() {
 async function render(page, state) {
 	if (state === 'startup-failure') await page.evaluate(() => window.__corsiaShowServiceFailure());
 	if (state === 'background-off' || state === 'background-on') {
-		await page.evaluate(() => window.__corsiaShowBackgroundApproval());
+		await page.evaluate(() => window.__corsiaShowStartup({ state: 'requires_approval' }));
 	}
 	if (state === 'background-on') {
 		await page.waitForFunction(() => document.getElementById('approval-check').dataset.state === 'on');

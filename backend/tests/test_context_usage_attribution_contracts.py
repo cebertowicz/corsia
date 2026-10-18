@@ -122,6 +122,37 @@ def test_opaque_provider_history_requires_provider_measurement():
     assert measured["token_source"] == "measured"
 
 
+def test_resumed_session_remainder_is_retained_history_not_other():
+    from infra.context_usage_attribution import merge_context_usage_with_snapshot
+
+    merged = merge_context_usage_with_snapshot(
+        {"model_context_window": 200_000, "total_used": 123_456},
+        snapshot=_snapshot(opaque_history=True),
+    )
+
+    parts = sum(merged[key] for key in (
+        "system_tokens", "tool_def_tokens", "history_tokens",
+        "user_tokens", "context_source_tokens",
+    ))
+    assert merged["total_used"] == 123_456
+    assert merged["history_tokens"] == 123_456 - 4_200 - merged["user_tokens"]
+    assert parts == 123_456
+    assert merged["attribution_delta_tokens"] == 0
+    assert "attribution_delta_reason" not in merged
+
+
+def test_resumed_session_overcount_still_reports_negative_gap():
+    from infra.context_usage_attribution import merge_context_usage_with_snapshot
+
+    merged = merge_context_usage_with_snapshot(
+        {"model_context_window": 200_000, "total_used": 4_000},
+        snapshot=_snapshot(opaque_history=True),
+    )
+
+    assert merged["history_tokens"] == 0
+    assert merged["attribution_delta_tokens"] == 4_000 - 4_200 - merged["user_tokens"]
+
+
 def test_runtime_window_precedes_snapshot_window():
     from infra.context_usage_attribution import merge_context_usage_with_snapshot
 

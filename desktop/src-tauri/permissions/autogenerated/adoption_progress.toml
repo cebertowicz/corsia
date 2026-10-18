@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-adoption-progress"
+description = "Enables the adoption_progress command without any pre-configured scope."
+commands.allow = ["adoption_progress"]
+
+[[permission]]
+identifier = "deny-adoption-progress"
+description = "Denies the adoption_progress command without any pre-configured scope."
+commands.deny = ["adoption_progress"]

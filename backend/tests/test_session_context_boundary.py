@@ -133,6 +133,7 @@ class TestSessionContextBoundary:
             actor_id="steve",
             reason="harness_model_switch",
             checkpoint_override=None,
+            setup_selection=False,
         )
 
     def test_model_patch_rejects_mixed_mutation_before_any_write(

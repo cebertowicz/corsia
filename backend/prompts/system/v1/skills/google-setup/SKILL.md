@@ -1,9 +1,6 @@
 ---
 name: google-setup
 description: Use when the person wants their email or calendar connected (first-run step 6, "connect my email"), or when `google_status` says not_connected or `google_connect` says no Google client is saved. You build the person's own private Google project in a browser they watch; they only sign in and click Allow.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Connect Google
