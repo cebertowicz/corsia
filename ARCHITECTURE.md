@@ -342,14 +342,34 @@ Whether the user is actually looking at a thread is state with one owner:
 document-open capabilities, and live-read verdict. Its durable entry, exit and
 finalization writes (`thread_presence` for the current visit, `presence_visits`
 for settled history) live in `backend/infra/presence_records.py`, called only by
-the owner; `presence.py` itself keeps claim orchestration and the keep-alive,
-mark-seen, delete and startup-reconcile writes. `backend/infra/presence_view.py` derives the `User
+the owner (keep-alive, mark-seen and the restart exit too); `presence.py` itself
+keeps claim orchestration, the sweep and the thread-delete write. `backend/infra/presence_view.py` derives the `User
 presence` line, thread read and `user_presence` tool payload from that owner.
 The browser client
 (`frontend/src/lib/ws/presence.ts`) only reports `presence` frames over the
 existing socket, and `backend/ws/presence_control.py` hands them straight to the
 owner: a presence frame never starts, steers or queues a Turn. Presence is
 never emitted as a product event, and no other module may compute or write it.
+
+Window focus is a second, separate fact the same owner records for Measurement
+attention (`backend/infra/presence_focus.py` holds its in-memory state). Each visit carries the spans in which a CORSIA window had focus
+(`focus_spans`, plus the open span's `focus_since`); every blur ends focus, and
+a focus change never touches presence, ownership or the visit's exit. A visit
+whose `focus_spans` is NULL predates focus tracking and counts whole. Measurement
+expands the spans only in the attention allocator's `presence_focus_spans`; the
+visit rows themselves stay one per visit, so `n` still counts visits.
+
+Reading every span costs time quadratic in how often a user switches windows, so
+Measurement reads the finished past from a cache of the same union: the focus
+rollup (`backend/api/presence_rollup.py`, tables in
+`backend/infra/presence_rollup_schema.py`) keeps, per 15-minute UTC bucket, the
+seconds during which exactly one set of threads was focused. `api.usage_rollup`
+runs its refresh beside the usage refresh (compute on the bulk lane, one short
+`write_transaction` per step). It covers only what it can prove: `built_through`
+never passes two hours ago or the start of a visit still open, and a trigger on
+`presence_visits` moves it back when a row is written below it, so a read is
+exact whatever the rollup's state and falls back to the spans when it is not
+usable. `backend/api/measurement_presence_rollup.py` is the one reader.
 
 ### Agent endpoints
 

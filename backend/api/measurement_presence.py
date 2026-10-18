@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from api.measurement_presence_rollup import rolled_attention_cte
 from core.measurement_scope import Grain
 
 
@@ -24,14 +25,48 @@ def presence_predicate(scope_threads: str, *, alias: str = "v") -> str:
     )
 
 
-def presence_allocation_cte(grain: Grain) -> str:
+def _visit_intervals(since: str) -> str:
+    """One row per visit overlapping ``[since, :to_ts)``, finished or live, clipped to it."""
+    return f"""
+        SELECT v.thread_id,v.project_id,
+          MAX(datetime(v.entered_at),datetime({since})) AS began,
+          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended,
+          v.focus_spans,NULL AS focus_since
+        FROM threads t JOIN presence_visits v ON v.thread_id=t.id
+        WHERE t.user_id=:user_id AND v.entered_at<:to_ts AND v.exited_at>{since}
+        UNION ALL
+        SELECT v.thread_id,v.project_id,
+          MAX(datetime(v.entered_at),datetime({since})) AS began,
+          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended,
+          v.focus_spans,NULL AS focus_since
+        FROM presence_visits v
+        WHERE v.thread_id IS NULL AND v.project_id IS NOT NULL
+          AND v.user_id=:user_id
+          AND v.entered_at<:to_ts AND v.exited_at>{since}
+        UNION ALL
+        SELECT p.thread_id,t.project_id,
+          MAX(datetime(p.last_entered_at),datetime({since})) AS began,
+          MIN(COALESCE(datetime(p.exit_pending_at),datetime('now')),datetime(:to_ts)) AS ended,
+          p.focus_spans,p.focus_since
+        FROM thread_presence p JOIN threads t ON t.id=p.thread_id
+        WHERE t.user_id=:user_id AND p.present=1
+          AND p.last_entered_at<:to_ts AND COALESCE(datetime(p.exit_pending_at),datetime('now'))>{since}"""
+
+
+def presence_allocation_cte(grain: Grain, *, rolled: bool = False) -> str:
     """Return one interval-union timeline and equal threaded allocations.
 
-    Every interval is clipped to the request range. Its starts, ends, and local
-    period boundaries partition time into slices on which the set of visits is
-    unchanged. ``presence_live_segments`` counts each slice once; ``presence_thread_slices``
-    divides a threaded slice evenly across the active threads. The latter is the only
-    source for agent attribution, so agent rows add to the threaded All-work total.
+    Every interval is clipped to the request range. ``presence_intervals`` holds one
+    row per visit; ``presence_focus_spans`` expands each into the spans it was focused
+    (NULL ``focus_spans`` predates focus tracking and counts whole; a live visit adds its
+    open span). Span ends and local period boundaries partition time into slices on which
+    the set of focused spans is unchanged. ``presence_live_segments`` counts each slice
+    once; ``presence_thread_slices`` divides a threaded slice evenly across the active
+    threads, the only source for agent attribution, so agent rows add to the All-work total.
+
+    ``rolled`` reads the spans only from ``:focus_rollup_through`` on (``presence_tail_intervals``):
+    the time before it is in the rollup (``api.presence_rollup``), which ``rolled_attention_cte``
+    adds to the scope's time. Visits are still counted over the whole range.
     """
     def boundary(name: str) -> str:
         # Grain boundaries deliberately omit seconds; normalize them before they join
@@ -42,31 +77,24 @@ def presence_allocation_cte(grain: Grain) -> str:
         [*(f"SELECT {boundary(f':gb{index}')} AS instant,0 AS delta" for index in range(len(grain.starts))),
          f"SELECT {boundary(':gend_partial')} AS instant,0 AS delta"]
     )
+    spans_from = "presence_tail_intervals" if rolled else "presence_intervals"
+    tail = f"presence_tail_intervals AS ({_visit_intervals(':focus_rollup_through')}\n      ), " if rolled else ""
     return f"""
-      presence_intervals AS (
-        SELECT v.thread_id,v.project_id,
-          MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
-          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
-        FROM threads t JOIN presence_visits v ON v.thread_id=t.id
-        WHERE t.user_id=:user_id AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+      presence_intervals AS ({_visit_intervals(':from_ts')}
+      ), {tail}presence_focus_spans AS (
+        SELECT v.thread_id,v.project_id,v.began,v.ended FROM {spans_from} v
+        WHERE v.focus_spans IS NULL
         UNION ALL
         SELECT v.thread_id,v.project_id,
-          MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
-          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
-        FROM presence_visits v
-        WHERE v.thread_id IS NULL AND v.project_id IS NOT NULL
-          AND v.user_id=:user_id
-          AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+          MAX(datetime(json_extract(j.value,'$[0]')),v.began) AS began,
+          MIN(datetime(json_extract(j.value,'$[1]')),v.ended) AS ended
+        FROM {spans_from} v,json_each(v.focus_spans) j WHERE v.focus_spans IS NOT NULL
         UNION ALL
-        SELECT p.thread_id,t.project_id,
-          MAX(datetime(p.last_entered_at),datetime(:from_ts)) AS began,
-          MIN(COALESCE(datetime(p.exit_pending_at),datetime('now')),datetime(:to_ts)) AS ended
-        FROM thread_presence p JOIN threads t ON t.id=p.thread_id
-        WHERE t.user_id=:user_id AND p.present=1
-          AND p.last_entered_at<:to_ts AND COALESCE(datetime(p.exit_pending_at),datetime('now'))>:from_ts
+        SELECT v.thread_id,v.project_id,MAX(datetime(v.focus_since),v.began) AS began,v.ended
+        FROM {spans_from} v WHERE v.focus_spans IS NOT NULL AND v.focus_since IS NOT NULL
       ), presence_events AS (
-        SELECT began AS instant,1 AS delta FROM presence_intervals WHERE began<ended
-        UNION ALL SELECT ended AS instant,-1 AS delta FROM presence_intervals WHERE began<ended
+        SELECT began AS instant,1 AS delta FROM presence_focus_spans WHERE began<ended
+        UNION ALL SELECT ended AS instant,-1 AS delta FROM presence_focus_spans WHERE began<ended
         UNION ALL {boundaries}
       ), presence_event_totals AS (
         SELECT instant,SUM(delta) AS delta FROM presence_events GROUP BY instant
@@ -80,7 +108,7 @@ def presence_allocation_cte(grain: Grain) -> str:
         FROM presence_segments WHERE active_visits>0 AND ended IS NOT NULL AND began<ended
       ), presence_active_threads AS (
         SELECT s.began,s.ended,v.thread_id
-        FROM presence_live_segments s JOIN presence_intervals v ON v.began<=s.began AND v.ended>=s.ended
+        FROM presence_live_segments s JOIN presence_focus_spans v ON v.began<=s.began AND v.ended>=s.ended
         WHERE v.thread_id IS NOT NULL GROUP BY s.began,s.ended,v.thread_id
       ), presence_thread_slices AS (
         SELECT a.thread_id,a.began,a.ended,
@@ -154,31 +182,35 @@ def first_presence_period(db, user_id: str, grain: Grain) -> str | None:
     return presence_coverage(db, user_id, grain.zone).start_period(grain)
 
 
-def scoped_presence_cte(grain: Grain, scope_threads: str) -> str:
+def scoped_presence_cte(grain: Grain, scope_threads: str, *, rolled: bool = False) -> str:
     """Return the one scoped presence time every presence-backed series reads.
 
     ``scoped_attention`` is the scope's union time: a composite scope counts each slice
-    once, an agent its evenly split thread slices. ``scoped_visits`` are the scope's
-    clipped visits, the observations behind that time.
+    once, an agent its evenly split thread slices; ``rolled`` adds the time the rollup
+    holds before ``:focus_rollup_through`` to the raw time after it. ``scoped_visits`` are the
+    scope's clipped visits, the observations behind that time.
     """
     predicate = presence_predicate(scope_threads)
-    return f"""{presence_allocation_cte(grain)}, scoped_attention AS (
-        SELECT s.began,s.ended,s.seconds FROM presence_live_segments s
+    rollup = (f", {rolled_attention_cte(grain, scope_threads, presence_predicate(scope_threads, alias='m'))}"
+              if rolled else "")
+    rolled_rows = "\n        UNION ALL SELECT began,seconds FROM presence_rollup_scoped" if rolled else ""
+    return f"""{presence_allocation_cte(grain, rolled=rolled)}{rollup}, scoped_attention AS (
+        SELECT s.began,s.seconds FROM presence_live_segments s
         WHERE :scope_agent IS NULL AND EXISTS (
-          SELECT 1 FROM presence_intervals v WHERE v.began<=s.began AND v.ended>=s.ended AND {predicate}
+          SELECT 1 FROM presence_focus_spans v WHERE v.began<=s.began AND v.ended>=s.ended AND {predicate}
         )
         UNION ALL
-        SELECT s.began,s.ended,s.seconds FROM presence_thread_slices s
-        WHERE :scope_agent IS NOT NULL AND s.thread_id IN (SELECT id FROM {scope_threads})
+        SELECT s.began,s.seconds FROM presence_thread_slices s
+        WHERE :scope_agent IS NOT NULL AND s.thread_id IN (SELECT id FROM {scope_threads}){rolled_rows}
       ), scoped_visits AS (
         SELECT v.began FROM presence_intervals v WHERE v.began<v.ended AND {predicate}
       )"""
 
 
-def presence_family_sql(grain: Grain, scope_threads: str) -> str:
+def presence_family_sql(grain: Grain, scope_threads: str, *, rolled: bool = False) -> str:
     """Return each scope's presence hours by period, with n the visits that began in it."""
     return f"""
-      WITH {scoped_presence_cte(grain, scope_threads)}, hours AS (
+      WITH {scoped_presence_cte(grain, scope_threads, rolled=rolled)}, hours AS (
         SELECT {grain.bucket('began')} AS period,SUM(seconds)/3600.0 AS value
         FROM scoped_attention WHERE {grain.bucket('began')} IS NOT NULL GROUP BY period
       ), visits AS (
@@ -188,14 +220,14 @@ def presence_family_sql(grain: Grain, scope_threads: str) -> str:
     """
 
 
-def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
+def active_family_sql(grain: Grain, scope_threads: str, outcomes: str, *, rolled: bool = False) -> str:
     """Return each scope's union-presence time and outcome count by period.
 
     A period with outcomes and no presence is served with zero time (``PresenceCoverage``);
     the caller withholds periods before coverage starts.
     """
     return f"""
-      WITH {scoped_presence_cte(grain, scope_threads)}, active_periods AS (
+      WITH {scoped_presence_cte(grain, scope_threads, rolled=rolled)}, active_periods AS (
         SELECT {grain.bucket('began')} AS period,SUM(seconds)/3600.0 AS active_hours
         FROM scoped_attention WHERE {grain.bucket('began')} IS NOT NULL GROUP BY period
       ), active_spine AS (
