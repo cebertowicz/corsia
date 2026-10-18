@@ -134,3 +134,30 @@ describe('run stubs', () => {
 		expect(joined.turnIds).toEqual(['t1', 't2']);
 	});
 });
+
+describe('a seed, which the transcript never draws', () => {
+	const seed = (seq: number) => ({
+		id: `seed-${seq}`, thread_id: 'thread-1', role: 'system', content: 'starting context', seq,
+		created_at: '2026-10-02T10:00:30', metadata: { cc: true, type: 'seed' },
+	}) as unknown as TranscriptMessage;
+	const context = (seq: number) => ({
+		id: `ctx-${seq}`, thread_id: 'thread-1', role: 'system', content: 'Plan refreshed', seq,
+		created_at: '2026-10-02T10:00:20', activity_weight: 0, metadata: { type: 'context_event' },
+	}) as unknown as TranscriptMessage;
+
+	it('makes no block between two visible rows, as the Focus page sends no stub for it', () => {
+		const entries = build([human('ask', 1, '10:00:00', 't1', '10:00:00'), seed(2), said('reply', 3, '10:01:00')], []);
+
+		expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
+	});
+
+	it('leaves a no-step block of context rows named for its context', () => {
+		const entries = build([
+			human('ask', 1, '10:00:00', 't1', '10:00:00'), context(2), seed(3), said('reply', 4, '10:01:00'),
+		], []);
+
+		const [run] = folds(entries);
+		expect(run.items.map((item) => item.message.id)).toEqual(['ctx-2']);
+		expect(runLabels(entries, {}, true).get(run.id)).toBe('Context updated');
+	});
+});

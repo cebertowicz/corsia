@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from infra.focus_rows import FOCUS_VISIBLE_SQL, focus_kind_sql
+from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, focus_kind_sql
 from api.thread_paging import (
     _DISPLAY_ANCHOR_FILTER,
     CursorNotFound,
@@ -37,7 +37,8 @@ _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 
 # The anchors the walk may inspect, newest-first: the one definition of the row set,
 # of visibility (`FOCUS_VISIBLE_SQL`) and of a row's Turn, shared by both walk
-# statements. `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
+# statements; a row the transcript never draws (`NEVER_DRAWN_FILTER`) is not in it.
+# `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
 # bound (or NULL) and `:newest_n` the most rows read.
 _VISIBLE_COLUMN = f"{FOCUS_VISIBLE_SQL} AS vis"
 _RUN_COLUMNS = (
@@ -53,7 +54,7 @@ def _anchors_cte(columns: str) -> str:
     return (
         f"anchors AS (SELECT id, seq, {columns} "
         "FROM messages WHERE thread_id = :thread AND seq IS NOT NULL "
-        f"{_DISPLAY_ANCHOR_FILTER}"
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}"
         "AND (:after IS NULL OR seq < :after) AND (:floor IS NULL OR seq >= :floor) "
         "ORDER BY seq DESC LIMIT :newest_n)"
     )
@@ -133,7 +134,7 @@ ORDER BY first_seq
 
 _OLDER_EXISTS_SQL = (
     "SELECT 1 FROM messages WHERE thread_id = ? AND seq IS NOT NULL AND seq < ? "
-    f"{_DISPLAY_ANCHOR_FILTER}LIMIT 1"
+    f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}LIMIT 1"
 )
 
 
@@ -200,7 +201,7 @@ def _unsequenced(db, thread_id: str) -> list[dict]:
     """
     rows = db.execute(
         DISPLAY_ROW_SELECT + "WHERE thread_id = ? AND seq IS NULL "
-        f"{_DISPLAY_ANCHOR_FILTER}"
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}"
         "ORDER BY input_order IS NULL, input_order ASC, created_at ASC, rowid ASC",
         (thread_id,),
     ).fetchall()
@@ -297,7 +298,10 @@ def _display_anchor_seq(db, thread_id: str, message_id: str) -> int:
 def page_run_range(
     db, thread_id: str, limit: int, from_id: str, to_id: str, before: str | None,
 ) -> dict:
-    """One page, newest-first, of the display anchors from `from_id` to `to_id`."""
+    """One page, newest-first, of the display anchors from `from_id` to `to_id`.
+
+    Either end may name a row the transcript never draws; the page never holds one.
+    """
     if limit < 1:
         raise ValueError("a range read requires `limit` >= 1")
     low = _display_anchor_seq(db, thread_id, from_id)
@@ -311,7 +315,7 @@ def page_run_range(
             upper = min(upper, cursor)
     rows = db.execute(
         DISPLAY_ROW_SELECT + "WHERE thread_id = ? "
-        f"{_DISPLAY_ANCHOR_FILTER}AND seq >= ? AND seq < ? "
+        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}AND seq >= ? AND seq < ? "
         "ORDER BY seq DESC LIMIT ?",
         (thread_id, low, upper, limit + 1),
     ).fetchall()

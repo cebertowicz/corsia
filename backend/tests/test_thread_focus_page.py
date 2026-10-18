@@ -175,6 +175,55 @@ class TestStubsAndCounts:
         assert stub["kinds"] == ["account_move", "error_recovered", "other", "subagent_finished"]
         assert stub["weight"] == 0
 
+    def test_a_seed_is_neither_counted_in_a_run_nor_sent(self):
+        conn = _db()
+        t = _Thread(conn)
+        first = t.add("u")
+        t.add("w", "T1")
+        t.add("c", meta={"cc": True, "type": "seed"}, content="starting context " * 4096)
+        t.add("w", "T2")
+        said = t.add("s", "T2")
+        conn.commit()
+        page = page_focus(conn, _SID, 10, None)
+        assert [m["id"] for m in page["messages"]] == [first, said]
+        (stub,) = page["runs"]
+        assert (stub["count"], stub["weight"], stub["kinds"]) == (2, 2, ["steps"])
+        assert "starting context" not in json.dumps(page)
+
+    def test_a_run_of_only_a_seed_yields_no_stub(self):
+        conn = _db()
+        t = _Thread(conn)
+        first = t.add("u")
+        t.add("c", meta={"type": "seed"}, content="starting context")
+        said = t.add("s", "T1")
+        conn.commit()
+        page = page_focus(conn, _SID, 10, None)
+        assert [m["id"] for m in page["messages"]] == [first, said]
+        assert page["runs"] == []
+
+    def test_a_no_step_run_with_a_seed_keeps_its_named_kind(self):
+        conn = _db()
+        t = _Thread(conn)
+        t.add("u")
+        context = t.add("c")
+        seed = t.add("c", meta={"type": "seed"}, content="starting context")
+        t.add("s", "T1")
+        conn.commit()
+        (stub,) = page_focus(conn, _SID, 10, None)["runs"]
+        assert (stub["count"], stub["kinds"]) == (1, ["context_update"])
+        assert (stub["first_id"], stub["last_id"]) == (context, context)
+        assert seed not in json.dumps(stub)
+
+    def test_a_seed_alone_below_a_full_page_is_not_more_history(self):
+        conn = _db()
+        t = _Thread(conn)
+        t.add("c", meta={"type": "seed"}, content="starting context")
+        t.add("u")
+        t.add("s", "T1")
+        conn.commit()
+        page = page_focus(conn, _SID, 2, None)
+        assert len(page["messages"]) == 2 and page["has_more"] is False
+
     def test_an_unrecovered_error_splits_the_run_and_a_recovered_one_does_not(self):
         conn = _db()
         t = _Thread(conn)
@@ -466,6 +515,18 @@ class TestRangeRead:
         third = page_run_range(conn, _SID, 2, "w002", "w006", second["oldest_id"])
         assert [m["id"] for m in third["messages"]] == ["w002"]
         assert third["has_more"] is False
+
+    def test_the_range_never_returns_a_seed_even_as_a_bound(self):
+        conn = _db()
+        t = _Thread(conn)
+        seed = t.add("c", meta={"type": "seed"}, content="starting context")
+        work = t.add("w", "T1")
+        late = t.add("c", meta={"cc": True, "type": "seed"}, content="starting context")
+        conn.commit()
+        for low, high in ((seed, late), (work, late), (seed, work)):
+            page = page_run_range(conn, _SID, 10, low, high, None)
+            assert [m["id"] for m in page["messages"]] == [work]
+            assert "starting context" not in json.dumps(page)
 
     def test_the_range_never_reads_outside_it(self):
         conn = self._run()

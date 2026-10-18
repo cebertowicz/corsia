@@ -13,6 +13,10 @@ const ACTIVITY_SYSTEM_TYPES = new Set([
 	'artifact_removed', 'model_switch', 'account_switch',
 ]);
 
+// System rows the transcript never draws: a `seed` is a session's starting context.
+// One is not visible, so it never closes a block, and no block holds or counts it.
+const NEVER_DRAWN_SYSTEM_TYPES = new Set(['seed']);
+
 // Rows that end a turn with an error. One stays a notice until the agent's next turn
 // starts with nothing to read in between; that start writes `recovered: true` on it.
 const ERROR_SYSTEM_TYPES = new Set([
@@ -21,6 +25,11 @@ const ERROR_SYSTEM_TYPES = new Set([
 
 export function systemType(message: TranscriptMessage): string {
 	return String(message.metadata?.type ?? '');
+}
+
+/** The twin of the backend's `NEVER_DRAWN_FILTER`. */
+export function isNeverDrawn(message: TranscriptMessage): boolean {
+	return message.role === 'system' && NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message));
 }
 
 /** Whether an error row carries the stamp that moves it inside its block. */
@@ -35,7 +44,7 @@ export function isSystemNotice(message: TranscriptMessage): boolean {
 	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;
 	// A provider result splits only as an error with something to read.
 	if (type === 'result') return message.metadata?.is_error === true && Boolean(message.content);
-	return !ACTIVITY_SYSTEM_TYPES.has(type);
+	return !ACTIVITY_SYSTEM_TYPES.has(type) && !NEVER_DRAWN_SYSTEM_TYPES.has(type);
 }
 
 /** The kinds a run stub names; the vocabulary is shared with the backend's `row_kind`. */
