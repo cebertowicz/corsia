@@ -304,8 +304,8 @@ def register_write_strict(
             metadata=artifact_metadata, origin=origin,
             db=_db,
         )
-        merge_identity_metadata(_db, artifact["id"], artifact_metadata)
-        artifact = models.get_artifact(artifact["id"], db=_db) or artifact
+        merge_identity_metadata(_db, (artifact or existing)["id"], artifact_metadata)
+        artifact = models.get_artifact((artifact or existing)["id"], db=_db) or artifact
         if existing is not None:
             from registry.review_edit_journal import journal_reviewed_edit
 
