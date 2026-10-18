@@ -109,9 +109,9 @@
 	.compact.ordered > .usage { grid-column: 3; }
 	.order { grid-column: 1; color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; text-align: center; }
 	/* The shared control and status are separate grid participants, so status never widens controls. */
-	.controls, :global(.provider-account-policy-control) { display: contents; }
-	:global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1; justify-self: end; }
-	:global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
+	.compact .controls, .compact :global(.provider-account-policy-control) { display: contents; }
+	.compact :global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1; justify-self: end; }
+	.compact :global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
@@ -153,8 +153,8 @@
 		.compact > strong, .compact > .usage { grid-column: -3 / -2; }
 		.compact .usage { margin: 0; text-align: left; white-space: normal; }
 		.compact > .order { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
-		:global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1 / span 2; }
-		:global(.policy-status) { grid-column: -3 / -1; justify-self: end; }
+		.compact :global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1 / span 2; }
+		.compact :global(.policy-status) { grid-column: -3 / -1; justify-self: end; }
 		.compact strong { display: flex; flex-wrap: wrap; align-items: baseline; }
 		.compact strong .email { flex-basis: 100%; }
 		.compact strong .separator { display: none; }

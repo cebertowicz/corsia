@@ -392,6 +392,22 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.screenshot({ path: testInfo.outputPath(`busy-${surface}.png`), animations: 'disabled', scale: 'css' });
 			releaseBusy?.();
 			await expect(toggle).toBeEnabled();
+
+			// The rollover switch shares the account rows' status treatment: odd saves fail, even saves hold.
+			modal = await openWorkspace(surface);
+			const failedRollover = modal.getByRole('button', { name: 'Roll over when an account hits its limit' });
+			await failedRollover.click();
+			await expect(modal.getByText("Couldn't save this change. Try again.")).toBeVisible();
+			await page.screenshot({ path: testInfo.outputPath(`rollover-save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			modal = await openWorkspace(surface);
+			const busyRollover = modal.getByRole('button', { name: 'Roll over when an account hits its limit' });
+			await busyRollover.click();
+			await expect(busyRollover).toBeDisabled();
+			await expect(modal.getByText('Saving…')).toBeVisible();
+			await page.screenshot({ path: testInfo.outputPath(`rollover-busy-${surface}.png`), animations: 'disabled', scale: 'css' });
+			releaseBusy?.();
+			await expect(busyRollover).toBeEnabled();
 		}
 	});
 
@@ -427,6 +443,8 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await createProjectAndOpenSettings(page, `project-policy-${state}-${surface}`);
 			const region = page.getByRole('region', { name: 'Project providers' });
 			await expect(region).toBeVisible();
+			// toBeVisible passes below the fold; the frame must show the policy rows themselves.
+			await region.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 			return region;
 		}
 		for (const [surface, width, height, colorScheme] of projectPolicySurfaces(testInfo.project.name)) {
