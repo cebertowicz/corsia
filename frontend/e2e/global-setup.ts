@@ -26,7 +26,12 @@ async function warmDevServer(baseURL: string | undefined) {
 		// it leaves no state for the tests to see.
 		const context = await browser.newContext({ baseURL });
 		context.setDefaultNavigationTimeout(COLD_SHELL_BUDGET_MS);
-		await openAppByUrl(await context.newPage(), { timeout: COLD_SHELL_BUDGET_MS });
+		const page = await context.newPage();
+		await openAppByUrl(page, { timeout: COLD_SHELL_BUDGET_MS });
+		// The design route and its framed variant pull modules the shell never loads, so the first test to open them
+		// would pay that transform inside its own 30 s budget.
+		await page.goto('/_design#attention-dock', { waitUntil: 'networkidle', timeout: COLD_SHELL_BUDGET_MS });
+		await page.goto('/_design?frame=attention-dock&scenario=one', { waitUntil: 'networkidle', timeout: COLD_SHELL_BUDGET_MS });
 	} catch (error) {
 		throw new Error(
 			`global-setup: the signed-in shell at ${baseURL} did not load and mount within ${COLD_SHELL_BUDGET_MS / 1000}s. ` +

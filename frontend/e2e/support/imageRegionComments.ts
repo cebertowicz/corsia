@@ -150,7 +150,7 @@ export async function shoot(page: Page, testInfo: TestInfo, name: string, both =
 /**
  * Waits until the layout has settled, for two frames in a row: no finite animation or transition is running anywhere in
  * the page, and the comments sheet, where it sits uncovered over the document's column, has that column's left and right
- * edges. A screenshot fast-forwards running CSS transitions to their end, but not what script places from them (the sheet
+ * client edges. A screenshot fast-forwards running CSS transitions to their end, but not what script places from them (the sheet
  * following its column, a card placed beside its tag), so a frame taken earlier shows those where they were mid-slide.
  */
 export async function settled(page: Page) {
@@ -159,7 +159,11 @@ export async function settled(page: Page) {
 			const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity);
 			if (running.length) return `${running.length} running`;
 			const sheet = document.querySelector('[data-adaptive-drawer].within:not(.covered)')?.getBoundingClientRect();
-			const column = document.querySelector('.cm-editor')?.closest('.leaf-body')?.getBoundingClientRect();
+			const body = document.querySelector('.cm-editor')?.closest('.leaf-body');
+			// The column's client box: a scrollbar gutter (the runner keeps its 6px layout space even when hidden) sits
+			// inside the border box but is not part of what the sheet covers.
+			const box = body?.getBoundingClientRect();
+			const column = body && box ? { left: box.left + body.clientLeft, right: box.left + body.clientLeft + body.clientWidth } : undefined;
 			if (sheet && column && (Math.abs(sheet.left - column.left) >= 1 || Math.abs(sheet.right - column.right) >= 1)) {
 				return `sheet ${sheet.left}-${sheet.right}, column ${column.left}-${column.right}`;
 			}

@@ -549,7 +549,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		expect(await ordinary.fresh.evaluate(() => {
 			const doc = document.querySelector<HTMLElement>('.doc')!;
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth };
+			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) };
 		}), 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
 		await ordinary.fresh.close();
 		// Zoom: a 200% zoom of this viewport is half the CSS width; the rail stays 24 or 44 CSS px.
