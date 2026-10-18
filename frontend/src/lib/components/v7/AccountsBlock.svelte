@@ -276,6 +276,7 @@
 		<Button size="sm" variant="primary" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 	{:else}
 		<div class="account-heading">
+			<span>Accounts</span>
 			<Button size="sm" variant="primary" disabled={addBusy} onclick={() => { if (!addBusy) { adding = !adding; actionError = ''; } }}>Add account</Button>
 		</div>
 		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
@@ -284,7 +285,7 @@
 		{#each accounts as account, index (account.id)}
 			{@const unit = policyProvider?.units.find((candidate) => candidate.id === account.id)}
 			{@const signIn = signin[account.id]}
-			<section class="account" id={`vendor-account-${account.id}`} role="button" aria-haspopup="menu" tabindex="0" aria-label={`${displayName(account)}, ${stateLabel(account)}`} {...accountMenu.rowHandlers(account)}>
+			<section class="account" id={`vendor-account-${account.id}`} role="button" aria-haspopup="menu" tabindex="0" aria-label={`More actions for ${displayName(account)}`} {...accountMenu.rowHandlers(account)}>
 				{#if editingId === account.id && account.state !== 'removed'}
 					<Field label="Name" error={editError}>
 						{#snippet trailing()}
@@ -402,9 +403,7 @@
 	.account:focus { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
 	.account-main { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 	.account-copy { min-width: 0; }
-	/* The action cluster keeps its natural width; the name/meta column absorbs
-	   the squeeze (it has min-width: 0 and breaks inside words). Without this
-	   a long meta line starved the cluster and the overflow button wrapped. */
+	/* The sign-in action keeps its natural width while the account copy wraps. */
 	.account-actions { flex-shrink: 0; }
 
 	.account-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
@@ -413,9 +412,6 @@
 	/* The shared Menu component owns row-menu styling. */
 	.signin-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.signin-state { min-width: 0; }
-	/* The row keeps its desktop shape on narrow screens: the account name wraps
-	   inside .account-copy (min-width: 0) and the overflow button stays on the
-	   same line, right-aligned. Stacking the row pushed that lone 28px control
-	   onto its own line, left-aligned, and made every row 46px taller. */
+	/* Account copy wraps on narrow screens while its sign-in action stays aligned. */
 	@media (max-width: 480px) { .accounts { padding: 10px 12px; } }
 </style>

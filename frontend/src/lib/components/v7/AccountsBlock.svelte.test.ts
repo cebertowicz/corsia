@@ -34,6 +34,13 @@ describe('rendering and actions', () => {
 		flushSync();
 	}
 
+	async function openAccountMenu(label: string): Promise<void> {
+		const row = document.querySelector<HTMLElement>(`[aria-label="More actions for ${label}"]`);
+		if (!row) throw new Error(`No account row for ${label}`);
+		row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 }));
+		await settle();
+	}
+
 	afterEach(() => {
 		vendorAccounts.set([]);
 		vi.unstubAllGlobals();
@@ -72,8 +79,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, workAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Work · work@example.test"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Work · work@example.test');
 			button('Rename').click();
 			await settle();
 			const input = document.querySelector('[aria-label="Rename Work · work@example.test"]') as HTMLInputElement;
@@ -86,8 +92,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Plus account 1"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Plus account 1');
 			button('Rename').click();
 			await settle();
 			const input = document.querySelector('[aria-label="Rename Plus account 1"]') as HTMLInputElement;
@@ -206,8 +211,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Plus account 1"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Plus account 1');
 			const menu = document.querySelector('[role="menu"]')?.textContent;
 			expect(menu).toContain('Rename');
 			expect(menu).not.toContain('Sign out');
@@ -224,8 +228,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Work · work@example.test"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Work · work@example.test');
 			button('Sign out').click();
 			await settle();
 			expect(document.body.textContent).toContain('The account was signed out. The account list could not be reloaded.');
@@ -246,7 +249,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle(); button('Sign in').click(); await settle(); button('Check').click(); await settle();
-			(document.querySelector('[aria-label="More actions for Work · work@example.test"]') as HTMLButtonElement).click(); await settle();
+			await openAccountMenu('Work · work@example.test');
 			button('Rename').click(); await settle();
 			const input = document.querySelector('[aria-label="Rename Work · work@example.test"]') as HTMLInputElement;
 			input.value = 'Renamed'; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
@@ -295,7 +298,7 @@ describe('lifecycle', () => {
 	function list(account = out) { return res({ accounts: [ambient, account] }); }
 	function button(name: string) { const el = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name); if (!el) throw new Error(`Missing ${name}`); return el; }
 	async function settle() { await new Promise((r) => setTimeout(r, 0)); flushSync(); }
-	async function more() { (document.querySelector('[aria-label="More actions for Work"]') as HTMLButtonElement).click(); await settle(); }
+	async function more() { const row = document.querySelector<HTMLElement>('[aria-label="More actions for Work"]')!; row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle(); }
 	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 	describe('account lifecycle truth', () => {
@@ -386,7 +389,7 @@ describe('recovery', () => {
 	const button = (name:string,scope:Element|Document=document) => [...scope.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===name)!;
 	const key = (input:HTMLInputElement,k:string) => input.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true}));
 	async function settle(){await new Promise(r=>setTimeout(r,0));flushSync();}
-	async function edit(id='work'){row(id).querySelector<HTMLButtonElement>('.more')!.click();await settle();button('Rename',row(id)).click();await settle();}
+	async function edit(id='work'){row(id).dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:8,clientY:8}));await settle();button('Rename').click();await settle();}
 	function type(text:string,scope:Element|Document=document){const input=scope.querySelector<HTMLInputElement>('input')!;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));return input;}
 	function deferred(){let resolve!:(r:Response)=>void;const promise=new Promise<Response>(r=>resolve=r);return {promise,resolve};}
 	let clearBoundary = () => {};
@@ -473,7 +476,7 @@ describe('billing in the account row', () => {
 		await settle();
 		expect(document.body.textContent).toContain('Billing Price not recorded');
 		expect(document.body.textContent).not.toContain('Billing history');
-		(document.querySelector('[aria-label="More actions for Work"]') as HTMLButtonElement).click(); await settle();
+		(document.querySelector<HTMLElement>('[aria-label="More actions for Work"]')!).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle();
 		expect(document.body.textContent).not.toContain('Billing history');
 		button('Set price').click(); flushSync();
 		const price = document.querySelector('input[inputmode="decimal"]') as HTMLInputElement;

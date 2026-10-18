@@ -180,7 +180,7 @@
 				{#if accountConfirm !== 'disconnect'}
 					<Button variant="ghost" size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
 				{:else}
-					<span class="confirm-text">Disconnect from {remoteName}?</span>
+					<span class="confirm-text">Disconnect from {remoteName}? Your work stays on {remoteName}. This app signs out and returns to setup.</span>
 					<Button variant="ghost" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
 					<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
 				{/if}
