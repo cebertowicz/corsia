@@ -237,13 +237,19 @@ def test_read_reports_skipped_display_names_without_their_content(wired, monkeyp
         agent_import,
         "read_memory",
         lambda *_args, **_kwargs: agent_import.MemoryRead(
-            skipped=[{"path": "~/.claude/CLAUDE.md", "reason": "couldn't read: Permission denied"}], failed=True
+            skipped=[
+                {"path": "~/.claude/CLAUDE.md", "reason": "couldn't read: Permission denied", "unread": True},
+                {"path": "~/.codex/auth.md", "reason": "a protected path"},
+            ],
+            failed=True,
         ),
     )
     result = json.loads(asyncio.run(_execute(consent_decision_id=_consent(wired))))
 
     assert result["result"] == "read"
-    assert result["skipped_files"] == ["~/.claude/CLAUDE.md"]
+    # A file that could not be opened can be retried; one skipped on purpose cannot.
+    assert result["unread_files"] == ["~/.claude/CLAUDE.md"]
+    assert result["skipped_files"] == ["~/.codex/auth.md"]
     assert "Permission denied" not in json.dumps(result)
 
 
@@ -258,7 +264,7 @@ def test_import_events_expose_only_counts_and_outcomes(wired, monkeypatch):
 
     assert events == [
         ("consent_card", {"tools_count": 2}),
-        ("read", {"excerpts_count": 1, "skills_count": 1, "skipped_count": 0}),
+        ("read", {"excerpts_count": 1, "skills_count": 1, "skipped_count": 0, "unread_count": 0}),
         ("install", {"outcome": "installed", "count": 1}),
     ]
 

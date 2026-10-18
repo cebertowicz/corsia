@@ -19,7 +19,6 @@ ALREADY_HERE = "already_here"
 INSTALLED = "installed"
 FAILED = "failed"
 _TOOL_GRANTS = frozenset({"allowed-tools", "hooks"})
-_RECORDED = frozenset({"written", "unchanged"})
 
 
 def _nested(value: object) -> bool:
@@ -52,25 +51,11 @@ def _sidecar(origin: Mapping[str, str]) -> str:
     return yaml.safe_dump({"origin": dict(origin)}, sort_keys=False, allow_unicode=True)
 
 
-def _holds(path: Path, data: bytes) -> bool:
-    try:
-        return not path.is_symlink() and path.is_file() and path.read_bytes() == data
-    except OSError:
-        return False
-
-
-def _discard(target: Path, name: str) -> dict[str, str]:
-    """Remove a bundle this install left incomplete and uncommitted, so a re-run can offer it again."""
-    logger.warning("skill install failed at guidance save for {}", name)
-    shutil.rmtree(target, ignore_errors=True)
-    return {"outcome": FAILED}
-
-
-def _installed(saved: SaveResult) -> dict[str, str]:
-    """Installed; a save history did not fully record carries its outcome and line for the caller to show."""
-    if saved.outcome in _RECORDED and not saved.unsynced:
-        return {"outcome": INSTALLED}
-    return {"outcome": INSTALLED, "history_outcome": saved.outcome, "guidance_history": saved.line or saved.reason}
+def _saved(saved: SaveResult) -> dict[str, str]:
+    """The item's state, then the save's own outcome and line unchanged, as every guidance save reports them.
+    Only ``stale`` (a file appeared at the destination) and ``refused`` write nothing."""
+    state = {"stale": ALREADY_HERE, "refused": FAILED}.get(saved.outcome, INSTALLED)
+    return {"outcome": state, "history_outcome": saved.outcome, **({"guidance_history": saved.line} if saved.line else {})}
 
 
 def install_skill_bundle(
@@ -85,8 +70,8 @@ def install_skill_bundle(
     consent_decision_id: str | None = None,
 ) -> dict[str, str]:
     """Install one imported skill with no overwrite and a single guidance save; ``outcome`` is
-    installed, already_here or failed, plus ``history_outcome`` and ``guidance_history`` when history
-    did not fully record the install."""
+    installed, already_here or failed, plus the save's ``history_outcome`` and ``guidance_history``
+    line whenever the save ran."""
     skill_md = _skill_text(name, upstream_skill_md, description)
     if skill_md is None:
         logger.warning("skill install failed at frontmatter rewrite for {}", name)
@@ -133,19 +118,13 @@ def install_skill_bundle(
             expected={path: None for path in writes},
         )
     except OSError:
-        return _discard(target, name)
-    if saved.outcome == "stale":
-        return {"outcome": ALREADY_HERE}
-    if saved.outcome == "refused":
-        logger.warning("skill install failed at bundle validation for {}: {}", name, saved.errors)
+        # A write failed before any commit, so this new folder holds only part of the bundle.
+        logger.warning("skill install failed at guidance save for {}", name)
+        shutil.rmtree(target, ignore_errors=True)
         return {"outcome": FAILED}
-    # A committed bundle is never removed outside history. A save without history still writes
-    # every file, so what is on disk decides that outcome.
-    if saved.outcome not in _RECORDED and not all(_holds(path, data) for path, data in writes.items()):
-        return _discard(target, name)
-    if saved.outcome not in _RECORDED or saved.unsynced:
-        logger.warning("skill {} installed without full guidance history: {}", name, saved.outcome)
-    return _installed(saved)
+    if saved.outcome not in ("written", "unchanged") or saved.unsynced:
+        logger.warning("skill {} guidance save: {} {}", name, saved.outcome, saved.errors or saved.reason)
+    return _saved(saved)
 
 
 def origin_metadata(source: str, upstream_skill_md: bytes, adopted_at: str) -> dict[str, str]:

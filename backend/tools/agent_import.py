@@ -170,7 +170,7 @@ def _card_facts(thread_id: str):
     return card if card is not None else NO_MODEL
 
 
-def _consent_fields(card, tools, *, thread_id: str | None = None) -> dict[str, Any]:
+def _consent_fields(card, tools, *, thread_id: str) -> dict[str, Any]:
     from dataclasses import replace
 
     from onboarding import setup_decisions
@@ -189,8 +189,7 @@ def _consent_fields(card, tools, *, thread_id: str | None = None) -> dict[str, A
     fields = {"error": RAISE_FIRST, "consent_decision": consent}
     if missing:
         fields["not_found"] = missing
-    if thread_id is not None:
-        _emit_event(thread_id, "consent_card", tools_count=len(card.tools))
+    _emit_event(thread_id, "consent_card", tools_count=len(card.tools))
     return fields
 
 
@@ -251,9 +250,12 @@ async def _read(thread_id, thread, decision_id, card) -> dict[str, Any]:
         result = "read"
     else:
         result = "read_failed" if memory.failed else "nothing_found"
-    skipped = sorted({str(row["path"]) for row in memory.skipped})
-    _emit_event(thread_id, result, excerpts_count=len(memory.excerpts), skills_count=len(skills), skipped_count=len(skipped))
+    skipped = sorted({str(row["path"]) for row in memory.skipped if not row.get("unread")})
+    unread = sorted({str(row["path"]) for row in memory.skipped if row.get("unread")})
+    _emit_event(thread_id, result, excerpts_count=len(memory.excerpts), skills_count=len(skills),
+                skipped_count=len(skipped), unread_count=len(unread))
     return {"result": result, "excerpts": memory.excerpts, "skills": skills, "skipped_files": skipped,
+            "unread_files": unread,
             "install_by": (datetime.datetime.fromisoformat(read_at) + INSTALL_WINDOW).isoformat()}
 
 

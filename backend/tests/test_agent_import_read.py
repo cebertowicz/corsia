@@ -243,6 +243,7 @@ def test_an_unreadable_file_marks_the_read_failed(home, monkeypatch):
     read = _read(home, [reader.HERMES])
     assert read.failed is True
     assert read.skipped[0]["reason"] == "couldn't read: Permission denied"
+    assert read.skipped[0]["unread"] is True
 
 
 def test_an_excerpt_hash_is_over_the_filtered_text_never_the_raw_bytes(home):
