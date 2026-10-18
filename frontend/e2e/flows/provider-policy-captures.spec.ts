@@ -104,6 +104,15 @@ async function openActivity(page: Page) {
 	await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
 }
 
+async function openWorkspaceProviderAccounts(page: Page) {
+	const card = page.locator('[data-provider-card="claude-code"]');
+	await card.getByRole('button', { name: 'Settings' }).click();
+	const modal = page.locator('.modal');
+	await expect(modal.getByRole('button', { name: 'Accounts' })).toBeVisible();
+	await expect(modal.locator('.accounts')).toBeVisible();
+	return modal;
+}
+
 async function createProjectAndOpenSettings(page: Page, name: string) {
 	await page.keyboard.press('Control+k');
 	await expect(page.locator('.palette')).toBeVisible();
@@ -133,14 +142,13 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					await openActivity(page);
 					await page.getByRole('button', { name: 'Workspace settings' }).click();
 					await openSettingsSection(page, 'Providers');
-					const region = page.getByRole('region', { name: 'Workspace providers' });
-					await expect(region).toBeVisible();
-					await expect(region.getByText('Overridden in 2 projects: Atlas migration, Field notes')).toHaveCount(2);
-					await expect(region.getByText('Personal Max · sam@example.com')).toBeVisible();
-					await expect(region.getByLabel('Account usage').first()).toHaveText('5h 38% left · wk 59% left');
-					await expect(region.getByRole('button', { name: 'Move Pro up' })).toHaveCount(0);
-					await region.scrollIntoViewIfNeeded();
-					await expect(region.getByRole('button', { name: 'Move Personal Max up' })).toBeVisible();
+					const accounts = await openWorkspaceProviderAccounts(page);
+					await expect(accounts.getByText('Overridden in 2 projects: Atlas migration, Field notes')).toHaveCount(2);
+					await expect(accounts.getByText('Personal Max · sam@example.com')).toBeVisible();
+					await expect(accounts.getByLabel('Account usage').first()).toHaveText('5h 38% left · wk 59% left');
+					await expect(accounts.getByRole('button', { name: 'Move Pro up' })).toHaveCount(0);
+					await accounts.scrollIntoViewIfNeeded();
+					await expect(accounts.getByRole('button', { name: 'Move Personal Max up' })).toBeVisible();
 				} else {
 					await openActivity(page);
 					await createProjectAndOpenSettings(page, `subscription-${screen}-${surface}`);
@@ -212,9 +220,9 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await openActivity(page);
 			await page.getByRole('button', { name: 'Workspace settings' }).click();
 			await openSettingsSection(page, 'Providers');
-			const region = page.getByRole('region', { name: 'Workspace providers' });
-			const first = region.getByRole('button', { name: 'Personal Max', exact: true });
-			const second = region.getByRole('button', { name: 'Acme (Team)', exact: true });
+			const accounts = await openWorkspaceProviderAccounts(page);
+			const first = accounts.getByRole('button', { name: 'Personal Max', exact: true });
+			const second = accounts.getByRole('button', { name: 'Acme (Team)', exact: true });
 			await expect(first).toBeEnabled();
 			await expect(second).toBeEnabled();
 			await first.click();
