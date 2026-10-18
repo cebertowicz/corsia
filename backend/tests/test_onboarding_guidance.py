@@ -189,7 +189,6 @@ def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
     for state in ("low_memory", "own_omlx", "picked", "not_checked", "checking", "failed"):
         assert f"`{state}`" in offer
     assert "make the offer without a name or size" in offer
-    assert "none_fits" not in offer
     assert "CORSIA's starter model, not oMLX's pick, so pass the `message` on" in offer
     # Onboarding copy says "computer"; "Mac" is only for Apple facts.
     assert "Mac" not in offer

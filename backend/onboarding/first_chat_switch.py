@@ -49,23 +49,24 @@ def record_first_model(thread_id: str, model: str) -> None:
         db.close()
 
 
-def _destination(provider: str, *, db: sqlite3.Connection) -> str | None:
-    """The tool's default listed model, else its first one."""
-    rows = db.execute(
-        "SELECT litellm_model, metadata_json FROM models WHERE harness=? AND enabled=1 AND available=1",
-        (provider,),
-    ).fetchall()
-    ranked = []
-    for row in rows:
-        try:
-            meta = json.loads(row["metadata_json"] or "{}")
-        except ValueError:
-            meta = {}
-        ranked.append((not meta.get("is_default"), meta.get("discovery_order", 0), str(row["litellm_model"])))
-    return min(ranked)[2] if ranked else None
+def _destination(provider: str, account_id: str, thread_id: str, *, db: sqlite3.Connection) -> str | None:
+    """The first account-ready vendor model in the catalog's public presentation order."""
+    from connections.account_policy import thread_project_scopes
+    from connections.vendor_accounts import get_account
+    from llm.account_catalog import account_model_status
+    from llm.model_status import catalog_base_rows
+
+    account = get_account(account_id, db=db)
+    project_ids = thread_project_scopes(thread_id, None, db=db)
+    for row in catalog_base_rows():
+        if row.get("connection") != provider:
+            continue
+        if account_model_status(account, row, project_ids=project_ids, db=db)["status"] == "ready":
+            return str(row["litellm_model"])
+    return None
 
 
-def claim_switch(provider: str, operation_id: str, *, db: sqlite3.Connection) -> tuple[str, str] | None:
+def claim_switch(provider: str, operation_id: str, *, account_id: str, db: sqlite3.Connection) -> tuple[str, str] | None:
     """The ``(thread_id, destination)`` to switch for this operation, claiming it; None when a guard fails."""
     with write_transaction(db, scope="first_chat_switch_claim") as connection:
         marker = get_setting(SETTINGS_KEY, db=connection)
@@ -81,10 +82,16 @@ def claim_switch(provider: str, operation_id: str, *, db: sqlite3.Connection) ->
             or str(thread["pending_model"] or "").strip()
         ):
             return None
-        destination = _destination(provider, db=connection)
+        destination = _destination(provider, account_id, str(marker["thread_id"]), db=connection)
         if destination is None:
+            log.info("first chat switch skipped: no ready destination for account %s on %s", account_id, provider)
             return None
-        set_setting(SETTINGS_KEY, {**marker, "handled": [*marker.get("handled", []), operation_id]}, db=connection)
+        # This write stays inside the claim transaction; ``set_setting`` opens its own transaction.
+        connection.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (SETTINGS_KEY, json.dumps({**marker, "handled": [*marker.get("handled", []), operation_id]})),
+        )
         return str(marker["thread_id"]), destination
 
 
@@ -106,7 +113,7 @@ async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, a
     def claim() -> tuple[str, str] | None:
         db = get_db()
         try:
-            return claim_switch(provider, operation_id, db=db)
+            return claim_switch(provider, operation_id, account_id=account_id, db=db)
         finally:
             db.close()
 

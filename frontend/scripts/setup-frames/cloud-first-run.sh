@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Starts the disposable frontend (port 5191, no backend), runs <script> against it, stops the server.
-# Usage: cloud-first-run.sh <script.mjs|script.py ...>   e.g. cloud-first-run.sh cloud-first.mjs <outDir> <metricsFile> --assets <dir>
+# Usage: cloud-first-run.sh <script.mjs ...>   e.g. cloud-first-run.sh cloud-first.mjs <outDir> <metricsFile> --assets <dir>
 cd "$(dirname "$0")/../.." || exit 1
 scripts/setup-frames/dev.sh > "${TMPDIR:-/tmp}/cloud-first-dev.log" 2>&1 &
 server=$!
