@@ -12,7 +12,7 @@ import asyncio
 from fastapi import WebSocketDisconnect
 
 import ws as ws_endpoint
-from infra import presence
+from infra import presence, presence_records
 from infra.ws_session import session_id
 from infra.thread_liveness import read_thread_liveness
 from ws import presence_control
@@ -220,3 +220,45 @@ def test_socket_cleanup_releases_its_claims(pdb):
     assert released["exit_pending_reason"] == "disconnected"
     assert released["exit_pending_at"] is not None
     assert presence.live_view(USER, thread)[0] == "away"
+
+
+def test_focus_frames_on_a_claimed_session_only_toggle_focus(pdb):
+    thread = new_thread(pdb, "focus-frames")
+    owner_reads: list[str] = []
+
+    async def counting_owner(user: dict, thread_id: str):
+        owner_reads.append(thread_id)
+        return await ws_endpoint._owned_thread(user, thread_id)
+
+    def foreground(focused: bool | None) -> dict:
+        frame = {"type": "presence", "surface": "chat", "thread_id": thread, "state": "foreground"}
+        return frame if focused is None else frame | {"focused": focused}
+
+    socket = _Socket([])
+
+    async def _scenario() -> None:
+        for focused in (True, False, True, False):
+            await presence_control.handle_presence(
+                socket, {"id": USER}, foreground(focused), owned_thread_fn=counting_owner)
+
+    asyncio.run(_scenario())
+
+    current = row(pdb, thread)
+    assert current["present"] == 1 and current["exit_pending_at"] is None
+    assert len(presence_records.decode_spans(current["focus_spans"])) == 2  # two closed spans...
+    assert current["focus_since"] is None  # ...and the last frame left the window
+    assert owner_reads == [thread]  # only the claim read ownership; focus toggles did not
+    assert presence.live_view(USER, thread) == ("here", None)
+
+
+def test_a_foreground_frame_without_focus_claims_as_focused(pdb):
+    thread = new_thread(pdb, "focus-unreported")
+    _read([{"type": "presence", "surface": "chat", "thread_id": thread, "state": "foreground"}], {"id": USER})
+    assert row(pdb, thread)["focus_since"] is not None
+
+
+def test_a_focus_flag_that_is_not_a_boolean_is_ignored(pdb):
+    thread = new_thread(pdb, "focus-junk")
+    _read([{"type": "presence", "surface": "chat", "thread_id": thread, "state": "foreground",
+            "focused": "no"}], {"id": USER})
+    assert row(pdb, thread)["focus_since"] is not None

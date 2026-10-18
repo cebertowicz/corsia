@@ -23,6 +23,9 @@ window a reconnecting client has to re-claim.
 Claims live in one process, the same assumption the WebSocket subscriptions
 make; more than one backend process would need claims in the database.
 
+**Focus** rides the visit for Measurement attention (``presence_focus``): each session
+reports whether a CORSIA window has focus, and a focus change never touches a claim.
+
 Record writers return the (user, thread) pairs whose row committed, for an
 after-commit dot nudge; a newly opened visit clears ``mark_seen``'s marks.
 """
@@ -35,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import infra.presence_records as presence_records
-from infra.database import write_transaction
+from infra.presence_focus import FocusState
 from infra.presence_time import iso, parse, seen_boundary
 from infra.visit_divider import divider_from_row
 
@@ -78,6 +81,7 @@ class _Visit:
     exit_written: bool = False
     divider_frozen: bool = False
     divider: dict | None = None
+    focus: FocusState = field(default_factory=FocusState)
 
 _LOCK = threading.RLock()
 _visits: dict[_Key, _Visit] = {}
@@ -98,7 +102,7 @@ def _require_surface(surface: str) -> None:
 
 def claim(
     db: sqlite3.Connection, *, user_id: str, surface: str, thread_id: str,
-    session: str, now: datetime,
+    session: str, now: datetime, focused: bool | None = None,
 ) -> Changed:
     """Record that ``session`` now shows ``thread_id`` on ``surface``.
 
@@ -125,15 +129,46 @@ def claim(
             visit.divider = divider if needs_divider else divider_from_row(db, presence_records.row(db, user_id, thread_id), thread_id)
             visit.divider_frozen = True
         visit.claims.setdefault(session, now)
+        visit.focus.reported[session] = focused if focused is not None else visit.focus.reported.get(session)
         visit.hidden.pop(session, None)
         visit.sessions.add(session)
         visit.left_at = visit.left_reason = None
         visit.exit_written = False
         _session_keys[(session, surface)] = key
         if opening:
-            presence_records.enter(db, user_id, thread_id, now)
+            stored = presence_records.enter(db, user_id, thread_id, now, focused is not False)
+            visit.focus.load(stored)
             changed.append((user_id, thread_id))
+        if visit.focus.retarget(visit.claims, now):
+            visit.focus.write(db, user_id, thread_id, now)
     return changed
+
+
+def set_focus(
+    db: sqlite3.Connection, *, session: str, surface: str, focused: bool, now: datetime,
+) -> Changed:
+    """Record that an already-claimed ``session`` gained or lost window focus.
+
+    Touches only focus state and the visit's spans: no claim, ownership read,
+    exit stamp or merge window changes.
+    """
+    _require_surface(surface)
+    with _LOCK:
+        key = _session_keys.get((session, surface))
+        if key is None:
+            return []
+        visit = _visits[key]
+        visit.focus.reported[session] = focused
+        if visit.focus.retarget(visit.claims, now):
+            visit.focus.write(db, key[0], key[2], now)
+    return []
+
+
+def is_claimed(*, session: str, surface: str, thread_id: str) -> bool:
+    """Whether ``session`` currently claims ``thread_id`` on ``surface``."""
+    with _LOCK:
+        key = _session_keys.get((session, surface))
+        return key is not None and key[2] == thread_id
 
 
 def release(
@@ -219,11 +254,14 @@ def _release(
     visit = _visits[key]
     visit.claims.pop(session, None)
     visit.document_open.pop(session, None)
+    visit.focus.reported.pop(session, None)
+    focus_changed = visit.focus.retarget(visit.claims, stamp)
     if reason == "hidden":
         visit.hidden[session] = stamp
     else:
         _note_left(visit, stamp, reason)
-    _settle(db, key, visit, now, changed)
+    if not _settle(db, key, visit, now, changed) and focus_changed:
+        visit.focus.write(db, key[0], key[2], now)
 
 
 def _note_left(visit: _Visit, stamp: datetime, reason: str) -> None:
@@ -232,21 +270,32 @@ def _note_left(visit: _Visit, stamp: datetime, reason: str) -> None:
 
 
 def _settle(db: sqlite3.Connection, key: _Key, visit: _Visit, now: datetime,
-            changed: Changed) -> None:
-    """Start the recorded exit once no claim is live and every grace has ended."""
-    if visit.claims:
-        return
-    for session, hidden_at in list(visit.hidden.items()):
-        if now - hidden_at >= HIDDEN_GRACE:
-            del visit.hidden[session]
-            _note_left(visit, hidden_at, "hidden")
-    if visit.hidden or visit.left_at is None or visit.exit_written:
-        return
-    user_id, _surface, thread_id = key
-    if presence_records.mark_exit_pending(db, user_id, thread_id, visit.left_at,
-                                          visit.left_reason or "navigated", now):
-        changed.append((user_id, thread_id))
-    visit.exit_written = True
+            changed: Changed) -> bool:
+    """Start the recorded exit once no claim is live and every grace has ended.
+
+    The exit write carries the visit's full span list. Returns whether it wrote
+    the exit; otherwise a dirty visit rewrites its spans here.
+    """
+    wrote = False
+    if not visit.claims:
+        for session, hidden_at in list(visit.hidden.items()):
+            if now - hidden_at >= HIDDEN_GRACE:
+                del visit.hidden[session]
+                _note_left(visit, hidden_at, "hidden")
+        if not (visit.hidden or visit.left_at is None or visit.exit_written):
+            user_id, _surface, thread_id = key
+            if presence_records.mark_exit_pending(
+                db, user_id, thread_id, visit.left_at,
+                visit.left_reason or "navigated", now, visit.focus.columns(),
+            ):
+                changed.append((user_id, thread_id))
+                wrote = True
+            visit.exit_written = True
+    if wrote:
+        visit.focus.dirty = False
+    elif visit.focus.dirty:
+        visit.focus.write(db, key[0], key[2], now)
+    return wrote
 
 
 def _live_view_locked(user_id: str, thread_id: str) -> tuple[str, datetime | None] | None:
@@ -289,27 +338,17 @@ def sweep(db: sqlite3.Connection, *, now: datetime) -> Changed:
             pending = _visits.get(key)
             if pending is not None and (pending.claims or pending.hidden):
                 continue
-            presence_records.finalize(db, row, len(pending.sessions) if pending else 1, now, CHAT_SURFACE)
+            presence_records.finalize(
+                db, row, len(pending.sessions) if pending else 1, now, CHAT_SURFACE,
+                pending.focus.columns() if pending is not None and pending.focus.dirty else None,
+            )
             changed.append((row["user_id"], row["thread_id"]))
             _visits.pop(key, None)
-        _keep_alive(db, now)
+        presence_records.keep_alive(
+            db, [(user_id, thread_id) for (user_id, _s, thread_id), visit in _visits.items() if visit.claims],
+            now, KEEPALIVE_INTERVAL)
         _forget_closed(db)
     return changed
-
-
-def _keep_alive(db: sqlite3.Connection, now: datetime) -> None:
-    stale = iso(now - KEEPALIVE_INTERVAL)
-    live = [key for key, visit in _visits.items() if visit.claims]
-    if not live:
-        return
-    with write_transaction(db, scope="presence_keep_alive"):
-        for user_id, _surface, thread_id in live:
-            db.execute(
-                "UPDATE thread_presence SET last_confirmed_at=?, updated_at=? "
-                "WHERE user_id=? AND thread_id=? AND present=1 "
-                "AND last_confirmed_at <= ?",
-                (iso(now), iso(now), user_id, thread_id, stale),
-            )
 
 
 def _forget_closed(db: sqlite3.Connection) -> None:
@@ -332,28 +371,10 @@ def reconcile_startup(db: sqlite3.Connection, *, now: datetime) -> None:
     with _LOCK:
         _visits.clear()
         _session_keys.clear()
-        with write_transaction(db, scope="presence_reconcile"):
-            db.execute(
-                "UPDATE thread_presence SET "
-                "exit_pending_at=COALESCE(exit_pending_at, last_confirmed_at), "
-                "exit_pending_since=?, "
-                "exit_pending_reason=COALESCE(exit_pending_reason, 'restart'), "
-                "updated_at=? WHERE present=1",
-                (iso(now), iso(now)),
-            )
+        presence_records.mark_restart_exits(db, now)
 
 
-def mark_seen(
-    db: sqlite3.Connection, *, user_id: str, thread_id: str, unread: bool, now: datetime,
-) -> bool:
-    """Mark read through ``now`` or unread; False with no record, never a new visit."""
-    stamp = iso(now)
-    with write_transaction(db, scope="presence_mark_seen"):
-        return db.execute(
-            "UPDATE thread_presence SET marked_read_at=CASE WHEN ? THEN marked_read_at ELSE ? END, "
-            "marked_unread_at=CASE WHEN ? THEN ? END, updated_at=? WHERE user_id=? AND thread_id=?",
-            (unread, stamp, unread, stamp, stamp, user_id, thread_id),
-        ).rowcount == 1
+mark_seen = presence_records.mark_seen
 
 
 def delete_thread_presence(db: sqlite3.Connection, thread_id: str) -> None:
