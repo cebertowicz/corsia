@@ -7,7 +7,7 @@ import pytest
 
 from llm import local_setup, local_setup_operation
 from llm.local_model import LocalModel
-from llm.local_setup_existing import OWN_OMLX_STARTER
+from llm.local_setup_existing import STARTER_MODEL
 
 MODEL = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)
 
@@ -41,7 +41,7 @@ def test_recovery_follows_the_recorded_task_without_posting_another_download(mon
     assert calls == [("GET", "/hf/tasks")]
 
 
-@pytest.mark.parametrize("model, kind", [(MODEL, "setup"), (OWN_OMLX_STARTER, "starter")])
+@pytest.mark.parametrize("model, kind", [(MODEL, "setup"), (STARTER_MODEL, "starter")])
 def test_restart_resumes_the_recorded_model_and_kind_under_the_operation_lock(monkeypatch, model, kind):
     local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind, "task-1"))
     observed: dict[str, object] = {}

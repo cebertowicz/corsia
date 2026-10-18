@@ -2,8 +2,9 @@
 export type LocalPickModel = { name: string; repository: string; download_size_bytes: number; download_size_gb: number; context_window: number };
 /** Welcome's local row: checking, the pick, or why there is none. */
 export type LocalPick = {
-	state: 'not_checked' | 'checking' | 'picked' | 'none_fits' | 'failed' | 'low_memory' | 'own_omlx';
+	state: 'not_checked' | 'checking' | 'picked' | 'failed' | 'low_memory' | 'own_omlx';
 	model: LocalPickModel | null;
+	/** Why there is no model, or, on a pick, why it is the starter model. */
 	message: string | null;
 };
 
@@ -13,6 +14,11 @@ const FAILED: LocalPick = { state: 'failed', model: null, message: null };
 /** Whether the picked model needs more room than this computer has free. */
 export function needsSpace(pick: LocalPick | null, freeDiskGb: number | undefined): boolean {
 	return Boolean(pick?.model) && (freeDiskGb ?? Infinity) < (pick?.model?.download_size_gb ?? 0);
+}
+
+/** Whether this computer has no local model to offer: too little memory. (oMLX recommending nothing still gets the starter model.) */
+export function noLocalModel(eligible: boolean | undefined, pick: LocalPick | null): boolean {
+	return eligible === false || pick?.state === 'low_memory';
 }
 
 /**

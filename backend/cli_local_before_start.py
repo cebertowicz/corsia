@@ -140,8 +140,6 @@ async def _setup(force_local: bool) -> int:
         result = await local_setup._run_flight(on_stage=stages)
     finally:
         heartbeat.cancel()
-    if result.get("skipped") == "none_fits":
-        return _needs_provider(limited=bool(notice), forced_local=force_local)
     if result.get("downloading"):
         return _failed("the model download did not finish within 4 hours.")
     if not result.get("ok"):
