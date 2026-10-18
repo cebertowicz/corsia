@@ -6,6 +6,7 @@ it in the report, it is never skipped silently.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -58,7 +59,10 @@ def fixture_ids(db_path: str) -> dict[str, str]:
         return None if row is None else str(row[0])
 
     ids = {
-        "thread_id": "thread-00000", "parent_thread_id": "thread-00000", "project_id": "project-00",
+        # Generic thread reads target the largest persistent-agent thread,
+        # whose newest turns include production-shaped seed/tool/assistant rows.
+        "thread_id": "thread-00000",
+        "parent_thread_id": "thread-00000", "project_id": "project-00",
         "node_id": "node-project-00-0001", "user_id": "steve", "metric": "messages",
         "artifact_id": first("SELECT artifact_id FROM artifact_registrations ORDER BY rowid LIMIT 1")
         or first("SELECT id FROM artifact_identities ORDER BY rowid LIMIT 1"),
@@ -94,7 +98,26 @@ def query_params(route) -> list[tuple[str, bool]]:
     return found
 
 
-def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str],
+def runtime_query_values() -> dict[str, dict[str, str]]:
+    """Client query fixtures keyed by route, with ``*`` for shared values."""
+    from infra import config
+
+    readme = str(config.WORKSPACE / "README.md")
+    values = {
+        "/api/artifacts/resolve": {"path": readme},
+        "/api/files/content": {"path": readme},
+        "/api/files/revision": {"path": readme},
+        "/api/fs/browse": {"path": str(config.WORKSPACE)},
+        "*": {},
+    }
+    if importlib.util.find_spec("api.measurement_registry") is None:
+        return values
+    from api.measurement_registry import REGISTRY
+    values["*"]["ids"] = ",".join(sorted(name for name, item in REGISTRY.items() if item.available))
+    return values
+
+
+def build_target(template: str, route, ids: dict[str, str], extra: dict[str, dict[str, str]],
                  token: str) -> Target:
     if template in NOT_A_READ:
         return Target(template, None, reason=NOT_A_READ[template])
@@ -105,14 +128,40 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
         values[name] = quote(ids[name], safe="")
     url = _PATH_PARAM.sub(lambda m: values[m.group(1)], template)
     query = []
+    route_extra = extra.get(template, {})
+    shared_extra = extra.get("*", {})
     for name, required in query_params(route):
         if name == "token":
             query.append(f"token={quote(token, safe='')}")  # some routes read only the query token
             continue
-        value = extra.get(name) or (QUERY_FILL.get(name) if required else None) or CLIENT_PAGING.get(name)
+        value = route_extra.get(name) or shared_extra.get(name) or (QUERY_FILL.get(name) if required else None) or CLIENT_PAGING.get(name)
         value = value or (ids.get(name) if required else None)
         if value is None and required:
             return Target(template, None, reason=f"no fixture value for required query parameter '{name}'")
         if value is not None:
             query.append(f"{name}={quote(value, safe=',')}")
     return Target(template, url + ("?" + "&".join(query) if query else ""))
+
+
+#: The exact client route whose Focus response has its own byte budget.
+FOCUS_MESSAGES_ROUTE = "/api/threads/{thread_id}/messages?limit=50&view=focus"
+#: Reads whose client query shape and selected fixture record change the response
+#: substantially. The generic paged read already targets the persistent-agent
+#: thread, so only the distinct Focus query needs an explicit measurement.
+CLIENT_QUERY_VARIANTS = {
+    "/api/threads/{thread_id}/messages": (
+        (FOCUS_MESSAGES_ROUTE, "view=focus"),
+    ),
+}
+
+
+def build_targets(template: str, route, ids: dict[str, str], extra: dict[str, str],
+                  token: str) -> list[Target]:
+    """Return the generic client read plus explicitly distinct query variants."""
+    primary = build_target(template, route, ids, extra, token)
+    if primary.url is None:
+        return [primary]
+    variants = [primary]
+    for route_key, extra_query in CLIENT_QUERY_VARIANTS.get(template, ()):
+        variants.append(Target(route_key, primary.url + "&" + extra_query))
+    return variants

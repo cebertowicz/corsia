@@ -1,4 +1,9 @@
-"""Non-blocking, aggregate-only HTTP request timing instrumentation."""
+"""Non-blocking, aggregate-only HTTP request timing instrumentation.
+
+``response_bytes`` counts body bytes emitted to the client. This middleware
+wraps JSON compression, so for gzip-capable clients it records compressed
+on-the-wire bytes; the speed gate separately measures TestClient-decoded bytes.
+"""
 
 from __future__ import annotations
 
@@ -46,13 +51,21 @@ class Aggregate:
     count: int = 0
     sum_ms: float = 0.0
     max_ms: float = 0.0
+    sum_bytes: int | None = 0
+    max_bytes: int | None = 0
     buckets: list[int] = field(default_factory=lambda: [0] * len(_BUCKET_UPPERS))
 
-    def add(self, duration_ms: float) -> None:
-        """Add one completed request duration to this aggregate."""
+    def add(self, duration_ms: float, response_bytes: int | None = None) -> None:
+        """Add one completed request's duration and emitted body length."""
         self.count += 1
         self.sum_ms += duration_ms
         self.max_ms = max(self.max_ms, duration_ms)
+        if response_bytes is None:
+            self.sum_bytes = None
+            self.max_bytes = None
+        elif self.sum_bytes is not None:
+            self.sum_bytes += response_bytes
+            self.max_bytes = max(self.max_bytes or 0, response_bytes)
         for index, upper in enumerate(_BUCKET_UPPERS):
             if duration_ms <= upper:
                 self.buckets[index] += 1
@@ -71,6 +84,7 @@ class SlowRequest:
     duration_ms: float
     dbq_ms: float
     db_ms: float
+    response_bytes: int | None = None
     dbq_read_ms: float | None = None
     db_read_ms: float | None = None
     dbq_bulk_ms: float | None = None
@@ -143,7 +157,11 @@ def _server_timing(started_at: float, timing: DbTiming) -> bytes:
 
 
 class RequestTimingMiddleware:
-    """Measure HTTP completion without buffering response bodies or streams."""
+    """Measure HTTP completion without buffering response bodies or streams.
+
+    Counts bytes passed to the outer ASGI sender, after JSON compression when
+    the client accepts it.
+    """
 
     def __init__(self, app: Callable) -> None:
         self.app = app
@@ -157,10 +175,11 @@ class RequestTimingMiddleware:
         token = _request_db_timing.set(timing)
         status = 500
         response_started = False
+        response_bytes = 0
         recorded = False
 
         async def timed_send(message) -> None:
-            nonlocal status, response_started, recorded
+            nonlocal status, response_started, response_bytes, recorded
             message_type = message["type"]
             if message_type == "http.response.start":
                 status = message["status"]
@@ -168,9 +187,10 @@ class RequestTimingMiddleware:
                 headers.append((b"server-timing", _server_timing(started_at, timing)))
                 message = {**message, "headers": headers}
                 response_started = True
-            elif message_type == "http.response.body" and not message.get("more_body", False):
-                if response_started and not recorded:
-                    self._record(scope, started_at, status, timing)
+            elif message_type == "http.response.body":
+                response_bytes += len(message.get("body", b""))
+                if not message.get("more_body", False) and response_started and not recorded:
+                    self._record(scope, started_at, status, timing, response_bytes)
                     recorded = True
             await send(message)
 
@@ -180,23 +200,23 @@ class RequestTimingMiddleware:
             # Unhandled errors reach ServerErrorMiddleware outside this one, so
             # its 500 response never passes through timed_send; count it here.
             if not recorded:
-                self._record(scope, started_at, status, timing)
+                self._record(scope, started_at, status, timing, None)
             raise
         finally:
             _request_db_timing.reset(token)
 
     @staticmethod
-    def _record(scope: dict, started_at: float, status: int, timing: DbTiming) -> None:
+    def _record(scope: dict, started_at: float, status: int, timing: DbTiming, response_bytes: int | None = None) -> None:
         duration_ms = (time.perf_counter() - started_at) * 1_000
         route = route_template(scope)
         day = datetime.now(UTC).date().isoformat()
         key = (day, _normalized_method(scope.get("method")), route, f"{status // 100}xx")
-        _aggregates[key].add(duration_ms)
+        _aggregates[key].add(duration_ms, response_bytes)
         if duration_ms > _SLOW_MS:
             _slow_requests.append(
                 SlowRequest(
                     datetime.now(UTC), key[1], route, status, duration_ms,
-                    timing.queue_ms, timing.execution_ms,
+                    timing.queue_ms, timing.execution_ms, response_bytes,
                     timing.read_queue_ms, timing.read_execution_ms,
                     timing.bulk_queue_ms, timing.bulk_execution_ms,
                 )
@@ -224,34 +244,39 @@ def write_batch(aggregates: dict[tuple[str, str, str, str], Aggregate],
     try:
         cur.sql("BEGIN")
         if aggregates:
-            values = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?)" for _ in aggregates)
+            values = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in aggregates)
             params = [
                 value
                 for (day, method, route, status_class), aggregate in aggregates.items()
                 for value in (day, method, route, status_class, aggregate.count, aggregate.sum_ms,
-                              aggregate.max_ms, aggregate.buckets)
+                              aggregate.max_ms, aggregate.sum_bytes, aggregate.max_bytes, aggregate.buckets)
             ]
             cur.execute(
-                "INSERT INTO request_timing_daily VALUES " + values + " "
+                "INSERT INTO request_timing_daily (day, method, route, status_class, count, sum_ms, max_ms, "
+                "sum_bytes, max_bytes, buckets) VALUES " + values + " "
                 "ON CONFLICT (day, method, route, status_class) DO UPDATE SET "
                 "count = request_timing_daily.count + excluded.count, "
                 "sum_ms = request_timing_daily.sum_ms + excluded.sum_ms, "
                 "max_ms = GREATEST(request_timing_daily.max_ms, excluded.max_ms), "
+                "sum_bytes = CASE WHEN request_timing_daily.sum_bytes IS NULL OR excluded.sum_bytes IS NULL "
+                "THEN NULL ELSE request_timing_daily.sum_bytes + excluded.sum_bytes END, "
+                "max_bytes = CASE WHEN request_timing_daily.max_bytes IS NULL OR excluded.max_bytes IS NULL "
+                "THEN NULL ELSE GREATEST(request_timing_daily.max_bytes, excluded.max_bytes) END, "
                 "buckets = list_transform(list_zip(request_timing_daily.buckets, excluded.buckets), "
                 "bucket -> bucket[1] + bucket[2])",
                 params,
             )
         if slow:
-            values = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in slow)
+            values = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in slow)
             slow_params = [
                 value
                 for row in slow
                 for value in (row.ts, row.method, row.route, row.status, row.duration_ms,
-                              row.dbq_ms, row.db_ms, row.dbq_read_ms, row.db_read_ms,
+                              row.dbq_ms, row.db_ms, row.response_bytes, row.dbq_read_ms, row.db_read_ms,
                               row.dbq_bulk_ms, row.db_bulk_ms)
             ]
             cur.execute(
-                "INSERT INTO request_slow (ts, method, route, status, dur_ms, dbq_ms, db_ms, "
+                "INSERT INTO request_slow (ts, method, route, status, dur_ms, dbq_ms, db_ms, response_bytes, "
                 "dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms) VALUES " + values,
                 slow_params,
             )
@@ -298,7 +323,7 @@ def window_start(days: int) -> date:
 def query_route_timing(conn, days: int) -> list[tuple]:
     """Return route timing rows for the inclusive UTC day window."""
     return conn.execute(
-        "SELECT day, method, route, status_class, count, max_ms, buckets "
+        "SELECT day, method, route, status_class, count, max_ms, buckets, sum_bytes, max_bytes "
         "FROM request_timing_daily WHERE day >= ?", (window_start(days),),
     ).fetchall()
 

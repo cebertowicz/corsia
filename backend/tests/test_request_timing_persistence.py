@@ -27,10 +27,10 @@ def analytics(tmp_path, monkeypatch):
     analytics_db._reset_for_tests()
 
 
-def _aggregate(*durations: float) -> request_timing.Aggregate:
+def _aggregate(*durations: float, response_bytes: int | None = 0) -> request_timing.Aggregate:
     aggregate = request_timing.Aggregate()
     for duration in durations:
-        aggregate.add(duration)
+        aggregate.add(duration, response_bytes)
     return aggregate
 
 
@@ -45,32 +45,35 @@ def _record(route: str = "/x") -> None:
 
 
 def test_write_batch_merges_into_existing_daily_row(analytics):
-    request_timing.write_batch({_KEY: _aggregate(1, 300)}, [])
-    request_timing.write_batch({_KEY: _aggregate(1, 5_000)}, [])
+    request_timing.write_batch({_KEY: _aggregate(1, 300, response_bytes=100)}, [])
+    request_timing.write_batch({_KEY: _aggregate(1, 5_000, response_bytes=400)}, [])
 
-    count, sum_ms, max_ms, buckets = analytics.execute(
-        "SELECT count, sum_ms, max_ms, buckets FROM request_timing_daily"
+    count, sum_ms, max_ms, sum_bytes, max_bytes, buckets = analytics.execute(
+        "SELECT count, sum_ms, max_ms, sum_bytes, max_bytes, buckets FROM request_timing_daily"
     ).fetchone()
     expected = [left + right for left, right in zip(_aggregate(1, 300).buckets, _aggregate(1, 5_000).buckets, strict=True)]
-    assert (count, sum_ms, max_ms) == (4, 5_302, 5_000)
+    assert (count, sum_ms, max_ms, sum_bytes, max_bytes) == (4, 5_302, 5_000, 1_000, 400)
     assert buckets == expected
 
 
 def test_write_batch_inserts_slow_rows(analytics):
     request_timing.write_batch({}, [_slow("/a"), _slow("/b")])
 
-    rows = analytics.execute("SELECT route, status, dur_ms, dbq_ms, db_ms FROM request_slow ORDER BY route").fetchall()
-    assert rows == [("/a", 200, 1_200, 2, 3), ("/b", 200, 1_200, 2, 3)]
+    rows = analytics.execute("SELECT route, status, dur_ms, dbq_ms, db_ms, response_bytes FROM request_slow ORDER BY route").fetchall()
+    assert rows == [("/a", 200, 1_200, 2, 3, None), ("/b", 200, 1_200, 2, 3, None)]
 
 
 def test_write_batch_persists_per_lane_columns_and_leaves_unmeasured_null(analytics):
-    laned = request_timing.SlowRequest(datetime.now(UTC), "GET", "/laned", 200, 1_200, 9, 8, 4, 3, 2, 1)
+    laned = request_timing.SlowRequest(
+        datetime.now(UTC), "GET", "/laned", 200, 1_200, 9, 8, response_bytes=4,
+        dbq_read_ms=3, db_read_ms=2, dbq_bulk_ms=1, db_bulk_ms=0,
+    )
     request_timing.write_batch({}, [laned, _slow("/unlaned")])
 
     rows = analytics.execute(
-        "SELECT route, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms FROM request_slow ORDER BY route"
+        "SELECT route, response_bytes, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms FROM request_slow ORDER BY route"
     ).fetchall()
-    assert rows == [("/laned", 4, 3, 2, 1), ("/unlaned", None, None, None, None)]
+    assert rows == [("/laned", 4, 3, 2, 1, 0), ("/unlaned", None, None, None, None, None)]
 
 
 def test_bootstrap_adds_lane_columns_to_an_existing_file_as_unknown(tmp_path, monkeypatch):
@@ -90,12 +93,45 @@ def test_bootstrap_adds_lane_columns_to_an_existing_file_as_unknown(tmp_path, mo
     analytics_db._reset_for_tests()
     try:
         row = analytics_db.get_db().execute(
-            "SELECT route, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms FROM request_slow"
+            "SELECT route, response_bytes, dbq_read_ms, db_read_ms, dbq_bulk_ms, db_bulk_ms FROM request_slow"
         ).fetchone()
     finally:
         analytics_db._reset_for_tests()
 
-    assert row == ("/before", None, None, None, None)
+    assert row == ("/before", None, None, None, None, None)
+
+
+def test_bootstrap_keeps_bytes_unknown_when_merging_an_old_daily_row(tmp_path, monkeypatch):
+    import duckdb
+
+    path = tmp_path / "old-timing.duckdb"
+    old = duckdb.connect(str(path))
+    old.execute(
+        "CREATE TABLE request_timing_daily (day DATE NOT NULL, method VARCHAR NOT NULL, route VARCHAR NOT NULL, "
+        "status_class VARCHAR NOT NULL, count BIGINT NOT NULL, sum_ms DOUBLE NOT NULL, max_ms DOUBLE NOT NULL, "
+        "buckets INTEGER[] NOT NULL, PRIMARY KEY (day, method, route, status_class))"
+    )
+    old.execute(
+        "INSERT INTO request_timing_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (*_KEY, 1, 2, 2, [1]),
+    )
+    old.close()
+    monkeypatch.setattr(analytics_db, "ANALYTICS_DB_PATH", path)
+    monkeypatch.delenv("CORSIA_ANALYTICS_DISABLE", raising=False)
+    analytics_db._reset_for_tests()
+    try:
+        analytics = analytics_db.get_db()
+        assert analytics.execute(
+            "SELECT sum_bytes, max_bytes FROM request_timing_daily WHERE route = '/x'"
+        ).fetchone() == (None, None)
+
+        request_timing.write_batch({_KEY: _aggregate(3, response_bytes=500)}, [])
+        assert analytics.execute(
+            "SELECT count, sum_bytes, max_bytes FROM request_timing_daily WHERE route = '/x'"
+        ).fetchone() == (2, None, None)
+    finally:
+        request_timing._reset_for_tests()
+        analytics_db._reset_for_tests()
 
 
 def test_write_batch_failure_rolls_back_the_whole_batch(analytics):
@@ -175,8 +211,8 @@ async def test_flush_loop_cancellation_flushes_once(analytics, monkeypatch):
 
 def test_prune_retention_keeps_boundary_date_and_timestamp(analytics):
     now = datetime(2026, 9, 25, tzinfo=UTC)
-    analytics.execute("INSERT INTO request_timing_daily VALUES ('2026-06-26', 'GET', '/old', '2xx', 1, 1, 1, [1])")
-    analytics.execute("INSERT INTO request_timing_daily VALUES ('2026-06-27', 'GET', '/edge', '2xx', 1, 1, 1, [1])")
+    analytics.execute("INSERT INTO request_timing_daily (day, method, route, status_class, count, sum_ms, max_ms, buckets) VALUES ('2026-06-26', 'GET', '/old', '2xx', 1, 1, 1, [1])")
+    analytics.execute("INSERT INTO request_timing_daily (day, method, route, status_class, count, sum_ms, max_ms, buckets) VALUES ('2026-06-27', 'GET', '/edge', '2xx', 1, 1, 1, [1])")
     insert_slow = "INSERT INTO request_slow (ts, method, route, status, dur_ms, dbq_ms, db_ms) VALUES (?, 'GET', ?, 200, 1, 0, 0)"
     analytics.execute(insert_slow, (now - timedelta(days=30, microseconds=1), "/old"))
     analytics.execute(insert_slow, (now - timedelta(days=30), "/edge"))
@@ -192,7 +228,7 @@ def test_route_query_window_is_inclusive_of_today(analytics, days, expected):
     today = datetime.now(UTC).date()
     for route, age in (("/today", 0), ("/edge", 2), ("/outside", 3)):
         analytics.execute(
-            "INSERT INTO request_timing_daily VALUES (?, 'GET', ?, '2xx', 1, 1, 1, [1])",
+            "INSERT INTO request_timing_daily (day, method, route, status_class, count, sum_ms, max_ms, buckets) VALUES (?, 'GET', ?, '2xx', 1, 1, 1, [1])",
             (today - timedelta(days=age), route),
         )
 
