@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
-	import { fetchLocalModelRecommendations, fetchSources } from '$lib/conductorSources';
+	import { localDownloadMeta, localDownloadRows } from '$lib/stores/localModelDownloadRows';
 	import {
 		providerModels,
 		loadProviderModelsFor,
@@ -96,7 +96,6 @@
 	const toggleLabels = $derived<[string, string]>(
 		isHarness ? ['Hide from picker', 'Show in picker'] : catalogOnly ? ['Turn off', 'Turn on'] : ['Unload', 'Load'],
 	);
-
 	function _hasTransitionalModel(): boolean {
 		for (const m of models) {
 			if (m.state === 'loading' || m.state === 'cache_warming' || m.state === 'queued') {
@@ -105,7 +104,6 @@
 		}
 		return false;
 	}
-
 	async function _pollTick() {
 		if (!polling) return;
 		await pollJobsFor(provider.raw, provider.server);
@@ -120,49 +118,26 @@
 		const next = active ? POLL_ACTIVE_MS : POLL_IDLE_MS;
 		pollHandle = setTimeout(_pollTick, next);
 	}
-
 	function _ensurePolling() {
 		if (polling) return;
 		polling = true;
 		lastActiveAt = Date.now();
 		pollHandle = setTimeout(_pollTick, POLL_ACTIVE_MS);
 	}
-	async function refreshLocalDownload() {
-		if (provider.name !== 'omlx') return;
-		const t = get(token);
-		if (!t) return;
-		try {
-			hasLocalDownload = (await fetchSources(t)).some((source) => source.source === 'omlx' && source.settings_download);
-		} catch { /* Keep the last known download state until the next source update. */ }
-	}
-
-	async function refreshLocalDownloadSpeeds() {
+	async function refreshLocalDownloads() {
 		if (provider.name !== 'omlx' || !provider.server?.id) return;
 		const t = get(token);
 		if (!t) return;
-		try {
-			const body = await fetchLocalModelRecommendations(t);
-			const entries = (body.downloads ?? []).filter((entry) =>
-				entry.status === 'available' && entry.server_id === provider.server?.id &&
-				typeof entry.speed === 'number' && Number.isFinite(entry.speed),
-			);
-			downloadSpeeds = new Map(entries.map((entry) => [entry.repository.split('/').at(-1)!, entry.speed!]));
-		} catch { /* The canonical server rows remain useful without optional measured speed. */ }
+		const rows = await localDownloadRows(t, provider.server.id);
+		if (rows.active !== undefined) hasLocalDownload = rows.active;
+		if (rows.speeds !== undefined) downloadSpeeds = rows.speeds;
 	}
-
-	function downloadSpeed(model: ProviderModel): number | null {
-		return downloadSpeeds.get(model.id) ?? null;
-	}
-
-	function displayMeta(model: ProviderModel): string {
-		const speed = downloadSpeed(model);
-		if (speed === null) return model.meta;
-		const shown = Number.isInteger(speed) ? String(speed) : String(Number(speed.toFixed(1)));
-		return [model.meta, `${shown} tokens/s`].filter(Boolean).join(' · ');
+	function downloadSpeed(model: ProviderModel): number | undefined {
+		return downloadSpeeds.get(model.id);
 	}
 
 	onMount(() => {
-		void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownload(), refreshLocalDownloadSpeeds()]).then(() => {
+		void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownloads()]).then(() => {
 			if (!catalogOnly) {
 				void pollJobsFor(provider.raw, provider.server);
 				_ensurePolling();
@@ -170,7 +145,7 @@
 		});
 		if (provider.name === 'omlx') {
 			stopLocalUpdates = on('models_updated', () => {
-				void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownload(), refreshLocalDownloadSpeeds()]);
+				void Promise.all([loadProviderModelsFor(provider.raw, provider.server), refreshLocalDownloads()]);
 			});
 		}
 	});
@@ -188,7 +163,6 @@
 		loadModels();
 		if (detailsFor) detailsFor = models.find((m) => m.id === detailsFor?.id) ?? detailsFor;
 	}
-
 	async function _doLoad(m: ProviderModel) {
 		const r = await loadModel(provider.raw, provider.server, m.id, m.dbId);
 		if (!r.ok) {
@@ -198,7 +172,6 @@
 		await loadProviderModelsFor(provider.raw, provider.server);
 		loadModels();
 	}
-
 	async function _doUnload(m: ProviderModel) {
 		const r = await unloadModel(provider.raw, provider.server, m.id, m.dbId);
 		if (!r.ok) {
@@ -208,7 +181,6 @@
 		await loadProviderModelsFor(provider.raw, provider.server);
 		loadModels();
 	}
-
 	async function _checkAndLoad(m: ProviderModel) {
 		const estimatedGb = m.sizeBytes ? m.sizeBytes / (1024 ** 3) : 0;
 		if (!isLocal || estimatedGb <= 0) {
@@ -243,7 +215,6 @@
 			await _doLoad(m);
 		}
 	}
-
 	async function handleToggleModel(m: ProviderModel) {
 		actionError = '';
 		if (m.state === 'loaded') {
@@ -256,7 +227,6 @@
 			await _checkAndLoad(m);
 		}
 	}
-
 	async function handleCancel(m: ProviderModel) {
 		actionError = '';
 		if (!m.jobId) {
@@ -268,16 +238,13 @@
 		if (!r.ok) actionError = r.message ?? 'Cancel failed';
 		await loadProviderModelsFor(provider.raw, provider.server);
 	}
-
 	async function handleRetry(m: ProviderModel) {
 		actionError = '';
 		await _checkAndLoad(m);
 	}
-
 	function requestDownloadDeletion(model: ProviderModel) {
 		deleteCandidate = model;
 	}
-
 	async function refreshAfterDownloadDeletion() {
 		await loadProviderModelsFor(provider.raw, provider.server);
 		loadModels();
@@ -342,7 +309,7 @@
 			<ModelRow
 				name={m.name}
 				state={m.state}
-				meta={displayMeta(m)}
+				meta={localDownloadMeta(m.meta, downloadSpeed(m))}
 				caps={m.caps}
 				warning={chatPickerWarning($catalogModels, m.dbId, isExternal)}
 				toggleOn={true}
@@ -363,7 +330,7 @@
 			<ModelRow
 				name={m.name}
 				state={m.state}
-				meta={displayMeta(m)}
+				meta={localDownloadMeta(m.meta, downloadSpeed(m))}
 				caps={m.caps}
 				progress={m.progress}
 				onCancel={() => handleCancel(m)}
@@ -383,9 +350,9 @@
 			<ModelRow
 				name={m.name}
 				state={m.state}
-				meta={displayMeta(m)}
+				meta={localDownloadMeta(m.meta, downloadSpeed(m))}
 				caps={m.caps}
-				note={downloadSpeed(m) !== null ? 'Settings measured on Macs like this one · omlx.ai' : null}
+				note={downloadSpeed(m) !== undefined ? 'Settings measured on Macs like this one · omlx.ai' : null}
 				toggleOn={false}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
@@ -407,7 +374,6 @@
 		<ProviderLocalModelControls onStarted={() => { void loadProviderModelsFor(provider.raw, provider.server); void refreshLocalDownload(); loadModels(); }} {onAddProvider} />
 	{/if}
 {/if}
-
 
 <style>
 	.section {
