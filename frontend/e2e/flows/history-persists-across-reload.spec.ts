@@ -1,16 +1,6 @@
 
 import { expect, test, type Page } from '@playwright/test';
-import {
-	assistantMessages,
-	chatComposer,
-	e2eModel,
-	loginByUrl,
-	saveEvidenceScreenshot,
-	sendChatMessage,
-	TEST_TOKEN,
-	userMessages,
-	waitForWsConnected,
-} from '../support/corsia';
+import { assistantMessages, chatComposer, e2eModel, loginByUrl, saveEvidenceScreenshot, sendChatMessage, TEST_TOKEN, userMessages, waitForWsConnected, sidebarThread } from '../support/corsia';
 
 const TRIM_FIX_LANDED = process.env.CORSIA_E2E_TRIM_FIX === '1';
 
@@ -39,7 +29,7 @@ test.describe('@flow:history @surface:chat history persists across reload', () =
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).click({ timeout: 10_000 });
+		await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
 
 		await waitForWsConnected(page);
 

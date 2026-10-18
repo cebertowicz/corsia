@@ -1,12 +1,6 @@
 
 import { expect, test, type Page } from '@playwright/test';
-import {
-	captureConsoleErrors,
-	createSession,
-	saveEvidenceScreenshot,
-	TEST_TOKEN,
-	waitForWsConnected,
-} from '../support/corsia';
+import { captureConsoleErrors, createSession, openAppPastLanding, saveEvidenceScreenshot, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { focusSetting } from '../support/focusOutcomeProof';
 import { setFocusMode } from '../support/focusMode';
 
@@ -44,8 +38,7 @@ test.describe('@flow:paging @surface:chat conversation message paging', () => {
 			});
 		});
 
-		await page.goto(`/?token=${TEST_TOKEN}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		// Focus is on by default since #565 and hides finished work; this spec counts raw rows.
 		await focusSetting(page, false);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
@@ -120,14 +113,13 @@ test.describe('@flow:paging @surface:chat conversation message paging', () => {
 			}
 		});
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		// Focus is on by default since #565 and hides finished work; this spec counts raw rows.
 		await focusSetting(page, false);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).click({ timeout: 10_000 });
+		await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 
 		// MessageList.svelte pages on its own when the view cannot scroll (10 short rows), so the held fetch is already
@@ -193,14 +185,13 @@ test.describe('@flow:paging @surface:chat conversation message paging', () => {
 			}
 		});
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		// Focus is on by default since #565 and hides finished work; this spec counts raw rows.
 		await focusSetting(page, false);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).click({ timeout: 10_000 });
+		await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 
 		// The view cannot scroll, so MessageList.svelte pages on its own and the first (failing) fetch runs unprompted.
@@ -256,20 +247,21 @@ test.describe('@flow:paging @surface:chat conversation message paging', () => {
 			});
 		});
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		// Focus is on by default since #565 and hides finished work; this spec counts raw rows.
 		await focusSetting(page, false);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).click({ timeout: 10_000 });
+		await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 		await expect(page.locator('.message')).toHaveCount(50);
 
 		const messages = page.locator('.messages');
+		// A wheel gesture is what a person does: it ends any programmatic pin to the bottom that still ignores scroll events.
 		await messages.evaluate((el) => { el.scrollTop = 0; });
-		await messages.dispatchEvent('scroll');
+		await messages.hover();
+		await page.mouse.wheel(0, -600);
 		await expect.poll(() => olderFetches).toBe(1);
 		await expect(page.locator('.message')).toHaveCount(100);
 
@@ -278,8 +270,10 @@ test.describe('@flow:paging @surface:chat conversation message paging', () => {
 		expect(await page.evaluate(() => document.visibilityState)).toBe('visible');
 		await expect.poll(() => firstPageFetches).toBe(2);
 
+		// A wheel gesture is what a person does: it ends any programmatic pin to the bottom that still ignores scroll events.
 		await messages.evaluate((el) => { el.scrollTop = 0; });
-		await messages.dispatchEvent('scroll');
+		await messages.hover();
+		await page.mouse.wheel(0, -600);
 		await expect.poll(() => olderFetches).toBe(2);
 		await expect(page.locator('.message')).toHaveCount(100);
 		await expect(page.locator('.message').first()).toContainText('Transcript message 1');

@@ -1,10 +1,6 @@
 import { expect, test } from '@playwright/test';
-import {
-	captureConsoleErrors,
-	createSession,
-	TEST_TOKEN,
-	waitForWsConnected,
-} from '../support/corsia';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, sidebarThread } from '../support/corsia';
+import { setFocusMode } from '../support/focusMode';
 import { injectMessage } from '../support/mock';
 
 const WIDE_TABLE = [
@@ -15,12 +11,19 @@ const WIDE_TABLE = [
 ].join('\n');
 
 test.describe('@flow:agent-table-mobile-overflow @surface:chat agent-sent table stays inside the bubble on mobile', () => {
+	// Focus collapses an agent message into a chip; the table only renders in the bubble with Focus off. Focus is a
+	// persisted server setting shared by every later spec, so restore it even when the test fails.
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
+	});
+
 	test('wide agent-sent table scrolls internally, never clips the viewport or widens the bubble', async ({
 		page,
 		request,
 	}, testInfo) => {
 		test.skip((page.viewportSize()?.width ?? 0) > 768, 'mobile-only reproduction');
 
+		await setFocusMode(request, false);
 		const consoleErrors = captureConsoleErrors(page);
 		const sessionTitle = `e2e agent-table-mobile-overflow ${Date.now()}`;
 		const sessionId = await createSession(request, sessionTitle);
@@ -40,12 +43,9 @@ test.describe('@flow:agent-table-mobile-overflow @surface:chat agent-sent table 
 			TEST_TOKEN,
 		);
 
-		await page.goto(`/?token=[REDACTED]}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({
-			timeout: 20_000,
-		});
+		await openAppPastLanding(page);
 		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-		await page.getByText(sessionTitle).click({ timeout: 10_000 });
+		await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 
 		const agentRow = page

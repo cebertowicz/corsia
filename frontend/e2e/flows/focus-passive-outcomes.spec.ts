@@ -76,7 +76,8 @@ for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 			await focusSetting(page, true);
 			await openOutcomeThread(page, proof.titles[0]);
 			await page.reload();
-			await expect(page.locator('.messages')).toBeVisible();
+			// A reload lands on Activity once the first run is over, so the shell is the ready signal.
+			await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
 			await openOutcomeThread(page, proof.titles[0]);
 			await expandLoadedWork(page);
 			await expect(page.locator('.passive-outcomes')).toHaveCount(4);
