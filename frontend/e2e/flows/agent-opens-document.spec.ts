@@ -171,7 +171,19 @@ test(`@surface:agent-opens-document compact links from chat and never replaces t
 	// Tapping the link opens exactly B.
 	await chatButton.click();
 	await revealWorked(page);
-	await page.getByRole('link', { name: 'Open B', exact: true }).last().click();
+	// The newest link sits under the composer, so the press scrolls it into view first, and leaving the live edge
+	// drops the list's bottom spacing, which slides the link out from under the pointer mid-press. Scroll it
+	// to the middle and wait for the list to stop moving, so the press lands on a link that is not about to move.
+	const openB = page.getByRole('link', { name: 'Open B', exact: true }).last();
+	await openB.evaluate((link) => link.scrollIntoView({ block: 'center' }));
+	let previous = '';
+	await expect.poll(async () => {
+		const box = JSON.stringify(await openB.boundingBox());
+		const still = box === previous;
+		previous = box;
+		return still;
+	}, { intervals: [100] }).toBe(true);
+	await openB.click();
 	await expect.poll(() => activeArtifactId(page, threadId)).toBe(b.artifactId);
 	await expect.poll(async () => (await canvasState(page, threadId)).tabs).toHaveLength(2);
 	await expect(editor).toContainText(b.name);
