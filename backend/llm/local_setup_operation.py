@@ -145,3 +145,18 @@ def unlock(handle: IO[str] | None) -> None:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     finally:
         handle.close()
+
+
+def finish(flight: Any, result: dict) -> dict:
+    """Record a flight's terminal result on ``flight`` and release the operation (setup and Settings)."""
+    flight.result = result
+    flight.stage = None
+    flight.following = False
+    if not result.get("downloading"):
+        # A finished task needs no follow, and a terminal oMLX error cannot be
+        # followed: removing its task id lets an explicit retry create one new
+        # task instead of replaying it. A still-downloading task keeps its id.
+        clear()
+    unlock(flight.operation_lock)
+    flight.operation_lock = None
+    return result

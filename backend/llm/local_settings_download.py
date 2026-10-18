@@ -108,7 +108,7 @@ async def _run_flight(model: LocalModel) -> dict:
         local_downloads.write(local_downloads.Download(
             model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
         ))
-    return ls._finish_flight(result)
+    return ls.local_setup_operation.finish(ls._flight, result)
 
 
 async def begin(model: LocalModel) -> dict:

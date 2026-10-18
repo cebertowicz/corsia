@@ -278,7 +278,7 @@ async def _run_flight(*, model: LocalModel | None = None, into_own_omlx: bool = 
         log.exception("Local setup failed")
         result = {**local_setup_error(_failure_message(exc)), "progress": events}
         _emit("failed", error_type=type(exc).__name__)
-    return _finish_flight(result)
+    return local_setup_operation.finish(_flight, result)
 
 
 def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
@@ -290,20 +290,6 @@ def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
         "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.",
         "progress": events,
     }
-
-
-def _finish_flight(result: dict) -> dict:
-    """Record a flight's terminal result and release it (setup and Settings)."""
-    _flight.result = result
-    _flight.stage = None
-    _flight.following = False
-    if not result.get("downloading"):
-        # A finished task needs no follow, and a terminal oMLX error cannot be
-        # followed: removing its task id lets an explicit retry create one new
-        # task instead of replaying it. A still-downloading task keeps its id.
-        local_setup_operation.clear()
-    _release_operation_lock()
-    return result
 
 
 def flight_task() -> asyncio.Task | None:
