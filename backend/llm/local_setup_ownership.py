@@ -321,7 +321,7 @@ def require_free_disk(download_bytes: int, model_dir: Path | None, repository: s
     if space["state"] == "insufficient":
         short = (needed - free) / 1000**3
         raise DiskSpaceError(
-            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this Mac has "
+            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this computer has "
             f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.")
 
 

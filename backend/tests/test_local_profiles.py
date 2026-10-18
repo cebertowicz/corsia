@@ -175,7 +175,7 @@ def test_disk_check_fails_with_the_space_needed_and_passes_with_room(monkeypatch
     model_dir = tmp_path / "missing" / "models"
     size = 106_318_234_757
     monkeypatch.setattr(own.shutil, "disk_usage", lambda _p: usage(0, 0, int(size * 1.1) - 1))
-    with pytest.raises(own.DiskSpaceError, match=r"needs 117 GB of free disk space and this Mac has 117 GB"):
+    with pytest.raises(own.DiskSpaceError, match=r"needs 117 GB of free disk space and this computer has 117 GB"):
         own.require_free_disk(size, model_dir, REPO)
     monkeypatch.setattr(own.shutil, "disk_usage", lambda _p: usage(0, 0, 50 * 1000**3))
     with pytest.raises(own.DiskSpaceError, match=r"Free up about 67 GB"):
@@ -318,7 +318,7 @@ def test_a_full_disk_fails_the_flight_before_the_download_is_requested(monkeypat
         requested.append(chosen.repository)
 
     def full(*_args):
-        raise RuntimeError("This download needs 117 GB of free disk space and this Mac has 1 GB.")
+        raise RuntimeError("This download needs 117 GB of free disk space and this computer has 1 GB.")
 
     wrote = _fake_new_omlx(monkeypatch, download, disk=full)
 
