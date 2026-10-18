@@ -4,6 +4,8 @@ import { expect, type BrowserContext, type Page, type WebSocketRoute } from '@pl
 export async function routeDocumentSaves(context: BrowserContext, delayMs = 0) {
 	let delay = delayMs;
 	let blocked = false;
+	let gate: Promise<void> | undefined;
+	let openGate: (() => void) | undefined;
 	let starts = 0;
 	let completed = 0;
 	const sockets: Array<{ page: WebSocketRoute; server: WebSocketRoute }> = [];
@@ -18,6 +20,14 @@ export async function routeDocumentSaves(context: BrowserContext, delayMs = 0) {
 		});
 		server.onMessage(message => {
 			const type = JSON.parse(String(message)).type;
+			if (gate && (type === 'doc_saved' || (type === 'doc_ack' && starts > 0))) {
+				void gate.then(() => {
+					if (blocked) return;
+					if (type === 'doc_saved') completed += 1;
+					page.send(message);
+				});
+				return;
+			}
 			if (type !== 'doc_saved' && !(type === 'doc_ack' && starts > 0 && delay > 0)) { page.send(message); return; }
 			const timer = setTimeout(() => {
 				timers.delete(timer);
@@ -33,6 +43,9 @@ export async function routeDocumentSaves(context: BrowserContext, delayMs = 0) {
 		get starts() { return starts; },
 		get completed() { return completed; },
 		setDelay(ms: number) { delay = ms; },
+		/** Hold save replies until release(), for a cue that must outlast a slow page rather than a fixed delay. */
+		hold() { gate = new Promise<void>(resolve => { openGate = resolve; }); },
+		release() { gate = undefined; openGate?.(); },
 		async cut() {
 			blocked = true;
 			for (const timer of timers) clearTimeout(timer);
