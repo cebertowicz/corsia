@@ -1,7 +1,7 @@
 """Setup's first chat moves to Claude Code or Codex when the person's sign-in finishes.
 
 Three guards keep it narrow: only the first chat setup created, only if the person has not
-picked a model in it since, and only once per sign-in operation.
+picked a model in it since, and only while no first-chat switch is in flight.
 """
 
 from __future__ import annotations
@@ -138,10 +138,10 @@ class TestGuards:
         _thread(agent, pending_model="opus")
         assert _run_claim("account-1:1") is None
 
-    def test_guard_3_the_same_operation_asks_once(self, agent):
+    def test_guard_3_a_second_claim_is_refused_while_the_first_is_in_flight(self, agent):
         hook.record_first_model(agent, LOCAL)
         assert _run_claim("account-1:1") == (agent, CLOUD)
-        assert _run_claim("account-1:1") is None
+        assert _run_claim("account-2:1") is None
 
     def test_no_listed_model_for_the_tool_means_no_switch_and_nothing_claimed(self, agent):
         hook.record_first_model(agent, LOCAL)
@@ -187,7 +187,7 @@ class TestGuards:
             )
             hook.record_first_model(agent, LOCAL)
             assert hook.claim_switch("claude-code", "account-1:1", account_id=_account_id(), db=db) is None
-            assert get_setting(hook.SETTINGS_KEY, db=db)["handled"] == []
+            assert get_setting(hook.SETTINGS_KEY, db=db)["claimed"] is None
         finally:
             db.close()
 
@@ -208,13 +208,14 @@ class TestSwitch:
         assert door.await_args.kwargs["checkpoint_override"] == "target"
         assert door.await_args.kwargs["account_id"] == _account_id()
 
-    async def test_a_repeated_ready_signal_is_a_no_op(self, agent, monkeypatch):
+    async def test_a_later_completion_after_success_is_a_no_op(self, agent, monkeypatch):
         hook.record_first_model(agent, LOCAL)
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
 
-        await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
-        again = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
+        assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id()) is True
+        _thread(agent, model=CLOUD, execution_epoch=1)
+        again = await hook.switch_when_ready("claude-code", "account-2:1", user_id="u1", account_id=_account_id())
 
         assert again is False
         door.assert_awaited_once()
@@ -225,18 +226,16 @@ class TestSwitch:
 
         assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id()) is False
 
-    async def test_a_failed_switch_does_not_leave_the_operation_handled(self, agent, monkeypatch):
+    async def test_a_failed_switch_releases_the_claim_for_a_different_completion(self, agent, monkeypatch):
         hook.record_first_model(agent, LOCAL)
         monkeypatch.setattr("thread.model.switch_model", AsyncMock(side_effect=RuntimeError("refused")))
-        await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
+        assert await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id()) is False
 
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
-        retried = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
-        again = await hook.switch_when_ready("claude-code", "account-1:1", user_id="u1", account_id=_account_id())
+        retried = await hook.switch_when_ready("claude-code", "account-2:1", user_id="u1", account_id=_account_id())
 
         assert retried is True
-        assert again is False
         door.assert_awaited_once()
 
 
