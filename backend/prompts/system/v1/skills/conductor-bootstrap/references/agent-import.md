@@ -18,7 +18,7 @@ The read returns `result`, `excerpts`, and `skipped_files`. Each excerpt is quot
 
 - `nothing_found` (no skills either): post `I looked, and they don’t hold much about you, so I kept nothing.` and carry on.
 - `read_failed`: post `I couldn’t read them this time, so I kept nothing. Ask me any time to try again.` and carry on.
-- `read`: on a re-run, first drop each excerpt whose `sha256` already appears in its recorded import provenance. Check the same sha256 in `search_knowledge`, the `USER.md` field’s import provenance, and the created dated task’s import provenance. When nothing is left: `Nothing new to bring over.` Otherwise post at most 15 items, one line each, ticked unless marked, each ending with *(tool, age since `changed`)*:
+- `read`: on a re-run, first drop each excerpt whose `sha256` you already kept: it appears in `search_knowledge`, in a `sha256` comment in `USER.md`, or in a task description. When nothing is left: `Nothing new to bring over.` Otherwise post at most 15 items, one line each, ticked unless marked, each ending with *(tool, age since `changed`)*:
 
 > Here’s what they know about you. Say "keep them", or tell me what to untick or fix.
 >
@@ -30,7 +30,7 @@ The read returns `result`, `excerpts`, and `skipped_files`. Each excerpt is quot
 
 Leave out an empty group. With more than 15, end with `I found [N] more. Say "show more" to see the next 15.`
 
-Keep only what the person confirmed: About you fields into the workspace `USER.md` (as step 1 does; place sets the time zone) with that excerpt’s sha256 in the field’s import provenance; each preference with `write_knowledge` at workspace scope, type preference, its source as `[tool] [file], imported [date], sha256 [sha256]`; a ticked dated item as a task with that excerpt’s sha256 in its import provenance. Nothing else, and never a key or password. Then post `Kept [N] things about you and how you work.`
+Keep only what the person confirmed: About you fields into the workspace `USER.md` (as step 1 does; place sets the time zone) each field followed by `<!-- imported sha256 [sha256] -->`; each preference with `write_knowledge` at workspace scope, type preference, its source as `[tool] [file], imported [date], sha256 [sha256]`; a ticked dated item as a task whose description ends `Imported from [tool] [file], sha256 [sha256].` Nothing else, and never a key or password. Then post `Kept [N] things about you and how you work.`
 
 ## Your skills
 
