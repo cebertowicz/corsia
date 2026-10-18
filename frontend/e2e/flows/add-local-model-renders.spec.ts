@@ -130,7 +130,7 @@ test('renders the approved local-model evidence states from intercepted fixtures
 				if (state === 'recommendations') {
 					await card.getByRole('button', { name: 'Add model', exact: true }).click();
 					const sheet = page.locator('.modal').filter({ hasText: 'Add model' });
-					await expect(sheet).toContainText('Picked for this Mac · 64 GB · 20 GB disk free');
+					await expect(sheet).toContainText('Picked for this computer · 64 GB · 20 GB disk free');
 					await expect(sheet).toContainText('Recommended');
 					// oMLX speeds are relative to the first best row, so the recommended row carries no speed word.
 					await expect(sheet).toContainText('262k context · 4-bit · 16 GB');

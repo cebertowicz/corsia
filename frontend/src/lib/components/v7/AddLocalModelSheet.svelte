@@ -23,18 +23,18 @@
 		loading = true; error = '';
 		const t = get(token);
 		if (!t) {
-			error = "Couldn't check which models fit this Mac.";
+			error = "Couldn't check which models fit this computer.";
 			loading = false;
 			return;
 		}
 		try {
 			const body = await fetchLocalModelRecommendations(t);
-			if (body?.state !== 'ready') throw new Error(body?.message ?? "Couldn't check which models fit this Mac.");
+			if (body?.state !== 'ready') throw new Error(body?.message ?? "Couldn't check which models fit this computer.");
 			sections = body.sections && typeof body.sections === 'object' ? body.sections : {};
 			downloaded = new Set((body.downloads ?? []).filter((entry) => entry.status === 'available').map((entry) => entry.repository));
 			memoryGb = typeof body.memory_gb === 'number' ? body.memory_gb : null;
 			diskFreeGb = typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null;
-		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't check which models fit this Mac."; }
+		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't check which models fit this computer."; }
 		finally { loading = false; }
 	}
 	async function download(repository: string) {
@@ -70,13 +70,13 @@
 
 <Modal title="Add model" size="sm" {onClose}>
 	{#if loading}
-		<div class="notice"><Spinner /> Checking which models fit this Mac…</div>
+		<div class="notice"><Spinner /> Checking which models fit this computer…</div>
 	{:else if error}
 		<div class="notice error">{error}<Button size="sm" variant="secondary" onclick={load}>Try again</Button></div>
 	{:else if Object.values(sections).every((models) => models.length === 0)}
-		<div class="notice">No recommended models fit this Mac.</div>
+		<div class="notice">No recommended models fit this computer.</div>
 	{:else}
-		<div class="section-line">Picked for this Mac{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
+		<div class="section-line">Picked for this computer{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
 		{#each Object.entries(sections) as [section, models]}
 			{#if models.length}
 				{#if section !== 'best'}<h3>{section}</h3>{/if}

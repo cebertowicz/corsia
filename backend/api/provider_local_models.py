@@ -94,7 +94,7 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
     model = next((item for rows in sections.values() for item in rows if item.repository == repository), None)
     if model is None:
         _clear_failed_record(model_id)
-        raise HTTPException(400, "That model no longer fits this Mac. Pick another from the list.")
+        raise HTTPException(400, "That model no longer fits this computer. Pick another from the list.")
     server = await _server()
     model_dir = await download_dir(str(server["id"]))
     space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
@@ -103,7 +103,7 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
         raise HTTPException(409, "Couldn't check free disk space. Try again.")
     if space["state"] == "insufficient":
         _clear_failed_record(model_id)
-        raise HTTPException(409, "This Mac does not have enough free disk space. Pick another from the list.")
+        raise HTTPException(409, "This computer does not have enough free disk space. Pick another from the list.")
     operation = local_setup_operation.read()
     if operation is not None:
         raise HTTPException(409, f"{operation.model.display_name} is already downloading.")

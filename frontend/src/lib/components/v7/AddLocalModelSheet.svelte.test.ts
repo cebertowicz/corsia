@@ -26,7 +26,7 @@ async function render(body: object) {
 describe('AddLocalModelSheet', () => {
 	it('shows the no-starter empty state when the recommender has no model', async () => {
 		await render({ state: 'ready', sections: {} });
-		expect(host.textContent).toContain('No recommended models fit this Mac.');
+		expect(host.textContent).toContain('No recommended models fit this computer.');
 		expect(host.textContent).not.toContain('Download');
 	});
 
