@@ -15,12 +15,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from connections.connected_accounts import corsia_only_reach, create_google_account, store_google_credentials
 from connections.google import client as google_client
 from connections.google import email_screen, gmail_read
-from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
-from infra.settings import set_setting
 from infra.time import utc_now
 from llm.isolated_structured import (
     IsolatedStructuredTimeoutError,
@@ -112,12 +111,12 @@ def mail(isolated_db, tmp_path, monkeypatch):
         return _REAL_CLIENT(*args, **kwargs)
 
     monkeypatch.setattr(google_client.httpx, "AsyncClient", factory)
-    for name, value in (
-        (key_store.GOOGLE_CLIENT_ID, "id-0123"), (key_store.GOOGLE_CLIENT_SECRET, "secret-0123"),
-        (key_store.GOOGLE_REFRESH_TOKEN, "refresh-0123"),
-    ):
-        key_store.set_managed_value(name, value)
-    set_setting("google_account", {"email": ACCOUNT, "scopes": [], "connected_at": "t", "status": "connected"})
+    account = create_google_account(
+        ACCOUNT, reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
+    )
+    store_google_credentials(str(account["id"]), {
+        "client_id": "id-0123", "client_secret": "secret-0123", "refresh_token": "refresh-0123",
+    })
     model = FakeModel()
 
     async def resolved():
