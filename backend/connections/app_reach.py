@@ -137,7 +137,7 @@ def key_entry_names(app_id: str, config: object) -> set[str]:
 
 
 def key_ref_descriptors(app_id: str, config: object, *, db: sqlite3.Connection) -> list[dict[str, object]]:
-    """Return declared app keys with set state, never their values or value references."""
+    """Return declared app key metadata, including its managed entry name, never a value or value reference."""
     if not isinstance(config, dict) or not isinstance(config.get("key_refs"), list):
         raise AppReachError("invalid app key references")
     from tools.mcp_secrets import entry_name
@@ -158,10 +158,12 @@ def key_ref_descriptors(app_id: str, config: object, *, db: sqlite3.Connection) 
         if not isinstance(ref, dict) or set(ref) != {"kind", "name"}:
             raise AppReachError("invalid app key references")
         field = "secret_env" if ref["kind"] == "env" else "secret_headers"
+        entry = entry_name(app_id, field, ref["name"])
         result.append({
             "kind": ref["kind"],
             "name": ref["name"],
-            "set": entry_name(app_id, field, ref["name"]) in set_entries,
+            "entry": entry,
+            "set": entry in set_entries,
         })
     return result
 

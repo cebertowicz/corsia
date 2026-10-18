@@ -6,6 +6,7 @@ import {
 	openProjectSettings,
 	recordSettingsHomeThread,
 	requestSettingsSection,
+	requestConnectedAppKey,
 	resetSettingsNavigation,
 	returnToProjectPage,
 	openSectionFromProject,
@@ -33,6 +34,12 @@ describe('settings navigation transitions', () => {
 		requestSettingsSection('providers', 'nowhere');
 		selectSettingsSection('keys');
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null });
+	});
+
+	it('clears a Connected apps return route when another Settings section is selected', () => {
+		requestConnectedAppKey('Stripe', 'stripe-key', [{ entry: 'stripe-key', name: 'API key' }]);
+		selectSettingsSection('skills');
+		expect(get(settingsNavigation)).toMatchObject({ section: 'skills', connectedAppKey: null, anchor: null });
 	});
 
 	describe('the thread Settings opened over', () => {

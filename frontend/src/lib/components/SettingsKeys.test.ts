@@ -8,7 +8,7 @@ import SettingsKeys from './SettingsKeys.svelte';
 import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
-import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, requestConnectedAppKey, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { disconnect } from '$lib/ws/connection';
 
 const VALUE = 'BSAmarkup-test-value-0123';
@@ -44,6 +44,7 @@ beforeEach(() => {
 	providerKeys = [];
 	serverKeys = [];
 	providerCardRequest.set(null);
+	resetSettingsNavigation();
 	writeAnswer = { status: 200, body: { key: webSearch } };
 	checkAnswer = { outcome: 'works', reason: null };
 	fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -67,9 +68,9 @@ afterEach(() => {
 	connectionError.set(null);
 });
 
-async function mountKeys() {
+async function mountKeys(firstEntry = 'web-search') {
 	component = mount(SettingsKeys, { target: host });
-	await vi.waitFor(() => expect(host.querySelector('[data-key-entry="web-search"]')).not.toBeNull());
+	await vi.waitFor(() => expect(host.querySelector(`[data-key-entry="${firstEntry}"]`)).not.toBeNull());
 }
 
 function button(card: string, label: string): HTMLButtonElement {
@@ -114,6 +115,27 @@ describe('Settings › Keys', () => {
 		expect(added).toContain('Added by Conductor');
 		expect(added).not.toContain('Used by');
 		expect(added).toContain('Remove');
+	});
+
+	it('labels every referenced card with its app and key name when Connected apps opens a multi-key app', async () => {
+		const originalScroll = HTMLElement.prototype.scrollIntoView;
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		try {
+			entries = [
+				{ ...maps, name: 'linear-primary', label: 'Linear primary key' },
+				{ ...maps, name: 'linear-secondary', label: 'Linear secondary key' },
+			];
+			requestConnectedAppKey('Linear', 'linear-primary', [
+				{ entry: 'linear-primary', name: 'LINEAR_PRIMARY_KEY' },
+				{ entry: 'linear-secondary', name: 'LINEAR_SECONDARY_KEY' },
+			]);
+			await mountKeys('linear-primary');
+			expect(host.querySelector('[data-key-entry="linear-primary"] h3')?.textContent).toBe('Linear key: LINEAR_PRIMARY_KEY');
+			expect(host.querySelector('[data-key-entry="linear-secondary"] h3')?.textContent).toBe('Linear key: LINEAR_SECONDARY_KEY');
+		} finally {
+			if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: originalScroll });
+			else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+		}
 	});
 
 	it('says on the entry card that an environment variable is ignored, and not when none is', async () => {
