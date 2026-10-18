@@ -532,19 +532,21 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 
 		await page.emulateMedia({ reducedMotion: 'no-preference' });
 		await openModelStep(page);
-		const normalAction = page.getByRole('button', { name: 'Use an API key instead' });
+		const normalAction = page.getByRole('region', { name: 'This computer' }).getByRole('button', { name: 'Cancel', exact: true });
 		await normalAction.hover();
 		await page.mouse.down();
 		await page.waitForTimeout(50);
 		await expect.poll(() => normalAction.evaluate((element) => getComputedStyle(element).transform)).not.toBe('none');
+		await page.mouse.move(0, 0); // release off the button so the press is not a Cancel click
 		await page.mouse.up();
 
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await openModelStep(page);
-		const reducedAction = page.getByRole('button', { name: 'Use an API key instead' });
+		const reducedAction = page.getByRole('region', { name: 'This computer' }).getByRole('button', { name: 'Cancel', exact: true });
 		await reducedAction.hover();
 		await page.mouse.down();
 		await expect(reducedAction.evaluate((element) => getComputedStyle(element).transform)).resolves.toBe('none');
+		await page.mouse.move(0, 0);
 		await page.mouse.up();
 	});
 });
