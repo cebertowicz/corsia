@@ -90,7 +90,7 @@
 			<span class="name">Billing</span>
 			<span class="value">{summary.text}</span>
 			{#if !readonly}
-				<span class="edit"><Button size="sm" onclick={begin}>{isSet ? 'Edit' : 'Set price'}</Button></span>
+				<span class="edit"><Button size="sm" variant="ghost" onclick={begin}>{isSet ? 'Edit' : 'Set price'}</Button></span>
 			{/if}
 		</div>
 	{:else}

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { loadProviders } from '$lib/stores/providers';
 	import ProviderManager from './ProviderManager.svelte';
-	import ProvidersPolicyBlock from './ProvidersPolicyBlock.svelte';
 	import SettingsSystem from './SettingsSystem.svelte';
 	import SystemBulletinsSetting from './SystemBulletinsSetting.svelte';
 	import SettingsDebug from './SettingsDebug.svelte';
@@ -128,7 +127,7 @@
 		<div class="section-host">
 			{#if section === 'providers'}
 				<ProviderManager />
-				<div class="policy"><ProvidersPolicyBlock /></div>
+				<!-- Harness account policy lives in each provider window's Accounts tab. -->
 			{:else if section === 'connected-apps'}
 				<h2 class="page-title">Connected apps</h2>
 				<ConnectedAppsSettings />
@@ -212,7 +211,6 @@
 		padding: 0 var(--space-2);
 		font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary);
 	}
-	.policy { margin-top: var(--space-6); padding: 0 var(--space-2); }
 	.mobile-root { display: none; }
 
 	@media (max-width: 768px) {

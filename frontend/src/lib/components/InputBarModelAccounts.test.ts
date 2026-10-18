@@ -185,7 +185,7 @@ describe('model picker account rows', () => {
 		expect(get(settingsNavigation).openRequest).toBe(1);
 		expect(get(settingsNavigation).section).toBe('providers');
 		expect(get(settingsNavigation).project).toBeNull();
-		expect(get(settingsNavigation).anchor).toBe('workspace-provider-policy');
+		expect(get(settingsNavigation).anchor).toBeNull();
 		expect(onclose).toHaveBeenCalledOnce();
 	});
 
