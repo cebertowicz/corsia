@@ -18,6 +18,19 @@ function surfacesFor(projectName: string) {
 	] as const;
 }
 
+function providerPageSurfaces(projectName: string) {
+	if (projectName === 'chromium-desktop') {
+		return [
+			['desktop-light', 1440, 1080, 'light'],
+			['desktop-dark', 1440, 1080, 'dark'],
+		] as const;
+	}
+	return [
+		['phone-light', 393, 852, 'light'],
+		['phone-dark', 393, 852, 'dark'],
+	] as const;
+}
+
 function vendorAccounts() {
 	const account = (id: string, provider: string, name: string, email: string, fiveHourUsed: number, weeklyUsed: number) => ({
 		id, provider, name, is_default: false, state: 'signed_in', revision: 1, identity: {},
@@ -196,7 +209,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 		test.setTimeout(120_000);
 		const state: { screen: ScreenId } = { screen: 'W1' };
 		await servePolicyStates(page, state);
-		for (const [surface, width, height, colorScheme] of surfacesFor(testInfo.project.name)) {
+		for (const [surface, width, height, colorScheme] of providerPageSurfaces(testInfo.project.name)) {
 			await page.setViewportSize({ width, height });
 			await page.emulateMedia({ colorScheme });
 			await loginByUrl(page, { waitForComposer: false });
