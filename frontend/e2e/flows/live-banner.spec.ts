@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { createSession, openAppByUrl, waitForWsConnected } from '../support/corsia';
+import { createSession, openAppByUrl, waitForWsConnected, watchSessionSubscriptions } from '../support/corsia';
 
 const LONG_BASH_PHRASE = "Running grep -rn --hidden --glob='*.ts' 'live work banner truncation must preserve the full command in details' frontend/src backend/tests";
 // transcriptRunLabel.liveLabel joins `Working · <time> · <phrase>` and drops a time its turn summaries do not prove
@@ -42,11 +42,13 @@ test('@surface:live-banner Focus shows a time-first single-line live bash step o
 	test.setTimeout(90_000);
 	const title = `live-banner-proof-${Date.now()}`;
 	const threadId = await createSession(request, title);
+	const subscriptions = watchSessionSubscriptions(page);
 
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await openThread(page, title);
-	// The server's turn snapshot arrives with the thread's first load and replaces local turn state.
+	// The server's turn snapshot arrives with the thread's first load and replaces local turn state, so inject after it.
 	await waitForWsConnected(page);
+	await subscriptions.waitForSubscribed(threadId);
 	await expect(page.getByText("What's on your mind?")).toBeVisible();
 	await showLiveBanner(page, threadId);
 
