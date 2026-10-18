@@ -32,10 +32,10 @@ mod lifecycle;
 mod pairing;
 mod proxy;
 mod release_proof;
-mod remote;
 mod remote_config;
 mod remote_lifecycle;
 mod service_management;
+mod shell_state;
 mod source_lifecycle;
 mod startup_failure;
 #[cfg(test)]
@@ -67,7 +67,7 @@ struct AppServiceState {
 #[derive(Default)]
 struct RemoteRuntime {
     browser: Mutex<Option<discovery::Browser>>,
-    connection: Mutex<remote::RemoteConnection>,
+    shell: Mutex<shell_state::ShellState>,
     proxy: Mutex<Option<proxy::ProxyHandle>>,
 }
 
@@ -107,7 +107,7 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
     })
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 enum ServiceStartup {
     Ready { url: String },
@@ -610,17 +610,26 @@ fn configure_work_folder(
     Ok(())
 }
 
-fn remote_shell_context(connection: &remote::RemoteConnection) -> serde_json::Value {
+fn remote_shell_context(connection: &shell_state::ShellState) -> serde_json::Value {
     match connection.state() {
-        remote::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
+        shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
         _ => serde_json::json!({ "mode": "local" }),
     }
 }
 
-fn remote_startup_state(state: &remote::LaunchState) -> Option<serde_json::Value> {
+/// What a page load hands the window: the shell context, and the script drawing the shell state. A finished load of
+/// any page but the startup shell means a Ready launch answer was followed, so it is not followed again.
+fn page_load_state(connection: &mut shell_state::ShellState, url: &str, finished: bool) -> (serde_json::Value, Option<String>) {
+    if finished && !is_shell_origin(url) {
+        connection.left_shell();
+    }
+    (remote_shell_context(connection), shell_state_script(connection.state()))
+}
+
+fn remote_startup_state(state: &shell_state::LaunchState) -> Option<serde_json::Value> {
     match state {
-        remote::LaunchState::Connecting { name } => Some(serde_json::json!({ "kind": "connecting", "name": name })),
-        remote::LaunchState::Failed { name, failure } => Some(failure_shell_state(name, failure)),
+        shell_state::LaunchState::Connecting { name } => Some(serde_json::json!({ "kind": "connecting", "name": name })),
+        shell_state::LaunchState::Failed { name, failure } => Some(failure_shell_state(name, failure)),
         _ => None,
     }
 }
@@ -638,21 +647,28 @@ fn failure_shell_state(name: &str, failure: &classify::ConnectFailure) -> serde_
 }
 
 /// The script that draws a state on the startup shell: its failure card for the local service, or the remote card.
-fn shell_state_script(state: &remote::LaunchState) -> Option<String> {
+fn shell_state_script(state: &shell_state::LaunchState) -> Option<String> {
     match state {
-        remote::LaunchState::ServiceFailed { reason } => Some(format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(reason).unwrap_or_default())),
+        shell_state::LaunchState::ServiceFailed { reason } => Some(format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(reason).unwrap_or_default())),
+        shell_state::LaunchState::LocalStartup { startup } => match serde_json::to_string(startup) {
+            Ok(startup) => Some(format!("window.__corsiaShowStartup?.({startup});")),
+            Err(error) => {
+                log::error!("could not hand the answer of the start to the window: {error}");
+                None
+            }
+        },
         other => remote_startup_state(other).map(|payload| format!("window.__corsiaShowRemoteState?.({payload});")),
     }
 }
 
-fn update_remote_state<R: tauri::Runtime>(
+fn update_shell_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    update: impl FnOnce(&mut remote::RemoteConnection),
+    update: impl FnOnce(&mut shell_state::ShellState),
 ) -> Result<(), String> {
     let runtime = app.state::<RemoteRuntime>();
     let state = {
         // A poisoned lock still holds a whole state: every writer replaces it in one assignment.
-        let mut connection = runtime.connection.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut connection = runtime.shell.lock().unwrap_or_else(PoisonError::into_inner);
         update(&mut connection);
         connection.state().clone()
     };
@@ -662,11 +678,36 @@ fn update_remote_state<R: tauri::Runtime>(
     Ok(())
 }
 
+/// The launch-time start can answer before the shell page has loaded, when a script sent to it is lost. No page awaits
+/// it, so its answer is shell state: drawn now if the page is up and by the page-load hook if not. A start the window
+/// runs itself is drawn by the page that awaits it, which is its only owner.
+fn show_launch_outcome<R: tauri::Runtime>(app: &tauri::AppHandle<R>, outcome: &Result<ServiceStartup, String>) {
+    if let Err(error) = outcome {
+        log::error!("bundled CORSIA service did not start: {error}");
+    }
+    report_shell_state(app, |connection| connection.launch_answered(outcome.clone()));
+}
+
+/// The window began a local start of its own, so the launch answer is no longer what it shows. Nothing is drawn: the
+/// page that runs the start draws its answer.
+fn local_start_began<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.state::<RemoteRuntime>().shell.lock().unwrap_or_else(PoisonError::into_inner).local_start_began();
+}
+
+/// A start the window ran finished. Its page draws the answer; any answer (Ready, approval, adoption) also ends a kept
+/// failure, which only a start that fails again leaves standing.
+fn local_start_answered<R: tauri::Runtime, E>(app: &tauri::AppHandle<R>, answer: Result<ServiceStartup, E>) -> Result<ServiceStartup, E> {
+    if answer.is_ok() {
+        report_shell_state(app, shell_state::ShellState::service_recovered);
+    }
+    answer
+}
+
 /// Records a state the shell cannot act on. The state is already stored when drawing it fails, and the next page
 /// load draws it, so the failure is logged and never dropped.
-fn report_remote_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>, update: impl FnOnce(&mut remote::RemoteConnection)) {
-    if let Err(error) = update_remote_state(app, update) {
-        log::error!("could not show the remote connection state: {error}");
+fn report_shell_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>, update: impl FnOnce(&mut shell_state::ShellState)) {
+    if let Err(error) = update_shell_state(app, update) {
+        log::error!("could not show the startup shell state: {error}");
     }
 }
 
@@ -765,7 +806,7 @@ impl<R: tauri::Runtime, U: FnMut() -> Result<(), String>, S: FnMut()> remote_lif
 
     fn show(&mut self, proxy: &proxy::ProxyHandle) -> Result<(), classify::ConnectFailure> {
         let name = self.record.name.clone();
-        update_remote_state(self.app, |connection| connection.connected(name.clone()))
+        update_shell_state(self.app, |connection| connection.connected(name.clone()))
             .and_then(|()| navigate_to_remote(self.app, &name, proxy.port))
             .map_err(|error| local_failure("show", error))
     }
@@ -792,7 +833,7 @@ fn key_changed_callback<R: tauri::Runtime>(app: &tauri::AppHandle<R>, name: &str
     let app = app.clone();
     let name = name.to_owned();
     move || {
-        report_remote_state(&app, |connection| connection.failed(name.clone(), classify::ConnectFailure::KeyChanged));
+        report_shell_state(&app, |connection| connection.failed(name.clone(), classify::ConnectFailure::KeyChanged));
         return_to_shell(&app);
     }
 }
@@ -801,9 +842,9 @@ fn key_changed_callback<R: tauri::Runtime>(app: &tauri::AppHandle<R>, name: &str
 /// never a silent return, so the shell never stays on "Connecting".
 async fn connect_saved_remote<R: tauri::Runtime>(app: tauri::AppHandle<R>, saved: remote_config::RemoteRecord) {
     let name = saved.name.clone();
-    report_remote_state(&app, |connection| connection.retry(name.clone()));
+    report_shell_state(&app, |connection| connection.retry(name.clone()));
     if let Err(failure) = enter_saved_remote(&app, saved).await {
-        report_remote_state(&app, |connection| connection.failed(name.clone(), failure));
+        report_shell_state(&app, |connection| connection.failed(name.clone(), failure));
     }
 }
 
@@ -914,7 +955,7 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
 /// the rollback recorded a failure), so a failed pairing never leaves the recorded state behind the real one.
 fn leave_pairing_unless_connected<R: tauri::Runtime>(app: &tauri::AppHandle<R>, outcome: &Result<RemotePairResponse, String>) {
     if !matches!(outcome, Ok(RemotePairResponse::Success { .. })) {
-        report_remote_state(app, |connection| connection.end_pairing());
+        report_shell_state(app, |connection| connection.end_pairing());
     }
 }
 
@@ -931,7 +972,7 @@ async fn remote_pair(
 
 async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote: &RemoteRuntime) -> Result<RemotePairResponse, String> {
     use classify::ConnectFailure;
-    update_remote_state(app, |connection| connection.begin_pairing())?;
+    update_shell_state(app, |connection| connection.begin_pairing())?;
     let app_dir = default_app_dir(app)?;
     let locator = match request.target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
@@ -1017,7 +1058,7 @@ fn clear_remote_session<R: tauri::Runtime>(app: &tauri::AppHandle<R>, clear: &Re
 /// page they are on has nothing left to recover with (its proxy is stopped and the local service did not come up).
 /// The failure is a state of the connection; the page-load hook draws it once the shell page's own script is running.
 fn show_shell_failure<R: tauri::Runtime>(app: &tauri::AppHandle<R>, reason: &str) {
-    report_remote_state(app, |connection| connection.service_failed(reason));
+    report_shell_state(app, |connection| connection.service_failed(reason));
     return_to_shell(app);
 }
 
@@ -1057,14 +1098,14 @@ fn disconnect_remote(
         || {
             clear_remote_session(&app, &remote_session_clear(actual.as_str()));
             replace_proxy(&remote, None);
-            report_remote_state(&app, |connection| connection.begin_disconnect());
+            report_shell_state(&app, |connection| connection.begin_disconnect());
         },
         || run_service_command("register"),
         || start_service(&app, &service),
     );
     match outcome {
         Ok(startup) => {
-            report_remote_state(&app, |connection| connection.local());
+            report_shell_state(&app, |connection| connection.local());
             if let ServiceStartup::Ready { url } = &startup {
                 let window = app.get_webview_window("main").ok_or("the CORSIA window is unavailable")?;
                 window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
@@ -1073,7 +1114,7 @@ fn disconnect_remote(
         }
         Err(remote_lifecycle::DisconnectError::NotForgotten(error)) => Err(error),
         Err(remote_lifecycle::DisconnectError::Forgotten(error)) => {
-            report_remote_state(&app, |connection| connection.local());
+            report_shell_state(&app, |connection| connection.local());
             // The calling page's proxy is gone, so it cannot show the error with a way forward; the startup
             // shell can. A shell caller is already on it and draws the failure from this error itself.
             if !is_shell_origin(actual.as_str()) {
@@ -1156,7 +1197,9 @@ fn quit_after_adoption(quit_asked: bool, adopted: &Result<(), adoption::Adoption
 
 #[tauri::command]
 async fn adopt_existing_install(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
-    off_main_thread(move || adopt_existing_install_blocking(&app)).await
+    local_start_began(&app);
+    let adopting = app.clone();
+    local_start_answered(&app, off_main_thread(move || adopt_existing_install_blocking(&adopting)).await)
 }
 
 fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
@@ -1201,6 +1244,7 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
 /// if it is stopped and release its exact hold. Never repeats the adoption.
 #[tauri::command]
 async fn start_existing_again(app: tauri::AppHandle) -> Result<(), adoption::AdoptionError> {
+    local_start_began(&app);
     off_main_thread(move || start_existing_again_blocking(&app)).await
 }
 
@@ -1279,31 +1323,32 @@ fn reopen_app(app: tauri::AppHandle) -> Result<(), String> {
 /// "Check again": the app's service is registered; wait for it to answer.
 #[tauri::command]
 async fn check_service_started(app: tauri::AppHandle) -> Result<ServiceStartup, adoption::AdoptionError> {
-    off_main_thread(move || {
-        let service = app.state::<AppServiceState>();
-        let app_dir = default_app_dir(&app).map_err(adoption::AdoptionError::switched)?;
-        let port = lifecycle::service_port(&app, &service);
+    local_start_began(&app);
+    let checking = app.clone();
+    let answer = off_main_thread(move || {
+        let service = checking.state::<AppServiceState>();
+        let app_dir = default_app_dir(&checking).map_err(adoption::AdoptionError::switched)?;
+        let port = lifecycle::service_port(&checking, &service);
         wait_for_service(port, &app_dir).map_err(adoption::AdoptionError::switched)?;
         Ok(ServiceStartup::Ready { url: service_url(port) })
     })
-    .await
+    .await;
+    local_start_answered(&app, answer)
 }
 
 #[tauri::command]
 async fn start_local_service(app: tauri::AppHandle) -> Result<ServiceStartup, String> {
     // Finishing an interrupted adoption's undo can wait on the source service,
     // so it never runs on the thread that handles the window's events.
+    local_start_began(&app);
     let started_app = app.clone();
-    let startup = tauri::async_runtime::spawn_blocking(move || {
+    let answer = tauri::async_runtime::spawn_blocking(move || {
         let service = started_app.state::<AppServiceState>();
         start_service(&started_app, &service)
     })
     .await
-    .map_err(|error| format!("starting CORSIA did not finish: {error}"))??;
-    if matches!(startup, ServiceStartup::Ready { .. }) {
-        report_remote_state(&app, |connection| connection.service_recovered());
-    }
-    Ok(startup)
+    .map_err(|error| format!("starting CORSIA did not finish: {error}"))?;
+    local_start_answered(&app, answer)
 }
 
 #[tauri::command]
@@ -1543,12 +1588,13 @@ pub fn run() {
             // Inject the drag handler on every page load. Idempotent —
             // the script self-guards via __corsia_drag_handler_installed
             // so multiple injections don't double-bind.
+            let finished = matches!(payload.event(), tauri::webview::PageLoadEvent::Finished);
             let (shell_context, startup_state) = webview
                 .app_handle()
                 .state::<RemoteRuntime>()
-                .connection
+                .shell
                 .lock()
-                .map(|connection| (remote_shell_context(&connection), shell_state_script(connection.state())))
+                .map(|mut connection| page_load_state(&mut connection, payload.url().as_str(), finished))
                 .unwrap_or_else(|_| (serde_json::json!({ "mode": "local" }), None));
             let show_state = startup_state.unwrap_or_default();
             let _ = webview.eval(format!("window.__CORSIA_SHELL__ = {shell_context};{DRAG_INIT_SCRIPT}{show_state}"));
@@ -1608,8 +1654,8 @@ pub fn run() {
             // service, whose login item was intentionally removed on pairing.
             if let Ok(app_dir) = default_app_dir(app.handle()) {
                 if let Ok(Some(saved)) = remote_config::load_remote(&app_dir) {
-                    if let Ok(mut connection) = app.state::<RemoteRuntime>().connection.lock() {
-                        *connection = remote::RemoteConnection::launch(Some(&saved));
+                    if let Ok(mut connection) = app.state::<RemoteRuntime>().shell.lock() {
+                        *connection = shell_state::ShellState::launch(Some(&saved));
                     }
                     let app_handle = app.handle().clone();
                     tauri::async_runtime::spawn(async move { connect_saved_remote(app_handle, saved).await; });
@@ -1622,43 +1668,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             thread::spawn(move || {
                 let service = app_handle.state::<AppServiceState>();
-                match start_service(&app_handle, &service) {
-                    Ok(ServiceStartup::Ready { url }) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            if let Err(error) = window.eval(format!("window.location.replace('{url}');")) {
-                                log::error!(
-                                    "could not navigate to the local CORSIA service: {error}"
-                                );
-                            }
-                        }
-                    }
-                    Ok(ServiceStartup::RequiresApproval) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.eval("window.__corsiaShowBackgroundApproval?.();");
-                        }
-                    }
-                    Ok(ServiceStartup::AdoptionOffered { workspace }) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let workspace = serde_json::to_string(&workspace).unwrap_or_default();
-                            let _ = window.eval(format!("window.__corsiaShowExistingInstall?.({workspace});"));
-                        }
-                    }
-                    Ok(ServiceStartup::AdoptionFailed { failure }) => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let failure = serde_json::to_string(&failure).unwrap_or_default();
-                            let _ = window.eval(format!("window.__corsiaShowAdoptionFailure?.({failure});"));
-                        }
-                    }
-                    Err(error) => {
-                        log::error!("bundled CORSIA service did not start: {error}");
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let reason = serde_json::to_string(&error).unwrap_or_default();
-                            let _ = window.eval(format!(
-                                "window.__corsiaShowServiceFailure?.({reason});"
-                            ));
-                        }
-                    }
-                }
+                show_launch_outcome(&app_handle, &start_service(&app_handle, &service));
             });
             Ok(())
         })
@@ -1829,7 +1839,7 @@ mod tests {
             name: "Studio".into(),
             proxy_port: 47911,
         };
-        let mut connection = remote::RemoteConnection::launch(Some(&saved));
+        let mut connection = shell_state::ShellState::launch(Some(&saved));
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
         connection.connected("Studio");
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio" }));
@@ -1970,10 +1980,84 @@ mod tests {
     }
 
     #[test]
+    fn a_launch_outcome_reached_before_the_shell_page_loads_is_drawn_by_every_shell_load() {
+        let app = launch_app();
+        let refusal = "A file named ~/Corsia is in the way. Nothing was changed.";
+        show_launch_outcome(app.handle(), &Err(refusal.into()));
+        let failure = format!("window.__corsiaShowServiceFailure?.({});", serde_json::to_string(refusal).unwrap());
+        assert_eq!(shell_state_script(&launch_state(&app)).as_deref(), Some(failure.as_str()));
+
+        // A service already running answers Ready within milliseconds, before the page is up.
+        let app = launch_app();
+        show_launch_outcome(app.handle(), &Ok(ServiceStartup::Ready { url: service_url(47_895) }));
+        assert_eq!(
+            shell_state_script(&launch_state(&app)).as_deref(),
+            Some(r#"window.__corsiaShowStartup?.({"state":"ready","url":"http://127.0.0.1:47895"});"#)
+        );
+
+        let app = launch_app();
+        app.state::<RemoteRuntime>().shell.lock().unwrap().begin_pairing();
+        show_launch_outcome(app.handle(), &Ok(ServiceStartup::RequiresApproval));
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Pairing, "a late launch outcome replaced a pairing");
+    }
+
+    #[test]
+    fn a_ready_launch_answer_is_followed_once_and_never_replayed_by_a_later_shell_load() {
+        let app = launch_app();
+        show_launch_outcome(app.handle(), &Ok(ServiceStartup::Ready { url: service_url(47_895) }));
+        let runtime = app.state::<RemoteRuntime>();
+        let mut connection = runtime.shell.lock().unwrap();
+        // The shell loads after the answer: it is drawn, and the window follows it to the service.
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html", true);
+        assert!(script.is_some_and(|script| script.contains(r#""state":"ready""#)));
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", false);
+        assert!(shell_state_script(connection.state()).is_some(), "a load still starting has not reached the service");
+        page_load_state(&mut connection, "http://127.0.0.1:47895/", true);
+        // A quit failure later sends the window back to the shell, which must stay on its own screen.
+        let (_, script) = page_load_state(&mut connection, "tauri://localhost/index.html#quit-failure", true);
+        assert_eq!(script, None);
+    }
+
+    #[test]
+    fn a_start_the_window_runs_clears_the_launch_answer_so_a_reload_shows_no_stale_offer() {
+        let app = launch_app();
+        show_launch_outcome(app.handle(), &Ok(ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() }));
+        assert!(shell_state_script(&launch_state(&app)).is_some());
+        local_start_began(app.handle());
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Local);
+        assert_eq!(shell_state_script(&launch_state(&app)), None);
+    }
+
+    #[test]
+    fn a_failure_card_survives_a_retry_that_fails_and_ends_when_a_start_answers() {
+        for answer in [
+            ServiceStartup::Ready { url: "http://127.0.0.1:47895".into() },
+            ServiceStartup::RequiresApproval,
+            ServiceStartup::AdoptionOffered { workspace: "~/corsia".into() },
+        ] {
+            let app = launch_app();
+            show_shell_failure(app.handle(), "did not start");
+            local_start_began(app.handle());
+            let _ = local_start_answered(app.handle(), Err::<ServiceStartup, _>("did not start again".to_string()));
+            assert_eq!(
+                shell_state_script(&launch_state(&app)).as_deref(),
+                Some("window.__corsiaShowServiceFailure?.(\"did not start\");"),
+                "a reload after a failed retry must still draw the failure and its Try again"
+            );
+            assert_eq!(local_start_answered(app.handle(), Ok::<_, String>(answer.clone())), Ok(answer.clone()));
+            assert_eq!(
+                launch_state(&app),
+                shell_state::LaunchState::Local,
+                "the old failure would be drawn over the screen for {answer:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_disconnect_that_cannot_bring_the_local_service_back_returns_to_a_shell_card_with_an_action() {
         let app = launch_app();
         show_shell_failure(app.handle(), "CORSIA service registration did not persist");
-        let connection = app.state::<RemoteRuntime>().connection.lock().unwrap().state().clone();
+        let connection = app.state::<RemoteRuntime>().shell.lock().unwrap().state().clone();
         assert_eq!(
             shell_state_script(&connection).as_deref(),
             Some("window.__corsiaShowServiceFailure?.(\"CORSIA service registration did not persist\");")
@@ -1984,10 +2068,10 @@ mod tests {
     #[test]
     fn a_key_change_while_connected_records_the_failure_and_returns_to_the_startup_shell() {
         let app = launch_app();
-        app.state::<RemoteRuntime>().connection.lock().unwrap().connected("Studio");
+        app.state::<RemoteRuntime>().shell.lock().unwrap().connected("Studio");
         key_changed_callback(app.handle(), "Studio")();
-        let state = app.state::<RemoteRuntime>().connection.lock().unwrap().state().clone();
-        assert_eq!(state, remote::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
+        let state = app.state::<RemoteRuntime>().shell.lock().unwrap().state().clone();
+        assert_eq!(state, shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
         assert_eq!(remote_startup_state(&state), Some(serde_json::json!({ "kind": "key_changed", "name": "Studio" })));
         assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()));
     }
@@ -2003,8 +2087,8 @@ mod tests {
         app
     }
 
-    fn launch_state(app: &tauri::App<tauri::test::MockRuntime>) -> remote::LaunchState {
-        app.state::<RemoteRuntime>().connection.lock().unwrap().state().clone()
+    fn launch_state(app: &tauri::App<tauri::test::MockRuntime>) -> shell_state::LaunchState {
+        app.state::<RemoteRuntime>().shell.lock().unwrap().state().clone()
     }
 
     #[test]
@@ -2015,7 +2099,7 @@ mod tests {
             remote_config::RemoteTrust::Pinned { spki_sha256: "not base64".into() },
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert_eq!(launch_state(&app), remote::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
     }
 
     #[test]
@@ -2040,7 +2124,7 @@ mod tests {
             remote_config::RemoteTrust::from(&trust::Trust::Pinned { spki_sha256: changed_pin }),
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert_eq!(launch_state(&app), remote::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
     }
 
@@ -2067,7 +2151,7 @@ mod tests {
             remote_config::RemoteTrust::System,
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert!(matches!(launch_state(&app), remote::LaunchState::Failed { failure: classify::ConnectFailure::Network | classify::ConnectFailure::Server, .. }), "{:?}", launch_state(&app));
+        assert!(matches!(launch_state(&app), shell_state::LaunchState::Failed { failure: classify::ConnectFailure::Network | classify::ConnectFailure::Server, .. }), "{:?}", launch_state(&app));
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
     }
 
@@ -2085,7 +2169,7 @@ mod tests {
         let entry = RemoteEntry { app: app.handle(), app_dir: &app_dir, record: saved.clone(), forget_on_rollback: false, unregister: || Ok::<(), String>(()), restore: || {} };
         let failure = entry.save(47912).err().expect("the save must fail");
         assert_eq!(failure, classify::ConnectFailure::Local);
-        let mut connection = remote::RemoteConnection::launch(Some(&saved));
+        let mut connection = shell_state::ShellState::launch(Some(&saved));
         connection.failed("Studio", failure);
         assert_eq!(remote_startup_state(connection.state()), Some(serde_json::json!({ "kind": "unreachable", "name": "Studio", "cause": "local" })));
     }
@@ -2106,7 +2190,7 @@ mod tests {
             ConnectFailure::Local,
         ];
         for failure in failures {
-            let mut connection = remote::RemoteConnection::launch(Some(&saved));
+            let mut connection = shell_state::ShellState::launch(Some(&saved));
             connection.failed("Studio", failure);
             let drawn = remote_startup_state(connection.state()).expect("a launch failure the shell cannot draw");
             assert_ne!(drawn["kind"], "connecting");
@@ -2154,13 +2238,13 @@ mod tests {
             Err("the CORSIA window is unavailable".into()),
         ];
         for outcome in outcomes {
-            update_remote_state(app.handle(), |connection| connection.begin_pairing()).unwrap();
+            update_shell_state(app.handle(), |connection| connection.begin_pairing()).unwrap();
             leave_pairing_unless_connected(app.handle(), &outcome);
-            assert_eq!(launch_state(&app), remote::LaunchState::Local);
+            assert_eq!(launch_state(&app), shell_state::LaunchState::Local);
         }
-        update_remote_state(app.handle(), |connection| connection.connected("Studio")).unwrap();
+        update_shell_state(app.handle(), |connection| connection.connected("Studio")).unwrap();
         leave_pairing_unless_connected(app.handle(), &Ok(RemotePairResponse::Success { ok: true, name: "Studio".into() }));
-        assert_eq!(launch_state(&app), remote::LaunchState::Remote { name: "Studio".into() });
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Remote { name: "Studio".into() });
     }
 
     #[test]

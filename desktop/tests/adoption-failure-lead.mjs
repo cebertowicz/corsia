@@ -197,7 +197,7 @@ async function open(theme, failure, script = {}) {
 		} } };
 	}, [failure, script]);
 	await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
-	await page.evaluate(() => window.__corsiaShowExistingInstall('~/work'));
+	await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/work' }));
 	await page.click('#retry');
 	await page.waitForFunction(() => document.getElementById('status').textContent.includes('switch'));
 	return page;
@@ -264,11 +264,11 @@ for (const theme of ['light', 'dark']) {
 		}, failure);
 		await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
 		const before = failed;
-		await page.evaluate((shown) => window.__corsiaShowAdoptionFailure(shown), failure);
+		await page.evaluate((shown) => window.__corsiaShowStartup({ state: 'adoption_failed', failure: shown }), failure);
 		compare(`${theme} ${name} at launch`, await read(page), expected);
 		if (name === 'launch-undo-reopen') {
 			// Try again after a settled failure starts the service, which finds the failed undo again.
-			await page.evaluate((shown) => window.__corsiaShowAdoptionFailure({ ...shown, outcome: 'restored', recovery: null }), failure);
+			await page.evaluate((shown) => window.__corsiaShowStartup({ state: 'adoption_failed', failure: { ...shown, outcome: 'restored', recovery: null } }), failure);
 			await page.click('#retry');
 			await page.waitForFunction((text) => document.getElementById('retry').textContent === text, 'Reopen CORSIA');
 			compare(`${theme} ${name} after Try again`, await read(page), expected);
@@ -317,7 +317,7 @@ for (const theme of ['light', 'dark']) {
 			} } };
 		}, progress);
 		await page.goto(`http://127.0.0.1:${server.address().port}/index.html`, { waitUntil: 'networkidle' });
-		await page.evaluate(() => window.__corsiaShowExistingInstall('~/work'));
+		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/work' }));
 		await page.click('#retry');
 		// The window polls once a second; wait for a reading to land.
 		await page.waitForFunction(() => window.__calls.includes('adoption_progress'), null, { timeout: 4000 });

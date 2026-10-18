@@ -482,20 +482,24 @@
 				// A relaunch may be waiting for the stop an earlier run left draining; the window shows it.
 				const stopFollowing = followProgress();
 				try {
-					const startup = await invoke(command);
-					if (startup.state === 'ready') {
-						continueToService(startup);
-					} else if (startup.state === 'adoption_offered') {
-						showExistingInstall(startup.workspace);
-					} else if (startup.state === 'adoption_failed') {
-						await showAdoptionFailure(startup.failure);
-					} else {
-						await showBackgroundApproval();
-					}
+					await showStartup(await invoke(command));
 				} catch (error) {
 					await showFailure(error, false, again);
 				} finally {
 					stopFollowing();
+				}
+			}
+
+			// Draws how a local start answered; the app's own start at launch is drawn through here too.
+			async function showStartup(startup) {
+				if (startup.state === 'ready') {
+					continueToService(startup);
+				} else if (startup.state === 'adoption_offered') {
+					showExistingInstall(startup.workspace);
+				} else if (startup.state === 'adoption_failed') {
+					await showAdoptionFailure(startup.failure);
+				} else {
+					await showBackgroundApproval();
 				}
 			}
 
@@ -612,9 +616,7 @@
 			window.__corsiaShowRemoteState = showRemoteState;
 			window.__corsiaShowServiceFailure = showFailure;
 			window.__corsiaShowQuitFailure = () => showFailure(undefined, true);
-			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
-			window.__corsiaShowExistingInstall = showExistingInstall;
-			window.__corsiaShowAdoptionFailure = showAdoptionFailure;
+			window.__corsiaShowStartup = showStartup;
 			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			quit.addEventListener('click', () => invoke?.('quit_app'));
