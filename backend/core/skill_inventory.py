@@ -13,8 +13,12 @@ from typing import Any
 from core.lesson_index import TRIAL_MARK, descriptor_estimates
 
 
-def _line_for(name: str, lines: list[str]) -> str | None:
-    """The delivered index line of one skill, or None when it is not listed."""
+def _line_for(entry: dict[str, Any], lines: list[str]) -> str | None:
+    """The delivered text charged to one listed skill, or None when unknown."""
+    name = str(entry.get("name", ""))
+    if entry.get("listed") == "name":
+        path = entry.get("path")
+        return f"{name} ({path})" if isinstance(path, str) and path else None
     for prefix in (f"- {name}:", f"- {name}{TRIAL_MARK}:"):
         for line in lines:
             if line.startswith(prefix):
@@ -27,8 +31,9 @@ def with_skill_tokens(
 ) -> dict[str, Any]:
     """Return ``metadata`` with a ``prompt_tokens`` on each listed skill.
 
-    A skill whose line is not in ``content`` gets none: its cost is unknown,
-    not zero. The block's own header and notes stay in the remainder.
+    A skill whose text is not in ``content`` gets none: its cost is unknown,
+    not zero. A names-only skill is charged for its own ``name (path)`` entry;
+    the overflow lead-in and the block's notes stay in the remainder.
     """
     skills = metadata.get("skills")
     if not isinstance(skills, list):
@@ -37,7 +42,7 @@ def with_skill_tokens(
     found = {
         str(index): line
         for index, entry in enumerate(skills)
-        if (line := _line_for(str(entry.get("name", "")), lines)) is not None
+        if isinstance(entry, dict) and (line := _line_for(entry, lines)) is not None
     }
     estimates = descriptor_estimates(
         [{"id": key, "index_line": line} for key, line in found.items()],

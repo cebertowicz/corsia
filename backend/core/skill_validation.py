@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
+from datetime import datetime
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from core.lesson_trials import LESSON_KEY, lesson_errors
@@ -92,9 +93,48 @@ def _retired_block_error(pointed: bool) -> str:
     )
 
 
+def _origin_errors(origin: Any) -> list[str]:
+    """Validate provenance for an adopted or imported skill copy."""
+    if not isinstance(origin, dict):
+        return ["corsia.origin must be a mapping"]
+    errors: list[str] = []
+    source = text_value(origin.get("source"))
+    if not source:
+        errors.append("corsia.origin.source is required")
+    elif Path(source).is_absolute() or PureWindowsPath(source).is_absolute():
+        errors.append("corsia.origin.source must not be an absolute path")
+    sha256 = origin.get("sha256")
+    if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
+        errors.append("corsia.origin.sha256 must be 64 hexadecimal characters")
+    if "installed_digest" in origin and (
+        not isinstance(origin["installed_digest"], str)
+        or not re.fullmatch(r"[0-9a-fA-F]{64}", origin["installed_digest"])
+    ):
+        errors.append("corsia.origin.installed_digest must be 64 hexadecimal characters")
+    adopted_at = origin.get("adopted_at")
+    if adopted_at is None or adopted_at == "":
+        errors.append("corsia.origin.adopted_at is required")
+    else:
+        try:
+            parsed = (
+                adopted_at
+                if isinstance(adopted_at, datetime)
+                else datetime.fromisoformat(str(adopted_at).replace("Z", "+00:00"))
+            )
+            if parsed.tzinfo is None:
+                errors.append("corsia.origin.adopted_at must be ISO-8601 with a zone")
+        except ValueError:
+            errors.append("corsia.origin.adopted_at must be ISO-8601 with a zone")
+    if "version" in origin and not text_value(origin["version"]):
+        errors.append("corsia.origin.version must be a non-empty string")
+    return errors
+
+
 def _validate_corsia_data(corsia: dict[str, Any]) -> list[str]:
     """Validate CORSIA data wherever it is filed: a lesson block or the sidecar."""
     errors: list[str] = []
+    if "origin" in corsia:
+        errors.extend(_origin_errors(corsia["origin"]))
     handler = corsia.get("handler")
     if handler is not None:
         if not isinstance(handler, dict):
