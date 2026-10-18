@@ -109,9 +109,12 @@ def found_tools(roots: Roots) -> list[str]:
 
 
 def display_path(path: Path) -> str:
-    """``~/``-relative when under home, so no receipt or source names a user folder."""
+    """``~/``-relative when under home, so no receipt or source names a user folder.
+
+    Only the parent is resolved: a link shows as itself, never as its target.
+    """
     home = Path(os.path.realpath(os.path.expanduser("~")))
-    real = Path(os.path.realpath(path))
+    real = Path(os.path.realpath(path.parent)) / path.name
     return f"~/{real.relative_to(home)}" if _inside(real, home) and real != home else str(real)
 
 
@@ -288,8 +291,10 @@ def _claude_auto_memory(read: MemoryRead, root: Path) -> None:
             _keep(read, CLAUDE_CODE, path, text)
 
 
-def _openclaw_workspace(root: Path) -> Path | None:
-    return next((root / name for name in OPENCLAW_WORKSPACES if os.path.isdir(root / name)), None)
+def _openclaw_file(root: Path, name: str) -> Path | None:
+    """``name`` in the first OpenClaw workspace folder that holds it, the fallbacks in order."""
+    return next((root / folder / name for folder in OPENCLAW_WORKSPACES
+                 if os.path.lexists(root / folder / name)), None)
 
 
 def _daily_notes(folder: Path, now: datetime.datetime) -> list[Path]:
@@ -311,12 +316,12 @@ def read_memory(roots: Roots, tools: list[str], *, now: datetime.datetime | None
     }
     claude, codex = checked.get(CLAUDE_CODE), checked.get(CODEX)
     openclaw, hermes = checked.get(OPENCLAW), checked.get(HERMES)
-    workspace = _openclaw_workspace(openclaw) if openclaw else None
+    claw = {name: _openclaw_file(openclaw, name) if openclaw else None for name in ("USER.md", "MEMORY.md", "memory")}
     if codex:
         _read(read, CODEX, codex, codex / "memories" / "memory_summary.md",
               lambda text: sections(text, _CODEX_SUMMARY))
-    if workspace:
-        _read(read, OPENCLAW, openclaw, workspace / "USER.md")
+    if claw["USER.md"]:
+        _read(read, OPENCLAW, openclaw, claw["USER.md"])
     if hermes:
         _read(read, HERMES, hermes, hermes / "memories" / "USER.md")
     if claude:
@@ -325,12 +330,12 @@ def read_memory(roots: Roots, tools: list[str], *, now: datetime.datetime | None
         _read(read, CODEX, codex, codex / "AGENTS.md")
     if claude:
         _claude_auto_memory(read, claude)
-    if workspace:
-        _read(read, OPENCLAW, openclaw, workspace / "MEMORY.md")
+    if claw["MEMORY.md"]:
+        _read(read, OPENCLAW, openclaw, claw["MEMORY.md"])
     if hermes:
         _read(read, HERMES, hermes, hermes / "memories" / "MEMORY.md")
-    if workspace:
-        for note in _daily_notes(workspace / "memory", now):
+    if claw["memory"]:
+        for note in _daily_notes(claw["memory"], now):
             _read(read, OPENCLAW, openclaw, note)
     if codex:
         _read(read, CODEX, codex, codex / "memories" / "MEMORY.md",
