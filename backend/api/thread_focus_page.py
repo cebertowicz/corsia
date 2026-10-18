@@ -12,7 +12,6 @@ visible rows cannot make one page unbounded.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 
 from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, focus_kind_sql
@@ -35,102 +34,24 @@ FOCUS_SCAN_CAP = 12000
 _LIVE_STATUSES = ("running", "waiting_retry")
 _LIVE_STATUS_LIST = ",".join(f"'{status}'" for status in _LIVE_STATUSES)
 
-# The anchors the walk may inspect, newest-first: the one definition of the row set,
-# of visibility (`FOCUS_VISIBLE_SQL`) and of a row's Turn, shared by both walk
-# statements; a row the transcript never draws (`NEVER_DRAWN_FILTER`) is not in it.
-# `:after` is the cursor's seq (or NULL), `:floor` an inclusive lower seq
-# bound (or NULL) and `:newest_n` the most rows read.
+# The one bounded anchor read for a Focus page. It classifies each row once in
+# SQLite, then the small run-reduction loop below avoids re-scanning the same anchors
+# through several window functions. Hidden message bodies never cross into Python.
 _VISIBLE_COLUMN = f"{FOCUS_VISIBLE_SQL} AS vis"
 _RUN_COLUMNS = (
-    f"{_VISIBLE_COLUMN}, {ACTIVITY_WEIGHT_SQL} AS weight, "
-    f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
+    f"role, {_VISIBLE_COLUMN}, {ACTIVITY_WEIGHT_SQL} AS weight, "
+    f"CASE WHEN role != 'assistant' THEN {focus_kind_sql('0')} ELSE 'other' END "
+    "AS non_assistant_row_kind, "
     "CASE WHEN json_valid(metadata) AND json_type(metadata, '$.turn_id') = 'text' "
     "AND json_extract(metadata, '$.turn_id') != '' "
     "THEN json_extract(metadata, '$.turn_id') END AS turn_id"
 )
-
-
-def _anchors_cte(columns: str) -> str:
-    return (
-        f"anchors AS (SELECT id, seq, {columns} "
-        "FROM messages WHERE thread_id = :thread AND seq IS NOT NULL "
-        f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}"
-        "AND (:after IS NULL OR seq < :after) AND (:floor IS NULL OR seq >= :floor) "
-        "ORDER BY seq DESC LIMIT :newest_n)"
-    )
-
-
-# The newest `:budget` visible anchors among the first `:newest_n` anchors; only they
-# cross into Python. When the budget fills, the last one's seq is where the walk stops.
-_VISIBLE_SQL = (
-    f"WITH {_anchors_cte(_VISIBLE_COLUMN)} "
-    "SELECT id, seq FROM anchors WHERE vis = 1 ORDER BY seq DESC LIMIT :budget"
+_WALK_ROWS_SQL = (
+    f"SELECT id, seq, {_RUN_COLUMNS} FROM messages WHERE thread_id = :thread "
+    "AND seq IS NOT NULL "
+    f"{_DISPLAY_ANCHOR_FILTER}{NEVER_DRAWN_FILTER}"
+    "AND (:after IS NULL OR seq < :after) ORDER BY seq DESC LIMIT :newest_n"
 )
-
-# Every hidden run among the first `:cap` anchors, aggregated in SQLite. A run closes
-# at each visible anchor (`seg` counts the visible anchors above a row) and wherever
-# two consecutive rows with a known Turn disagree on whether it is live; a row with no
-# Turn stays with the run above it. `turn_ids` lists a run's Turns oldest-first, a
-# repeat of the Turn just above collapsed. `kinds` is the distinct `row_kind` of a
-# run's rows. One `meta` row reports how many anchors the
-# CTE held (`count`, up to `:newest_n`) and the oldest one within the cap (`first_id`).
-_RUNS_SQL = f"""
-WITH {_anchors_cte(_RUN_COLUMNS)},
-scanned AS (
-    SELECT *, ROW_NUMBER() OVER (ORDER BY seq DESC) AS rn FROM anchors
-),
-bounded AS (
-    SELECT id, seq, vis, weight, row_kind, turn_id, rn,
-        COALESCE(SUM(vis) OVER (ORDER BY seq DESC
-            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS seg,
-        CASE WHEN turn_id IS NOT NULL
-            THEN turn_id IN (SELECT id FROM active_turns WHERE thread_id = :thread
-                AND status IN ({_LIVE_STATUS_LIST})) END AS live
-    FROM scanned WHERE rn <= :cap
-),
-hidden AS (
-    SELECT *, MAX(CASE WHEN live IS NOT NULL THEN rn * 2 + live END) OVER (
-        PARTITION BY seg ORDER BY seq DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_known
-    FROM bounded WHERE vis = 0
-),
-split AS (
-    SELECT *, SUM(CASE WHEN live IS NOT NULL AND prev_known IS NOT NULL
-        AND prev_known % 2 != live THEN 1 ELSE 0 END) OVER (
-        PARTITION BY seg ORDER BY seq DESC ROWS UNBOUNDED PRECEDING) AS run_no
-    FROM hidden
-),
-ends AS (
-    SELECT *,
-        FIRST_VALUE(id) OVER ends_window AS newest_id,
-        LAST_VALUE(id) OVER ends_window AS oldest_id
-    FROM split
-    WINDOW ends_window AS (PARTITION BY seg, run_no ORDER BY seq DESC
-        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
-),
-turns AS (
-    SELECT seg, run_no, seq, turn_id, LAG(turn_id) OVER (
-        PARTITION BY seg, run_no ORDER BY seq DESC) AS newer_turn
-    FROM split WHERE turn_id IS NOT NULL
-),
-run_turns AS (
-    SELECT seg, run_no, json_group_array(turn_id ORDER BY seq ASC) AS turn_ids
-    FROM turns WHERE newer_turn IS NULL OR newer_turn != turn_id
-    GROUP BY seg, run_no
-)
-SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
-    COUNT(*) AS count, SUM(ends.weight) AS weight,
-    MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
-    COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,
-    json_group_array(DISTINCT ends.row_kind) AS kinds
-FROM ends LEFT JOIN run_turns USING (seg, run_no)
-GROUP BY ends.seg, ends.run_no
-UNION ALL
-SELECT 'meta', NULL, NULL, (SELECT COUNT(*) FROM anchors), 0,
-    (SELECT id FROM scanned WHERE rn = MIN((SELECT COUNT(*) FROM anchors), :cap)),
-    NULL, NULL, '[]'
-ORDER BY first_seq
-"""
 
 _OLDER_EXISTS_SQL = (
     "SELECT 1 FROM messages WHERE thread_id = ? AND seq IS NOT NULL AND seq < ? "
@@ -151,42 +72,95 @@ class _Walk:
     scanned: int = 0
 
 
+def _reduce_runs(rows: list, active_turn_ids: set[str]) -> list[dict]:
+    """Reduce newest-first classified anchors to oldest-first Focus run stubs."""
+    groups: list[dict] = []
+    current: dict | None = None
+    previous_live: bool | None = None
+    previous_turn: str | None = None
+
+    for row in rows:
+        if row["vis"]:
+            current = None
+            previous_live = None
+            previous_turn = None
+            continue
+
+        turn_id = row["turn_id"]
+        live = turn_id in active_turn_ids if turn_id is not None else None
+        if live is not None and previous_live is not None and live != previous_live:
+            current = None
+            previous_turn = None
+        if live is not None:
+            previous_live = live
+        if current is None:
+            current = {
+                "kind": "run", "first_id": row["id"], "last_id": row["id"],
+                "first_seq": row["seq"], "last_seq": row["seq"], "count": 0,
+                "turn_ids": [], "weight": 0, "kinds": set(), "continues_older": False,
+            }
+            groups.append(current)
+
+        current["first_id"] = row["id"]
+        current["first_seq"] = row["seq"]
+        current["count"] += 1
+        current["weight"] += int(row["weight"] or 0)
+        current["kinds"].add(
+            "steps" if row["role"] == "assistant" and row["weight"] > 0
+            else row["non_assistant_row_kind"]
+        )
+        if turn_id is not None and turn_id != previous_turn:
+            current["turn_ids"].append(turn_id)
+            previous_turn = turn_id
+
+    runs = list(reversed(groups))
+    for run in runs:
+        run["turn_ids"].reverse()
+        run["kinds"] = sorted(run["kinds"])
+    return runs
+
+
 def _walk(
     db, thread_id: str, cursor_seq: int | None,
     budget: int, cap: int,
 ) -> _Walk:
-    """Walk newest-first until `budget` visible anchors or `cap` rows are read.
+    """Walk newest-first until `budget` visible anchors or `cap` rows are read."""
+    cursor = db.execute(
+        _WALK_ROWS_SQL,
+        {"thread": thread_id, "after": cursor_seq, "newest_n": cap + 1},
+    )
+    anchors = []
+    visible = []
+    has_extra = False
+    for row in cursor:
+        if len(anchors) == cap:
+            has_extra = True
+            break
+        anchors.append(row)
+        if row["vis"]:
+            visible.append(row)
+            if len(visible) == budget:
+                break
+    cursor.close()
 
-    Two statements, both aggregating in SQLite: the first finds the visible anchors
-    (and so where the walk stops), the second reduces the hidden rows in that range
-    to run stubs. Only visible anchors and stubs cross into Python.
-    """
-    args = {"thread": thread_id, "after": cursor_seq, "floor": None, "cap": cap}
-    visible = db.execute(_VISIBLE_SQL, {**args, "newest_n": cap, "budget": budget}).fetchall()
-    walk = _Walk(visible_ids=[row["id"] for row in reversed(visible)])
-    floor = visible[-1]["seq"] if len(visible) >= budget else None
-    rows = db.execute(_RUNS_SQL, {**args, "floor": floor, "newest_n": cap + 1}).fetchall()
-    meta = next(row for row in rows if row["kind"] == "meta")
-    walk.oldest_id = meta["first_id"]
-    walk.scanned = min(meta["count"], cap)
-    if floor is None:
-        walk.has_more = meta["count"] > cap
+    walk = _Walk(visible_ids=[row["id"] for row in reversed(visible)], scanned=len(anchors))
+    if len(visible) == budget:
+        last_visible = visible[-1]
+        walk.oldest_id = last_visible["id"]
+        walk.has_more = db.execute(
+            _OLDER_EXISTS_SQL, (thread_id, last_visible["seq"]),
+        ).fetchone() is not None
     else:
-        walk.has_more = db.execute(_OLDER_EXISTS_SQL, (thread_id, floor)).fetchone() is not None
-    runs = [row for row in rows if row["kind"] == "run"]
-    for row in runs:
-        walk.runs.append({
-            "kind": "run",
-            "first_id": row["first_id"],
-            "last_id": row["last_id"],
-            "first_seq": row["first_seq"],
-            "last_seq": row["last_seq"],
-            "count": row["count"],
-            "turn_ids": json.loads(row["turn_ids"]),
-            "weight": int(row["weight"] or 0),
-            "kinds": sorted(json.loads(row["kinds"])),
-            "continues_older": False,
-        })
+        walk.oldest_id = anchors[-1]["id"] if anchors else None
+        walk.has_more = has_extra
+
+    active_turn_ids = {
+        row["id"] for row in db.execute(
+            "SELECT id FROM active_turns WHERE thread_id = ? AND status IN (?, ?)",
+            (thread_id, *_LIVE_STATUSES),
+        ).fetchall()
+    }
+    walk.runs = _reduce_runs(anchors, active_turn_ids)
     # The oldest run is cut off by the cap or budget only if it holds the last row read.
     if walk.runs and walk.runs[0]["first_id"] == walk.oldest_id:
         walk.runs[0]["continues_older"] = walk.has_more
