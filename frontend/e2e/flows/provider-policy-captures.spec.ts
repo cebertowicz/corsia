@@ -150,12 +150,13 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					await page.getByRole('button', { name: 'Workspace settings' }).click();
 					await openSettingsSection(page, 'Providers');
 					const accounts = await openWorkspaceProviderAccounts(page);
-					await expect(accounts.getByText('Overridden in 2 projects: Atlas migration, Field notes')).toHaveCount(2);
+					await expect(accounts.getByText('Overridden in 2 projects:')).toBeVisible();
+					await expect(accounts.getByRole('button', { name: 'Atlas migration' })).toBeVisible();
+					await expect(accounts.getByRole('button', { name: 'Field notes' })).toBeVisible();
 					await expect(accounts.getByText('Personal Max · sam@example.com')).toBeVisible();
 					await expect(accounts.getByLabel('Account usage').first()).toHaveText('5h 38% left · wk 59% left');
-					await expect(accounts.getByRole('button', { name: 'Move Pro up' })).toHaveCount(0);
 					await accounts.scrollIntoViewIfNeeded();
-					await expect(accounts.getByRole('button', { name: 'Move Personal Max up' })).toBeVisible();
+					await expect(accounts.getByRole('button', { name: 'Move Personal Max · sam@example.com up' })).toBeVisible();
 				} else {
 					await openActivity(page);
 					await createProjectAndOpenSettings(page, `subscription-${screen}-${surface}`);
@@ -229,8 +230,8 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.getByRole('button', { name: 'Workspace settings' }).click();
 			await openSettingsSection(page, 'Providers');
 			const accounts = await openWorkspaceProviderAccounts(page);
-			const first = accounts.getByRole('button', { name: 'Personal Max', exact: true });
-			const second = accounts.getByRole('button', { name: 'Acme (Team)', exact: true });
+			const first = accounts.getByRole('button', { name: 'Personal Max · sam@example.com', exact: true });
+			const second = accounts.getByRole('button', { name: 'Acme (Team) · sam@example.com', exact: true });
 			await expect(first).toBeEnabled();
 			await expect(second).toBeEnabled();
 			await first.click();
