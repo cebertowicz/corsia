@@ -1,9 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requestCorsiaMessage, requestSettingsSection } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn(), requestSettingsSection: vi.fn() }));
+const { requestCorsiaMessage, requestSettingsSection, requestConnectedAppKey } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn(), requestSettingsSection: vi.fn(), requestConnectedAppKey: vi.fn() }));
 vi.mock('$lib/corsiaRequest', () => ({ requestCorsiaMessage }));
-vi.mock('$lib/stores/settingsNavigation', () => ({ requestSettingsSection }));
+vi.mock('$lib/stores/settingsNavigation', () => ({ requestSettingsSection, requestConnectedAppKey }));
 
 import ConnectAppFlow from './ConnectAppFlow.svelte';
 import { token } from '$lib/stores/auth';
@@ -158,6 +158,15 @@ describe('ConnectAppFlow', () => {
 		expect(host.textContent).toContain('Done');
 		press('Set key');
 		expect(requestSettingsSection).toHaveBeenCalledWith('keys');
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('opens the exact key card when the app declares its key', async () => {
+		const refs = [{ name: 'FILES_TOKEN', kind: 'env', entry: 'files-token', set: false }];
+		const { onClose } = await connectResult('needs_token', { key_refs: refs });
+		press('Set key');
+		expect(requestConnectedAppKey).toHaveBeenCalledWith('Files', 'files-token', refs);
+		expect(requestSettingsSection).not.toHaveBeenCalled();
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 
