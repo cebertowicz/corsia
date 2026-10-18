@@ -1,7 +1,8 @@
-import { tick } from 'svelte';
+import { tick, untrack } from 'svelte';
 import {
 	FOCUS_REACH,
 	WINDOW_OVERSCAN,
+	anchorShift,
 	indexAt,
 	itemOffsets,
 	mountedIndexes,
@@ -56,6 +57,27 @@ export class SidebarWindow<T> {
 		const [sum, count] = this.sums[item.kind];
 		if (count > 0) return sum / count;
 		return item.kind === 'row' ? DEFAULT_ROW_HEIGHT : DEFAULT_LABEL_HEIGHT;
+	}
+
+	/**
+	 * Replace the item list (a thread moved, arrived or left). Browser scroll anchoring is off on the scroller, so
+	 * keep the first visible item at the same screen offset by hand, then recompute the range. At the very top
+	 * nothing is anchored, as in the browser: new items appear above and the list stays at the top.
+	 */
+	setItems(next: WindowItem<T>[]) {
+		untrack(() => {
+			const view = this.viewport();
+			const before = this.items;
+			const oldOffsets = this.offsets;
+			const anchor = view && view.top > 0 ? indexAt(oldOffsets, view.top) : -1;
+			this.items = next;
+			if (anchor < 0) return void tick().then(() => this.update());
+			const delta = anchorShift(before.map((i) => i.key), oldOffsets, anchor, next.map((i) => i.key), this.offsets);
+			void tick().then(() => {
+				if (delta && this.scroller) this.scroller.scrollTop += delta;
+				this.update();
+			});
+		});
 	}
 
 	/** Items to render, in order, with gap spacers for the runs between them. `kept` are keys that must stay mounted. */

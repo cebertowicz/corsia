@@ -112,3 +112,26 @@ export function reachAround(index: number, reach: number): number[] {
 	for (let i = index - reach; i <= index + reach; i++) if (i >= 0) out.push(i);
 	return out;
 }
+
+/**
+ * How far the content moved when the item list changed, measured at the first visible item, so the caller can
+ * shift scrollTop by the same amount and leave the rows the person is looking at where they are. When the
+ * anchor item is gone the nearest surviving neighbour (searching outward in the old order) stands in.
+ * Returns null when no old item survives.
+ */
+export function anchorShift(
+	oldKeys: string[],
+	oldOffsets: number[],
+	anchor: number,
+	newKeys: string[],
+	newOffsets: number[],
+): number | null {
+	const at = new Map(newKeys.map((key, i) => [key, i]));
+	for (let d = 0; d < oldKeys.length; d++) {
+		for (const i of d === 0 ? [anchor] : [anchor - d, anchor + d]) {
+			const next = i >= 0 && i < oldKeys.length ? at.get(oldKeys[i]) : undefined;
+			if (next !== undefined) return newOffsets[next] - oldOffsets[i];
+		}
+	}
+	return null;
+}

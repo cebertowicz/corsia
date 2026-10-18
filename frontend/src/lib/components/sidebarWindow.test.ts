@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	WINDOW_OVERSCAN,
+	anchorShift,
 	WINDOW_THRESHOLD,
 	buildWindowItems,
 	indexAt,
@@ -133,5 +134,32 @@ describe('reachAround', () => {
 		expect(reachAround(10, 3)).toEqual([7, 8, 9, 10, 11, 12, 13]);
 		expect(reachAround(1, 3)).toEqual([0, 1, 2, 3, 4]);
 		expect(reachAround(-1, 3)).toEqual([]);
+	});
+});
+
+describe('anchorShift', () => {
+	const heights = (n: number, h = 40) => itemOffsets(new Array<number>(n).fill(h));
+
+	it('is zero when nothing above the anchor changed', () => {
+		const keys = ['a', 'b', 'c', 'd'];
+		expect(anchorShift(keys, heights(4), 2, keys, heights(4))).toBe(0);
+	});
+
+	it('shifts by the height of items inserted above the anchor', () => {
+		// a thread moved from below the viewport into a group above it
+		expect(anchorShift(['a', 'b', 'c', 'd'], heights(4), 2, ['x', 'a', 'b', 'c', 'd'], heights(5))).toBe(40);
+	});
+
+	it('shifts back when an item above the anchor leaves, and ignores moves below it', () => {
+		expect(anchorShift(['a', 'b', 'c', 'd'], heights(4), 2, ['b', 'c', 'd'], heights(3))).toBe(-40);
+		expect(anchorShift(['a', 'b', 'c', 'd'], heights(4), 1, ['a', 'b', 'd', 'c'], heights(4))).toBe(0);
+	});
+
+	it('falls back to the nearest surviving item when the anchor is gone', () => {
+		expect(anchorShift(['a', 'b', 'c', 'd'], heights(4), 2, ['a', 'd', 'x', 'b'], heights(4))).toBe(80); // 'c' is gone; its predecessor 'b' stood at 40 and now stands at 120
+	});
+
+	it('returns null when no old item survives', () => {
+		expect(anchorShift(['a', 'b'], heights(2), 0, ['x'], heights(1))).toBeNull();
 	});
 });

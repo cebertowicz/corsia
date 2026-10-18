@@ -91,7 +91,7 @@
 	let rowCount = $derived(pinnedThreads.length + unpinnedThreads.length);
 	let windowed = $derived(shouldWindow(rowCount));
 	$effect.pre(() => {
-		win.items = windowed ? buildWindowItems(pinnedThreads, timeGroups) : [];
+		win.setItems(windowed ? buildWindowItems(pinnedThreads, timeGroups) : []);
 	});
 	let windowSegments = $derived(
 		win.segments([renamingThreadId, swipingThreadId, revealedThreadId, contextMenuThreadId]),
@@ -335,7 +335,7 @@
 						{@const item = win.items[segment.index]}
 						{#if item.kind === 'label'}
 							<div class="win-item" data-win-key={item.key} use:win.measure>
-								<div class="list-section-label">{item.text}</div>
+								<div class="list-section-label" role="presentation">{item.text}</div>
 							</div>
 						{:else}
 							<div
@@ -353,17 +353,17 @@
 				{/each}
 			</div>
 		{:else}
-		<div class="scope-pane" in:fly={{ y: 6, duration: 180, easing: cubicOut }}>
+		<div class="scope-pane" role="list" aria-label="Conversations" in:fly={{ y: 6, duration: 180, easing: cubicOut }}>
 			{#if pinnedThreads.length > 0}
-				<div class="list-section-label">Pinned</div>
+				<div class="list-section-label" role="presentation">Pinned</div>
 				{#each pinnedThreads as thread (thread.id)}
-					{@render row(thread)}
+					<div class="win-item" role="listitem">{@render row(thread)}</div>
 				{/each}
 			{/if}
 			{#each timeGroups as group (group.label)}
-				<div class="list-section-label">{group.label}</div>
+				<div class="list-section-label" role="presentation">{group.label}</div>
 				{#each group.threads as thread (thread.id)}
-					{@render row(thread)}
+					<div class="win-item" role="listitem">{@render row(thread)}</div>
 				{/each}
 			{/each}
 			{#if scopedThreads.length === 0}
