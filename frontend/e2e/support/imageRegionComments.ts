@@ -126,13 +126,19 @@ export async function drag(page: Page, from: { x: number; y: number }, to: { x: 
 	await page.mouse.move(to.x, to.y, { steps: 8 });
 	await page.mouse.up();
 }
-/** One finger, through CDP, so the touch path (not the mouse path) draws or pans. */
+/**
+ * One finger, through CDP, so the touch path (not the mouse path) draws or pans. It moves at a finger's pace and rests
+ * a moment before lifting: eight moves sent back to back, then a lift, read as a fast flick, and the browser swallowed
+ * the next tap (touch and pointer events, no click) as the one that stops a fling, on the runner and not locally.
+ */
 export async function touchDrag(page: Page, a: { x: number; y: number }, b: { x: number; y: number }) {
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x, y: a.y, id: 0 }] });
 	for (let step = 1; step <= 8; step++) {
+		await page.waitForTimeout(24);
 		await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x + ((b.x - a.x) * step) / 8, y: a.y + ((b.y - a.y) * step) / 8, id: 0 }] });
 	}
+	await page.waitForTimeout(150);
 	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 	await cdp.detach();
 }
