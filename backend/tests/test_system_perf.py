@@ -27,5 +27,5 @@ def test_route_endpoint_uses_own_cursor_while_rw_connection_is_open(monkeypatch,
 
     assert response.status_code == 200
     assert response.json()["rows"][0][2] == "/items/{item_id}"
-    assert response.json()["rows"][0][6:8] == [512, 512]
+    assert response.json()["rows"][0][7:9] == [512, 512]
     conn.close()

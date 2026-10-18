@@ -18,7 +18,7 @@ GROWTH = 0.25
 MIN_RISE = {"steps": 10_000, "statements": 5, "bytes": 16_384}
 #: Fresh-route ceilings: a route above one is a would-fail unless grandfathered.
 CEILINGS = {"steps": 500_000, "statements": 500, "bytes": 1_048_576}
-#: The fixed Focus page measures 63,783 bytes with a production-shaped agent
+#: The fixed Focus page measures 58,671 bytes with a production-shaped agent
 #: thread. Keep a twofold margin for ordinary variation while making a seed
 #: payload regression fail even though its SQLite walk still exceeds the step cap.
 ROUTE_CEILINGS = {

@@ -307,7 +307,9 @@ def _open_app(backend: Path, db_file: Path):
     # after selecting a workspace file. It is synthetic and lives under this
     # run's disposable workspace.
     workspace = Path(os.environ["CORSIA_WORKSPACE"])
-    (workspace / "README.md").write_text("speed-gate synthetic document\n")
+    document = workspace / "README.md"
+    document.write_text("speed-gate synthetic document\n")
+    os.utime(document, (1_700_000_000, 1_700_000_000))  # its mtime is part of file-route responses
     from infra.database import DB_PATH, close_thread_db
 
     shutil.copyfile(db_file, DB_PATH)

@@ -15,10 +15,11 @@
     "/api/measurement/series",
     "/api/measurement/series/index",
     "/api/plans/operator/scopes/projects/{project_id}",
+    "/api/threads/{thread_id}/context-snapshot/next-turn",
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Measure default and Focus first pages after seed payloads are omitted from run stubs; TestClient records decoded bytes",
+  "reason": "Restore context snapshot's pre-PR thread-00000 worst-case measurement; delegation status now reads production-shaped seed rows from that same thread, a fixture change rather than a code change.",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -76,12 +77,12 @@
       "steps": 25890462
     },
     "/api/delegation/threads/{thread_id}/status": {
-      "bytes": 6503,
+      "bytes": 170857,
       "statements": 15,
       "steps": 423
     },
     "/api/files/content": {
-      "bytes": 206,
+      "bytes": 200,
       "statements": 5,
       "steps": 231
     },
@@ -91,7 +92,7 @@
       "steps": 231
     },
     "/api/files/tree": {
-      "bytes": 277,
+      "bytes": 271,
       "statements": 23,
       "steps": 374
     },
@@ -206,9 +207,9 @@
       "steps": 14641
     },
     "/api/plans/operator/threads/{thread_id}": {
-      "bytes": 7545,
-      "statements": 102,
-      "steps": 102821
+      "bytes": 16096,
+      "statements": 103,
+      "steps": 117377
     },
     "/api/projects": {
       "bytes": 4530,
@@ -301,7 +302,7 @@
       "steps": 15
     },
     "/api/system/update-status": {
-      "bytes": 436,
+      "bytes": 458,
       "statements": 5,
       "steps": 62
     },
@@ -318,7 +319,7 @@
     "/api/threads/{thread_id}/artifacts": {
       "bytes": 5725,
       "statements": 30,
-      "steps": 2189
+      "steps": 2289
     },
     "/api/threads/{thread_id}/artifacts/reconcile": {
       "bytes": 79,
@@ -326,21 +327,16 @@
       "steps": 206
     },
     "/api/threads/{thread_id}/checkpoints": {
-      "bytes": 18,
+      "bytes": 199,
       "statements": 3,
-      "steps": 87
+      "steps": 99
     },
     "/api/threads/{thread_id}/context-snapshot/next-turn": {
-      "bytes": 178789,
+      "bytes": 182828,
       "statements": 41,
-      "steps": 14502
+      "steps": 2022543
     },
     "/api/threads/{thread_id}/messages": {
-      "bytes": 49831,
-      "statements": 12,
-      "steps": 3217
-    },
-    "/api/threads/{thread_id}/messages?limit=50": {
       "bytes": 53821,
       "statements": 14,
       "steps": 9274
@@ -353,7 +349,7 @@
     "/api/threads/{thread_id}/updates": {
       "bytes": 44,
       "statements": 3,
-      "steps": 134
+      "steps": 158
     },
     "/api/threads/{thread_id}/vendor-account": {
       "bytes": 412,
@@ -376,7 +372,7 @@
       "steps": 370
     },
     "/api/version": {
-      "bytes": 767,
+      "bytes": 771,
       "statements": 0,
       "steps": 0
     }

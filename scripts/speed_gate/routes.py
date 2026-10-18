@@ -59,10 +59,9 @@ def fixture_ids(db_path: str) -> dict[str, str]:
         return None if row is None else str(row[0])
 
     ids = {
-        # Generic thread reads use an ordinary thread. The Focus first-page
-        # variant below targets a persistent agent whose newest turns include
-        # production-shaped seed/tool/assistant rows.
-        "thread_id": "thread-00018", "agent_thread_id": "thread-00000",
+        # Generic thread reads target the largest persistent-agent thread,
+        # whose newest turns include production-shaped seed/tool/assistant rows.
+        "thread_id": "thread-00000",
         "parent_thread_id": "thread-00000", "project_id": "project-00",
         "node_id": "node-project-00-0001", "user_id": "steve", "metric": "messages",
         "artifact_id": first("SELECT artifact_id FROM artifact_registrations ORDER BY rowid LIMIT 1")
@@ -136,12 +135,11 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
 
 
 #: Reads whose client query shape and selected fixture record change the response
-#: substantially. The ordinary default page is retained, while the persistent-agent
-#: thread gets explicit default and Focus page measurements.
+#: substantially. The generic paged read already targets the persistent-agent
+#: thread, so only the distinct Focus query needs an explicit measurement.
 CLIENT_QUERY_VARIANTS = {
     "/api/threads/{thread_id}/messages": (
-        ("?limit=50", "", True),
-        ("?limit=50&view=focus", "view=focus", False),
+        ("?limit=50&view=focus", "view=focus"),
     ),
 }
 
@@ -153,11 +151,8 @@ def build_targets(template: str, route, ids: dict[str, str], extra: dict[str, st
     if primary.url is None:
         return [primary]
     variants = [primary]
-    for suffix, extra_query, needs_agent_thread in CLIENT_QUERY_VARIANTS.get(template, ()):
-        if needs_agent_thread and "agent_thread_id" not in ids:
-            continue
-        variant_ids = {**ids, "thread_id": ids.get("agent_thread_id", ids["thread_id"])}
-        variant = build_target(template, route, variant_ids, extra, token)
+    for suffix, extra_query in CLIENT_QUERY_VARIANTS.get(template, ()):
+        variant = build_target(template, route, ids, extra, token)
         assert variant.url is not None  # the primary and variant share the same route contract
         if extra_query:
             separator = "&" if "?" in variant.url else "?"
