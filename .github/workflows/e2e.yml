@@ -33,7 +33,7 @@ jobs:
   e2e:
     name: Playwright UI-E2E (mock)
     runs-on: ubuntu-24.04
-    # One serial suite (playwright workers: 1, fullyParallel: false, because the mock backend is shared). Measured on run 39011776573: 491 of 1062 tests in 90 min (about 9 s per passing test), so the full suite needs about 3 h.
+    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. Measured on run 39076476997: the single job took 181 min for the full suite (about 3 h), so 240 leaves about 60 min of headroom.
     timeout-minutes: 240
 
     strategy:
