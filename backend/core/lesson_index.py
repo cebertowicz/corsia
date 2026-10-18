@@ -46,6 +46,8 @@ MISPLACED = "its file is not in its owner's skills"
 HELD_PREFIX = "trial lesson not offered: "
 #: Follows a trial's name on its index line; an ordinary skill has none.
 TRIAL_MARK = " (trial, unproven)"
+#: Maximum description length for non-System index lines.
+NON_SYSTEM_DESCRIPTION_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -59,8 +61,16 @@ class LessonPartition:
 
 def index_line(row: SkillRow) -> str:
     """The one line a skill contributes to the delivered index."""
+    description = row.description
+    if row.scope != "system":
+        description = description[:NON_SYSTEM_DESCRIPTION_LIMIT]
     trial = lesson_block(row.metadata) is not None
-    return line_for(row.name, row.description, row.path, trial=trial)
+    return line_for(row.name, description, row.path, trial=trial)
+
+
+def name_entry(name: str, path: object) -> str:
+    """The compact findable entry for a names-only overflow skill."""
+    return f"{name} ({path})"
 
 
 def line_for(name: str, description: str, path: object, *, trial: bool = False) -> str:

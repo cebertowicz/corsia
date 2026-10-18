@@ -120,7 +120,7 @@ describe('update model', () => {
 			...failure('disk_space'),
 			detail: JSON.stringify({ needed_bytes: 16_000_000_000, free_bytes: 4_000_000_000 }),
 		});
-		expect(copy.body).toContain('Needs 16 GB free; this Mac has 4 GB.');
+		expect(copy.body).toContain('Needs 16 GB free; this computer has 4 GB.');
 		expect(copy.toastLine).toBe('Needs 12 GB more free space');
 		expect(copy.retryLabel).toBe('Try again after freeing space');
 	});

@@ -10,6 +10,7 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
+from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
@@ -85,6 +86,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(JsonGZipMiddleware)
 app.add_middleware(RequestTimingMiddleware)
 
 
