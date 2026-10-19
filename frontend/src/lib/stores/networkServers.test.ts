@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { get } from 'svelte/store';
 import { token } from './auth';
+import { SERVER_UNREACHABLE } from '$lib/plainError';
 import {
-	addNetworkServer, networkServers, parseModelIds, removeNetworkServer, setNetworkServerBilling, setNetworkServerEnabled, testNetworkServer,
+	addNetworkServer, networkServers, parseModelIds, removeNetworkServer, setNetworkServerBilling, setNetworkServerEnabled, setNetworkServerPrivate, testNetworkServer,
 	updateNetworkServer, type NetworkServer,
 } from './networkServers';
 
@@ -130,6 +131,24 @@ describe('setNetworkServerEnabled', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(404, { detail: 'Server not found' })));
 
 		expect(await setNetworkServerEnabled('ns-gone', true)).toEqual({ ok: false, message: 'Server not found' });
+	});
+});
+
+describe('setNetworkServerPrivate', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('passes on a sentence the server wrote', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => response(404, { detail: 'Server not found' })));
+		expect(await setNetworkServerPrivate('ns-gone', true)).toEqual({ ok: false, message: 'Server not found' });
+	});
+
+	it('never shows a status code, machine code or runtime error', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => response(500, {})));
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, message: 'The server did not accept the change. Try again.' });
+		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'person_session_required' })));
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, message: 'The server did not accept the change. Try again.' });
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+		expect(await setNetworkServerPrivate('ns-1', false)).toEqual({ ok: false, message: SERVER_UNREACHABLE });
 	});
 });
 

@@ -21,13 +21,13 @@ export type ProviderPolicy = {
 export type ProjectCloudModelsPolicy = { cloud_models_off: boolean };
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string; conflict?: boolean };
 
-async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> {
+async function request<T>(path: string, init?: RequestInit, refused = 'Could not save subscriptions.'): Promise<Result<T>> {
 	const auth = get(token);
 	if (!auth) return { ok: false, error: 'Sign in to manage subscriptions.' };
 	try {
 		const response = await fetch(path, { ...init, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
 		const data = await response.json().catch(() => null);
-		if (!response.ok) return { ok: false, conflict: response.status === 409, error: plainErrorText(data?.detail, 'Could not save subscriptions.') };
+		if (!response.ok) return { ok: false, conflict: response.status === 409, error: plainErrorText(data?.detail, refused) };
 		return { ok: true, value: data as T };
 	} catch { return { ok: false, error: SERVER_UNREACHABLE }; }
 }
@@ -51,5 +51,5 @@ export function loadCloudModelsOff(projectId: string) {
 export function saveCloudModelsOff(projectId: string, cloudModelsOff: boolean) {
 	return request<ProjectCloudModelsPolicy>(`/api/projects/${encodeURIComponent(projectId)}/cloud-models-off`, {
 		method: 'PUT', body: JSON.stringify({ cloud_models_off: cloudModelsOff }),
-	});
+	}, 'The server did not accept the change. Try again.');
 }

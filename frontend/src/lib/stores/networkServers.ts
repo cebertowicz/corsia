@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { token } from './auth';
+import { plainResponseError, SERVER_UNREACHABLE } from '$lib/plainError';
 
 export type EndpointKind = 'local' | 'lan' | 'tailscale' | 'public';
 
@@ -201,10 +202,9 @@ export async function setNetworkServerPrivate(
 			networkServers.update(servers => servers.map(row => row.id === serverId ? { ...row, private: isPrivate } : row));
 			return { ok: true };
 		}
-		const data = await res.json().catch(() => ({}));
-		return { ok: false, message: typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}` };
-	} catch (e) {
-		return { ok: false, message: String(e) };
+		return { ok: false, message: await plainResponseError(res, 'The server did not accept the change. Try again.') };
+	} catch {
+		return { ok: false, message: SERVER_UNREACHABLE };
 	}
 }
 
