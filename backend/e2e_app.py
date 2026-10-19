@@ -44,6 +44,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(mock_router)
+app.include_router(e2e_reset.router, prefix="/api/test", tags=["test"])
 _live_fault_router = build_router(_live_fault_controller, opt_in_requested=_live_fault_opt_in)
 if _live_fault_router is not None:
     app.include_router(_live_fault_router)

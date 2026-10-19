@@ -11,6 +11,7 @@ caller tells the new process apart by ``BOOT_ID``.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import sys
@@ -18,6 +19,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
 
 from infra.adoption_snapshot import create_adoption_snapshot, restore_adoption_snapshot
 
@@ -89,3 +92,35 @@ def restart_from_seed() -> None:
         os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
 
     threading.Thread(target=replace_process, name="e2e-reset", daemon=True).start()
+
+
+router = APIRouter()
+
+
+@router.post("/seed")
+async def capture_seed_route() -> dict:
+    """Record the running app's state as the seed ``POST /api/test/reset`` returns to.
+
+    The suite calls it once, after warm-up and before its first spec.
+    """
+    await asyncio.to_thread(capture_seed)
+    return {"ok": True, "boot_id": BOOT_ID}
+
+
+@router.post("/reset")
+async def reset_to_seed_route() -> dict:
+    """Restart this backend from the captured seed: database, state root, workspace and all in-memory state.
+
+    The response comes back first; the caller polls ``GET /api/test/boot-id`` until it names a new process.
+    """
+    try:
+        restart_from_seed()
+    except RuntimeError as refused:
+        raise HTTPException(409, str(refused)) from refused
+    return {"ok": True, "restarting_boot_id": BOOT_ID}
+
+
+@router.get("/boot-id")
+async def read_boot_id() -> dict:
+    """Name the serving process; it changes once ``POST /api/test/reset`` has replaced it."""
+    return {"boot_id": BOOT_ID}
