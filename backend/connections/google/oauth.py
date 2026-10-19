@@ -180,10 +180,12 @@ def _take_pending(state: object) -> _Pending:
     return pending
 
 
-def _store(pending: _Pending, refresh_token: str, email: str, scopes: list[str]) -> None:
+def _store(
+    pending: _Pending, refresh_token: str, email: str, scopes: list[str], provider_subject: str | None,
+) -> None:
     """Keep the legacy single-account flow on one connected-account bundle."""
     from connections.connected_accounts import (
-        corsia_only_reach, create_google_account, store_google_credentials,
+        backfill_google_subject, corsia_only_reach, create_google_account, store_google_credentials,
     )
 
     from connections.connected_accounts import google_account, set_state
@@ -194,10 +196,13 @@ def _store(pending: _Pending, refresh_token: str, email: str, scopes: list[str])
         if account is None:
             account = create_google_account(
                 email, reach=corsia_only_reach(), created_by=("system", "google_oauth"),
-                signed_in_by=("system", "google_oauth"), state=STATUS_CONNECTED, db=db,
+                signed_in_by=("system", "google_oauth"), provider_subject=provider_subject,
+                state=STATUS_CONNECTED, db=db,
             )
         else:
             set_state(str(account["id"]), STATUS_CONNECTED, db=db)
+            if provider_subject is not None:
+                backfill_google_subject(str(account["id"]), provider_subject, db=db)
         store_google_credentials(str(account["id"]), {
             "client_id": pending.client_id, "client_secret": pending.client_secret,
             "refresh_token": refresh_token, "scopes": scopes,
@@ -226,6 +231,7 @@ async def complete_sign_in(code: object, state: object) -> str:
         grant = response.json()
         refresh_token, access = grant["refresh_token"], grant["access_token"]
         scopes = sorted(str(grant.get("scope", "")).split())
+        provider_subject = client.id_token_subject(grant.get("id_token"))
         email = (await client.request_json("GET", PROFILE_URL, token=access))["emailAddress"]
         refresh_token = key_store.validated_value(refresh_token)
     except GoogleError:
@@ -234,7 +240,7 @@ async def complete_sign_in(code: object, state: object) -> str:
         raise GoogleSignInError(DENIED) from None
     if not set(REQUIRED_SCOPES) <= set(scopes):
         raise GoogleSignInError(MISSING_SCOPES)
-    await run_in_db(_store, pending, refresh_token, str(email), scopes)
+    await run_in_db(_store, pending, refresh_token, str(email), scopes, provider_subject)
     return str(email)
 
 

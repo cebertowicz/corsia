@@ -36,6 +36,11 @@ EMAIL = "person@example.com"
 _REAL_CLIENT = httpx.AsyncClient
 
 
+def _id_token(subject: str) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": subject}).encode()).rstrip(b"=").decode()
+    return f"header.{payload}.signature"
+
+
 class FakeGoogle:
     """Google's token, profile and API endpoints; records each request body."""
 
@@ -44,6 +49,7 @@ class FakeGoogle:
         self.token_forms: list[dict] = []
         self.refresh_status = 200
         self.scope = " ".join(oauth.SCOPES)
+        self.id_token: str | None = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -53,13 +59,17 @@ class FakeGoogle:
             if form["grant_type"] == "refresh_token":
                 if self.refresh_status != 200:
                     return httpx.Response(self.refresh_status, json={"error": "invalid_grant", "echo": REFRESH})
-                return httpx.Response(200, json={"access_token": ACCESS})
+                grant = {"access_token": ACCESS}
+                if self.id_token is not None:
+                    grant["id_token"] = self.id_token
+                return httpx.Response(200, json=grant)
             digest = hashlib.sha256(form["code_verifier"].encode()).digest()
             if base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != self.challenge:
                 return httpx.Response(400, json={"error": "invalid_grant"})
-            return httpx.Response(200, json={
-                "access_token": ACCESS, "refresh_token": REFRESH, "scope": self.scope,
-            })
+            grant = {"access_token": ACCESS, "refresh_token": REFRESH, "scope": self.scope}
+            if self.id_token is not None:
+                grant["id_token"] = self.id_token
+            return httpx.Response(200, json=grant)
         if url == oauth.PROFILE_URL:
             return httpx.Response(200, json={"emailAddress": EMAIL})
         return httpx.Response(200, json={"ok": True})
@@ -209,6 +219,27 @@ async def test_connects_when_the_person_declines_drive_docs_and_sheets(google, c
     assert key_store.resolve_google() is not None
     status = json.loads(await GoogleStatusTool().execute(_thread_id=conductor))
     assert set(status["scopes"]) == set(oauth.REQUIRED_SCOPES)
+
+
+async def test_token_subject_is_saved_without_requesting_a_new_scope(google, conductor, client_file):
+    google.id_token = _id_token("google-subject-1")
+    _, state = await _start(google, conductor, client_file)
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert response.status_code == 200
+    assert google_account(db=get_db())["provider_subject"] == "google-subject-1"
+    assert "openid" not in oauth.SCOPES
+
+
+async def test_refresh_backfills_a_migrated_account_subject_when_google_supplies_one(google, conductor, client_file):
+    _, state = await _start(google, conductor, client_file)
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert response.status_code == 200
+    assert google_account(db=get_db())["provider_subject"] is None
+    google.id_token = _id_token("google-subject-2")
+    await google_client.get_json("https://gmail.googleapis.com/gmail/v1/users/me/labels")
+    assert google_account(db=get_db())["provider_subject"] == "google-subject-2"
 
 
 async def test_not_connected_text_and_status_shape(google, conductor):

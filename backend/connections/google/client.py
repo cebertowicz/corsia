@@ -6,6 +6,8 @@ response body: callers may hand the message straight to an agent.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 from typing import Any
 
@@ -17,7 +19,6 @@ from infra.db_async import run_in_db
 log = logging.getLogger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-ACCOUNT_SETTING = "google_account"
 STATUS_CONNECTED = "connected"
 STATUS_NEEDS_SIGN_IN = "needs_sign_in"
 TIMEOUT_SECONDS = 20.0
@@ -62,6 +63,36 @@ class GoogleRequestFailed(GoogleError):
         super().__init__(UNREACHABLE if status is None else f"Google refused the request (HTTP {status}).")
 
 
+def id_token_subject(value: object) -> str | None:
+    """Read a non-empty ``sub`` claim from Google's token response, if present."""
+    if not isinstance(value, str):
+        return None
+    pieces = value.split(".")
+    if len(pieces) != 3:
+        return None
+    try:
+        payload = base64.urlsafe_b64decode(pieces[1] + "=" * (-len(pieces[1]) % 4))
+        claims = json.loads(payload)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    subject = claims.get("sub") if isinstance(claims, dict) else None
+    return subject if isinstance(subject, str) and subject else None
+
+
+def _backfill_google_subject(provider_subject: str) -> None:
+    """Store a refreshed Google identity on a migrated account when available."""
+    from connections.connected_accounts import backfill_google_subject, google_account
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        account = google_account(db=db)
+        if account is not None:
+            backfill_google_subject(str(account["id"]), provider_subject, db=db)
+    finally:
+        db.close()
+
+
 def _mark_needs_sign_in() -> None:
     """Mark the single compatibility account without touching legacy settings."""
     from connections.connected_accounts import google_account, set_state
@@ -98,11 +129,16 @@ async def access_token() -> str:
     if response.status_code != 200:
         raise GoogleRequestFailed(response.status_code)
     try:
-        token = response.json().get("access_token")
+        grant = response.json()
+        token = grant.get("access_token")
+        provider_subject = id_token_subject(grant.get("id_token"))
     except ValueError:
         token = None
+        provider_subject = None
     if not isinstance(token, str) or not token:
         raise GoogleRequestFailed(response.status_code)
+    if provider_subject is not None:
+        await run_in_db(_backfill_google_subject, provider_subject)
     return token
 
 

@@ -195,6 +195,26 @@ def create_google_account(
         connection.close()
 
 
+def backfill_google_subject(
+    account_id: str, provider_subject: str, *, db: sqlite3.Connection | None = None,
+) -> None:
+    """Persist a Google subject only for a migrated row that lacks one."""
+    if not isinstance(provider_subject, str) or not provider_subject:
+        raise ConnectedAccountError("invalid provider subject")
+    with write_transaction(db, scope="connected_account_subject") as conn:
+        row = conn.execute(
+            "SELECT provider_subject FROM connected_accounts WHERE id=? AND provider=?",
+            (account_id, GOOGLE_PROVIDER),
+        ).fetchone()
+        if row is None:
+            raise ConnectedAccountError("connected account not found")
+        if row["provider_subject"] is None:
+            conn.execute(
+                "UPDATE connected_accounts SET provider_subject=?,updated_at=? WHERE id=?",
+                (provider_subject, utc_now_iso(), account_id),
+            )
+
+
 def store_google_credentials(
     account_id: str, credentials: dict[str, object], *, db: sqlite3.Connection | None = None,
 ) -> None:

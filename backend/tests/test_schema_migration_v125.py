@@ -1,79 +1,61 @@
-"""Schema 125 -> 126: connected accounts and legacy Google migration."""
+"""Schema 124 -> 125: the reviewer gate keeps the head a maintainer approved."""
 
 from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
 
-import pytest
-
-from connections.connected_accounts import corsia_only_reach, google_account, resolve_google_credentials
-from infra import key_store, key_store_values
 from infra.database import initialize_schema
-from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
-from infra.migration_125_to_126_connected_accounts import migrate_125_to_126
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_124_to_125_reviewer_gate_approval import migrate_124_to_125
 from infra.schema import SCHEMA_VERSION
-from infra.settings import get_setting, set_setting
 
 
-ACCOUNT = "person@example.test"
-CURSOR = {"account": ACCOUNT, "floor_at": "old-floor", "history_id": "old-history", "last_success_at": "old-success"}
+def _columns(db: sqlite3.Connection) -> list[tuple[str, str]]:
+    return [(row[1], row[2]) for row in db.execute("PRAGMA table_info(reviewer_gate_approval)")]
 
 
 def _fresh() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
     initialize_schema(db)
     return db
 
 
-def _seed_legacy(db: sqlite3.Connection) -> None:
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, "client-id", db=db)
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, "client-secret", db=db)
-    key_store.set_managed_value(key_store.GOOGLE_REFRESH_TOKEN, "refresh-token", db=db)
-    set_setting("google_account", {"email": ACCOUNT, "status": "connected"}, db=db)
-    set_setting("gmail_poll_cursor", CURSOR, db=db)
+def _wound_back_to_v124() -> sqlite3.Connection:
+    """A fresh current database wound back to its schema-124 shape, with one review receipt."""
+    db = _fresh()
+    db.execute("DROP TABLE reviewer_gate_approval")
+    db.execute("PRAGMA user_version=124")
+    db.execute("INSERT INTO reviewer_gate_state(pr_key,reviewed_sha) VALUES ('o/r#1','abc')")
+    db.commit()
+    return db
 
 
-def test_v125_registers_connected_accounts_step() -> None:
+def test_the_step_is_registered_at_124() -> None:
     assert SCHEMA_VERSION == 126
-    assert MIGRATIONS[125] is migrate_125_to_126
+    assert MIGRATIONS[124] is migrate_124_to_125
 
 
-def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        db.execute("PRAGMA user_version=125")
-        db.commit()
+def test_the_step_matches_a_fresh_schema_and_keeps_receipts() -> None:
+    with closing(_fresh()) as fresh, closing(_wound_back_to_v124()) as db:
+        migrate_124_to_125(db)
 
+        assert _columns(db) == _columns(fresh) == [("pr_key", "TEXT"), ("approved_sha", "TEXT")]
+        assert db.execute("SELECT reviewed_sha FROM reviewer_gate_state").fetchall() == [("abc",)]
+
+
+def test_the_step_is_safe_to_run_again() -> None:
+    with closing(_wound_back_to_v124()) as db:
+        migrate_124_to_125(db)
+        migrate_124_to_125(db)
+        assert len(_columns(db)) == 2
+
+
+def test_the_runner_takes_a_124_database_to_current_and_stays_there() -> None:
+    with closing(_wound_back_to_v124()) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 125, 126)
-        account = google_account(db=db)
-        assert account is not None
-        assert account["address"] == ACCOUNT
-        assert account["reach"] == corsia_only_reach().as_dict()
-        assert account["cursor"] == CURSOR
-        assert resolve_google_credentials(str(account["id"]), db=db) == {
-            "client_id": "client-id", "client_secret": "client-secret", "refresh_token": "refresh-token",
-        }
-        assert get_setting("google_account", db=db) is None
-        assert get_setting("gmail_poll_cursor", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] == account["id"]
+
+        assert (result.migrated, result.from_version, result.to_version) == (True, 124, SCHEMA_VERSION)
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert len(_columns(db)) == 2
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-
-
-def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(monkeypatch) -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-
-        monkeypatch.setattr(key_store_values, "put", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
-        with pytest.raises(MigrationError):
-            migrate_to_current(db, SCHEMA_VERSION)
-
-        assert get_setting("google_account", db=db) == {"email": ACCOUNT, "status": "connected"}
-        assert get_setting("gmail_poll_cursor", db=db) == CURSOR
-        assert set(key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db)) == set(key_store.GOOGLE_ENTRIES)
-        assert db.execute("SELECT COUNT(*) FROM connected_accounts").fetchone()[0] == 0

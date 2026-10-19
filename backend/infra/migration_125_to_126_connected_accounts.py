@@ -22,6 +22,38 @@ LEGACY_CURSOR_SETTING = "gmail_poll_cursor"
 JOURNAL_KEY = "google-singleton-v1"
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Whether a legacy table exists at this point in the migration ladder."""
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,),
+    ).fetchone() is not None
+
+
+def _legacy_setting(conn: sqlite3.Connection, key: str) -> object | None:
+    """Read a legacy setting only when its table predates this migration."""
+    return get_setting(key, db=conn) if _has_table(conn, "settings") else None
+
+
+def _legacy_credentials(conn: sqlite3.Connection) -> dict[str, str] | None:
+    """Return a complete legacy bundle when the old key-store path is usable."""
+    if not _has_table(conn, "key_store_entries"):
+        return None
+    resolved = key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=conn)
+    if set(resolved) != set(key_store.GOOGLE_ENTRIES):
+        return None
+    values = {name: resolved[name] for name in key_store.GOOGLE_ENTRIES}
+    return values if all(isinstance(value, str) and value for value in values.values()) else None
+
+
+def _clear_legacy(conn: sqlite3.Connection) -> None:
+    """Retire any surviving singleton data after the new state is durable."""
+    if _has_table(conn, "key_store_entries"):
+        conn.execute("DELETE FROM key_store_entries WHERE name IN (?,?,?)", key_store.GOOGLE_ENTRIES)
+        key_store_values.sweep_after_commit(conn)
+    if _has_table(conn, "settings"):
+        conn.execute("DELETE FROM settings WHERE key IN (?,?)", (LEGACY_ACCOUNT_SETTING, LEGACY_CURSOR_SETTING))
+
+
 def migrate_125_to_126(conn: sqlite3.Connection) -> None:
     """Move one usable legacy Google singleton atomically into its account row.
 
@@ -36,30 +68,25 @@ def migrate_125_to_126(conn: sqlite3.Connection) -> None:
     ).fetchone() is not None:
         return
 
-    legacy = get_setting(LEGACY_ACCOUNT_SETTING, db=conn)
-    if legacy is None:
+    legacy = _legacy_setting(conn, LEGACY_ACCOUNT_SETTING)
+    cursor = _legacy_setting(conn, LEGACY_CURSOR_SETTING)
+    if not isinstance(legacy, dict):
+        _clear_legacy(conn)
         _journal(conn, None)
         return
     address = legacy.get("email")
     if not isinstance(address, str) or not address.strip():
-        raise ValueError("legacy Google account has no address")
-    credentials = key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=conn)
-    if set(credentials) != set(key_store.GOOGLE_ENTRIES):
-        raise ValueError("legacy Google account has incomplete credentials")
+        _clear_legacy(conn)
+        _journal(conn, None)
+        return
+
+    credentials = _legacy_credentials(conn)
     status = legacy.get("status")
-    state = status if status in {"connected", "needs_sign_in"} else "signed_out"
-    cursor = get_setting(LEGACY_CURSOR_SETTING, db=conn)
+    state = status if credentials is not None and status in {"connected", "needs_sign_in"} else "needs_sign_in"
     account_id = str(uuid.uuid4())
     now = utc_now_iso()
     reach = corsia_only_reach()
     key = credential_key(account_id)
-    bundle = {
-        "client_id": credentials[key_store.GOOGLE_CLIENT_ID],
-        "client_secret": credentials[key_store.GOOGLE_CLIENT_SECRET],
-        "refresh_token": credentials[key_store.GOOGLE_REFRESH_TOKEN],
-        "scopes": sorted(scope for scope in legacy.get("scopes", []) if isinstance(scope, str)),
-    }
-
     conn.execute(
         "INSERT INTO connected_accounts("
         "id,provider,provider_subject,address,capabilities_json,state,reach_mode,outside_projects,"
@@ -72,18 +99,22 @@ def migrate_125_to_126(conn: sqlite3.Connection) -> None:
          json.dumps(cursor, separators=(",", ":"), sort_keys=True) if cursor is not None else None,
          "system", "legacy_google_migration", "system", "legacy_google_migration", now, now),
     )
-    ref = key_store_values.put(conn, key, json.dumps(bundle, separators=(",", ":"), sort_keys=True))
-    conn.execute(
-        "INSERT INTO key_store_entries(name,label,description,created_at,set_at,value_ref) VALUES (?,?,?,?,?,?)",
-        (key, "Google account", "Credential bundle for one connected Google account.", now, now, ref),
-    )
-    resolved = key_store_values.resolve(conn, [key]).get(key)
-    if resolved != json.dumps(bundle, separators=(",", ":"), sort_keys=True):
-        raise ValueError("new Google account credentials could not be verified")
-
-    conn.execute("DELETE FROM key_store_entries WHERE name IN (?,?,?)", key_store.GOOGLE_ENTRIES)
-    conn.execute("DELETE FROM settings WHERE key IN (?,?)", (LEGACY_ACCOUNT_SETTING, LEGACY_CURSOR_SETTING))
-    key_store_values.sweep_after_commit(conn)
+    if credentials is not None:
+        bundle = {
+            "client_id": credentials[key_store.GOOGLE_CLIENT_ID],
+            "client_secret": credentials[key_store.GOOGLE_CLIENT_SECRET],
+            "refresh_token": credentials[key_store.GOOGLE_REFRESH_TOKEN],
+            "scopes": sorted(scope for scope in legacy.get("scopes", []) if isinstance(scope, str)),
+        }
+        encoded = json.dumps(bundle, separators=(",", ":"), sort_keys=True)
+        ref = key_store_values.put(conn, key, encoded)
+        conn.execute(
+            "INSERT INTO key_store_entries(name,label,description,created_at,set_at,value_ref) VALUES (?,?,?,?,?,?)",
+            (key, "Google account", "Credential bundle for one connected Google account.", now, now, ref),
+        )
+        if key_store_values.resolve(conn, [key]).get(key) != encoded:
+            raise ValueError("new Google account credentials could not be verified")
+    _clear_legacy(conn)
     _journal(conn, account_id)
 
 
