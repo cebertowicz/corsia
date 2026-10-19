@@ -195,6 +195,7 @@ def _local_only_refusal(parent, model):
             thread_local_only=bool(parent.get("local_only")),
             project_id=parent.get("project_id") or None,
             db=db,
+            spawn=True,
         )
     finally:
         db.close()

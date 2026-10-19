@@ -211,7 +211,14 @@ def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | 
             return "not_found"
         inherited_from = thread["local_only_inherited_from_thread_id"]
         if inherited_from:
-            return {"error": "inherited", "parent_thread_id": inherited_from}
+            root = db.execute(
+                "SELECT title FROM threads WHERE id=?", (inherited_from,),
+            ).fetchone()
+            return {
+                "error": "inherited",
+                "root_thread_id": inherited_from,
+                "root_thread_title": (root["title"] if root else "Untitled"),
+            }
         if local_only:
             for model in (thread["model"], thread["pending_model"]):
                 refusal = local_only_model_refusal(
@@ -243,10 +250,16 @@ async def set_local_only(
     if result == "not_found":
         raise HTTPException(404)
     if result.get("error") == "inherited":
-        raise HTTPException(
-            409,
-            "This thread inherited Local only from root thread "
-            f"{result['parent_thread_id']} and cannot change it.",
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": (
+                    "This thread inherited Local only from "
+                    f"{result['root_thread_title']} and can't turn it off. Start a new thread "
+                    "for work that needs a cloud model."
+                ),
+                "root_thread_id": result["root_thread_id"],
+            },
         )
     if result.get("error") == "local_only_refusal":
         raise HTTPException(409, result["detail"])

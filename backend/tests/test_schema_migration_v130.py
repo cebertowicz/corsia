@@ -1,11 +1,11 @@
-"""Schema 129 -> 130: durable local-only thread scope."""
+"""Schema 129 -> 130: project policy and durable local-only thread scope."""
 
 from __future__ import annotations
 
 import sqlite3
 
 from infra.database_migrations import MIGRATIONS
-from infra.migration_129_to_130_local_only import migrate_129_to_130
+from infra.migration_129_to_130_project_inference_policy import migrate_129_to_130
 
 
 def test_v129_registers_local_only_thread_scope() -> None:

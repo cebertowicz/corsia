@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from llm.locality import locality_refusal
+from llm.locality import locality_refusal, project_cloud_off_text
 
 LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
+LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
 
 
 def _catalog_row(model: str, *, db: sqlite3.Connection) -> dict:
@@ -15,19 +16,16 @@ def _catalog_row(model: str, *, db: sqlite3.Connection) -> dict:
     return catalog_row(model, db=db) or {"litellm_model": model}
 
 
-def _ready_local_selectors(*, project_id: str | None, db: sqlite3.Connection) -> str:
+def _ready_local_selectors() -> list[str]:
     from llm.model_status import catalog_base_rows
 
-    selectors: list[str] = []
-    for status in catalog_base_rows():
-        selector = str(status.get("litellm_model") or "")
-        if not selector or status.get("status") != "ready":
-            continue
-        if locality_refusal(
-            _catalog_row(selector, db=db), thread_local_only=True, project_id=project_id,
-        ) is None:
-            selectors.append(selector)
-    return ", ".join(sorted(set(selectors))) or "no ready local models"
+    return sorted({
+        str(status["litellm_model"])
+        for status in catalog_base_rows()
+        if status.get("is_local") is True
+        and status.get("status") == "ready"
+        and status.get("litellm_model")
+    })
 
 
 def local_only_model_refusal(
@@ -36,22 +34,38 @@ def local_only_model_refusal(
     thread_local_only: bool,
     project_id: str | None,
     db: sqlite3.Connection,
+    spawn: bool = False,
 ) -> str | None:
-    """Return the one recoverable refusal for a non-local model selection."""
-    if not thread_local_only or not isinstance(model, str) or not model.strip():
+    """Return the governing locality refusal for one model selection."""
+    if not isinstance(model, str) or not model.strip():
         return None
+    if not thread_local_only and not project_id:
+        return None
+    selector = model.strip()
     reason = locality_refusal(
-        _catalog_row(model.strip(), db=db),
-        thread_local_only=True,
+        _catalog_row(selector, db=db),
+        thread_local_only=thread_local_only,
         project_id=project_id,
+        db=db,
     )
     if reason is None:
         return None
-    selectors = _ready_local_selectors(project_id=project_id, db=db)
-    return (
-        f"{LOCAL_ONLY_REFUSAL_CODE}: This Local only thread can run only local "
-        f"models because {reason}. Choose one of: {selectors}."
-    )
+    selectors = _ready_local_selectors()
+    if reason == "project_cloud_off":
+        return project_cloud_off_text(selector, selectors, spawn=spawn)
+    if not thread_local_only:
+        return None
+    text = f"This thread is Local only, so it can't use {selector}: {reason}. "
+    if selectors:
+        text += f"Use a ready local model: {', '.join(selectors)}."
+    else:
+        text += (
+            "No local model is ready now. Stay on your current model and do the work inline, "
+            "or check model_catalog later."
+        )
+    if spawn:
+        text += " Local workers run one at a time."
+    return f"{LOCAL_ONLY_REFUSAL_CODE}: {text}"
 
 
 def inherited_local_only(
@@ -103,7 +117,9 @@ def send_confirmation_refusal(
     )
     if refusal is None or no_sensitive_content is True:
         return None
+    recipient_name = str(recipient.get("title") or recipient.get("id") or "This recipient")
     return (
-        "Before sending to a cloud-model agent, remove sensitive content and call "
-        "again with no_sensitive_content: true."
+        f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} runs on a cloud model "
+        f"({recipient_model}). Remove anything sensitive from the message (keys, secrets, "
+        "personal data, private file contents), then call again with no_sensitive_content: true."
     )

@@ -50,6 +50,54 @@ def _thread(
     )
 
 
+def test_model_refusal_uses_governance_wording(monkeypatch) -> None:
+    from infra import local_only
+
+    db = _db()
+    monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "thread_local_only")
+    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ["omlx@local/a", "omlx@local/b"])
+
+    assert local_only.local_only_model_refusal(
+        "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db,
+    ) == (
+        "local_only_requires_local_model: This thread is Local only, so it can't use "
+        "codex/gpt-6.1-sol: thread_local_only. Use a ready local model: "
+        "omlx@local/a, omlx@local/b."
+    )
+
+
+def test_model_refusal_uses_governance_no_ready_wording_and_spawn_suffix(monkeypatch) -> None:
+    from infra import local_only
+
+    db = _db()
+    monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "thread_local_only")
+    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: [])
+
+    assert local_only.local_only_model_refusal(
+        "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db, spawn=True,
+    ) == (
+        "local_only_requires_local_model: This thread is Local only, so it can't use "
+        "codex/gpt-6.1-sol: thread_local_only. No local model is ready now. Stay on your "
+        "current model and do the work inline, or check model_catalog later. "
+        "Local workers run one at a time."
+    )
+
+
+def test_model_refusal_delegates_project_cloud_off_wording_to_locality(monkeypatch) -> None:
+    from infra import local_only
+
+    db = _db()
+    monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "project_cloud_off")
+    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ["omlx@local/a"])
+
+    assert local_only.local_only_model_refusal(
+        "codex/gpt-6.1-sol", thread_local_only=False, project_id="project", db=db, spawn=True,
+    ) == (
+        "project_cloud_off: This project has cloud models turned off, so codex/gpt-6.1-sol "
+        "can't run here. Use a ready local model: omlx@local/a. Local workers run one at a time."
+    )
+
+
 def test_create_fresh_thread_refuses_cloud_child_without_writing(monkeypatch) -> None:
     from infra import fresh_threads
 
@@ -189,6 +237,26 @@ def test_inheritance_uses_root_and_every_creator_candidate(monkeypatch) -> None:
     assert unaffected["local_only"] == 0
 
 
+@pytest.mark.parametrize("lineage_field", ["spawned_by", "parent_thread_id", "actor_thread_id"])
+def test_inheritance_covers_each_lineage_path(monkeypatch, lineage_field) -> None:
+    from infra import fresh_threads
+
+    db = _db()
+    _thread(db, "root", local_only=1)
+    monkeypatch.setattr(fresh_threads, "local_only_model_refusal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "connections.account_selection.bind_model_account",
+        lambda *_args, **_kwargs: None,
+    )
+
+    child = fresh_threads.create_fresh_thread(
+        user_id="u", thread_id=f"child-{lineage_field}", model="local", db=db,
+        **{lineage_field: "root"},
+    )
+
+    assert (child["local_only"], child["local_only_inherited_from_thread_id"]) == (1, "root")
+
+
 def test_non_local_thread_can_switch_to_a_cloud_model(monkeypatch) -> None:
     from infra import model_switches
 
@@ -267,7 +335,13 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
         )
 
     assert inherited.status_code == 409
-    assert "root" in inherited.json()["detail"]
+    assert inherited.json() == {
+        "detail": (
+            "This thread inherited Local only from New Chat and can't turn it off. Start a new "
+            "thread for work that needs a cloud model."
+        ),
+        "root_thread_id": "root",
+    }
     assert invalid.status_code == 422
     assert foreign.status_code == 404
     assert OTHER_TOKEN  # Keep the seeded foreign-account contract explicit.
@@ -410,12 +484,14 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
 
     result = await delegate_send.DelegateSendTool().execute(
         "recipient",
-        "safe task",
+        "private-key-material",
         _thread_id="sender",
         no_sensitive_content=confirmed,
     )
 
     assert ("no_sensitive_content: true" in result) is refused
+    if refused:
+        assert "private-key-material" not in result
     assert sent == ([] if refused else ["delivered"])
 
 
@@ -431,12 +507,16 @@ def test_person_chat_on_a_cloud_model_still_needs_confirmation(monkeypatch) -> N
 
     refusal = local_only.send_confirmation_refusal(
         {"local_only": True},
-        {"model": "cloud", "agent_enabled": 0, "spawned_by": None},
+        {"id": "recipient", "title": "Researcher", "model": "cloud", "agent_enabled": 0, "spawned_by": None},
         no_sensitive_content=False,
         db=db,
     )
 
-    assert refusal is not None and "no_sensitive_content: true" in refusal
+    assert refusal == (
+        "local_only_send_needs_confirm: Researcher runs on a cloud model (cloud). Remove anything "
+        "sensitive from the message (keys, secrets, personal data, private file contents), then call "
+        "again with no_sensitive_content: true."
+    )
 
 
 @pytest.mark.asyncio
