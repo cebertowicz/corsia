@@ -201,6 +201,8 @@ def notify_reviewer_verdict(
             "nit_count": verdict.get("nit_count", 0),
             "finding_count": verdict.get("finding_count", 0),
             "model": verdict.get("model_label") or verdict.get("model"),
+            "reviewer_version": verdict.get("reviewer_version"),
+            "reviewer_standards": verdict.get("reviewer_standards", []),
         },
         loop,
     )
