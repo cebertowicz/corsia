@@ -1,4 +1,4 @@
-"""Which plan node a classified owner message corrects, in the module's documented order, from real rows."""
+"""Which plan node a classified owner message corrects: the answered turn's, from real rows."""
 from __future__ import annotations
 
 import json
@@ -50,18 +50,20 @@ def message(db, message_id: str, thread: str, at: str, *, own_turn: str | None =
                 "2026-10-16" if retracted else None))
 
 
-def test_each_rule_in_order_uses_the_message_time_never_the_fact_time(db) -> None:
+def test_only_the_answered_turn_counts_by_the_message_time_never_the_fact_time(db) -> None:
     turn(db, "before", "t1", "earlier", "2026-10-02T00:00:00Z")
     turn(db, "mine", "t1", "own", "2026-10-03 00:00:00")  # the message's own turn never counts as earlier
     message(db, "m1", "t1", "2026-10-03T00:00:01Z", own_turn="mine")
     turn(db, "only", "t2", "own", "2026-10-03T00:00:00Z")
-    message(db, "m2", "t2", "2026-10-02T00:00:00Z", own_turn="only")
-    message(db, "m3", "t3", "2026-10-02T00:00:00Z")
-    message(db, "m4", "t4", "2026-10-02T00:00:00Z")
+    message(db, "m2", "t2", "2026-10-02T00:00:00Z", own_turn="only")  # the reply turn's task is not inferred
+    message(db, "m3", "t3", "2026-10-02T00:00:00Z")  # nor the attempt open when it arrived
+    db.execute("INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+               "VALUES ('idle','t4',0,'m','completed','2026-10-01T00:00:00Z','boot')")
+    message(db, "m4", "t4", "2026-10-02T00:00:00Z")  # answered a turn between tasks
     message(db, "gone", "t4", "2026-10-02T00:00:00Z", retracted=True)
     message(db, "noise", "t4", "2026-10-02T00:00:00Z", label="unreadable")
     found = {fact.message_id: fact.node_id for fact in attributed_facts(db)}
-    assert found == {"m1": "earlier", "m2": "own", "m3": "attempt", "m4": None}
+    assert found == {"m1": "earlier", "m2": None, "m3": None, "m4": None}
 
 
 def test_a_node_maps_to_its_nearest_run_or_says_why_not() -> None:

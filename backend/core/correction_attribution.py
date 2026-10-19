@@ -1,14 +1,13 @@
 """Which plan node each classified owner message belongs to: the single owner of that join.
 
-Measurement's Workflows built-ins and the workflow verdict (``core.workflow_verdict_read``) call
-this module; neither re-derives the rule. For one ``measurement.correction`` fact, the corrected
-work is, in order:
-
-1. the latest turn in the message's thread that started before the message, excluding the
-   message's own turn: its plan node;
-2. the message's own turn: its plan node;
-3. the thread's plan attempt that was in progress when the message arrived;
-4. otherwise none: **Unattributed**.
+The workflow verdict (``core.workflow_verdict_read``) calls this module, and any later Measurement
+read of corrections by task must too; none re-derives the rule. For one ``measurement.correction``
+fact, the corrected work is the plan node of the turn the message answered: the latest turn in the
+message's thread that started before the message, excluding the message's own turn. A turn bound to
+no task means the agent was between tasks when it replied (a chat, a message or an event), and the
+fact is **Unattributed**. Nothing is inferred in its place: the reply turn's task or the agent's last
+released task put a third or more of such corrections on the wrong task. Turns are bound from
+Sep 9, 2026, so earlier corrections are Unattributed by construction.
 
 Times are the MESSAGE's ``created_at``, never the fact's ``ts``: most facts were backfilled long
 after the message. A node outside every workflow is **Not in a workflow**, which is not the same
@@ -35,17 +34,10 @@ def _ts(column: str) -> str:
 
 _ATTRIBUTED_SQL = f"""
     SELECT m.id AS message_id, m.created_at AS message_at, f.attributes AS attributes,
-      COALESCE(
-        (SELECT t.plan_node_id FROM active_turns t
-          WHERE t.thread_id=m.thread_id AND t.id IS NOT m.active_turn_id
-            AND {_ts('t.started_at')} < {_ts('m.created_at')}
-          ORDER BY {_ts('t.started_at')} DESC, t.turn_order DESC LIMIT 1),
-        (SELECT t.plan_node_id FROM active_turns t WHERE t.id=m.active_turn_id),
-        (SELECT a.node_id FROM plan_node_attempts a
-          WHERE a.executor_thread_id=m.thread_id AND {_ts('a.selected_at')} <= {_ts('m.created_at')}
-            AND (a.released_at IS NULL OR {_ts('a.released_at')} > {_ts('m.created_at')})
-          ORDER BY {_ts('a.selected_at')} DESC LIMIT 1)
-      ) AS node_id
+      (SELECT t.plan_node_id FROM active_turns t
+        WHERE t.thread_id=m.thread_id AND t.id IS NOT m.active_turn_id
+          AND {_ts('t.started_at')} < {_ts('m.created_at')}
+        ORDER BY {_ts('t.started_at')} DESC, t.turn_order DESC LIMIT 1) AS node_id
     FROM outcome_events f
     JOIN messages m ON m.id=json_extract(f.attributes,'$.message_id')
     WHERE f.event_name=:event AND f.retracted_at IS NULL
