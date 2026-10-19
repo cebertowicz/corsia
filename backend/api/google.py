@@ -55,10 +55,9 @@ def _body_field(body: object, key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
-def _agent_visible_account_ids(user: dict, missing_thread_message: str) -> set[str]:
-    """Return exactly the Google account ids the calling agent's thread can reach."""
+def _agent_thread_id(user: dict, missing_thread_message: str) -> str:
+    """The calling agent's own server-known thread; which accounts it may see is ``account_reaches_thread``'s."""
     from api.connected_apps import _agent_thread
-    from api.connected_account_rows import list_account_rows
     from infra.database import get_db
 
     if not isinstance(user.get("thread_id"), str) or not user["thread_id"]:
@@ -66,7 +65,18 @@ def _agent_visible_account_ids(user: dict, missing_thread_message: str) -> set[s
     db = get_db()
     try:
         thread_id, _scope = _agent_thread(user, db)
-        return {str(row["id"]) for row in list_account_rows(thread_id, db=db)}
+        return thread_id
+    finally:
+        db.close()
+
+
+def _reaches(account_id: str, thread_id: str) -> bool:
+    from connections.connected_accounts import account_reaches_thread
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return account_reaches_thread(account_id, thread_id, db=db)
     finally:
         db.close()
 
@@ -86,11 +96,11 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
     account_id = _body_field(body, "account_id")
     person = is_person_session(user)
     if account_id is not None and not person:
-        visible_ids = await run_in_db(
-            _agent_visible_account_ids, user,
+        thread_id = await run_in_db(
+            _agent_thread_id, user,
             "Google account sign-in from an agent needs its current thread context; call this through corsia_api from that thread.",
         )
-        if account_id not in visible_ids:
+        if not await run_in_db(_reaches, account_id, thread_id):
             raise HTTPException(403, "This Google account is not available to your project; ask the person in Connected apps.")
     adding_thread_id = None if person or account_id else _body_field(user, "thread_id")
     if account_id is None and not person and adding_thread_id is None:
@@ -125,8 +135,8 @@ async def status(user: dict = Depends(require_user)) -> dict[str, Any]:
     if is_person_session(user):
         return await run_in_db(oauth.accounts_status)
 
-    visible_ids = await run_in_db(
-        _agent_visible_account_ids, user,
+    thread_id = await run_in_db(
+        _agent_thread_id, user,
         "Google account status from an agent needs its current thread context; call this through corsia_api from that thread.",
     )
-    return await run_in_db(oauth.accounts_status, visible_ids)
+    return await run_in_db(oauth.accounts_status, thread_id)

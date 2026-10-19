@@ -39,15 +39,17 @@ def corsia_only_reach() -> AppReach:
     return AppReach(mode="selected", project_ids=frozenset(), outside_projects=False)
 
 
-def _designated_thread(thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Today's designated CORSIA thread: an available thread that coordinates a scope."""
-    from infra.conductor import get_coordination_scopes
+def _is_corsia_agent_thread(thread_id: str, *, db: sqlite3.Connection) -> bool:
+    """Only CORSIA: the designated CORSIA agent while available, never a project conductor; fails closed."""
+    from infra.corsia_agent import CorsiaAgentSettingError, is_corsia_agent
     from infra.queries import thread_available_sql
 
-    available = db.execute(
-        f"SELECT 1 FROM threads WHERE id=? AND {thread_available_sql()}", (thread_id,),
-    ).fetchone()
-    return available is not None and bool(get_coordination_scopes(thread_id, db=db))
+    try:
+        designated = is_corsia_agent(thread_id, db=db)
+    except CorsiaAgentSettingError:
+        return False
+    available = f"SELECT 1 FROM threads WHERE id=? AND {thread_available_sql()}"
+    return designated and db.execute(available, (thread_id,)).fetchone() is not None
 
 
 def _account_reach(account_id: str, *, db: sqlite3.Connection) -> AppReach:
@@ -69,11 +71,11 @@ def _account_reach(account_id: str, *, db: sqlite3.Connection) -> AppReach:
 
 
 def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Whether an account can serve the caller's full parent chain, failing closed."""
+    """The one reach check every agent surface asks: can this account serve the caller's full parent chain."""
     try:
         reach = _account_reach(account_id, db=db)
         if reach == corsia_only_reach():
-            return _designated_thread(thread_id, db=db)
+            return _is_corsia_agent_thread(thread_id, db=db)
         return reach_reaches_thread(reach, thread_id, db=db)
     except (AppReachError, ConnectedAccountError):
         return False

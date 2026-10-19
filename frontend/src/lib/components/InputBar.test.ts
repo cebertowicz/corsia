@@ -661,6 +661,65 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(component.getDrafts().get('thread-1')).toMatchObject({ content: 'Keep this draft', attachments: [attachment] });
 	});
 
+	describe('an automatic send that fails keeps the draft and reports how it failed', () => {
+		async function mountWithDraft() {
+			activeThreadId.set('thread-1');
+			threads.set([{
+				id: 'thread-1', user_id: 'user-1', profile: 'default',
+				title: 'CORSIA', model: 'network/model',
+				created_at: '2026-09-29T08:00:00Z', updated_at: '2026-09-29T08:00:01Z',
+			}]);
+			const onSend = vi.fn();
+			component = mount(InputBar, { target: host, props: { onSend } });
+			flushSync();
+			await component.setText('Keep this draft');
+			const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+			Object.defineProperty(fileInput, 'files', {
+				configurable: true,
+				value: [new File(['notes'], attachment.filename, { type: attachment.mime_type })],
+			});
+			fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+			await vi.waitFor(() => expect(host.querySelector('.attachment-chip')).not.toBeNull());
+			return onSend;
+		}
+
+		function expectDraftKept(): void {
+			expect(component!.getInputText()).toBe('Keep this draft');
+			expect(host.querySelector<HTMLElement>('.composer')!.textContent).toBe('Keep this draft');
+			expect(host.querySelector('.attachment-chip')).not.toBeNull();
+		}
+
+		it('returns not_sent with no toast of its own when the model cannot take it', async () => {
+			const onSend = await mountWithDraft();
+			selectUnavailableModel();
+			flushSync();
+			const before = get(toasts).length;
+
+			const outcome = await component!.setAndSend('Connect a Google account for all my projects', true);
+
+			expect(outcome).toBe('not_sent');
+			expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+			expect(onSend).not.toHaveBeenCalled();
+			expect(get(toasts)).toHaveLength(before);
+			expectDraftKept();
+		});
+
+		it('returns notified after its own connection-lost toast', async () => {
+			const onSend = await mountWithDraft();
+			wsMocks.sendMessage.mockReturnValueOnce(null);
+			const before = get(toasts).length;
+
+			const outcome = await component!.setAndSend('Connect a Google account for all my projects', true);
+
+			expect(outcome).toBe('notified');
+			expect(onSend).not.toHaveBeenCalled();
+			expect(get(toasts).slice(before)).toEqual([
+				expect.objectContaining({ message: 'Connection lost before CORSIA could accept this message.', type: 'error' }),
+			]);
+			expectDraftKept();
+		});
+	});
+
 	it('sends from a thread with no model yet, for the server to hold until one is chosen', async () => {
 		activeThreadId.set('thread-1');
 		activeModelId.set(null);

@@ -65,6 +65,14 @@ def _usable(account: dict) -> dict:
     raise GoogleError(UNAVAILABLE.format(address=account["address"]))
 
 
+def visible_google_accounts(thread_id: str | None, *, db: sqlite3.Connection) -> list[dict[str, object]]:
+    """Every Google account for the person (``thread_id`` None); for an agent, only those that reach its thread."""
+    return [
+        account for account in google_accounts(db=db)
+        if thread_id is None or account_reaches_thread(str(account["id"]), thread_id, db=db)
+    ]
+
+
 def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
     """The one connected account ``selector`` names, if ``thread_id`` may use it; else a fixed refusal."""
     if db is None:

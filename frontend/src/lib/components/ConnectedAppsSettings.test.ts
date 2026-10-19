@@ -465,6 +465,26 @@ describe('WhereItWorks', () => {
 		expect(host.textContent).not.toContain(notice);
 	});
 
+	it('names an Only CORSIA account’s current reach under the title, with nothing chosen and Save off', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
+		const line = 'Today, only CORSIA can use this account.';
+		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		const current = [...host.querySelectorAll('p.second')].find((p) => p.textContent === line);
+		expect(current).toBeTruthy();
+		expect(current?.parentElement?.firstElementChild).toBe(current);
+		expect([...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].some((input) => input.checked)).toBe(false);
+		expect(([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Save')) as HTMLButtonElement).disabled).toBe(true);
+		unmount(component);
+		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const, reach: { mode: 'selected', project_ids: ['garden'], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(host.textContent).not.toContain(line);
+		unmount(component);
+		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, reach: { mode: 'selected', project_ids: [], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(host.textContent).not.toContain(line);
+	});
+
 	it('disables Save until an individual target is selected', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })));
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, reach: { mode: 'selected', project_ids: [], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });

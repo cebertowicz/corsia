@@ -46,13 +46,9 @@ def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[s
 
 def list_account_rows(thread_id: str | None, *, db: sqlite3.Connection) -> list[dict[str, object]]:
     """Every Google account for the person (``thread_id`` None); for an agent only those that reach its thread."""
-    from connections.connected_accounts import account_reaches_thread, google_accounts
+    from connections.google.accounts import visible_google_accounts
 
-    return [
-        account_row(account, db=db)
-        for account in google_accounts(db=db)
-        if thread_id is None or account_reaches_thread(str(account["id"]), thread_id, db=db)
-    ]
+    return [account_row(account, db=db) for account in visible_google_accounts(thread_id, db=db)]
 
 
 def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> None:

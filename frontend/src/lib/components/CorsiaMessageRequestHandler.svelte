@@ -24,8 +24,11 @@
 				toasts.show("Couldn't open CORSIA's chat. Try again.", 'error');
 				return;
 			}
-			if (!await chatPanel.setAndSend(request.text, true)) {
-				console.warn('CORSIA request was not sent; its text remains in the composer');
+			// The person's own draft comes back either way; a refused request gets exactly one toast.
+			const outcome = await chatPanel.setAndSend(request.text, true);
+			if (outcome !== 'sent') {
+				console.warn("CORSIA request was not sent; the composer kept the person's own draft");
+				if (outcome === 'not_sent') toasts.show("Couldn't send that to CORSIA. Try again.", 'error');
 			}
 		} finally {
 			if (!active()) return;

@@ -17,7 +17,7 @@
 		watchInputBarHeight,
 	} from './inputBarHelpers';
 	import { createComposerDrafts, type ComposerDraft } from './composerDrafts';
-	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination } from './composerSendReadiness';
+	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination, type SendOutcome } from './composerSendReadiness';
 	import { activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
 	import { on, sendMessage, stopTurn } from '$lib/ws';
 	import { subagentMeta } from '$lib/stores/subagents';
@@ -173,11 +173,11 @@
 
 	type DeliveryIntent = 'apply_now' | 'queue_after_turn';
 
-	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now'): Promise<boolean> {
-		if (!canSendToModel) return false;
+	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now'): Promise<SendOutcome> {
+		if (!canSendToModel) return 'not_sent';
 		const prepared = prepareMessage();
 		const message = prepared instanceof Promise ? await prepared : prepared;
-		if (!message || !canSendToModel) return false;
+		if (!message || !canSendToModel) return 'not_sent';
 		const { threadId, content, modelId, attachments } = message;
 		const submittedDraft = currentComposerDraft() ?? {
 			content,
@@ -194,14 +194,14 @@
 			: sendMessage(threadId, content, modelId, attachments, undefined);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
-			return false;
+			return 'notified';
 		}
 		drafts.trackSubmit(inputId, threadId, submittedDraft);
 		// Save before onSend, which may synchronously switch threads.
 		drafts.saveCurrentDraft(threadId);
 		resetComposer();
 		onSend();
-		return true;
+		return 'sent';
 	}
 
 	const activeThread = $derived(
@@ -316,7 +316,7 @@
 
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
-	export async function setAndSend(text: string, preserveDraft = false): Promise<boolean> {
+	export async function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
 		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments] } : null, draftThreadId = boundThreadId;
 		inputText = text; if (preserveDraft) pendingAttachments = [];
 		if (inputEl) inputEl.textContent = text;

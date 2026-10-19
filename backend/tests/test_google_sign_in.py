@@ -382,9 +382,16 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
         {"mode": "selected", "project_ids": ["garden"], "outside_projects": False},
         actor=("person", "person"),
     )
-    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == (
+    # By id, an account outside this conversation's reach is indistinguishable from an unknown one;
+    # signing in as its address again still names what the conversation lacks.
+    refusal = f"Error: {oauth.UNKNOWN_ACCOUNT}"
+    assert await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id) == refusal
+    _, state = await _start(google, conductor, None)
+    async with _http() as http:
+        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert duplicate.status_code == 400 and (
         f"{EMAIL} is connected, but not for Q4 launch. To add Q4 launch, use Where it works… on its row in Connected apps."
-    )
+    ) in duplicate.text
 
     db = get_db()
     try:
@@ -395,7 +402,7 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
     all_projects_reply = (
         f"{EMAIL} is connected, but not for all your projects. To make it work for all of them, use Where it works… on its row in Connected apps."
     )
-    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == all_projects_reply
+    assert await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id) == refusal
 
     _, state = await _start(google, conductor, None)
     async with _http() as http:
@@ -404,7 +411,7 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
 
     db = get_db()
     try:
-        db.execute("UPDATE threads SET project_id='launch' WHERE id=?", (conductor,))
+        db.execute("UPDATE threads SET project_id='garden' WHERE id=?", (conductor,))
         db.execute("UPDATE connected_accounts SET state='needs_sign_in' WHERE id=?", (account_id,))
         db.commit()
     finally:
@@ -544,6 +551,91 @@ async def test_agent_routes_filter_status_and_refuse_an_unreachable_reconnect(go
     assert [account["account_id"] for account in visible.json()["accounts"]] == [account_id]
     assert hidden.status_code == 200 and hidden.json() == {"accounts": []}
     assert reconnect.status_code == 403
+
+
+def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:
+    """Projects A and B, A's conductor, and one account per reach: B only, A only, Only CORSIA, All projects."""
+    from connections.app_reach import AppReach
+    from connections.connected_accounts import corsia_only_reach, create_google_account
+    from infra.conductor import set_project_conductor
+
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [("a", "Project A", "t", "t"), ("b", "Project B", "t", "t")],
+        )
+        db.commit()
+        conductor_a = make_session(db, project_id="a", prefix="conductor-a")
+        assert set_project_conductor("a", conductor_a, db=db)
+        db.commit()
+        reaches = {
+            "b-only@example.com": AppReach(mode="selected", project_ids=frozenset({"b"}), outside_projects=False),
+            "a-only@example.com": AppReach(mode="selected", project_ids=frozenset({"a"}), outside_projects=False),
+            "corsia-only@example.com": corsia_only_reach(),
+            "everywhere@example.com": AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
+        }
+        ids = {
+            address: str(create_google_account(
+                address, reach=reach, created_by=("system", "test"), state="connected", db=db,
+            )["id"])
+            for address, reach in reaches.items()
+        }
+    finally:
+        db.close()
+    return conductor_a, ids
+
+
+async def _tool_and_api_status(thread_id: str) -> tuple[set[str], set[str]]:
+    tool = json.loads(await GoogleStatusTool().execute(_thread_id=thread_id))
+    async with _http() as http:
+        with internal_request("steve", thread_id):
+            api = await http.get("/api/google/status")
+    assert api.status_code == 200, api.text
+    return {row["account_id"] for row in tool["accounts"]}, {row["account_id"] for row in api.json()["accounts"]}
+
+
+async def test_a_project_conductor_sees_and_names_only_the_accounts_that_reach_it(google, conductor):
+    conductor_a, ids = _reach_cast(conductor)
+
+    tool_ids, api_ids = await _tool_and_api_status(conductor_a)
+    assert tool_ids == api_ids == {ids["a-only@example.com"], ids["everywhere@example.com"]}
+
+    refusal = f"Error: {oauth.UNKNOWN_ACCOUNT}"
+    for account_id in (ids["b-only@example.com"], ids["corsia-only@example.com"], "no-such-account"):
+        out = await GoogleConnectTool().execute(_thread_id=conductor_a, account_id=account_id)
+        assert out == refusal
+        assert "b-only@example.com" not in out and "corsia-only@example.com" not in out
+    reachable = json.loads(await GoogleConnectTool().execute(_thread_id=conductor_a, account_id=ids["a-only@example.com"]))
+    assert reachable["link"] == f"#connected-apps/{ids['a-only@example.com']}"
+
+
+async def test_only_corsia_reaches_the_corsia_agent_and_no_project_conductor(google, conductor):
+    from connections.connected_accounts import account_reaches_thread
+    from connections.google.accounts import resolve_for_thread
+
+    conductor_a, ids = _reach_cast(conductor)
+    only_corsia = ids["corsia-only@example.com"]
+
+    tool_ids, api_ids = await _tool_and_api_status(conductor)
+    assert tool_ids == api_ids == {only_corsia, ids["everywhere@example.com"]}
+    reply = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=only_corsia))
+    assert "corsia-only@example.com" in reply["reply"]
+
+    db = get_db()
+    try:
+        assert account_reaches_thread(only_corsia, conductor, db=db)
+        assert not account_reaches_thread(only_corsia, conductor_a, db=db)
+        # The email and calendar tools and inbox delivery ask the same predicate.
+        assert resolve_for_thread(only_corsia, conductor, db=db)["id"] == only_corsia
+        with pytest.raises(google_client.GoogleError):
+            resolve_for_thread(only_corsia, conductor_a, db=db)
+        # A corrupt CORSIA designation fails closed rather than falling back to any coordinator.
+        db.execute("UPDATE settings SET value='{' WHERE key='corsia_agent_thread_id'")
+        db.commit()
+        assert not account_reaches_thread(only_corsia, conductor, db=db)
+    finally:
+        db.close()
 
 
 async def test_person_google_routes_remain_unfiltered(google, conductor, client_file):

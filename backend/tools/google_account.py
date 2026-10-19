@@ -1,9 +1,11 @@
-"""The agent-facing Google sign-in: add or sign in one account and read every account's state, never a token.
+"""The agent-facing Google sign-in: add an account, or read the state of the accounts that reach the caller, never a token.
 
-Only the designated CORSIA thread (the check ``corsia_api`` uses) may call
-these. The sign-in itself happens in the person's own browser; the token goes
-from Google into that account's bundle and never reaches a tool result. An
-added account reaches the scope of the thread that added it, never wider.
+Only a designated coordinating thread (the check ``corsia_api`` uses) may call
+these, and it sees only the accounts ``account_reaches_thread`` lets its thread
+see, the same set ``/api/google/status`` gives it. The sign-in itself happens
+in the person's own browser; the token goes from Google into that account's
+bundle and never reaches a tool result. An added account reaches the scope of
+the thread that added it, never wider.
 """
 
 from __future__ import annotations
@@ -12,7 +14,9 @@ import json
 import logging
 from typing import Any
 
-from connections.connected_accounts import ConnectedAccountError, get_account, resolve_google_credentials
+from connections.connected_accounts import (
+    ConnectedAccountError, account_reaches_thread, get_account, resolve_google_credentials,
+)
 from connections.google import oauth
 from connections.google.client import GoogleError, STATUS_CONNECTED
 from infra.database import get_db
@@ -45,9 +49,15 @@ def _reach_phrase(account: dict[str, object], db) -> str:  # type: ignore[no-unt
 
 
 def _existing_account_reply(account_id: str, thread_id: str) -> tuple[str, str]:
-    """Build the row-directed B-G1 tool result without starting another OAuth flow."""
+    """Build the row-directed B-G1 tool result without starting another OAuth flow.
+
+    An account outside the caller's reach gets the unknown-id refusal, so the caller
+    can't tell it exists.
+    """
     db = get_db()
     try:
+        if not account_reaches_thread(account_id, thread_id, db=db):
+            raise oauth.GoogleSignInError(oauth.UNKNOWN_ACCOUNT)
         try:
             account = get_account(account_id, db=db)
         except ConnectedAccountError:
@@ -158,7 +168,7 @@ class GoogleStatusTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Every connected Google account: {accounts: [{account_id, email, status (connected, "
+            "Every connected Google account this conversation can use: {accounts: [{account_id, email, status (connected, "
             "needs_sign_in or signed_out), scopes, reach, poller_state, last_success_at}]}. An "
             "empty list means none is connected. The Gmail and Calendar tools take one of these "
             "as account_id. When an account's sign-in is rejected, its needs_action gives the "
@@ -173,7 +183,7 @@ class GoogleStatusTool(Tool):
         if refusal := await _designated(kwargs):
             return refusal
         try:
-            return json.dumps(await run_in_db(oauth.accounts_status))
+            return json.dumps(await run_in_db(oauth.accounts_status, kwargs["_thread_id"]))
         except Exception:
             log.exception("google_status failed")
             return "Error: Couldn't read the Google sign-in state."

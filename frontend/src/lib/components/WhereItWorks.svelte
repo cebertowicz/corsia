@@ -5,6 +5,8 @@
 
 	let { app, approve = false, onClose, onSaved }: { app: ConnectedAppsRow; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedAppsRow) => void } = $props();
 	const appName = $derived(app.kind === 'account' ? `Google — ${app.address}` : app.name);
+	/** An account saved with no place is Only CORSIA; the sheet names that before anything is chosen. */
+	const onlyCorsia = $derived(app.kind === 'account' && app.reach.mode === 'selected' && app.reach.project_ids.length === 0 && !app.reach.outside_projects);
 	let mode = $state<'all' | 'selected'>(app.reach.mode);
 	let selected = $state(new Set(app.reach.project_ids));
 	let outsideProjects = $state(app.reach.outside_projects);
@@ -78,6 +80,7 @@
 
 <Modal title={`Where ${appName} works`} size="sm" {onClose}>
 	<div class="where-it-works">
+		{#if onlyCorsia}<p class="second">Today, only CORSIA can use this account.</p>{/if}
 		<label class="choice">
 			<input type="radio" name="reach" checked={mode === 'all'} onchange={selectAllProjects} />
 			<span class="label">All projects</span>

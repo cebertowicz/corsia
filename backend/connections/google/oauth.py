@@ -351,19 +351,20 @@ async def complete_sign_in(code: object, state: object) -> str:
     return email
 
 
-def accounts_status(visible_account_ids: set[str] | None = None) -> dict:
-    """Visible Google accounts' sign-in state for ``google_status``: never a token or a secret."""
+def accounts_status(thread_id: str | None = None) -> dict:
+    """Google accounts' sign-in state, never a token or a secret: every account for the person
+    (``thread_id`` None), only those that reach the calling agent's thread otherwise. Both
+    ``/api/google/status`` and the ``google_status`` tool answer from here."""
     # Imported here: the poller module imports this one.
-    from connections.connected_accounts import google_accounts, google_scopes, resolve_google_credentials
+    from connections.connected_accounts import google_scopes, resolve_google_credentials
+    from connections.google.accounts import visible_google_accounts
     from events.connectors.gmail_poller import poller_status
 
     db = get_db()
     try:
         rows = []
-        for account in google_accounts(db=db):
+        for account in visible_google_accounts(thread_id, db=db):
             account_id = str(account["id"])
-            if visible_account_ids is not None and account_id not in visible_account_ids:
-                continue
             status = str(account["state"])
             if status == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is None:
                 status = client.STATUS_NEEDS_SIGN_IN
