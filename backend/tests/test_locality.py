@@ -96,6 +96,23 @@ def test_project_cloud_off_text_is_governance_wording():
     )
 
 
+def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
+    from prompts.cloud_off import HOLD_ACTION, held_error
+    from prompts.plan_wakes import ACCOUNT_HOLD_COPY
+
+    action = (
+        "Move the thread to a ready local model from model_catalog (delegate_set_model). "
+        "The held message runs once it is on one. "
+        "If none is ready, do the work in a thread already on a local model."
+    )
+    assert HOLD_ACTION == action
+    assert held_error("codex/gpt-5.6-terra") == (
+        "Held: cloud models are off in this project, so codex/gpt-5.6-terra can't run here. " + action
+    )
+    assert ACCOUNT_HOLD_COPY["project_cloud_off"][1] == action
+    assert "current model" not in held_error("codex/gpt-5.6-terra")
+
+
 def test_email_screen_keeps_external_loopback_behavior():
     from connections.google.email_screen import local_endpoint_refusal
 

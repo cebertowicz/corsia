@@ -13,8 +13,12 @@ _STAY_INLINE = "stay on your current model and do the work inline, or check mode
 
 NO_LOCAL_READY_TEXT = f"No local model is ready now. {_STAY_INLINE[0].upper()}{_STAY_INLINE[1:]}"
 
-#: What a held agent can do when it has no ready-model list to quote.
-HOLD_ACTION = f"{_USE_READY_LOCAL} from model_catalog. If none is ready, {_STAY_INLINE}"
+#: What to do about a held thread: its current model is the cause, so staying on it is no recovery.
+HOLD_ACTION = (
+    "Move the thread to a ready local model from model_catalog (delegate_set_model). "
+    "The held message runs once it is on one. "
+    "If none is ready, do the work in a thread already on a local model."
+)
 
 
 def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:

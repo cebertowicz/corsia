@@ -249,6 +249,9 @@ async def update_external_server(server_id: str, body) -> dict:
             if declared:
                 fields[META_KEY] = declared
             cleared = (META_KEY,) if declared == [] else ()
+            if moved:
+                # The private mark vouched for the old address; the person marks the new one if they mean it.
+                cleared += ("private",)
             nd.set_server_metadata(server_id, db=db, clear=cleared, **fields)
 
     await run_in_db(_persist_update)
