@@ -138,7 +138,7 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 
 ### Know before you start
 
-- **macOS on Apple Silicon only.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`. Local models need macOS 15 or later.
+- **A Mac with Apple Silicon (M1 or later) and macOS 15 or later.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`.
 - **16 GB Macs currently need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider until a suitable local agent model is available. The corrections classifier still needs to run locally.
 - **Corrections are recorded only once the local corrections classifier is installed.** Until then CORSIA records none. Installing the classifier during setup is tracked in [#704](https://github.com/cebertowicz/corsia/issues/704).
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
@@ -147,8 +147,6 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 - **Pre-release.** Releases are dated tags on `main`. There is no packaged desktop app yet.
 
 ### Install
-
-CORSIA runs on Macs with Apple silicon (M1 or later) and macOS 15 or later.
 
 Open Terminal and run:
 
