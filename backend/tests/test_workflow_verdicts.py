@@ -185,25 +185,42 @@ def test_a_rolled_back_version_keeps_its_full_history_place_in_the_order() -> No
 
 def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
     source = history(
-        runs("v1", 1, started=80, ended=70),
-        runs("v2", 1, started=40, ended=35),
-        runs("v3", 1, started=30, ended=20),
+        runs("v1", 0, started=80, ended=50),
+        runs("v1", 5, started=50, ended=38),
+        runs("v2", 0, started=40, ended=40),
     )
     early = Snapshot(_at(37), (source,))
     later = Snapshot(NOW.isoformat(), (source,))
-    early_plan = next(item.plan for item in compute(early) if item.subject == "workflow:sdlc-process@v2")
-    later_plan = next(item.plan for item in compute(later) if item.subject == "workflow:sdlc-process@v2")
-    assert early_plan == later_plan
+    early_evaluation = next(item for item in compute(early) if item.subject == "workflow:sdlc-process@v2")
+    later_evaluation = next(item for item in compute(later) if item.subject == "workflow:sdlc-process@v2")
+    assert early_evaluation == later_evaluation
 
 
-def test_calibration_splits_use_all_history_for_their_baseline() -> None:
-    source = history(runs("v1", 1, count=80, started=90, ended=30))
+def test_unsettled_predecessor_remains_a_named_no_baseline() -> None:
+    source = history(runs("v1", 0, started=50, ended=38), runs("v2", 0, started=40, ended=40))
+    plan = freeze_plan(source, "v2")
+    assert plan.baseline is None
+    assert decide(source, plan, NOW).reason == "no_baseline"
+
+
+def test_calibration_splits_use_the_production_first_use_cutoff() -> None:
+    source = history(
+        runs("v1", 1, started=90, ended=80),
+        runs("v1", 1, started=70, ended=60),
+    )
     ordered = sorted(source.runs, key=lambda run: (run.started_at, run.run_id))
-    halves = [replace(run, version="a" if index % 2 == 0 else "b") for index, run in enumerate(ordered)]
+    midpoint = len(ordered) // 2
+    halves = [replace(run, version="a" if index < midpoint else "b") for index, run in enumerate(ordered)]
     split = replace(source, runs=tuple(halves))
     calls, _ = calibration_script().splits(source, NOW)
-    assert freeze_plan(split, "b", baseline_as_of=NOW).baseline == "a"
-    assert any(call != "too_few" for found in calls.values() for call, _ in found)
+    assert freeze_plan(split, "b").baseline == "a"
+    assert any(call != "no_baseline" for found in calls.values() for call, _ in found)
+
+
+def test_calibration_split_refuses_without_a_production_baseline() -> None:
+    calls, words = calibration_script().splits(history(runs("v1", 1)), NOW)
+    assert words == [("not_enough_data", 20)]
+    assert {call for found in calls.values() for call, _ in found} == {"no_baseline"}
 
 
 def test_baseline_runs_are_the_most_recent_up_to_twice_the_minimum_per_group() -> None:

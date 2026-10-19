@@ -120,7 +120,6 @@ def test_settled_means_terminal_and_past_the_window_and_failed_runs_are_not_outc
     assert runs["open"].terminal_at is None and not runs["open"].settled(0, NOW)
 
 
-
 def test_the_group_is_the_runs_own_model_difficulty_and_size_band(db) -> None:
     node(db, "opus", difficulty="hard", size="XL")
     usage(db, "u1", "opus", prompt=900)
@@ -175,8 +174,7 @@ def test_the_frozen_plan_uses_the_definitions_in_force_at_the_versions_first_run
     assert (v2.definition_version, v2.margin_gap) == (2, pytest.approx(0.4))
 
 
-
-def test_reached_verdicts_remain_skipped_after_their_event_ages_past_the_read_window(db) -> None:
+def test_reached_verdicts_remain_skipped_after_an_old_event(db) -> None:
     node(db, "run")
     subject = "workflow:sdlc-process@v1"
     old = (NOW - timedelta(days=400)).isoformat()
@@ -238,10 +236,12 @@ def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only
     assert not any(f"r{index}" in out.split() or f"m{index}" in out for index in range(66))
 
 
-def test_calibration_script_refuses_when_workspace_has_no_owner_kpi_definitions(db, isolated_db) -> None:
-    node(db, "run")
+def test_calibration_script_refuses_when_a_calibrated_workflow_lacks_owner_kpi_definitions(db, isolated_db) -> None:
+    _definitions(db)
+    node(db, "sdlc-run")
+    node(db, "brief-run", workflow="decision-brief", version="v1")
     db.commit()
-    with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE"):
+    with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE: decision-brief"):
         calibration_script().main([str(isolated_db)])
 
 

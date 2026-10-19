@@ -37,7 +37,6 @@ from core.workflow_verdict_rules import WorkflowHistory, baseline_runs, compute,
 from core.workflow_verdicts import measure_call, parse_ts  # noqa: E402
 
 CALIBRATED = ("sdlc-process", "decision-brief")
-BLOCKS = range(1, 6)
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -62,28 +61,28 @@ def _fmt(value: float | None, digits: int = 3) -> str:
 
 
 def splits(history: WorkflowHistory, now: datetime) -> tuple[dict, list[tuple[str, int]]]:
-    """Per measure: calls and differences over every A/A split; plus each split's whole verdict word."""
+    """Per measure: calls and differences over chronological A/A halves; plus each half's verdict word."""
     calls: dict[str, list[tuple[str, float | None]]] = defaultdict(list)
     words: list[tuple[str, int]] = []
     for version in history.versions():
         own = sorted((r for r in history.runs if r.version == version), key=lambda r: (parse_ts(r.started_at), r.run_id))
-        for block in BLOCKS:
-            halves = [replace(run, version="a" if (index // block) % 2 == 0 else "b") for index, run in enumerate(own)]
-            split = replace(history, ref=f"{history.ref}#{version}#{block}", runs=tuple(halves))
-            if {run.version for run in halves} != {"a", "b"}:
-                continue
-            plan = freeze_plan(split, "b", baseline_as_of=now)
-            words.append((decide(split, plan, now).word, len(own)))
-            if plan.baseline is None:
-                for measure in plan.measures:
-                    calls[measure.name].append(("too_few", None))
-                continue
-            window = max(m.window_days for m in plan.measures)
-            old = baseline_runs(split, "a", plan.minimum, window, now)
-            new = [run for run in halves if run.version == "b"]
+        midpoint = len(own) // 2
+        halves = [replace(run, version="a" if index < midpoint else "b") for index, run in enumerate(own)]
+        split = replace(history, ref=f"{history.ref}#{version}", runs=tuple(halves))
+        if {run.version for run in halves} != {"a", "b"}:
+            continue
+        plan = freeze_plan(split, "b")
+        words.append((decide(split, plan, now).word, len(own)))
+        if plan.baseline is None:
             for measure in plan.measures:
-                call = measure_call(measure, new, old, minimum=plan.minimum, now=now, seed=plan.seed + len(measure.name))
-                calls[measure.name].append((call.call, call.difference))
+                calls[measure.name].append(("no_baseline", None))
+            continue
+        window = max(m.window_days for m in plan.measures)
+        old = baseline_runs(split, plan.baseline, plan.minimum, window, parse_ts(split.first_use("b")))
+        new = [run for run in halves if run.version == "b" and run.terminal_at]
+        for measure in plan.measures:
+            call = measure_call(measure, new, old, minimum=plan.minimum, now=now, seed=plan.seed + len(measure.name))
+            calls[measure.name].append((call.call, call.difference))
     return calls, words
 
 
@@ -108,9 +107,13 @@ def main(argv: list[str] | None = None) -> int:
     calibrated = [history for history in histories if history.ref in CALIBRATED]
     if not calibrated:
         raise SystemExit("missing calibrated workflow history for calibration")
-    if not any(history.owner and any(definition.kind == "kpi" for definition in history.definitions)
-               for history in calibrated):
-        raise SystemExit("missing owner KPI definitions for calibration in CORSIA_WORKSPACE")
+    missing_definitions = [
+        history.ref for history in calibrated
+        if not history.owner or not any(definition.kind == "kpi" for definition in history.definitions)
+    ]
+    if missing_definitions:
+        raise SystemExit("missing owner KPI definitions for calibration in CORSIA_WORKSPACE: "
+                         + ", ".join(missing_definitions))
 
     print("A/A splits: share reading Keep or Not enough data, and p90 |difference|")
     print(f"{'workflow':<16} {'measure':<26} {'splits':>6} {'called':>6} {'keep/ned':>8} {'p90 diff':>9}")

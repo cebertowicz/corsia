@@ -124,7 +124,6 @@ def definitions_in_force(definitions: Sequence[Definition], at: str) -> list[Def
     return [item for item in latest.values() if not item.removed]
 
 
-
 def assert_evaluator_fields(definitions: Sequence[Definition], workflow: str, version_attr: str | None = None
                             ) -> tuple[tuple[PlannedMeasure, ...], tuple[tuple[str, str], ...], int]:
     """The deciding KPIs that still pass the sync test, the refused ones with why, and the minimum.
@@ -178,15 +177,15 @@ def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window
     return None, tuple(skipped)
 
 
-def freeze_plan(history: WorkflowHistory, version: str, *, baseline_as_of: datetime | None = None) -> FrozenPlan:
-    """Freeze a plan at first use, or at ``baseline_as_of`` for retrospective calibration (design §3.4)."""
+def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
+    """Freeze definitions and baseline eligibility at the version's first use (design §3.4)."""
     subject = f"workflow:{history.ref}@{version}"
+    first_use = parse_ts(history.first_use(version))
     in_force = definitions_in_force(history.definitions, history.first_use(version))
     kpis, refusals, minimum = assert_evaluator_fields(in_force, history.ref, history.version_attr)
     measures = (*BUILTINS, *kpis)
     window = max(measure.window_days for measure in measures)
-    baseline, skipped = choose_baseline(
-        history, version, minimum, window, baseline_as_of or parse_ts(history.first_use(version)))
+    baseline, skipped = choose_baseline(history, version, minimum, window, first_use)
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed)
 
@@ -244,7 +243,8 @@ def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime, replaced_b
     if plan.baseline is None:
         return Verdict("not_enough_data", "no_baseline", 0, (), {"minimum": plan.minimum, "skipped": list(plan.skipped)})
     window = max(m.window_days for m in plan.measures)
-    old = baseline_runs(history, plan.baseline, plan.minimum, window, now)
+    baseline_cutoff = parse_ts(history.first_use(plan.version))
+    old = baseline_runs(history, plan.baseline, plan.minimum, window, baseline_cutoff)
     new = sorted((r for r in _side(history, plan.version) if r.terminal_at), key=lambda r: parse_ts(r.terminal_at or ""))
     call = lambda m, runs, bootstrap=True: measure_call(m, runs, old, minimum=plan.minimum, now=now,  # noqa: E731
                                                         seed=plan.seed + len(m.name), bootstrap=bootstrap)

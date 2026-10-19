@@ -153,7 +153,6 @@ def _recorded(db: sqlite3.Connection) -> tuple[dict[str, FrozenPlan], frozenset[
     return plans, frozenset(reached)
 
 
-
 def _terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) -> str | None:
     if node["state"] not in TERMINAL_STATES:
         return None
