@@ -781,6 +781,8 @@ class TestSkipGuardWrite:
                 "pr_number": 42,
                 "head_sha": "abc123de",
                 "verdict": "clean",
+                "reviewer_version": None,
+                "reviewer_standards": [],
             }
             for call in emit_event.call_args_list
         )

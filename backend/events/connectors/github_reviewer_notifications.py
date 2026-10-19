@@ -219,6 +219,8 @@ def notify_reviewer_verdict(
                 "pr_number": pr_number,
                 "head_sha": head_sha[:8],
                 "verdict": verdict_name,
+                "reviewer_version": verdict.get("reviewer_version"),
+                "reviewer_standards": verdict.get("reviewer_standards", []),
             },
         )
     return result

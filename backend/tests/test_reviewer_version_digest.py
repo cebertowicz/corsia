@@ -86,15 +86,18 @@ def test_reviewer_version_digest_changes_for_template_edit(monkeypatch):
     ) != original
 
 
-def test_reviewer_version_digest_changes_for_standard_content():
+def test_reviewer_version_digest_tracks_injected_standard_content_only():
     from reviewer.reviewer_context import reviewer_version_digest
 
-    original = {"product": "before", "eng-arch": "unchanged"}
-    changed = {**original, "product": "after"}
+    original = {
+        "product": "# Product\n\nIntro.\n\n## Reviewer Contract\n- Block: before\n\n## Appendix\nOutside.",
+    }
+    outside_contract = {**original, "product": original["product"].replace("Outside.", "Edited.")}
+    inside_contract = {**original, "product": original["product"].replace("before", "after")}
+    original_digest = reviewer_version_digest("prompt", original, "model-a")
 
-    assert reviewer_version_digest("prompt", original, "model-a") != reviewer_version_digest(
-        "prompt", changed, "model-a"
-    )
+    assert reviewer_version_digest("prompt", outside_contract, "model-a") == original_digest
+    assert reviewer_version_digest("prompt", inside_contract, "model-a") != original_digest
 
 
 def test_reviewer_version_digest_returns_after_standard_content_restore():
@@ -158,3 +161,57 @@ def test_reviewer_verdict_event_includes_version_and_standards(monkeypatch):
         "reviewer_version": "0123456789ab",
         "reviewer_standards": ["eng-arch", "product"],
     }
+
+
+def test_ownerless_reviewer_verdict_event_includes_version_and_standards(monkeypatch):
+    from events.connectors import github_reviewer_notifications
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        github_reviewer_notifications, "deliver_owner_event", lambda *_args: "no_owner"
+    )
+    monkeypatch.setattr(
+        github_reviewer_notifications,
+        "emit_product_event",
+        lambda *_args, **kwargs: captured.update(kwargs["properties"]),
+    )
+
+    github_reviewer_notifications.notify_reviewer_verdict(
+        "owner/repo", 7, "abc123def", {
+            "verdict": "clean",
+            "reviewer_version": "0123456789ab",
+            "reviewer_standards": ["eng-arch", "product"],
+        },
+    )
+
+    assert captured["reviewer_version"] == "0123456789ab"
+    assert captured["reviewer_standards"] == ["eng-arch", "product"]
+
+
+def test_reviewer_completed_event_includes_version_and_standards(monkeypatch):
+    from reviewer import on_pr_review
+
+    events: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr(on_pr_review, "parse_findings", lambda _raw: [])
+    monkeypatch.setattr(on_pr_review, "prepare_findings_for_publication", lambda findings, **_kwargs: findings)
+    monkeypatch.setattr(on_pr_review, "format_status_summary", lambda *_args: ("none", "clean", 0, 0, 0))
+    monkeypatch.setattr(on_pr_review, "fetch_existing_review_comments", lambda *_args: [])
+    monkeypatch.setattr(on_pr_review, "fetch_existing_issue_comments", lambda *_args: [])
+    monkeypatch.setattr(on_pr_review, "classify_review_findings", lambda *_args, **_kwargs: ([], [], 0))
+    monkeypatch.setattr(on_pr_review, "publish_review", lambda **_kwargs: None)
+    monkeypatch.setattr(on_pr_review, "set_success", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        on_pr_review,
+        "emit_product_event",
+        lambda domain, event, *, properties: events.append((domain, event, properties)),
+    )
+
+    on_pr_review._process_findings(
+        "[]", 7, "owner/repo", "abc123", "model-a",
+        reviewer_version="0123456789ab",
+        reviewer_standards=["eng-arch", "product"],
+    )
+
+    completed = next(properties for _, event, properties in events if event == "completed")
+    assert completed["reviewer_version"] == "0123456789ab"
+    assert completed["reviewer_standards"] == ["eng-arch", "product"]

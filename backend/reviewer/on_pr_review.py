@@ -21,9 +21,9 @@ from reviewer.reviewer_categories import (
 from reviewer.reviewer_exact_source import exact_review_diff
 from reviewer.reviewer_context import (
     ReviewerContextManifest,
-    resolve_reviewer_context,
     reviewer_context_to_prompt_text,
     resolve_reviewer_context_from_contents,
+    reviewer_standard_contents,
     reviewer_standard_contents_for_keys,
     reviewer_standards_registry,
     reviewer_version_digest,
@@ -69,7 +69,6 @@ _PROJECT_ROOT = str(WORKSPACE / "projects" / "corsia" / "source" / "corsia")
 
 # UX/IA remains a separate screenshot-based vision-audit modality.
 _CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product", "copy"]
-
 
 
 def on_pr_review(event_type: str, payload: dict[str, Any]) -> ReviewerResult | None:
@@ -387,13 +386,14 @@ def _process_findings(
             "new_count": len(new_threads),
             "unchanged_count": unchanged_count,
             "resolved_count": len(resolve_replies),
+            "reviewer_version": reviewer_version,
+            "reviewer_standards": reviewer_standards or [],
         },
     )
     return reviewer_verdict(
         verdict, required_action, summary, block_count, flag_count, nit_count,
         len(findings), model_label, reviewer_version, reviewer_standards,
     )
-
 
 
 def _build_context(
@@ -408,19 +408,17 @@ def _build_context(
     manifest = ReviewerContextManifest(
         anti_patterns=True, standards=_CODE_REVIEW_STANDARDS,
     )
-    resolved = (
-        resolve_reviewer_context_from_contents(
-            manifest, _WORKSPACE_ROOT, reviewer_standards,
-        )
-        if reviewer_standards is not None
-        else resolve_reviewer_context(manifest, _WORKSPACE_ROOT)
+    reviewer_standards = reviewer_standards or reviewer_standard_contents(
+        manifest, _WORKSPACE_ROOT,
+    )
+    resolved = resolve_reviewer_context_from_contents(
+        manifest, _WORKSPACE_ROOT, reviewer_standards,
     )
     _require_standards(resolved)
     resolved.extend(_resolve_prd_contracts(diff, pr_number, repo))
     context_text = reviewer_context_to_prompt_text(resolved)
     handoff = _pr_handoff_context(payload)
     return f"{context_text}\n\n{handoff}" if handoff else context_text
-
 
 
 def _resolve_prd_contracts(

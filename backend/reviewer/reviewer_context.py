@@ -41,19 +41,11 @@ def resolve_reviewer_context(
     workspace_root: str | Path,
 ) -> list[tuple[str, str]]:
     """Resolve selected reviewer contracts and the anti-pattern catalog."""
-    workspace = Path(workspace_root)
-    results: list[tuple[str, str]] = []
-
-    for key in manifest.standards:
-        _add_standard(workspace, key, results)
-
-    if manifest.anti_patterns:
-        path = str(workspace / _STANDARDS_REGISTRY["anti-patterns"])
-        content = _read_file(path)
-        if content is not None:
-            results.append((path, content))
-
-    return results
+    return resolve_reviewer_context_from_contents(
+        manifest,
+        workspace_root,
+        reviewer_standard_contents(manifest, workspace_root),
+    )
 
 
 def resolve_reviewer_context_from_contents(
@@ -130,11 +122,14 @@ def reviewer_version_digest(
     standards: Mapping[str, str],
     model: str,
 ) -> str:
-    """Return a stable digest of the prompt, raw standards, and model identity."""
+    """Return a stable digest of the prompt, injected standards, and model."""
     payload = {
         "model": model,
         "prompt": prompt_text,
-        "standards": {key: standards[key] for key in sorted(standards)},
+        "standards": {
+            key: _reviewer_version_standard_text(key, standards[key])
+            for key in sorted(standards)
+        },
     }
     serialized = json.dumps(
         payload,
@@ -158,18 +153,9 @@ def _read_file(path: str) -> str | None:
         return None
 
 
-def _add_standard(
-    workspace: Path,
-    key: str,
-    results: list[tuple[str, str]],
-) -> None:
-    """Append one selected standard's Reviewer Contract section."""
-    relative_path = _STANDARDS_REGISTRY.get(key)
-    if relative_path is None:
-        logger.warning(f"Reviewer context: unknown standards key: {key!r}")
-        return
-    path = str(workspace / relative_path)
-    _add_standard_content(workspace, key, _read_file(path), results)
+def _reviewer_version_standard_text(key: str, content: str) -> str:
+    """Return the exact text injected for one standard in a reviewer prompt."""
+    return content if key == "anti-patterns" else _extract_reviewer_contract(content)
 
 
 def _add_standard_content(

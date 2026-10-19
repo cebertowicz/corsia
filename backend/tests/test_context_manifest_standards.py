@@ -377,21 +377,29 @@ class TestBuildContextStandards:
 
         captured = {}
 
-        def _spy_resolve(manifest, workspace_root):
+        def _spy_resolve(manifest, workspace_root, standards):
             captured["has_project_specs"] = hasattr(manifest, "project_specs")
+            captured["standards"] = standards
             reg = reviewer_standards_registry()
             return [
                 (f"/ws/{reg[k]}", "## Reviewer Contract\n- Block: x")
                 for k in [*on_pr_review._CODE_REVIEW_STANDARDS, "anti-patterns"]
             ]
 
-        monkeypatch.setattr(on_pr_review, "resolve_reviewer_context", _spy_resolve)
+        monkeypatch.setattr(on_pr_review, "resolve_reviewer_context_from_contents", _spy_resolve)
+        standards = {
+            key: "# Standard\n\n## Reviewer Contract\n- Block: x"
+            for key in [*on_pr_review._CODE_REVIEW_STANDARDS, "anti-patterns"]
+        }
 
         on_pr_review._build_context(
             diff="+++ b/backend/core/foo.py\n@@ +1 @@\n+x = 1\n",
             pr_number=1,
             repo="owner/repo",
+            reviewer_standards=standards,
         )
+
+        assert captured["standards"] == standards
 
         assert captured["has_project_specs"] is False
 
