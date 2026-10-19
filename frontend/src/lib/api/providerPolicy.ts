@@ -19,17 +19,17 @@ export type ProviderPolicy = {
 	overriding_projects?: { id: string; name: string }[];
 };
 export type ProjectCloudModelsPolicy = { cloud_models_off: boolean };
-export type Result<T> = { ok: true; value: T } | { ok: false; error: string; conflict?: boolean };
+export type Result<T> = { ok: true; value: T } | { ok: false; error: string; conflict?: boolean; detail?: unknown; reached?: boolean };
 
 async function request<T>(path: string, init?: RequestInit, refused = 'Could not save subscriptions.', unreachable = SERVER_UNREACHABLE): Promise<Result<T>> {
 	const auth = get(token);
-	if (!auth) return { ok: false, error: 'Sign in to manage subscriptions.' };
+	if (!auth) return { ok: false, error: 'Sign in to manage subscriptions.', reached: true };
 	try {
 		const response = await fetch(path, { ...init, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
 		const data = await response.json().catch(() => null);
-		if (!response.ok) return { ok: false, conflict: response.status === 409, error: plainErrorText(data?.detail, refused) };
+		if (!response.ok) return { ok: false, conflict: response.status === 409, error: plainErrorText(data?.detail, refused), detail: data?.detail, reached: true };
 		return { ok: true, value: data as T };
-	} catch { return { ok: false, error: unreachable }; }
+	} catch { return { ok: false, error: unreachable, reached: false }; }
 }
 
 export function loadProviderPolicy(projectId?: string) {
@@ -51,5 +51,5 @@ export function loadCloudModelsOff(projectId: string) {
 export function saveCloudModelsOff(projectId: string, cloudModelsOff: boolean) {
 	return request<ProjectCloudModelsPolicy>(`/api/projects/${encodeURIComponent(projectId)}/cloud-models-off`, {
 		method: 'PUT', body: JSON.stringify({ cloud_models_off: cloudModelsOff }),
-	}, "The change wasn't saved.", "Couldn't reach CORSIA. Check your connection.");
+	});
 }

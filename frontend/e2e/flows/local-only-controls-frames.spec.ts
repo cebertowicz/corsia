@@ -89,7 +89,7 @@ async function serve(page: Page, state: State) {
 	await page.route('**/api/projects/*/cloud-models-off**', async (route) => {
 		if (route.request().method() === 'PUT') {
 			if (state.hold) await state.hold;
-			if (state.failSave) return route.fulfill({ status: 500, json: { detail: 'Server unavailable' } });
+			if (state.failSave) return route.abort();
 			state.cloudOff = (route.request().postDataJSON() as { cloud_models_off: boolean }).cloud_models_off;
 		}
 		await route.fulfill({ json: { cloud_models_off: state.cloudOff } });
@@ -97,7 +97,7 @@ async function serve(page: Page, state: State) {
 	await page.route('**/api/settings/network-servers**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/settings/network-servers'
 		? route.fulfill({ json: { servers: state.servers } }) : route.continue());
 	await page.route('**/api/settings/network-servers/*/private**', (route) => state.failPrivate
-		? route.fulfill({ status: 500, json: { detail: 'Server unavailable' } })
+		? route.abort()
 		: route.fulfill({ json: { ok: true } }));
 }
 
@@ -187,13 +187,13 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: false, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
 				await region.getByRole('button', { name: 'Local models only', exact: true }).click();
-				await expect(region.getByText("Couldn't save this change. Server unavailable Try again.")).toBeVisible();
+				await expect(region.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
 				await shot('project-save-failed', size, theme);
 
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: true, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
 				await region.getByRole('button', { name: 'Local models only', exact: true }).click();
-				await expect(region.getByText("Couldn't save this change. Server unavailable Try again.")).toBeVisible();
+				await expect(region.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
 				await shot('project-save-failed-off', size, theme);
 				state.failSave = false;
 
@@ -234,7 +234,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 					await openEndpoints(page, label);
 					if (act === 'fail') {
 						await page.getByRole('button', { name: 'Private machine', exact: true }).click();
-						await expect(page.getByText("Couldn't save this change. Server unavailable Try again.")).toBeVisible();
+						await expect(page.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
 					}
 					await shot(name, size, theme);
 				}

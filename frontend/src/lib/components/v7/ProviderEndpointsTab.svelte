@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { setNetworkServerPrivate, type NetworkServer } from '$lib/stores/networkServers';
+	import { saveFailureText } from '$lib/saveFailure';
 	import Toggle from '../ui/Toggle.svelte';
 
 	let { server }: { server: NetworkServer } = $props();
@@ -15,7 +16,7 @@
 		busy = true; error = '';
 		const result = await setNetworkServerPrivate(server.id, value);
 		if (result.ok) saved = value;
-		else error = `Couldn't save this change. ${result.message ?? "The change wasn't saved."} Try again.`;
+		else error = saveFailureText(result.detail, result.reached);
 		busy = false;
 	}
 </script>

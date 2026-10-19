@@ -1,6 +1,5 @@
 import { writable, get } from 'svelte/store';
 import { token } from './auth';
-import { plainResponseError } from '$lib/plainError';
 
 export type EndpointKind = 'local' | 'lan' | 'tailscale' | 'public';
 
@@ -191,7 +190,7 @@ export async function setNetworkServerEnabled(
 export async function setNetworkServerPrivate(
 	serverId: string,
 	isPrivate: boolean,
-): Promise<{ ok: boolean; message?: string }> {
+): Promise<{ ok: true } | { ok: false; detail?: unknown; reached: boolean }> {
 	try {
 		const res = await fetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
 			method: 'PUT',
@@ -202,9 +201,10 @@ export async function setNetworkServerPrivate(
 			networkServers.update(servers => servers.map(row => row.id === serverId ? { ...row, private: isPrivate } : row));
 			return { ok: true };
 		}
-		return { ok: false, message: await plainResponseError(res, "The change wasn't saved.") };
+		const data = await res.json().catch(() => null);
+		return { ok: false, detail: data?.detail, reached: true };
 	} catch {
-		return { ok: false, message: "Couldn't reach CORSIA. Check your connection." };
+		return { ok: false, reached: false };
 	}
 }
 

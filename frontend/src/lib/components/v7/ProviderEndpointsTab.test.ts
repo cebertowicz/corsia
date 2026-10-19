@@ -21,7 +21,7 @@ const toggle = () => host.querySelector('[aria-label="Private machine"]') as HTM
 function render(s: NetworkServer, put: 'ok' | 'fail' = 'ok') {
 	vi.stubGlobal('fetch', vi.fn(async (_i: RequestInfo | URL, init?: RequestInit) => {
 		bodies.push(JSON.parse(init?.body as string));
-		return put === 'ok' ? { ok: true, json: async () => ({}) } : { ok: false, status: 500, json: async () => ({ detail: 'Server unavailable' }) };
+		return put === 'ok' ? { ok: true, json: async () => ({}) } : { ok: false, status: 500, json: async () => ({ detail: 'Your permission changed' }) };
 	}));
 	component = mount(ProviderEndpointsTab, { target: host, props: { server: s } });
 	flushSync();
@@ -58,14 +58,14 @@ describe('ProviderEndpointsTab private machine', () => {
 	it('save failed: uses the shared retry wording and the switch stays off', async () => {
 		render(server({}), 'fail');
 		toggle()!.click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
 	});
 	it('save failed turning it off: the same line, and the switch stays on', async () => {
 		render(server({ private: true }), 'fail');
 		toggle()!.click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
 	});
 });

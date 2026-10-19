@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { get } from 'svelte/store';
 import { token } from './auth';
-import { SERVER_UNREACHABLE } from '$lib/plainError';
 import {
 	addNetworkServer, networkServers, parseModelIds, removeNetworkServer, setNetworkServerBilling, setNetworkServerEnabled, setNetworkServerPrivate, testNetworkServer,
 	updateNetworkServer, type NetworkServer,
@@ -137,18 +136,18 @@ describe('setNetworkServerEnabled', () => {
 describe('setNetworkServerPrivate', () => {
 	afterEach(() => vi.unstubAllGlobals());
 
-	it('passes on a sentence the server wrote', async () => {
+	it('preserves the server-written reason for the shared setting formatter', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(404, { detail: 'Server not found' })));
-		expect(await setNetworkServerPrivate('ns-gone', true)).toEqual({ ok: false, message: 'Server not found' });
+		expect(await setNetworkServerPrivate('ns-gone', true)).toEqual({ ok: false, detail: 'Server not found', reached: true });
 	});
 
-	it('never shows a status code, machine code or runtime error', async () => {
+	it('distinguishes an absent or machine-readable reason from an unreachable request', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(500, {})));
-		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, message: 'The server did not accept the change. Try again.' });
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: undefined, reached: true });
 		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'person_session_required' })));
-		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, message: 'The server did not accept the change. Try again.' });
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: 'person_session_required', reached: true });
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
-		expect(await setNetworkServerPrivate('ns-1', false)).toEqual({ ok: false, message: SERVER_UNREACHABLE });
+		expect(await setNetworkServerPrivate('ns-1', false)).toEqual({ ok: false, reached: false });
 	});
 });
 

@@ -3,6 +3,7 @@
 	import { loadCloudModelsOff, saveCloudModelsOff } from '$lib/api/providerPolicy';
 	import { models } from '$lib/stores/models';
 	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import { saveFailureText } from '$lib/saveFailure';
 
 	// The project's own switch: only models on this computer or a private machine run in the project.
 	let { projectId }: { projectId: string } = $props();
@@ -25,7 +26,7 @@
 		saving = true; error = '';
 		const result = await saveCloudModelsOff(projectId, next);
 		if (result.ok) off = result.value.cloud_models_off;
-		else error = `Couldn't save this change. ${result.error} Try again.`;
+		else error = saveFailureText(result.detail, result.reached !== false);
 		saving = false;
 	}
 </script>

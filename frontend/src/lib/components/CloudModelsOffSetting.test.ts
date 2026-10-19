@@ -20,7 +20,7 @@ function stub(initial: boolean, put: 'ok' | 'fail' = 'ok') {
 			saves.push(JSON.parse(init.body as string));
 			return put === 'ok'
 				? { ok: true, json: async () => JSON.parse(init.body as string) }
-				: { ok: false, status: 500, json: async () => ({ detail: 'Server unavailable' }) };
+				: { ok: false, status: 500, json: async () => ({ detail: 'Your permission changed' }) };
 		}
 		return { ok: true, json: async () => ({ cloud_models_off: initial }) };
 	}));
@@ -79,7 +79,7 @@ describe('CloudModelsOffSetting', () => {
 	it('save failed: uses the shared retry wording and keeps the saved switch state', async () => {
 		stub(false, 'fail'); await mountSetting();
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
 	});
@@ -87,7 +87,7 @@ describe('CloudModelsOffSetting', () => {
 		stub(true, 'fail'); await mountSetting();
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
 });
