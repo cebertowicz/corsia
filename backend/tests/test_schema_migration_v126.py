@@ -43,7 +43,7 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v125_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 126
+    assert SCHEMA_VERSION == 127
     assert MIGRATIONS[125] is migrate_125_to_126
 
 
@@ -54,7 +54,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 125, 126)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 125, 127)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -78,7 +78,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 126)
+        assert (result.migrated, result.to_version) == (True, 127)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -98,7 +98,7 @@ def test_addressless_legacy_data_is_retired_and_journaled_without_an_account() -
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 126)
+        assert (result.migrated, result.to_version) == (True, 127)
         assert google_account(db=db) is None
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
