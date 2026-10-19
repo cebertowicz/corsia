@@ -21,7 +21,9 @@
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 
-	const groups = $derived(groupModels($models, $activeModelId));
+	const cloudModelsOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
+	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => model.status_reason !== 'project_cloud_off') : $models);
+	const groups = $derived(groupModels(pickerModels, $activeModelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
 	// stay visible, while their account list opens only on demand, the same for every vendor and state.
 	let opened = $state<Record<string, boolean>>({});
@@ -154,7 +156,9 @@
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if groups.length === 0 && !$localStatus}
+			{#if cloudModelsOff && groups.length === 0}
+				<div class="model-list-empty">Cloud models are off in this project, and no local model is ready. <button type="button" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+			{:else if groups.length === 0 && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
@@ -280,6 +284,7 @@
 						{/if}
 					</section>
 				{/each}
+				{#if cloudModelsOff}<div class="model-list-empty">Cloud models are off in this project.</div>{/if}
 				{#if !hasLocalGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />

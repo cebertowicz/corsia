@@ -1,7 +1,26 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { token } from '$lib/stores/auth';
 	import type { NetworkServer } from '$lib/stores/networkServers';
+	import Toggle from '../ui/Toggle.svelte';
+	import Message from '../ui/Message.svelte';
 
 	let { server }: { server: NetworkServer } = $props();
+	let privateMachine = $state(server.metadata?.private ?? false);
+	let busy = $state(false);
+	let error = $state('');
+	const managedThisMac = $derived(server.provider === 'omlx' && server.kind === 'managed' && (server.endpoints ?? []).some((endpoint) => endpoint.kind === 'local'));
+	async function savePrivate(value: boolean) {
+		if (busy) return;
+		busy = true; error = '';
+		try {
+			const auth = get(token);
+			const response = await fetch(`/api/network-servers/${encodeURIComponent(server.id)}/private`, { method: 'PUT', headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ private: value }) });
+			if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? 'Could not save this setting.');
+			privateMachine = value;
+		} catch (cause) { error = `Could not turn Private machine ${value ? 'on' : 'off'}: ${cause instanceof Error ? cause.message : 'Could not save this setting.'}`; }
+		finally { busy = false; }
+	}
 </script>
 
 <div class="stat-card">
@@ -16,6 +35,15 @@
 		</div>
 	{/each}
 </div>
+{#if managedThisMac}
+	<p class="hint">On this Mac: its models count as local.</p>
+{:else}
+	<div class="private-machine">
+		<div><span>Private machine</span><p>Its models count as local for local-only chats and cloud-off projects. Only turn this on if its models run on that machine, not on a service it forwards to.</p></div>
+		<Toggle checked={privateMachine} disabled={busy} ariaLabel="Private machine" onchange={savePrivate} />
+	</div>
+	{#if error}<Message variant="err">{error}</Message>{/if}
+{/if}
 <p class="hint">Endpoints are auto-discovered (mDNS or probe). The active host is the one currently serving requests.</p>
 
 <style>
@@ -45,6 +73,11 @@
 		display: inline-flex; align-items: center; gap: 8px;
 	}
 	.row code { font-family: 'SF Mono', monospace; font-size: var(--text-footnote); color: var(--text-secondary); }
+	.private-machine { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; }
+	.private-machine > div { min-width: 0; }
+	.private-machine span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
+	.private-machine p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.private-machine :global(.tg) { flex: 0 0 auto; }
 	.hint {
 		font-size: var(--text-subhead); color: var(--text-tertiary);
 		line-height: 1.6;

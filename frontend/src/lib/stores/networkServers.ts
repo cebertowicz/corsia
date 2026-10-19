@@ -21,6 +21,7 @@ export interface ExternalDiscoveryResult {
 }
 
 export interface NetworkServerMetadata {
+	private?: boolean;
 	base_url?: string;
 	discovery?: ExternalDiscoveryResult;
 	// Ids the user declared because the endpoint does not list its models.
