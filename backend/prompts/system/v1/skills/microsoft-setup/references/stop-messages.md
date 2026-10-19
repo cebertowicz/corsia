@@ -10,7 +10,7 @@ Message for IT: `Please let me register applications in Microsoft Entra ID, eith
 
 ## R2 Existing app takes other account types (step 7)
 
-`Your CORSIA app on Microsoft only accepts <its supported account types>, and Microsoft doesn’t let that change. Connecting this account needs a separate setup, so I’ve stopped here and changed nothing.`
+`Your CORSIA app on Microsoft only accepts <its supported account types>, and Microsoft doesn’t let that change, so I can’t connect <address> with it. I’ve changed nothing. I can connect an account of that type now if you have one. This version of CORSIA can’t set up a second app for this account.`
 
 ## R3 Needs admin approval: `admin_approval_required` (step 14)
 
