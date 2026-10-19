@@ -121,7 +121,9 @@ def test_startup_migration_adds_comment_context_columns_idempotently() -> None:
                 artifact_id TEXT NOT NULL,
                 anchor_text TEXT,
                 from_off INTEGER,
-                to_off INTEGER
+                to_off INTEGER,
+                author_kind TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL
             );
             PRAGMA user_version=66;
         """)
