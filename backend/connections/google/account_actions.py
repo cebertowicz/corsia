@@ -86,10 +86,7 @@ def _remove_locally(account_id: str, actor: Actor, *, db: sqlite3.Connection | N
         account = _google_row(account_id, conn)
         held = resolve_google_credentials(account_id, db=conn)
         audit_id = record_audit(account_id, "remove", actor, db=conn)
-        try:
-            key_store.drop_managed_entry(str(account["credential_key"]), db=conn)
-        except key_store.KeyStoreError:
-            raise
+        key_store.drop_managed_entry(str(account["credential_key"]), db=conn)
         conn.execute("DELETE FROM connected_account_reach WHERE account_id=?", (account_id,))
         conn.execute("DELETE FROM email_screens WHERE account=?", (account_id,))
         conn.execute("DELETE FROM connected_accounts WHERE id=?", (account_id,))

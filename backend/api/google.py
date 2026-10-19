@@ -33,15 +33,11 @@ CONNECTED_PAGE = "Google is connected. You can close this tab and go back to COR
 
 
 def _callback_message(error: GoogleError) -> str:
-    """Translate agent recovery instructions before putting them in a person's browser."""
+    """Use the error's browser-safe copy, with a safe fallback for future agent-only errors."""
+    if isinstance(error, oauth.GoogleSignInError) and error.browser_message:
+        return error.browser_message
     message = str(error)
-    if message.startswith("You signed in as "):
-        return "That's a different Google account from the one you were adding. Go back to CORSIA and try again."
-    if message.startswith("That Google account was removed"):
-        return "This Google account was removed from CORSIA. Go back to CORSIA and connect it again."
-    if message.startswith("Too many Google sign-ins"):
-        return "Too many Google sign-ins are waiting. Finish one or wait ten minutes, then go back to CORSIA and try again."
-    return message
+    return message if "google_" not in message else "Google sign-in couldn't finish. Go back to CORSIA and try again."
 
 
 def _page(message: str, status: int = 200) -> HTMLResponse:
@@ -59,6 +55,22 @@ def _body_field(body: object, key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _agent_visible_account_ids(user: dict, missing_thread_message: str) -> set[str]:
+    """Return exactly the Google account ids the calling agent's thread can reach."""
+    from api.connected_apps import _agent_thread
+    from api.connected_account_rows import list_account_rows
+    from infra.database import get_db
+
+    if not isinstance(user.get("thread_id"), str) or not user["thread_id"]:
+        raise HTTPException(403, missing_thread_message)
+    db = get_db()
+    try:
+        thread_id, _scope = _agent_thread(user, db)
+        return {str(row["id"]) for row in list_account_rows(thread_id, db=db)}
+    finally:
+        db.close()
+
+
 @router.post("/connect")
 async def connect(request: Request, user: dict = Depends(require_user)) -> dict[str, Any]:
     """Start one sign-in; returns the URL for the person to open and the account it is for.
@@ -74,17 +86,12 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
     account_id = _body_field(body, "account_id")
     person = is_person_session(user)
     if account_id is not None and not person:
-        from api.connected_apps import _agent_thread
-        from api.connected_account_rows import list_account_rows
-        from infra.database import get_db
-
-        db = get_db()
-        try:
-            thread_id, _scope = _agent_thread(user, db)
-            if account_id not in {str(row["id"]) for row in list_account_rows(thread_id, db=db)}:
-                raise HTTPException(403, "This Google account is not available to your project; ask the person in Connected apps.")
-        finally:
-            db.close()
+        visible_ids = await run_in_db(
+            _agent_visible_account_ids, user,
+            "Google account sign-in from an agent needs its current thread context; call this through corsia_api from that thread.",
+        )
+        if account_id not in visible_ids:
+            raise HTTPException(403, "This Google account is not available to your project; ask the person in Connected apps.")
     adding_thread_id = None if person or account_id else _body_field(user, "thread_id")
     if account_id is None and not person and adding_thread_id is None:
         raise HTTPException(403, "Only the person or an agent's own thread can add a Google account.")
@@ -118,17 +125,8 @@ async def status(user: dict = Depends(require_user)) -> dict[str, Any]:
     if is_person_session(user):
         return await run_in_db(oauth.accounts_status)
 
-    def visible_status() -> dict:
-        from api.connected_apps import _agent_thread
-        from api.connected_account_rows import list_account_rows
-        from infra.database import get_db
-
-        db = get_db()
-        try:
-            thread_id, _scope = _agent_thread(user, db)
-            ids = {str(row["id"]) for row in list_account_rows(thread_id, db=db)}
-        finally:
-            db.close()
-        return oauth.accounts_status(ids)
-
-    return await run_in_db(visible_status)
+    visible_ids = await run_in_db(
+        _agent_visible_account_ids, user,
+        "Google account status from an agent needs its current thread context; call this through corsia_api from that thread.",
+    )
+    return await run_in_db(oauth.accounts_status, visible_ids)

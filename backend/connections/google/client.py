@@ -9,10 +9,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 import httpx
 
+from infra import key_store
 from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
@@ -21,6 +23,14 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 STATUS_CONNECTED = "connected"
 STATUS_NEEDS_SIGN_IN = "needs_sign_in"
 TIMEOUT_SECONDS = 20.0
+CLIENT_FILE_MAX_BYTES = 16_384
+NEEDS_CLIENT_FILE = (
+    "No Google client is saved. If this setup already created the person's Desktop OAuth client, "
+    "pass client_file: the path of its downloaded JSON. If none exists yet, follow skill "
+    "`google-setup`: it creates one in the person's own Google project, in a browser they watch, "
+    "and publishes it In production. Never create a second project or client when one already exists."
+)
+BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
 
 NOT_CONNECTED = "Google isn't connected. Call google_connect and give the person the link."
 SIGN_IN_RECOVERY = (
@@ -49,6 +59,14 @@ class GoogleSignInRejected(GoogleError):
         super().__init__(NEEDS_SIGN_IN)
 
 
+class GoogleSignInError(GoogleError):
+    """An actionable error while starting or finishing a Google sign-in."""
+
+    def __init__(self, message: str, *, browser_message: str | None = None) -> None:
+        super().__init__(message)
+        self.browser_message = browser_message
+
+
 class GoogleRequestFailed(GoogleError):
     """A Google call failed; ``never_sent`` is True only when it provably had no effect.
 
@@ -60,6 +78,26 @@ class GoogleRequestFailed(GoogleError):
         self.status = status
         self.never_sent = never_sent or (status is not None and 400 <= status < 500)
         super().__init__(UNREACHABLE if status is None else f"Google refused the request (HTTP {status}).")
+
+
+def read_client_file(raw_path: object) -> tuple[str, str]:
+    """Read a downloaded Desktop OAuth client file, or raise an actionable sign-in error."""
+    from tools.conductor_api_paths import forbidden_path
+
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise GoogleSignInError(NEEDS_CLIENT_FILE)
+    try:
+        path = Path(raw_path.strip()).expanduser().resolve()
+        if forbidden_path({"path": str(path)}, for_write=False) or path.suffix != ".json":
+            raise GoogleSignInError(BAD_CLIENT_FILE)
+        if not path.is_file() or path.stat().st_size > CLIENT_FILE_MAX_BYTES:
+            raise GoogleSignInError(BAD_CLIENT_FILE)
+        installed = json.loads(path.read_text(encoding="utf-8")).get("installed")
+        return key_store.validated_value(installed["client_id"]), key_store.validated_value(installed["client_secret"])
+    except GoogleSignInError:
+        raise
+    except Exception:
+        raise GoogleSignInError(BAD_CLIENT_FILE) from None
 
 
 def id_token_subject(value: object) -> str | None:

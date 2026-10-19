@@ -11,14 +11,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import os
 import secrets
 import threading
 import time
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
@@ -51,21 +49,16 @@ IDENTITY_SCOPES = ("openid",)
 SCOPES = REQUIRED_SCOPES + OPTIONAL_SCOPES + IDENTITY_SCOPES
 PENDING_SECONDS = 600
 PENDING_MAX = 8
-CLIENT_FILE_MAX_BYTES = 16_384
 CALLBACK_PATH = "/api/google/oauth/callback"
 
-NEEDS_CLIENT_FILE = (
-    "No Google client is saved. If this setup already created the person's Desktop OAuth client, "
-    "pass client_file: the path of its downloaded JSON. If none exists yet, follow skill "
-    "`google-setup`: it creates one in the person's own Google project, in a browser they watch, "
-    "and publishes it In production. Never create a second project or client when one already exists."
-)
-BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
+NEEDS_CLIENT_FILE = client.NEEDS_CLIENT_FILE
 DENIED = "Google sign-in was refused or has expired. Call google_connect for a new link."
+BROWSER_DENIED = "Google sign-in was refused or expired. Go back to CORSIA and try again."
 MISSING_SCOPES = (
     "The person didn't allow Gmail and Calendar access. Call google_connect and ask them to allow "
     "Gmail and Calendar; Drive, Docs and Sheets are optional."
 )
+BROWSER_MISSING_SCOPES = "Gmail and Calendar access weren't allowed. Go back to CORSIA and try again."
 ALREADY_CONNECTED = (
     "{address} is already connected{reach}. To change where it works, use Where it works… on its row in "
     "Connected apps."
@@ -92,8 +85,7 @@ GONE = "That Google account was removed during its sign-in. Call google_connect 
 TOO_MANY = "Too many Google sign-ins are waiting. Finish one or wait ten minutes, then call google_connect."
 
 
-class GoogleSignInError(GoogleError):
-    """A sign-in step failed; the text is fixed and safe to show."""
+GoogleSignInError = client.GoogleSignInError
 
 
 @dataclass(frozen=True)
@@ -126,29 +118,7 @@ def redirect_uri() -> str:
     return f"http://127.0.0.1:{os.environ.get('BACKEND_PORT') or DEFAULT_BACKEND_PORT}{CALLBACK_PATH}"
 
 
-def read_client_file(raw_path: object) -> tuple[str, str]:
-    """The ``(client_id, client_secret)`` in a downloaded Desktop client JSON, or a fixed refusal."""
-    from tools.conductor_api_paths import forbidden_path
-
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise GoogleSignInError(NEEDS_CLIENT_FILE)
-    try:
-        # Check and read the same resolved file, so a symlink can't swap in another one.
-        path = Path(raw_path.strip()).expanduser().resolve()
-        if forbidden_path({"path": str(path)}, for_write=False) or path.suffix != ".json":
-            raise GoogleSignInError(BAD_CLIENT_FILE)
-        if not path.is_file() or path.stat().st_size > CLIENT_FILE_MAX_BYTES:
-            raise GoogleSignInError(BAD_CLIENT_FILE)
-        installed = json.loads(path.read_text(encoding="utf-8")).get("installed")
-        client_id, client_secret = installed["client_id"], installed["client_secret"]
-        return (
-            key_store.validated_value(client_id),
-            key_store.validated_value(client_secret),
-        )
-    except GoogleSignInError:
-        raise
-    except Exception:
-        raise GoogleSignInError(BAD_CLIENT_FILE) from None
+read_client_file = client.read_client_file
 
 
 def _client_for(account_id: str | None, client_file: object, db) -> tuple[str, str] | None:  # type: ignore[no-untyped-def]
@@ -156,7 +126,7 @@ def _client_for(account_id: str | None, client_file: object, db) -> tuple[str, s
     from connections.connected_accounts import google_accounts, google_client_material
 
     if client_file:
-        return read_client_file(client_file)
+        return client.read_client_file(client_file)
     if account_id is not None and (own := google_client_material(account_id, db=db)):
         return own
     for account in google_accounts(db=db):
@@ -173,7 +143,9 @@ def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-de
     except ConnectedAccountError:
         raise GoogleSignInError(UNKNOWN_ACCOUNT) from None
     if account["state"] == "removing":
-        raise GoogleSignInError(GONE)
+        raise GoogleSignInError(
+            GONE, browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
+        )
     if account["state"] == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is not None:
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
 
@@ -208,7 +180,10 @@ def _begin(
         for stale in [nonce for nonce, flow in _pending.items() if flow.expired]:
             _pending.pop(stale, None)
         if len(_pending) >= PENDING_MAX:
-            raise GoogleSignInError(TOO_MANY)
+            raise GoogleSignInError(
+                TOO_MANY,
+                browser_message="Too many Google sign-ins are waiting. Go back to CORSIA and try again later.",
+            )
         _pending[pending.state] = pending
     return AUTH_URL + "?" + urlencode({
         "client_id": pending.client_id, "redirect_uri": pending.redirect_uri, "response_type": "code",
@@ -237,14 +212,14 @@ def _take_pending(state: object) -> _Pending:
     the loopback callback, and that must not cancel the person's sign-in.
     """
     if not isinstance(state, str) or not state:
-        raise GoogleSignInError(DENIED)
+        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     with _pending_lock:
         match = next(
             (nonce for nonce in _pending if secrets.compare_digest(state.encode(), nonce.encode())), None,
         )
         pending = _pending.pop(match, None) if match is not None else None
     if pending is None or pending.expired:
-        raise GoogleSignInError(DENIED)
+        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     return pending
 
 
@@ -320,11 +295,20 @@ def _store(
             try:
                 account = get_account(pending.account_id, db=conn)
             except ConnectedAccountError:
-                raise GoogleSignInError(GONE) from None
+                raise GoogleSignInError(
+                    GONE,
+                    browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
+                ) from None
             if account["state"] == "removing":
-                raise GoogleSignInError(GONE)
+                raise GoogleSignInError(
+                    GONE,
+                    browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
+                )
             if not _same_identity(account, email, provider_subject):
-                raise GoogleSignInError(WRONG_ACCOUNT.format(signed_in=email, address=account["address"]))
+                raise GoogleSignInError(
+                    WRONG_ACCOUNT.format(signed_in=email, address=account["address"]),
+                    browser_message="That's a different Google account from the one you were adding. Go back to CORSIA and try again.",
+                )
         store_google_credentials(pending.account_id, bundle, db=conn)
         if not pending.adding:
             mark_signed_in(
@@ -337,7 +321,7 @@ async def complete_sign_in(code: object, state: object) -> str:
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
     if not isinstance(code, str) or not code:
-        raise GoogleSignInError(DENIED)
+        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.post(TOKEN_URL, data={
@@ -348,7 +332,7 @@ async def complete_sign_in(code: object, state: object) -> str:
     except httpx.HTTPError:
         raise GoogleRequestFailed() from None
     if response.status_code != 200:
-        raise GoogleSignInError(DENIED)
+        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     try:
         grant = response.json()
         refresh_token, access = grant["refresh_token"], grant["access_token"]
@@ -360,9 +344,9 @@ async def complete_sign_in(code: object, state: object) -> str:
     except GoogleError:
         raise
     except Exception:
-        raise GoogleSignInError(DENIED) from None
+        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED) from None
     if not set(REQUIRED_SCOPES) <= set(scopes):
-        raise GoogleSignInError(MISSING_SCOPES)
+        raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
     await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
     return email
 

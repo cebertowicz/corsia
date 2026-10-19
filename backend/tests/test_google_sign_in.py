@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -25,6 +27,7 @@ from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.internal_principal import internal_request
 from tests.registry_helpers import make_session
 from tools.corsia_api import CorsiaApiTool
 from tools.google_account import GoogleConnectTool, GoogleStatusTool
@@ -490,6 +493,92 @@ async def test_no_token_or_secret_reaches_any_output_or_log(google, conductor, c
             assert canary not in text
     # The saved client survives a rejected token, so reconnecting needs no client file.
     assert (await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id)).startswith("{")
+
+
+async def test_agent_routes_filter_status_and_refuse_an_unreachable_reconnect(google, conductor, client_file):
+    account_id = await _connect(google, conductor, client_file)
+    other = make_session(get_db(), prefix="other-agent")
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [("visible", "Visible", "t", "t"), ("hidden", "Hidden", "t", "t")],
+        )
+        db.execute("UPDATE threads SET project_id='visible' WHERE id=?", (conductor,))
+        db.execute("UPDATE threads SET project_id='hidden' WHERE id=?", (other,))
+        db.commit()
+    finally:
+        db.close()
+    from connections.google.account_actions import change_google_account_reach
+    await run_in_db(
+        change_google_account_reach, account_id,
+        {"mode": "selected", "project_ids": ["visible"], "outside_projects": False}, actor=("person", "person"),
+    )
+    async with _http() as http:
+        with internal_request("steve", conductor):
+            visible = await http.get("/api/google/status")
+        with internal_request("steve", other):
+            hidden = await http.get("/api/google/status")
+        with internal_request("steve", other):
+            reconnect = await http.post("/api/google/connect", json={"account_id": account_id})
+    assert [account["account_id"] for account in visible.json()["accounts"]] == [account_id]
+    assert hidden.status_code == 200 and hidden.json() == {"accounts": []}
+    assert reconnect.status_code == 403
+
+
+async def test_person_google_routes_remain_unfiltered(google, conductor, client_file):
+    account_id = await _connect(google, conductor, client_file)
+    async with _http() as http:
+        status = await http.get("/api/google/status", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
+        reconnect = await http.post(
+            "/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}, json={"account_id": account_id},
+        )
+    assert [account["account_id"] for account in status.json()["accounts"]] == [account_id]
+    assert reconnect.status_code == 400 and "already connected" in reconnect.text
+
+
+def test_concurrent_begins_never_exceed_the_pending_limit(monkeypatch):
+    monkeypatch.setattr(oauth, "_client_for", lambda *args, **kwargs: (CLIENT_ID, SECRET))
+    with ThreadPoolExecutor(max_workers=oauth.PENDING_MAX + 4) as pool:
+        outcomes = list(pool.map(
+            lambda _: _begin_for_test(), range(oauth.PENDING_MAX + 4),
+        ))
+    assert len(oauth._pending) == oauth.PENDING_MAX
+    assert outcomes.count(oauth.TOO_MANY) == 4
+
+
+def _begin_for_test() -> str | None:
+    try:
+        oauth._begin(None, None, ("person", "owner"), None, google_api.ALL_PROJECTS)
+    except oauth.GoogleSignInError as error:
+        return str(error)
+    return None
+
+
+async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
+    errors = (
+        oauth.GoogleSignInError(oauth.DENIED, browser_message=oauth.BROWSER_DENIED),
+        oauth.GoogleSignInError(oauth.MISSING_SCOPES, browser_message=oauth.BROWSER_MISSING_SCOPES),
+        oauth.GoogleSignInError(
+            oauth.TOO_MANY, browser_message="Too many Google sign-ins are waiting. Go back to CORSIA and try again later.",
+        ),
+        oauth.GoogleSignInError(
+            oauth.GONE, browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
+        ),
+        oauth.GoogleSignInError(
+            oauth.WRONG_ACCOUNT.format(signed_in="wrong@example.test", address="right@example.test"),
+            browser_message="That's a different Google account from the one you were adding. Go back to CORSIA and try again.",
+        ),
+    )
+    async with _http() as http:
+        for error in errors:
+            async def fail(*_args, _error=error, **_kwargs):
+                raise _error
+            monkeypatch.setattr(oauth, "complete_sign_in", fail)
+            response = await http.get("/api/google/oauth/callback", params={"code": "code", "state": "state"})
+            assert response.status_code == 400
+            assert error.browser_message in html.unescape(response.text)
+            assert "google_" not in response.text
 
 
 async def test_routes_need_a_signed_in_caller(google):
