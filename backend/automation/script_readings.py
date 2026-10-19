@@ -285,7 +285,7 @@ def emit_report(
     noted = _note_readings(db, schedule, report, registered, now)
     store.finish_run(
         schedule.id, ran_at=now, status=status, error=report.error,
-        noted=noted, last_measures=measures.line if measures.accepted else None, db=db,
+        noted=noted, last_measures=measures.line if (measures.accepted or measures.refused) else None, db=db,
     )
     return woken
 
