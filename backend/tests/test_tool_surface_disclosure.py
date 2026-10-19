@@ -133,6 +133,8 @@ def test_google_connect_surface_requires_status_before_reconnect():
     assert description.startswith("Call google_status first.")
     assert "needs_action, follow it before calling google_connect" in description
     assert description.index("needs_action") < description.index("returns a URL")
+    assert "With account_id, it returns {reply, link}" in description
+    assert "post its reply verbatim with post_update followed by [Open it in Connected apps](<link>)" in description
     assert "Give the person the link" not in description
 
 

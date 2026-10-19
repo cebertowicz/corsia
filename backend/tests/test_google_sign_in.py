@@ -24,6 +24,7 @@ from connections.google import oauth
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
+from infra.db_async import run_in_db
 from tests.registry_helpers import make_session
 from tools.corsia_api import CorsiaApiTool
 from tools.google_account import GoogleConnectTool, GoogleStatusTool
@@ -290,8 +291,11 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
     assert "If none exists yet, follow skill `google-setup`" in out
     assert "Never create a second project or client when one already exists." in out
     account_id = await _connect(google, conductor, client_file)
-    out = await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id)
-    assert out == f"Error: {EMAIL} is already connected."
+    out = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+    assert out == {
+        "reply": f"{EMAIL} is already connected for all your projects. To change where it works, use Where it works… on its row in Connected apps.",
+        "link": f"#connected-apps/{account_id}",
+    }
     [status] = json.loads(await GoogleStatusTool().execute(_thread_id=conductor))["accounts"]
     assert status["status"] == "connected" and status["email"] == EMAIL
     assert status["account_id"] == account_id and "needs_action" not in status
@@ -301,6 +305,140 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
         again = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert again.status_code == 400 and f"{EMAIL} is already connected." in again.text
     assert [account["id"] for account in _accounts()] == [account_id]
+
+
+@pytest.mark.parametrize(("reach", "projects", "reach_phrase"), [
+    ({"mode": "all", "project_ids": [], "outside_projects": False}, [], " for all your projects"),
+    ({"mode": "selected", "project_ids": ["garden"], "outside_projects": False}, [("garden", "Garden plan")], " for Garden plan"),
+    ({"mode": "selected", "project_ids": ["garden", "launch"], "outside_projects": False}, [("garden", "Garden plan"), ("launch", "Q4 launch")], ""),
+])
+async def test_existing_connected_account_returns_the_b_g1_reply_for_each_reach(
+    google, conductor, client_file, reach, projects, reach_phrase,
+):
+    account_id = await _connect(google, conductor, client_file)
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [(project_id, name, "t", "t") for project_id, name in projects],
+        )
+        db.commit()
+    finally:
+        db.close()
+    from connections.google.account_actions import change_google_account_reach
+
+    await run_in_db(change_google_account_reach, account_id, reach, actor=("person", "person"))
+    if reach["mode"] == "selected":
+        db = get_db()
+        try:
+            db.execute("UPDATE threads SET project_id='garden' WHERE id=?", (conductor,))
+            db.commit()
+        finally:
+            db.close()
+    result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+
+    assert result == {
+        "reply": f"{EMAIL} is already connected{reach_phrase}. To change where it works, use Where it works… on its row in Connected apps.",
+        "link": f"#connected-apps/{account_id}",
+    }
+    assert [account["id"] for account in _accounts()] == [account_id]
+
+
+async def test_existing_connected_account_reply_names_when_the_calling_scope_is_not_covered(
+    google, conductor, client_file,
+):
+    """B-G1 distinguishes the account's reach from the scope this conversation asks for."""
+    account_id = await _connect(google, conductor, client_file)
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [("garden", "Garden plan", "t", "t"), ("launch", "Q4 launch", "t", "t")],
+        )
+        db.commit()
+    finally:
+        db.close()
+    from connections.google.account_actions import change_google_account_reach
+
+    workspace_reply = f"{EMAIL} is already connected for all your projects. To change where it works, use Where it works… on its row in Connected apps."
+    needs_sign_in_reply = f"{EMAIL} is already connected, but it needs you to sign in again. Use Sign in on its row in Connected apps."
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == workspace_reply
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET project_id='launch' WHERE id=?", (conductor,))
+        db.commit()
+    finally:
+        db.close()
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == workspace_reply
+
+    await run_in_db(
+        change_google_account_reach,
+        account_id,
+        {"mode": "selected", "project_ids": ["garden"], "outside_projects": False},
+        actor=("person", "person"),
+    )
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == (
+        f"{EMAIL} is connected, but not for Q4 launch. To add Q4 launch, use Where it works… on its row in Connected apps."
+    )
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET project_id=NULL WHERE id=?", (conductor,))
+        db.commit()
+    finally:
+        db.close()
+    all_projects_reply = (
+        f"{EMAIL} is connected, but not for all your projects. To make it work for all of them, use Where it works… on its row in Connected apps."
+    )
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == all_projects_reply
+
+    _, state = await _start(google, conductor, None)
+    async with _http() as http:
+        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert duplicate.status_code == 400 and all_projects_reply in duplicate.text
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET project_id='launch' WHERE id=?", (conductor,))
+        db.execute("UPDATE connected_accounts SET state='needs_sign_in' WHERE id=?", (account_id,))
+        db.commit()
+    finally:
+        db.close()
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == needs_sign_in_reply
+
+
+async def test_person_readding_connected_account_gets_already_connected_reply(google, conductor, client_file):
+    """A person adding through Connected apps must not be sent through a needless re-sign-in."""
+    await _connect(google, conductor, client_file)
+
+    async with _http() as http:
+        started = await http.post("/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
+        assert started.status_code == 200
+        query = parse_qs(urlparse(started.json()["url"]).query)
+        google.challenge = query["code_challenge"][0]
+        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": query["state"][0]})
+
+    assert duplicate.status_code == 400
+    assert f"{EMAIL} is already connected." in duplicate.text
+    assert "sign in again" not in duplicate.text
+
+
+async def test_existing_needs_sign_in_account_returns_its_row_link_without_a_second_row(google, conductor, client_file):
+    account_id = await _connect(google, conductor, client_file)
+    google.refresh_status = 400
+    with pytest.raises(google_client.GoogleSignInRejected):
+        await google_client.get_json(account_id, "https://gmail.googleapis.com/gmail/v1/users/me/labels")
+
+    result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+
+    assert result == {
+        "reply": f"{EMAIL} is already connected, but it needs you to sign in again. Use Sign in on its row in Connected apps.",
+        "link": f"#connected-apps/{account_id}",
+    }
+    assert [account["id"] for account in _accounts()] == [account_id]
+    url, signing_in = await oauth.start_sign_in(actor=("person", "person"), account_id=account_id)
+    assert url.startswith(oauth.AUTH_URL) and signing_in == account_id
 
 
 async def test_a_file_that_is_not_a_client_is_refused_without_echo(google, conductor, tmp_path):
@@ -339,7 +477,12 @@ async def test_no_token_or_secret_reaches_any_output_or_log(google, conductor, c
     outputs.append(await GoogleStatusTool().execute(_thread_id=conductor))
     [status] = json.loads(outputs[-1])["accounts"]
     assert status["status"] == "needs_sign_in"
-    assert status["needs_action"] == google_client.SIGN_IN_RECOVERY
+    assert status["needs_action"] == (
+        'Google rejected the saved sign-in. Sign-ins for a project in Testing expire after 7 days: '
+        'if the Audience page of the OAuth consent screen in Google Cloud shows Testing, ask the person '
+        'to publish their app "In production", keeping the same project. Then call google_connect with '
+        'this account_id and post its reply verbatim followed by its link as [Open it in Connected apps](<link>).'
+    )
     captured = capsys.readouterr()
     outputs.extend([caplog.text, captured.out, captured.err])
     for text in outputs:

@@ -315,7 +315,8 @@ async def test_send_refuses_when_the_drafts_account_is_signed_out(mail, monkeypa
     )
     assert output == (
         "Error: Not sent: person@example.com is signed out. Ask the person to use Sign in on its row "
-        "in Connected apps, or call google_connect with this account_id and give them the link."
+        "in Connected apps, or call google_connect with this account_id and post its reply verbatim followed "
+        "by its link as [Open it in Connected apps](<link>)."
     )
     assert calls == []
     row = get_db().execute("SELECT state FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()

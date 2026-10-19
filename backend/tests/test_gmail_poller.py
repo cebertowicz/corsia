@@ -72,8 +72,9 @@ def _stored_cursor(account_id: str) -> dict:
 def _capture_deliveries(monkeypatch) -> list[dict]:
     delivered: list[dict] = []
 
-    def deliver(connector: str, raw: dict, *, db=None):
+    def deliver(connector: str, raw: dict, *, target_filter=None, db=None):
         assert connector == "gmail"
+        assert target_filter is not None
         delivered.append(raw)
         return []  # designation=None is handled, not a Gmail polling error.
 
@@ -167,12 +168,19 @@ async def test_a_message_deleted_after_listing_is_skipped(monkeypatch, account):
 async def test_retry_after_a_partial_page_wakes_each_message_once(monkeypatch, account):
     from connections import binder
     from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
+    from registry import artifact_record as records
     from tests.event_routing_helpers import mk_session
 
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
     workspace = mk_session("ws")
     assert set_scope_coordinator(WORKSPACE_SCOPE, workspace)
     assert binder.ensure_designation_rule(connector="gmail", fact="label", value="INBOX") is not None
+    for message_id in ("a", "b"):
+        records.register_or_resolve(
+            {"integration": "gmail", "type": "email-thread",
+             "external_id": f"google:{account}:thread:thread-{message_id}"},
+            owner_intent=workspace,
+        )
     old = _seed_cursor(account)
     failing = {"b"}
 
@@ -366,3 +374,58 @@ async def test_cancel_account_stops_its_in_flight_poll_only(monkeypatch, account
         assert get_account(other, db=db)["state"] == "connected"
     finally:
         db.close()
+
+
+def test_inbox_delivery_only_reaches_the_account_scope_and_counts_the_drop(account):
+    """A resolved owner outside an account's reach receives no wake or fallback delivery."""
+    from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
+    from registry import artifact_record as records
+    from tests.event_routing_helpers import mk_session
+
+    outside = mk_session("outside")
+    blocked_thread = f"google:{account}:thread:thread-1"
+    records.register_or_resolve(
+        {"integration": "gmail", "type": "email-thread", "external_id": blocked_thread},
+        owner_intent=outside,
+    )
+    payload = poller.event_payload(
+        account, _message("blocked"), email_screen.Screen("screened", "mail", "now", False, "none", "local"),
+        "history-blocked",
+    )
+
+    assert poller._deliver(account, payload)
+    db = get_db()
+    try:
+        assert db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", (outside,),
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+    assert poller.poller_status(account)["delivery"] == {
+        "delivered": 0, "excluded": 1, "outcomes": {"filtered": 1},
+    }
+
+    workspace = mk_session("workspace")
+    assert set_scope_coordinator(WORKSPACE_SCOPE, workspace)
+    allowed_thread = f"google:{account}:thread:thread-2"
+    records.register_or_resolve(
+        {"integration": "gmail", "type": "email-thread", "external_id": allowed_thread},
+        owner_intent=workspace,
+    )
+    allowed_message = gmail_read.Message("allowed", "thread-2", _message().headers, "body")
+    allowed_payload = poller.event_payload(
+        account, allowed_message, email_screen.Screen("screened", "mail", "now", False, "none", "local"),
+        "history-allowed",
+    )
+
+    assert poller._deliver(account, allowed_payload)
+    db = get_db()
+    try:
+        assert db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", (workspace,),
+        ).fetchone()[0] == 1
+    finally:
+        db.close()
+    assert poller.poller_status(account)["delivery"] == {
+        "delivered": 1, "excluded": 1, "outcomes": {"filtered": 1, "woke": 1},
+    }

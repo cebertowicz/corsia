@@ -131,6 +131,20 @@ class TestDelivery:
         assert [d.outcome for d in again] == [DUPLICATE]
         assert _count("SELECT COUNT(*) FROM dead_letter_events") == 1
 
+    def test_gmail_first_seen_event_ignores_rule_and_structured_tag_routes(self, isolated_db):
+        rule_target = mk_session("rule-target")
+        tagged_target = mk_session("tagged-target")
+        binder.create_rule(
+            connector="gmail", fact="from", value="a@example.com", destination_thread_id=rule_target,
+        )
+        raw = _mail(**SCREENED_NOW, corsia_tags={"thread_id": tagged_target, "tag": "urgent"})
+
+        out = deliver_platform_event_sync("gmail", raw)
+
+        assert [(delivery.outcome, delivery.thread_id) for delivery in out] == [(WOKE, rule_target)]
+        assert _wakes(rule_target) == 1
+        assert _wakes(tagged_target) == 0
+
 
 class TestDesignationRule:
     def test_designation_move_repoints_rule(self, workspace):
