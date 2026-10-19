@@ -73,7 +73,7 @@ def test_the_step_runs_after_the_startup_schema_pass_and_again() -> None:
 def test_the_counter_check_admits_the_five_new_counters() -> None:
     with closing(_wound_back_to_v126()) as db:
         migrate_126_to_127(db)
-        for counter in ("name_undeclared", "namespace_not_owned", "identity_mismatch", "rate_limited", "record_refused"):
+        for counter in ("name_undeclared", "namespace_not_owned", "identity_mismatch", "rate_limited", "record_refused", "unversioned"):
             db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES (?,?,?,?)", (counter, "mail.triaged", "a", "2026-01-01"))
 
 

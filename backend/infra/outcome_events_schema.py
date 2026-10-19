@@ -45,7 +45,7 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
             'name_undeclared', 'namespace_not_owned', 'identity_mismatch',
-            'rate_limited', 'record_refused')),
+            'rate_limited', 'record_refused', 'unversioned')),
         event_name TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL DEFAULT '',
         day TEXT NOT NULL DEFAULT '0000-00-00',

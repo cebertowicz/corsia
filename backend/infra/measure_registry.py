@@ -19,6 +19,8 @@ from infra.outcome_event_attributes import AttributeSpec
 REFUSAL_LIMIT = 20
 # Reserved attributes the server stamps on every declared event; a file cannot declare them.
 _STAMPED = {name: AttributeSpec("id") for name in ("run_id", "workflow_ref", "workflow_version")}
+_REMOVED = "_removed"  # a retired name's newest version: the name stays in history but is no longer declared
+_REMOVED_SPEC = json.dumps({_REMOVED: True})
 _NO_OWNER = (
     "measure_sync: workflow {workflow} has no owner, so its measures.yaml can't be synced. "
     "Add `owner: <your thread id>` under `corsia:` then `workflow:` in its SKILL.md frontmatter, "
@@ -56,6 +58,8 @@ class MeasureRegistry:
         )
         for owner, name, raw in rows:
             spec = json.loads(raw)
+            if spec.get(_REMOVED):
+                continue  # retired by a later sync: no longer admitted, its old rows stay readable
             specs = {**_attribute_specs(spec["attributes"]), **_STAMPED}
             self.events[name] = DeclaredEvent(owner, specs, tuple(spec["dedupe"]), spec["attributes"], int(spec.get("keep_days", 400)))
             if spec.get("_workflow"):
@@ -102,6 +106,17 @@ def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent
     return f'Namespace "{namespace}" belongs to another agent (thread {holder}); {mine}'
 
 
+def _no_longer_declared(connection: sqlite3.Connection, owner: str, path: str, kept: set[tuple[str, str]]) -> list[tuple[str, str, int]]:
+    """Names this owner last synced from ``path`` that the new file leaves out, with their next version."""
+    latest: dict[tuple[str, str], tuple[int, str, str]] = {}
+    for kind, name, version, spec_json, file_path in connection.execute(
+        "SELECT kind,name,version,spec_json,file_path FROM measure_definitions WHERE owner_thread_id=? ORDER BY version", (owner,),
+    ):
+        latest[(kind, name)] = (version, spec_json, file_path)
+    return [(kind, name, version + 1) for (kind, name), (version, spec_json, file_path) in sorted(latest.items())
+            if file_path == path and (kind, name) not in kept and _REMOVED not in json.loads(spec_json)]
+
+
 def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) -> dict[str, Any]:
     """Validate and atomically persist a declaration file, then refresh the registry."""
     try:
@@ -133,6 +148,10 @@ def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) 
                 continue
             version = 1 if row is None else row[0] + 1
             connection.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?)", (owner_thread_id, kind, name, version, normalized, path, sha, now))
-            changes.append({"name": name, "status": "added" if version == 1 else f"changed v{version - 1}→v{version}"})
+            fresh = row is None or _REMOVED in json.loads(row[1])
+            changes.append({"name": name, "status": "added" if fresh else f"changed v{version - 1}→v{version}"})
+        for kind, name, version in _no_longer_declared(connection, owner_thread_id, path, {(kind, name) for kind, name, _ in items}):
+            connection.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?)", (owner_thread_id, kind, name, version, _REMOVED_SPEC, path, sha, now))
+            changes.append({"name": name, "status": "removed"})
     REGISTRY.rebuild(db)
     return {"namespace": namespace, "items": changes}

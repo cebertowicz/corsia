@@ -159,12 +159,17 @@ def _register_access_tools(agent: CORSIAAgent) -> None:
     from tools.audit_reads import AuditReadTool
     from tools.host_access import ReleaseHostAccessTool, RequestHostAccessTool
     from tools.log_read import LogReadTool
-    from tools.measures import MeasureStatusTool, MeasureSyncTool
 
     agent.tools.register(RequestHostAccessTool())
     agent.tools.register(ReleaseHostAccessTool())
     agent.tools.register(AuditReadTool())
     agent.tools.register(LogReadTool())
+
+
+def _register_measure_tools(agent: CORSIAAgent) -> None:
+    """Register the declared-measure tools: loading a measures.yaml and reading what intake did with it."""
+    from tools.measures import MeasureStatusTool, MeasureSyncTool
+
     agent.tools.register(MeasureSyncTool())
     agent.tools.register(MeasureStatusTool())
 
@@ -348,7 +353,7 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(AutomationListTool())
 
     _register_access_tools(agent)
-
+    _register_measure_tools(agent)
     _register_managed_process_tools(agent)
 
     from tools.knowledge import WriteKnowledgeTool, SearchKnowledgeTool, ListKnowledgeTool

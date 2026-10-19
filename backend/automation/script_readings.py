@@ -16,8 +16,6 @@ Routing is deliberately small:
 
 from __future__ import annotations
 
-import json
-import math
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -28,6 +26,8 @@ from loguru import logger
 
 from automation import script_schedules as store
 from automation.schedules import Schedule, _parse
+from automation.script_lines import LineRefusal, Reading, parse_output
+from automation.script_measures import settle_measures
 from automation.script_sandbox import STDOUT_CAP_BYTES, ScriptRun
 from host_access.credential_sanitizer import sanitize_credential_text
 
@@ -40,12 +40,6 @@ _WAKE_NEXT = (
     "on disk stays stopped: cancel it with automation_cancel and register the "
     "new file with automation_schedule."
 )
-
-
-@dataclass(frozen=True)
-class Reading:
-    series: str
-    value: float
 
 
 @dataclass(frozen=True)
@@ -65,54 +59,9 @@ class RunReport:
     signals: list[Signal]
     error: str | None = None
     measures: list[dict[str, Any]] = field(default_factory=list)
+    measure_refusals: list[LineRefusal] = field(default_factory=list)
+    measures_over_cap: int = 0
     run_id: str | None = None
-
-
-def parse_readings(
-    stdout: bytes, registered: dict[str, store.Series],
-) -> tuple[list[Reading], list[str]]:
-    """Read stdout as JSON lines; return the valid readings and what was wrong."""
-    try:
-        text = stdout.decode("utf-8")
-    except UnicodeDecodeError:
-        return [], ["output is not valid UTF-8"]
-    readings: dict[str, Reading] = {}
-    problems: list[str] = []
-    for number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict) and set(parsed) == {"measure"}:
-            continue
-        problem = _read_line(line, registered, readings)
-        if problem:
-            problems.append(f"line {number}: {problem}")
-    return list(readings.values()), problems
-
-
-def _read_line(
-    line: str, registered: dict[str, store.Series], readings: dict[str, Reading],
-) -> str | None:
-    try:
-        item = json.loads(line)
-    except json.JSONDecodeError:
-        return "not a JSON object"
-    if not isinstance(item, dict) or set(item) != {"series", "value"}:
-        return 'expected exactly {"series": ..., "value": ...}'
-    key, value = item["series"], item["value"]
-    if not isinstance(key, str) or key not in registered:
-        return "series is not registered on this schedule"
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return f"{key} value is not a number"
-    if not math.isfinite(value):
-        return f"{key} value is not finite"
-    if key in readings:
-        return f"{key} appears more than once"
-    readings[key] = Reading(key, float(value))
-    return None
 
 
 def classify(series: store.Series, value: float) -> str:
@@ -142,7 +91,7 @@ def _script_name(schedule: Schedule) -> str:
     return (schedule.script_path or "script").rsplit("/", 1)[-1]
 
 
-def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str | None = None) -> RunReport:
+def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str) -> RunReport:
     """Turn one finished run into a status, its readings and its signals. Pure."""
     if run.timed_out:
         return _failure(
@@ -160,15 +109,8 @@ def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str | None = Non
             f"exited with code {run.returncode}: {_stderr_tail(run)}",
         )
     registered = {s.key: s for s in store.series_of(schedule)}
-    readings, problems = parse_readings(run.stdout, registered)
-    measures: list[dict[str, Any]] = []
-    for line in run.stdout.decode("utf-8", errors="replace").splitlines():
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(item, dict) and set(item) == {"measure"} and isinstance(item["measure"], dict):
-            measures.append(item["measure"])
+    parsed = parse_output(run.stdout, registered)
+    readings, problems = parsed.readings, parsed.problems
     signals = _signals(schedule, registered, readings)
     status = store.worst_status([s.kind for s in signals] or ["ok"])
     if problems:
@@ -179,8 +121,13 @@ def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str | None = Non
             f"not read: {message}",
             {"message": message},
         ))
-        return RunReport("error", readings, signals, error=message, measures=measures, run_id=run_id)
-    return RunReport(status, readings, signals, measures=measures, run_id=run_id)
+        status, error = "error", message
+    else:
+        error = None
+    return RunReport(
+        status, readings, signals, error=error, measures=parsed.measures,
+        measure_refusals=parsed.refused, measures_over_cap=parsed.over_cap, run_id=run_id,
+    )
 
 
 def _signals(
@@ -323,25 +270,27 @@ def emit_report(
 ) -> bool:
     """Write a run's events, notes and wakes and settle it; True if the owner was woken."""
     registered = {s.key: s for s in store.series_of(schedule)}
-    # Measure refusals are intake data, never script-run errors or wakes.
-    from infra.measure_admission import admit
-    workflow = (schedule.payload or {}).get("workflow")
-    for measure in report.measures[:200]:
-        event_name = measure.get("event.name")
-        attributes = measure.get("attributes", {})
-        if isinstance(event_name, str) and isinstance(attributes, dict):
-            admit(
-                db, owner_thread_id=schedule.thread_id, event_name=event_name,
-                attributes=attributes, project_id=(None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id),
-                run_id=f"script:{schedule.id}:{report.run_id or 'unknown'}", workflow=workflow,
-                ts=measure.get("time") if isinstance(measure.get("time"), str) else None,
-            )
+    # Measure refusals are intake data, counted for measure_status: never run errors or wakes.
+    measures = settle_measures(db, schedule, report)
+    signals, status = list(report.signals), report.status
+    if status == "ok" and not report.readings and measures.accepted == 0:
+        signals.append(_no_data(schedule))  # a silently broken measure script still surfaces
+        status = "no_data"
     woken = False
-    for signal in report.signals:
+    for signal in signals:
         woken = _wake(db, schedule, signal, now) or woken
     noted = _note_readings(db, schedule, report, registered, now)
     store.finish_run(
-        schedule.id, ran_at=now, status=report.status, error=report.error,
-        noted=noted, db=db,
+        schedule.id, ran_at=now, status=status, error=report.error,
+        noted=noted, payload_patch=measures.payload, db=db,
     )
     return woken
+
+
+def _no_data(schedule: Schedule) -> Signal:
+    """No reading and no accepted measure line; it shares the day's run-level wake key with run errors."""
+    return Signal(
+        "no_data", None,
+        f'Script "{_script_name(schedule)}" printed no reading and no measure line that was accepted.',
+        {"series": None},
+    )

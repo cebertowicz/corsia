@@ -31,9 +31,16 @@ def status(db: sqlite3.Connection, agent_thread_id: str) -> dict[str, Any]:
         "SELECT file_path, file_sha256, max(synced_at) FROM measure_definitions WHERE owner_thread_id=? GROUP BY file_path, file_sha256 ORDER BY max(synced_at) DESC",
         (agent_thread_id,),
     ).fetchall()
-    return {
+    result: dict[str, Any] = {
         "events": {name: events[name] for name in sorted(events)},
         "recent_refusals": list(REGISTRY.refusals.get(agent_thread_id, ())),
         "refusals_note": f"The last {REFUSAL_LIMIT} refusal texts are held in memory and are lost when CORSIA restarts; the counters above are kept.",
         "synced_files": [{"path": path, "sha256": sha, "synced_at": synced} for path, sha, synced in files],
     }
+    unversioned = sum(window["counters"].get("unversioned", 0) for per_event in events.values() for window in [per_event["last_7_days"]])
+    if unversioned:
+        result["unversioned"] = (
+            f"{unversioned} rows unversioned in the last 7 days: their schedule's workflow is no longer yours, "
+            "so they carry no workflow version. Sync that workflow's measures.yaml again, or register the schedule with a workflow you own."
+        )
+    return result

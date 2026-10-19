@@ -194,3 +194,32 @@ def test_can_decide_check_4_allows_two_quality_kpis_per_workflow(tmp_path: Path)
     spend = small(deciding(name="first") + deciding(name="second") + deciding("  decides_as: spend\n", name="third"))
     path = skill_file(tmp_path, spend)
     sync(db(), owner_thread_id=OWNER, path=path, text=spend)
+
+
+def test_a_name_left_out_of_the_resynced_file_is_removed_and_no_longer_admitted() -> None:
+    from infra.measure_admission import admit
+
+    wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
+    connection = db()
+    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=wider)
+    assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m1"}).refusal is None
+    left_out = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    assert {item["name"]: item["status"] for item in left_out["items"]} == {"mail.triaged": "unchanged", "replied_share": "unchanged", "mail.sorted": "removed"}
+    refused = admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m2"})
+    assert refused.refusal and "is not declared in your measures.yaml" in refused.refusal
+    assert connection.execute("SELECT count(*) FROM outcome_events WHERE event_name='mail.sorted'").fetchone()[0] == 1  # old rows stay readable
+    assert [version for (version,) in connection.execute("SELECT version FROM measure_definitions WHERE name='mail.sorted' ORDER BY version")] == [1, 2]
+    again = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    assert [item["status"] for item in again["items"]] == ["unchanged", "unchanged"]  # a retired name is reported once
+    back = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=wider)
+    assert {item["name"]: item["status"] for item in back["items"]}["mail.sorted"] == "added"
+    assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m3"}).refusal is None
+
+
+def test_a_name_synced_from_another_file_is_not_removed_by_this_one() -> None:
+    connection = db()
+    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    other = MEASURES.replace("mail.triaged", "mail.other").replace("replied_share", "other_share")
+    result = sync(connection, owner_thread_id="agent-a", path="/tmp/other/measures.yaml", text=other)
+    assert all(item["status"] == "added" for item in result["items"])
+    assert "mail.triaged" in REGISTRY.events and "mail.other" in REGISTRY.events

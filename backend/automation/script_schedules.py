@@ -151,8 +151,8 @@ def create_script(
     series: list[Series],
     timeout_seconds: int,
     now: str,
+    db,
     workflow: str | None = None,
-    db=None,
 ) -> Schedule:
     """Register one script schedule, due at once, under the per-agent and instance caps."""
     if isinstance(cadence_seconds, bool) or not (
@@ -265,9 +265,13 @@ def finish_run(
     status: str,
     error: str | None = None,
     noted: bool = False,
+    payload_patch: dict[str, Any] | None = None,
     db,
 ) -> None:
-    """Record one settled run on the schedule row and clear its in-flight mark."""
+    """Record one settled run on the schedule row and clear its in-flight mark.
+
+    ``payload_patch`` merges into the payload ``automation_list`` shows (this run's measure line).
+    """
     if error is not None:
         error = sanitize_credential_text(error)[:MAX_ERROR_CHARS]
     db.execute(
@@ -278,6 +282,12 @@ def finish_run(
            WHERE id=? AND kind='script'""",
         (ran_at, status, error, int(noted), ran_at, ran_at, schedule_id),
     )
+    if payload_patch:
+        db.execute(
+            "UPDATE automation_schedules SET payload_json=json_patch(coalesce(payload_json,'{}'),?) "
+            "WHERE id=? AND kind='script'",
+            (json.dumps(payload_patch), schedule_id),
+        )
 
 
 def stop_runs(schedule_id: str, *, status: str, error: str, now: str, db) -> None:

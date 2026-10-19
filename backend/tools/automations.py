@@ -29,6 +29,19 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
+def _check_workflow(thread_id: str, workflow: Any) -> None:
+    """Refuse a script schedule's workflow that is unknown or not the owner's."""
+    from infra.measure_admission import workflow_refusal
+
+    db = get_db()
+    try:
+        refusal = workflow_refusal(db, thread_id, str(workflow))
+    finally:
+        db.close()
+    if refusal:
+        raise ValueError(refusal)
+
+
 def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
     """Register one model-free script run for the current thread."""
     from infra.config import WORKSPACE
@@ -37,6 +50,8 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
         if params.get(name) is None:
             raise ValueError(f"{name} is required for a script schedule")
     series = script_schedules.parse_series(params.get("series", []))
+    if params.get("workflow") is not None:
+        _check_workflow(thread_id, params["workflow"])
     path, sha256 = script_schedules.pin_script(
         str(params["script_path"]), workspace=WORKSPACE,
     )
@@ -207,7 +222,7 @@ class AutomationScheduleTool(Tool):
                 },
                 "workflow": {
                     "type": "string",
-                    "description": "script kind: optional owned workflow ref used to version accepted measure lines.",
+                    "description": "script kind: optional workflow ref you own; groups accepted measure lines under this workflow.",
                 },
                 "timeout_seconds": {
                     "type": "integer",
@@ -253,7 +268,9 @@ class AutomationListTool(Tool):
         return (
             "List automation schedules owned by the current thread. A script "
             "schedule shows state, last_status (ok, breach, no_data, error, "
-            "timeout, hash_mismatch, interrupted), last_error and last_run_at."
+            "timeout, hash_mismatch, interrupted), last_error and last_run_at; its "
+            "payload shows last_measures (measure lines recorded and refused) and "
+            "workflow_stale (true when its workflow is no longer yours)."
         )
 
     @property

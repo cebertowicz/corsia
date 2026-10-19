@@ -65,7 +65,8 @@ def admit(
         return refuse("identity_mismatch", mismatch)
     if run_id:
         stamps["run_id"] = run_id
-    if workflow and REGISTRY.workflows.get(workflow) == owner_thread_id:
+    unversioned = bool(workflow) and REGISTRY.workflows.get(workflow) != owner_thread_id
+    if workflow and not unversioned:
         stamps["workflow_ref"] = workflow
     stripped = [key for key in attributes if key in _STAMPED]
     subject = (claims.subject if claims else None) or attributes.get("corsia.subject")
@@ -88,11 +89,35 @@ def admit(
         return refuse("record_refused", text)
     if result.inserted and stripped:
         count_outcome_event(db, "attribute_dropped", event_name, len(stripped), agent_thread_id=owner_thread_id)
+    if result.inserted and unversioned:
+        count_outcome_event(db, "unversioned", event_name, agent_thread_id=owner_thread_id)  # the schedule's workflow is no longer the agent's
     dropped = (*stripped, *result.dropped_keys) if result.inserted else ()
     notes = tuple(_drop_text(event_name, entry, name, attributes.get(name)) for name in dropped)
     for note in notes:
-        REGISTRY.note(owner_thread_id, note)
+        REGISTRY.note(owner_thread_id, note)  # in memory: a rolled-back settle leaves harmless notes
     return Admission(result, None, notes)
+
+
+def refuse_line(db: sqlite3.Connection, owner: str, text: str, *, event_name: str, count: int = 1) -> None:
+    """Count and note a measure line that was refused before it reached admission (a malformed line, or past the cap)."""
+    count_outcome_event(db, "record_refused", event_name, count, agent_thread_id=owner)
+    REGISTRY.note(owner, text)  # in memory only: a rolled-back settle leaves a harmless note
+
+
+def workflow_is_owned(db: sqlite3.Connection, owner: str, workflow: str) -> bool:
+    """True when ``workflow`` is one of the agent's own synced workflows."""
+    if not REGISTRY.loaded:
+        REGISTRY.rebuild(db)
+    return REGISTRY.workflows.get(workflow) == owner
+
+
+def workflow_refusal(db: sqlite3.Connection, owner: str, workflow: str) -> str | None:
+    """The text refusing a schedule's ``workflow`` that is unknown or not the agent's, naming the ones it owns."""
+    if workflow_is_owned(db, owner, workflow):
+        return None
+    mine = ", ".join(sorted(ref for ref, holder in REGISTRY.workflows.items() if holder == owner)) or "none"
+    why = "is owned by another agent" if workflow in REGISTRY.workflows else "is not declared by any synced measures.yaml"
+    return f'workflow "{workflow}" {why}; the schedule was not registered. Use a workflow you own (yours: {mine}), or leave workflow out.'
 
 
 class _Refuser:
