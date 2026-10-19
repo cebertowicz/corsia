@@ -361,14 +361,14 @@ class TestBuildContextStandards:
         monkeypatch.setattr(on_pr_review, "_WORKSPACE_ROOT", str(ws))
         monkeypatch.setattr(on_pr_review, "_PROJECT_ROOT", str(ws))
 
-        text = on_pr_review._build_context(diff="", pr_number=1, repo="owner/repo")
+        context = on_pr_review._build_context(diff="", pr_number=1, repo="owner/repo")
 
-        assert "DEVELOPMENT-DOCTRINE" in text
-        assert "ENGINEERING-ARCHITECTURE" in text
-        assert "PRODUCT-STANDARDS" in text
-        assert "COPY-STANDARD" in text
-        assert "GLOSSARY_BODY" in text
-        assert "UX-IA" not in text
+        assert "DEVELOPMENT-DOCTRINE" in context.text
+        assert "ENGINEERING-ARCHITECTURE" in context.text
+        assert "PRODUCT-STANDARDS" in context.text
+        assert "COPY-STANDARD" in context.text
+        assert "GLOSSARY_BODY" in context.text
+        assert "UX-IA" not in context.text
 
     def test_context_manifest_has_no_subsystem_spec_surface(self, monkeypatch):
         """Retired subsystem specs cannot re-enter through a manifest field."""
@@ -377,29 +377,21 @@ class TestBuildContextStandards:
 
         captured = {}
 
-        def _spy_resolve(manifest, workspace_root, standards):
+        def _spy_resolve(manifest, workspace_root):
             captured["has_project_specs"] = hasattr(manifest, "project_specs")
-            captured["standards"] = standards
             reg = reviewer_standards_registry()
             return [
                 (f"/ws/{reg[k]}", "## Reviewer Contract\n- Block: x")
                 for k in [*on_pr_review._CODE_REVIEW_STANDARDS, "anti-patterns"]
             ]
 
-        monkeypatch.setattr(on_pr_review, "resolve_reviewer_context_from_contents", _spy_resolve)
-        standards = {
-            key: "# Standard\n\n## Reviewer Contract\n- Block: x"
-            for key in [*on_pr_review._CODE_REVIEW_STANDARDS, "anti-patterns"]
-        }
+        monkeypatch.setattr(on_pr_review, "resolve_reviewer_context", _spy_resolve)
 
         on_pr_review._build_context(
             diff="+++ b/backend/core/foo.py\n@@ +1 @@\n+x = 1\n",
             pr_number=1,
             repo="owner/repo",
-            reviewer_standards=standards,
         )
-
-        assert captured["standards"] == standards
 
         assert captured["has_project_specs"] is False
 

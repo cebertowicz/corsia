@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
 
 from infra.product_events import emit_product_event
 from infra.settings import get_agent_defaults
-from prompts.reviewer import build_reviewer_prompt, reviewer_prompt_version_text
+from prompts.reviewer import build_reviewer_prompt
 from reviewer.reviewer_backends import (
     CCRateLimitError,
     CCUnavailableError,
@@ -18,7 +17,6 @@ from reviewer.reviewer_backends import (
 )
 from reviewer.reviewer_account import reviewer_launch
 from reviewer.reviewer_categories import MAX_RETRIES, RETRY_BACKOFF_MINUTES
-from reviewer.reviewer_context import reviewer_version_digest
 from reviewer.reviewer_exact_source import exact_review_source
 from reviewer.reviewer_status import set_failure, set_pending
 
@@ -162,8 +160,6 @@ def run_cc_review(
     base_ref: str,
     base_sha: str = "",
     review_history: str = "",
-    reviewer_standards: Mapping[str, str] | None = None,
-    reviewer_version_sink: Callable[[str | None], None] | None = None,
 ) -> tuple[str, str] | None:
     """Run the reviewer with rate-limit retries and configured fallback."""
     model = _primary_model()
@@ -174,8 +170,6 @@ def run_cc_review(
         out = _attempt(
             diff, context_text, pr_number, repo, head_sha, working_dir,
             model, label, base_sha, review_history, target=target,
-            reviewer_standards=reviewer_standards,
-            reviewer_version_sink=reviewer_version_sink,
         )
         return (out, label) if out is not None else None
     except CCUnavailableError as exc:
@@ -219,8 +213,6 @@ def run_cc_review(
         out = _attempt(
             diff, context_text, pr_number, repo, head_sha, working_dir,
             fb_model, fb_label, base_sha, review_history, target=fb_target,
-            reviewer_standards=reviewer_standards,
-            reviewer_version_sink=reviewer_version_sink,
         )
         return (out, fb_label) if out is not None else None
     except CCUnavailableError as exc:
@@ -232,10 +224,7 @@ def _attempt(
     diff: str, context_text: str, pr_number: int, repo: str,
     head_sha: str, working_dir: str, model: str, label: str,
     base_sha: str, review_history: str,
-    *,
-    target=None,
-    reviewer_standards: Mapping[str, str] | None = None,
-    reviewer_version_sink: Callable[[str | None], None] | None = None,
+    *, target=None,
 ) -> str | None:
     """Run one review attempt on ``model``."""
     with exact_review_source(
@@ -248,14 +237,6 @@ def _attempt(
             change_source=change_source,
             review_history=review_history,
         )
-        if reviewer_version_sink is not None:
-            reviewer_version_sink(
-                reviewer_version_digest(
-                    reviewer_prompt_version_text(), reviewer_standards, model,
-                )
-                if reviewer_standards
-                else None
-            )
         return _run_cc_with_retries(
             prompt, pr_number, repo, head_sha, review_dir,
             model=model, target=target, source_git_dir=source_git_dir,

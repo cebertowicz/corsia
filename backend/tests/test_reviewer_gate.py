@@ -55,6 +55,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "set_success"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert verdict["verdict"] == "clean"
@@ -79,6 +80,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert verdict["verdict"] == "code_fail"
@@ -120,6 +122,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert verdict["verdict"] == "code_fail"
@@ -145,6 +148,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
                 "ignored", 42, "owner/repo", "abc123", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert "approach reset required" in verdict["summary"]
@@ -186,6 +190,7 @@ class TestReviewerVerdictReturn:
         ) as set_failure:
             verdict = on_pr_review._process_findings(
                 "ignored", 42, "owner/repo", "abc123", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert verdict["verdict"] == "code_fail"
@@ -239,6 +244,7 @@ class TestReviewerVerdictReturn:
         ), patch.object(on_pr_review, "set_failure", return_value=True):
             on_pr_review._process_findings(
                 "ignored", 42, "owner/repo", "abc123", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert published[0]["resolve_replies"] == []
@@ -276,6 +282,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "set_success", return_value=True) as success:
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert verdict["verdict"] == "clean"
@@ -321,6 +328,7 @@ class TestReviewerPublicationFailures:
         def run_cc(*_args, **_kwargs):
             return reviewer_mod._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         payload = {
@@ -585,6 +593,8 @@ class TestSkipGuardWrite:
             "nit_count": 0,
             "finding_count": 0,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -626,6 +636,8 @@ class TestSkipGuardWrite:
             "nit_count": 0,
             "finding_count": 3,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -674,6 +686,8 @@ class TestSkipGuardWrite:
             "nit_count": 1,
             "finding_count": 4,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -712,6 +726,8 @@ class TestSkipGuardWrite:
             "nit_count": 0,
             "finding_count": 0,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -760,6 +776,8 @@ class TestSkipGuardWrite:
             "nit_count": 0,
             "finding_count": 0,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -781,8 +799,8 @@ class TestSkipGuardWrite:
                 "pr_number": 42,
                 "head_sha": "abc123de",
                 "verdict": "clean",
-                "reviewer_version": None,
-                "reviewer_standards": [],
+                "reviewer_version": "test-version",
+                "reviewer_standards": ["product"],
             }
             for call in emit_event.call_args_list
         )
@@ -911,6 +929,8 @@ class TestSkipGuardWrite:
             "nit_count": 0,
             "finding_count": 0,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -939,6 +959,8 @@ class TestSkipGuardWrite:
             "nit_count": 0,
             "finding_count": 0,
             "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -964,6 +986,8 @@ class TestSkipGuardWrite:
                 "nit_count": 0,
                 "finding_count": 0,
                 "model_label": "codex",
+            "reviewer_version": "test-version",
+            "reviewer_standards": ["product"],
             }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
@@ -1164,6 +1188,7 @@ class TestInfraRedRespectsStandingSuccess:
              patch.object(on_pr_review, "emit_product_event"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
+                reviewer_version="test-version", reviewer_standards=["product"],
             )
 
         assert verdict["verdict"] == "code_fail"
@@ -1250,7 +1275,13 @@ class TestInfraRedRespectsStandingSuccess:
 
         with patch("reviewer.gh_api.subprocess.run", side_effect=fake), \
              patch.object(on_pr_review, "_review_diff", return_value="+x"), \
-             patch.object(on_pr_review, "_build_context", return_value="ctx"), \
+             patch.object(
+                 on_pr_review,
+                 "_build_context",
+                 return_value=on_pr_review._ReviewContext(
+                     "ctx", "test-version", ["product"],
+                 ),
+             ), \
              patch.object(
                  on_pr_review, "run_cc_review", return_value=("[]", "codex"),
              ) as run_review, \
@@ -1312,7 +1343,10 @@ def test_completed_exact_head_supplies_thread_state_for_resolution():
          patch.object(on_pr_review, "publish_review") as publish_review, \
          patch.object(on_pr_review, "set_success", return_value=True), \
          patch.object(on_pr_review, "emit_product_event"):
-        on_pr_review._process_findings("[]", 42, "owner/repo", head, "claude")
+        on_pr_review._process_findings(
+            "[]", 42, "owner/repo", head, "claude",
+            reviewer_version="test-version", reviewer_standards=["product"],
+        )
 
     resolutions = publish_review.call_args.kwargs["resolve_replies"]
     assert len(resolutions) == 1
@@ -1346,7 +1380,10 @@ def test_stale_thread_snapshot_does_not_enable_lifecycle_mutations():
          patch.object(on_pr_review, "publish_review") as publish_review, \
          patch.object(on_pr_review, "set_success", return_value=True), \
          patch("reviewer.review_thread_lifecycle.emit_product_event") as emit_event:
-        on_pr_review._process_findings("[]", 42, "owner/repo", "a" * 40, "claude")
+        on_pr_review._process_findings(
+            "[]", 42, "owner/repo", "a" * 40, "claude",
+            reviewer_version="test-version", reviewer_standards=["product"],
+        )
 
     assert publish_review.call_args.kwargs["resolve_replies"] == []
     assert any(

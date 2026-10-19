@@ -16,7 +16,7 @@ class ReviewerVerdict(TypedDict):
     nit_count: int
     finding_count: int
     model_label: str
-    reviewer_version: str | None
+    reviewer_version: str
     reviewer_standards: list[str]
 
 
@@ -33,6 +33,7 @@ ReviewComments = tuple[list[dict[str, Any]], list[dict[str, Any]]]
 
 
 def reviewer_verdict(
+    *,
     verdict: Literal["clean", "code_fail"],
     required_action: Literal["none", "approach_reset"],
     summary: str,
@@ -41,8 +42,8 @@ def reviewer_verdict(
     nit_count: int,
     finding_count: int,
     model_label: str,
-    reviewer_version: str | None,
-    reviewer_standards: list[str] | None,
+    reviewer_version: str,
+    reviewer_standards: list[str],
 ) -> ReviewerVerdict:
     """Build the terminal result delivered by the reviewer gate."""
     return {
@@ -55,5 +56,5 @@ def reviewer_verdict(
         "finding_count": finding_count,
         "model_label": model_label,
         "reviewer_version": reviewer_version,
-        "reviewer_standards": reviewer_standards or [],
+        "reviewer_standards": reviewer_standards,
     }

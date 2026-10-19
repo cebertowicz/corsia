@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -41,27 +40,17 @@ def resolve_reviewer_context(
     workspace_root: str | Path,
 ) -> list[tuple[str, str]]:
     """Resolve selected reviewer contracts and the anti-pattern catalog."""
-    return resolve_reviewer_context_from_contents(
-        manifest,
-        workspace_root,
-        reviewer_standard_contents(manifest, workspace_root),
-    )
-
-
-def resolve_reviewer_context_from_contents(
-    manifest: ReviewerContextManifest,
-    workspace_root: str | Path,
-    standards: Mapping[str, str],
-) -> list[tuple[str, str]]:
-    """Format reviewer context from one raw standards snapshot."""
     workspace = Path(workspace_root)
     results: list[tuple[str, str]] = []
 
     for key in manifest.standards:
-        _add_standard_content(workspace, key, standards.get(key), results)
+        _add_standard(workspace, key, results)
 
-    if manifest.anti_patterns and (content := standards.get("anti-patterns")) is not None:
-        results.append((str(workspace / _STANDARDS_REGISTRY["anti-patterns"]), content))
+    if manifest.anti_patterns:
+        path = str(workspace / _STANDARDS_REGISTRY["anti-patterns"])
+        content = _read_file(path)
+        if content is not None:
+            results.append((path, content))
 
     return results
 
@@ -85,54 +74,10 @@ def reviewer_standards_registry() -> dict[str, str]:
     return dict(_STANDARDS_REGISTRY)
 
 
-def reviewer_standard_contents(
-    manifest: ReviewerContextManifest,
-    workspace_root: str | Path,
-) -> dict[str, str]:
-    """Return the raw bytes-equivalent text of standards loaded for a review."""
-    workspace = Path(workspace_root)
-    keys = [*manifest.standards]
-    if manifest.anti_patterns:
-        keys.append("anti-patterns")
-
-    contents: dict[str, str] = {}
-    for key in keys:
-        relative_path = _STANDARDS_REGISTRY.get(key)
-        if relative_path is None:
-            continue
-        content = _read_file(str(workspace / relative_path))
-        if content is not None:
-            contents[key] = content
-    return contents
-
-
-def reviewer_standard_contents_for_keys(
-    standards: list[str],
-    workspace_root: str | Path,
-) -> dict[str, str]:
-    """Read the raw standard files used by a code-review invocation."""
-    return reviewer_standard_contents(
-        ReviewerContextManifest(anti_patterns=True, standards=standards),
-        workspace_root,
-    )
-
-
-def reviewer_version_digest(
-    prompt_text: str,
-    standards: Mapping[str, str],
-    model: str,
-) -> str:
-    """Return a stable digest of the prompt, injected standards, and model."""
-    payload = {
-        "model": model,
-        "prompt": prompt_text,
-        "standards": {
-            key: _reviewer_version_standard_text(key, standards[key])
-            for key in sorted(standards)
-        },
-    }
+def reviewer_version_digest(prompt_template: str, standards_context: str) -> str:
+    """Return a stable digest of the template and injected standards context."""
     serialized = json.dumps(
-        payload,
+        {"prompt": prompt_template, "standards": standards_context},
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -153,26 +98,20 @@ def _read_file(path: str) -> str | None:
         return None
 
 
-def _reviewer_version_standard_text(key: str, content: str) -> str:
-    """Return the exact text injected for one standard in a reviewer prompt."""
-    return content if key == "anti-patterns" else _extract_reviewer_contract(content)
-
-
-def _add_standard_content(
+def _add_standard(
     workspace: Path,
     key: str,
-    content: str | None,
     results: list[tuple[str, str]],
 ) -> None:
-    """Append one resolved standard's injected Reviewer Contract section."""
+    """Append one selected standard's Reviewer Contract section."""
     relative_path = _STANDARDS_REGISTRY.get(key)
     if relative_path is None:
         logger.warning(f"Reviewer context: unknown standards key: {key!r}")
         return
+    path = str(workspace / relative_path)
+    content = _read_file(path)
     if content is not None:
-        results.append(
-            (str(workspace / relative_path), _extract_reviewer_contract(content))
-        )
+        results.append((path, _extract_reviewer_contract(content)))
 
 
 def _extract_reviewer_contract(content: str) -> str:
