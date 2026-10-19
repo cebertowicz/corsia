@@ -143,6 +143,8 @@ def queue_correction_note(
     """Journal a singular note for chat or decision sources, never per comment."""
     if candidate.source_kind == "doc_comment" or not _first_record(db, candidate, event_id):
         return None
+    if candidate.source_kind != "message" and not candidate.arrived:
+        return None  # A scan never notes a decision answer; only its arrival does.
     if not candidate.arrived and (not _is_active(db, version) or _newer_owner_message(db, candidate)):
         return None
     subject = subject_key(candidate.source_kind, candidate.source_id)
@@ -164,9 +166,9 @@ def queue_correction_note(
 
 
 def queue_review_round_note(
-    db: sqlite3.Connection, *, artifact_id: str, hold_id: str, raised_at: str, recipient_id: str,
+    db: sqlite3.Connection, *, artifact_id: str, note_key: str, raised_at: str, recipient_id: str,
 ) -> str | None:
-    """Write one ask-round note for every positive user comment after its raise."""
+    """Write one note for every positive user comment after ``raised_at``, once per ``note_key``."""
     rows = db.execute(
         """SELECT c.id,c.anchor_text,c.body,c.created_at
            FROM doc_comments c
@@ -198,7 +200,7 @@ def queue_review_round_note(
     return _append_note(
         db,
         thread_id=recipient_id,
-        note_key=f"review-round:{hold_id}",
+        note_key=note_key,
         summary="\n".join(lines),
         subjects=[f"doc-comment:{row['id']}" for row in rows],
     )
@@ -231,7 +233,7 @@ def queue_feedback_batch_note(db: sqlite3.Connection, batch) -> str | None:
     return queue_review_round_note(
         db,
         artifact_id=str(values["artifact_id"]),
-        hold_id=f"doc-feedback:{values['id']}",
+        note_key=f"doc-feedback:{values['id']}",
         raised_at="",
         recipient_id=str(values["recipient_id"]),
     )

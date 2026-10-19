@@ -88,7 +88,7 @@ def _record_fact(
                 admitted = materialize_pending_digest(
                     db,
                     candidate.thread_id,
-                    message_id=f"correction-wake:{note_key}",
+                    wake_id=f"correction-wake:{note_key}",
                 )
                 if admitted is None or admitted.duplicate:
                     note_key = None
@@ -116,7 +116,10 @@ def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidat
             target = str(artifact['parent_thread_id'])
             project = db.execute("SELECT project_id FROM threads WHERE id=?", (target,)).fetchone()
             content = f"Artifact excerpt: {row['anchor_text'] or '(no anchor)'}\nOwner comment: {row['body']}"
-            return CorrectionCandidate("doc_comment", str(row['id']), target, project[0] if project else None, owner_text(content), str(row['created_at']))
+            return CorrectionCandidate(
+                "doc_comment", str(row['id']), target, project[0] if project else None,
+                owner_text(content), str(row['created_at']),
+            )
         if source_kind == "plan_decision_answer":
             from plans.decision_projection import identity_row
 

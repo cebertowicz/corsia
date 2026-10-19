@@ -215,7 +215,7 @@ def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer
             note_key = queue_review_round_note(
                 db,
                 artifact_id=artifact_id,
-                hold_id=str(asks[0]["hold_id"]),
+                note_key=f"review-round:{asks[0]['hold_id']}",
                 raised_at=since,
                 recipient_id=str(batch["recipient_id"]),
             )

@@ -230,6 +230,21 @@ describe('a correction note is for the agent only', () => {
 		expect(pendingContextDigest).toBeNull();
 	});
 
+	it('shows nothing for the hidden wake that carries it to an idle agent', () => {
+		const wake = backendDigest('correction-wake:message:c1', [note], {
+			content: `[PASSIVE CONTEXT DIGEST]\n${NOTE}`,
+			delivery_state: 'queued',
+			metadata: {
+				type: 'context_event', event_type: 'context.digest', event_disposition: 'wake',
+				summary: NOTE.split('\n')[0], context_events: [note],
+			},
+		});
+		const { visibleMessages, pendingContextDigest } = buildMessageListPresentation([wake]);
+
+		expect(visibleMessages).toEqual([]);
+		expect(pendingContextDigest).toBeNull();
+	});
+
 	it('leaves the rest of a mixed digest and counts only what it shows', () => {
 		const mixed = noteDigest('d1', 'delivered', [note, ev('a', 'Plan paused')]);
 		const [row] = buildMessageListPresentation([mixed]).visibleMessages as Array<Record<string, any>>;

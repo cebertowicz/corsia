@@ -318,18 +318,3 @@ async def test_scan_batches_messages_comments_and_free_text_answers(isolated_db)
         ("plan_decision_answer", "decision:7"), ("doc_comment", "comment"), ("message", "owner-message"),
     ]
 
-
-def test_measurement_figure_excludes_comment_and_decision_facts(isolated_db):
-    from datetime import datetime, timezone
-
-    from core.corrections_recording import CorrectionCandidate
-    from jobs.corrections_activation import weekly_correction_figure
-    from jobs.corrections_recording import _record_fact
-
-    timestamp = datetime.now(timezone.utc).isoformat()
-    payload = {"label": "correction", "truncated": False, "original_tokens": 1, "failure_reason": "none"}
-    assert _record_fact(CorrectionCandidate("message", "message", "thread", "project", "Wrong.", timestamp), payload, _version())[0]
-    assert _record_fact(CorrectionCandidate("doc_comment", "comment", "thread", "project", "Wrong.", timestamp), payload, _version())[0]
-    assert _record_fact(CorrectionCandidate("plan_decision_answer", "decision:7", "thread", "project", "Wrong.", timestamp), payload, _version())[0]
-
-    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 2

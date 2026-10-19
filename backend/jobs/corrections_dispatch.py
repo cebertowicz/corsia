@@ -7,6 +7,7 @@ arrival loop so source hydration stays separate from model lifecycle state.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from loguru import logger
 
@@ -24,8 +25,10 @@ async def dispatch_arrival(worker, source_kind: str, source_id: str, enqueued_at
             source_id if source_kind == "message" else source_kind,
             *(() if source_kind == "message" else (source_id,)),
         )
-        if candidate is not None and (await worker.classify_arrival(candidate)).kind in {"recorded", "unreadable"}:
-            worker.release_hold()
+        if candidate is not None:
+            outcome = await worker.classify_arrival(replace(candidate, arrived=True))
+            if outcome.kind in {"recorded", "unreadable"}:
+                worker.release_hold()
     except Exception:
         logger.exception("corrections classifier arrival failed; the scan will read it")
         worker.owe_scan()

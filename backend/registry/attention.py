@@ -270,7 +270,7 @@ def _clear_attention(
                 from infra.passive_changes import materialize_pending_digest
 
                 admitted = materialize_pending_digest(
-                    _db, target, message_id=f"correction-wake:{note_key}",
+                    _db, target, wake_id=f"correction-wake:{note_key}",
                 )
                 if admitted is not None and not admitted.duplicate and idle_drives is not None:
                     idle_drives.append(target)

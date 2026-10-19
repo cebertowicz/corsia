@@ -322,9 +322,9 @@ def materialize_pending_digest(
     thread_id: str,
     *,
     admit_while_fenced: bool = False,
-    message_id: str | None = None,
+    wake_id: str | None = None,
 ) -> AcceptedInput | None:
-    """Pull relevant unseen changes into one passive FIFO input."""
+    """Pull relevant unseen changes into one passive FIFO input; ``wake_id`` makes it a turn-starting wake."""
     if thread_id == "ui":  # Reserved user principal, never a runnable thread.
         return None
     session = db.execute(
@@ -366,11 +366,11 @@ def materialize_pending_digest(
             role="system",
             content=content,
             intent="queue_after_turn",
-            message_id=message_id or f"context-digest:{thread_id}:{after + 1}:{through}{clock_suffix}",
+            message_id=wake_id or f"context-digest:{thread_id}:{after + 1}:{through}{clock_suffix}",
             metadata={
                 "type": "context_event",
                 "event_type": "context.digest",
-                "event_disposition": "passive",
+                "event_disposition": "wake" if wake_id else "passive",
                 "summary": digest_summary(content, events),
                 "context_events": events,
                 "journal_from_seq": after + 1,
