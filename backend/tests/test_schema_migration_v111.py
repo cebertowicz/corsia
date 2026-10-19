@@ -28,7 +28,7 @@ def _insert(db, sid: str, name: str, metadata) -> None:
 
 
 def test_the_step_is_registered_and_current():
-    assert SCHEMA_VERSION == 128
+    assert SCHEMA_VERSION == 129
     assert MIGRATIONS[110] is migrate_110_to_111
 
 
@@ -47,7 +47,7 @@ def test_v110_upgrade_unmarks_every_ordinary_host(isolated_db):
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 128)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 129)
     rows = {sid: json.loads(raw) for sid, raw in db.execute("SELECT id, metadata_json FROM network_servers")}
     assert rows["named-only"] == rows["renamed"] == {"base_url": _ORDINARY}
     assert endpoint_agent_use("external@named-only/glm-5.3") == "allowed"

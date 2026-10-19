@@ -20,6 +20,7 @@
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { loadRunRange } from '$lib/focusRunLoader';
 	import InputBar from './InputBar.svelte';
+	import type { SendOutcome } from './composerSendReadiness';
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
 	import ChatWarmToast from './ChatWarmToast.svelte';
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
@@ -161,8 +162,8 @@
 			console.error('fetchThreadMessages fetch failed:', e);
 		}
 	}
-	export async function setAndSend(text: string) {
-		await inputBarRef?.setAndSend(text);
+	export async function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
+		return await inputBarRef?.setAndSend(text, preserveDraft) ?? 'not_sent';
 	}
 	const pagerPort: PagerPort = {
 		async fetchPage(cursor: string): Promise<MessagePage | null> {

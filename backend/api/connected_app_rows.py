@@ -74,6 +74,16 @@ def _agent_next_step(
     return None
 
 
+def _with_entry_names(app_id: object, key_refs: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Add each key's managed entry name for the person's Settings; an agent's row never carries it."""
+    from tools.mcp_secrets import entry_name
+
+    return [
+        {**ref, "entry": entry_name(str(app_id), "secret_env" if ref["kind"] == "env" else "secret_headers", str(ref["name"]))}
+        for ref in key_refs
+    ]
+
+
 def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person: bool = False) -> dict[str, object]:
     """Return a value-free app projection, limiting unreachable agent rows."""
     if app["state"] in {"awaiting_approval", "expired"}:
@@ -106,7 +116,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "next_step": _agent_next_step(
             app["name"], live["state"], live["failure_class"], key_refs, on_here=on_here,
         ),
-        "key_refs": key_refs,
+        "key_refs": _with_entry_names(app["id"], key_refs) if person else key_refs,
         "config": {key: value for key, value in config.items() if key != "key_refs"},
         "pending_config": app["pending_config"],
         "pending_actor_thread_id": app["pending_actor_thread_id"],

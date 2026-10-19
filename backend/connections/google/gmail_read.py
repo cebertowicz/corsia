@@ -52,19 +52,19 @@ def headers_from_payload(payload: dict[str, Any]) -> dict[str, str]:
     return found
 
 
-async def search(query: str, max_results: int) -> list[Message]:
-    """Matching messages' ids and headers only, newest first (Gmail's order)."""
+async def search(account_id: str, query: str, max_results: int) -> list[Message]:
+    """One account's matching messages' ids and headers only, newest first (Gmail's order)."""
     limit = max(1, min(int(max_results), MAX_RESULTS))
-    token = await client.access_token()
+    token = await client.access_token(account_id)
     listed = await client.request_json(
-        "GET", API, token=token,
+        "GET", API, account_id=account_id, token=token,
         params={"q": query, "maxResults": limit, "fields": "messages(id,threadId)"},
     )
     refs = [m for m in (listed.get("messages") or []) if _ID.match(str(m.get("id", "")))][:limit]
 
     async def one(ref: dict[str, Any]) -> Message:
         data = await client.request_json(
-            "GET", f"{API}/{ref['id']}", token=token,
+            "GET", f"{API}/{ref['id']}", account_id=account_id, token=token,
             params={
                 "format": "metadata", "metadataHeaders": ["From", "Date", "Subject"],
                 "fields": "id,threadId,payload(headers)",
@@ -99,11 +99,12 @@ def body_text(payload: dict[str, Any]) -> str:
     return _BLANKS.sub("\n\n", "\n".join(rendered)).strip()
 
 
-async def fetch(message_id: str) -> Message:
-    """One message with its headers and decoded body."""
+async def fetch(account_id: str, message_id: str) -> Message:
+    """One message of one account, with its headers and decoded body."""
     mid = check_message_id(message_id)
     data = await client.request_json(
-        "GET", f"{API}/{mid}", params={"format": "full", "fields": "id,threadId,payload"},
+        "GET", f"{API}/{mid}", account_id=account_id,
+        params={"format": "full", "fields": "id,threadId,payload"},
     )
     payload = data.get("payload") or {}
     return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload))

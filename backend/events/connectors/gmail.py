@@ -4,6 +4,10 @@ Gmail has no pre-existing artifact for a first-seen thread; the envelope carries
 the *candidate* email-thread identity (``thread_id``) and a Connections rule
 (S3) supplies ownership on first registration. After that, a repeat message
 resolves by ownership exactly like a GitHub PR — same path, no Gmail router.
+
+Gmail's own ids are local to one mailbox, so an event's identity includes its
+``account_id`` and the producer namespaces ``thread_id`` as
+``google:<account-id>:thread:<gmail-thread-id>``: two mailboxes never collide.
 """
 
 from __future__ import annotations
@@ -26,8 +30,9 @@ def _classify(raw: dict[str, Any]) -> str:
 
 
 def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
-    keys = ("from", "to", "label", "thread_id", "message_id", "date", "history_id", "subject",
-            "screen_status", "needs_person", "injection", "injection_rule", "kind", "screen_model")
+    keys = ("account_id", "from", "to", "label", "thread_id", "message_id", "date", "history_id",
+            "subject", "screen_status", "needs_person", "injection", "injection_rule", "kind",
+            "screen_model")
     return {k: raw[k] for k in keys if raw.get(k) is not None}
 
 
@@ -53,7 +58,7 @@ MANIFEST = register(ConnectorManifest(
     version="1",
     event_types={
         "email.received": EventTypeDecl(
-            "email.received", ("message_id",), _FILTERABLE,
+            "email.received", ("account_id", "message_id"), _FILTERABLE,
             artifact_type=EMAIL_THREAD_TYPE, artifact_integration=GMAIL_INTEGRATION,
             relationships=(_MESSAGE_TO_THREAD,), event_class="informational",
             actionable_when={"screen_status": "screened", "injection": False,
