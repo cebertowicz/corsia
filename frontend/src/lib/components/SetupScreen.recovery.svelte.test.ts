@@ -8,6 +8,7 @@ vi.mock('$lib/setupFirstModel', async (importOriginal) => ({
 }));
 
 import SetupScreen from './SetupScreen.svelte';
+import { SetupFirstModelError } from '$lib/setupFirstModel';
 import { token, user } from '$lib/stores/auth';
 
 vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
@@ -32,11 +33,17 @@ afterEach(async () => {
 	component = null; host?.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); token.set(null); user.set(null);
 });
 
-async function openModels() {
+async function openModels({ localEligible = false, localReplies = [], progressFails = false }: { localEligible?: boolean; localReplies?: Array<Response | Error>; progressFails?: boolean } = {}) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, work_folder: '~/CORSIA' });
+		if ((url === '/api/setup/local-download' || url === '/api/providers/local/setup') && init?.method === 'POST') {
+			const reply = localReplies.shift() ?? json({ ok: true });
+			if (reply instanceof Error) throw reply;
+			return reply;
+		}
 		if (url === '/api/setup/first-account' && init?.method === 'POST') return json({ token: 'test-token', user: { id: 'user', name: 'Ada' } });
+		if (url === '/api/setup/progress' && init?.method === 'PUT') return json({}, progressFails ? 500 : 200);
 		if (url.includes('/sources')) return json({ sources: [] });
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.includes('/models')) return json({ models: [{ id: 'claude', name: 'Claude', backend: 'harness', litellm_model: 'claude-code/sonnet', status: 'ready', connection: 'claude-code', runs_on: [{ selected: true, status: 'ready' }] }] });
@@ -73,20 +80,48 @@ describe('SetupScreen account recovery', () => {
 	});
 });
 
-describe('SetupScreen completion recovery', () => {
+describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['no working model', 'No working setup model', 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.'],
-		['incomplete model binding', 'Model binding is not complete', 'CORSIA couldn’t save the selected model. Retry.'],
-		['422 refusal', 'model catalog 422', 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.'],
-		['handoff save', 'handoff', 'CORSIA couldn’t save setup progress. Retry.'],
-		['completion save', 'completion', 'CORSIA couldn’t save setup progress. Retry.'],
-	])('shows named recovery copy for %s', async (_name, failure, expected) => {
+		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'Another oMLX is running. Quit your other oMLX, then Retry.'],
+		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t set up the local model. Retry. Reference: Unavailable'],
+		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t set up the local model. Retry. Reference: Unavailable'],
+	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
+		await openModels({ localEligible: true, localReplies: [...localReplies] });
+		await vi.waitFor(() => expect(host.textContent).toContain(expected));
+		expect(host.textContent).not.toContain('private route detail');
+	});
+
+	it('shows the foreign-oMLX recovery when the person’s choice cannot start setup', async () => {
+		await openModels({ localEligible: true, localReplies: [json({ code: 'consent_required' }, 409), json({ message: 'private route detail' }, 500)] });
+		click('Keep both running');
+		await vi.waitFor(() => expect(host.textContent).toContain('Another oMLX is running. Quit your other oMLX, then Retry.'));
+		expect(host.textContent).not.toContain('private route detail');
+	});
+});
+
+describe('SetupScreen completion recovery', () => {
+	it('uses the progress-save code when the actual completion write fails', async () => {
 		bindSetupFirstModel.mockReset();
-		bindSetupFirstModel.mockRejectedValueOnce(new Error(failure));
+		bindSetupFirstModel.mockResolvedValueOnce({ model: 'claude-code/sonnet', source: 'claude-code' });
+		await openModels({ progressFails: true });
+		click('Start using CORSIA');
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t save setup progress. Retry.'));
+	});
+
+	it.each([
+		['no model', 'no_model', 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.'],
+		['incomplete model binding', 'binding_incomplete', 'CORSIA couldn’t save the selected model. Retry.'],
+		['catalog refusal', 'catalog_refused', 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.'],
+		['catalog unavailable', 'catalog_unavailable', 'CORSIA couldn’t check your available models. Retry.'],
+		['agent unavailable', 'agent_unavailable', 'CORSIA couldn’t reach its agent. Retry.'],
+		['progress save', 'progress_save', 'CORSIA couldn’t save setup progress. Retry.'],
+	] as const)('shows named recovery copy for %s', async (_name, code, expected) => {
+		bindSetupFirstModel.mockReset();
+		bindSetupFirstModel.mockRejectedValueOnce(new SetupFirstModelError(code));
 		await openModels();
 		click('Start using CORSIA');
 		await vi.waitFor(() => expect(bindSetupFirstModel).toHaveBeenCalledOnce());
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));
-		expect(host.textContent).not.toContain(failure);
+		expect(host.textContent).not.toContain(code);
 	});
 });

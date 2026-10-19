@@ -11,13 +11,13 @@ type LocalSetupFailure = { cause?: string; outcome?: string; reference?: string;
 
 /** Keep local setup recovery specific without exposing installer output. */
 export function localSetupRecovery({ cause, outcome, reference, bytesToFree, size }: LocalSetupFailure): string {
+	if (outcome === 'setup_failed' || cause === 'setup_failed') return 'CORSIA couldn’t set up the local model. Retry, or save a report.';
 	if (outcome === 'start_failed' || cause === 'start_failed') return 'The local model downloaded but couldn’t start. Retry, or save a report.';
 	if (cause === 'disk_full') return `Couldn’t download the local model: the disk is full. Free up ${bytesToFree ? `${Math.ceil(bytesToFree / 1e9)} GB` : size}, then Retry.`;
 	if (cause === 'connection') return 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.';
 	if (cause === 'memory') return 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.';
 	if (cause === 'other_omlx') return 'Another oMLX is running. Quit your other oMLX, then Retry.';
 	if (cause === 'other') return `CORSIA couldn’t set up the local model. Retry. Reference: ${reference ?? 'Unavailable'}`;
-	if (outcome === 'setup_failed' || cause === 'setup_failed') return 'CORSIA couldn’t set up the local model. Retry, or save a report.';
 	return 'CORSIA couldn’t set up the local model. Retry.';
 }
 

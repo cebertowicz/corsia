@@ -11,7 +11,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_register_managed_server_retires_all_prior_omlx_rows(isolated_db, monkeypatch, tmp_path) -> None:
+async def test_register_managed_server_retires_only_legacy_managed_row(isolated_db, monkeypatch, tmp_path) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
     from llm.local_setup_managed import is_corsia_managed_server, reserve_managed_omlx_port
@@ -107,6 +107,39 @@ async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
     await app_startup_runtime.resume_local_setup()
 
     assert calls == ["retire", "backfill", "resume", "notice", "upgrade"]
+
+
+@pytest.mark.asyncio
+async def test_manual_loopback_row_survives_startup_retirement_after_upgrade(isolated_db, monkeypatch, tmp_path) -> None:
+    import app_startup_runtime
+    from infra.db_async import run_in_db
+    from llm import network_discovery as discovery
+    from llm import local_model, local_setup_upgrade
+    from llm.local_setup_ownership import marker_path
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    marker_path().write_text("legacy\n", encoding="utf-8")
+    manual = await run_in_db(
+        discovery.upsert_server,
+        provider="omlx", instance_id="127.0.0.1:9000", instance_name="My oMLX",
+        host="127.0.0.1", port=9000, status="online", kind="external", source="manual",
+    )
+
+    async def resumed() -> bool:
+        return False
+
+    async def notified() -> None:
+        return None
+
+    monkeypatch.setattr(local_model, "backfill_legacy_record", lambda: None)
+    monkeypatch.setattr("llm.local_setup_recovery.resume_pending_setup", resumed)
+    monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
+    monkeypatch.setattr("llm.local_setup_upgrade.done_path", lambda: SimpleNamespace(exists=lambda: True))
+    monkeypatch.setattr(local_setup_upgrade, "start_upgrade", lambda: None)
+
+    await app_startup_runtime.resume_local_setup()
+
+    assert (await run_in_db(discovery.get_server, manual))["status"] == "online"
 
 
 def test_legacy_service_migrates_only_after_ownership_proof(monkeypatch) -> None:

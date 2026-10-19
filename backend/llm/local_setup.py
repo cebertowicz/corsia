@@ -53,7 +53,7 @@ from llm.local_setup_runtime import (
 )
 
 EVENT_CATEGORY = "local_setup"
-CAUSES = frozenset({"connection", "disk_full", "memory", "other_omlx", "other"})
+CAUSES = frozenset({"connection", "disk_full", "memory", "other"})
 log = logging.getLogger(__name__)
 
 async def _wait_for_download(
@@ -201,7 +201,7 @@ def setup_status() -> dict[str, Any]:
         state = "downloading"
     else:
         # Success follows a completed catalog refresh, so this model is usable.
-        state = "ready" if result.get("ok") else "failed"
+        state = "ready" if result.get("ok") else "setup_failed" if result.get("pre_download") else "failed"
     percent = None
     if stage:
         import re
@@ -317,16 +317,12 @@ async def _run_flight(*, model: LocalModel | None = None,
 def _failure_cause(exc: Exception) -> str:
     """Classify concrete local-flight exceptions once, at their producer."""
     import httpx
-    from llm.local_setup_managed import ManagedPortUnavailable
-
     if isinstance(exc, DiskSpaceError):
         return "disk_full"
     if isinstance(exc, MemoryError):
         return "memory"
     if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, ConnectionError, TimeoutError)):
         return "connection"
-    if isinstance(exc, ManagedPortUnavailable):
-        return "other"
     return "other"
 
 def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:

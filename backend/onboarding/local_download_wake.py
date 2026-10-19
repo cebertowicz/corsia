@@ -57,8 +57,6 @@ def _fix(cause: str, ref: str | None, bytes_to_free: int | None) -> str:
         return "Check the connection, then retry in Settings."
     if cause == "memory":
         return "Choose a subscription or API provider instead."
-    if cause == "other_omlx":
-        return "Quit your other oMLX, then retry."
     if ref and _REF.fullmatch(ref):
         return f"Retry in Settings. Reference: {ref}."
     return "Retry in Settings."

@@ -34,6 +34,9 @@ describe('setup provider rows', () => {
 		['other_omlx', undefined, undefined, 'Another oMLX is running. Quit your other oMLX, then Retry.'],
 		['other', undefined, 'setup-report-123', 'CORSIA couldn’t set up the local model. Retry. Reference: setup-report-123'],
 		[undefined, 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
+		['other', 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
+		['connection', 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
+		['disk_full', 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
 		[undefined, 'start_failed', undefined, 'The local model downloaded but couldn’t start. Retry, or save a report.'],
 	] as const)('gives %s/%s its own local setup recovery', (cause, outcome, reference, expected) => {
 		const { start, ...otherActions } = actions();

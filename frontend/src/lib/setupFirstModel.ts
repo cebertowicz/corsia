@@ -4,6 +4,15 @@ import { fetchCorsiaAgent } from '$lib/utils/conductor';
 export type SetupModel = Model & { is_default?: boolean };
 export type TestedProvider = { source: string; model?: string };
 export type SetupBinding = { model: string; source: string };
+export type SetupFirstModelErrorCode = 'no_model' | 'binding_incomplete' | 'catalog_refused' | 'catalog_unavailable' | 'agent_unavailable' | 'progress_save';
+
+/** Coded setup failures keep recovery copy independent of transport wording. */
+export class SetupFirstModelError extends Error {
+	constructor(readonly code: SetupFirstModelErrorCode) {
+		super(code);
+		this.name = 'SetupFirstModelError';
+	}
+}
 
 /** Setup and Start share the catalog's readiness, including the selected account. */
 export function setupModelWorks(model: SetupModel): boolean {
@@ -32,25 +41,47 @@ export function bestSetupModel(models: SetupModel[], tested: TestedProvider[] = 
 
 /** Read the same scope the CORSIA agent will use, never the unscoped catalog. */
 export async function setupCatalog(session: string): Promise<{ models: SetupModel[]; thread: string }> {
-	const lookup = await fetchCorsiaAgent(session);
-	if (lookup.kind !== 'target') throw new Error('CORSIA agent unavailable');
+	let lookup: Awaited<ReturnType<typeof fetchCorsiaAgent>>;
+	try {
+		lookup = await fetchCorsiaAgent(session);
+	} catch {
+		throw new SetupFirstModelError('agent_unavailable');
+	}
+	if (lookup.kind !== 'target') throw new SetupFirstModelError('agent_unavailable');
 	const thread = lookup.target.thread_id;
-	const response = await fetch(`/api/models?thread_id=${encodeURIComponent(thread)}`, { headers: { Authorization: `Bearer ${session}` } });
-	if (!response.ok) throw new Error(`model catalog ${response.status}`);
-	const body = await response.json();
-	if (!Array.isArray(body.models)) throw new Error('model catalog unavailable');
-	return { models: body.models, thread };
+	let response: Response;
+	try {
+		response = await fetch(`/api/models?thread_id=${encodeURIComponent(thread)}`, { headers: { Authorization: `Bearer ${session}` } });
+	} catch {
+		throw new SetupFirstModelError('catalog_unavailable');
+	}
+	if (!response.ok) {
+		throw new SetupFirstModelError(response.status >= 400 && response.status < 500 ? 'catalog_refused' : 'catalog_unavailable');
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new SetupFirstModelError('catalog_unavailable');
+	}
+	if (!body || typeof body !== 'object' || !Array.isArray((body as { models?: unknown }).models)) throw new SetupFirstModelError('catalog_unavailable');
+	return { models: (body as { models: SetupModel[] }).models, thread };
 }
 
 /** Refresh and bind before completion; failures leave setup open. */
 export async function bindSetupFirstModel(session: string, tested: TestedProvider[] = [], beforeBind?: (binding: SetupBinding) => Promise<void>): Promise<SetupBinding> {
 	const { models, thread } = await setupCatalog(session);
 	const model = bestSetupModel(models, tested);
-	if (!model) throw new Error('No working setup model');
+	if (!model) throw new SetupFirstModelError('no_model');
 	const selector = getModelDispatchId(model);
 	const binding = { model: selector, source: model.connection ?? model.provider ?? '' };
-	await beforeBind?.(binding);
-	const saved = await saveThreadModel(thread, selector, session, 'setup');
-	if (saved.kind !== 'committed' || saved.model !== selector) throw new Error('Model binding is not complete');
-	return binding;
+	try {
+		await beforeBind?.(binding);
+		const saved = await saveThreadModel(thread, selector, session, 'setup');
+		if (saved.kind !== 'committed' || saved.model !== selector) throw new SetupFirstModelError('binding_incomplete');
+		return binding;
+	} catch (error) {
+		if (error instanceof SetupFirstModelError) throw error;
+		throw new SetupFirstModelError('binding_incomplete');
+	}
 }

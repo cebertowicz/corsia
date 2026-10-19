@@ -130,6 +130,7 @@ async def test_failure_reference_matches_the_rail_and_log(monkeypatch, caplog):
     result = await local_setup._run_flight()
     rail = local_download_state.current()
 
+    assert rail["state"] == "setup_failed"
     assert rail["ref"] == result["ref"]
     assert f"reference={result['ref']}" in caplog.text
 
@@ -160,11 +161,19 @@ async def test_pre_download_failure_is_setup_failed(monkeypatch):
     assert called.await_args.args == ("local-model", "setup_failed")
 
 
-@pytest.mark.parametrize("cause", ["connection", "disk_full", "memory", "other_omlx", "other"])
-def test_five_flight_causes_reach_rail_and_wake_identically(cause):
+@pytest.mark.parametrize("cause", ["connection", "disk_full", "memory", "other"])
+def test_flight_causes_reach_rail_and_wake_identically(cause):
     from onboarding import local_download_state, local_download_wake
 
     rail = local_download_state.normalize({"state": "failed", "cause": cause})
     wake = local_download_wake._payload("failed", model=None, cause=cause, ref=None, bytes_to_free=None)
 
     assert rail["cause"] == wake["cause"] == cause
+
+
+def test_wake_does_not_classify_start_path_other_omlx_as_a_flight_cause():
+    from onboarding import local_download_wake
+
+    wake = local_download_wake._payload("failed", model=None, cause="other_omlx", ref=None, bytes_to_free=None)
+
+    assert wake["cause"] == "other"

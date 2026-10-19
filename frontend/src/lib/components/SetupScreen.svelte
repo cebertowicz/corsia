@@ -12,12 +12,12 @@
 	import ProviderSettingsModal from './v7/ProviderSettingsModal.svelte';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, recheckSources, cancelLocalDownload, setupLocalSource, type ModelSource } from '$lib/conductorSources';
+	import { fetchSources, recheckSources, cancelLocalDownload, type ModelSource } from '$lib/conductorSources';
 	import { createSetupConnect, POLL_MS } from '$lib/setupConnect.svelte';
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
-	import { bestSetupModel, setupModelWorks, setupCatalog, bindSetupFirstModel, type SetupModel } from '$lib/setupFirstModel';
+	import { bestSetupModel, setupModelWorks, setupCatalog, bindSetupFirstModel, SetupFirstModelError, type SetupModel } from '$lib/setupFirstModel';
 	import { fetchSetupProgress, recordSetupProgress, type SetupHandoff } from '$lib/setupProgress';
 	import { saveSetupReport } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -27,12 +27,27 @@
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
+	type LocalStartResult = 'started' | 'consent_required' | 'foreign_omlx_changed' | 'failed';
+	async function requestLocalStart(session: string | null, consentExisting = false, manageExisting?: boolean): Promise<LocalStartResult> {
+		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
+			body: JSON.stringify({ consent_existing: consentExisting, manage_existing: manageExisting }),
+		});
+		const body = await response.json().catch(() => null);
+		const code = body?.detail?.code ?? body?.code;
+		if (response.status === 409 && code === 'consent_required') return 'consent_required';
+		if (response.status === 409 && code === 'foreign_omlx_changed') return 'foreign_omlx_changed';
+		return response.ok && body?.ok !== false ? 'started' : 'failed';
+	}
 	function setupFinishRecovery(error: unknown): string {
-		const message = error instanceof Error ? error.message : '';
-		if (message === 'No working setup model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.';
-		if (message === 'Model binding is not complete') return 'CORSIA couldn’t save the selected model. Retry.';
-		if (/\b422\b/.test(message)) return 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.';
-		if (message === 'handoff' || message === 'completion') return 'CORSIA couldn’t save setup progress. Retry.';
+		const code = error instanceof SetupFirstModelError ? error.code : undefined;
+		if (code === 'no_model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.';
+		if (code === 'binding_incomplete') return 'CORSIA couldn’t save the selected model. Retry.';
+		if (code === 'catalog_refused') return 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.';
+		if (code === 'catalog_unavailable') return 'CORSIA couldn’t check your available models. Retry.';
+		if (code === 'agent_unavailable') return 'CORSIA couldn’t reach its agent. Retry.';
+		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Retry.';
 		return 'CORSIA couldn’t finish model setup. Retry.';
 	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
@@ -45,7 +60,7 @@
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localPending = $state(false), localStartError = $state(''), localBusy = $state(false), otherQuestion = $state(false);
+	let localPending = $state(false), localStartError = $state<'other' | 'other_omlx' | ''>(''), localBusy = $state(false), otherQuestion = $state(false);
 	let otherOmlx = $state<SetupHandoff['other_omlx']>('none'), finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
@@ -137,23 +152,24 @@
 		localBusy = true; localStartError = '';
 		try {
 			const current = get(token);
-			const result = current ? await setupLocalSource(current) : await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(async (response) => ({ ...await response.json(), ok: response.ok }));
-			if (result.code === 'consent_required') otherQuestion = true;
-			else if (result.ok === false) localStartError = result.message || 'download_failed';
+			const result = await requestLocalStart(current);
+			if (result === 'consent_required') otherQuestion = true;
+			else if (result === 'foreign_omlx_changed') localStartError = 'other_omlx';
+			else if (result === 'failed') localStartError = 'other';
 			else localPending = true;
 			if (current) await refreshSources();
-		} catch { localStartError = 'connection'; }
+		} catch { localStartError = 'other'; }
 		finally { localBusy = false; }
 	}
 	async function chooseOther(stop: boolean) {
 		localBusy = true;
 		try {
 			const current = get(token);
-			const result = current ? await setupLocalSource(current, true, stop) : await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: true, manage_existing: stop }) }).then(async (response) => ({ ...await response.json(), ok: response.ok }));
-			if (result.ok === false) { localStartError = result.message || 'start_failed'; return; }
+			const result = await requestLocalStart(current, true, stop);
+			if (result !== 'started') { localStartError = 'other_omlx'; return; }
 			otherOmlx = stop ? 'stopped_theirs' : 'kept_both'; otherQuestion = false; localPending = true;
 			if (current) await refreshSources();
-		} catch { localStartError = 'start_failed'; }
+		} catch { localStartError = 'other_omlx'; }
 		finally { localBusy = false; }
 	}
 	async function stopLocal() { const current = get(token); if (current) { await cancelLocalDownload(current); await refreshSources(); } localPending = false; }
@@ -185,9 +201,9 @@
 		finishing = true; sourceError = '';
 		try {
 			await bindSetupFirstModel(current, tested, async () => {
-				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new Error('handoff');
+				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new SetupFirstModelError('progress_save');
 			});
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new Error('completion');
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new SetupFirstModelError('progress_save');
 			onFinished();
 		} catch (error) {
 			await refreshSources(true);
