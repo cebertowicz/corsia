@@ -199,6 +199,13 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.issue.closed": {
         **_ISSUE_ATTRS, "state_reason": enum_attr("completed", "not_planned", "reopened", "duplicate"),
     },
+    # Immutable verdict records use bounded serialized details rather than a
+    # second table.  The engine writes these only while its switch is enabled.
+    "measurement.verdict.planned": {"plan": text_attr(2_000)},
+    "measurement.verdict.reached": {
+        "verdict": enum_attr("keep", "revert", "changed_early"),
+        "reason": text_attr(200), "detail": text_attr(2_000),
+    },
 }
 
 
