@@ -1,4 +1,4 @@
-"""Schema 126 -> 127: declared measure registry, per-agent per-day intake counters, a schedule's last measures."""
+"""Schema 127 -> 128: declared measure registry, per-agent per-day intake counters, a schedule's last measures."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_126_to_127_measure_registry import migrate_126_to_127
+from infra.migration_127_to_128_measure_registry import migrate_127_to_128
 from infra.schema import SCHEMA_VERSION
 
 _OLD_COUNTERS = """
@@ -43,8 +43,8 @@ def _fresh() -> sqlite3.Connection:
     return db
 
 
-def _wound_back_to_v126(*, registry_present: bool = False) -> sqlite3.Connection:
-    """A fresh current database wound back to schema 126, with two old counter totals."""
+def _wound_back_to_v127(*, registry_present: bool = False) -> sqlite3.Connection:
+    """A fresh current database wound back to schema 127, with two old counter totals."""
     db = _fresh()
     db.execute("DROP TABLE outcome_event_counters")
     db.execute(_OLD_COUNTERS)
@@ -54,19 +54,21 @@ def _wound_back_to_v126(*, registry_present: bool = False) -> sqlite3.Connection
         db.execute("DROP TABLE measure_definitions")
         db.execute("ALTER TABLE automation_schedules DROP COLUMN last_measures")
     db.execute("DROP INDEX idx_outcome_events_agent_observed")
-    db.execute("PRAGMA user_version=126")
+    # Step 127's comments index is part of a 127 database.
+    assert _index_sql(db, "idx_doc_comments_user_created") is not None
+    db.execute("PRAGMA user_version=127")
     db.commit()
     return db
 
 
-def test_the_step_is_registered_at_126() -> None:
-    assert SCHEMA_VERSION == 127
-    assert MIGRATIONS[126] is migrate_126_to_127
+def test_the_step_is_registered_at_127() -> None:
+    assert SCHEMA_VERSION == 128
+    assert MIGRATIONS[127] is migrate_127_to_128
 
 
 def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -> None:
-    with closing(_fresh()) as fresh, closing(_wound_back_to_v126()) as db:
-        migrate_126_to_127(db)
+    with closing(_fresh()) as fresh, closing(_wound_back_to_v127()) as db:
+        migrate_127_to_128(db)
         for table in ("outcome_event_counters", "measure_definitions", "automation_schedules"):
             assert _columns(db, table) == _columns(fresh, table)
         assert ("last_measures", "TEXT") in _columns(db, "automation_schedules")
@@ -81,33 +83,33 @@ def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -
 
 
 def test_the_step_runs_after_the_startup_schema_pass_and_again() -> None:
-    with closing(_wound_back_to_v126(registry_present=True)) as db:
-        migrate_126_to_127(db)
-        migrate_126_to_127(db)
+    with closing(_wound_back_to_v127(registry_present=True)) as db:
+        migrate_127_to_128(db)
+        migrate_127_to_128(db)
         assert {name for name, _ in _columns(db, "outcome_event_counters")} >= {"agent_thread_id", "day"}
         assert db.execute("SELECT sum(n) FROM outcome_event_counters").fetchone()[0] == 10
 
 
 def test_the_counter_check_admits_the_four_new_counters_and_nothing_unwritten() -> None:
-    with closing(_wound_back_to_v126()) as db:
-        migrate_126_to_127(db)
+    with closing(_wound_back_to_v127()) as db:
+        migrate_127_to_128(db)
         for counter in ("name_undeclared", "namespace_not_owned", "record_refused", "unversioned"):
             db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES (?,?,?,?)", (counter, "mail.triaged", "a", "2026-01-01"))
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES ('rate_limited','mail.triaged','a','2026-01-01')")
 
 
-def test_the_runner_takes_a_126_database_to_current_and_stays_there() -> None:
-    with closing(_wound_back_to_v126()) as db:
+def test_the_runner_takes_a_127_database_to_current_and_stays_there() -> None:
+    with closing(_wound_back_to_v127()) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 126, SCHEMA_VERSION)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 127, SCHEMA_VERSION)
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
 def test_measure_definitions_carries_a_removed_flag_that_admits_only_zero_or_one() -> None:
-    with closing(_wound_back_to_v126()) as db:
-        migrate_126_to_127(db)
+    with closing(_wound_back_to_v127()) as db:
+        migrate_127_to_128(db)
         assert ("removed", "INTEGER") in _columns(db, "measure_definitions")
         row = ("a", "event", "mail.x", 1, "{}", "/p", "sha", "t")
         db.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?,1)", row)

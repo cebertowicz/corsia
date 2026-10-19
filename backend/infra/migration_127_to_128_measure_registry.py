@@ -1,4 +1,4 @@
-"""Schema 126 -> 127: declared measure definitions, per-agent per-day intake counters, and a
+"""Schema 127 -> 128: declared measure definitions, per-agent per-day intake counters, and a
 script schedule's last measure summary.
 
 The counters are keyed agent, day, event, counter so one agent's recent window is a single
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sqlite3
 
-_COUNTERS_127_DDL = """
+_COUNTERS_128_DDL = """
     CREATE TABLE outcome_event_counters (
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
@@ -32,7 +32,7 @@ _COUNTERS_127_DDL = """
     )
 """
 
-_REGISTRY_127_DDL = (
+_REGISTRY_128_DDL = (
     """
     CREATE TABLE IF NOT EXISTS measure_definitions (
         owner_thread_id TEXT NOT NULL,
@@ -60,9 +60,9 @@ _AGENT_OBSERVED_INDEX_DDL = """
 """
 
 
-def migrate_126_to_127(conn: sqlite3.Connection) -> None:
+def migrate_127_to_128(conn: sqlite3.Connection) -> None:
     """Create the registry and index, and widen counters without losing existing totals."""
-    for statement in _REGISTRY_127_DDL:
+    for statement in _REGISTRY_128_DDL:
         conn.execute(statement)
     # Migration 77 creates outcome_events; the index is made only where that table exists.
     if conn.execute(
@@ -76,10 +76,10 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
     if "agent_thread_id" in columns:
         return
     if not columns:
-        conn.execute(_COUNTERS_127_DDL)
+        conn.execute(_COUNTERS_128_DDL)
         return
     conn.execute("ALTER TABLE outcome_event_counters RENAME TO outcome_event_counters_old")
-    conn.execute(_COUNTERS_127_DDL)
+    conn.execute(_COUNTERS_128_DDL)
     conn.execute(
         "INSERT INTO outcome_event_counters(counter, event_name, agent_thread_id, day, n) "
         "SELECT counter, event_name, '', '0000-00-00', n FROM outcome_event_counters_old"
