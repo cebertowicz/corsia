@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 
 from infra.product_events import emit_product_event
 from infra.settings import get_agent_defaults
-from prompts.reviewer import build_reviewer_prompt
+from prompts.reviewer import build_reviewer_prompt, reviewer_prompt_version_text
 from reviewer.reviewer_backends import (
     CCRateLimitError,
     CCUnavailableError,
@@ -250,7 +250,9 @@ def _attempt(
         )
         if reviewer_version_sink is not None:
             reviewer_version_sink(
-                reviewer_version_digest(prompt, reviewer_standards, model)
+                reviewer_version_digest(
+                    reviewer_prompt_version_text(), reviewer_standards, model,
+                )
                 if reviewer_standards
                 else None
             )

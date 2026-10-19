@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
-from typing import Mapping
 
 from loguru import logger
 

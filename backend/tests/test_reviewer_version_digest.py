@@ -13,6 +13,47 @@ def test_reviewer_version_digest_is_deterministic():
     )
 
 
+def test_reviewer_version_ignores_review_specific_inputs():
+    from prompts.reviewer import build_reviewer_prompt, reviewer_prompt_version_text
+    from reviewer.reviewer_context import reviewer_version_digest
+
+    first_prompt = build_reviewer_prompt(
+        "first diff",
+        "first context",
+        model_label="model-a",
+        change_source="first source",
+        review_history="first history",
+    )
+    second_prompt = build_reviewer_prompt(
+        "second diff",
+        "second context",
+        model_label="model-a",
+        change_source="second source",
+        review_history="second history",
+    )
+    standards = {"product": "product standard"}
+
+    assert first_prompt != second_prompt
+    assert reviewer_version_digest(
+        reviewer_prompt_version_text(), standards, "model-a"
+    ) == reviewer_version_digest(reviewer_prompt_version_text(), standards, "model-a")
+
+
+def test_reviewer_version_digest_changes_for_template_edit(monkeypatch):
+    from prompts import reviewer as reviewer_prompt
+    from reviewer.reviewer_context import reviewer_version_digest
+
+    standards = {"product": "product standard"}
+    original = reviewer_version_digest(
+        reviewer_prompt.reviewer_prompt_version_text(), standards, "model-a"
+    )
+    monkeypatch.setattr(reviewer_prompt, "_TEMPLATE", f"{reviewer_prompt._TEMPLATE}\nnew rule")
+
+    assert reviewer_version_digest(
+        reviewer_prompt.reviewer_prompt_version_text(), standards, "model-a"
+    ) != original
+
+
 def test_reviewer_version_digest_changes_for_standard_content():
     from reviewer.reviewer_context import reviewer_version_digest
 

@@ -35,7 +35,7 @@ from reviewer.reviewer_runner import (
     configured_primary_label,
     run_cc_review,
 )
-from prompts.reviewer import build_reviewer_prompt
+from prompts.reviewer import build_reviewer_prompt, reviewer_prompt_version_text
 from reviewer.reviewer_prd_context import resolve_prd_contracts
 from reviewer.pr_handoff import (
     _PR_HANDOFF_MAX_CHARS,
@@ -250,9 +250,9 @@ def _run_local(
         raw_output, pr_number, repo, head_sha, "qwen3.6-27B Dense",
         fallback_file=next(iter(extract_changed_files_from_diff(diff)), ""),
         reviewer_version=(
-            reviewer_version_digest(prompt, reviewer_standards, "qwen3.6-27B Dense")
-            if reviewer_standards
-            else None
+            reviewer_version_digest(
+                reviewer_prompt_version_text(), reviewer_standards, "qwen3.6-27B Dense",
+            ) if reviewer_standards else None
         ),
         reviewer_standards=sorted(reviewer_standards),
     )
