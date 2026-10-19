@@ -196,14 +196,15 @@ async def _execute(schedule: Schedule) -> RunReport:
     if current != schedule.script_sha256:
         return hash_mismatch_report(schedule)
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
+    run_id = uuid.uuid4().hex
     try:
         run = await run_script(
             schedule.thread_id, project, path,
-            run_id=uuid.uuid4().hex, timeout_seconds=int(schedule.timeout_seconds or 0),
+            run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
-    return build_report(schedule, run)
+    return build_report(schedule, run, run_id=run_id)
 
 
 def settle(schedule: Schedule, report: RunReport, now: str, db) -> bool:

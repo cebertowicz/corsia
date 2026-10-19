@@ -51,6 +51,7 @@ def _utc(ts: str) -> str:
 
 def count_outcome_event(
     db: sqlite3.Connection, counter: str, event_name: str, n: int = 1,
+    agent_thread_id: str = "", day: str | None = None,
 ) -> None:
     """Add ``n`` to a durable intake counter; an unknown ``counter`` is refused by the schema.
 
@@ -61,9 +62,9 @@ def count_outcome_event(
     if n < 1:
         raise ValueError("outcome event counters only grow; n must be positive")
     db.execute(
-        "INSERT INTO outcome_event_counters (counter,event_name,n) VALUES (?,?,?) "
-        "ON CONFLICT(counter,event_name) DO UPDATE SET n=n+excluded.n",
-        (counter, event_name, n),
+        "INSERT INTO outcome_event_counters (counter,event_name,agent_thread_id,day,n) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(counter,event_name,agent_thread_id,day) DO UPDATE SET n=n+excluded.n",
+        (counter, event_name, agent_thread_id, day or _now()[:10], n),
     )
 
 
@@ -106,10 +107,10 @@ def record_outcome_event(
          json.dumps(kept, separators=(",", ":"))),
     )
     if cursor.rowcount != 1:
-        count_outcome_event(db, "duplicate_ignored", event_name)
+        count_outcome_event(db, "duplicate_ignored", event_name, agent_thread_id=agent_thread_id or "")
         return RecordResult(False, None, ())
     if dropped:
-        count_outcome_event(db, "attribute_dropped", event_name, len(dropped))
+        count_outcome_event(db, "attribute_dropped", event_name, len(dropped), agent_thread_id=agent_thread_id or "")
     return RecordResult(True, event_id, tuple(dropped))
 
 

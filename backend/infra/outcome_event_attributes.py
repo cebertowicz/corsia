@@ -47,6 +47,12 @@ class AttributeSpec:
         """Whether ``value`` is a legal value for this attribute."""
         if self.kind == "count":
             return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        if self.kind == "num":
+            return (
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                and value >= 0 and value == value and value not in (float("inf"), float("-inf"))
+                and round(value, 6) == value
+            )
         if self.kind == "login":
             return (
                 isinstance(value, str)
@@ -210,7 +216,10 @@ def filter_attributes(
     a row a dropped enum value is simply absent — only the moving counter says that
     anything was dropped at all.
     """
-    allowed = ATTRIBUTE_ALLOWLISTS.get(event_name, {})
+    allowed = ATTRIBUTE_ALLOWLISTS.get(event_name)
+    if allowed is None:
+        from infra.measure_registry import declared_attribute_specs
+        allowed = declared_attribute_specs(event_name) or {}
     kept: dict[str, Any] = {}
     dropped: list[str] = []
     for key, value in (attributes or {}).items():

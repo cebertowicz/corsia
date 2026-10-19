@@ -33,10 +33,10 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
     """Register one model-free script run for the current thread."""
     from infra.config import WORKSPACE
 
-    for name in ("script_path", "cadence_seconds", "series"):
+    for name in ("script_path", "cadence_seconds"):
         if params.get(name) is None:
             raise ValueError(f"{name} is required for a script schedule")
-    series = script_schedules.parse_series(params["series"])
+    series = script_schedules.parse_series(params.get("series", []))
     path, sha256 = script_schedules.pin_script(
         str(params["script_path"]), workspace=WORKSPACE,
     )
@@ -50,6 +50,7 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
         timeout_seconds=params.get(
             "timeout_seconds", script_schedules.DEFAULT_TIMEOUT_SECONDS,
         ),
+        workflow=params.get("workflow"),
         now=datetime.now(timezone.utc).isoformat(),
         db=None,
     )
@@ -177,7 +178,7 @@ class AutomationScheduleTool(Tool):
                 },
                 "series": {
                     "type": "array",
-                    "minItems": 1,
+                    "minItems": 0,
                     "maxItems": script_schedules.MAX_SERIES,
                     "description": (
                         "script kind: the readings the script may print. min "
@@ -203,6 +204,10 @@ class AutomationScheduleTool(Tool):
                         },
                         "required": ["key"],
                     },
+                },
+                "workflow": {
+                    "type": "string",
+                    "description": "script kind: optional owned workflow ref used to version accepted measure lines.",
                 },
                 "timeout_seconds": {
                     "type": "integer",

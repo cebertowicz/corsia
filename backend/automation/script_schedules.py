@@ -73,8 +73,8 @@ def _number(value: Any, name: str) -> float | None:
 
 def parse_series(raw: Any) -> list[Series]:
     """Validate the registration's series list."""
-    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_SERIES:
-        raise ValueError(f"series must list 1 to {MAX_SERIES} readings")
+    if not isinstance(raw, list) or len(raw) > MAX_SERIES:
+        raise ValueError(f"series must list at most {MAX_SERIES} readings")
     parsed: list[Series] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -151,7 +151,8 @@ def create_script(
     series: list[Series],
     timeout_seconds: int,
     now: str,
-    db,
+    workflow: str | None = None,
+    db=None,
 ) -> Schedule:
     """Register one script schedule, due at once, under the per-agent and instance caps."""
     if isinstance(cadence_seconds, bool) or not (
@@ -164,7 +165,7 @@ def create_script(
     if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
     payload = json.dumps(
-        {"series": [vars(s) for s in series]}, sort_keys=True,
+        {"series": [vars(s) for s in series], "workflow": workflow}, sort_keys=True,
     )
     schedule_id = uuid.uuid4().hex
     with write_transaction(db, scope="automation_script_create") as connection:

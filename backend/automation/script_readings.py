@@ -64,6 +64,8 @@ class RunReport:
     readings: list[Reading]
     signals: list[Signal]
     error: str | None = None
+    measures: list[dict[str, Any]] = field(default_factory=list)
+    run_id: str | None = None
 
 
 def parse_readings(
@@ -78,6 +80,12 @@ def parse_readings(
     problems: list[str] = []
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and set(parsed) == {"measure"}:
             continue
         problem = _read_line(line, registered, readings)
         if problem:
@@ -134,7 +142,7 @@ def _script_name(schedule: Schedule) -> str:
     return (schedule.script_path or "script").rsplit("/", 1)[-1]
 
 
-def build_report(schedule: Schedule, run: ScriptRun) -> RunReport:
+def build_report(schedule: Schedule, run: ScriptRun, *, run_id: str | None = None) -> RunReport:
     """Turn one finished run into a status, its readings and its signals. Pure."""
     if run.timed_out:
         return _failure(
@@ -153,6 +161,14 @@ def build_report(schedule: Schedule, run: ScriptRun) -> RunReport:
         )
     registered = {s.key: s for s in store.series_of(schedule)}
     readings, problems = parse_readings(run.stdout, registered)
+    measures: list[dict[str, Any]] = []
+    for line in run.stdout.decode("utf-8", errors="replace").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict) and set(item) == {"measure"} and isinstance(item["measure"], dict):
+            measures.append(item["measure"])
     signals = _signals(schedule, registered, readings)
     status = store.worst_status([s.kind for s in signals] or ["ok"])
     if problems:
@@ -163,8 +179,8 @@ def build_report(schedule: Schedule, run: ScriptRun) -> RunReport:
             f"not read: {message}",
             {"message": message},
         ))
-        return RunReport("error", readings, signals, error=message)
-    return RunReport(status, readings, signals)
+        return RunReport("error", readings, signals, error=message, measures=measures, run_id=run_id)
+    return RunReport(status, readings, signals, measures=measures, run_id=run_id)
 
 
 def _signals(
@@ -307,8 +323,17 @@ def emit_report(
 ) -> bool:
     """Write a run's events, notes and wakes and settle it; True if the owner was woken."""
     registered = {s.key: s for s in store.series_of(schedule)}
-    # TODO(measurement seam, Self-Improvement): persist readings only once the
-    # numeric event contract can retain values rather than valueless rows.
+    # Measure refusals are intake data, never script-run errors or wakes.
+    from infra.measure_registry import admit
+    for measure in report.measures[:200]:
+        event_name = measure.get("event.name")
+        attributes = measure.get("attributes", {})
+        if isinstance(event_name, str) and isinstance(attributes, dict):
+            admit(
+                db, owner_thread_id=schedule.thread_id, event_name=event_name,
+                attributes=attributes, project_id=(None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id),
+                run_id=f"script:{schedule.id}:{report.run_id or 'unknown'}",
+            )
     woken = False
     for signal in report.signals:
         woken = _wake(db, schedule, signal, now) or woken

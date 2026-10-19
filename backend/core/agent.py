@@ -159,11 +159,14 @@ def _register_access_tools(agent: CORSIAAgent) -> None:
     from tools.audit_reads import AuditReadTool
     from tools.host_access import ReleaseHostAccessTool, RequestHostAccessTool
     from tools.log_read import LogReadTool
+    from tools.measures import MeasureStatusTool, MeasureSyncTool
 
     agent.tools.register(RequestHostAccessTool())
     agent.tools.register(ReleaseHostAccessTool())
     agent.tools.register(AuditReadTool())
     agent.tools.register(LogReadTool())
+    agent.tools.register(MeasureSyncTool())
+    agent.tools.register(MeasureStatusTool())
 
 
 def _register_agent_roster_tools(agent: CORSIAAgent) -> None:
