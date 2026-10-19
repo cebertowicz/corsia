@@ -25,7 +25,7 @@ _INSERT = (
 )
 _NO_OWNER = (
     "measure_sync: workflow {workflow} has no owner, so its measures.yaml can't be synced. "
-    "Add `owner: <your thread id>` under `corsia:` then `workflow:` in its SKILL.md frontmatter, "
+    "Add `corsia: {{workflow: {{owner: <your thread id>}}}}` to its SKILL.md frontmatter, "
     "or keep your measures in your own .threads folder."
 )
 

@@ -71,8 +71,9 @@ class MeasureStatusTool(Tool):
     @property
     def description(self) -> str:
         return ("Show your measure intake for today and the last 7 days: rows recorded, drops "
-                "and refusals by event, plus the active synced definition files. Use it after a "
-                "script run to find a dropped record and its fix.")
+                "and refusals by event, plus the active synced definition files. Each recent "
+                "refusal names the event, attribute and value, whether the row or only the "
+                "attribute was dropped, and the fix. Use it after a script run.")
 
     @property
     def parameters(self) -> dict[str, Any]:

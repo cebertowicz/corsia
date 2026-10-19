@@ -149,7 +149,11 @@ class AutomationScheduleTool(Tool):
             "cadence with no model turn, in your own sandbox: use it to watch "
             "a number (a count, a duration, a cost) cheaply. The script prints "
             "one JSON object per line, {\"series\": \"<key>\", \"value\": "
-            "<number>}, for each series you registered, and exits 0. You are "
+            "<number>}, for each series you registered, and exits 0. It may also "
+            "print measure lines for events declared in a measures.yaml you "
+            "synced with measure_sync: {\"measure\": {\"event.name\": \"<event>\", "
+            "\"attributes\": {<name>: <value>}, \"time\": \"<ISO 8601, optional>\"}}; "
+            "measure_status shows what was recorded or refused and why. You are "
             "woken once per series per day when a reading leaves its min/max, "
             "the script fails or times out, or the file changes after "
             "registration; readings inside bounds reach you as a passive "
@@ -222,7 +226,12 @@ class AutomationScheduleTool(Tool):
                 },
                 "workflow": {
                     "type": "string",
-                    "description": "script kind: optional workflow ref you own; groups accepted measure lines under this workflow.",
+                    "description": (
+                        "script kind: optional. The workflow: name of a synced measures.yaml whose "
+                        "SKILL.md names you as corsia.workflow.owner; each measure line is recorded "
+                        "with this workflow_ref. A refusal lists the workflows you own. Leave it out "
+                        "for agent-level measures."
+                    ),
                 },
                 "timeout_seconds": {
                     "type": "integer",

@@ -102,7 +102,7 @@ def test_namespace_belongs_to_first_syncing_agent() -> None:
 
 def test_workflow_without_skill_owner_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "measures.yaml"
-    with pytest.raises(ValueError, match="measure_sync: workflow inbox-triage has no owner, so its measures.yaml can't be synced. Add `owner: <your thread id>`"):
+    with pytest.raises(ValueError, match="measure_sync: workflow inbox-triage has no owner, so its measures.yaml can't be synced. Add `corsia: {workflow: {owner: <your thread id>}}` to its SKILL.md frontmatter"):
         sync(db(), owner_thread_id="agent-a", path=str(path), text=MEASURES.replace("# agent-level declaration: no workflow", "workflow: inbox-triage"))
     skill_file(tmp_path, MEASURES, owner=None)
     with pytest.raises(ValueError, match="has no owner"):
