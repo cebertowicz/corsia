@@ -3,7 +3,7 @@
 Activity's count, the operator payload, the chat list, status and the dock
 queue share one rule (``operator_display_state.ask_deferred`` and its SQL twin).
 The ask stays raised and answerable meanwhile, resume restores it, and an
-unpaused sibling ask keeps counting. A decision node itself refuses a pause.
+unpaused sibling ask keeps counting. Every kind pauses alike, a decision included.
 """
 
 from __future__ import annotations
@@ -12,17 +12,20 @@ import pytest
 
 from api import attention
 from plans import (
+    activity_projection,
     admission,
     boundary,
     decision_projection,
+    decisions,
     operator_chat_state,
     operator_display_state,
     operator_projection,
-    node_settlement,
     service,
     status,
     user_ask,
 )
+from plans.boundary import PlanActor
+from plans.pause_authority import reaches_paused_agent
 from tests.plan_ask_helpers import document_ask
 from tests.test_plan_decision_answer import (
     _human,
@@ -72,6 +75,11 @@ def _dock(db) -> list:
     return attention._queue_for("user-1", db=db)
 
 
+def _activity_awaiting(db) -> int:
+    actor = PlanActor(None, "user-1", None, kind="user")
+    return activity_projection.read_workspace(actor=actor, db=db)["attention"]["awaiting_count"]
+
+
 def test_ask_deferred_sql_matches_projected_pause_facts(db):
     from tests.test_plan_decisions import _task
 
@@ -106,9 +114,12 @@ def test_pause_defers_the_decision_count_and_resume_restores_it(db):
     plan, _source, decision = _raised_decision(db)
     assert decision_projection.awaiting_count([plan.id], db=db) == 1
     assert _payload_awaiting(db) == 1
+    assert _activity_awaiting(db) == 1
     assert len(_dock(db)) == 1
 
     _lifecycle(db, plan.id, "pause")
+
+    assert _activity_awaiting(db) == 0
 
     assert decision_projection.awaiting_count([plan.id], db=db) == 0
     assert _payload_awaiting(db) == 0
@@ -125,32 +136,83 @@ def test_pause_defers_the_decision_count_and_resume_restores_it(db):
     assert len(_dock(db)) == 1
 
 
-def test_decision_node_refuses_pause_and_stays_counted(db):
+def _decision_surfaces(db, plan_id: str, decision: dict, sibling: dict) -> tuple:
+    """Every Needs-you surface's reading of the two decisions."""
+    pane = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]
+    asking = {node["id"] for node in pane["nodes"] if node["requires_user_action"]}
+    items = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"][
+        "attention_items"
+    ]
+    return (
+        decision_projection.awaiting_count([plan_id], db=db),
+        _payload_awaiting(db),
+        _activity_awaiting(db),
+        [row["detail"]["id"] for row in _dock(db)],
+        asking & {decision["node_id"], sibling["node_id"]},
+        [item["node_id"] for item in items if item["kind"] == "decision"],
+    )
+
+
+def test_pause_node_defers_a_decision_and_resume_restores_it(db):
     plan, _source, decision = _raised_decision(db)
     _same_plan, _sibling_source, sibling = _raised_decision(db, title="Keep this decision visible")
+    both = (
+        2, 2, 2, [decision["id"], sibling["id"]],
+        {decision["node_id"], sibling["node_id"]}, [decision["node_id"], sibling["node_id"]],
+    )
+    assert _decision_surfaces(db, plan.id, decision, sibling) == both
 
-    assert decision_projection.awaiting_count([plan.id], db=db) == 2
-    assert _payload_awaiting(db) == 2
-    assert len(_dock(db)) == 2
-    status_before = status.read(db, service._plan_row(db, plan.id), actor=_human())["severity"]
+    _node_lifecycle(db, plan.id, decision["node_id"], "pause_node")
 
-    with pytest.raises(node_settlement.LaneOwnedNodeError, match="decision awaiting the user"):
-        _node_lifecycle(db, plan.id, decision["node_id"], "pause_node")
+    assert _decision_surfaces(db, plan.id, decision, sibling) == (
+        1, 1, 1, [sibling["id"]], {sibling["node_id"]}, [sibling["node_id"]],
+    )
+    # Deferred, not removed: still raised and answerable, and its node unmoved.
+    assert decision["id"] in {
+        item["id"] for item in decision_projection.raised_decisions([plan.id], db=db)
+    }
+    assert service._node_row(db, decision["node_id"])["state"] == "review_requested"
 
-    assert decision_projection.awaiting_count([plan.id], db=db) == 2
-    assert _payload_awaiting(db) == 2
-    assert [row["detail"]["id"] for row in _dock(db)] == [decision["id"], sibling["id"]]
-    pane = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]
-    assert all(node["requires_user_action"] for node in pane["nodes"] if node["id"] in {
-        decision["node_id"], sibling["node_id"],
-    })
-    assert operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"][
-        "attention_items"
-    ] == [
-        {"kind": "decision", "title": decision["title"], "node_id": decision["node_id"]},
-        {"kind": "decision", "title": sibling["title"], "node_id": sibling["node_id"]},
-    ]
-    assert status.read(db, service._plan_row(db, plan.id), actor=_human())["severity"] == status_before
+    _node_lifecycle(db, plan.id, decision["node_id"], "resume_node")
+
+    assert _decision_surfaces(db, plan.id, decision, sibling) == both
+
+
+def test_paused_only_decision_leaves_chat_list_and_status_unowed(db):
+    plan, _source, decision = _raised_decision(db)
+    _node_lifecycle(db, plan.id, decision["node_id"], "pause_node")
+
+    state = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"]
+    assert state["attention_items"] == []
+    assert state["state"] != "blocked_on_you"
+    assert status.read(db, service._plan_row(db, plan.id), actor=_human())["severity"] != "needs_input"
+
+
+def test_answering_a_paused_decision_delivers_it_and_settles_the_item(db):
+    plan, _source, decision = _raised_decision(db)
+    _node_lifecycle(db, plan.id, decision["node_id"], "pause_node")
+    plan_state = service._plan_row(db, plan.id)["state"]
+
+    answered = decisions.answer(
+        decision["id"], option_id="A", expected_revision=decision["revision"],
+        mutation_id=_mid(), actor=_human(), provenance="api.plans.decision", db=db,
+    ).result["decision"]
+    db.commit()
+
+    assert answered["state"] == "answered"
+    assert service._node_row(db, decision["node_id"])["state"] == "accepted"
+    assert service._plan_row(db, plan.id)["state"] == plan_state != "paused"
+    row = db.execute(
+        "SELECT * FROM messages WHERE id=?", (f"plan-decision-answer:{decision['id']}",),
+    ).fetchone()
+    assert row["thread_id"] == "owner" and row["delivery_state"] == "queued"
+    assert reaches_paused_agent(row)
+    assert decision_projection.awaiting_count([plan.id], db=db) == 0
+    # The answer ended the person's own pause on it; nothing is left holding.
+    assert db.execute(
+        "SELECT COUNT(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL",
+        (decision["node_id"],),
+    ).fetchone()[0] == 0
 
 
 def test_pause_node_defers_a_user_assigned_step_and_keeps_its_sibling(db):

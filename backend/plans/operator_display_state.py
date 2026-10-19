@@ -70,13 +70,18 @@ def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> boo
     return plan_paused or node_paused
 
 
-def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
-    """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
-    return f"""({plan_state_sql}='paused' OR EXISTS (
+def node_paused_sql(node_id_sql: str) -> str:
+    """SQL twin of ``node_paused``: the node carries an uncleared user pause hold."""
+    return f"""EXISTS (
         SELECT 1 FROM plan_node_holds pause
          WHERE pause.node_id={node_id_sql} AND pause.cleared_at IS NULL
            AND pause.kind='paused' AND pause.owner_kind='user'
-    ))"""
+    )"""
+
+
+def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
+    """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
+    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
 
 
 def needs_user_from_facts(

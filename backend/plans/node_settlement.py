@@ -26,6 +26,10 @@ answer that has not been given, so both are refused too. ``close_node`` is the
 same act as the archive by a different name -- it ends the node outright -- so
 it is refused for the same reason.
 
+The user's own pause and resume are not settlement: a pause is a hold that
+defers the question's attention until resume, the node keeps the state the
+answer settles from, and the answer still lands while it is paused.
+
 This module only classifies and refuses. It writes nothing, so it adds no second
 owner of decision state.
 """
@@ -49,6 +53,9 @@ SETTLING_OPERATIONS = frozenset({
 })
 
 DECISION = "decision"
+
+#: The user's own steering a decision node admits; none of them settles it.
+_USER_STEERING = frozenset({"close_node", "pause_node", "resume_node"})
 
 _LANE_SQL = """
     SELECT i.type AS artifact_type, i.metadata AS metadata
@@ -101,14 +108,14 @@ def lane_refusing(
     """Return the lane that refuses this generic operation on the node, or None.
 
     Non-raising, for ``plans.boundary_guard``; ``refuse`` raises the refusal.
-    The user's Won't do is the one exception: the question was put to the user,
-    so the user may drop it, and ``plans.user_steering`` withdraws the decision
-    rather than closing its node under it.
+    The question was put to the user, so the user may steer it: Won't do
+    (``plans.user_steering`` withdraws the decision rather than closing its
+    node under it) and pause/resume, which hold the node without moving it.
     """
     if operation not in SETTLING_OPERATIONS:
         return None
     lane = owning_lane(db, node_id)
-    if lane == DECISION and by_user and operation == "close_node":
+    if lane == DECISION and by_user and operation in _USER_STEERING:
         return None
     return lane
 
