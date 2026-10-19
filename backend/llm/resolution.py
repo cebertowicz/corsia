@@ -261,9 +261,16 @@ def scope_to_thread(target: ExecutionTarget, *, thread_id: str | None, db) -> Ex
     row = _target_row(target.catalog_id, db=db)
     if row is None:
         return target
+    thread = (
+        db.execute("SELECT local_only FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        if thread_id
+        else None
+    )
     refusal = locality_refusal(
-        # The thread's own local-only flag is read here once threads carry one.
-        row, thread_local_only=False, project_id=thread_project(thread_id, db), db=db,
+        row,
+        thread_local_only=bool(thread and thread["local_only"]),
+        project_id=thread_project(thread_id, db),
+        db=db,
     )
     if refusal is None:
         return target

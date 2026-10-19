@@ -93,9 +93,35 @@ def test_model_refusal_delegates_project_cloud_off_wording_to_locality(monkeypat
     assert local_only.local_only_model_refusal(
         "codex/gpt-6.1-sol", thread_local_only=False, project_id="project", db=db, spawn=True,
     ) == (
-        "project_cloud_off: This project has cloud models turned off, so codex/gpt-6.1-sol "
+        "project_cloud_off: This project uses local models only, so codex/gpt-6.1-sol "
         "can't run here. Use a ready local model: omlx@local/a. Local workers run one at a time."
     )
+
+
+def test_scope_to_thread_resolves_a_local_only_thread_through_the_canonical_resolver(
+    monkeypatch,
+) -> None:
+    from llm import locality
+    from llm.resolution import resolve_thread_target
+
+    db = _db()
+    _thread(db, "local-thread", local_only=1)
+    db.execute(
+        "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,"
+        "backend,enabled,available,context_window,created_at,updated_at) "
+        "VALUES ('cloud','native','external','cloud','cloud','Cloud',"
+        "'network',1,1,1,'t','t')"
+    )
+    monkeypatch.setattr(
+        locality,
+        "locality_refusal",
+        lambda _row, *, thread_local_only, **_kwargs: (
+            "thread_local_only" if thread_local_only else None
+        ),
+    )
+    resolved = resolve_thread_target("cloud", thread_id="local-thread", db=db)
+
+    assert (resolved.available, resolved.availability_reason) == (False, "thread_local_only")
 
 
 def test_create_fresh_thread_refuses_cloud_child_without_writing(monkeypatch) -> None:

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from llm.locality import locality_refusal, project_cloud_off_text
+from llm.locality import locality_refusal
+from prompts.cloud_off import project_cloud_off_text
 
 LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
 LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
