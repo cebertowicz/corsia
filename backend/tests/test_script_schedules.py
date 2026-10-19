@@ -396,7 +396,7 @@ def test_oversized_output_is_an_error_not_a_reading(tmp_path):
     schedule = _register(db, tmp_path)
     big = _run('{"series":"cost","value":1}\n' * 5000)
     assert big.over_cap
-    report = build_report(schedule, big)
+    report = build_report(schedule, big, run_id="run-1")
     assert report.status == "error" and report.readings == []
 
 
@@ -423,7 +423,7 @@ def test_deleting_the_owner_removes_its_schedules_and_the_thread(tmp_path):
 def test_run_settling_after_owner_deletion_is_dropped(tmp_path):
     db = _db()
     schedule = _register(db, tmp_path)
-    report = build_report(schedule, _run('{"series":"cost","value":1}\n'))
+    report = build_report(schedule, _run('{"series":"cost","value":1}\n'), run_id="run-1")
     db.execute("DELETE FROM automation_schedules")
     assert script_runner.settle(schedule, report, T0, db) is False
 

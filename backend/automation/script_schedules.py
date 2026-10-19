@@ -73,8 +73,8 @@ def _number(value: Any, name: str) -> float | None:
 
 def parse_series(raw: Any) -> list[Series]:
     """Validate the registration's series list."""
-    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_SERIES:
-        raise ValueError(f"series must list 1 to {MAX_SERIES} readings")
+    if not isinstance(raw, list) or len(raw) > MAX_SERIES:
+        raise ValueError(f"series must list at most {MAX_SERIES} readings")
     parsed: list[Series] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -152,6 +152,7 @@ def create_script(
     timeout_seconds: int,
     now: str,
     db,
+    workflow: str | None = None,
 ) -> Schedule:
     """Register one script schedule, due at once, under the per-agent and instance caps."""
     if isinstance(cadence_seconds, bool) or not (
@@ -164,7 +165,7 @@ def create_script(
     if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
     payload = json.dumps(
-        {"series": [vars(s) for s in series]}, sort_keys=True,
+        {"series": [vars(s) for s in series], "workflow": workflow}, sort_keys=True,
     )
     schedule_id = uuid.uuid4().hex
     with write_transaction(db, scope="automation_script_create") as connection:
@@ -264,18 +265,23 @@ def finish_run(
     status: str,
     error: str | None = None,
     noted: bool = False,
+    last_measures: str | None = None,
     db,
 ) -> None:
-    """Record one settled run on the schedule row and clear its in-flight mark."""
+    """Record one settled run on the schedule row and clear its in-flight mark.
+
+    ``last_measures`` is this run's measure line for ``automation_list``; a run that settled
+    no measures keeps the previous one.
+    """
     if error is not None:
         error = sanitize_credential_text(error)[:MAX_ERROR_CHARS]
     db.execute(
         """UPDATE automation_schedules
            SET runs=runs+1, last_run_at=?, running_since=NULL, last_status=?,
                last_error=?, noted_at=CASE WHEN ? THEN ? ELSE noted_at END,
-               updated_at=?
+               last_measures=coalesce(?, last_measures), updated_at=?
            WHERE id=? AND kind='script'""",
-        (ran_at, status, error, int(noted), ran_at, ran_at, schedule_id),
+        (ran_at, status, error, int(noted), ran_at, last_measures, ran_at, schedule_id),
     )
 
 

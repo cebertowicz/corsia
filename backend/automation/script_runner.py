@@ -14,6 +14,8 @@ The runs themselves are tasks, so a 5-minute script never holds the sweep.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import sqlite3
 import uuid
 from functools import partial
 from pathlib import Path
@@ -31,8 +33,9 @@ from automation.script_readings import (
 )
 from automation.script_sandbox import ScriptSandboxError, run_script
 from host_access.processes import ProcessOwnerError
-from infra.database import write_transaction
-from infra.db_async import run_in_db_unless_owned
+from infra.database import get_db, write_transaction
+from infra.db_async import run_in_db_unless_owned, run_off_db
+from infra.measure_registry import REGISTRY
 from infra.queries import get_thread, thread_is_available
 
 #: Runs in flight at once. Set from the sandbox-startup probe on the owner's Mac.
@@ -152,6 +155,7 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
     except Exception as exc:  # noqa: BLE001 - a run's failure is its report
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
+    report = await _stamped(schedule, report)
     try:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(), db,
@@ -164,6 +168,32 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         return
     if woken:
         await _drive_owner(schedule.thread_id)
+
+
+async def _stamped(schedule: Schedule, report: RunReport) -> RunReport:
+    """Resolve the workflow stamp before settling, off the database pool (it reads Git).
+
+    The owner rule is read live; a failure to resolve records the rows unversioned.
+    """
+    workflow = (schedule.payload or {}).get("workflow")
+    if not workflow or not report.measures:
+        return report
+
+    def resolve():
+        from tools.workflow_owners import workflow_stamp
+
+        db = get_db()
+        try:
+            return workflow_stamp(schedule.thread_id, str(workflow), db)
+        finally:
+            db.close()
+
+    try:
+        stamp = await run_off_db(resolve)
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):  # unresolved: unversioned, never a failed run
+        logger.exception("script schedule {} could not resolve workflow {}", schedule.id, workflow)
+        stamp = None
+    return dataclasses.replace(report, workflow_stamp=stamp)
 
 
 def _record_settle_failure(schedule_id: str, cause: str, now: str, db) -> None:
@@ -196,18 +226,20 @@ async def _execute(schedule: Schedule) -> RunReport:
     if current != schedule.script_sha256:
         return hash_mismatch_report(schedule)
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
+    run_id = uuid.uuid4().hex
     try:
         run = await run_script(
             schedule.thread_id, project, path,
-            run_id=uuid.uuid4().hex, timeout_seconds=int(schedule.timeout_seconds or 0),
+            run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
-    return build_report(schedule, run)
+    return build_report(schedule, run, run_id=run_id)
 
 
 def settle(schedule: Schedule, report: RunReport, now: str, db) -> bool:
     """Record one finished run on its row; True if it woke the owner."""
+    REGISTRY.ensure_loaded(db if db is not None else get_db())  # the first load reads outside the transaction
     with write_transaction(db, scope="script_runner_settle") as connection:
         try:
             current = get(schedule.id, db=connection)

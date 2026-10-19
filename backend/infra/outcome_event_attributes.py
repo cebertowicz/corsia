@@ -47,6 +47,12 @@ class AttributeSpec:
         """Whether ``value`` is a legal value for this attribute."""
         if self.kind == "count":
             return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        if self.kind == "num":
+            return (
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                and value >= 0 and value == value and value not in (float("inf"), float("-inf"))
+                and round(value, 6) == value
+            )
         if self.kind == "login":
             return (
                 isinstance(value, str)
@@ -198,8 +204,12 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
 
 def filter_attributes(
     event_name: str, attributes: dict[str, Any] | None,
+    declared: dict[str, AttributeSpec] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Return (kept, dropped keys): allowlisted valid values only, sanitized.
+
+    ``declared`` is a declared measure event's own specs, passed in by admission; without it the
+    event's built-in allowlist applies, so what is kept never depends on what has been loaded.
 
     Raises ``OutcomeInputRefusal`` (a ``ValueError``) at the kept-attribute 4 KiB guard.
 
@@ -210,7 +220,7 @@ def filter_attributes(
     a row a dropped enum value is simply absent — only the moving counter says that
     anything was dropped at all.
     """
-    allowed = ATTRIBUTE_ALLOWLISTS.get(event_name, {})
+    allowed = declared if declared is not None else ATTRIBUTE_ALLOWLISTS.get(event_name, {})
     kept: dict[str, Any] = {}
     dropped: list[str] = []
     for key, value in (attributes or {}).items():
