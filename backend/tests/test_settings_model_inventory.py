@@ -16,8 +16,8 @@ def test_settings_inventory_exposes_saved_and_resolved_windows(isolated_db):
         init_model_profiles()
         db.executemany(
             "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,"
-            "display_name,context_window,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,1000000,'t0','t0')",
+            "display_name,source,context_window,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?, 'test',1000000,'t0','t0')",
             [
                 (codex_id, "codex", "codex", "gpt-5.6-luna", codex_id, "GPT-5.6-Luna"),
                 (omlx_id, "native", "omlx", "Qwen3.8-Flash-Next", omlx_id, "Qwen3.8 Flash Next"),

@@ -149,13 +149,12 @@ def test_pre_account_local_download_status_exposes_only_the_safe_projection(clie
     assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}
 
 
-@pytest.mark.asyncio
-async def test_local_download_requires_a_foreign_process_choice_and_only_stops_the_verified_pid(client, monkeypatch):
-    from unittest.mock import AsyncMock
+def test_local_download_applies_the_foreign_process_choice_before_starting(client, monkeypatch):
+    from unittest.mock import AsyncMock, Mock, call
 
     started = AsyncMock(return_value={"ok": True})
-    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: 42)
-    monkeypatch.setattr(setup_api, "stop_foreign_omlx_process", lambda pid: pid == 42)
+    choice = Mock(side_effect=["consent_required", None, None])
+    monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", choice)
     monkeypatch.setattr("llm.local_setup.begin_local_setup", started)
 
     assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
@@ -163,6 +162,11 @@ async def test_local_download_requires_a_foreign_process_choice_and_only_stops_t
     assert kept.status_code == 200 and kept.json() == {"ok": True}
     stopped = client.post("/api/setup/local-download", json={"consent_existing": True, "manage_existing": True}, headers=JSON_HEADERS)
     assert stopped.status_code == 200 and stopped.json() == {"ok": True}
+    assert choice.call_args_list == [
+        call(consent_existing=False, manage_existing=None),
+        call(consent_existing=True, manage_existing=False),
+        call(consent_existing=True, manage_existing=True),
+    ]
     assert started.await_count == 2
 
 
