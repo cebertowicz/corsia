@@ -1,6 +1,6 @@
 import type { SetupAttempt } from './setupConnect.svelte';
 export type SetupPicks = { claude: boolean; chatgpt: boolean; key: boolean };
-export type SetupHandoff = { tools: Record<string, SetupAttempt>; other_omlx: 'none' | 'stopped_theirs' | 'kept_both'; bound_model: { model: string; source: string } };
+export type SetupHandoff = { tools: Record<string, SetupAttempt>; other_omlx: 'none' | 'stopped_theirs' | 'kept_both'; bound_model?: { model: string; source: string } | null };
 
 /** First-run setup progress, which the backend owns: the app reads it to resume and reports changes to it. */
 export type SetupProgress = {
