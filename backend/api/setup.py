@@ -18,12 +18,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
+from pydantic import ValidationError
 
-from api.setup_handoff import SetupHandoff
+from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
-from infra import accounts, config, setup_progress, user_profile
+from infra import accounts, config, setup_progress
 from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
@@ -38,47 +38,7 @@ _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localho
 _MINIMUM_MACOS_MAJOR = 15
 
 
-class LocalDownloadRequest(BaseModel):
-    """Consent for setup to inspect a pre-existing oMLX, and whether CORSIA may manage it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    consent_existing: bool = False
-    #: Welcome's choice for it: Let CORSIA manage it, Use mine, or None where it wasn't shown.
-    manage_existing: bool | None = None
-
-
-# Validated setup-to-chat handoff models live in api.setup_handoff.
-
-class SetupProgressUpdate(BaseModel):
-    """One change to the setup record, including its validated setup-to-chat handoff."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    step: str | None = None
-    local_ai: bool | None = None
-    picks: dict[str, StrictBool] | None = None
-    handoff: SetupHandoff | None = None
-    completed: bool = False
-
-
-class FirstAccountRequest(BaseModel):
-    """The account screen's fields; password confirmation remains client-side."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=120)
-    username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=1024)
-    email: str | None = Field(default=None, max_length=320)
-
-    @field_validator("name")
-    @classmethod
-    def _name_is_not_blank(cls, value: str) -> str:
-        """A name of only whitespace is a validation error, never a profile-file one."""
-        if not user_profile.one_line(value):
-            raise ValueError("name is required")
-        return value
+# Request body validation lives in api.setup_requests.
 
 
 def _own_backend_port(request: Request) -> int | None:

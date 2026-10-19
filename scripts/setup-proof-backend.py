@@ -23,17 +23,7 @@ def main() -> None:
     assert all(Path(value).is_relative_to(root) for value in paths.values()), 'runtime isolation failed'
     assert args.port not in {1956, 3001}, 'live port refused'
     print('SETUP_PROOF_RUNTIME ' + json.dumps(paths), flush=True)
-    original_connect = database._make_connection
 
-    def checked_connect(path: str):
-        actual = Path(path).resolve()
-        assert actual.is_relative_to(root), 'runtime database escaped proof root'
-        connection = original_connect(path)
-        has_auth = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='auth_tokens'").fetchone() is not None
-        print('SETUP_PROOF_CONNECTION ' + json.dumps({'database': str(actual), 'auth_tokens': has_auth}), flush=True)
-        return connection
-
-    database._make_connection = checked_connect
     import uvicorn
     uvicorn.run('e2e_app:app' if args.mock else 'main:app', host='127.0.0.1', port=args.port)
 

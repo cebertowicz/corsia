@@ -42,6 +42,17 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
 )
 
 
+async def resume_local_setup() -> None:
+    """Restore managed-model state and resume durable setup work after a restart."""
+    from llm.local_model import backfill_legacy_record
+    from llm.local_setup_recovery import resume_pending_setup
+    from onboarding.local_download_wake import resume_pending_local_download
+
+    await asyncio.to_thread(backfill_legacy_record)
+    await resume_pending_setup()
+    await resume_pending_local_download()
+
+
 async def _startup_harness_discovery() -> list[dict]:
     """Re-ask Claude/Codex for their catalogs and sign-in once at backend startup."""
     from connections.startup import startup_harness_discovery
