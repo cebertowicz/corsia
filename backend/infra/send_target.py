@@ -70,7 +70,6 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target and enforce the project's cloud-model policy."""
-    from connections.account_policy import thread_scope
     from infra.database import get_db
     from llm.locality import locality_refusal
 
@@ -78,8 +77,11 @@ def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionT
     try:
         target = model_resolution.resolve_execution_target(model, db=db)
         row = model_resolution.catalog_row(model, db=db)
-        project_id = thread_scope(thread_id, db=db)["project_id"] if thread_id else None
         if row is not None:
+            scope = db.execute(
+                "SELECT project_id FROM threads WHERE id = ?", (thread_id,),
+            ).fetchone() if thread_id else None
+            project_id = scope["project_id"] if scope else None
             refusal = locality_refusal(
                 row, thread_local_only=False, project_id=project_id, db=db,
             )

@@ -1,4 +1,4 @@
-"""Local-only classification and email-screen compatibility tests."""
+"""Local-only classification, DB policy, and email-screen compatibility tests."""
 
 from __future__ import annotations
 
@@ -9,11 +9,8 @@ import pytest
 
 def _row(**overrides) -> dict:
     row = {
-        "selector": "omlx@local/model",
-        "litellm_model": "omlx@local/model",
-        "connection": "omlx",
-        "provider": "omlx",
-        "backend": "network",
+        "selector": "omlx@local/model", "litellm_model": "omlx@local/model",
+        "connection": "omlx", "provider": "omlx", "backend": "network",
     }
     row.update(overrides)
     return row
@@ -45,6 +42,34 @@ def test_row_is_local_fails_closed_when_endpoint_cannot_be_read(monkeypatch):
 
     monkeypatch.setattr(capabilities, "make_provider_params", lambda _model: (_ for _ in ()).throw(ValueError()))
     assert row_is_local(_row()) is False
+
+
+def _project(db, project_id="project"):
+    db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES (?,?,?,?)", (project_id, project_id, "t", "t"))
+
+
+def _server(db, server_id="remote", *, private=False):
+    metadata = '{"private": true}' if private else "{}"
+    db.execute("INSERT INTO network_servers(id,provider,kind,instance_id,instance_name,port,status,metadata_json,last_seen_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (server_id, "omlx", "managed", server_id, server_id, 8000, "online", metadata, "t", "t", "t"))
+
+
+def test_locality_refusal_reads_private_mark_and_project_policy(isolated_db):
+    from infra.database import get_db
+    from llm.locality import locality_refusal, set_project_cloud_models_off
+
+    db = get_db()
+    _project(db)
+    _server(db)
+    set_project_cloud_models_off("project", cloud_models_off=True, db=db)
+    row = {"litellm_model": "omlx@remote/model", "backend": "network", "provider": "omlx", "harness": "native"}
+    assert locality_refusal(row, thread_local_only=False, project_id="project", db=db) == "project_cloud_off"
+    db.execute("UPDATE network_servers SET metadata_json='{\"private\": true}' WHERE id='remote'")
+    db.commit()
+    assert locality_refusal(row, thread_local_only=False, project_id="project", db=db) is None
+    assert locality_refusal({"backend": "api"}, thread_local_only=True, project_id="project", db=db) == "thread_local_only"
+    set_project_cloud_models_off("project", cloud_models_off=False, db=db)
+    assert locality_refusal({"backend": "api"}, thread_local_only=False, project_id="project", db=db) is None
+    assert locality_refusal({"backend": "api"}, thread_local_only=False, project_id=None, db=db) is None
 
 
 def test_email_screen_keeps_external_loopback_behavior():

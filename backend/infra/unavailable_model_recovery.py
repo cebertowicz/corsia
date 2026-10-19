@@ -150,9 +150,7 @@ async def resolve_or_hold(
     """Resolve ``model`` with the one resolver, then apply the admission seam."""
     from infra import send_target
 
-    return await hold_unless_runnable(
-        await send_target.resolve_target(model, thread_id=batch.thread_id), batch,
-    )
+    return await hold_unless_runnable(await send_target.resolve_target(model), batch)
 
 
 async def _resume_held_heads() -> None:
