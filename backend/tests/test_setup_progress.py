@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from api import provider_sources as provider_sources_api  # noqa: E402
 from api import setup as setup_api  # noqa: E402
 from infra import accounts, setup_progress  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
@@ -48,6 +49,7 @@ def client(isolated_db, tmp_path, monkeypatch, facts):
     database.commit()
     app = FastAPI()
     app.include_router(setup_api.router)
+    app.include_router(provider_sources_api.router)
     with TestClient(app, base_url=BASE, client=("127.0.0.1", 50100)) as test_client:
         yield test_client
 
@@ -147,6 +149,51 @@ def test_pre_account_local_download_status_exposes_only_the_safe_projection(clie
 
     assert response.status_code == 200
     assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}
+
+
+@pytest.mark.parametrize(("result", "downloaded"), [
+    ({"ok": False, "cause": "connection", "message": "connection lost"}, False),
+    ({"ok": False, "cause": "disk_full", "bytes_to_free": 4_000_000_000, "message": "disk full"}, False),
+    ({"ok": False, "cause": "memory", "message": "memory"}, False),
+    ({"ok": False, "cause": "other", "ref": "setup-42", "message": "other"}, False),
+    ({"ok": False, "cause": "other", "pre_download": True, "message": "setup"}, False),
+    ({"ok": False, "cause": "connection", "message": "start"}, True),
+], ids=["connection", "disk-full", "memory", "other", "setup-failed", "start-failed"])
+def test_signed_in_omlx_source_projects_the_same_terminal_flight_as_local_download(client, monkeypatch, result, downloaded):
+    """The authenticated source row uses Welcome's one safe local-flight projection."""
+    from llm import local_setup, local_sources
+
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(result=result, downloaded=downloaded))
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    monkeypatch.setattr(local_sources, "installed_omlx", lambda: None)
+
+    rail = client.get("/api/setup/local-download", headers=HOST)
+    assert rail.status_code == 200
+    token = _create_account(client)
+    sources = client.get("/api/providers/sources", headers={"Authorization": f"Bearer {token}"})
+    assert sources.status_code == 200
+    source = next(row for row in sources.json()["sources"] if row["source"] == "omlx")
+
+    assert {key: source.get(key) for key in ("local_state", "setup_error_code", "setup_error_reference", "bytes_to_free")} == {
+        "local_state": rail.json()["state"],
+        "setup_error_code": rail.json().get("cause"),
+        "setup_error_reference": rail.json().get("ref"),
+        "bytes_to_free": rail.json().get("bytes_to_free"),
+    }
+
+
+def test_settings_flight_never_projects_local_download_fields(monkeypatch):
+    from llm import local_setup, local_sources
+
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(
+        kind="settings", result={"ok": False, "cause": "other", "ref": "settings-42"},
+    ))
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    monkeypatch.setattr(local_sources, "installed_omlx", lambda: None)
+
+    source = local_sources.omlx_source((set(), set()))
+
+    assert not {"local_state", "setup_error_code", "setup_error_reference", "bytes_to_free"} & source.keys()
 
 
 def test_local_download_applies_the_foreign_process_choice_before_starting(client, monkeypatch):

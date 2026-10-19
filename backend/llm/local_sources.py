@@ -56,20 +56,33 @@ def _stage_percent(stage: str) -> int | None:
     return min(100, int(match.group(1))) if match else None
 
 
+def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
+    """Give an unavailable signed-in row the same safe flight fields as Welcome."""
+    if flight is not None and result["state"] != "ready":
+        result.update(
+            local_state=flight["state"],
+            setup_error_code=flight.get("cause"),
+            setup_error_reference=flight.get("ref"),
+            bytes_to_free=flight.get("bytes_to_free"),
+        )
+
+
 def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
     """A managed server decides; only with none is this host's binary asked.
 
     A managed server is registered by host and port, so it may be remote.
     """
     from llm.local_setup import (
-        download_estimate, format_size, local_memory_ok, setup_failure, setup_kind, setup_stage, setup_status,
+        download_estimate, format_size, local_memory_ok, setup_failure, setup_kind, setup_stage,
         setup_stopped_following,
     )
     from llm.local_setup_prepare import known_model
+    from onboarding.local_download_state import current as local_download_state
 
     eligible = local_memory_ok()
     model = known_model() if eligible else None
     settings_flight = setup_kind() == "settings"
+    flight = None if settings_flight else local_download_state()
     stage = None if settings_flight else setup_stage()
     terminal = None if settings_flight else setup_failure()
 
@@ -90,7 +103,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         eta_seconds, stalled = download_estimate()
         result["download_eta_seconds"] = eta_seconds
         result["download_stalled"] = stalled
-        result["setup_downloading"] = setup_status()["state"] == "downloading"
+        result["setup_downloading"] = flight["state"] == "downloading"
+        _project_local_flight(result, flight)
         return result
     name = "Local model"
     servers = [s for s in get_servers(provider="omlx")
@@ -122,6 +136,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         message = str(terminal.get("message") or "Local setup failed.")
         result.update(reason=message, fix=OMLX_FIX, setup_error=message)
         result.pop("reason_code", None)
+    _project_local_flight(result, flight)
     return result
 
 

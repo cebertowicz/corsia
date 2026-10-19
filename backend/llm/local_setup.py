@@ -201,7 +201,8 @@ def setup_status() -> dict[str, Any]:
         state = "downloading"
     else:
         # Success follows a completed catalog refresh, so this model is usable.
-        state = "ready" if result.get("ok") else "setup_failed" if result.get("pre_download") else "failed"
+        state = ("ready" if result.get("ok") else "setup_failed" if result.get("pre_download")
+                 else "start_failed" if _flight.downloaded else "failed")
     percent = None
     if stage:
         import re

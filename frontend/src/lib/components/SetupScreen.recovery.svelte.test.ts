@@ -83,8 +83,8 @@ describe('SetupScreen account recovery', () => {
 describe('SetupScreen local-start recovery', () => {
 	it.each([
 		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'Another oMLX is running. Quit your other oMLX, then Retry.'],
-		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t set up the local model. Retry. Reference: Unavailable'],
-		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t set up the local model. Retry. Reference: Unavailable'],
+		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t set up the local model. Retry.'],
+		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t set up the local model. Retry.'],
 	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));

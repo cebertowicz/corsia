@@ -96,7 +96,7 @@
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
 		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, freeDisk: status.free_disk_gb,
-			start: () => void startLocal(), stop: () => void stopLocal(), stopOther: () => void chooseOther(true), check: () => void checkLocal() })));
+			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal() })));
 		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });

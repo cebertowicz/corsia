@@ -5,7 +5,7 @@ import { measuredDownloadTime } from './setupLocalPresentation';
 
 // Settings imports the separable first sentence from setupLocalPick.
 export type LocalRowState = ModelSource & { local_state?: string; setup_error_code?: string; setup_error_reference?: string; bytes_to_free?: number };
-export type LocalRowInput = { source?: LocalRowState; pick: LocalPick | null; eligible: boolean; downloading: boolean; ready: boolean; startError: string; freeDisk?: number; start: () => void; stop: () => void; stopOther: () => void; check: () => void };
+export type LocalRowInput = { source?: LocalRowState; pick: LocalPick | null; eligible: boolean; downloading: boolean; ready: boolean; startError: string; freeDisk?: number; start: () => void; stop: () => void; check: () => void };
 
 type LocalSetupFailure = { cause?: string; outcome?: string; reference?: string; bytesToFree?: number; size?: string };
 
@@ -17,19 +17,18 @@ export function localSetupRecovery({ cause, outcome, reference, bytesToFree, siz
 	if (cause === 'connection') return 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.';
 	if (cause === 'memory') return 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.';
 	if (cause === 'other_omlx') return 'Another oMLX is running. Quit your other oMLX, then Retry.';
-	if (cause === 'other') return `CORSIA couldn’t set up the local model. Retry. Reference: ${reference ?? 'Unavailable'}`;
+	if (cause === 'other') return `CORSIA couldn’t set up the local model. Retry.${reference ? ` Reference: ${reference}` : ''}`;
 	return 'CORSIA couldn’t set up the local model. Retry.';
 }
 
 /** Present one local lifecycle and one cause-specific recovery action. */
 export function setupLocalRow(input: LocalRowInput): AiRow {
-	const { source, pick, eligible, downloading, ready, startError, freeDisk, start, stop, stopOther, check } = input;
+	const { source, pick, eligible, downloading, ready, startError, freeDisk, start, stop, check } = input;
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
 	if (!eligible) return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (ready) return { ...row, meta: `${model} · runs on this computer`, pill: { state: 'success', label: 'Ready' } };
-	if (source?.local_state === 'not_loaded') return { ...row, meta: 'The local model downloaded, but there isn’t enough free memory to start it while your oMLX is running.', action: { label: 'Stop mine', run: stopOther } };
 	if (downloading) {
 		if (source?.download_stalled) return { ...row, meta: 'Download paused. It continues when the connection returns.', action: { label: 'Stop download', run: stop } };
 		if (source?.local_state === 'starting' || /load|start/i.test(source?.setup_stage ?? '')) return { ...row, meta: 'Starting the local model…', busy: true };

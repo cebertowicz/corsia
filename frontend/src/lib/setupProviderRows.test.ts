@@ -5,9 +5,27 @@ import { setupLocalRow, setupStartNote } from './setupProviderRows';
 const actions = () => ({
 	start: vi.fn(),
 	stop: vi.fn(),
-	stopOther: vi.fn(),
 	check: vi.fn(),
 });
+
+// Matches the four fields the signed-in source row receives from local-download.
+const flightShapes = [
+	{ state: 'failed', cause: 'connection', expected: 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.' },
+	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, expected: 'Couldn’t download the local model: the disk is full. Free up 4 GB, then Retry.' },
+	{ state: 'failed', cause: 'memory', expected: 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.' },
+	{ state: 'failed', cause: 'other', ref: 'setup-report-123', expected: 'CORSIA couldn’t set up the local model. Retry. Reference: setup-report-123' },
+	{ state: 'setup_failed', cause: 'other', expected: 'CORSIA couldn’t set up the local model. Retry, or save a report.' },
+	{ state: 'start_failed', cause: 'connection', expected: 'The local model downloaded but couldn’t start. Retry, or save a report.' },
+] as const;
+
+function sourceFromFlight(flight: typeof flightShapes[number]) {
+	return {
+		source: 'omlx', name: 'Local model', state: 'needs_setup' as const, setup_error: 'failed',
+		local_state: flight.state, setup_error_code: flight.cause,
+		setup_error_reference: 'ref' in flight ? flight.ref : undefined,
+		bytes_to_free: 'bytes_to_free' in flight ? flight.bytes_to_free : undefined,
+	};
+}
 
 describe('setup provider rows', () => {
 	it('shows a ready local model as a completed provider row', () => {
@@ -27,23 +45,12 @@ describe('setup provider rows', () => {
 		});
 	});
 
-	it.each([
-		['connection', undefined, undefined, 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.'],
-		['disk_full', undefined, undefined, 'Couldn’t download the local model: the disk is full. Free up 4 GB, then Retry.'],
-		['memory', undefined, undefined, 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.'],
-		['other_omlx', undefined, undefined, 'Another oMLX is running. Quit your other oMLX, then Retry.'],
-		['other', undefined, 'setup-report-123', 'CORSIA couldn’t set up the local model. Retry. Reference: setup-report-123'],
-		[undefined, 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
-		['other', 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
-		['connection', 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
-		['disk_full', 'setup_failed', undefined, 'CORSIA couldn’t set up the local model. Retry, or save a report.'],
-		[undefined, 'start_failed', undefined, 'The local model downloaded but couldn’t start. Retry, or save a report.'],
-	] as const)('gives %s/%s its own local setup recovery', (cause, outcome, reference, expected) => {
+	it.each(flightShapes)('gives $state/$cause its matching local setup recovery', (flight) => {
 		const { start, ...otherActions } = actions();
 		const row = setupLocalRow({
 			...otherActions,
 			start,
-			source: { source: 'omlx', name: 'Local model', state: 'needs_setup', setup_error: 'failed', setup_error_code: cause, local_state: outcome, setup_error_reference: reference, bytes_to_free: 4_000_000_000 },
+			source: sourceFromFlight(flight),
 			pick: { state: 'picked', model: { name: 'Qwen 3.8', download_size_gb: 30 } } as never,
 			eligible: true,
 			downloading: false,
@@ -51,7 +58,7 @@ describe('setup provider rows', () => {
 			startError: '',
 		});
 
-		expect(row.meta).toBe(expected);
+		expect(row.meta).toBe(flight.expected);
 		expect(row.action?.label).toBe('Retry');
 		row.action?.run();
 		expect(start).toHaveBeenCalledOnce();

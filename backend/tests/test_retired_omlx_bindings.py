@@ -51,11 +51,17 @@ def _managed_server() -> str:
 
 @pytest.fixture
 def retired(isolated_db, monkeypatch, tmp_path) -> str:
-    """A loopback oMLX added in Settings, its model bound, then retired at startup."""
-    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    """A marker-gated legacy CORSIA loopback row, retired before its model is rediscovered."""
+    from llm import network_discovery as discovery
+    from llm.local_setup_ownership import marker_path
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME, retire_unowned_local_omlx_rows
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    local = _add_through_settings(monkeypatch, "127.0.0.1")
+    marker_path().write_text("legacy\n", encoding="utf-8")
+    local = discovery.upsert_server(
+        provider="omlx", instance_id="127.0.0.1:8000", instance_name=LOCAL_SERVER_NAME,
+        host="127.0.0.1", port=8000, status="online", kind="managed", source="manual",
+    )
     _model_row("local-model", f"omlx@{local}/{MODEL}", MODEL)
     assert retire_unowned_local_omlx_rows() == [local]
     assert _resolve("local-model").available is False
