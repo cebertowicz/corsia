@@ -28,6 +28,7 @@ for (const viewport of viewports) {
 	for (const theme of themes) {
 		test(`Connect an app captures the reviewed states at ${viewport.name} ${theme}`, async ({ page }, testInfo) => {
 			let pendingConnect: Route | null = null;
+			let googleAccountReady = false;
 			let signInStarts = 0;
 			const messages: Record<string, unknown>[] = [];
 			const corsiaThreadId = await createSession(page.request, `CORSIA Google connect ${viewport.name} ${theme}`);
@@ -49,9 +50,16 @@ for (const viewport of viewports) {
 					pendingConnect = route;
 					return;
 				}
-				await route.fulfill({ json: { servers: [], sign_in_here: true } });
+				await route.fulfill({ json: {
+					servers: [], sign_in_here: true,
+					accounts: googleAccountReady ? [{
+						id: 'google-work', provider: 'google', address: 'sam.work@example.com', state: 'connected',
+						capabilities: ['mail', 'calendar', 'files'], reach: { mode: 'selected', project_ids: [], outside_projects: false },
+					}] : [],
+				} });
 			});
 			await page.route('**/api/mcp/servers/*/sign-in**', async (route) => {
+				if (route.request().method() === 'GET') return route.fulfill({ json: { status: 'idle' } });
 				expect(route.request().method()).toBe('POST');
 				signInStarts += 1;
 				await route.fulfill({ json: { authorization_url: 'https://auth.example.test/authorize?state=abc', expires_at: '2030-01-01T00:00:00Z', reopened: false } });
@@ -175,12 +183,12 @@ for (const viewport of viewports) {
 					tool_calls: [{
 						id: `google-post-update-${viewport.name}-${theme}`,
 						name: 'post_update',
-						arguments: JSON.stringify({ text: "Let's connect a Google account for all your projects. Which account should agents use?" }),
+						arguments: JSON.stringify({ text: 'Google is connected. [Open Google — sam.work@example.com](#connected-apps/google-work)' }),
 					}],
 					finish_reason: 'tool_calls',
 					match_thread: corsiaThreadId,
 				},
-				{ content: 'I asked which Google account to use.', finish_reason: 'stop', match_thread: corsiaThreadId },
+				{ content: 'Your Google account is ready.', finish_reason: 'stop', match_thread: corsiaThreadId },
 			]);
 			await googleDialog.getByLabel('Google (email, calendar and files)').click();
 			await googleDialog.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -189,11 +197,18 @@ for (const viewport of viewports) {
 			await expect(userMessages(page)).toHaveCount(1);
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeEmpty();
 			await expect.poll(() => messages.filter((frame) => frame.content === 'Connect a Google account for all my projects').length).toBe(1);
-			const googleReply = page.locator('main .message.assistant').filter({ hasText: "Let's connect a Google account for all your projects. Which account should agents use?" });
+			const googleReply = page.locator('main .message.assistant').filter({ hasText: 'Google is connected.' });
 			await expect(googleReply).toHaveCount(1);
 			await expect(googleReply).toBeVisible();
 			await expect.poll(() => readMockCallCount(page.request), { timeout: 20_000 }).toBe(2);
 			await capture(page, testInfo, `google-reply-${viewport.name}-${theme}`, { fullPage: false });
+
+			googleAccountReady = true;
+			await googleReply.getByRole('link', { name: 'Open Google — sam.work@example.com' }).click();
+			const accountRow = page.locator('[data-connected-account-id="google-work"]');
+			await expect(accountRow).toBeVisible();
+			await expect(accountRow.getByRole('button', { name: 'Google — sam.work@example.com' })).toHaveAttribute('aria-expanded', 'true');
+			await expect(accountRow.getByRole('button', { name: 'Where it works…' })).toBeFocused();
 		});
 	}
 }

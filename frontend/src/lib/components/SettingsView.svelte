@@ -132,7 +132,6 @@
 				<div class="inset"><ProviderManager /></div>
 				<div class="policy"><ProvidersPolicyBlock /></div>
 			{:else if section === 'connected-apps'}
-				<h2 class="page-title">Connected apps</h2>
 				<ConnectedAppsSettings />
 			{:else if section === 'skills'}
 				<h2 class="page-title">Skills</h2>

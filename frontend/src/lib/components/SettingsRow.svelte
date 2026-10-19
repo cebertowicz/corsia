@@ -14,6 +14,7 @@
 		ariaLabel,
 		expanded,
 		stackActions = false,
+		wrapName = false,
 		mark = null,
 		menuItems = [],
 		onOpen,
@@ -34,6 +35,8 @@
 		expanded?: boolean;
 		/** The actions drop below the copy when the row is too narrow for both, so a long second line is not cut to make room for them. */
 		stackActions?: boolean;
+		/** An expanded title can wrap to preserve its complete identity. */
+		wrapName?: boolean;
 		/** A project's colour, drawn as its §0.1 project mark before the name. */
 		mark?: string | null;
 		menuItems?: MenuItem[];
@@ -55,7 +58,7 @@
 {#snippet content()}
 	{#if mark}<span class="mark" style:background={mark} aria-hidden="true"></span>{/if}
 	<span class="copy">
-		<span class="name">{#if typeof name === 'string'}{name}{:else}{@render name()}{/if}</span>
+		<span class="name" class:wrap={wrapName} data-wrap-name={wrapName || undefined}>{#if typeof name === 'string'}{name}{:else}{@render name()}{/if}</span>
 		{#if sub}<span class="sub" class:multi={typeof sub !== 'string'} class:failed={subTone === 'failed'} class:attention={subTone === 'attention'}>{#if typeof sub === 'string'}{sub}{:else}{@render sub()}{/if}</span>{/if}
 	</span>
 	{#if trailing}<span class="trailing">{trailing}</span>{/if}
@@ -106,6 +109,7 @@
 	.copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 	.name, .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.name { font-size: var(--text-subhead); color: var(--text-primary); }
+	.name.wrap { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 	.sub { font-size: var(--text-caption); color: var(--text-tertiary); }
 	/* A drawn second line carries a status and a place; it wraps rather than hiding either. */
 	.sub.multi { white-space: normal; overflow-wrap: anywhere; }
