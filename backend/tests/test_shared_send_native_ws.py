@@ -146,9 +146,26 @@ async def test_native_ws_persists_broadcasts_and_starts_browser_turn(
     class _WS:
         def __init__(self):
             self.sent: list[dict] = []
+            self._sent = asyncio.Condition()
 
         async def send_json(self, payload):
-            self.sent.append(payload)
+            async with self._sent:
+                self.sent.append(payload)
+                self._sent.notify_all()
+
+        async def wait_for_delivery_states(
+            self, message_id: str, expected: list[str],
+        ) -> None:
+            def _delivered_states() -> list[str]:
+                return [
+                    message["delivery_state"]
+                    for payload in self.sent
+                    for message in _broadcast_messages(payload)
+                    if message["id"] == message_id
+                ]
+
+            async with self._sent:
+                await self._sent.wait_for(lambda: _delivered_states() == expected)
 
     ws = _WS()
     peer_ws = _WS()
@@ -216,6 +233,12 @@ async def test_native_ws_persists_broadcasts_and_starts_browser_turn(
                 broadcast_exclude_ws=ws,
             )
             await settled.wait()
+            await asyncio.gather(
+                ws.wait_for_delivery_states(result.message_id, ["queued", "delivered"]),
+                peer_ws.wait_for_delivery_states(
+                    result.message_id, ["queued", "queued", "delivered"],
+                ),
+            )
     finally:
         state._ws_thread_clients.pop("native-ws", None)
 
