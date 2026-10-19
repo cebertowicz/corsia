@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from doceditor.comment_state_updates import PERSON_COMMENT_RESOLVE_RULE
 from plans import admission, artifact_links, service
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
@@ -24,10 +25,9 @@ AGENT_FRAMING = (
 )
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
-    "the current source. Acknowledge what you agree with and make the change. Leave the "
-    "user's comment open for them to resolve, above all one you replied to; resolve it "
-    "yourself only when they asked you to, or when you made exactly the change it asked for "
-    "and had nothing to say. Reply only to ask a question, give a reason for declining, or "
+    "the current source. Acknowledge what you agree with and make the change. "
+    + PERSON_COMMENT_RESOLVE_RULE
+    + " Reply only to ask a question, give a reason for declining, or "
     "show evidence that a point is mistaken."
 )
 AGENT_EDIT_FRAMING = (
