@@ -43,6 +43,7 @@
 	/** A hosted-app approval that returns needs-sign-in begins its existing one-shot repair path. */
 	let signInAfterApprove = $state<string | null>(null);
 	let closedLocalPrefixes = $state(new Map<string, string>());
+	let linkedAccountId = $state<string | null>(null);
 	let textContext: CanvasRenderingContext2D | null = null;
 
 	const stateLine = (app: ConnectedApp) => connectedAppStateLine(app, signedOut.has(app.id));
@@ -242,6 +243,7 @@
 		const accountId = $settingsNavigation.connectedAppId;
 		if (loading || !accountId || !rows.some((row) => row.id === accountId)) return;
 		openId = accountId;
+		linkedAccountId = accountId;
 		requestAnimationFrame(() => {
 			const row = document.querySelector<HTMLElement>(`[data-connected-account-id="${CSS.escape(accountId)}"]`);
 			const account = rows.find((candidate): candidate is ConnectedAccount => candidate.id === accountId && isAccount(candidate));
@@ -292,7 +294,7 @@
 									{#if manualStep?.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
 									<div class="actions account-actions">
 										{#if accountNeedsSignIn(row)}<span class="account-action"><Button variant="primary" size="sm" loading={actionId === row.id} onclick={() => startSignIn(row)}>Sign in</Button></span>{/if}
-										<span class="account-action"><Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
+										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id} data-chat-link-focus={linkedAccountId === row.id || undefined}><Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
 										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
 										<span class="danger-text account-action"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
@@ -351,6 +353,8 @@
 	.account-local-prefix { overflow: hidden; text-overflow: clip; }
 	.account-open-name { overflow-wrap: anywhere; }
 	.account-action { position: relative; display: inline-flex; }
+	/* A chat link moves focus here after opening the account, so retain a visible arrival mark even without keyboard modality. */
+	.account-action.deep-link-focus :global(.btn) { outline: medium solid var(--accent); outline-offset: var(--space-1); }
 	.account-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }
 	.account-action :global(button) { position: relative; z-index: 1; }
 </style>

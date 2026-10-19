@@ -32,14 +32,30 @@ function accountsFor(state: AccountState): Account[] {
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {
+	// Capture the settled viewport; full-page captures intermittently paint a blank desktop document after Settings reloads.
+	await page.waitForTimeout(400);
 	mkdirSync(outputDir, { recursive: true });
-	await page.screenshot({ path: join(outputDir, `${name}-${testInfo.project.name}.png`), fullPage: true, animations: 'disabled' });
+	await page.screenshot({ path: join(outputDir, `${name}-${testInfo.project.name}.png`), fullPage: false, animations: 'disabled' });
 }
 
 async function openConnectedApps(page: Page) {
 	await openSettings(page);
 	await openSettingsSection(page, 'Connected apps');
 	await expect(page.getByRole('heading', { name: 'Connected apps' })).toBeVisible();
+}
+
+async function expectPaintedLongNamesToStaySeparate(page: Page) {
+	const measurements = await page.locator('[data-connected-account-id]').evaluateAll((rows) => rows.map((row) => {
+		const prefix = row.querySelector('.account-local-prefix');
+		const suffix = row.querySelector('.account-local-suffix');
+		if (!prefix || !suffix) return null;
+		const range = document.createRange();
+		range.selectNodeContents(prefix);
+		return { prefix: prefix.textContent, paintedRight: range.getBoundingClientRect().right, nextLeft: suffix.getBoundingClientRect().left };
+	}));
+	expect(measurements).toHaveLength(2);
+	expect(measurements.every((measurement) => measurement && measurement.prefix?.includes('…') && measurement.paintedRight <= measurement.nextLeft + 0.5)).toBe(true);
+	expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(2);
 }
 
 test.describe('Google account rows capture', () => {
@@ -103,7 +119,7 @@ test.describe('Google account rows capture', () => {
 			await openConnectedApps(page);
 			await expect(page.getByText('Needs you to sign in · Only CORSIA')).toBeVisible();
 			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
-			await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+			await expect(page.locator('[data-connected-account-id="google-work"]').getByRole('button', { name: 'Sign in' })).toBeVisible();
 			await capture(page, testInfo, `11-needs-sign-in-${width}-${theme}`);
 
 			state = 'signed-out';
@@ -116,6 +132,7 @@ test.describe('Google account rows capture', () => {
 			await page.reload();
 			await openConnectedApps(page);
 			await expect(page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com' })).toBeVisible();
+			if (viewport <= 768) await expectPaintedLongNamesToStaySeparate(page);
 			await capture(page, testInfo, `24-same-prefix-long-closed-${width}-${theme}`);
 			await page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com' }).click();
 			await capture(page, testInfo, `17-long-open-${width}-${theme}`);
@@ -131,7 +148,9 @@ test.describe('Google account rows capture', () => {
 			await removeDialog.getByRole('button', { name: 'Cancel' }).click();
 
 			await page.evaluate(() => { window.location.hash = 'connected-apps/google-work'; });
-			await expect(page.getByRole('button', { name: 'Where it works…' })).toBeFocused();
+			const linkedAction = page.locator('[data-chat-link-focus] .btn');
+			await expect(linkedAction).toBeFocused();
+			await expect(linkedAction).toHaveCSS('outline-style', 'solid');
 			await capture(page, testInfo, `18-chat-link-focus-${width}-${theme}`);
 
 			failNextList = true;
