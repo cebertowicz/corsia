@@ -24,7 +24,7 @@ describe('FolderRow', () => {
 
 		expect(host.textContent).toContain('Work folder');
 		expect(host.textContent).toContain('~/Documents/corsia');
-		expect(host.textContent).toContain('macOS will ask before CORSIA can use Documents.');
+		expect(host.textContent).toContain('macOS asks you once to let CORSIA use your Documents folder. Choose Allow when it does.');
 		(host.querySelector('button') as HTMLButtonElement).click();
 		expect(change).toHaveBeenCalledOnce();
 	});
@@ -32,7 +32,7 @@ describe('FolderRow', () => {
 	it('shows the write reason and exposes its blocking state', () => {
 		render({ folder: '/Volumes/Archive/corsia', notice: { kind: 'unwritable', reason: 'the disk is read-only' }, onChange: vi.fn() });
 
-		expect(host.textContent).toContain("CORSIA can’t write here: the disk is read-only.");
+		expect(host.textContent).toContain('CORSIA can’t write to this folder. Choose another one.');
 		expect(host.querySelector('[data-folder-blocked="true"]')).not.toBeNull();
 	});
 });

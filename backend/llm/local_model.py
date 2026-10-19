@@ -212,12 +212,9 @@ def record_set_up(model: LocalModel) -> None:
 def _starter_installed(starter: LocalModel) -> bool:
     """Whether CORSIA's private model directory holds the completed starter."""
     from llm.local_setup_managed import managed_omlx_paths
-    from llm.local_setup_ownership import download_complete
+    from llm.local_setup_disk import download_complete
 
-    try:
-        model_dir = managed_omlx_paths().model_dir
-    except OSError:
-        return False
+    model_dir = managed_omlx_paths().model_dir
     return download_complete(model_dir / starter.repository, starter.download_size_bytes)
 
 

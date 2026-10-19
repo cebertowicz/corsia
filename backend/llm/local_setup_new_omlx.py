@@ -12,7 +12,7 @@ from typing import Callable
 from llm import local_setup as ls
 from llm import local_setup_prepare as prepare
 from llm.local_model import LocalModel, omlx_has_recommender, record_set_up
-from llm.local_setup_managed import managed_omlx_paths
+from llm.local_setup_managed import reserve_managed_omlx_port
 from llm.local_setup_ownership import retire_legacy_owned_omlx_service
 
 
@@ -31,12 +31,12 @@ async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
     # The old Homebrew service is stopped only after its marker and resolved
     # formula location prove CORSIA installed it. A user-owned oMLX is untouched.
     await asyncio.to_thread(retire_legacy_owned_omlx_service)
-    paths = await asyncio.to_thread(managed_omlx_paths)
+    paths, port = await asyncio.to_thread(reserve_managed_omlx_port)
     from llm.local_setup_runtime import register_managed_server
     from llm.providers.omlx_supervisor import start_server
 
     server_id, key = await register_managed_server(
-        port=paths.port, base_path=str(paths.base_path), model_dir=str(paths.model_dir),
+        port=port, base_path=str(paths.base_path), model_dir=str(paths.model_dir),
     )
     report("Starting")
     started = await start_server({"server_id": server_id})
@@ -45,7 +45,7 @@ async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
     report("Configuring")
     await ls.secure_local_omlx(server_id, key)
     await ls._configure_global(server_id)
-    return server_id, paths.port
+    return server_id, port
 
 
 async def _setup_new_omlx(report: Callable[[str], None], events: list[str],

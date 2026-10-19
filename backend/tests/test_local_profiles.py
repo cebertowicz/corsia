@@ -82,7 +82,7 @@ usage = namedtuple("usage", "total used free")
 
 
 def test_disk_check_fails_with_the_space_needed_and_passes_with_room(monkeypatch, tmp_path):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     model_dir = tmp_path / "missing" / "models"
     size = 106_318_234_757
@@ -97,7 +97,7 @@ def test_disk_check_fails_with_the_space_needed_and_passes_with_room(monkeypatch
 
 
 def test_disk_check_reads_the_volume_of_the_reported_directory(monkeypatch, tmp_path):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     read = []
     monkeypatch.setattr(own.shutil, "disk_usage", lambda path: read.append(path) or usage(0, 0, 10**15))
@@ -106,7 +106,7 @@ def test_disk_check_reads_the_volume_of_the_reported_directory(monkeypatch, tmp_
 
 
 def test_disk_check_credits_bytes_already_downloaded(monkeypatch, tmp_path):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     folder = tmp_path / REPO
     folder.mkdir(parents=True)
@@ -128,7 +128,7 @@ def test_disk_check_credits_bytes_already_downloaded(monkeypatch, tmp_path):
 
 
 def test_disk_check_logs_a_warning_and_proceeds_when_space_or_directory_is_unknown(monkeypatch, tmp_path, caplog):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     def boom(_p):
         raise PermissionError("denied")

@@ -17,36 +17,12 @@ def _row_to_dict(row) -> dict | None:
     return dict(row) if row else None
 
 
-def _is_routable_model(row: dict | None) -> bool:
-    """Reject catalog rows for oMLX processes CORSIA does not own.
-
-    Test fixtures deliberately have no network-server record. Production oMLX
-    rows are discoverable only from CORSIA's state-root managed process.
-    """
-    if row is None or row.get("provider") != "omlx" or row.get("source") == "test":
-        return row is not None
-    litellm_model = row.get("litellm_model")
-    if not isinstance(litellm_model, str):
-        return False
-    identity, separator, _model = litellm_model.partition("/")
-    if not separator or not identity.startswith("omlx@"):
-        return False
-    from llm.local_setup_managed import is_corsia_managed_server
-    from llm.network_discovery import get_server
-
-    server = get_server(identity.removeprefix("omlx@")) or {}
-    # Explicit External providers are user-configured and observe-only; only
-    # historical managed/local rows need the private-process ownership proof.
-    return server.get("kind") == "external" or is_corsia_managed_server(server)
-
-
 def get_model(model_id: str) -> dict | None:
     """Look up a model by its short ID (e.g. 'claude-haiku')."""
     db = get_db()
     row = db.execute("SELECT * FROM models WHERE id = ?", (model_id,)).fetchone()
     db.close()
-    result = _row_to_dict(row)
-    return result if _is_routable_model(result) else None
+    return _row_to_dict(row)
 
 
 def get_model_by_litellm(litellm_model: str) -> dict | None:
@@ -63,25 +39,18 @@ def get_model_by_litellm(litellm_model: str) -> dict | None:
         "SELECT * FROM models WHERE litellm_model = ?", (litellm_model,)
     ).fetchone()
 
-    result = _row_to_dict(row)
-    if not _is_routable_model(result):
-        result = None
-    if result is None and "@" in litellm_model:
+    if row is None and "@" in litellm_model:
         provider, _, rest = litellm_model.partition("@")
         if provider == "omlx":
             _, _, provider_model_id = rest.partition("/")
             if provider_model_id:
-                candidates = db.execute(
+                row = db.execute(
                     "SELECT * FROM models WHERE provider = ? AND provider_model_id = ? AND available = 1",
                     (provider, provider_model_id),
-                ).fetchall()
-                result = next(
-                    (candidate for candidate in map(_row_to_dict, candidates) if _is_routable_model(candidate)),
-                    None,
-                )
+                ).fetchone()
 
     db.close()
-    return result
+    return _row_to_dict(row)
 
 
 def list_models(
@@ -109,7 +78,7 @@ def list_models(
         f"SELECT * FROM models{where} ORDER BY provider, display_name", params
     ).fetchall()
     db.close()
-    return [row for raw in rows if _is_routable_model(row := dict(raw))]
+    return [dict(r) for r in rows]
 
 
 def get_selectable_models() -> list[dict]:
@@ -142,19 +111,18 @@ def get_model_status_catalog_rows() -> list[dict]:
         """
     ).fetchall()
     db.close()
-    return [row for raw in rows if _is_routable_model(row := dict(raw))]
+    return [dict(row) for row in rows]
 
 
 def is_valid_model_choice(litellm_model: str) -> bool:
     """Check if a litellm model string is a valid selection (enabled + available)."""
     db = get_db()
     row = db.execute(
-        "SELECT * FROM models WHERE litellm_model = ? AND enabled = 1 AND available = 1",
+        "SELECT id FROM models WHERE litellm_model = ? AND enabled = 1 AND available = 1",
         (litellm_model,),
     ).fetchone()
     db.close()
-    result = _row_to_dict(row)
-    return _is_routable_model(result)
+    return row is not None
 
 
 def is_dispatchable_model(model: str | None) -> bool:

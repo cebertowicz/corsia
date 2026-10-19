@@ -103,12 +103,13 @@ def binary_from_config(provider: str, cfg: dict, *, candidate_roots: tuple[Path,
     manual = cfg.get("binary")
     if manual and os.path.isfile(manual) and os.access(manual, os.X_OK):
         return manual
-    search_path = None if candidate_roots is None else os.pathsep.join(str(root) for root in candidate_roots)
-    found = shutil.which(name, path=search_path)
+    if candidate_roots is None:
+        found = shutil.which(name)
+    else:
+        found = shutil.which(name, path=os.pathsep.join(str(root) for root in candidate_roots))
+        candidates = [str(root / name) for root in candidate_roots]
     if found:
         return found
-    if candidate_roots is not None:
-        candidates = [str(root / name) for root in candidate_roots]
     for c in candidates:
         p = os.path.expanduser(c)
         if os.path.isfile(p) and os.access(p, os.X_OK):

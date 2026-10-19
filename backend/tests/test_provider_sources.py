@@ -823,7 +823,11 @@ class TestRecheck:
         current["pid"] = 4243
         assert client.post("/api/providers/local/setup").status_code == 200
         assert _sources(client)["omlx"]["state"] == "not_installed"
-        assert foreign_model not in set().union(*local_sources.catalog_membership())
+        # Startup retires the unowned loopback row, and its model with it.
+        from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+
+        assert retire_unowned_local_omlx_rows() == [foreign]
+        assert f"omlx@{foreign}" not in set().union(*local_sources.catalog_membership())
 
     def test_local_setup_route_explicit_stop_supersedes_remembered_keep_for_the_same_pid(
             self, isolated_db, client, monkeypatch, tmp_path):

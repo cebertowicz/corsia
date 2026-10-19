@@ -18,6 +18,7 @@ async def shutdown_owned_tasks(
     from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
     from llm.local_setup_prepare import prepare_task
+    from llm.local_setup_upgrade import upgrade_task
     from onboarding.local_download_wake import retry_task as local_download_retry_task
     from tools.mcp_oauth_flow import stop_all as stop_app_signins
 
@@ -29,6 +30,7 @@ async def shutdown_owned_tasks(
         ),
         ("local model setup", flight_task()),
         ("local model pick", prepare_task()),
+        ("local model upgrade", upgrade_task()),
         ("local-download wake retry", local_download_retry_task()),
         *zip(
             ("provider auto-start", "cloud discovery", "network discovery",

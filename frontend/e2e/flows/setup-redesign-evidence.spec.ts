@@ -182,6 +182,11 @@ async function capture(page: Page, fixture: Fixture, theme: string, width: numbe
 	console.log(`FRAME ${file}: ${fixture.element}`);
 }
 
+// The first-run frames turn Focus off; restore it even when a frame fails, so later specs render with it on.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
+
 test('setup redesign complete state frames @setup-redesign', async ({ browser, request }) => {
 	test.setTimeout(600000);
 	for (const theme of ['light', 'dark']) {
@@ -195,7 +200,6 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 		}
 	}
 	await setFocusMode(request, false);
-	try {
 	for (const theme of ['light', 'dark']) {
 		const context = await browser.newContext({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
 		const page = await context.newPage();
@@ -222,9 +226,6 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 		records.push({ file, state: 'first-run-opening-fixture', element: 'Fixture opening message and bound composer model (not Select Model)' });
 		console.log(`FRAME ${file}: first-run fixture opening and bound composer model`);
 		await context.close();
-	}
-	} finally {
-		await setFocusMode(request, true);
 	}
 	const manifest = resolve(assets!, 'frames.json');
 	const previous: typeof records = existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8')) : [];

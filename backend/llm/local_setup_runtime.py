@@ -53,27 +53,46 @@ async def wait_for_health(port: int) -> None:
     )
 
 
-async def register_managed_server(*, port: int, base_path: str, model_dir: str) -> tuple[str, str]:
-    """Create CORSIA's sole managed oMLX row and retire legacy managed rows.
+def retire_unowned_local_omlx_rows() -> list[str]:
+    """Remove every oMLX row on this Mac's loopback that CORSIA does not own.
 
-    User-owned oMLX instances are never retained as managed servers. The generated
-    credential stays in the server key store and is passed only to CORSIA's owned
-    subprocess through its supervisor configuration.
+    v0.3/v0.4 registered whatever oMLX answered on this Mac. Such a row cannot
+    prove CORSIA owns its process, base path or models, so it stops routing;
+    its models leave the catalog with it, and a thread bound to one resolves to
+    the same model on the managed server once that lists it. An oMLX on another
+    machine and an External provider are the person's and stay. The rule is
+    ``is_retired_local_omlx``; this runs at startup and when setup registers its
+    server. Blocking: run it on the database thread.
+    """
+    from llm import network_discovery as discovery
+    from llm.local_setup_managed import is_retired_local_omlx
+    from llm.network_endpoints import get_endpoints
+
+    retired: list[str] = []
+    for server in discovery.get_servers(provider="omlx"):
+        hosts = [str(endpoint.get("host") or "") for endpoint in get_endpoints(str(server["id"]))]
+        if is_retired_local_omlx(server, hosts) and discovery.remove_server(str(server["id"])):
+            retired.append(str(server["id"]))
+    if retired:
+        log.info("retired %d oMLX row(s) on this Mac that CORSIA does not manage", len(retired))
+    return retired
+
+
+async def register_managed_server(*, port: int, base_path: str, model_dir: str) -> tuple[str, str]:
+    """Create CORSIA's sole managed oMLX row and retire unowned local rows.
+
+    The generated credential stays in the server key store and is passed only to
+    CORSIA's owned subprocess through its supervisor configuration.
     """
     from infra.db_async import run_in_db
     from infra.key_store_servers import resolve_server, set_server_key
     from llm import network_discovery as discovery
+    from llm.local_setup_managed import MANAGED_INSTANCE_ID
 
     def persist() -> tuple[str, str]:
-        # v0.3/v0.4 managed rows named an arbitrary local oMLX. They cannot
-        # prove CORSIA owns its process, base path, or models, so setup replaces
-        # those rows. Explicit External providers are person-configured and
-        # observe-only; their remote/local model routes must survive.
-        for server in discovery.get_servers(provider="omlx"):
-            if server.get("kind") != "external" and server.get("instance_id") != "corsia-managed":
-                discovery.remove_server(str(server["id"]))
+        retire_unowned_local_omlx_rows()
         server_id = discovery.upsert_server(
-            provider="omlx", instance_id="corsia-managed", instance_name=LOCAL_SERVER_NAME,
+            provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name=LOCAL_SERVER_NAME,
             host=LOCAL_HOST, port=port, status="offline", kind="managed", source="corsia",
         )
         credential = resolve_server(server_id) or secrets.token_urlsafe(32)

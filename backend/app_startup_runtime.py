@@ -43,14 +43,33 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
 
 
 async def resume_local_setup() -> None:
-    """Restore managed-model state and resume durable setup work after a restart."""
+    """Restore managed-model state and resume durable setup work after a restart.
+
+    Each step is independent and none can stop the app: a failure is logged and
+    local inference reports its own state.
+    """
+    from loguru import logger
+
+    from infra.db_async import run_in_db
     from llm.local_model import backfill_legacy_record
     from llm.local_setup_recovery import resume_pending_setup
+    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_upgrade import start_upgrade
     from onboarding.local_download_wake import resume_pending_local_download
 
-    await asyncio.to_thread(backfill_legacy_record)
-    await resume_pending_setup()
-    await resume_pending_local_download()
+    steps = (
+        ("retire unowned local oMLX rows", lambda: run_in_db(retire_unowned_local_omlx_rows)),
+        ("record an earlier setup's model", lambda: asyncio.to_thread(backfill_legacy_record)),
+        ("resume local setup", resume_pending_setup),
+        ("resume local download notice", resume_pending_local_download),
+    )
+    for label, step in steps:
+        try:
+            await step()
+        except Exception as exc:
+            logger.warning(f"Local setup startup step failed ({label}): {exc}")
+    # Moving an earlier install's models can take minutes; startup does not wait.
+    start_upgrade()
 
 
 async def _startup_harness_discovery() -> list[dict]:

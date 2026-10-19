@@ -21,6 +21,8 @@ from llm.local_setup_managed import MANAGED_DIR
 
 MARKER_NAME = "local_setup_installed_omlx"
 OMLX_FORMULA = "jundot/omlx/omlx"
+#: The launchd job ``brew services`` runs the oMLX formula as.
+BREW_SERVICE_LABEL = "homebrew.mxcl.omlx"
 
 log = logging.getLogger(__name__)
 
@@ -114,8 +116,11 @@ def setup_owns_current_omlx(brew: str, omlx: str) -> bool:
 
 def legacy_setup_owns_current_omlx() -> bool:
     """Whether the prior Homebrew service is positively identified as CORSIA's."""
+    # The marker is checked first, so an install without it runs nothing.
+    if not marker_path().exists():
+        return False
     brew, omlx = shutil.which("brew"), installed_omlx()
-    if not marker_path().exists() or not brew or not omlx:
+    if not brew or not omlx:
         return False
     try:
         return setup_owns_current_omlx(brew, omlx)
@@ -127,7 +132,7 @@ def retire_legacy_owned_omlx_service() -> bool:
     """Stop only the prior service that the v0.3/v0.4 proof identifies as ours.
 
     A failure leaves the private managed launch safe: its port and paths are
-    distinct, and the old instance remains excluded from CORSIA's catalog.
+    distinct, and the old instance's row is retired at startup.
     """
     if not legacy_setup_owns_current_omlx():
         return False
@@ -144,8 +149,69 @@ def retire_legacy_owned_omlx_service() -> bool:
 
 
 def legacy_omlx_settings_file() -> Path:
-    """Read the old CORSIA service settings only after ownership is proven."""
-    return Path.home() / ".omlx" / "settings.json"
+    """Where CORSIA's old Homebrew oMLX kept ``settings.json``; read only after ownership is proven.
+
+    oMLX's macOS app writes a one-line ``base-path`` file when the person moves
+    its data root, and oMLX reads it before falling back to ``~/.omlx`` (oMLX
+    v0.7.0 ``omlx/settings.py``).
+    """
+    bootstrap = Path.home() / "Library" / "Application Support" / "oMLX" / "base-path"
+    try:
+        moved = bootstrap.read_text(encoding="utf-8").strip()
+    except OSError:
+        moved = ""
+    base = Path(moved).expanduser() if moved else Path.home() / ".omlx"
+    return base / "settings.json"
+
+
+def launchd_jobs() -> dict[int, str] | None:
+    """Running launchd jobs in this login session, PID to label; None when unreadable.
+
+    ``launchctl list`` only reads.
+    """
+    try:
+        result = subprocess.run(["launchctl", "list"], capture_output=True, text=True,
+                                timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    jobs: dict[int, str] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit():
+            jobs[int(parts[0])] = parts[2].strip()
+    return jobs
+
+
+def _omlx_serve_processes() -> list[tuple[int, int]]:
+    """``(pid, parent pid)`` of every ``omlx serve`` except CORSIA's managed one."""
+    try:
+        result = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True,
+                                text=True, timeout=2, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    from infra.config import STATE_ROOT
+
+    managed_base = str(Path(STATE_ROOT) / MANAGED_DIR)
+    found: list[tuple[int, int]] = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) != 3 or "omlx serve" not in parts[2] or managed_base in parts[2]:
+            continue
+        try:
+            found.append((int(parts[0]), int(parts[1])))
+        except ValueError:
+            continue
+    return found
+
+
+def _job_label(jobs: dict[int, str] | None, pid: int, parent: int) -> str | None:
+    """The launchd job running ``pid``, directly or as its launched child.
+
+    Unreadable jobs answer None, so the process is treated as a plain one.
+    """
+    if not jobs:
+        return None
+    return jobs.get(pid) or (jobs.get(parent) if parent > 1 else None)
 
 
 def foreign_omlx_process() -> int | None:
@@ -153,31 +219,39 @@ def foreign_omlx_process() -> int | None:
 
     This examines process commands only. It never reads a person's oMLX settings,
     registers their server, or treats an ambiguous process list as consent to stop.
+    CORSIA's own v0.3/v0.4 Homebrew service is not foreign: the upgrade retires it.
     """
-    try:
-        result = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True,
-                                text=True, timeout=2, check=True)
-    except (OSError, subprocess.SubprocessError):
+    processes = _omlx_serve_processes()
+    if not processes:
         return None
-    from infra.config import STATE_ROOT
-
-    managed_base = str(Path(STATE_ROOT) / MANAGED_DIR)
-    matches: list[int] = []
-    for line in result.stdout.splitlines():
-        parts = line.strip().split(maxsplit=1)
-        if len(parts) != 2 or "omlx serve" not in parts[1] or managed_base in parts[1]:
-            continue
-        try:
-            matches.append(int(parts[0]))
-        except ValueError:
-            continue
+    jobs = launchd_jobs()
+    matches = [
+        pid for pid, parent in processes
+        if not (_job_label(jobs, pid, parent) == BREW_SERVICE_LABEL and legacy_setup_owns_current_omlx())
+    ]
     return matches[0] if len(matches) == 1 else None
 
 
 def stop_foreign_omlx_process(pid: int) -> bool:
-    """Terminate only the currently re-identified foreign oMLX process."""
+    """Stop only the currently re-identified foreign oMLX process.
+
+    A launchd job (``brew services`` runs one) would restart a signalled
+    process, so its job is booted out of this login session instead. The
+    person's plist is never edited, unloaded for good or deleted, and the job
+    comes back at their next login. A plain process gets SIGTERM.
+    """
     if foreign_omlx_process() != pid:
         return False
+    parent = next((ppid for found, ppid in _omlx_serve_processes() if found == pid), 0)
+    label = _job_label(launchd_jobs(), pid, parent)
+    if label:
+        try:
+            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+                           capture_output=True, text=True, timeout=30, check=True)
+        except (OSError, subprocess.SubprocessError) as error:
+            log.warning("could not stop the oMLX launchd job: %s", error)
+            return False
+        return True
     try:
         os.kill(pid, 15)
     except (OSError, ProcessLookupError):
@@ -283,79 +357,6 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
     except (OSError, subprocess.SubprocessError) as exc:
         action = "reinstall" if broken else "update"
         raise RuntimeError(homebrew_failure_message(action, exc)) from exc
-
-
-
-class DiskSpaceError(RuntimeError):
-    """The models volume lacks room for the download; the message says how much to free."""
-
-
-def _present_bytes(folder: Path) -> int:
-    """Bytes already under ``folder`` (finished and partial files); 0 when it is absent."""
-    total = 0
-    for root, _dirs, files in os.walk(folder):
-        for name in files:
-            try:
-                total += (Path(root) / name).stat().st_size
-            except OSError:
-                continue
-    return total
-
-
-def download_complete(folder: Path, download_bytes: int) -> bool:
-    """Whether ``folder`` holds a finished download: every expected byte, and no partial file.
-
-    A cancelled or failed download leaves its folder behind (oMLX resumes there), so the
-    folder existing proves nothing. Partial files carry Hugging Face's ``.incomplete``
-    suffix until they are renamed into place.
-    """
-    if not folder.is_dir():
-        return False
-    for _root, _dirs, files in os.walk(folder):
-        if any(name.endswith(".incomplete") for name in files):
-            return False
-    return _present_bytes(folder) >= download_bytes
-
-
-def download_disk_space(download_bytes: int, model_dir: Path | None, repository: str) -> dict[str, int | str]:
-    """Describe the actual remaining download space requirement without guessing.
-
-    oMLX resumes inside ``<model_dir>/<repository>``, so present partial bytes are
-    credited and the existing 10% safety margin applies only to the remainder.
-    """
-    if model_dir is None:
-        return {"state": "unknown"}
-    path = model_dir
-    try:
-        while not path.exists() and path != path.parent:
-            path = path.parent
-        free = shutil.disk_usage(path).free
-        remaining = max(0, download_bytes - _present_bytes(model_dir / repository))
-    except OSError:
-        return {"state": "unknown"}
-    required = int(remaining * 1.1)
-    return {
-        "state": "ready" if free >= required else "insufficient",
-        "free_bytes": free,
-        "remaining_bytes": remaining,
-        "required_bytes": required,
-    }
-
-
-def require_free_disk(download_bytes: int, model_dir: Path | None, repository: str) -> None:
-    """Raise DiskSpaceError when oMLX's download volume lacks room for the remainder."""
-    space = download_disk_space(download_bytes, model_dir, repository)
-    if space["state"] == "unknown":
-        log.warning("Free disk space check skipped: oMLX download directory is unavailable")
-        return
-    free = int(space["free_bytes"])
-    needed = int(space["required_bytes"])
-    if space["state"] == "insufficient":
-        short = (needed - free) / 1000**3
-        raise DiskSpaceError(
-            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this computer has "
-            f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.")
-
 
 
 _LOG_ERROR = re.compile(r"^(ERROR|CRITICAL)\b| - (ERROR|CRITICAL) - |^\w*(Error|Exception):")

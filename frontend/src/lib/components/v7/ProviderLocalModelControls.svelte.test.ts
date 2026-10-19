@@ -24,10 +24,9 @@ describe('ProviderLocalModelControls', () => {
 		component = mount(ProviderLocalModelControls, { target: host, props: { onStarted: vi.fn(), onAddProvider } });
 		await tick(); await tick(); flushSync();
 
-		expect(host.textContent).toContain('This computer doesn’t have enough memory to run a local model. Connect a subscription or an API key instead.');
-		expect(host.textContent).toContain('Connect a subscription or an API key instead.');
+		expect(host.textContent).toContain('Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider. Smaller local models may come in a future update.');
 		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Add provider']);
-			expect(host.querySelector('button')?.classList.contains('secondary')).toBe(true);
+		expect(host.querySelector('button')?.classList.contains('secondary')).toBe(true);
 		expect(host.textContent).not.toContain('Add model');
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		expect(onAddProvider).toHaveBeenCalledOnce();

@@ -14,7 +14,7 @@ from llm.local_model import OMLX_PIN, LocalModel, PickUnavailable, ask_recommend
 from llm.local_setup_auth import omlx_version
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok
 from llm.local_setup_download import download_dir
-from llm.local_setup_ownership import download_disk_space
+from llm.local_setup_disk import download_disk_space
 from llm.network_discovery import get_servers
 
 router = APIRouter(prefix="/api/providers/local", tags=["providers"])

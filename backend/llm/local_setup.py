@@ -32,7 +32,7 @@ from llm.local_setup_auth import (  # noqa: F401
     secure_local_omlx,
 )
 from llm.local_setup_ownership import ensure_omlx as _ensure_omlx
-from llm.local_setup_ownership import require_free_disk
+from llm.local_setup_disk import require_free_disk
 from llm.local_setup_ownership import run_command as _run
 from llm.local_profiles import format_size
 from llm import local_setup_cancel, local_setup_download, local_setup_operation
