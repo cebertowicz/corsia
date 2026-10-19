@@ -196,10 +196,10 @@
       "sha256": "8b6f2c7ae15ae1c60d688880d0aa079fa1b83356ecca9e642d4645d2a5bf8aaa"
     },
     {
-      "bytes": 9864,
+      "bytes": 11506,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/remote-access.md",
-      "sha256": "d2b7323916a52ab779f0e1bcd0051be0f607946868eb4366380a1e23e55c5425"
+      "sha256": "9c60ac459a676f677d4178eefc85caaab175278b3c67815f0527d22b10203331"
     },
     {
       "bytes": 4898,
