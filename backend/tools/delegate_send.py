@@ -74,6 +74,10 @@ class DelegateSendTool(Tool):
                         "scope id when supplied; it does not authorize cross-scope sends."
                     ),
                 },
+                "no_sensitive_content": {
+                    "type": "boolean",
+                    "description": "Confirm this cloud-bound send contains no sensitive content.",
+                },
             },
             ["thread_id", "message"],
         )
@@ -103,6 +107,14 @@ class DelegateSendTool(Tool):
         )
         if scope_error:
             return scope_error
+        confirmation_error = await delegation.run_in_db(
+            _send_confirmation_error,
+            current,
+            target,
+            kwargs.get("no_sensitive_content"),
+        )
+        if confirmation_error:
+            return confirmation_error
         intent = delegation._clean(kwargs.get("intent")) or "progress"
         if intent not in ("progress", "completion"):
             return "Error: intent must be 'progress' or 'completion'"
@@ -140,6 +152,19 @@ class DelegateSendTool(Tool):
         if plan_task is not None:
             sent["plan_task"] = plan_task
         return delegation._json(sent)
+
+
+def _send_confirmation_error(sender, recipient, no_sensitive_content):
+    from infra.local_only import send_confirmation_refusal
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return send_confirmation_refusal(
+            sender, recipient, no_sensitive_content=no_sensitive_content, db=db,
+        )
+    finally:
+        db.close()
 
 
 async def _answer_needs(from_thread_id: str, thread_id: str, node_id: str, kwargs) -> dict:

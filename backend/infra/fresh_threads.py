@@ -18,6 +18,7 @@ from infra.config import WORKSPACE
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.execution_class import provider_label
+from infra.local_only import local_only_model_refusal
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
@@ -31,6 +32,8 @@ _SESSION_EVENT_FIELDS = (
     "project_id",
     "parent_session_id",
     "spawned_by",
+    "local_only",
+    "local_only_inherited_from_thread_id",
     "reasoning_effort",
     "created_at",
     "updated_at",
@@ -99,23 +102,41 @@ def create_fresh_thread(
     """
     sid = thread_id or str(uuid.uuid4())[:8]
     now = created_at or _now()
-    row = {
-        "id": sid,
-        "user_id": user_id,
-        "profile": profile,
-        "title": title,
-        "model": model,
-        "project_id": project_id,
-        "parent_thread_id": parent_thread_id,
-        "spawned_by": spawned_by,
-        "reasoning_effort": reasoning_effort,
-        "created_at": now,
-        "updated_at": now,
-    }
-    values = {key: value for key, value in row.items() if value is not None}
-
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
+        inherited_from = spawned_by or parent_thread_id or actor_thread_id
+        parent = (
+            _db.execute(
+                "SELECT local_only FROM threads WHERE id = ?", (inherited_from,)
+            ).fetchone()
+            if inherited_from
+            else None
+        )
+        local_only = bool(parent and parent["local_only"])
+        refusal = local_only_model_refusal(
+            model,
+            thread_local_only=local_only,
+            project_id=project_id,
+            db=_db,
+        )
+        if refusal:
+            raise ValueError(refusal)
+        row = {
+            "id": sid,
+            "user_id": user_id,
+            "profile": profile,
+            "title": title,
+            "model": model,
+            "project_id": project_id,
+            "parent_thread_id": parent_thread_id,
+            "spawned_by": spawned_by,
+            "local_only": int(local_only),
+            "local_only_inherited_from_thread_id": inherited_from if local_only else None,
+            "reasoning_effort": reasoning_effort,
+            "created_at": now,
+            "updated_at": now,
+        }
+        values = {key: value for key, value in row.items() if value is not None}
         cols = list(values.keys())
         marks = ", ".join("?" for _ in cols)
         _db.execute(

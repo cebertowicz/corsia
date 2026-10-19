@@ -57,6 +57,8 @@ SCHEMA_SQL = f"""
         pinned INTEGER DEFAULT 0,
         parent_thread_id TEXT REFERENCES threads(id),
         spawned_by TEXT REFERENCES threads(id),
+        local_only INTEGER NOT NULL DEFAULT 0,
+        local_only_inherited_from_thread_id TEXT REFERENCES threads(id),
         bootloader_files TEXT,
         pending_compaction_trigger TEXT,
         pending_compaction_detail TEXT,
@@ -235,14 +237,12 @@ SCHEMA_SQL = f"""
     {KEY_STORE_SCHEMA_SQL}
     {CONNECTED_APPS_SCHEMA_SQL}
     {CONNECTED_ACCOUNTS_SCHEMA_SQL}
-
     CREATE TABLE IF NOT EXISTS fact_extraction_runs (
         run_date TEXT PRIMARY KEY,
         status TEXT NOT NULL DEFAULT 'ok',
         result_json TEXT,
         ran_at TEXT NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS network_servers (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL DEFAULT 'omlx',

@@ -80,6 +80,10 @@ class DelegateTaskTool(Tool):
                         "'none' keeps your task and returns the result as a chat message."
                     ),
                 },
+                "no_sensitive_content": {
+                    "type": "boolean",
+                    "description": "Confirm this cloud-bound task contains no sensitive content.",
+                },
             },
             ["task", "model"],
         )
@@ -127,6 +131,14 @@ async def _spawn(
     model, refusal = await run_in_db(partial(eligible_delegation_model, requested_model, **scope))
     if refusal:
         return f"Error: {refusal}"
+    confirmation_error = await run_in_db(
+        _first_message_confirmation_error,
+        parent,
+        model,
+        kwargs.get("no_sensitive_content"),
+    )
+    if confirmation_error:
+        return confirmation_error
     try:
         requested_is_cc = delegation._is_cc_model(model)
     except Exception as exc:
@@ -178,6 +190,22 @@ async def _spawn(
         "driver": result.driver,
         "duplicate": result.duplicate,
     }
+
+
+def _first_message_confirmation_error(parent, model, no_sensitive_content):
+    from infra.database import get_db
+    from infra.local_only import send_confirmation_refusal
+
+    db = get_db()
+    try:
+        return send_confirmation_refusal(
+            parent,
+            {"model": model, "project_id": parent.get("project_id")},
+            no_sensitive_content=no_sensitive_content,
+            db=db,
+        )
+    finally:
+        db.close()
 
 
 async def _hand_over(

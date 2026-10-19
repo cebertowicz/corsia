@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from api.thread_deletion import delete_owned_thread as _delete_owned_thread
-from infra.auth import authenticate
+from infra.auth import authenticate, require_human_user
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.passive_changes import append_agent_roster_transition
@@ -201,6 +201,43 @@ def _write_metadata_patch(
             "context_boundary_changed": context_boundary_changed,
             "archive_changed": archive_changed,
         }
+
+
+def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | str:
+    with write_transaction(None, scope="thread_local_only") as db:
+        thread = get_thread_for_user(thread_id, user_id, db=db)
+        if not thread:
+            return "not_found"
+        inherited_from = thread["local_only_inherited_from_thread_id"]
+        if inherited_from:
+            return {"error": "inherited", "parent_thread_id": inherited_from}
+        db.execute(
+            "UPDATE threads SET local_only=?, updated_at=? WHERE id=?",
+            (int(local_only), utc_now_iso(), thread_id),
+        )
+        return {"local_only": local_only, "local_only_inherited_from_thread_id": None}
+
+
+@router.put("/threads/{thread_id}/local-only")
+async def set_local_only(
+    thread_id: str,
+    body: dict,
+    user: dict = Depends(require_human_user),
+):
+    """Set a root thread's person-only local-only model scope."""
+    local_only = body.get("local_only")
+    if not isinstance(local_only, bool):
+        raise HTTPException(422, "local_only must be a boolean")
+    result = await run_in_db(_write_local_only, thread_id, user["id"], local_only)
+    if result == "not_found":
+        raise HTTPException(404)
+    if result.get("error") == "inherited":
+        raise HTTPException(
+            409,
+            "This thread inherited Local only from parent thread "
+            f"{result['parent_thread_id']} and cannot change it.",
+        )
+    return {"ok": True, **result}
 
 
 async def _patch_metadata(thread_id: str, user_id: str, body: dict):
