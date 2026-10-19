@@ -190,7 +190,7 @@ export async function setNetworkServerPrivate(
 	isPrivate: boolean,
 ): Promise<{ ok: boolean; message?: string }> {
 	try {
-		const res = await fetch(`${BASE}/api/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
+		const res = await fetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ private: isPrivate }),

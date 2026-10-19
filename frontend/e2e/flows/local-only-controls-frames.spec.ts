@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { loginByUrl, openSettings, openSettingsSection, sendChatMessage } from '../support/corsia';
+import { assistantMessages, loginByUrl, openSettings, openSettingsSection, sendChatMessage, waitForWsConnected } from '../support/corsia';
+import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 
 /**
@@ -12,6 +13,7 @@ import { seedMockResponses } from '../support/mock';
  */
 const OUT = process.env.LOCAL_ONLY_FRAMES_OUT;
 const BEFORE = process.env.LOCAL_ONLY_FRAMES_MODE === 'before';
+const REFERENCE_ONLY = process.env.LOCAL_ONLY_FRAMES_MODE === 'reference';
 
 const surfaces = (projectName: string) => projectName === 'chromium-desktop'
 	? ([['1440', 1440, 900, 'light'], ['1440', 1440, 900, 'dark']] as const)
@@ -141,7 +143,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			return `lo-${testInfo.project.name}-${stamp}`;
 		};
 
-		for (const [size, width, height, theme] of surfaces(testInfo.project.name)) {
+		for (const [size, width, height, theme] of REFERENCE_ONLY ? [] : surfaces(testInfo.project.name)) {
 			const prefix = BEFORE ? 'before-' : '';
 			// Project page.
 			Object.assign(state, { models: catalogs.plain, cloudOff: false, failSave: false });
@@ -196,12 +198,14 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 		// Reference: the chat canvas once, at 1440, light.
 		if (!BEFORE && testInfo.project.name === 'chromium-desktop') {
 			await page.unrouteAll({ behavior: 'ignoreErrors' });
-			await seedMockResponses(page.request, [{ content: 'Here is the outline: three sections, each with one open question for you to settle.' }]);
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await page.emulateMedia({ colorScheme: 'light' });
+			await setFocusMode(page.request, false);
 			await loginByUrl(page);
+			await waitForWsConnected(page);
+			await seedMockResponses(page.request, [{ content: 'Here is the outline: three sections, each with one open question for you to settle.', finish_reason: 'stop' }]);
 			await sendChatMessage(page, 'Outline the client report for me.');
-			await expect(page.getByText('Here is the outline')).toBeVisible({ timeout: 20_000 });
+			await expect(assistantMessages(page).last()).toContainText('Here is the outline', { timeout: 30_000 });
 			await shot('reference-chat-canvas', '1440', 'light');
 		}
 	});

@@ -47,4 +47,5 @@
 	.setting :global(.tg) { flex: 0 0 auto; }
 	.label { color: var(--text-primary); font-size: var(--text-subhead); font-weight: 500; }
 	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	p + p { margin-top: var(--space-1); }
 </style>
