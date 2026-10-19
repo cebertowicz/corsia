@@ -192,6 +192,10 @@ def test_reviewer_events_include_version_and_standards(monkeypatch):
         reviewer_standards=["eng-arch", "product"],
     )
 
-    attributes = [properties for _, event, properties in events if event in {"finding.created", "completed"}]
-    assert all(event["reviewer_version"] == "0123456789ab" for event in attributes)
-    assert all(event["reviewer_standards"] == ["eng-arch", "product"] for event in attributes)
+    attributes = {
+        event: properties for _, event, properties in events
+        if event in {"finding.created", "completed"}
+    }
+    assert attributes.keys() == {"finding.created", "completed"}
+    assert all(event["reviewer_version"] == "0123456789ab" for event in attributes.values())
+    assert all(event["reviewer_standards"] == ["eng-arch", "product"] for event in attributes.values())
