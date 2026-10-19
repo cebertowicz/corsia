@@ -138,7 +138,8 @@ def source_candidate(source_kind: str, source_id: str) -> CorrectionCandidate | 
                 or not isinstance(answered_at, str) or not answered_at
             ):
                 return None
-            options = body.get('options') if isinstance(body.get('options'), list) else ()
+            listed = body.get('options')
+            options = listed if isinstance(listed, list) else []
             options_text = '; '.join(
                 f"{item.get('id')} — {item.get('label')} — {item.get('detail', '')}"
                 for item in options if isinstance(item, dict)
