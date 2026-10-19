@@ -42,3 +42,19 @@ describe('model sheet in a cloud-off project', () => {
 		expect(text()).toContain('Claude Opus'); expect(text()).not.toContain('Cloud models are off');
 	});
 });
+
+describe('Local header follows the backend is_local flag', () => {
+	const remote = (isLocal: boolean): Model => ({ id: 'omlx/llama', name: 'Llama', size: '', backend: 'network', provider: 'omlx', server_name: 'Studio mini', litellm_model: 'omlx@llama', speed: '', status: 'ready', is_local: isLocal } as Model);
+	it('remote oMLX not marked private: no Local label', () => {
+		models.set([remote(false)]); open();
+		expect(text()).toContain('Llama'); expect(text()).not.toContain('Local · ready');
+	});
+	it('the same group marked private: Local label', () => {
+		models.set([remote(true)]); open();
+		expect(text()).toContain('Local · ready');
+	});
+	it('External group with is_local: Local label', () => {
+		models.set([{ id: 'ext/lms', name: 'Gemma', size: '', backend: 'network', provider: 'external', server_name: 'LM Studio', litellm_model: 'external@lms/gemma', speed: '', status: 'ready', is_local: true } as Model]); open();
+		expect(text()).toContain('Local · ready');
+	});
+});

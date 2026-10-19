@@ -35,6 +35,8 @@ const catalogs = {
 	someLocal: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff),
 		localRow('qwen', 'Qwen3 8B', 'This Mac'), localRow('llama', 'Llama 3.3 70B', 'Studio mini')],
 	noneReady: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff)],
+	remoteNotPrivate: [cloudRow('opus', 'Opus 5.5'), cloudRow('sonnet', 'Sonnet 5.5'),
+		localRow('qwen', 'Qwen3 8B', 'This Mac'), localRow('llama', 'Llama 3.3 70B', 'Studio mini', { is_local: false })],
 	localDown: [cloudRow('opus', 'Opus 5.5', cloudOff), localRow('qwen', 'Qwen3 8B', 'This Mac', { status: 'available' })],
 };
 
@@ -186,6 +188,9 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			}
 
 			// Composer model sheet in a cloud-off project.
+			Object.assign(state, { models: catalogs.remoteNotPrivate, cloudOff: false });
+			await openSheetInProject(page, await begin(width, height, theme));
+			await shot(`${prefix}sheet-remote-not-private`, size, theme);
 			if (!BEFORE) {
 				for (const [name, models] of [['sheet-some-local', catalogs.someLocal], ['sheet-no-local', catalogs.noneReady]] as const) {
 					Object.assign(state, { models, cloudOff: true });

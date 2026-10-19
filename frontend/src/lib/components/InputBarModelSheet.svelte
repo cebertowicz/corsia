@@ -213,7 +213,7 @@
 							name={group.name}
 							groupKey={group.key}
 							count={group.rows.length}
-							local={isLocalGroup(group) && usable}
+							local={group.rows.some((model) => model.is_local === true) && usable}
 							open={open}
 							status={headStatus}
 							subtitle={subtitle}

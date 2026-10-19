@@ -27,7 +27,7 @@ const CATALOG = [
 	row({ id: 'cc/opus', name: 'Claude Code · Opus', display_name: 'Opus', litellm_model: 'claude-code/opus', usage }),
 	row({ id: 'cc/sonnet', name: 'Claude Code · Sonnet', display_name: 'Sonnet', litellm_model: 'claude-code/sonnet', usage }),
 	row({ id: 'cx/sol', name: 'Codex · Sol', display_name: 'Sol', connection: 'codex', provider: 'codex', backend: 'codex', litellm_model: 'codex/sol', usage }),
-	row({ id: 'om/q', name: 'Qwen', display_name: 'Qwen', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac', litellm_model: 'omlx@s/q' }),
+	row({ id: 'om/q', name: 'Qwen', display_name: 'Qwen', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac', litellm_model: 'omlx@s/q', is_local: true }),
 ];
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
