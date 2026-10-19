@@ -11,6 +11,7 @@
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
+	import ConnectAppFlow from './ConnectAppFlow.svelte';
 
 	let apps = $state<ConnectedApp[]>([]);
 	let loading = $state(true);
@@ -20,6 +21,7 @@
 	let errorId = $state<string | null>(null);
 	let whereApp = $state<ConnectedApp | null>(null);
 	let whereApprove = $state(false);
+	let connectAppOpen = $state(false);
 	let openId = $state<string | null>(null);
 	let signInHere = $state(false);
 	let signedOut = $state<Set<string>>(new Set());
@@ -111,14 +113,19 @@
 {#snippet secondLine(app: ConnectedApp)}{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}{#if app.folder}<span class="line">From Claude Code · {app.folder} folder</span>{/if}{/snippet}
 
 <section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
-	<p class="lede">Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>
-	{#if anyFirstSignIn(apps)}<p class="lede">{SIGN_IN_LEDE}</p>{/if}
+	<div class="heading">
+		<div>
+			<p class="lede">Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>
+			{#if anyFirstSignIn(apps)}<p class="lede">{SIGN_IN_LEDE}</p>{/if}
+		</div>
+		<Button variant="primary" onclick={() => connectAppOpen = true}>Connect an app</Button>
+	</div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
 	{:else if error}
 		<div class="state" role="alert"><p>{error}</p><Button onclick={load}>Try again</Button></div>
 	{:else if apps.length === 0}
-		<p class="state">No connected apps yet. Ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent, for example: “Bring over my apps from Claude.”</p>
+		<p class="state">No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent, for example: “Bring over my apps from Claude.”</p>
 	{:else}
 		<div class="rows">
 			{#each apps as app (app.id)}
@@ -172,9 +179,11 @@
 </section>
 
 {#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { if (whereApprove) approved(app); else replace(app); whereApp = null; }} />{/if}
+{#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { apps = [...apps, app]; }} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
+	.heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 	/* The ledes and the empty, loading and error states are one body size, inset to the edge the page title and rows use. */
 	.lede, .state { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
 	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
@@ -190,4 +199,5 @@
 	/* Remove is a text action in the danger tone. */
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); padding: 0 var(--space-2); font-size: var(--text-footnote); }
+	/* The header action wraps beneath the explanation on narrow screens. */
 </style>

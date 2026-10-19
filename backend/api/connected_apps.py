@@ -231,10 +231,9 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
         result = await run_in_db(create)
     except Exception as exc:
         raise _app_error(exc) from None
-    if human:
-        await _run_app_runtime("connect", result["id"])
+    runtime = await _run_app_runtime("connect", result["id"]) if human else {}
     notice = _local_app_notice(config)
-    return {**result, **({"notice": notice} if notice else {})}
+    return {**result, **runtime, **({"notice": notice} if notice else {})}
 
 
 @connected_apps_router.patch("/servers/{app_id}")

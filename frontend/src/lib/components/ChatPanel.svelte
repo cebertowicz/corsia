@@ -166,8 +166,8 @@
 			console.error('fetchThreadMessages fetch failed:', e);
 		}
 	}
-	export async function setAndSend(text: string) {
-		await inputBarRef?.setAndSend(text);
+	export async function setAndSend(text: string): Promise<boolean> {
+		return await inputBarRef?.setAndSend(text) ?? false;
 	}
 	const pagerPort: PagerPort = {
 		async fetchPage(cursor: string): Promise<MessagePage | null> {

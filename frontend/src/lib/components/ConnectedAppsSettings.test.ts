@@ -33,7 +33,7 @@ describe('ConnectedAppsSettings', () => {
 		vi.stubGlobal('fetch', fetch);
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
-		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Approve')) as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_revision: 1 }) })));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
 		const connectedRow = host.querySelector('.item');
@@ -228,7 +228,7 @@ describe('ConnectedAppsSettings', () => {
 			vi.stubGlobal('fetch', fetch);
 			component = mount(ConnectedAppsSettings, { target: host });
 			await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
-			(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+			([...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve') as HTMLButtonElement).click();
 			await vi.waitFor(() => expect(signInPosts(fetch)).toHaveLength(1));
 			await vi.waitFor(() => expect(host.textContent).toContain("Tracker's sign-in page is open in your browser."));
 			await settle();
@@ -257,7 +257,7 @@ describe('ConnectedAppsSettings', () => {
 			vi.stubGlobal('fetch', fetch);
 			component = mount(ConnectedAppsSettings, { target: host });
 			await vi.waitFor(() => expect(host.textContent).toContain('Waiting for your approval'));
-			(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
+			([...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Approve') as HTMLButtonElement).click();
 			await vi.waitFor(() => expect(host.textContent).toContain('Connected'));
 			await settle();
 			expect(signInPosts(fetch)).toHaveLength(0);
@@ -267,8 +267,8 @@ describe('ConnectedAppsSettings', () => {
 	it('renders the empty-state copy when there are no apps', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
-		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Ask CORSIA in chat'));
-		expect(host.textContent).not.toContain('Connect one here');
+		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet. Connect one here, or ask CORSIA in chat to bring over the apps you use in Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent'));
+		expect(host.textContent).not.toContain('No apps shared with every project yet.');
 	});
 
 	it('draws the state in its colour: red for a failure, amber for waiting on the person, quiet when working', async () => {
