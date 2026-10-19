@@ -59,6 +59,7 @@ def test_v128_registers_connected_accounts_step() -> None:
     assert SCHEMA_VERSION == 130
     assert MIGRATIONS[128] is migrate_128_to_129
     assert 129 in MIGRATIONS
+    assert 130 not in MIGRATIONS
 
 
 def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> None:

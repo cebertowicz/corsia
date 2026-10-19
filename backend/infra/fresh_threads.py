@@ -18,7 +18,7 @@ from infra.config import WORKSPACE
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.execution_class import provider_label
-from infra.local_only import local_only_model_refusal
+from infra.local_only import inherited_local_only, local_only_model_refusal
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
@@ -104,15 +104,9 @@ def create_fresh_thread(
     now = created_at or _now()
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
-        inherited_from = spawned_by or parent_thread_id or actor_thread_id
-        parent = (
-            _db.execute(
-                "SELECT local_only FROM threads WHERE id = ?", (inherited_from,)
-            ).fetchone()
-            if inherited_from
-            else None
+        local_only, inherited_from = inherited_local_only(
+            (spawned_by, parent_thread_id, actor_thread_id), db=_db,
         )
-        local_only = bool(parent and parent["local_only"])
         refusal = local_only_model_refusal(
             model,
             thread_local_only=local_only,

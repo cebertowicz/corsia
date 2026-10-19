@@ -54,6 +54,22 @@ def local_only_model_refusal(
     )
 
 
+def inherited_local_only(
+    parent_ids: tuple[str | None, ...], *, db: sqlite3.Connection,
+) -> tuple[bool, str | None]:
+    """Resolve a local-only creator to the root thread a person can change."""
+    for parent_id in dict.fromkeys(parent_ids):
+        if not parent_id:
+            continue
+        parent = db.execute(
+            "SELECT id,local_only,local_only_inherited_from_thread_id FROM threads WHERE id=?",
+            (parent_id,),
+        ).fetchone()
+        if parent and parent["local_only"]:
+            return True, parent["local_only_inherited_from_thread_id"] or parent["id"]
+    return False, None
+
+
 def thread_model_refusal(row: sqlite3.Row, model: str | None, *, db: sqlite3.Connection) -> str | None:
     """Apply a persisted thread's local-only scope to one model selection."""
     return local_only_model_refusal(
@@ -73,6 +89,13 @@ def send_confirmation_refusal(
 ) -> str | None:
     """Require a local-only sender to confirm a cloud-bound recipient is safe."""
     if not sender.get("local_only"):
+        return None
+    # A visible, non-agent root is the person's own thread, which is exempt.
+    if (
+        ("spawned_by" in recipient or "agent_enabled" in recipient)
+        and not recipient.get("spawned_by")
+        and not recipient.get("agent_enabled")
+    ):
         return None
     recipient_model = recipient.get("model")
     if not isinstance(recipient_model, str) or not recipient_model.strip():

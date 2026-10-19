@@ -9,6 +9,7 @@ from api.thread_deletion import delete_owned_thread as _delete_owned_thread
 from infra.auth import authenticate, require_human_user
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from infra.local_only import local_only_model_refusal
 from infra.passive_changes import append_agent_roster_transition
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
@@ -88,7 +89,7 @@ async def _patch_model(thread_id: str, user_id: str, body: dict):
             setup_selection=source == "setup",
             **({"account_id": body["account_id"]} if body.get("account_id") is not None else {}),
         )
-    except (ModelSwitchPreparationError, ModelSwitchConflict) as exc:
+    except (ModelSwitchPreparationError, ModelSwitchConflict, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
     if not isinstance(result, ModelSwitchOutcome):
         from infra.model_switch_types import SwitchRequest
@@ -211,6 +212,16 @@ def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | 
         inherited_from = thread["local_only_inherited_from_thread_id"]
         if inherited_from:
             return {"error": "inherited", "parent_thread_id": inherited_from}
+        if local_only:
+            for model in (thread["model"], thread["pending_model"]):
+                refusal = local_only_model_refusal(
+                    model,
+                    thread_local_only=True,
+                    project_id=thread["project_id"] or None,
+                    db=db,
+                )
+                if refusal:
+                    return {"error": "local_only_refusal", "detail": refusal}
         db.execute(
             "UPDATE threads SET local_only=?, updated_at=? WHERE id=?",
             (int(local_only), utc_now_iso(), thread_id),
@@ -234,9 +245,11 @@ async def set_local_only(
     if result.get("error") == "inherited":
         raise HTTPException(
             409,
-            "This thread inherited Local only from parent thread "
+            "This thread inherited Local only from root thread "
             f"{result['parent_thread_id']} and cannot change it.",
         )
+    if result.get("error") == "local_only_refusal":
+        raise HTTPException(409, result["detail"])
     return {"ok": True, **result}
 
 
