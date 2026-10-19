@@ -16,17 +16,21 @@ from reviewer_gate_fixtures import (  # noqa: F401
 
 
 def _verdict(verdict: str) -> dict:
+    from reviewer.reviewer_types import reviewer_verdict
+
     blocks = 1 if verdict == "code_fail" else 0
-    return {
-        "verdict": verdict,
-        "required_action": "none",
-        "summary": f"{blocks} block, 0 flag, 0 nit -- reviewed by codex",
-        "block_count": blocks,
-        "flag_count": 0,
-        "nit_count": 0,
-        "finding_count": blocks,
-        "model_label": "codex",
-    }
+    return reviewer_verdict(
+        verdict=verdict,
+        required_action="none",
+        summary=f"{blocks} block, 0 flag, 0 nit -- reviewed by codex",
+        block_count=blocks,
+        flag_count=0,
+        nit_count=0,
+        finding_count=blocks,
+        model_label="codex",
+        reviewer_version="test-version",
+        reviewer_standards=["product"],
+    )
 
 
 def _run(gate_mod, verdict, delivered):

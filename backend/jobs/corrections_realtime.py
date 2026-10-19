@@ -34,7 +34,7 @@ Scan state (``scan``)::
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
 
-An outage writes no fact and keeps the message pending. A deterministic startup
+An outage writes no fact and keeps the source pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after
 it reaches the end using its originally selected manifest; a deterministic failure
 ends the pass unactivated, and the next pass re-selects (or the state is failed).
@@ -56,9 +56,7 @@ from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import (
-    candidate_for_message, record_classification, record_unreadable, unreadable_messages,
-)
+from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
 QUEUE_SIZE = 256
@@ -75,7 +73,7 @@ class CorrectionsWorker:
     """The one owner of the arrival queue, one child, and both state machines."""
 
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=QUEUE_SIZE)
+        self.queue: asyncio.Queue[tuple[str, str, float]] = asyncio.Queue(maxsize=QUEUE_SIZE)
         self.arrived = asyncio.Event()
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
@@ -108,6 +106,7 @@ class CorrectionsWorker:
             self._notice_failed_state(failure_version)
 
     def _owe(self) -> None:
+        """Idle to owed: an arrival the queue could not take is left for the next pass."""
         if self.scan == "idle":
             self.scan = "owed"
 
@@ -232,11 +231,11 @@ class CorrectionsWorker:
             if manifest is None:
                 return outcome
 
-    async def _arrival(self, message_id: str, enqueued_at: float) -> None:
+    async def _arrival(self, source_kind: str, source_id: str, enqueued_at: float) -> None:
         started_at = _clock()
         self.queue_delay_ms = (started_at - enqueued_at) * 1000
         try:
-            candidate = await run_in_db(candidate_for_message, message_id)
+            candidate = await run_in_db(candidate_for_source, source_kind, source_id)
             if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
                 self._release_hold()
         except Exception:
@@ -278,7 +277,8 @@ class CorrectionsWorker:
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
                 return await activate_after_backfill(version)
-            before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
+            tail = batch.selected_keys[-1]
+            before = (tail.created_at, tail.source_kind, tail.source_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
@@ -299,13 +299,13 @@ class CorrectionsWorker:
     async def run(self) -> None:
         while True:
             try:
-                message_id, enqueued_at = self.queue.get_nowait()
+                source_kind, source_id, enqueued_at = self.queue.get_nowait()
             except asyncio.QueueEmpty:
                 if self.scan == "idle" or self.held_reason is not None:
                     return
                 await self._scan_pass()
                 continue
-            await self._arrival(message_id, enqueued_at)
+            await self._arrival(source_kind, source_id, enqueued_at)
 
     def _start_task(self, coroutine) -> None:
         if self.task is not None and not self.task.done():
@@ -325,12 +325,13 @@ class CorrectionsWorker:
             self._set("unavailable", f"worker error: {type(error).__name__}")
         self._hold(f"worker error: {type(error).__name__}")
 
-    def notify(self, message_id: str) -> None:
+    def notify(self, source_kind: str, source_id: str) -> None:
+        """Take one committed source on the worker's loop; a full queue or a stopping worker owes the scan."""
         if self.stopping:
             self._owe()
             return
         try:
-            self.queue.put_nowait((message_id, _clock()))
+            self.queue.put_nowait((source_kind, source_id, _clock()))
         except asyncio.QueueFull:
             self._owe()
             self.dropped_arrivals += 1
@@ -370,8 +371,8 @@ async def _startup_worker() -> None:
     await WORKER.run()
 
 
-def notify(message_id: str) -> None:
-    WORKER.notify(message_id)
+def notify(source_kind: str, source_id: str) -> None:
+    WORKER.notify(source_kind, source_id)
 
 
 def startup_scan() -> None:
@@ -385,15 +386,5 @@ async def shutdown() -> None:
 def state_snapshot(db: Any = None) -> dict[str, object]:
     snapshot = WORKER.snapshot()
     if db is not None:
-        snapshot["unreadable_messages"] = unreadable_messages(db, WORKER.version) if WORKER.version else 0
+        snapshot["unreadable_facts"] = unreadable_facts(db, WORKER.version) if WORKER.version else 0
     return snapshot
-
-
-def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
-    from core.corrections_recording import is_owner_authored_message
-
-    try:
-        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
-            notify(accepted.message_id)
-    except Exception:
-        logger.exception("corrections classifier admission notification failed")

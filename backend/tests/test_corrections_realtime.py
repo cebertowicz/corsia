@@ -9,14 +9,14 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from jobs import corrections_runtime
+from jobs import corrections_recording, corrections_runtime
 
 
 def _candidate(message_id: str = "owner-message"):
     from core.corrections_recording import CorrectionCandidate
 
     return CorrectionCandidate(
-        message_id=message_id, thread_id="thread", project_id="project",
+        source_kind="message", source_id=message_id, thread_id="thread", project_id="project",
         content="That result is wrong.", created_at="2026-10-14T00:00:00Z",
         context=(("Agent", "Earlier answer."),),
     )
@@ -395,8 +395,15 @@ async def test_only_version_with_two_native_load_exits_notifies_once_and_stays_r
         update_failure_notice, "tell_corrections_classifier_load_crash_detached",
         lambda version, *, tasks: notices.append((version, tasks)),
     )
+    recorded = []
+    real_record = worker._record_only_version_load_crash
+    monkeypatch.setattr(  # the worker's own method changes its state; no module function does
+        worker, "_record_only_version_load_crash",
+        lambda version, reason, retry_at: (recorded.append(version), real_record(version, reason, retry_at)),
+    )
 
     assert (await worker._classify(_candidate())).kind == "outage"
+    assert recorded == ["v1"]
     assert (worker.state, worker.reason) == ("unavailable", "load native exit")
     assert worker.failed_versions == {}
     assert worker.snapshot()["retryable"] is True
@@ -483,7 +490,7 @@ async def test_scan_ends_unactivated_on_mid_pass_version_failure_then_activates_
     async def next_batch(version, *_args, **_kwargs):
         calls[version.version] += 1
         if calls[version.version] == 1:
-            return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)], candidates=[candidate])
+            return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, source_kind="message", source_id=candidate.source_id)], candidates=[candidate])
         return SimpleNamespace(selected_keys=[], candidates=[])
 
     activate = AsyncMock(return_value="done")
@@ -548,7 +555,7 @@ async def test_only_version_failing_during_a_scan_fails_with_one_notice_and_no_a
         return _selection(_manifest())
 
     async def next_batch(*_args, **_kwargs):
-        return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)], candidates=[candidate])
+        return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, source_kind="message", source_id=candidate.source_id)], candidates=[candidate])
 
     activate = AsyncMock(return_value="done")
     monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
@@ -697,7 +704,7 @@ async def test_input_that_fails_twice_on_a_healthy_child_is_recorded_unreadable(
 
     assert (await worker._classify(_candidate("huge"))).kind in {"recorded", "unreadable"}
 
-    assert unreadable.await_args.args[0].message_id == "huge"
+    assert unreadable.await_args.args[0].source_id == "huge"
     assert unreadable.await_args.args[2] == "rss"
     # An unreadable input is an outcome, not an outage: the classifier stays ready.
     assert worker.state == "ready"
@@ -710,7 +717,7 @@ async def test_unreadable_fact_is_written_with_its_reason_and_not_counted(isolat
     from jobs.corrections_activation import weekly_correction_figure
 
     ids = _seed_owner_messages(1)
-    candidate = await asyncio.to_thread(corrections_realtime.candidate_for_message, ids[0])
+    candidate = await asyncio.to_thread(corrections_recording.candidate_for_source, "message", ids[0])
     ScriptedChild.calls = [OnnxMessageFailed("child_error"), OnnxMessageFailed("child_error")]
 
     assert (await worker._classify(candidate)).kind in {"recorded", "unreadable"}
@@ -719,7 +726,7 @@ async def test_unreadable_fact_is_written_with_its_reason_and_not_counted(isolat
 
     db = get_db()
     try:
-        assert corrections_realtime.state_snapshot(db)["unreadable_messages"] == 1
+        assert corrections_realtime.state_snapshot(db)["unreadable_facts"] == 1
     finally:
         db.close()
     assert weekly_correction_figure(_version(), since="2000-01-01", weeks=1) == 0
@@ -768,11 +775,12 @@ async def test_inference_runs_outside_a_database_write_transaction(isolated_db, 
 # ---- scan status -------------------------------------------------------------------------
 
 
-def test_full_arrival_queue_keeps_send_admission_and_owes_the_scan(worker):
+@pytest.mark.asyncio
+async def test_full_arrival_queue_keeps_send_admission_and_owes_the_scan(worker):
     worker.queue = asyncio.Queue(maxsize=1)
-    worker.queue.put_nowait(("already-queued", 0.0))
+    worker.queue.put_nowait(("message", "already-queued", 0.0))
 
-    worker.notify("dropped")
+    worker.notify("message", "dropped")
 
     state = worker.snapshot()
     assert state["dropped_arrivals"] == 1
@@ -808,7 +816,7 @@ async def test_outage_holds_the_scan_before_activation_and_an_arrival_releases_i
     assert (worker.scan, worker.held_reason) == ("owed", "classifier unavailable: load timeout")
 
     # A later arrival classifies: the hold clears and the owed scan finishes the backlog.
-    worker.queue.put_nowait((ids[0], 0.0))
+    worker.queue.put_nowait(("message", ids[0], 0.0))
     await worker.run()
 
     assert _recorded_message_ids() == set(ids)
@@ -825,10 +833,10 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", locked)
     processed = []
-    monkeypatch.setattr(corrections_realtime, "candidate_for_message", lambda message_id: processed.append(message_id))
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: processed.append(message_id))
 
     worker.scan = "owed"
-    worker.queue.put_nowait(("arrival", 0.0))
+    worker.queue.put_nowait(("message", "arrival", 0.0))
     await worker.run()
 
     assert processed == ["arrival"]
@@ -839,15 +847,15 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
 async def test_a_failing_arrival_owes_the_scan_and_the_next_arrival_still_runs(worker, monkeypatch):
     from jobs import corrections_realtime
 
-    def candidate(message_id):
+    def candidate(_kind, message_id):
         if message_id == "first":
             raise RuntimeError("database is locked")
         return None
 
-    monkeypatch.setattr(corrections_realtime, "candidate_for_message", candidate)
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", candidate)
     monkeypatch.setattr(worker, "_scan_pass", AsyncMock(side_effect=lambda: worker._finish_scan()))
-    worker.queue.put_nowait(("first", 0.0))
-    worker.queue.put_nowait(("second", 0.0))
+    worker.queue.put_nowait(("message", "first", 0.0))
+    worker.queue.put_nowait(("message", "second", 0.0))
 
     await worker.run()
 
@@ -870,8 +878,8 @@ async def test_worker_task_that_dies_keeps_the_scan_owed_and_notify_restarts_it(
     assert (worker.scan, worker.held_reason) == ("owed", "worker error: RuntimeError")
 
     seen = []
-    monkeypatch.setattr(corrections_realtime, "candidate_for_message", lambda message_id: seen.append(message_id))
-    corrections_realtime.notify("after-crash")
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: seen.append(message_id))
+    corrections_realtime.notify("message", "after-crash")
     await worker.task
 
     assert seen == ["after-crash"]
@@ -967,8 +975,8 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
     first, second = _candidate(), _candidate("older-message")
     batch = SimpleNamespace(
         selected_keys=[
-            SimpleNamespace(created_at=first.created_at, message_id=first.message_id),
-            SimpleNamespace(created_at=second.created_at, message_id=second.message_id),
+            SimpleNamespace(created_at=first.created_at, source_kind="message", source_id=first.source_id),
+            SimpleNamespace(created_at=second.created_at, source_kind="message", source_id=second.source_id),
         ],
         candidates=[first, second],
     )
@@ -980,8 +988,8 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
     async def classify(candidate, *_args):
         from jobs.corrections_runtime import ClassificationOutcome
 
-        calls.append(candidate.message_id)
-        worker.queue.put_nowait(("fresh-arrival", 0.0))
+        calls.append(candidate.source_id)
+        worker.queue.put_nowait(("message", "fresh-arrival", 0.0))
         return ClassificationOutcome("recorded")
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
@@ -996,7 +1004,7 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
 
 def _one_candidate_batch(candidate):
     return SimpleNamespace(
-        selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)],
+        selected_keys=[SimpleNamespace(created_at=candidate.created_at, source_kind="message", source_id=candidate.source_id)],
         candidates=[candidate],
     )
 
@@ -1061,7 +1069,7 @@ async def test_an_arrival_queued_during_the_backfill_pause_is_picked_up_at_once(
     worker.task = asyncio.create_task(worker._scan_pass())
     await paused.wait()
     started = asyncio.get_running_loop().time()
-    worker.notify("fresh-arrival")
+    worker.notify("message", "fresh-arrival")
     await asyncio.wait_for(asyncio.shield(worker.task), timeout=1.0)
 
     assert asyncio.get_running_loop().time() - started < 1.0
@@ -1073,10 +1081,11 @@ async def test_one_worker_processes_arrival_queued_during_startup_scan(worker, m
     processed = []
 
     async def scan():
-        worker.queue.put_nowait(("during-startup", 0.0))
+        worker.queue.put_nowait(("message", "during-startup", 0.0))
         worker._finish_scan()
 
-    async def arrival(message_id, enqueued_at):
+    async def arrival(source_kind, message_id, enqueued_at):
+        assert source_kind == "message"
         processed.append(message_id)
         worker.queue.task_done()
 
@@ -1132,7 +1141,7 @@ async def test_shutdown_cancels_the_worker_kills_the_child_and_owes_later_arriva
     assert child.killed and child.closed
     assert worker.child is None and worker.child_manifest is None
 
-    corrections_realtime.notify("arrived-during-shutdown")
+    corrections_realtime.notify("message", "arrived-during-shutdown")
 
     assert worker.task is None
     assert worker.queue.qsize() == 0
@@ -1240,7 +1249,7 @@ def _recorded_message_ids() -> set[str]:
     try:
         return {
             str(row[0]) for row in db.execute(
-                "SELECT json_extract(attributes,'$.message_id') FROM outcome_events"
+                "SELECT json_extract(attributes,'$.source_id') FROM outcome_events"
             ).fetchall()
         }
     finally:
@@ -1262,7 +1271,7 @@ async def test_recorded_newest_messages_do_not_hide_older_pending_ones(isolated_
 
     # The 22 newest are already recorded: more than one 20-message page.
     for message_id in ids[-22:]:
-        candidate = await asyncio.to_thread(corrections_realtime.candidate_for_message, message_id)
+        candidate = await asyncio.to_thread(corrections_recording.candidate_for_source, "message", message_id)
         assert await corrections_realtime.record_classification(candidate, _result())
     assert _recorded_message_ids() == set(ids[-22:])
 

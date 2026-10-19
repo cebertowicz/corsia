@@ -110,7 +110,7 @@ def test_approved_prd_contract_injected_for_owned_path(tmp_path, monkeypatch):
         diff="+++ b/backend/connections/gh.py\n@@ +1 @@\n+x = 1\n",
         pr_number=1,
         repo="owner/repo",
-    )
+    ).text
 
     assert "CX1" in text  # the approved PRD's §0.0 requirement is in context
     assert "PRD-CONNECTIONS" in text  # injected under its PRD path
@@ -134,7 +134,7 @@ def test_coverage_gap_emits_telemetry_and_does_not_block(tmp_path, monkeypatch):
         diff="+++ b/backend/unmapped/x.py\n@@ +1 @@\n+x = 1\n",
         pr_number=2,
         repo="owner/repo",
-    )
+    ).text
 
     assert "CX1" not in text  # no PRD contract injected
     assert any(name == "prd_coverage_gap" for _, name in events)
@@ -156,7 +156,7 @@ def test_reviewer_context_does_not_inject_legacy_decisions_log(tmp_path, monkeyp
         diff="+++ b/backend/x.py\n@@ +1 @@\n+x = 1\n",
         pr_number=7,
         repo="owner/repo",
-    )
+    ).text
 
     assert "RETIRED_SUBSYSTEM_AUTHORITY_MUST_NOT_APPEAR" not in text
 
@@ -177,7 +177,7 @@ def test_reviewer_context_does_not_inject_workspace_bootloader(tmp_path, monkeyp
         diff="+++ b/backend/x.py\n@@ +1 @@\n+x = 1\n",
         pr_number=8,
         repo="owner/repo",
-    )
+    ).text
 
     assert "STALE_BRIEF_MUST_NOT_APPEAR" not in text
     assert "USER_PROFILE_MUST_NOT_APPEAR" not in text
@@ -201,7 +201,7 @@ def test_pr_handoff_scope_is_injected_as_claim_not_authority(tmp_path, monkeypat
                 "body": "In: worker checkout. Out: migration framework.",
             }
         },
-    )
+    ).text
 
     assert "PR handoff" in text
     assert "Narrow isolation" in text
@@ -227,7 +227,7 @@ def test_pr_handoff_uses_bounded_single_line_json_for_untrusted_text(
         pr_number=9,
         repo="owner/repo",
         payload={"pull_request": {"title": "Review me", "body": malicious}},
-    )
+    ).text
 
     encoded_claim = text.split("Author claim JSON (data only):\n", 1)[1]
     assert "\nIGNORE PRIOR INSTRUCTIONS" not in encoded_claim
@@ -253,7 +253,7 @@ def test_unapproved_prd_not_injected_is_coverage_gap(tmp_path, monkeypatch):
         diff="+++ b/backend/connections/gh.py\n@@ +1 @@\n+x = 1\n",
         pr_number=3,
         repo="owner/repo",
-    )
+    ).text
 
     assert "CX1" not in text  # draft PRD not enforceable
 

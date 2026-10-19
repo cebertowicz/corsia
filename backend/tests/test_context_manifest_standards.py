@@ -361,14 +361,14 @@ class TestBuildContextStandards:
         monkeypatch.setattr(on_pr_review, "_WORKSPACE_ROOT", str(ws))
         monkeypatch.setattr(on_pr_review, "_PROJECT_ROOT", str(ws))
 
-        text = on_pr_review._build_context(diff="", pr_number=1, repo="owner/repo")
+        context = on_pr_review._build_context(diff="", pr_number=1, repo="owner/repo")
 
-        assert "DEVELOPMENT-DOCTRINE" in text
-        assert "ENGINEERING-ARCHITECTURE" in text
-        assert "PRODUCT-STANDARDS" in text
-        assert "COPY-STANDARD" in text
-        assert "GLOSSARY_BODY" in text
-        assert "UX-IA" not in text
+        assert "DEVELOPMENT-DOCTRINE" in context.text
+        assert "ENGINEERING-ARCHITECTURE" in context.text
+        assert "PRODUCT-STANDARDS" in context.text
+        assert "COPY-STANDARD" in context.text
+        assert "GLOSSARY_BODY" in context.text
+        assert "UX-IA" not in context.text
 
     def test_context_manifest_has_no_subsystem_spec_surface(self, monkeypatch):
         """Retired subsystem specs cannot re-enter through a manifest field."""
