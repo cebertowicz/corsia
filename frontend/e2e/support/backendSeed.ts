@@ -2,8 +2,11 @@ import { expect } from '@playwright/test';
 
 const BACKEND_URL = `http://127.0.0.1:${Number(process.env.CORSIA_E2E_BACKEND_PORT ?? 3110)}`;
 
-/** Only the mock-mode backend (`e2e_app`) serves the seed routes; a real-mode run has no seed to return to. */
-export const SEED_ENABLED = process.env.CORSIA_E2E_MOCK === '1';
+/**
+ * Only the mock-mode backend (`e2e_app`) serves the seed routes; a real-mode run has no seed to return to. A live-fault run
+ * keeps its own run directory in the state root and restarts its backend itself, so a seed restore would undo that.
+ */
+export const SEED_ENABLED = process.env.CORSIA_E2E_MOCK === '1' && process.env.CORSIA_E2E_LIVE_FAULTS !== '1';
 
 async function post(path: string): Promise<void> {
 	const response = await fetch(`${BACKEND_URL}${path}`, { method: 'POST' });
