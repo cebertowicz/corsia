@@ -24,7 +24,7 @@ async def target_for(
     model = admission.accepted.target_model
     if supplied is not None and supplied.catalog_id == model:
         return supplied
-    return await resolve_target(model)
+    return await resolve_target(model, thread_id=admission.accepted.thread_id)
 
 
 async def publish_projection(step: str, admission: InputAdmission, call: Callable) -> None:

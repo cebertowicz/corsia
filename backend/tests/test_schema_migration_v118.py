@@ -47,7 +47,7 @@ def _keys(db: sqlite3.Connection) -> dict[str, str]:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 129
+    assert SCHEMA_VERSION == 130
     assert MIGRATIONS[117] is migrate_117_to_118
 
 

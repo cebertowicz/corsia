@@ -34,7 +34,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 129
+SCHEMA_VERSION = 130
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -226,7 +226,7 @@ SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status); CREATE TABLE IF NOT EXISTS project_inference_policies (project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE, cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1)));
     {PROJECT_REPO_POLICY_TABLE_SQL};
     {HOST_ACCESS_LEASE_SCHEMA_SQL}
     {MANAGED_PROCESS_SCHEMA_SQL}

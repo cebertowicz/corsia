@@ -46,7 +46,7 @@ class TargetInvalid(RuntimeError):
         self.detail = detail
 
 
-async def resolve_target(model: str) -> ExecutionTarget:
+async def resolve_target(model: str, *, thread_id: str | None = None) -> ExecutionTarget:
     """Resolve catalog truth, distinguishing our defect from bad configuration.
 
     ``ModelUnavailableError`` here means no model is configured or the selected
@@ -60,12 +60,34 @@ async def resolve_target(model: str) -> ExecutionTarget:
     """
     try:
         return await db_async.run_in_db(
-            lambda: model_resolution.resolve_execution_target(model)
+            lambda: _resolve_target_in_scope(model, thread_id=thread_id)
         )
     except ModelUnavailableError as exc:
         raise TargetUnavailable(str(exc), side=DeliveryFailureSide.OURS) from exc
     except ValueError as exc:
         raise TargetInvalid(str(exc)) from exc
+
+
+def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
+    """Resolve one target and enforce the project's cloud-model policy."""
+    from connections.account_policy import thread_scope
+    from infra.database import get_db
+    from llm.locality import locality_refusal
+
+    db = get_db()
+    try:
+        target = model_resolution.resolve_execution_target(model, db=db)
+        row = model_resolution.catalog_row(model, db=db)
+        project_id = thread_scope(thread_id, db=db)["project_id"] if thread_id else None
+        if row is not None:
+            refusal = locality_refusal(
+                row, thread_local_only=False, project_id=project_id, db=db,
+            )
+            if refusal:
+                raise ModelUnavailableError(model, refusal)
+        return target
+    finally:
+        db.close()
 
 
 TargetAdmission = Literal["run", "wait", "fail"]

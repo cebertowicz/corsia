@@ -43,7 +43,7 @@ def _v103_database(path):
 
 
 def test_migration_is_registered():
-    assert SCHEMA_VERSION == 129 and MIGRATIONS[103] is migrate_103_to_104
+    assert SCHEMA_VERSION == 130 and MIGRATIONS[103] is migrate_103_to_104
 
 
 def test_legacy_image_rows_are_retyped_and_only_their_type_changes(tmp_path):

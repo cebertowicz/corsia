@@ -59,8 +59,8 @@ def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_al
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert SCHEMA_VERSION == 129
-    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 129)
+    assert SCHEMA_VERSION == 130
+    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 130)
     assert endpoint_agent_use("external@legacy-v109/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@allowed-v109/glm-5.3") == "allowed"
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated
@@ -82,7 +82,7 @@ def test_v109_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.to_version) == (True, 129)
+    assert (result.migrated, result.to_version) == (True, 130)
     rows = dict(db.execute("SELECT id, metadata_json FROM network_servers").fetchall())
     assert rows == {"null-meta": "null", "list-meta": "[1]", "text-meta": '"x"'}
 

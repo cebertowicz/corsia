@@ -83,15 +83,36 @@ def _cloud_providers_active() -> set[str]:
 
 
 def _network_server_status() -> dict[str, str]:
+    """Read each network server's current status for one catalog build."""
     status: dict[str, str] = {}
     try:
-        from llm.network_discovery import get_servers as _get_net_servers
-        for s in _get_net_servers():
-            status[s["id"]] = s["status"]
-    except Exception as e:
+        from llm.network_discovery import get_servers
+
+        for server in get_servers():
+            status[str(server["id"])] = server["status"]
+    except Exception as error:
         from loguru import logger
-        logger.warning(f"network discovery lookup failed; treating all servers as offline: {e}")
+
+        logger.warning(f"network discovery lookup failed; treating all servers as offline: {error}")
     return status
+
+
+def _private_server_ids() -> set[str]:
+    """Read each network server's private mark once for one catalog build."""
+    try:
+        from llm.network_discovery import get_servers, parse_server_metadata
+
+        return {
+            str(server["id"])
+            for server in get_servers()
+            if (metadata := parse_server_metadata(str(server["id"]), server.get("metadata_json")))
+            and metadata.get("private") is True
+        }
+    except Exception as error:
+        from loguru import logger
+
+        logger.warning(f"network private-mark lookup failed; treating all servers as unmarked: {error}")
+        return set()
 
 
 def _loaded_model_ids_fn():
@@ -237,6 +258,7 @@ def _public_status_entry(
     context_window: int | None,
     status: str,
     status_reason: str | None,
+    private_servers: set[str],
 ) -> dict:
     """Project one catalog row for every public consumer."""
     capabilities = _capabilities_for_row(
@@ -258,6 +280,9 @@ def _public_status_entry(
         "litellm_model": row["litellm_model"], "context_window": context_window,
         "capabilities": capabilities,
     }
+    from llm.locality import row_is_local
+
+    entry["is_local"] = row_is_local(entry, private_servers=private_servers)
     if status_reason:
         entry["status_reason"] = status_reason
     if harness in ("claude-code", "codex"):
@@ -309,16 +334,17 @@ def catalog_base_rows() -> list[dict]:
 
     cloud_active = _cloud_providers_active()
     server_status = _network_server_status()
+    private_servers = _private_server_ids()
     loaded_ids_fn = _loaded_model_ids_fn()
     rows: list[dict] = []
     for row in model_catalog.get_model_status_catalog_rows():
-        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn)
+        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers)
         if entry is not None:
             rows.append(entry)
     return rows
 
 
-def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict | None:
+def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn, private_servers) -> dict | None:
     """One catalog row's public entry; ``None`` for an inactive cloud provider."""
     from llm.context_window import resolve_window_for_row
 
@@ -353,4 +379,5 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict
     return _public_status_entry(
         row, harness=harness, provider=provider, backend=backend, meta=meta,
         context_window=context_window, status=status, status_reason=status_reason,
+        private_servers=private_servers,
     )

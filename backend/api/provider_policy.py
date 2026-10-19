@@ -4,7 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
+from api.key_session_guard import require_person_for_key
 from connections.provider_policy import policy_payload, set_policy, set_use_workspace
+from llm.locality import project_cloud_models_off, set_project_cloud_models_off
 from connections.vendor_accounts import AccountError
 from infra.auth import require_user
 from infra.database import get_db
@@ -23,6 +25,10 @@ class ProviderPolicyWrite(BaseModel):
 class UseWorkspaceWrite(BaseModel):
     expected_revision: StrictInt = Field(ge=0)
     use_workspace: StrictBool
+
+
+class CloudModelsOffWrite(BaseModel):
+    cloud_models_off: StrictBool
 
 
 def _call(fn, *args, **kwargs):
@@ -55,3 +61,19 @@ async def put_provider_policy(provider_key: str, body: ProviderPolicyWrite, proj
 async def put_use_workspace(project_id: str, body: UseWorkspaceWrite):
     return await _run(set_use_workspace, project_id, use_workspace=body.use_workspace,
                       expected_revision=body.expected_revision)
+
+
+@router.get("/projects/{project_id}/cloud-models-off")
+async def get_cloud_models_off(project_id: str):
+    enabled = await _run(project_cloud_models_off, project_id)
+    return {"project_id": project_id, "cloud_models_off": enabled}
+
+
+@router.put("/projects/{project_id}/cloud-models-off")
+async def put_cloud_models_off(
+    project_id: str, body: CloudModelsOffWrite, user: dict = Depends(require_user),
+):
+    require_person_for_key(user, kind="project", name=project_id, action="write")
+    return await _run(
+        set_project_cloud_models_off, project_id, cloud_models_off=body.cloud_models_off,
+    )

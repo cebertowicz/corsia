@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from api.network_server_billing import billing_views, router as network_server_billing_router
 from api.network_server_jobs import router as network_server_jobs_router
@@ -41,6 +41,11 @@ router = APIRouter(
     tags=["network-servers"],
     dependencies=[Depends(require_user)],
 )
+private_router = APIRouter(
+    prefix="/api/network-servers",
+    tags=["network-servers"],
+    dependencies=[Depends(require_user)],
+)
 router.include_router(network_server_billing_router)
 router.include_router(network_server_jobs_router)
 router.include_router(network_server_lifecycle_router)
@@ -60,6 +65,7 @@ def _public_server_view(row: dict, keys: dict[str, str] | None = None) -> dict:
         meta.pop(field, None)
     stored = (keys if keys is not None else server_keys([str(row.get("id"))])).get(str(row.get("id")))
     row["metadata"] = meta
+    row["private"] = bool(meta.get("private"))
     row["has_key"] = bool(stored)
     row["masked_key"] = mask_key(stored) if stored else ""
     return row
@@ -266,6 +272,24 @@ async def remove_server(server_id: str):
 
 class EnabledBody(BaseModel):
     enabled: bool
+
+
+class PrivateBody(BaseModel):
+    private: StrictBool
+
+
+@private_router.put("/{server_id}/private")
+@router.put("/{server_id}/private")
+async def set_server_private(
+    server_id: str, body: PrivateBody, user: dict = Depends(require_user),
+):
+    """Set the person's private-network mark without replacing server metadata."""
+    require_person_for_key(user, kind="server", name=server_id, action="write")
+    server = await run_in_db(nd.get_server, server_id)
+    if not server:
+        raise HTTPException(404, detail="Server not found")
+    await run_in_db(nd.set_server_metadata, server_id, private=body.private)
+    return {"server_id": server_id, "private": body.private}
 
 
 @router.put("/{server_id}/enabled")

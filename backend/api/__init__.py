@@ -30,6 +30,7 @@ from api.providers import router as providers_router
 from api.provider_policy import router as provider_policy_router
 from api.vendor_accounts import router as vendor_accounts_router
 from api.discovered_models import router as discovered_models_router
+from api.network_servers import private_router as network_server_private_router
 from api.network_servers import router as network_servers_router
 from api.version import router as version_router
 from api.devices import router as devices_router
@@ -79,6 +80,7 @@ __all__ = [
     "vendor_accounts_router",
     "discovered_models_router",
     "network_servers_router",
+    "network_server_private_router",
     "version_router",
     "devices_router",
     "webhooks_router",
