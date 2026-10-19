@@ -12,7 +12,10 @@ from connections.app_reach import AppReach
 from connections.microsoft import client, oauth
 from connections.microsoft.accounts import microsoft_accounts, resolve_microsoft_credentials
 from connections.microsoft.account_actions import remove_microsoft_account
-from connections.microsoft.errors import INPUT_REFUSAL, REFRESH_TOKEN_INVALID, MicrosoftError
+from connections.microsoft.errors import (
+    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, INPUT_REFUSAL, PROVIDER_UNAVAILABLE,
+    REFRESH_TOKEN_INVALID, MicrosoftError,
+)
 from infra.database import get_db
 
 CLIENT_ID = "11111111-1111-4111-8111-111111111111"
@@ -66,7 +69,7 @@ async def _callback(redirect_uri: str, *, path: str | None = None, **query: str)
     parsed = urlparse(redirect_uri)
     assert parsed.hostname == "localhost" and parsed.port is not None
     reader, writer = await asyncio.open_connection("127.0.0.1", parsed.port)
-    target = (path or parsed.path) + "?" + urlencode(query)
+    target = (path if path is not None else parsed.path or "/") + "?" + urlencode(query)
     writer.write(f"GET {target} HTTP/1.1\r\nHost: localhost:{parsed.port}\r\nConnection: close\r\n\r\n".encode())
     await writer.drain()
     response = await asyncio.wait_for(reader.read(), 2)
@@ -80,10 +83,12 @@ async def _connect(fake: FakeMicrosoft, *, kind: str = "work", tenant: str | Non
     query = parse_qs(urlparse(url).query)
     assert query["scope"] == [" ".join(oauth.SCOPES)]
     assert query["code_challenge_method"] == ["S256"]
-    assert query["redirect_uri"][0].startswith("http://localhost:")
+    redirect_uri = query["redirect_uri"][0]
+    assert redirect_uri == f"http://localhost:{oauth._pending[query['state'][0]].listener.port}"
     assert "client_secret" not in query
-    status, _page = await _callback(query["redirect_uri"][0], code="authorization-code", state=query["state"][0])
+    status, _page = await _callback(redirect_uri, code="authorization-code", state=query["state"][0])
     assert status == 200
+    assert fake.forms[-1]["redirect_uri"] == redirect_uri
     return account_id
 
 
@@ -107,7 +112,7 @@ async def test_loopback_callback_uses_its_own_port_and_refuses_wrong_state(micro
     query = parse_qs(urlparse(url).query)
     redirect_uri, state = query["redirect_uri"][0], query["state"][0]
     pending = oauth._pending[state]
-    assert urlparse(redirect_uri).port == pending.listener.port
+    assert redirect_uri == f"http://localhost:{pending.listener.port}"
     assert pending.listener.bound_addresses() == ["127.0.0.1"]
     wrong_path_status, _ = await _callback(redirect_uri, path="/not-microsoft", code="not-used", state=state)
     assert wrong_path_status == 404
@@ -123,6 +128,92 @@ async def test_loopback_callback_uses_its_own_port_and_refuses_wrong_state(micro
     assert not oauth._pending
     assert pending.listener.bound_addresses() == []
     assert microsoft.forms[-1]["code"] == "authorization-code"
+    assert microsoft.forms[-1]["redirect_uri"] == redirect_uri
+
+
+@pytest.mark.parametrize(("redirect_query", "cause"), [
+    ({"error": "access_denied", "error_subcode": "cancel", "error_description": "provider-cancel-canary"}, CONSENT_CANCELLED),
+    ({"error": "access_denied", "error_description": "AADSTS90094 provider-admin-canary"}, ADMIN_APPROVAL_REQUIRED),
+    ({"error": "provider-unknown-canary", "error_description": "AADSTS99999 provider-unknown-canary"}, PROVIDER_UNAVAILABLE),
+])
+async def test_redirect_failures_are_redacted_and_observable_for_add_and_resignin(microsoft, isolated_db, redirect_query, cause) -> None:
+    add_url, _ = await oauth.start_sign_in(
+        CLIENT_ID, "work", TENANT_A, actor=("agent", "thread-a"), adding_thread_id="thread-a",
+    )
+    add_query = parse_qs(urlparse(add_url).query)
+    add_status, add_page = await _callback(add_query["redirect_uri"][0], state=add_query["state"][0], **redirect_query)
+    assert add_status == 400
+    assert oauth.accounts_status("thread-a") == {"status": "not_connected", "cause": cause}
+    for value in redirect_query.values():
+        assert value.encode() not in add_page
+
+    account_id = await _connect(microsoft)
+    resignin_url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, account_id=account_id, actor=("system", "test"))
+    resignin_query = parse_qs(urlparse(resignin_url).query)
+    resignin_status, resignin_page = await _callback(
+        resignin_query["redirect_uri"][0], state=resignin_query["state"][0], **redirect_query,
+    )
+    assert resignin_status == 400
+    assert oauth.accounts_status(account_id=account_id)["state"] == "needs_sign_in"
+    assert oauth.accounts_status(account_id=account_id)["cause"] == cause
+    for value in redirect_query.values():
+        assert value.encode() not in resignin_page
+
+
+@pytest.mark.parametrize(("payload", "cause"), [
+    ({"error": "unauthorized_client", "error_codes": [65004]}, CONSENT_CANCELLED),
+    ({"error": "access_denied", "error_codes": [90094]}, ADMIN_APPROVAL_REQUIRED),
+    ({"error": "access_denied", "error_codes": [90095, 65001]}, ADMIN_APPROVAL_REQUIRED),
+])
+def test_token_error_codes_use_integer_aadsts_mapping(payload, cause) -> None:
+    from connections.microsoft.errors import token_error_cause
+
+    assert token_error_cause(400, payload) == cause
+
+
+async def test_success_clears_latest_add_failure(microsoft, isolated_db, monkeypatch) -> None:
+    from connections.microsoft import accounts
+
+    monkeypatch.setattr(
+        accounts, "reach_for_adding_thread", lambda _thread_id, *, db: AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
+    )
+    failed_url, _ = await oauth.start_sign_in(
+        CLIENT_ID, "work", TENANT_A, actor=("agent", "thread-a"), adding_thread_id="thread-a",
+    )
+    failed_query = parse_qs(urlparse(failed_url).query)
+    await _callback(failed_query["redirect_uri"][0], state=failed_query["state"][0], error="access_denied", error_subcode="cancel")
+    assert oauth.accounts_status("thread-a") == {"status": "not_connected", "cause": CONSENT_CANCELLED}
+
+    success_url, _ = await oauth.start_sign_in(
+        CLIENT_ID, "work", TENANT_A, actor=("agent", "thread-a"), adding_thread_id="thread-a",
+    )
+    success_query = parse_qs(urlparse(success_url).query)
+    status, _ = await _callback(success_query["redirect_uri"][0], code="authorization-code", state=success_query["state"][0])
+    assert status == 200
+    assert oauth.accounts_status("thread-a") == {"status": "not_connected"}
+
+
+async def test_add_failure_status_expires_with_pending_lifetime(microsoft, isolated_db, monkeypatch) -> None:
+    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0.01)
+    url, _ = await oauth.start_sign_in(
+        CLIENT_ID, "work", TENANT_A, actor=("agent", "expiry-thread"), adding_thread_id="expiry-thread",
+    )
+    query = parse_qs(urlparse(url).query)
+    listener = oauth._pending[query["state"][0]].listener
+
+    status, _ = await _callback(
+        query["redirect_uri"][0], state=query["state"][0], error="access_denied", error_subcode="cancel",
+    )
+    assert status == 400
+    assert oauth.accounts_status("expiry-thread") == {"status": "not_connected", "cause": CONSENT_CANCELLED}
+    assert not oauth._pending
+    assert listener.bound_addresses() == []
+
+    await asyncio.sleep(0.05)
+
+    assert oauth.accounts_status("expiry-thread") == {"status": "not_connected"}
+    assert not oauth._pending
+    assert listener.bound_addresses() == []
 
 
 async def test_callback_failure_page_never_echoes_code_or_provider_detail(microsoft, isolated_db) -> None:
@@ -265,6 +356,11 @@ def test_microsoft_tool_contract_is_pinned() -> None:
         },
     }
     assert status.name == "microsoft_status"
+    assert status.description == (
+        "With no account_id, list every Microsoft account this conversation can use. If there are none, return status "
+        "not_connected and the latest fixed sign-in failure cause when available. With account_id, report that one row: "
+        "address, kind, state, fixed cause when blocked, and reach."
+    )
     assert status.parameters == {
         "type": "object",
         "additionalProperties": False,

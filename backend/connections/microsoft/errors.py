@@ -34,14 +34,19 @@ class MicrosoftError(Exception):
 def token_error_cause(status: int | None, payload: object = None) -> str:
     """Map Microsoft OAuth failures to the approved fixed vocabulary only."""
     code = payload.get("error") if isinstance(payload, dict) else None
+    error_codes = payload.get("error_codes") if isinstance(payload, dict) else None
+    aadsts_codes = {value for value in error_codes if isinstance(value, int) and not isinstance(value, bool)} if isinstance(error_codes, list) else set()
+    # Microsoft confirms AADSTS65004 is declined consent, never administrator approval.
+    if 65004 in aadsts_codes:
+        return CONSENT_CANCELLED
+    if aadsts_codes & {90094, 90095, 65001}:
+        return ADMIN_APPROVAL_REQUIRED
     if code in {"authorization_pending", "temporarily_unavailable"}:
         return PROVIDER_UNAVAILABLE
     if code in {"invalid_grant", "invalid_client"}:
         return REFRESH_TOKEN_INVALID
     if code in {"access_denied", "consent_required", "interaction_required"}:
         return CONSENT_CANCELLED
-    if code in {"unauthorized_client", "AADSTS65001", "AADSTS65004"}:
-        return ADMIN_APPROVAL_REQUIRED
     if status in (400, 401):
         return CONSENT_CANCELLED
     return PROVIDER_UNAVAILABLE

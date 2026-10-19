@@ -79,7 +79,7 @@ class MicrosoftStatusTool(Tool):
 
     @property
     def description(self) -> str:
-        return "With no account_id, list every Microsoft account this conversation can use (or status not_connected). With account_id, report that one row: address, kind, state, fixed cause when blocked, and reach."
+        return "With no account_id, list every Microsoft account this conversation can use. If there are none, return status not_connected and the latest fixed sign-in failure cause when available. With account_id, report that one row: address, kind, state, fixed cause when blocked, and reach."
 
     @property
     def parameters(self) -> dict[str, Any]:

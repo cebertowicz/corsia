@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import re
 import secrets
 import threading
 import time
@@ -26,7 +27,6 @@ from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import CallbackListener, allowed_hosts
 
 AUTHORITY_HOST = "https://login.microsoftonline.com/"
-CALLBACK_PATH = "/api/microsoft/oauth/callback"
 SCOPES = ("Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.ReadWrite", "offline_access", "User.Read")
 PENDING_SECONDS = 600
 PENDING_MAX = 8
@@ -55,8 +55,19 @@ class _Pending:
         return time.monotonic() >= self.created_at + PENDING_SECONDS
 
 
+@dataclass(frozen=True)
+class _LatestAddFailure:
+    cause: str
+    created_at: float
+
+    @property
+    def expired(self) -> bool:
+        return time.monotonic() >= self.created_at + PENDING_SECONDS
+
+
 _pending: dict[str, _Pending] = {}
 _pending_expiries: dict[str, asyncio.Task[None]] = {}
+_latest_add_failures: dict[str, _LatestAddFailure] = {}
 _pending_lock = threading.Lock()
 
 
@@ -100,7 +111,7 @@ def _new_pending(
         state=secrets.token_urlsafe(32), account_id=account_id or str(uuid.uuid4()), adding=account_id is None,
         actor=actor, adding_thread_id=adding_thread_id, reach=reach, kind=valid_kind, authority=authority,
         verifier=secrets.token_urlsafe(64), client_id=valid_client, tenant_id=valid_tenant,
-        redirect_uri=f"http://localhost:{listener.port}{CALLBACK_PATH}", listener=listener, created_at=time.monotonic(),
+        redirect_uri=f"http://localhost:{listener.port}", listener=listener, created_at=time.monotonic(),
     )
 
 
@@ -126,8 +137,50 @@ async def _close_expired() -> None:
         for pending in expired:
             _pending.pop(pending.state, None)
             _cancel_expiry(pending.state)
+        _clear_expired_add_failures()
     for pending in expired:
         await pending.listener.stop()
+
+
+def _clear_expired_add_failures() -> None:
+    for thread_id, failure in list(_latest_add_failures.items()):
+        if failure.expired:
+            _latest_add_failures.pop(thread_id)
+
+
+def _record_add_failure(thread_id: str, cause: str) -> None:
+    with _pending_lock:
+        _clear_expired_add_failures()
+        if thread_id not in _latest_add_failures and len(_latest_add_failures) >= PENDING_MAX:
+            oldest = min(_latest_add_failures, key=lambda key: _latest_add_failures[key].created_at)
+            _latest_add_failures.pop(oldest)
+        _latest_add_failures[thread_id] = _LatestAddFailure(cause=cause, created_at=time.monotonic())
+
+
+def _clear_add_failure(thread_id: str) -> None:
+    with _pending_lock:
+        _latest_add_failures.pop(thread_id, None)
+
+
+def _redirect_error_cause(query: dict[str, str]) -> str:
+    """Classify a callback error without retaining any provider-supplied text."""
+    aadsts_codes = {int(match.group(1)) for value in query.values() for match in re.finditer(r"AADSTS(\d+)", value)}
+    # Microsoft confirms AADSTS65004 is declined consent, never administrator approval.
+    if (query.get("error") == "access_denied" and query.get("error_subcode") == "cancel") or 65004 in aadsts_codes:
+        return CONSENT_CANCELLED
+    if aadsts_codes & {90094, 90095, 65001}:
+        return ADMIN_APPROVAL_REQUIRED
+    return PROVIDER_UNAVAILABLE
+
+
+async def _record_failure(pending: _Pending, cause: str) -> None:
+    if pending.adding:
+        if pending.adding_thread_id is not None:
+            _record_add_failure(pending.adding_thread_id, cause)
+        return
+    from connections.microsoft.accounts import mark_microsoft_needs_sign_in
+
+    await run_in_db(mark_microsoft_needs_sign_in, pending.account_id, cause=cause)
 
 
 async def start_sign_in(
@@ -145,12 +198,20 @@ async def start_sign_in(
         given = query.get("state", "")
         if not given or not secrets.compare_digest(given, pending.state):
             return 400, "This isn't the Microsoft sign-in CORSIA is waiting for.", False, "state"
+        if "error" in query:
+            pending = _take_pending(given)
+            await _record_failure(pending, _redirect_error_cause(query))
+            return 400, "Microsoft sign-in couldn't finish. Go back to CORSIA and try again.", True, None
         try:
             await _complete_sign_in(query.get("code"), given)
         except MicrosoftError as exc:
+            await _record_failure(pending, exc.cause)
             return 400, exc.browser_message or "Microsoft sign-in couldn't finish. Go back to CORSIA and try again.", True, None
         except Exception:
+            await _record_failure(pending, PROVIDER_UNAVAILABLE)
             return 500, "Microsoft sign-in couldn't finish. Go back to CORSIA and try again.", True, None
+        if pending.adding_thread_id is not None:
+            _clear_add_failure(pending.adding_thread_id)
         return 200, "Microsoft is connected. You can close this tab and go back to CORSIA.", True, None
 
     async def on_cap() -> None:
@@ -158,7 +219,7 @@ async def start_sign_in(
         if pending is not None:
             await _discard_pending(pending)
 
-    listener = CallbackListener(path=CALLBACK_PATH, allowed_hosts=allowed_hosts("localhost"), handler=handler, on_cap=on_cap)
+    listener = CallbackListener(path="/", allowed_hosts=allowed_hosts("localhost"), handler=handler, on_cap=on_cap)
     try:
         await listener.start()
         pending = _new_pending(client_id, kind, tenant_id, account_id, actor, adding_thread_id, reach, listener)
@@ -304,6 +365,11 @@ def accounts_status(thread_id: str | None = None, account_id: object = None) -> 
         if account_id is not None:
             selected = next((row for row in rows if row["account_id"] == account_id), None)
             return selected or {"status": "not_connected"}
-        return {"accounts": rows} if rows else {"status": "not_connected"}
+        if rows:
+            return {"accounts": rows}
+        with _pending_lock:
+            _clear_expired_add_failures()
+            failure = _latest_add_failures.get(thread_id) if thread_id is not None else None
+        return {"status": "not_connected", "cause": failure.cause} if failure else {"status": "not_connected"}
     finally:
         db.close()

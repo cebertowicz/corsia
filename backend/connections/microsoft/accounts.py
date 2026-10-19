@@ -135,7 +135,7 @@ def resolve_microsoft_credentials(account_id: str, *, db: sqlite3.Connection) ->
 
 
 def mark_microsoft_needs_sign_in(
-    account_id: str, refresh_token: str | None = None, *, db: sqlite3.Connection | None = None,
+    account_id: str, refresh_token: str | None = None, *, cause: str = "refresh_token_invalid", db: sqlite3.Connection | None = None,
 ) -> bool:
     with write_transaction(db, scope="microsoft_account_needs_sign_in") as conn:
         bundle = _microsoft_stored_bundle(account_id, db=conn)
@@ -143,7 +143,7 @@ def mark_microsoft_needs_sign_in(
             return False
         if conn.execute(
             "UPDATE connected_accounts SET state='needs_sign_in',state_cause=?,updated_at=? WHERE id=? AND provider=?",
-            ("refresh_token_invalid", utc_now_iso(), account_id, MICROSOFT_PROVIDER),
+            (cause, utc_now_iso(), account_id, MICROSOFT_PROVIDER),
         ).rowcount != 1:
             raise ConnectedAccountError("connected account not found")
         return True
