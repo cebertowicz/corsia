@@ -217,6 +217,20 @@ def _check_kpi(name: str, spec: dict[str, Any], context: _Context) -> None:
             raise fail(context.lines, where, f"kpi {name} can_decide: true with decides_as quality is {ordinal} in workflow {context.workflow}; a workflow may have two. Set can_decide: false on one, or set decides_as: spend if it measures cost.")
 
 
+def deciding_refusal(name: str, spec: dict[str, Any], events: dict[str, dict[str, Any]], workflow: str | None,
+                     version_attr: str | None = None) -> str | None:
+    """Run the sync-time ``can_decide`` test (§4.2), version rule and ``version_attr`` check again when a
+    verdict is read; the refusal text, or None when the KPI still passes. The two-quality limit spans a
+    workflow's KPIs, so its caller counts it."""
+    lines = Lines("")
+    try:
+        _check_version_attr({"workflow": workflow, "version_attr": version_attr}, events, lines)
+        _check_kpi(name, spec, _Context(events, workflow, lines))
+    except ValueError as exc:
+        return str(exc).split(": ", 1)[-1]
+    return None
+
+
 def _version_capable(spec: dict[str, Any], context: _Context) -> bool:
     """The Version rule: an operand declared in a file that names a workflow its owner owns."""
     if not context.workflow:

@@ -1,259 +1,292 @@
-"""Deterministic, side-by-side workflow verdicts (slice 1).
+"""Workflow keep-or-revert verdicts: runs, measures and the call for each measure (verdict design §3.2-§3.6).
 
-The evaluator supplies settled run facts from its read phase.  This module keeps
-all statistics out of SQLite transactions and writes only immutable outcome
-records when the deliberately-off switch is enabled.
+Pure code, no database. ``core.workflow_verdict_read`` builds the runs from real history and
+``core.workflow_verdict_rules`` chooses the baseline, freezes the plan and applies the verdict rule.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import random
-import sqlite3
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping, Sequence
 
 POLICY_VERSION = "workflow-verdict-v1"
 DEFAULT_MINIMUM = 20
 GROUP_MINIMUM = 5
 BOOTSTRAP_DRAWS = 2_000
+BUILTIN_WINDOW_DAYS = 3
+BUILTIN_MARGIN = 0.25
+CORRECTION_FLOOR = 0.02
+# KPI design §4.6: Imported and stronger let a deciding KPI decide; the rest never do.
+ALLOWED_LABELS = frozenset({"observed", "imported", "labeled", "corroborated"})
+OUTCOME_STATES = frozenset({"accepted", "accepted_with_followup"})
+TERMINAL_STATES = OUTCOME_STATES | {"failed", "closed"}
+MIXED = "mixed"
+CORRECTIONS, COST, MINUTES = "corrections_per_outcome", "cost_per_outcome", "minutes_per_outcome"
+# Calls that keep a measure from deciding at all, as opposed to waiting for runs.
+BLOCKED = frozenset({"not_comparable", "unconfirmed"})
+
+Group = tuple[str, str, str]
+
+
+def parse_ts(value: str) -> datetime:
+    """A stored timestamp in either separator form; a zoneless one is UTC."""
+    parsed = datetime.fromisoformat(value.replace(" ", "T").replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 @dataclass(frozen=True)
-class WorkflowRun:
-    """A settled run and its already-priced, deciding measure values.
+class CorrectionFact:
+    message_id: str
+    message_at: str
+    counter: str
+    is_correction: bool
 
-    ``None`` means unknown.  Cost must come from ``priced_run_costs`` below;
-    callers must never substitute ``llm_usage.cost_usd``.
-    """
+
+@dataclass(frozen=True)
+class KpiRow:
+    """One row behind a deciding KPI, from the KPI-row reader (KPI slice 2's formula engine)."""
+
+    part: str  # "num" or "den"
+    label: str
+    value: float
+    ts: str
+    paired_den_allowed: bool = False  # a numerator row whose denominator row is allowed (rule 3)
+
+
+@dataclass(frozen=True)
+class Run:
+    """One workflow run: the root plan node carrying the workflow and its settled facts."""
 
     run_id: str
     version: str
-    model: str
-    difficulty: str | None
-    size_band: str | None
-    settled_at: str
-    values: Mapping[str, float | None]
-    correction_counter: str | None = None
+    group: Group
+    started_at: str
+    terminal_at: str | None
+    state: str
+    corrections: tuple[CorrectionFact, ...] = ()
+    cost: float | None = None
+    kpi_rows: Mapping[str, tuple[KpiRow, ...]] | None = None  # None: no KPI-row reader yet
 
     @property
-    def group(self) -> tuple[str, str, str]:
-        return (self.model, self.difficulty or "unrated", self.size_band or "unsized")
+    def outcome(self) -> bool:
+        return self.state in OUTCOME_STATES
+
+    def settled(self, window_days: int, now: datetime) -> bool:
+        """Terminal, and its follow-up window has passed."""
+        return (self.terminal_at is not None and self.state in TERMINAL_STATES
+                and parse_ts(self.terminal_at) + timedelta(days=window_days) <= now)
+
+    def in_window(self, ts: str, window_days: int) -> bool:
+        assert self.terminal_at is not None
+        return parse_ts(ts) <= parse_ts(self.terminal_at) + timedelta(days=window_days)
 
 
 @dataclass(frozen=True)
-class DecidingMeasure:
+class PlannedMeasure:
+    """One measure in a frozen plan. Built-ins carry a relative margin; owner KPIs their own gap."""
+
     name: str
+    role: str  # quality, spend or shown
     better: str
-    margin: float
-    kind: str = "quality"
-    minimum: int = DEFAULT_MINIMUM
+    source: str  # builtin or kpi
+    window_days: int
+    definition_version: int | None = None
+    margin_gap: float | None = None
+    floor: float = 0.0
+    coverage: bool = False
 
-    def __post_init__(self) -> None:
-        if self.better not in {"higher", "lower"}:
-            raise ValueError("better must be higher or lower")
-        if self.kind not in {"quality", "spend"}:
-            raise ValueError("kind must be quality or spend")
-
-
-@dataclass(frozen=True)
-class FrozenPlan:
-    subject: str
-    baseline: str
-    measures: tuple[DecidingMeasure, ...]
-    seed: int
-    policy_version: str = POLICY_VERSION
-
-    def encoded(self) -> str:
-        return json.dumps({"subject": self.subject, "baseline": self.baseline,
-                           "measures": [asdict(item) for item in self.measures],
-                           "seed": self.seed, "policy_version": self.policy_version},
-                          sort_keys=True, separators=(",", ":"))
+    def margin(self, baseline_value: float) -> float:
+        if self.margin_gap is not None:
+            return self.margin_gap
+        return max(BUILTIN_MARGIN * abs(baseline_value), self.floor)
 
 
 @dataclass(frozen=True)
 class MeasureCall:
     name: str
+    role: str
     call: str
-    difference: float | None
-    interval: tuple[float, float] | None
-    groups: tuple[tuple[str, str, str], ...]
+    reason: str | None = None
+    difference: float | None = None
+    interval: tuple[float, float] | None = None
+    margin: float | None = None
+    groups: tuple[Group, ...] = ()
+    n_new: int = 0
+    n_base: int = 0
+    values: tuple[float | None, float | None] = (None, None)  # baseline, new
+    detail: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class Verdict:
-    word: str
-    reason: str
-    look: int
-    calls: tuple[MeasureCall, ...]
+class _Sample:
+    num: float
+    den: float
+    n: int
 
 
-def nearest_baseline(versions: Sequence[str], runs: Iterable[WorkflowRun], candidate: str,
-                     minimum: int = DEFAULT_MINIMUM) -> str | None:
-    """Return predecessor, walking back when it lacks enough settled runs."""
-    before = list(versions[:versions.index(candidate)])
-    counts: dict[str, int] = defaultdict(int)
+def _counter(measure: PlannedMeasure, runs: Sequence[Run]) -> str | None | bool:
+    """The one classifier version that counted every message on both sides, None for none, False if none did."""
+    by_message: dict[str, set[str]] = defaultdict(set)
     for run in runs:
-        counts[run.version] += 1
-    return next((version for version in reversed(before) if counts[version] >= minimum), None)
-
-
-def freeze_plan(subject: str, baseline: str, measures: Iterable[DecidingMeasure]) -> FrozenPlan:
-    """Freeze all policy inputs before any verdict is calculated."""
-    ordered = tuple(measures)
-    if not ordered or not any(item.kind == "quality" for item in ordered):
-        raise ValueError("a frozen workflow plan needs a quality measure")
-    seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
-    return FrozenPlan(subject, baseline, ordered, seed=seed)
-
-
-def read_frozen_plan(db: sqlite3.Connection, subject: str) -> FrozenPlan | None:
-    """Read the immutable planned event during the evaluator's read phase."""
-    row = db.execute("SELECT attributes FROM outcome_events WHERE dedupe_key=? AND retracted_at IS NULL",
-                     (f"verdict:planned:{subject}",)).fetchone()
-    if row is None:
+        for fact in run.corrections:
+            if run.in_window(fact.message_at, measure.window_days):
+                by_message[fact.message_id].add(fact.counter)
+    if not by_message:
         return None
-    payload = json.loads(json.loads(row[0])["plan"])
-    measures = tuple(DecidingMeasure(**item) for item in payload["measures"])
-    return FrozenPlan(payload["subject"], payload["baseline"], measures, int(payload["seed"]), payload["policy_version"])
+    common = set.intersection(*by_message.values())
+    return max(common) if common else False
 
 
-def _values(runs: Iterable[WorkflowRun], version: str, measure: str) -> dict[tuple[str, str, str], list[float]]:
-    grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+def _sample(measure: PlannedMeasure, run: Run, counter: str | None) -> _Sample | None:
+    den = 1.0 if run.outcome else 0.0
+    if measure.name == CORRECTIONS:
+        count = sum(1 for fact in run.corrections if fact.is_correction and fact.counter == counter
+                    and run.in_window(fact.message_at, measure.window_days))
+        return _Sample(float(count), den, 1)
+    if measure.name == COST:  # an unknown cost was already called unknown, never 0
+        return None if run.cost is None else _Sample(run.cost, den, 1)
+    rows = [row for row in (run.kpi_rows or {}).get(measure.name, ())
+            if row.label in ALLOWED_LABELS and run.in_window(row.ts, measure.window_days)]
+    dens = sum(1 for row in rows if row.part == "den")
+    return _Sample(sum(row.value for row in rows if row.part == "num"), float(dens), dens)
+
+
+def _blocked(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run]) -> MeasureCall | None:
+    """The calls decided before any number: not comparable, unconfirmed or unknown."""
+    runs = [*new, *old]
+
+    def call(name: str, reason: str, **detail: object) -> MeasureCall:
+        return MeasureCall(measure.name, measure.role, name, reason, detail=detail)
+
+    if measure.role == "shown":
+        return call("shown", "not_attributed_per_run")
+    if measure.source == "kpi":
+        if any(run.kpi_rows is None for run in runs):
+            return call("not_comparable", "kpi_engine_missing")
+        rows = [row for run in runs for row in (run.kpi_rows or {}).get(measure.name, ())
+                if run.in_window(row.ts, measure.window_days)]
+        unconfirmed = sum(1 for row in rows if row.part == "num" and row.label not in ALLOWED_LABELS
+                          and row.paired_den_allowed)
+        if unconfirmed:
+            return call("unconfirmed", "kpi_unconfirmed", kpi=measure.name, k=unconfirmed)
+        if measure.coverage:
+            for side in (new, old):
+                labelled = sum(1 for run in side if any(row.label in ALLOWED_LABELS
+                                                        for row in (run.kpi_rows or {}).get(measure.name, ())))
+                if side and labelled * 2 < len(side):
+                    return call("not_comparable", "coverage_under_half", kpi=measure.name)
+    if measure.name == COST:
+        if any(not run.outcome for run in runs):
+            return call("unknown", "failed_run_unpriced")
+        if any(run.cost is None for run in runs):
+            return call("unknown", "cost_unknown")
+    return None
+
+
+def _grouped(measure: PlannedMeasure, runs: Iterable[Run], counter: str | None) -> dict[Group, list[_Sample]]:
+    grouped: dict[Group, list[_Sample]] = defaultdict(list)
     for run in runs:
-        value = run.values.get(measure)
-        if run.version == version and value is not None:
-            grouped[run.group].append(float(value))
+        sample = _sample(measure, run, counter)
+        if sample is not None:
+            grouped[run.group].append(sample)
     return grouped
 
 
-def _interval(new: dict[tuple[str, str, str], list[float]], old: dict[tuple[str, str, str], list[float]],
-              measure: DecidingMeasure, seed: int) -> tuple[float, tuple[float, float], tuple[tuple[str, str, str], ...]] | None:
-    groups = tuple(sorted(group for group in new if len(new[group]) >= GROUP_MINIMUM and len(old.get(group, ())) >= GROUP_MINIMUM))
-    if not groups:
-        return None
-    if sum(len(new[group]) for group in groups) < measure.minimum or sum(len(old[group]) for group in groups) < measure.minimum:
-        return None
-    weights = {group: len(new[group]) / sum(len(new[item]) for item in groups) for group in groups}
-    direction = 1 if measure.better == "higher" else -1
-    randomizer = random.Random(seed)
-    differences: list[float] = []
-    for _ in range(BOOTSTRAP_DRAWS):
-        total = 0.0
-        for group in groups:
-            new_sample = [randomizer.choice(new[group]) for _ in new[group]]
-            old_sample = [randomizer.choice(old[group]) for _ in old[group]]
-            total += weights[group] * direction * (sum(new_sample) / len(new_sample) - sum(old_sample) / len(old_sample))
-        differences.append(total)
-    differences.sort()
-    point = sum(differences) / len(differences)
-    return point, (differences[int(.05 * len(differences))], differences[int(.95 * len(differences))]), groups
+def _value(samples: Sequence[_Sample]) -> float | None:
+    den = sum(sample.den for sample in samples)
+    return None if den == 0 else sum(sample.num for sample in samples) / den
 
 
-def _call_from_interval(interval: tuple[float, float], margin: float) -> str:
-    if interval[1] <= -margin:
-        return "worse"
-    if interval[0] >= margin:
-        return "better"
-    if interval[0] > -margin:
-        return "no_worse"
-    return "unclear"
-
-
-def measure_call(runs: Iterable[WorkflowRun], version: str, plan: FrozenPlan, measure: DecidingMeasure) -> MeasureCall:
-    """Classify one frozen measure; all numeric differences point toward better.
-
-    A qualifying group that alone reaches the full minimum can establish harm;
-    pooling may not wash it out.
-    """
-    all_runs = tuple(runs)
-    if measure.name == "corrections":
-        counters = {run.correction_counter for run in all_runs if run.version in {version, plan.baseline}}
-        if len(counters - {None}) > 1:
-            return MeasureCall(measure.name, "not_comparable", None, None, ())
-    new, old = _values(all_runs, version, measure.name), _values(all_runs, plan.baseline, measure.name)
-    seed = plan.seed + sum(ord(char) for char in measure.name)
-    outcome = _interval(new, old, measure, seed)
-    if outcome is None:
-        return MeasureCall(measure.name, "too_few", None, None, ())
-    difference, interval, groups = outcome
+def _pooled(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequence[_Sample]],
+            groups: Sequence[Group]) -> tuple[float, float, float] | None:
+    """Within-group differences averaged with the new version's weights: (difference, baseline, new)."""
+    total = diff = base = fresh = 0.0
     for group in groups:
-        if len(new[group]) >= measure.minimum and len(old[group]) >= measure.minimum:
-            group_outcome = _interval({group: new[group]}, {group: old[group]}, measure, seed + len(group))
-            assert group_outcome is not None
-            if _call_from_interval(group_outcome[1], measure.margin) == "worse":
-                return MeasureCall(measure.name, "worse", difference, interval, groups)
-    return MeasureCall(measure.name, _call_from_interval(interval, measure.margin), difference, interval, groups)
-
-
-def decide(runs: Iterable[WorkflowRun], version: str, plan: FrozenPlan, *, replaced_by: str | None = None) -> Verdict:
-    """Apply the fixed two-look rule.  A final result never reopens."""
-    runs = tuple(runs)
-    new_count = sum(run.version == version for run in runs)
-    minimum = max(item.minimum for item in plan.measures)
-    if replaced_by and new_count < minimum:
-        return Verdict("changed_early", f"replaced_by:{replaced_by};runs:{new_count}", 0, ())
-    calls = tuple(measure_call(runs, version, plan, measure) for measure in plan.measures)
-    quality = tuple((measure, call) for measure, call in zip(plan.measures, calls) if measure.kind == "quality")
-    spend = tuple(call for measure, call in zip(plan.measures, calls) if measure.kind == "spend")
-    if any(call.call == "worse" for _, call in quality):
-        return Verdict("revert", "quality_worse", 1, calls)
-    if any(call.call == "better" for _, call in quality):
-        return Verdict("keep", "quality_better", 1, calls)
-    if quality and all(call.call == "no_worse" for _, call in quality):
-        if any(call.call == "worse" for call in spend):
-            return Verdict("revert", "cost_worse_without_quality_gain", 1, calls)
-        return Verdict("keep", "no_worse", 1, calls)
-    if any(call.call == "unclear" for _, call in quality):
-        doubled = all(sum(run.version == side for run in runs) >= 2 * measure.minimum
-                      for measure in plan.measures for side in (version, plan.baseline))
-        return Verdict("keep" if doubled else "collecting", "no_clear_difference" if doubled else "wait_for_look_2", 2 if doubled else 1, calls)
-    return Verdict("not_enough_data", "no_independent_quality_measure", 0, calls)
-
-
-def priced_run_costs(db: sqlite3.Connection, params: dict[str, object]) -> dict[str, float | None]:
-    """Return whole-chain API-equivalent spend by run, or unknown.
-
-    This intentionally reuses Measurement's chain and price admission.  A run
-    with any unpriceable chain row is unknown, never a false zero from the
-    call-time ``llm_usage.cost_usd`` column.
-    """
-    from api.cost_identity import IdentityResolver
-    from api.measurement_model_cost import materialize_chain, query_model_costs
-
-    chain = materialize_chain(db, params)
-    try:
-        rows = query_model_costs(db, params, IdentityResolver(db), chain_rows=chain)
-    finally:
-        db.execute(f"DELETE FROM {chain}")
-    costs: dict[str, float | None] = {}
-    for row in rows:
-        run_id = str(row["task_id"])
-        amount = row.get("dollars")
-        if row.get("outcome") != "priced" or amount is None:
-            costs[run_id] = None
-        elif run_id not in costs:
-            costs[run_id] = float(amount)
-        elif costs[run_id] is not None:
-            known = costs[run_id]
-            assert known is not None
-            costs[run_id] = known + float(amount)
-    return costs
-
-
-def assert_evaluator_fields(specs: Iterable[Mapping[str, object]]) -> tuple[DecidingMeasure, ...]:
-    """Select only definitions sync admitted as deciding, preserving their declared role."""
-    result = []
-    for spec in specs:
-        if not spec.get("can_decide"):
+        new_value, old_value = _value(new[group]), _value(old[group])
+        if new_value is None or old_value is None:
             continue
-        if spec.get("decides_as", "quality") not in {"quality", "spend"}:
-            raise ValueError("decides_as must be quality or spend")
-        if not spec.get("version_attr") and not spec.get("workflow_version", True):
-            raise ValueError("can_decide KPI has no workflow version or version_attr")
-        name, better, margin, minimum = spec.get("name"), spec.get("better"), spec.get("margin"), spec.get("min_n", DEFAULT_MINIMUM)
-        if not isinstance(name, str) or not isinstance(better, str) or not isinstance(margin, (int, float)) or not isinstance(minimum, int):
-            raise ValueError("deciding KPI has an invalid evaluator definition")
-        result.append(DecidingMeasure(name, better, float(margin), str(spec.get("decides_as", "quality")), minimum))
-    return tuple(result)
+        weight = float(sum(sample.n for sample in new[group]))
+        total, diff = total + weight, diff + weight * (new_value - old_value)
+        base, fresh = base + weight * old_value, fresh + weight * new_value
+    return None if total == 0 else (diff / total, base / total, fresh / total)
+
+
+def _interval(new: Mapping[Group, Sequence[_Sample]], old: Mapping[Group, Sequence[_Sample]],
+              groups: Sequence[Group], seed: int) -> tuple[float, float]:
+    """A 90% bootstrap interval: runs resampled within each side and group, seeded from the subject."""
+    rng, draws = random.Random(seed), []
+    for _ in range(BOOTSTRAP_DRAWS):
+        resampled_new = {g: [rng.choice(new[g]) for _ in new[g]] for g in groups}
+        resampled_old = {g: [rng.choice(old[g]) for _ in old[g]] for g in groups}
+        pooled = _pooled(resampled_new, resampled_old, groups)
+        if pooled is not None:
+            draws.append(pooled[0])
+    draws.sort()
+    return draws[int(0.05 * (len(draws) - 1))], draws[int(0.95 * (len(draws) - 1))]
+
+
+def _call_from(better: str, difference: float, interval: tuple[float, float], margin: float) -> str:
+    harm = difference if better == "lower" else -difference
+    low, high = interval if better == "lower" else (-interval[1], -interval[0])
+    if low > 0 and harm >= margin:
+        return "worse"
+    if high < 0 and -harm >= margin:
+        return "better"
+    return "no_worse" if high < margin else "unclear"
+
+
+def eligible(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run], counter: str | None
+             ) -> tuple[dict[Group, list[_Sample]], dict[Group, list[_Sample]], list[Group], list[Group]]:
+    """Both sides' samples, the groups they share and the shared groups with enough runs on each side."""
+    new_g, old_g = _grouped(measure, new, counter), _grouped(measure, old, counter)
+    shared = sorted(set(new_g) & set(old_g))
+    ok = [g for g in shared if sum(s.n for s in new_g[g]) >= GROUP_MINIMUM and sum(s.n for s in old_g[g]) >= GROUP_MINIMUM
+          and _value(new_g[g]) is not None and _value(old_g[g]) is not None]
+    return new_g, old_g, shared, ok
+
+
+def measure_call(measure: PlannedMeasure, new: Sequence[Run], old: Sequence[Run], *, minimum: int,
+                 now: datetime, seed: int, bootstrap: bool = True, base_minimum: int | None = None) -> MeasureCall:
+    """One measure's call at a look: Worse, Better, No worse, Unclear, Too few, Not comparable or unknown.
+
+    ``base_minimum`` (default ``minimum``) is the baseline side's bar: look 2 doubles only the new side's,
+    since the baseline keeps at most twice the minimum per group.
+    """
+    new = [run for run in new if run.settled(measure.window_days, now)]
+    old = [run for run in old if run.settled(measure.window_days, now)]
+    blocked = _blocked(measure, new, old)
+    if blocked is not None:
+        return blocked
+    counter = _counter(measure, [*new, *old]) if measure.name == CORRECTIONS else None
+    if counter is False:
+        return MeasureCall(measure.name, measure.role, "not_comparable", "counter_changed")
+    new_g, old_g, shared, groups = eligible(measure, new, old, counter or None)  # type: ignore[arg-type]
+    if not new_g:
+        return MeasureCall(measure.name, measure.role, "too_few", "below_minimum")
+    if not shared:
+        return MeasureCall(measure.name, measure.role, "not_comparable", "no_shared_groups")
+    n_new = sum(s.n for g in groups for s in new_g[g])
+    n_old = sum(s.n for g in groups for s in old_g[g])
+    base = MeasureCall(measure.name, measure.role, "too_few", "below_minimum", groups=tuple(groups), n_new=n_new, n_base=n_old)
+    if n_new < minimum or n_old < (minimum if base_minimum is None else base_minimum):
+        return base
+    pooled = _pooled(new_g, old_g, groups)
+    assert pooled is not None
+    difference, baseline_value, new_value = pooled
+    margin = measure.margin(baseline_value)
+    if not bootstrap:
+        return replace(base, call="counted", reason=None, margin=margin)
+    interval = _interval(new_g, old_g, groups, seed)
+    call, reason = _call_from(measure.better, difference, interval, margin), None
+    if measure.role == "quality" and call != "worse":
+        for group in groups:
+            if sum(s.n for s in new_g[group]) >= minimum and sum(s.n for s in old_g[group]) >= minimum:
+                one = _pooled(new_g, old_g, [group])
+                assert one is not None
+                interval_g = _interval(new_g, old_g, [group], seed + 1)
+                if _call_from(measure.better, one[0], interval_g, measure.margin(one[1])) == "worse":
+                    call, reason = "worse", "harm_in_group"
+    return MeasureCall(measure.name, measure.role, call, reason, difference, interval, margin, tuple(groups),
+                       n_new, n_old, (baseline_value, new_value))
