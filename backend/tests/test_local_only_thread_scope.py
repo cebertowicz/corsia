@@ -419,7 +419,7 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
     assert sent == ([] if refused else ["delivered"])
 
 
-def test_person_recipient_is_exempt_from_send_confirmation(monkeypatch) -> None:
+def test_person_chat_on_a_cloud_model_still_needs_confirmation(monkeypatch) -> None:
     from infra import local_only
 
     db = _db()
@@ -429,12 +429,14 @@ def test_person_recipient_is_exempt_from_send_confirmation(monkeypatch) -> None:
         lambda *_args, **_kwargs: "cloud",
     )
 
-    assert local_only.send_confirmation_refusal(
+    refusal = local_only.send_confirmation_refusal(
         {"local_only": True},
         {"model": "cloud", "agent_enabled": 0, "spawned_by": None},
         no_sensitive_content=False,
         db=db,
-    ) is None
+    )
+
+    assert refusal is not None and "no_sensitive_content: true" in refusal
 
 
 @pytest.mark.asyncio
@@ -442,12 +444,12 @@ def test_person_recipient_is_exempt_from_send_confirmation(monkeypatch) -> None:
     ("parent_local_only", "model", "confirmed", "refused"),
     [
         (True, "cloud", False, True),
-        (True, "cloud", True, False),
+        (True, "cloud", True, True),
         (True, "local", False, False),
         (False, "cloud", False, False),
     ],
 )
-async def test_delegate_task_first_message_enforces_cloud_confirmation(
+async def test_delegate_task_refuses_a_cloud_worker_for_a_local_only_parent(
     isolated_db,
     monkeypatch,
     parent_local_only,
@@ -475,7 +477,9 @@ async def test_delegate_task_first_message_enforces_cloud_confirmation(
 
     monkeypatch.setattr(
         "infra.local_only.local_only_model_refusal",
-        lambda selected, **_kwargs: "cloud" if selected == "cloud" else None,
+        lambda selected, *, thread_local_only, **_kwargs: (
+            "cloud" if thread_local_only and selected == "cloud" else None
+        ),
     )
     monkeypatch.setattr(delegate_task, "eligible_delegation_model", lambda selected, **_kwargs: (selected, None))
     monkeypatch.setattr(delegate_task.delegation, "_is_cc_model", lambda _model: False)
@@ -492,7 +496,7 @@ async def test_delegate_task_first_message_enforces_cloud_confirmation(
 
     assert isinstance(result, str) is refused
     if refused:
-        assert "no_sensitive_content: true" in result
+        assert result == "Error: cloud"
         assert spawned == []
     else:
         assert result["ok"] is True

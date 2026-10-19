@@ -90,13 +90,8 @@ def send_confirmation_refusal(
     """Require a local-only sender to confirm a cloud-bound recipient is safe."""
     if not sender.get("local_only"):
         return None
-    # A visible, non-agent root is the person's own thread, which is exempt.
-    if (
-        ("spawned_by" in recipient or "agent_enabled" in recipient)
-        and not recipient.get("spawned_by")
-        and not recipient.get("agent_enabled")
-    ):
-        return None
+    # Every recipient thread is read by its own bound model, so only its
+    # locality decides; a person's chat on a cloud model is still cloud-bound.
     recipient_model = recipient.get("model")
     if not isinstance(recipient_model, str) or not recipient_model.strip():
         return None

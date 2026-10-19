@@ -237,12 +237,14 @@ SCHEMA_SQL = f"""
     {KEY_STORE_SCHEMA_SQL}
     {CONNECTED_APPS_SCHEMA_SQL}
     {CONNECTED_ACCOUNTS_SCHEMA_SQL}
+
     CREATE TABLE IF NOT EXISTS fact_extraction_runs (
         run_date TEXT PRIMARY KEY,
         status TEXT NOT NULL DEFAULT 'ok',
         result_json TEXT,
         ran_at TEXT NOT NULL
     );
+
     CREATE TABLE IF NOT EXISTS network_servers (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL DEFAULT 'omlx',

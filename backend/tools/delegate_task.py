@@ -80,10 +80,6 @@ class DelegateTaskTool(Tool):
                         "'none' keeps your task and returns the result as a chat message."
                     ),
                 },
-                "no_sensitive_content": {
-                    "type": "boolean",
-                    "description": "Confirm this cloud-bound task contains no sensitive content.",
-                },
             },
             ["task", "model"],
         )
@@ -131,14 +127,10 @@ async def _spawn(
     model, refusal = await run_in_db(partial(eligible_delegation_model, requested_model, **scope))
     if refusal:
         return f"Error: {refusal}"
-    confirmation_error = await run_in_db(
-        _first_message_confirmation_error,
-        parent,
-        model,
-        kwargs.get("no_sensitive_content"),
-    )
-    if confirmation_error:
-        return confirmation_error
+    # The worker inherits Local only, so a cloud model is refused before anything starts.
+    local_refusal = await run_in_db(_local_only_refusal, parent, model)
+    if local_refusal:
+        return f"Error: {local_refusal}"
     try:
         requested_is_cc = delegation._is_cc_model(model)
     except Exception as exc:
@@ -192,16 +184,16 @@ async def _spawn(
     }
 
 
-def _first_message_confirmation_error(parent, model, no_sensitive_content):
+def _local_only_refusal(parent, model):
     from infra.database import get_db
-    from infra.local_only import send_confirmation_refusal
+    from infra.local_only import local_only_model_refusal
 
     db = get_db()
     try:
-        return send_confirmation_refusal(
-            parent,
-            {"model": model, "project_id": parent.get("project_id")},
-            no_sensitive_content=no_sensitive_content,
+        return local_only_model_refusal(
+            model,
+            thread_local_only=bool(parent.get("local_only")),
+            project_id=parent.get("project_id") or None,
             db=db,
         )
     finally:
