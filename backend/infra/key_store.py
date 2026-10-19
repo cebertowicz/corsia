@@ -11,9 +11,9 @@ commit point: a rolled-back write leaves the entry on its old value.
 
 Nothing here turns an entry's name into its value for a caller. What uses a
 key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
-:func:`resolve_google` and ``infra.key_store_servers.resolve_server`` are the
-only readers, and only a built-in, a cloud-provider, a Google sign-in or a
-server entry has one. An entry an agent adds does nothing until code
+``connections.connected_accounts.resolve_google_credentials`` and
+``infra.key_store_servers.resolve_server`` are the only readers, and only a
+built-in, a cloud-provider, a Google account or a server entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
@@ -273,22 +273,6 @@ def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str 
     if name not in PROVIDER_NAMES:
         return None
     return resolve_names([f"{PROVIDER_PREFIX}{name}"], db=db).get(f"{PROVIDER_PREFIX}{name}")
-
-
-def resolve_google(*, db: sqlite3.Connection | None = None) -> dict[str, str] | None:
-    """The single-account compatibility credential view for Google callers.
-
-    Legacy fixed entry names are deliberately never read after the connected
-    account migration. PR B replaces this temporary accessor with required
-    account selection.
-    """
-    from connections.connected_accounts import google_account, resolve_google_credentials
-
-    conn = _db(db)
-    account = google_account(db=conn)
-    if account is None:
-        return None
-    return resolve_google_credentials(str(account["id"]), db=conn)
 
 
 def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:

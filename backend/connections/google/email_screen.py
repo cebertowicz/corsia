@@ -194,24 +194,27 @@ def _resolve_local_target(model_id: str | None = None) -> Any:
 
 
 def _record(
-    account: str, message_id: str, screen: Screen, db: sqlite3.Connection | None = None,
+    account_id: str, message_id: str, screen: Screen, db: sqlite3.Connection | None = None,
 ) -> None:
+    """Store one result, but only while its account is connected: a Remove drops pending results."""
     with write_transaction(db, scope="email_screen_record") as conn:
         conn.execute(
             "INSERT INTO email_screens (account, message_id, status, kind, needs_person, injection,"
-            " injection_rule, model_id, screened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " injection_rule, model_id, screened_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?"
+            " WHERE EXISTS (SELECT 1 FROM connected_accounts WHERE id=? AND state='connected')"
             " ON CONFLICT(account, message_id) DO UPDATE SET status=excluded.status, kind=excluded.kind,"
             " needs_person=excluded.needs_person, injection=excluded.injection,"
             " injection_rule=excluded.injection_rule, model_id=excluded.model_id,"
             " screened_at=excluded.screened_at, attempts=attempts+1",
-            (account, message_id, screen.status, screen.kind, screen.needs_person,
+            (account_id, message_id, screen.status, screen.kind, screen.needs_person,
              int(screen.injection) if screen.status == STATUS_SCREENED else None,
-             screen.rule if screen.status == STATUS_SCREENED else None, screen.model_id, utc_now_iso()),
+             screen.rule if screen.status == STATUS_SCREENED else None, screen.model_id, utc_now_iso(),
+             account_id),
         )
 
 
-def stored_screens(account: str, message_ids: list[str], db: sqlite3.Connection | None = None) -> dict[str, Screen]:
-    """The stored result of each listed message that has one."""
+def stored_screens(account_id: str, message_ids: list[str], db: sqlite3.Connection | None = None) -> dict[str, Screen]:
+    """The stored result of each listed message of one account that has one."""
     conn = db if db is not None else get_db()
     found: dict[str, Screen] = {}
     for start in range(0, len(message_ids), 200):
@@ -219,7 +222,7 @@ def stored_screens(account: str, message_ids: list[str], db: sqlite3.Connection 
         rows = conn.execute(
             "SELECT message_id, status, kind, needs_person, injection, injection_rule, model_id"
             f" FROM email_screens WHERE account = ? AND message_id IN ({','.join('?' * len(chunk))})",
-            (account, *chunk),
+            (account_id, *chunk),
         ).fetchall()
         for row in rows:
             found[row["message_id"]] = Screen(
@@ -259,7 +262,7 @@ async def classify(
 
 
 async def screen_message(
-    account: str, message_id: str, headers: dict[str, str], body: str,
+    account_id: str, message_id: str, headers: dict[str, str], body: str,
     *, invoke: Invoke | None = None,
 ) -> Screen:
     """Screen one message once, store and return the result. Never raises for a model failure."""
@@ -285,7 +288,7 @@ async def screen_message(
         log.warning("email screen failed for %s: %s", message_id, type(exc).__name__)
         screen = Screen(STATUS_FAILED, model_id=model_id)
     try:
-        await run_in_db(_record, account, message_id, screen)
+        await run_in_db(_record, account_id, message_id, screen)
     except Exception:
         log.exception("email screen result could not be saved for %s", message_id)
     return screen

@@ -1,4 +1,4 @@
-"""A minimal authorized Google HTTP client over the key store's sign-in.
+"""A minimal authorized Google HTTP client, one connected account per call.
 
 Every error here carries fixed text and never a token, a secret or Google's
 response body: callers may hand the message straight to an agent.
@@ -13,7 +13,6 @@ from typing import Any
 
 import httpx
 
-from infra import key_store
 from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
@@ -27,8 +26,8 @@ NOT_CONNECTED = "Google isn't connected. Call google_connect and give the person
 SIGN_IN_RECOVERY = (
     'Google rejected the saved sign-in. Sign-ins for a project in Testing expire after 7 days: '
     'if the Audience page of the OAuth consent screen in Google Cloud shows Testing, ask the person '
-    'to publish their app "In production", keeping the same project. Then call google_connect and '
-    'give them the link.'
+    'to publish their app "In production", keeping the same project. Then call google_connect with '
+    'this account_id and give them the link.'
 )
 NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."
@@ -79,37 +78,32 @@ def id_token_subject(value: object) -> str | None:
     return subject if isinstance(subject, str) and subject else None
 
 
-def _backfill_google_subject(provider_subject: str) -> None:
-    """Store a refreshed Google identity on a migrated account when available."""
-    from connections.connected_accounts import backfill_google_subject, google_account
+def _on_account(work, account_id: str, *args: object):  # type: ignore[no-untyped-def]
+    """Run one connected-account read or write on its own connection."""
     from infra.database import get_db
 
     db = get_db()
     try:
-        account = google_account(db=db)
-        if account is not None:
-            backfill_google_subject(str(account["id"]), provider_subject, db=db)
+        return work(account_id, *args, db=db)
     finally:
         db.close()
 
 
-def _mark_needs_sign_in() -> None:
-    """Mark the single compatibility account without touching legacy settings."""
-    from connections.connected_accounts import google_account, set_state
-    from infra.database import get_db
+def _usable_credentials(account_id: str, *, db) -> dict[str, str] | None:  # type: ignore[no-untyped-def]
+    """The account's bundle only while it is connected: a signed-out or removing row lends nothing."""
+    from connections.connected_accounts import is_connected, resolve_google_credentials
 
-    db = get_db()
-    try:
-        account = google_account(db=db)
-        if account is not None and account["state"] != STATUS_NEEDS_SIGN_IN:
-            set_state(str(account["id"]), STATUS_NEEDS_SIGN_IN, db=db)
-    finally:
-        db.close()
+    return resolve_google_credentials(account_id, db=db) if is_connected(account_id, db=db) else None
 
 
-async def access_token() -> str:
-    """A fresh access token from the stored refresh token, for the one request that uses it."""
-    stored = await run_in_db(key_store.resolve_google)
+async def access_token(account_id: str) -> str:
+    """A fresh access token for this one account, for the one request that uses it.
+
+    A refused refresh marks only this account ``needs_sign_in``; no other account changes.
+    """
+    from connections.connected_accounts import backfill_google_subject, mark_needs_sign_in
+
+    stored = await run_in_db(_on_account, _usable_credentials, account_id)
     if stored is None:
         raise GoogleNotConnected()
     try:
@@ -123,8 +117,8 @@ async def access_token() -> str:
     except httpx.HTTPError:
         raise GoogleRequestFailed() from None
     if response.status_code in (400, 401):
-        # invalid_grant or an unauthorized client: the saved sign-in no longer works.
-        await run_in_db(_mark_needs_sign_in)
+        # invalid_grant or an unauthorized client: this account's saved sign-in no longer works.
+        await run_in_db(_on_account, mark_needs_sign_in, account_id, stored["refresh_token"])
         raise GoogleSignInRejected()
     if response.status_code != 200:
         raise GoogleRequestFailed(response.status_code)
@@ -138,16 +132,23 @@ async def access_token() -> str:
     if not isinstance(token, str) or not token:
         raise GoogleRequestFailed(response.status_code)
     if provider_subject is not None:
-        await run_in_db(_backfill_google_subject, provider_subject)
+        await run_in_db(_on_account, backfill_google_subject, account_id, provider_subject)
     return token
 
 
 async def request_json(
-    method: str, url: str, *, params: dict[str, Any] | None = None, body: dict[str, Any] | None = None,
-    token: str | None = None,
+    method: str, url: str, *, account_id: str | None, params: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None, token: str | None = None,
 ) -> Any:
-    """One authorized JSON call to a Google API, returning the decoded body."""
-    bearer = token or await access_token()
+    """One authorized JSON call to a Google API as one account, returning the decoded body.
+
+    ``account_id`` is None only with a ``token`` for an account that has no row yet (sign-in).
+    """
+    from connections.connected_accounts import mark_needs_sign_in
+
+    if token is None and account_id is None:
+        raise GoogleNotConnected()
+    bearer = token or await access_token(str(account_id))
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.request(
@@ -156,7 +157,8 @@ async def request_json(
     except httpx.HTTPError as exc:
         raise GoogleRequestFailed(never_sent=isinstance(exc, _NEVER_SENT)) from None
     if response.status_code == 401:
-        await run_in_db(_mark_needs_sign_in)
+        if account_id is not None:
+            await run_in_db(_on_account, mark_needs_sign_in, account_id)
         raise GoogleSignInRejected()
     if response.status_code >= 400:
         raise GoogleRequestFailed(response.status_code)
@@ -166,9 +168,11 @@ async def request_json(
         raise GoogleRequestFailed(response.status_code) from None
 
 
-async def get_json(url: str, *, params: dict[str, Any] | None = None) -> Any:
-    return await request_json("GET", url, params=params)
+async def get_json(account_id: str, url: str, *, params: dict[str, Any] | None = None) -> Any:
+    return await request_json("GET", url, account_id=account_id, params=params)
 
 
-async def post_json(url: str, body: dict[str, Any], *, params: dict[str, Any] | None = None) -> Any:
-    return await request_json("POST", url, params=params, body=body)
+async def post_json(
+    account_id: str, url: str, body: dict[str, Any], *, params: dict[str, Any] | None = None,
+) -> Any:
+    return await request_json("POST", url, account_id=account_id, params=params, body=body)

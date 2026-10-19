@@ -19,12 +19,13 @@ async def test_history_pages_are_exhausted_before_the_cursor_advances(monkeypatc
         ]},
     ]
 
-    async def get_json(_url: str, *, params: dict[str, str]):
+    async def get_json(account_id: str, _url: str, *, params: dict[str, str]):
+        assert account_id == "acct-1"
         calls.append(dict(params))
         return pages.pop(0)
 
     monkeypatch.setattr(feed.client, "get_json", get_json)
-    page = await feed.added_messages("h1")
+    page = await feed.added_messages("acct-1", "h1")
 
     assert page == feed.HistoryPage(("one", "two", "three"), "h3")
     assert calls[0]["startHistoryId"] == "h1"
@@ -32,9 +33,9 @@ async def test_history_pages_are_exhausted_before_the_cursor_advances(monkeypatc
 
 
 async def test_expired_history_is_distinct_from_an_ordinary_google_failure(monkeypatch):
-    async def rejected(_url: str, *, params: dict[str, str]):
+    async def rejected(_account_id: str, _url: str, *, params: dict[str, str]):
         raise client.GoogleRequestFailed(404)
 
     monkeypatch.setattr(feed.client, "get_json", rejected)
     with pytest.raises(feed.GmailHistoryExpired):
-        await feed.added_messages("expired")
+        await feed.added_messages("acct-1", "expired")
