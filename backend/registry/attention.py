@@ -178,14 +178,15 @@ def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
     hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
-    drives: list[str] | None = None, idle_drives: list[str] | None = None,
+    drives: list[str] | None = None,
 ) -> AttentionResult:
     """Clear attention through one of the public user/system outcomes.
 
     A review ``verdict`` (with its optional ``note`` and the ``hold_ids`` the
     person answered) rides only on ``answer``.
-    ``drives`` collects the threads this write gave a plan wake (an answered
-    ask's asker), for the caller to drive once the write has committed.
+    ``drives`` collects the threads this write gave work to (an answered ask's
+    asker, a correction note's recipient), for the caller to drive once the
+    write has committed. A verdict always needs it: its notes must be driven.
     """
     if outcome not in CLEAR_OUTCOMES:
         raise AttentionError(f"unknown clearing outcome {outcome!r}")
@@ -193,10 +194,12 @@ def clear_attention(
         raise AttentionError("a verdict or note goes only with the answer outcome")
     if note is not None and verdict is None:
         raise AttentionError("a note needs a verdict")
+    if verdict is not None and drives is None:
+        raise ValueError("a verdict needs drives: the threads its answer wakes must be driven")
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
         verdict=verdict, note=note, hold_ids=hold_ids, require_hold_ids=require_hold_ids,
-        db=db, drives=drives, idle_drives=idle_drives,
+        db=db, drives=drives,
     )
 
 
@@ -211,7 +214,7 @@ def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
     hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
-    drives: list[str] | None = None, idle_drives: list[str] | None = None,
+    drives: list[str] | None = None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -224,9 +227,6 @@ def _clear_attention(
 
     with write_transaction(db, scope="clear_attention") as _db, \
             plans_public.collect_wake_recipients(_db, drives):
-        from core.correction_notes import input_floor, queue_round_notes
-
-        floor = input_floor(_db)
         row = _identity_row(artifact_id, _db)
         identity = _identity(row)
         record = AR.register_or_resolve(identity, db=_db)
@@ -262,8 +262,11 @@ def _clear_attention(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )
         if answer is not None:
+            from core.correction_notes import queue_round_notes
+
+            assert drives is not None  # clear_attention refuses a verdict without drives
             # The rounds the answer ended, now that their holds are cleared as answered.
-            queue_round_notes(_db, str(row["id"]), answer.hold_ids, floor=floor, wakes=idle_drives)
+            drives.extend(queue_round_notes(_db, str(row["id"]), answer.hold_ids))
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",

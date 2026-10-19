@@ -12,8 +12,8 @@ from typing import Any
 from doceditor import review_requests
 
 
-def complete_delivered_batch(db, batch: Any, delivered: Any, now: str, floor: int) -> tuple[str, ...]:
-    """Persist a successful delivery; ``floor`` is ``input_floor`` from before the delivery."""
+def complete_delivered_batch(db, batch: Any, delivered: Any, now: str) -> tuple[str, ...]:
+    """Persist a successful delivery; returns the threads it gave work to, for the caller to drive."""
     from core.correction_notes import queue_batch_notes
 
     if delivered.outcome is None:
@@ -25,7 +25,4 @@ def complete_delivered_batch(db, batch: Any, delivered: Any, now: str, floor: in
         (delivered.node_id, delivered.outcome, now, batch_id),
     )
     db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-    review_woken = review_requests.settle_for_batch(db, batch)
-    wakes: list[str] = []
-    queue_batch_notes(db, batch_id, floor=floor, wakes=wakes)
-    return review_woken + tuple(wakes)
+    return review_requests.settle_for_batch(db, batch) + queue_batch_notes(db, batch_id)

@@ -177,11 +177,9 @@ def test_comment_and_answer_replay_are_deduplicated(db):
     assert not _record(db, "doc_comment", comment)[0]
     assert _record(db, "doc_comment", comment, version=_version("v2"))[0]
     batch = _deliver_batch(db)
-    from core.correction_notes import input_floor, queue_batch_notes
+    from core.correction_notes import queue_batch_notes
 
-    wakes = []
-    queue_batch_notes(db, batch["id"], floor=input_floor(db), wakes=wakes)
-    assert wakes == []  # the delivery replay writes nothing
+    assert queue_batch_notes(db, batch["id"]) == ()  # the delivery replay writes nothing
 
     assert _record(db, "plan_decision_answer", "dec") == (True, ["owner"])
     assert _record(db, "plan_decision_answer", "dec") == (False, [])
@@ -197,7 +195,7 @@ def test_comment_and_answer_replay_are_deduplicated(db):
 @pytest.mark.parametrize("source", ["doc_comment", "plan_decision_answer"])
 @pytest.mark.parametrize("target", ["missing", "archived", "ui"])
 def test_missing_archived_or_ui_target_keeps_fact_without_note(db, source, target):
-    from core.correction_notes import input_floor, queue_batch_notes
+    from core.correction_notes import queue_batch_notes
 
     thread = {"missing": "gone", "archived": "owner", "ui": "ui"}[target]
     if target == "archived":
@@ -207,9 +205,7 @@ def test_missing_archived_or_ui_target_keeps_fact_without_note(db, source, targe
         outcome = _record(db, "doc_comment", comment)
         batch_id = batches(db)[0]["id"]
         db.execute("UPDATE doc_feedback_batches SET recipient_id=?,state='delivered' WHERE id=?", (thread, batch_id))
-        wakes = []
-        queue_batch_notes(db, batch_id, floor=input_floor(db), wakes=wakes)
-        assert wakes == []
+        assert queue_batch_notes(db, batch_id) == ()
     else:
         _seed_decision(db, thread=thread)
         outcome = _record(db, "plan_decision_answer", "dec")
@@ -340,7 +336,7 @@ def test_note_appended_during_running_turn_still_wakes(agent, main_db):
     wake = main_db.execute(
         "SELECT id,role,delivery_state,content,metadata FROM messages WHERE id LIKE 'correction-wake:%'"
     ).fetchone()
-    assert wake["id"] == "correction-wake:decision-answer:dec:7" and wake["delivery_state"] == "queued"
+    assert wake["id"] == f"correction-wake:{THREAD}:decision-answer:dec:7" and wake["delivery_state"] == "queued"
     assert wake["role"] == "system" and not wake["content"].startswith("[EVENT")
     metadata = json.loads(wake["metadata"])
     assert (metadata["type"], metadata["event_disposition"]) == ("context_event", "wake")
@@ -353,7 +349,7 @@ def test_note_replay_and_batch_close_queue_one_wake(db):
     _seed_decision(db)
     for version in ("v1", "v1", "v2"):
         _record(db, "plan_decision_answer", "dec", version=_version(version))
-    assert _wakes(db) == ["correction-wake:decision-answer:dec:7"]
+    assert _wakes(db) == ["correction-wake:owner:decision-answer:dec:7"]
 
     artifact = seed_document(db, "owner", name="p.md")
     _ask(db, artifact)
@@ -363,7 +359,7 @@ def test_note_replay_and_batch_close_queue_one_wake(db):
     _answer(db, artifact, "changes_requested")
 
     # The answer's own wake already carries the batch note, so it adds no second one.
-    assert _wakes(db) == ["correction-wake:decision-answer:dec:7"]
+    assert _wakes(db) == ["correction-wake:owner:decision-answer:dec:7"]
     carrying = [
         row[0] for row in db.execute(
             "SELECT metadata FROM messages WHERE id LIKE 'context-digest:%' AND delivery_state='queued'"

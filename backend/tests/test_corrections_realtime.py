@@ -719,7 +719,7 @@ async def test_unreadable_fact_is_written_with_its_reason_and_not_counted(isolat
 
     db = get_db()
     try:
-        assert corrections_realtime.state_snapshot(db)["unreadable_messages"] == 1
+        assert corrections_realtime.state_snapshot(db)["unreadable_facts"] == 1
     finally:
         db.close()
     assert weekly_correction_figure(_version(), since="2000-01-01", weeks=1) == 0

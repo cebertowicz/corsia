@@ -53,7 +53,7 @@ def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: i
     Message and document-comment ``correction`` facts count. Decision answers
     remain triage-visible but are excluded from served correction rates.
     """
-    from core.corrections_recording import CORRECTION_EVENT, LABEL_CORRECTION
+    from core.corrections_recording import CORRECTION_EVENT, DECISION_SUBJECT_PREFIX, LABEL_CORRECTION
     from infra.database import get_db
 
     version_filter, version_params = version_match_sql("e", version)
@@ -63,9 +63,12 @@ def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: i
             f"""SELECT COUNT(*) FROM outcome_events e
                WHERE e.event_name=:event AND e.retracted_at IS NULL AND e.ts >= :since
                  AND {version_filter}
-                 AND e.subject_key NOT LIKE 'plan-decision-answer:%'
+                 AND e.subject_key NOT LIKE :decision_prefix || '%'
                  AND json_extract(e.attributes, '$.label')=:label""",
-            {**version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION},
+            {
+                **version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION,
+                "decision_prefix": DECISION_SUBJECT_PREFIX,
+            },
         ).fetchone()
         return int(row[0]) / weeks
     finally:

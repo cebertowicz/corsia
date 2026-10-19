@@ -164,7 +164,7 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
     from datetime import datetime, timezone
 
     from core.corrections_recording import ClassifierVersion, CorrectionCandidate
-    from jobs.corrections_recording import _record_fact, unreadable_messages
+    from jobs.corrections_recording import _record_fact, unreadable_facts
 
     db = _db()
     try:
@@ -184,8 +184,8 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
 
     db = _db()
     try:
-        assert unreadable_messages(db, _version()) == 1
-        assert unreadable_messages(db, newer) == 1
+        assert unreadable_facts(db, _version()) == 1
+        assert unreadable_facts(db, newer) == 1
     finally:
         db.close()
 

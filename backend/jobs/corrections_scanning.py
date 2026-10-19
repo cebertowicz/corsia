@@ -111,18 +111,16 @@ def pending_source_candidate_keys(
     The source tables remain canonical.  This scan only selects identities, then
     ``source_candidate`` rechecks the source and builds the bounded input.
     """
+    from core.correction_targets import comment_target_sql
     from infra.database import get_db
     from plans.public import DECISION_TYPE
-    from registry.identity_bridge import OWNER_REGISTRATION_STATES
 
     db = get_db()
     try:
         version_filter, version_filter_params = version_match_sql("e", version)
-        state_params = {f"owner_state_{index}": state for index, state in enumerate(OWNER_REGISTRATION_STATES)}
         params = {
             **version_filter_params,
             **_before_params(before),
-            **state_params,
             "correction_event": CORRECTION_EVENT,
             "comment_prefix": COMMENT_SUBJECT_PREFIX,
             "decision_prefix": DECISION_SUBJECT_PREFIX,
@@ -132,11 +130,10 @@ def pending_source_candidate_keys(
         }
         comment_rows = db.execute(
             f"""
-            SELECT DISTINCT c.id,c.created_at
+            SELECT c.id,c.created_at
             FROM doc_comments c
-            JOIN artifact_registrations r ON r.artifact_id=c.artifact_id
             WHERE c.author_kind='user'
-              AND r.relationship_state IN ({','.join(':' + key for key in state_params)})
+              AND ({comment_target_sql('c')}) IS NOT NULL
               AND {_before_clause('doc_comment', 'c.id', 'c.created_at')}
               AND (:since_created_at IS NULL OR c.created_at >= :since_created_at)
               AND NOT EXISTS (

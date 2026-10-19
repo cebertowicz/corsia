@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from core.corrections_input import owner_text
 from core.corrections_recording import (
     CORRECTION_EVENT,
+    DECISION_SUBJECT_PREFIX,
     FACT_KEYS,
     LABEL_UNREADABLE,
     ClassifierVersion,
@@ -59,7 +60,7 @@ def _record_fact(
     note rolls the fact back and the source stays pending for the scan to retry.
     Returns whether the fact was new and the threads its notes woke.
     """
-    from core.correction_notes import input_floor, queue_fact_notes
+    from core.correction_notes import queue_fact_notes
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -67,7 +68,6 @@ def _record_fact(
     if set(attributes) != set(FACT_KEYS):
         raise RuntimeError("correction fact attributes are incomplete")
     with write_transaction(None, scope="record_correction_fact") as db:
-        floor = input_floor(db)
         result = record_outcome_event(
             db,
             dedupe_key=dedupe_key(candidate, version),
@@ -82,12 +82,9 @@ def _record_fact(
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
-        wakes: list[str] = []
-        if result.inserted and result.event_id:
-            queue_fact_notes(
-                db, candidate, str(classification["label"]), version, result.event_id, floor=floor, wakes=wakes,
-            )
-        return result.inserted, wakes
+        if not (result.inserted and result.event_id):
+            return result.inserted, []
+        return True, list(queue_fact_notes(db, candidate, str(classification["label"]), version, result.event_id))
 
 
 def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
@@ -105,16 +102,15 @@ def source_candidate(source_kind: str, source_id: str) -> CorrectionCandidate | 
     db = get_db()
     try:
         if source_kind == "doc_comment":
-            row = db.execute(
-                """SELECT id,artifact_id,anchor_text,body,created_at FROM doc_comments
-                   WHERE id=? AND author_kind='user'""", (source_id,),
-            ).fetchone()
-            from registry.models import get_artifact
+            from core.correction_targets import comment_target_sql
 
-            artifact = get_artifact(str(row['artifact_id']), db=db) if row is not None else None
-            if row is None or artifact is None or not artifact.get('parent_thread_id'):
-                return None
-            target = str(artifact['parent_thread_id'])
+            row = db.execute(
+                f"""SELECT c.id,c.anchor_text,c.body,c.created_at,{comment_target_sql('c')} AS target
+                    FROM doc_comments c WHERE c.id=? AND c.author_kind='user'""", (source_id,),
+            ).fetchone()
+            if row is None or not row['target']:
+                return None  # No agent was or will be handed it: the scan never selects it either.
+            target = str(row['target'])
             project = db.execute("SELECT project_id FROM threads WHERE id=?", (target,)).fetchone()
             content = f"Artifact excerpt: {row['anchor_text'] or '(no anchor)'}\nOwner comment: {row['body']}"
             return CorrectionCandidate(
@@ -184,12 +180,10 @@ async def _record_and_drive(
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
 ) -> bool:
-    inserted, wakes = await run_in_db(_record_fact, candidate, classification, version)
-    if wakes:
-        from infra.thread_execution import drive_idle_thread
+    from plans.public import drive_threads
 
-        for thread_id in wakes:
-            await drive_idle_thread(thread_id)
+    inserted, woken = await run_in_db(_record_fact, candidate, classification, version)
+    await drive_threads(woken)
     return inserted
 
 
@@ -210,10 +204,10 @@ async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierV
     }, version)
 
 
-def unreadable_messages(db, version: ClassifierVersion) -> int:
-    """Count served unreadable facts in the Measurement window, once each.
+def unreadable_facts(db, version: ClassifierVersion) -> int:
+    """Count served unreadable facts in the Measurement window, once per source.
 
-    Comment facts count alongside messages, including legacy facts that lack a
+    Message and document-comment facts count, including legacy facts that lack a
     source-kind attribute. Decision answers stay triage-only. The ``(event_name,
     ts)`` index bounds the read to the window's correction facts.
     """
@@ -223,10 +217,11 @@ def unreadable_messages(db, version: ClassifierVersion) -> int:
     row = db.execute(
         f"""SELECT COUNT(DISTINCT e.subject_key) FROM outcome_events e
            WHERE e.event_name=:event AND e.ts >= :since AND e.retracted_at IS NULL
-             AND {version_filter} AND e.subject_key NOT LIKE 'plan-decision-answer:%'
+             AND {version_filter} AND e.subject_key NOT LIKE :decision_prefix || '%'
              AND json_extract(e.attributes,'$.label')=:label""",
         {
             **version_params, "event": CORRECTION_EVENT, "label": LABEL_UNREADABLE,
+            "decision_prefix": DECISION_SUBJECT_PREFIX,
             "since": measurement_window_start().isoformat(),
         },
     ).fetchone()

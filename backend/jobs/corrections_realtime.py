@@ -34,7 +34,7 @@ Scan state (``scan``)::
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
 
-An outage writes no fact and keeps the message pending. A deterministic startup
+An outage writes no fact and keeps the source pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after
 it reaches the end using its originally selected manifest; a deterministic failure
 ends the pass unactivated, and the next pass re-selects (or the state is failed).
@@ -56,9 +56,7 @@ from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import (
-    candidate_for_source, record_classification, record_unreadable, unreadable_messages,
-)
+from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
 QUEUE_SIZE = 256
@@ -66,8 +64,10 @@ SCAN_BATCH = 20
 ATTEMPTS_PER_KIND = 2
 LOAD_CRASH_BACKOFF_SECONDS = 60.0
 
+
 def _clock() -> float:
     return time.monotonic()
+
 
 class CorrectionsWorker:
     """The one owner of the arrival queue, one child, and both state machines."""
@@ -199,14 +199,10 @@ class CorrectionsWorker:
             reason = "classifier keeps crashing on load; retrying after backoff"
             self._set("unavailable", reason)
             return ClassificationOutcome("outage", reason)
-        has_fallback = any(
-            item["state"] == "ready" and item["version"] != manifest.version
-            for item in self.versions
-        )
+        has_fallback = any(item["state"] == "ready" and item["version"] != manifest.version for item in self.versions)
         outcome = await classify(
             self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND, has_fallback=has_fallback,
-            clock=_clock, record_classification=record_classification,
-            record_unreadable=record_unreadable,
+            clock=_clock, record_classification=record_classification, record_unreadable=record_unreadable,
         )
         if outcome.only_version_load_crash:
             self._record_only_version_load_crash(manifest.version, outcome.reason or "load exited", now)
@@ -358,7 +354,9 @@ class CorrectionsWorker:
             self.child.kill()
         await drop_child(self)
 
+
 WORKER = CorrectionsWorker()
+
 
 async def _startup_worker() -> None:
     try:
@@ -367,20 +365,25 @@ async def _startup_worker() -> None:
         logger.exception("corrections activation notice retry failed; the next startup retries it")
     await WORKER.run()
 
+
 def notify(source_kind: str, source_id: str) -> None:
     WORKER.notify(source_kind, source_id)
+
 
 def startup_scan() -> None:
     WORKER.startup()
 
+
 async def shutdown() -> None:
     await WORKER.shutdown()
+
 
 def state_snapshot(db: Any = None) -> dict[str, object]:
     snapshot = WORKER.snapshot()
     if db is not None:
-        snapshot["unreadable_messages"] = unreadable_messages(db, WORKER.version) if WORKER.version else 0
+        snapshot["unreadable_facts"] = unreadable_facts(db, WORKER.version) if WORKER.version else 0
     return snapshot
+
 
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
     from core.corrections_recording import is_owner_authored_message

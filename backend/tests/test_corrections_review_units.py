@@ -78,21 +78,19 @@ def test_two_asks_cleared_together_write_one_note_per_round(db):
     assert sorted(notes.values()) == sorted([[f"doc-comment:{first}"], [f"doc-comment:{second}"]])
 
 
-def test_a_note_after_an_input_this_transaction_queued_rides_it_instead_of_waking(db):
-    from core.correction_notes import input_floor, queue_fact_notes
+def test_a_note_for_a_thread_with_queued_input_rides_it_instead_of_waking(db):
+    from core.correction_notes import queue_fact_notes
     from events.delivery import enqueue_event_wake
     from jobs.corrections_recording import candidate_for_source
 
     _seed_decision(db)
     candidate = candidate_for_source("plan_decision_answer", "dec")
-    floor = input_floor(db)
     enqueue_event_wake("owner", "webhook.github.pr_merged", "PR merged", message_id="event-1", db=db)
-    wakes: list[str] = []
 
-    queue_fact_notes(db, candidate, "correction", _version(), "event-0", floor=floor, wakes=wakes)
+    woken = queue_fact_notes(db, candidate, "correction", _version(), "event-0")
     db.commit()
 
-    assert wakes == [] and _wakes(db) == []
+    assert woken == ("owner",) and _wakes(db) == []  # still driven, so the queued input runs
     carrying = [
         row[0] for row in db.execute(
             "SELECT id FROM messages WHERE id LIKE 'context-digest:%' AND delivery_state='queued'"

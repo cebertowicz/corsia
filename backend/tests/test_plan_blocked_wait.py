@@ -458,7 +458,7 @@ def test_answering_an_active_document_ask_is_one_wake_naming_the_selected_task(d
     before = _last_input_order(db)
 
     attention.clear_attention(
-        ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", db=db,
+        ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", drives=[], db=db,
     )
 
     [wake] = _plan_wakes_after(db, before)
@@ -487,7 +487,7 @@ def test_the_ask_wake_carries_the_description_the_work_selected_wake_would(
     )
     before = _last_input_order(db)
 
-    attention.clear_attention(ask, outcome="answer", verdict="approved", db=db)
+    attention.clear_attention(ask, outcome="answer", verdict="approved", drives=[], db=db)
 
     [wake] = _plan_wakes_after(db, before)
     shown = _ask_wake_next(
@@ -527,7 +527,7 @@ def test_answering_an_ask_on_a_scope_plan_wakes_the_task_executor(db):
     db.commit()
     before = _last_input_order(db, "runner")
 
-    attention.clear_attention(ask, outcome="answer", verdict="approved", db=db)
+    attention.clear_attention(ask, outcome="answer", verdict="approved", drives=[], db=db)
 
     [wake] = _plan_wakes_after(db, before, "runner")
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
@@ -563,7 +563,7 @@ def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
     )
 
     attention.clear_attention(
-        ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", db=db,
+        ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", drives=[], db=db,
     )
 
     [wake] = _ask_release_wakes(db)

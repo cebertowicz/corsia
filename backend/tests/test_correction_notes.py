@@ -144,7 +144,7 @@ def test_the_note_text_quotes_the_person_and_names_when_they_sent_it(monkeypatch
         monkeypatch.delenv("TZ")
         time.tzset()
     assert text == (
-        "Correction recorded on your work (feedback c1, sent 2026-10-16 13:05 PDT): "
+        "Correction recorded on your work (message c1, sent 2026-10-16 13:05 PDT): "
         '"That chart uses the wrong units, again."\n'
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
@@ -168,7 +168,7 @@ def test_a_fast_starting_turn_gets_the_note_on_the_next_input_never_a_turn_of_it
     second = agent.say("m2")
     assert _notes(second) == ["message:c1"]
     digest = next(item for item in second if item.message_id.startswith("context-digest:"))
-    assert "Correction recorded on your work (feedback c1" in digest.content
+    assert "Correction recorded on your work (message c1" in digest.content
     assert digest.metadata["context_events"][0]["chip"] is None
     agent.deliver()
     assert _notes(agent.say("m3")) == []

@@ -72,7 +72,7 @@ def _comment(db, artifact_id: str, **kwargs) -> None:
 
 def _answer(db, artifact_id: str, verdict: str, note: str | None = None):
     result = attention.clear_attention(
-        artifact_id, outcome="answer", verdict=verdict, note=note, db=db,
+        artifact_id, outcome="answer", verdict=verdict, note=note, drives=[], db=db,
     )
     db.commit()
     return result
@@ -196,7 +196,7 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
 
     with pytest.raises(review_bar.AnswerRefused) as refused:
         attention.clear_attention(
-            artifact, outcome="answer", verdict="changes_requested", db=db,
+            artifact, outcome="answer", verdict="changes_requested", drives=[], db=db,
         )
 
     assert refused.value.code == "note_required"
@@ -257,7 +257,7 @@ def test_a_superseded_ask_returns_stale_and_is_never_cleared_twice(db):
     before = len(_notices(db))
 
     with pytest.raises(review_bar.AnswerRefused) as refused:
-        attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
+        attention.clear_attention(artifact, outcome="answer", verdict="approved", drives=[], db=db)
 
     assert refused.value.code == "ask_stale"
     assert len(_notices(db)) == before
@@ -271,7 +271,7 @@ def test_a_retired_ask_returns_stale(db):
     db.commit()
 
     with pytest.raises(review_bar.AnswerRefused) as refused:
-        attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
+        attention.clear_attention(artifact, outcome="answer", verdict="approved", drives=[], db=db)
 
     assert refused.value.code == "ask_stale"
 
@@ -280,7 +280,7 @@ def test_a_verdict_on_a_document_never_asked_about_returns_stale(db):
     artifact = seed_document(db, "owner", name="proposal.md")
 
     with pytest.raises(review_bar.AnswerRefused) as refused:
-        attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
+        attention.clear_attention(artifact, outcome="answer", verdict="approved", drives=[], db=db)
 
     assert refused.value.code == "ask_stale"
 
@@ -302,7 +302,7 @@ def test_a_verdict_on_a_replaced_ask_is_stale_and_leaves_the_replacement_open(db
 
     with pytest.raises(review_bar.AnswerRefused) as refused:
         attention.clear_attention(
-            artifact, outcome="answer", verdict="approved", hold_ids=shown, db=db,
+            artifact, outcome="answer", verdict="approved", hold_ids=shown, drives=[], db=db,
         )
     assert refused.value.code == "ask_stale"
     assert _open_holds(db, node) == 1
@@ -310,7 +310,7 @@ def test_a_verdict_on_a_replaced_ask_is_stale_and_leaves_the_replacement_open(db
     current = review_bar.round_state(db, artifact)
     assert current["ask_reason"] == "Please read the new draft"
     attention.clear_attention(
-        artifact, outcome="answer", verdict="approved", hold_ids=current["hold_ids"], db=db,
+        artifact, outcome="answer", verdict="approved", hold_ids=current["hold_ids"], drives=[], db=db,
     )
     db.commit()
     assert _open_holds(db, node) == 0
@@ -335,7 +335,7 @@ def test_an_unknown_verdict_is_refused(db):
     _ask(db, artifact)
 
     with pytest.raises(review_bar.AnswerRefused) as refused:
-        attention.clear_attention(artifact, outcome="answer", verdict="maybe", db=db)
+        attention.clear_attention(artifact, outcome="answer", verdict="maybe", drives=[], db=db)
 
     assert refused.value.code == "verdict_unknown"
 

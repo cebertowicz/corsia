@@ -1,5 +1,13 @@
 """Schema for the one passive context-change journal."""
 
+#: A correction note's durable key, so writing a note asks one indexed row
+#: instead of reading the thread's whole journal (migration_126_to_127).
+NOTE_KEY_INDEX_SQL = """
+    CREATE INDEX IF NOT EXISTS idx_context_changes_note_key
+        ON context_change_journal(object_id, json_extract(details_json, '$.note_key'))
+        WHERE object_kind='thread_context' AND json_extract(details_json, '$.note_key') IS NOT NULL;
+"""
+
 CONTEXT_CHANGE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS context_change_journal (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13,4 +21,4 @@ CONTEXT_CHANGE_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_context_changes_object
         ON context_change_journal(object_kind, object_id, seq);
-"""
+""" + NOTE_KEY_INDEX_SQL

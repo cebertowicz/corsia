@@ -20,7 +20,7 @@ from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fix
 
 def test_measurement_excludes_decision_answers_from_correction_rates(db):
     from jobs.corrections_activation import weekly_correction_figure
-    from jobs.corrections_recording import unreadable_messages
+    from jobs.corrections_recording import unreadable_facts
 
     now = datetime.now(timezone.utc).isoformat()
     comment = _user_comment(db, seed_document(db, "owner", name="p.md"))
@@ -38,14 +38,14 @@ def test_measurement_excludes_decision_answers_from_correction_rates(db):
     _record(db, "plan_decision_answer", "dec", payload=UNREADABLE, version=_version("v2"))
 
     assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 2
-    assert unreadable_messages(db, _version("v2")) == 0
+    assert unreadable_facts(db, _version("v2")) == 0
     assert any(subject == "plan-decision-answer:dec:7" for subject, _ in _facts(db))  # triage still sees it
 
 
 def test_a_legacy_fact_with_message_id_and_no_source_kind_still_counts(db):
     from core.corrections_recording import version_attributes
     from jobs.corrections_activation import weekly_correction_figure
-    from jobs.corrections_recording import unreadable_messages
+    from jobs.corrections_recording import unreadable_facts
 
     now = datetime.now(timezone.utc).isoformat()
     for message_id, label in (("old-correction", "correction"), ("old-unreadable", "unreadable")):
@@ -63,4 +63,4 @@ def test_a_legacy_fact_with_message_id_and_no_source_kind_still_counts(db):
     db.commit()
 
     assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 1
-    assert unreadable_messages(db, _version()) == 1
+    assert unreadable_facts(db, _version()) == 1
