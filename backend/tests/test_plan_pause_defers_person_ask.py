@@ -373,6 +373,7 @@ def test_an_artifact_asked_from_two_tasks_stays_raised_until_both_are_paused(db)
     _node_lifecycle(db, second_plan.id, second.id, "pause_node")
     assert attention._summarize_raised(None, "user-1", db=db) == []
 
+
 def test_a_settled_link_in_a_paused_plan_never_hides_a_live_ask(db):
     from tests.test_plan_decisions import _task
 

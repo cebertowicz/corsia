@@ -177,8 +177,9 @@
 
 </script>
 
+<!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
 {#snippet row(node: OperatorNode, nest: number, view?: ScheduledView)}
-		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && artifact.attention_state === 'raised')}
+		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && (artifact.attention_state === 'raised' || artifact.attention_state === 'deferred'))}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"

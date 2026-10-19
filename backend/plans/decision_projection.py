@@ -307,7 +307,7 @@ def awaiting_count(plan_ids, *, db) -> int:
         if not operator_display_state.plan_defers_asks(row["state"])
     ]
     return sum(
-        not item["node_paused"]
+        not operator_display_state.ask_deferred(node_paused=item["node_paused"])
         for item in raised_decisions(live, db=db, open_nodes=True)
     )
 
