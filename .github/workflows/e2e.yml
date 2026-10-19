@@ -33,8 +33,8 @@ jobs:
   e2e:
     name: Playwright UI-E2E (mock)
     runs-on: ubuntu-24.04
-    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. Interim 300 min while the suite is being made green: red runs took 181 and 205 min (mostly failing tests running to their timeouts); set this from a green run's measured duration plus headroom.
-    timeout-minutes: 300
+    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. The last green full run took 1h32m before the per-file backend reset (each reset restarts the backend from a captured seed, about 3 s, 244 times across both projects: about 16 min more); 180 min is that expected ~1h50m plus headroom. Re-measure from the next green run.
+    timeout-minutes: 180
 
     strategy:
       fail-fast: false
@@ -118,130 +118,13 @@ jobs:
           E2E_GREP: ${{ inputs.grep }}
         run: |
           if [ -n "$E2E_GREP" ]; then
-            # A filtered dispatch is a diagnosis run: the browser daemon writes its debug log into the session dir.
-            export AGENT_BROWSER_DEBUG=1
-            # ...and a sampler records who is waiting on whom: the client, its daemon, Chrome and their sockets.
-            mkdir -p "$RUNNER_TEMP/browser-diag"
-            python3 -m pip install --quiet --user py-spy
-            # SIGUSR1 to the backend then writes every pending asyncio task's stack (.github/diag/sitecustomize.py).
-            export CORSIA_DIAG_TASKS_FILE="$RUNNER_TEMP/browser-diag/asyncio-tasks.txt"
-            export PYTHONPATH="$PWD/.github/diag${PYTHONPATH:+:$PYTHONPATH}"
-            (
-              while true; do
-                {
-                  date +%T
-                  if pids=$(pgrep -d, -f 'agent-browser|chrome --remote|uvicorn'); then
-                    ps -o pid,ppid,etimes,stat,wchan:22,args -p "$pids" | cut -c1-220
-                  fi
-                  ss -tanp 2>/dev/null | grep -E 'agent-browser|uvicorn' | cut -c1-200
-                  # Where each browser process's stdout and stderr point: a daemon holding the backend's pipes open
-                  # keeps a pipe-reading client from ever seeing end of output.
-                  for pid in $(pgrep -f 'agent-browser-linux-x64'); do
-                    echo "fd $pid: $(readlink /proc/"$pid"/fd/1 2>&1) $(readlink /proc/"$pid"/fd/2 2>&1)"
-                  done
-                  # Worker threads and the loop's current frame show whether the backend is stuck in Python or idle.
-                  if api=$(pgrep -f '^/.*python -m uvicorn e2e_app' | head -n 1) && pgrep -f 'agent-browser-linux-x64' > /dev/null; then
-                    sudo "$HOME/.local/bin/py-spy" dump --nonblocking --pid "$api" 2>&1 | cut -c1-200
-                    kill -USR1 "$api" || true
-                  fi
-                } >> "$RUNNER_TEMP/browser-diag/sampler.txt" 2>&1
-                sleep 3
-              done
-            ) &
-            sampler=$!
-            trap 'kill $sampler 2>/dev/null || true' EXIT
             bash scripts/e2e-local --grep "$E2E_GREP"
           else
             bash scripts/e2e-local
           fi
 
-      # browser-pane waits on the first native browser open; when the suite fails, record why the browser does
-      # or does not start on this runner (kernel sandbox policy, launch output, backend session logs).
-      - name: Diagnose native browser launch
-        if: failure()
-        continue-on-error: true
-        run: |
-          out="$RUNNER_TEMP/browser-diag"
-          mkdir -p "$out"
-          probe() {
-            local label="$1" url="$2"; shift 2
-            local dir="/tmp/abdiag-$label"
-            rm -rf "$dir"; mkdir -m 700 "$dir"
-            echo "--- probe $label: $*" >> "$out/summary.txt"
-            start=$(date +%s)
-            env "$@" AGENT_BROWSER_SOCKET_DIR="$dir" timeout 60 agent-browser --session "diag-$label" --debug --json open "$url" >> "$out/summary.txt" 2>&1
-            echo "exit=$? seconds=$(( $(date +%s) - start ))" >> "$out/summary.txt"
-            cp "$dir"/*.log "$out/probe-$label.log" 2>/dev/null || true
-            env AGENT_BROWSER_SOCKET_DIR="$dir" timeout 30 agent-browser --session "diag-$label" --json close >> "$out/summary.txt" 2>&1 || true
-          }
-          {
-            echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>&1)"
-            echo "CI=${CI:-} AGENT_BROWSER_EXECUTABLE_PATH=${AGENT_BROWSER_EXECUTABLE_PATH:-} AGENT_BROWSER_ARGS=${AGENT_BROWSER_ARGS:-}"
-            sudo dmesg 2>&1 | grep -i -E "apparmor|userns|chrome" | tail -n 40 || true
-          } > "$out/summary.txt" 2>&1
-          # The test opens an http page on loopback, so probe that too, not only about:blank.
-          mkdir -p /tmp/abdiag-www && echo '<title>probe</title>ok' > /tmp/abdiag-www/index.html
-          python3 -m http.server 38999 --bind 127.0.0.1 --directory /tmp/abdiag-www > /dev/null 2>&1 &
-          sleep 1
-          # The backend's own daemon and browser at failure time: running or not, and with which arguments.
-          pgrep -a -f 'agent-browser|chrome' | cut -c1-300 >> "$out/summary.txt" || true
-          # Probe a cold start: the backend's own daemon would otherwise be reused by every probe below.
-          pkill -f 'agent-browser-linux-x64' || true
-          pkill -f 'google-chrome --remote-debugging-port' || true
-          sleep 1
-          probe stock about:blank FOO=1
-          probe sandboxed about:blank -u CI
-          probe http http://127.0.0.1:38999/index.html FOO=1
-          # The backend reads the client's stdout and stderr through pipes: does the client return then?
-          python3 - >> "$out/summary.txt" 2>&1 <<'PY'
-          import os, subprocess, time
-          url = "http://127.0.0.1:38999/index.html"
-          for label, stdin in (("pipes-stdin-null", subprocess.DEVNULL), ("pipes-stdin-inherited", None)):
-              sock = f"/tmp/abdiag-{label}"
-              os.makedirs(sock, mode=0o700, exist_ok=True)
-              env = {**os.environ, "AGENT_BROWSER_SOCKET_DIR": sock}
-              for name in ("AGENT_BROWSER_DAEMON", "AGENT_BROWSER_DASHBOARD", "AGENT_BROWSER_SESSION"):
-                  env.pop(name, None)
-              base = ["agent-browser", "--session", f"diag-{label}"]
-              started = time.time()
-              try:
-                  done = subprocess.run([*base, "--executable-path", os.environ["AGENT_BROWSER_EXECUTABLE_PATH"], "--json", "open", url],
-                                        stdin=stdin, capture_output=True, env=env, timeout=20)
-                  print(f"--- {label}: returned rc={done.returncode} after {time.time() - started:.1f}s {done.stdout[:160]!r}")
-              except subprocess.TimeoutExpired:
-                  print(f"--- {label}: still not returned after 20s with piped output")
-              subprocess.run([*base, "--json", "close"], env=env, timeout=30, capture_output=True, check=False)
-          PY
-          kill %1 2>/dev/null || true
-          # The backend's own session sockets and daemon sidecars (never the sockets themselves).
-          find /tmp -maxdepth 2 -regextype posix-extended -regex '/tmp/[0-9a-f]{16}-[0-9a-f]{24}(/.*)?' -type f -exec cp --parents {} "$out" \; 2>/dev/null || true
-          cat "$out/summary.txt"
-
-      - name: Upload browser diagnostics
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-diagnostics-${{ matrix.run-index }}
-          path: ${{ runner.temp }}/browser-diag
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload browser-pane trace
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-pane-trace-${{ matrix.run-index }}
-          path: |
-            frontend/test-results/*browser-pane*/trace.zip
-            frontend/test-results/*browser-pane*/error-context.md
-          if-no-files-found: ignore
-          retention-days: 7
-
-      # Every failing test keeps its trace (playwright.config.ts retain-on-failure) and, on Linux, the socket and TCP
-      # counter state its backend port had when it failed (support/networkDiagnostics.ts); a failure that does not
-      # reproduce locally is rooted in these, not guessed at.
+      # Every failing test keeps its trace (playwright.config.ts retain-on-failure); a failure that does not
+      # reproduce locally is rooted in it, not guessed at.
       - name: Upload failing-test traces
         if: failure()
         continue-on-error: true
@@ -251,7 +134,6 @@ jobs:
           path: |
             frontend/test-results/**/trace.zip
             frontend/test-results/**/error-context.md
-            frontend/test-results/**/network-diagnostics.txt
           if-no-files-found: ignore
           retention-days: 7
 
