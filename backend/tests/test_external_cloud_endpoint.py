@@ -96,7 +96,7 @@ async def test_the_users_window_wins_over_the_published_one(isolated_db, model_t
 async def test_card_lists_the_catalog_rows_and_says_which_cannot_run(
     isolated_db, model_table, monkeypatch,
 ):
-    from api.network_server_helpers import list_daemon_models
+    from api.network_daemon_models import list_daemon_models
     from llm import network_discovery as nd
 
     sid = await _discover(monkeypatch)
@@ -118,7 +118,7 @@ async def test_card_lists_the_catalog_rows_and_says_which_cannot_run(
 async def test_card_counts_a_saved_checkpoint_window_like_dispatch_does(
     isolated_db, model_table, monkeypatch,
 ):
-    from api.network_server_helpers import list_daemon_models
+    from api.network_daemon_models import list_daemon_models
     from infra.database import get_db, init_model_profiles
     from llm import network_discovery as nd
     from llm.context_window import resolve_window_for_row
@@ -151,7 +151,7 @@ async def test_turning_a_model_off_withdraws_it_and_back_on_restores_it(
     isolated_db, model_table, monkeypatch,
 ):
     """The card's toggle is the catalog's own update, by the row id it lists."""
-    from api import network_server_helpers as helpers
+    from api import network_daemon_models as helpers
     from llm import catalog
     from llm import network_discovery as nd
 
