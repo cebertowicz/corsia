@@ -72,7 +72,7 @@ def _sign_out_locally(account_id: str, actor: Actor, *, db: sqlite3.Connection |
 def _remove_locally(account_id: str, actor: Actor, *, db: sqlite3.Connection | None = None) -> tuple[int, str | None]:
     """Audit, then delete the bundle, reach, cursor, queued screens and row, in one transaction.
 
-    The audit row keeps the account id after the row is gone: SQLite foreign keys are off here.
+    The audit row keeps the account id after the row is gone: history tables carry no foreign key.
     """
     with write_transaction(db, scope="google_remove") as conn:
         account = _google_row(account_id, conn)

@@ -245,3 +245,24 @@ def test_only_the_person_can_widen_where_an_account_works(isolated_db):
     # Saving Only CORSIA through Where it works is refused: it needs at least one place.
     with pytest.raises(ConnectedAccountError, match=account_actions.EMPTY_REACH):
         account_actions.change_google_account_reach(account_id, corsia_only_reach(), actor=PERSON)
+
+
+def test_the_remove_audit_survives_with_foreign_keys_on(isolated_db):
+    """Remove deletes the account row; its audit and migration records must outlive it."""
+    account_id = str(create_google_account(
+        "person@example.com", reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
+    )["id"])
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO connected_account_migration_journal VALUES ('google-singleton-v1', 't', ?)", (account_id,),
+        )
+        db.commit()
+        db.execute("PRAGMA foreign_keys=ON")
+        assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        account_actions._remove_locally(account_id, PERSON, db=db)
+        assert db.execute("SELECT COUNT(*) FROM connected_accounts WHERE id=?", (account_id,)).fetchone()[0] == 0
+        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()[0] == account_id
+    finally:
+        db.close()
+    assert _audits(account_id) == [("person", "steve", "remove", None)]

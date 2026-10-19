@@ -155,3 +155,15 @@ def test_screens_without_a_legacy_account_are_dropped() -> None:
         migrate_to_current(db, SCHEMA_VERSION)
 
         assert db.execute("SELECT COUNT(*) FROM email_screens").fetchone()[0] == 0
+
+
+def test_account_history_tables_carry_no_foreign_keys() -> None:
+    """Remove deletes the account row; its audit and migration records must outlive it."""
+    with closing(_fresh()) as db:
+        db.execute("DROP TABLE connected_account_audit")
+        db.execute("DROP TABLE connected_account_migration_journal")
+        db.execute("PRAGMA user_version=125")
+        db.commit()
+        migrate_to_current(db, SCHEMA_VERSION)
+        for table in ("connected_account_audit", "connected_account_migration_journal"):
+            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []

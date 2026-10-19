@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
-CONNECTED_ACCOUNTS_SCHEMA_SQL = """
+# History tables keep the account id without a foreign key: Remove deletes the
+# account row, and its audit and migration records must outlive it even when
+# SQLite foreign keys are on.
+AUDIT_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS connected_account_audit (
+        id INTEGER PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        actor_kind TEXT NOT NULL CHECK(actor_kind IN ('person', 'agent', 'system')),
+        actor_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
+        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
+            'revoked', 'provider_unreachable', 'provider_timeout',
+            'provider_rejected', 'provider_unexpected', 'manual_only'
+        ))
+    )"""
+JOURNAL_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS connected_account_migration_journal (
+        migration_key TEXT PRIMARY KEY,
+        completed_at TEXT NOT NULL,
+        account_id TEXT
+    )"""
+
+CONNECTED_ACCOUNTS_SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS connected_accounts (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
@@ -35,23 +58,8 @@ CONNECTED_ACCOUNTS_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_connected_account_reach_project
         ON connected_account_reach(project_id, account_id);
-    CREATE TABLE IF NOT EXISTS connected_account_audit (
-        id INTEGER PRIMARY KEY,
-        created_at TEXT NOT NULL,
-        account_id TEXT NOT NULL REFERENCES connected_accounts(id) ON DELETE CASCADE,
-        actor_kind TEXT NOT NULL CHECK(actor_kind IN ('person', 'agent', 'system')),
-        actor_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
-        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
-            'revoked', 'provider_unreachable', 'provider_timeout',
-            'provider_rejected', 'provider_unexpected', 'manual_only'
-        ))
-    );
+{AUDIT_TABLE_SQL};
     CREATE INDEX IF NOT EXISTS idx_connected_account_audit_account
         ON connected_account_audit(account_id, id);
-    CREATE TABLE IF NOT EXISTS connected_account_migration_journal (
-        migration_key TEXT PRIMARY KEY,
-        completed_at TEXT NOT NULL,
-        account_id TEXT REFERENCES connected_accounts(id)
-    );
+{JOURNAL_TABLE_SQL};
 """
