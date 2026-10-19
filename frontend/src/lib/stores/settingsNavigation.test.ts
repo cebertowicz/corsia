@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 
 import {
 	closeSettingsBack,
+	listenForConnectedAppLinks,
 	openProjectSettings,
 	recordSettingsHomeThread,
 	requestSettingsSection,
@@ -33,6 +34,24 @@ describe('settings navigation transitions', () => {
 		requestSettingsSection('providers', 'nowhere');
 		selectSettingsSection('keys');
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null });
+	});
+
+	it('opens a connected app from the initial hash and later hash changes, then cleans up', () => {
+		window.history.replaceState({}, '', '#connected-apps/google%20drive');
+		const openSettings = vi.fn();
+		const stop = listenForConnectedAppLinks(openSettings);
+		expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', connectedAppId: 'google drive', openRequest: 1 });
+
+		window.history.replaceState({}, '', '#connected-apps/google-calendar');
+		window.dispatchEvent(new Event('hashchange'));
+		expect(get(settingsNavigation)).toMatchObject({ connectedAppId: 'google-calendar', openRequest: 2 });
+		expect(openSettings).toHaveBeenCalledTimes(2);
+
+		stop();
+		window.history.replaceState({}, '', '#connected-apps/google-docs');
+		window.dispatchEvent(new Event('hashchange'));
+		expect(openSettings).toHaveBeenCalledTimes(2);
+		window.history.replaceState({}, '', '/');
 	});
 
 	describe('the thread Settings opened over', () => {
