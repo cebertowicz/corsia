@@ -17,10 +17,11 @@ makes it once):
 - a unit completes (``write_unit_notes``): the unit key an answer or a
   delivery enqueues after its own commit.
 
-A scan pass's recovery covers a unit key the worker never took: it hands
-``write_comment_notes`` each comment the active version found a correction in,
-made after that version became active, so ``_unit_of`` stays the one
-membership rule. A failing note fails that worker step, so it has one failure
+Every writer reads a comment's verdict from the active version's fact alone
+(``_fact_states``). A scan pass's recovery covers a unit key the worker never
+took: it hands ``write_comment_notes`` each comment the active version found a
+correction in, made after that version became active, so ``_unit_of`` stays
+the one membership rule. A failing note fails that worker step, so it has one failure
 policy: the fact rolls back and the scan retries it; the scan recovers a unit key.
 No note starts a turn. It rides its recipient's next admitted input as a
 passive digest, exactly as a chat note does.
@@ -43,7 +44,9 @@ from core.corrections_recording import (
     active_since,
     is_owner_authored_message,
     owner_message_sql_predicate,
+    read_active_version,
     subject_key,
+    version_match_sql,
 )
 
 NOTE_KIND = "correction_note"
@@ -209,15 +212,23 @@ class _Comment:
 
 
 def _fact_states(db: sqlite3.Connection, comment_ids: Sequence[str]) -> dict[str, tuple[bool, bool]]:
-    """Each comment's ``(recorded, positive)`` from its live facts, in one indexed read."""
+    """Each comment's ``(recorded, positive)`` from the active version's live fact, in one indexed read.
+
+    The one verdict every note writer reads: another version's fact (a retired
+    one's, or a candidate's during its backfill) leaves a comment unrecorded here.
+    """
+    version = read_active_version(db)
+    if not isinstance(version, ClassifierVersion):
+        return {}  # No readable active version: no comment has a verdict, so no unit is noted.
+    version_filter, version_params = version_match_sql("e", version)
     keys = {subject_key("doc_comment", comment_id): comment_id for comment_id in comment_ids}
     rows = db.execute(  # by subject: the planner would otherwise read every correction fact by name
-        """SELECT e.subject_key, MAX(json_extract(e.attributes,'$.label')=:label)
+        f"""SELECT e.subject_key, MAX(json_extract(e.attributes,'$.label')=:label)
              FROM outcome_events e INDEXED BY idx_outcome_events_subject
             WHERE e.subject_key IN (SELECT value FROM json_each(:keys))
-              AND e.event_name=:event AND e.retracted_at IS NULL
+              AND e.event_name=:event AND e.retracted_at IS NULL AND {version_filter}
             GROUP BY e.subject_key""",
-        {"keys": json.dumps(list(keys)), "event": CORRECTION_EVENT, "label": LABEL_CORRECTION},
+        {**version_params, "keys": json.dumps(list(keys)), "event": CORRECTION_EVENT, "label": LABEL_CORRECTION},
     ).fetchall()
     return {keys[str(row[0])]: (True, bool(row[1])) for row in rows}
 

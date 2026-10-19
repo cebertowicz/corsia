@@ -178,13 +178,15 @@ class CorrectionsWorker:
             str(version), reason, reader, tasks=self.failure_notice_tasks,
         )
 
-    def _record_only_version_load_crash(self, version: str, reason: str, retry_at: float) -> None:
-        """Back the sole version off until ``retry_at``, telling the person once per version."""
-        if version not in self.load_crash_retry_at:
-            from automation.update_failure_notice import tell_corrections_classifier_load_crash_detached
+    def _notice_load_crash(self, version: str) -> None:
+        from automation.update_failure_notice import tell_corrections_classifier_load_crash_detached
 
-            tell_corrections_classifier_load_crash_detached(version, tasks=self.failure_notice_tasks)
-        self.load_crash_retry_at[version] = retry_at
+        tell_corrections_classifier_load_crash_detached(version, tasks=self.failure_notice_tasks)
+
+    def _record_only_version_load_crash(self, version: str, reason: str, now: float) -> None:
+        if version not in self.load_crash_retry_at:
+            self._notice_load_crash(version)
+        self.load_crash_retry_at[version] = now + LOAD_CRASH_BACKOFF_SECONDS
         self._set("unavailable", reason)
 
     async def _after_version_failure(self, failure: ClassificationOutcome) -> AssetManifest | None:
@@ -212,8 +214,7 @@ class CorrectionsWorker:
             record_unreadable=record_unreadable,
         )
         if outcome.only_version_load_crash:
-            retry_at = now + LOAD_CRASH_BACKOFF_SECONDS
-            self._record_only_version_load_crash(manifest.version, outcome.reason or "load exited", retry_at)
+            self._record_only_version_load_crash(manifest.version, outcome.reason or "load exited", now)
         elif outcome.load_succeeded and manifest.version in self.load_crash_retry_at:
             self.load_crash_retry_at[manifest.version] = 0.0
         return outcome

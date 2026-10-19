@@ -41,6 +41,7 @@ def db(isolated_db, monkeypatch):
     connection = get_db()
     seed_thread(connection, "owner", title="Style")
     connection.commit()
+    _activate(connection, "2000-01-01T00:00:00+00:00")  # the version ``_record`` writes as: its verdicts note
     try:
         yield connection
     finally:
@@ -81,6 +82,14 @@ def _answer(db, artifact_id, verdict, note=None):
     result = _clear_with_answer(db, artifact_id, verdict, note)
     _worker_takes(db)
     return result
+
+
+def _backfilling(db):
+    """No version is active yet: the first version is filling its measurement window."""
+    from core.corrections_recording import ACTIVE_VERSION_SETTING
+
+    db.execute("DELETE FROM settings WHERE key=?", (ACTIVE_VERSION_SETTING,))
+    db.commit()
 
 
 def _record(db, source_kind, source_id, *, arrived=True, payload=CORRECTION, version=None):
@@ -283,8 +292,8 @@ def test_scan_facts_note_only_under_the_active_version(db, active):
     comment = _user_comment(db, seed_document(db, "owner", name="p.md"))
     batch = _deliver_batch(db)  # the batch left before the scan found its comment
     _seed_decision(db)
-    if active:  # a later scan pass; without it, the activation backfill
-        _activate(db, "2000-01-01T00:00:00+00:00")
+    if not active:  # the activation backfill; otherwise a later scan pass
+        _backfilling(db)
 
     candidates = hydrate_candidates(pending_source_candidate_keys(_version(), 10))
 
@@ -420,6 +429,7 @@ def test_notes_queue_no_input_of_their_own(db):
 
 
 def test_backfill_facts_write_no_note(db):
+    _backfilling(db)
     _seed_decision(db)
     comment = _user_comment(db, seed_document(db, "owner", name="p.md"))
 

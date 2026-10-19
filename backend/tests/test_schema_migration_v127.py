@@ -14,7 +14,7 @@ from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.migration_126_to_127_correction_note_subjects import migrate_126_to_127
 from infra.schema import SCHEMA_VERSION
 
-_INDEXES = ("idx_context_changes_note_key", "idx_plan_holds_user_ask_rounds")
+_INDEXES = ("idx_context_changes_note_key", "idx_plan_holds_user_ask_rounds", "idx_doc_comments_user_created")
 _OLD_NOTE = {"chip": None, "kind": "correction_note", "correction_subject": "message:c1", "reoffer_unwritten": True}
 
 

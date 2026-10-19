@@ -146,9 +146,18 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
     logged and returned as ``CorruptActivation`` so no caller mistakes it for absence.
     """
     from infra.database import get_db
-    from infra.settings import get_setting
 
     db = get_db()
+    try:
+        return read_active_version(db)
+    finally:
+        db.close()
+
+
+def read_active_version(db) -> ClassifierVersion | CorruptActivation | None:
+    """``active_corrections_version`` on the caller's connection, so a writer reads it in its own transaction."""
+    from infra.settings import get_setting
+
     try:
         active = get_setting(ACTIVE_VERSION_SETTING, db=db)
         if active is None:
@@ -162,8 +171,6 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         logger.error("corrections activation record is unreadable: {}", type(error).__name__)
         return CorruptActivation(type(error).__name__)
-    finally:
-        db.close()
 
 
 def active_since(db, version: ClassifierVersion | None = None) -> str | None:

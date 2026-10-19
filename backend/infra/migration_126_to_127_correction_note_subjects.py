@@ -13,7 +13,8 @@ none, so the first scan after this upgrade notes no history: a scan fact notes
 only a source made after it (``core.correction_notes``).
 
 It then adds the index on a note's key and the index on an artifact's user
-asks, which the note path reads.
+asks, which the note path reads, and the index on user comments by time,
+which the corrections scan reads.
 
 Runs inside the runner's transaction; it never commits or rolls back.
 """
@@ -25,6 +26,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from infra.context_change_schema import NOTE_KEY_INDEX_SQL
+from infra.doc_comments_schema import USER_COMMENTS_BY_TIME_INDEX_SQL
 from infra.plan_ask_schema import ASK_ROUNDS_INDEX_SQL
 
 # Frozen at this step: the note kind and the key it replaces, as written before 127.
@@ -102,7 +104,7 @@ def _stamp_activation(conn: sqlite3.Connection) -> None:
 
 
 def migrate_126_to_127(conn: sqlite3.Connection) -> None:
-    """Rewrite old-shape correction notes, stamp the activation, then add the note-key and user-ask indexes."""
+    """Rewrite old-shape correction notes, stamp the activation, then add the note-key, user-ask and comment-time indexes."""
     if _has_table(conn, "settings"):
         _stamp_activation(conn)
     if _has_table(conn, "context_change_journal"):
@@ -112,3 +114,5 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
         _rewrite_digests(conn)
     if _has_table(conn, "plan_node_holds"):
         conn.execute(ASK_ROUNDS_INDEX_SQL)
+    if _has_table(conn, "doc_comments"):
+        conn.execute(USER_COMMENTS_BY_TIME_INDEX_SQL)

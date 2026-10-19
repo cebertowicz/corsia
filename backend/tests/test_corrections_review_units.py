@@ -195,7 +195,10 @@ async def test_the_scan_recovers_each_unit_whose_key_the_worker_never_took(db, m
 async def test_recovery_reads_nothing_made_before_activation(db):
     from jobs.corrections_recording import recover_comment_notes
 
+    from tests.test_corrections_comments_answers import _backfilling
+
     _missed_units(db)
+    _backfilling(db)
     await recover_comment_notes("2000-01-01T00:00:00+00:00")  # no active version: no note is owed
     assert _correction_notes(db) == []
 
@@ -248,6 +251,26 @@ async def test_a_candidate_versions_backfill_never_notes_a_unit_the_active_versi
     await recover_comment_notes("2000-01-01T00:00:00+00:00")
 
     assert _correction_notes(db) == []
+
+
+@pytest.mark.parametrize("found", ["flagged", "cleared"])
+def test_every_note_writer_reads_only_the_active_versions_verdict(db, found):
+    """A round open across an upgrade: another version's fact never notes or completes it."""
+    from core.correction_notes import write_unit_notes
+
+    artifact = seed_document(db, "owner", name="p.md")
+    hold = _ask(db, artifact)
+    comment = _user_comment(db, artifact)
+    other = {"flagged": CORRECTION, "cleared": {**CORRECTION, "label": "not_correction"}}[found]
+    # A retired or candidate version's arrival fact: its own fact path writes nothing.
+    assert _record(db, "doc_comment", comment, payload=other, version=_version("v2")) is True
+    _clear_with_answer(db, artifact, "changes_requested")
+    write_unit_notes(db, "review-round", hold)  # the answer's unit key
+    assert _correction_notes(db) == []  # v1, the active version, has no verdict yet
+
+    _record(db, "doc_comment", comment, payload={**CORRECTION, "label": "not_correction"})
+    write_unit_notes(db, "review-round", hold)
+    assert _correction_notes(db) == []  # v1 found it clean, whatever v2 found
 
 
 @pytest.mark.asyncio
@@ -345,9 +368,8 @@ async def test_recovery_writes_exactly_the_notes_arrival_writes(db, monkeypatch,
     assert _note_rows(db) == arrived
 
 
-def test_recovery_reads_positive_comment_facts_by_time(db):
-    from jobs.corrections_scanning import positive_comment_keys
-
+def _query_plan(marker: str, read) -> list[str]:
+    """The plan steps of each query ``read`` runs whose SQL contains ``marker``."""
     import infra.database as database
 
     plan: list[str] = []
@@ -358,7 +380,7 @@ def test_recovery_reads_positive_comment_facts_by_time(db):
             self._connection = connection
 
         def execute(self, sql, params=()):
-            if "FROM outcome_events e" in sql:
+            if marker in sql:
                 plan.extend(row[3] for row in self._connection.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall())
             return self._connection.execute(sql, params)
 
@@ -367,8 +389,25 @@ def test_recovery_reads_positive_comment_facts_by_time(db):
 
     database.get_db = lambda: Explaining(real_get_db())
     try:
-        positive_comment_keys(_version(), "2000-01-01", 5)
+        read()
     finally:
         database.get_db = real_get_db
+    return plan
+
+
+def test_recovery_reads_positive_comment_facts_by_time(db):
+    from jobs.corrections_scanning import positive_comment_keys
+
+    plan = _query_plan("FROM outcome_events e", lambda: positive_comment_keys(_version(), "2000-01-01", 5))
 
     assert any("idx_outcome_events_name_ts" in step and "ts>" in step for step in plan), plan
+
+
+def test_the_scan_reads_only_its_windows_comments(db):
+    from jobs.corrections_scanning import pending_source_candidate_keys
+
+    plan = _query_plan("FROM doc_comments c", lambda: pending_source_candidate_keys(_version(), 20, since="2000-01-01"))
+
+    assert any(
+        step.startswith("SEARCH c") and "idx_doc_comments_user_created" in step and "created_at>" in step for step in plan
+    ), plan

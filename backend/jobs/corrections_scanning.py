@@ -137,7 +137,8 @@ def pending_source_candidate_keys(
             WHERE c.author_kind='user'
               AND ({comment_target_sql('c')}) IS NOT NULL
               AND {_before_clause('doc_comment', 'c.id', 'c.created_at')}
-              AND (:since_created_at IS NULL OR c.created_at >= :since_created_at)
+              -- A range on idx_doc_comments_user_created: the read stops at the window's start.
+              AND c.created_at >= COALESCE(:since_created_at, '')
               AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event

@@ -16,6 +16,7 @@ from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fix
     CORRECTION,
     _answer,
     _ask,
+    _backfilling,
     _correction_notes,
     _deliver_batch,
     _facts,
@@ -99,6 +100,7 @@ def test_late_fact_for_a_delivered_lone_batch_writes_one_note(db):
 
 
 def test_a_backfill_fact_never_notes_a_delivered_batch(db):
+    _backfilling(db)
     artifact = seed_document(db, "owner", name="p.md")
     comment = _user_comment(db, artifact)
     _deliver_batch(db)
