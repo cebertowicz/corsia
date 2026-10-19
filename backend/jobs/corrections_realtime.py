@@ -34,10 +34,12 @@ Scan state (``scan``)::
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
 
-A unit key (``UNIT_KINDS``) only writes notes; a finished pass first recovers missed ones. An outage
-writes no fact and keeps the source pending. A deterministic startup failure is retained per process in
-``failed_versions``. A scan activates only after it reaches the end using its originally selected
-manifest; a deterministic failure ends the pass unactivated, and the next pass re-selects (or fails).
+An outage writes no fact and keeps the source pending. A deterministic startup
+failure is retained per process in ``failed_versions``. A scan activates only after
+it reaches the end using its originally selected manifest; a deterministic failure
+ends the pass unactivated, and the next pass re-selects (or the state is failed).
+A review unit's key (``UNIT_KINDS``) only writes the notes it owes; a pass that
+reaches the end first recovers the unit keys the worker never took.
 """
 
 from __future__ import annotations
@@ -53,12 +55,14 @@ from loguru import logger
 from core.corrections_classifier import CORRECTIONS_SPEC
 from core.onnx_asset import AssetError, AssetManifest, cleanup_staging
 from core.onnx_child import OnnxChild
-from core.corrections_recording import UNIT_KINDS, ClassifierVersion, CorrectionCandidate
+from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts, write_unit
-from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
+from jobs.corrections_recording import arrival_candidate, record_classification, record_unreadable, unreadable_facts
+from jobs.corrections_runtime import (
+    ClassificationOutcome, classify, drop_child, hand_to_app_loop, record_only_version_load_crash,
+)
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -78,7 +82,6 @@ class CorrectionsWorker:
         self.arrived = asyncio.Event()
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
-        self.loop: asyncio.AbstractEventLoop | None = None  # the loop ``startup`` runs the worker on
         self.child: OnnxChild | None = None
         self.child_manifest: AssetManifest | None = None
         self.stopping = False
@@ -108,6 +111,7 @@ class CorrectionsWorker:
             self._notice_failed_state(failure_version)
 
     def _owe(self) -> None:
+        """Idle to owed: an arrival the queue could not take is left for the next pass."""
         if self.scan == "idle":
             self.scan = "owed"
 
@@ -174,17 +178,6 @@ class CorrectionsWorker:
             str(version), reason, reader, tasks=self.failure_notice_tasks,
         )
 
-    def _notice_load_crash(self, version: str) -> None:
-        from automation.update_failure_notice import tell_corrections_classifier_load_crash_detached
-
-        tell_corrections_classifier_load_crash_detached(version, tasks=self.failure_notice_tasks)
-
-    def _record_only_version_load_crash(self, version: str, reason: str, now: float) -> None:
-        if version not in self.load_crash_retry_at:
-            self._notice_load_crash(version)
-        self.load_crash_retry_at[version] = now + LOAD_CRASH_BACKOFF_SECONDS
-        self._set("unavailable", reason)
-
     async def _after_version_failure(self, failure: ClassificationOutcome) -> AssetManifest | None:
         """Re-select past a deterministic failure; with nothing left, fail naming that version."""
         manifest = await self._select_manifest(after_version_failure=True)
@@ -200,13 +193,18 @@ class CorrectionsWorker:
             reason = "classifier keeps crashing on load; retrying after backoff"
             self._set("unavailable", reason)
             return ClassificationOutcome("outage", reason)
-        has_fallback = any(item["state"] == "ready" and item["version"] != manifest.version for item in self.versions)
+        has_fallback = any(
+            item["state"] == "ready" and item["version"] != manifest.version
+            for item in self.versions
+        )
         outcome = await classify(
             self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND, has_fallback=has_fallback,
-            clock=_clock, record_classification=record_classification, record_unreadable=record_unreadable,
+            clock=_clock, record_classification=record_classification,
+            record_unreadable=record_unreadable,
         )
         if outcome.only_version_load_crash:
-            self._record_only_version_load_crash(manifest.version, outcome.reason or "load exited", now)
+            retry_at = now + LOAD_CRASH_BACKOFF_SECONDS
+            record_only_version_load_crash(self, manifest.version, outcome.reason or "load exited", retry_at)
         elif outcome.load_succeeded and manifest.version in self.load_crash_retry_at:
             self.load_crash_retry_at[manifest.version] = 0.0
         return outcome
@@ -232,9 +230,7 @@ class CorrectionsWorker:
         started_at = _clock()
         self.queue_delay_ms = (started_at - enqueued_at) * 1000
         try:
-            if source_kind in UNIT_KINDS:  # a completed review unit's key: write the notes it owes
-                return await run_in_db(write_unit, source_kind, source_id)
-            candidate = await run_in_db(candidate_for_source, source_kind, source_id)
+            candidate = await run_in_db(arrival_candidate, source_kind, source_id)
             if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
                 self._release_hold()
         except Exception:
@@ -275,7 +271,8 @@ class CorrectionsWorker:
             if not batch.selected_keys:
                 await recover_unit_notes(cutoff.isoformat())  # the unit keys the worker never took
                 return await activate_after_backfill(version)
-            before = (tail := batch.selected_keys[-1]).created_at, tail.source_kind, tail.source_id
+            tail = batch.selected_keys[-1]
+            before = (tail.created_at, tail.source_kind, tail.source_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
@@ -323,12 +320,11 @@ class CorrectionsWorker:
         self._hold(f"worker error: {type(error).__name__}")
 
     def notify(self, source_kind: str, source_id: str) -> None:
-        """Take a source or unit key from any thread: a DB pool thread's commit effect hops onto the loop."""
-        if (loop := self.loop) is not None and not loop.is_closed() and asyncio._get_running_loop() is not loop:
-            loop.call_soon_threadsafe(self.notify, source_kind, source_id)
-            return
-        if self.stopping or asyncio._get_running_loop() is None:  # no loop to take it: the scan's recovery reads it
+        """Take a source or unit key from any thread; off the loop it hops onto the application loop."""
+        if self.stopping:
             self._owe()
+            return
+        if hand_to_app_loop(self, source_kind, source_id):
             return
         try:
             self.queue.put_nowait((source_kind, source_id, _clock()))
@@ -341,7 +337,7 @@ class CorrectionsWorker:
         self._start_task(self.run())
 
     def startup(self) -> None:
-        self.stopping, self.loop = False, asyncio.get_running_loop()
+        self.stopping = False
         cleanup_staging(asset_root())
         self._release_hold()
         self.scan = "owed"

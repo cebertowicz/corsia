@@ -364,12 +364,12 @@ async def test_typed_source_arrival_is_classified_as_arrived_through_the_shared_
     from unittest.mock import AsyncMock
 
     from core.corrections_recording import CorrectionCandidate
-    from jobs import corrections_realtime
+    from jobs import corrections_realtime, corrections_recording
 
     source = CorrectionCandidate("doc_comment", "comment", "owner", None, "Wrong.", "2026-10-19T00:00:00Z")
     seen = []
     monkeypatch.setattr(
-        corrections_realtime, "candidate_for_source",
+        corrections_recording, "candidate_for_source",
         lambda source_kind, source_id: seen.append((source_kind, source_id)) or with_fields(source, arrived=True),
     )
     worker = corrections_realtime.CorrectionsWorker()

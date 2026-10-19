@@ -12,6 +12,7 @@ from core.corrections_recording import (
     DECISION_SUBJECT_PREFIX,
     FACT_KEYS,
     LABEL_UNREADABLE,
+    UNIT_KINDS,
     ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
@@ -124,6 +125,14 @@ async def recover_unit_notes(window_start: str) -> None:
         for unit in keys:
             await run_in_db(write_unit, unit.kind, unit.unit_id)
         after = keys[-1]
+
+
+def arrival_candidate(arrival_kind: str, arrival_id: str) -> CorrectionCandidate | None:
+    """Take one arrival: a completed review unit's key writes the notes it owes; a source is hydrated."""
+    if arrival_kind in UNIT_KINDS:
+        write_unit(arrival_kind, arrival_id)
+        return None
+    return candidate_for_source(arrival_kind, arrival_id)
 
 
 def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:

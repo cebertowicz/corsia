@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from jobs import corrections_runtime
+from jobs import corrections_recording, corrections_runtime
 
 
 def _candidate(message_id: str = "owner-message"):
@@ -710,7 +710,7 @@ async def test_unreadable_fact_is_written_with_its_reason_and_not_counted(isolat
     from jobs.corrections_activation import weekly_correction_figure
 
     ids = _seed_owner_messages(1)
-    candidate = await asyncio.to_thread(corrections_realtime.candidate_for_source, "message", ids[0])
+    candidate = await asyncio.to_thread(corrections_recording.candidate_for_source, "message", ids[0])
     ScriptedChild.calls = [OnnxMessageFailed("child_error"), OnnxMessageFailed("child_error")]
 
     assert (await worker._classify(candidate)).kind in {"recorded", "unreadable"}
@@ -826,7 +826,7 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", locked)
     processed = []
-    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: processed.append(message_id))
+    monkeypatch.setattr(corrections_recording, "candidate_for_source", lambda _kind, message_id: processed.append(message_id))
 
     worker.scan = "owed"
     worker.queue.put_nowait(("message", "arrival", 0.0))
@@ -845,7 +845,7 @@ async def test_a_failing_arrival_owes_the_scan_and_the_next_arrival_still_runs(w
             raise RuntimeError("database is locked")
         return None
 
-    monkeypatch.setattr(corrections_realtime, "candidate_for_source", candidate)
+    monkeypatch.setattr(corrections_recording, "candidate_for_source", candidate)
     monkeypatch.setattr(worker, "_scan_pass", AsyncMock(side_effect=lambda: worker._finish_scan()))
     worker.queue.put_nowait(("message", "first", 0.0))
     worker.queue.put_nowait(("message", "second", 0.0))
@@ -871,7 +871,7 @@ async def test_worker_task_that_dies_keeps_the_scan_owed_and_notify_restarts_it(
     assert (worker.scan, worker.held_reason) == ("owed", "worker error: RuntimeError")
 
     seen = []
-    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: seen.append(message_id))
+    monkeypatch.setattr(corrections_recording, "candidate_for_source", lambda _kind, message_id: seen.append(message_id))
     corrections_realtime.notify("message", "after-crash")
     await worker.task
 
@@ -1264,7 +1264,7 @@ async def test_recorded_newest_messages_do_not_hide_older_pending_ones(isolated_
 
     # The 22 newest are already recorded: more than one 20-message page.
     for message_id in ids[-22:]:
-        candidate = await asyncio.to_thread(corrections_realtime.candidate_for_source, "message", message_id)
+        candidate = await asyncio.to_thread(corrections_recording.candidate_for_source, "message", message_id)
         assert await corrections_realtime.record_classification(candidate, _result())
     assert _recorded_message_ids() == set(ids[-22:])
 

@@ -47,6 +47,40 @@ async def drop_child(worker: CorrectionsWorker) -> bool:
     return True
 
 
+def hand_to_app_loop(worker: CorrectionsWorker, source_kind: str, source_id: str) -> bool:
+    """Off the event loop (a DB pool thread's commit effect), hand ``notify`` to the application loop.
+
+    Returns False on a running loop, where the caller enqueues itself. With no
+    application loop the scan is owed, and its recovery reads the source or unit.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        return False
+    import infra.app_loop as app_loop
+
+    async def _on_loop() -> None:
+        worker.notify(source_kind, source_id)
+
+    try:
+        app_loop.submit(_on_loop())
+    except app_loop.AppLoopUnavailable:
+        worker._owe()
+    return True
+
+
+def record_only_version_load_crash(worker: CorrectionsWorker, version: str, reason: str, retry_at: float) -> None:
+    """Back the sole version off until ``retry_at``, telling the person once per version."""
+    if version not in worker.load_crash_retry_at:
+        from automation.update_failure_notice import tell_corrections_classifier_load_crash_detached
+
+        tell_corrections_classifier_load_crash_detached(version, tasks=worker.failure_notice_tasks)
+    worker.load_crash_retry_at[version] = retry_at
+    worker._set("unavailable", reason)
+
+
 def record_version_state(worker: CorrectionsWorker, version: str, state: str, reason: str | None) -> None:
     """Keep one candidate's diagnostic state in the worker snapshot."""
     worker.versions = [

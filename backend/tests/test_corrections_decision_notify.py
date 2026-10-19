@@ -1,8 +1,8 @@
 """A decision answer commits on a DB thread; its arrival reaches the corrections worker on the app loop.
 
-The worker's queue, event and task are bound to the loop it started on, so its
-``notify`` hops a commit effect from a DB pool thread onto that loop, and with
-no loop the scan is owed and recovers the answer.
+The worker's queue, event and task are bound to the application loop, so its
+``notify`` hands a commit effect from a DB pool thread to ``infra.app_loop``,
+and with no application loop the scan is owed and recovers the answer.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ def _isolated_worker(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_answer_through_run_in_db_notifies_the_worker_on_its_loop(db, monkeypatch):
+    import infra.app_loop as app_loop
     from infra.db_async import run_in_db
 
     worker = _isolated_worker(monkeypatch)
@@ -46,12 +47,15 @@ async def test_answer_through_run_in_db_notifies_the_worker_on_its_loop(db, monk
     monkeypatch.setattr(
         worker, "notify", lambda *args: (notified_on.append(threading.get_ident()), real_notify(*args)),
     )
-    worker.loop = asyncio.get_running_loop()  # what ``startup`` captures
+    app_loop.capture(asyncio.get_running_loop())  # what ``lifespan`` captures
     _plan, _source, decision = _raised_decision(db)
 
-    await run_in_db(lambda: _answer(db, decision))
-    for _ in range(5):
-        await asyncio.sleep(0)
+    try:
+        await run_in_db(lambda: _answer(db, decision))
+        for _ in range(5):
+            await asyncio.sleep(0)
+    finally:
+        app_loop.clear()
 
     assert worker.queue.get_nowait()[:2] == ("plan_decision_answer", decision["id"])
     # Called on the DB pool's thread, it hopped once and enqueued on the loop's.
