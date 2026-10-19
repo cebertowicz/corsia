@@ -53,9 +53,8 @@ from llm.local_setup_runtime import (
 )
 
 EVENT_CATEGORY = "local_setup"
-
+CAUSES = frozenset({"connection", "disk_full", "memory", "other_omlx", "other"})
 log = logging.getLogger(__name__)
-
 
 async def _wait_for_download(
     server_id: str, progress: Callable[[str], None], model: LocalModel,
@@ -71,7 +70,6 @@ async def _wait_for_download(
 
 async def _download_dir(server_id: str):
     return await local_setup_download.download_dir(server_id)
-
 
 async def _download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
     """Check the disk oMLX downloads to, then request and follow the model's download."""
@@ -317,16 +315,18 @@ async def _run_flight(*, model: LocalModel | None = None,
     return local_setup_operation.finish(_flight, result)
 
 def _failure_cause(exc: Exception) -> str:
-    """Classify a local-flight failure once, at its producer."""
+    """Classify concrete local-flight exceptions once, at their producer."""
+    import httpx
+    from llm.local_setup_managed import ManagedPortUnavailable
+
     if isinstance(exc, DiskSpaceError):
         return "disk_full"
     if isinstance(exc, MemoryError):
         return "memory"
-    label = f"{type(exc).__name__} {exc}".lower()
-    if "connect" in label or "network" in label or "timeout" in label:
+    if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, ConnectionError, TimeoutError)):
         return "connection"
-    if "omlx" in label or "foreign" in label or "port" in label:
-        return "other_omlx"
+    if isinstance(exc, ManagedPortUnavailable):
+        return "other"
     return "other"
 
 def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:

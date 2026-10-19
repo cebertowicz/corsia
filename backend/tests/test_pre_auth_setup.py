@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -161,13 +162,21 @@ def test_post_setup_returns_complete_code(client, method, path):
     assert response.json() == {"code": "setup_complete"}
 
 
-def test_status_does_not_inspect_foreign_omlx(client, monkeypatch):
-    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: pytest.fail("status must not inspect processes"))
+def test_polling_setup_status_and_local_download_spawn_no_processes(client, monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("polling must not inspect processes")
 
-    response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
+    monkeypatch.setattr(setup_api, "foreign_omlx_process", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
 
-    assert response.status_code == 200
-    assert "existing_omlx" not in response.json()
+    status = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
+    local_download = client.get("/api/setup/local-download", headers=LOOPBACK_HEADERS)
+
+    assert status.status_code == local_download.status_code == 200
+    assert "existing_omlx" not in status.json()
+    assert local_download.json()["state"] == "stopped"
 
 
 def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_exists(client, monkeypatch):

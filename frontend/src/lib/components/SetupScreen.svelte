@@ -27,6 +27,14 @@
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
+	function setupFinishRecovery(error: unknown): string {
+		const message = error instanceof Error ? error.message : '';
+		if (message === 'No working setup model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.';
+		if (message === 'Model binding is not complete') return 'CORSIA couldn’t save the selected model. Retry.';
+		if (/\b422\b/.test(message)) return 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.';
+		if (message === 'handoff' || message === 'completion') return 'CORSIA couldn’t save setup progress. Retry.';
+		return 'CORSIA couldn’t finish model setup. Retry.';
+	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'folder' | 'models' | 'hard-stop' | 'error' | 'connect';
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; app_location?: string; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState };
@@ -119,8 +127,8 @@
 			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: 'needs_setup', local_state: live.state,
 				setup_downloading: live.state === 'downloading', setup_stage: live.state === 'starting' ? 'starting' : undefined,
 				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error: ['failed', 'start_failed'].includes(live.state) ? live.cause ?? 'other' : undefined,
-				setup_error_code: live.state === 'start_failed' ? 'start_failed' : live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free };
+				setup_error: ['failed', 'setup_failed', 'start_failed'].includes(live.state) ? live.cause ?? live.state : undefined,
+				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free };
 			localPending = false;
 		} catch { /* Preserve the last job projection until the next successful read. */ }
 	}
@@ -182,11 +190,8 @@
 			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new Error('completion');
 			onFinished();
 		} catch (error) {
-			const message = error instanceof Error ? error.message : '';
 			await refreshSources(true);
-			sourceError = message === 'handoff' || message === 'completion'
-				? 'CORSIA couldn’t save setup progress. Retry.'
-				: message || 'CORSIA couldn’t finish model setup. Retry.';
+			sourceError = setupFinishRecovery(error);
 		}
 		finally { finishing = false; }
 	}

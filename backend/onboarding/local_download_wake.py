@@ -14,6 +14,8 @@ import logging
 import re
 from typing import Any, Literal
 
+from llm.local_setup import CAUSES
+
 log = logging.getLogger(__name__)
 
 EVENT = "onboarding.local_download"
@@ -23,7 +25,7 @@ SUMMARY = (
     "state. Tell the person the outcome and one next step; do not rebind the CORSIA agent."
 )
 OUTCOMES = frozenset({"ready", "failed", "start_failed", "setup_failed"})
-_RETRY_DELAYS_SECONDS = (0.1, 0.25, 0.5, 1.0)
+
 _REF = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _flush_lock = asyncio.Lock()
 
@@ -72,7 +74,7 @@ def _payload(
             raise ValueError("a ready local-download outcome needs its model")
         detail["model"] = model[:512]
         return detail
-    normalized_cause = str(cause) if cause in {"connection", "disk_full", "memory", "other_omlx", "other"} else "other"
+    normalized_cause = str(cause) if cause in CAUSES else "other"
     detail["cause"] = normalized_cause
     detail["fix"] = _fix(normalized_cause, ref, bytes_to_free)
     if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
@@ -129,10 +131,6 @@ async def _pending() -> dict[str, dict]:
 async def _has_pending() -> bool:
     return bool(await _pending())
 
-
-def retry_task() -> None:
-    """Kept for shutdown compatibility; normal pre-render waiting owns no task."""
-    return None
 
 
 async def resume_pending_local_download() -> asyncio.Task[None] | None:
