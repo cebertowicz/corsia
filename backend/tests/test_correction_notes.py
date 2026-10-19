@@ -150,9 +150,7 @@ def test_the_note_text_quotes_the_person_and_names_when_they_sent_it(monkeypatch
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
         "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
         "The triage is working state, not part of your reply. "
-        "If you already fixed and triaged it when the message arrived, do nothing more.\n"
-        "If several correction notes reach you together, triage them as one: look for one general cause "
-        "and re-check the whole artifact or decision, not each comment separately."
+        "If you already fixed and triaged it when the message arrived, do nothing more."
     )
 
 

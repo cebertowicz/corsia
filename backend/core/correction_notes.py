@@ -27,7 +27,7 @@ from core.corrections_recording import (
 
 NOTE_KIND = "correction_note"
 QUOTE_CHARS = 160
-# Several notes can arrive in one digest (a round of review comments); every note asks for one triage.
+# Several comment or answer notes can arrive in one digest (a round of review); each of those asks for one triage.
 TRIAGE_TOGETHER = (
     "If several correction notes reach you together, triage them as one: look for one general cause "
     "and re-check the whole artifact or decision, not each comment separately."
@@ -58,8 +58,7 @@ def _note(where: str, words: str, arrived_as: str) -> str:
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
         "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
         "The triage is working state, not part of your reply. "
-        f"If you already fixed and triaged it when the {arrived_as} arrived, do nothing more.\n"
-        + TRIAGE_TOGETHER
+        f"If you already fixed and triaged it when the {arrived_as} arrived, do nothing more."
     )
 
 
@@ -73,8 +72,10 @@ def _source_note_text(candidate: CorrectionCandidate) -> str:
     clock = _local_clock(candidate.created_at)
     if candidate.source_kind == "doc_comment":
         where = f"artifact {candidate.about} (comment {candidate.source_id}, sent {clock})"
-        return _note(where, candidate.quote or "", "comment")
-    return _note(f'plan decision "{candidate.about}" (answered {clock})', candidate.quote or "", "answer")
+        note = _note(where, candidate.quote or "", "comment")
+    else:
+        note = _note(f'plan decision "{candidate.about}" (answered {clock})', candidate.quote or "", "answer")
+    return note + "\n" + TRIAGE_TOGETHER
 
 
 def _has_target(db: sqlite3.Connection, thread_id: str) -> bool:

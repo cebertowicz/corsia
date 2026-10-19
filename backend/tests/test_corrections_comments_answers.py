@@ -212,6 +212,23 @@ def test_each_note_names_its_source_quotes_the_person_and_asks_for_one_triage(db
     assert all(note.endswith("\n" + TRIAGE_TOGETHER) for note in (on_comment, on_decision))
 
 
+def test_a_chat_note_does_not_ask_to_triage_comments_together():
+    from core.correction_notes import TRIAGE_TOGETHER, note_text
+
+    note = note_text("m1", "That is wrong.", "2026-10-19T00:00:00Z")
+    assert TRIAGE_TOGETHER not in note and note.endswith("when the message arrived, do nothing more.")
+
+
+def test_a_failing_comment_notify_never_fails_the_committed_comment(monkeypatch):
+    from jobs.corrections_recording import notify_doc_comment
+
+    def broken(*_args):
+        raise RuntimeError("worker gone")
+
+    monkeypatch.setattr("jobs.corrections_realtime.notify", broken)
+    notify_doc_comment("c1")
+
+
 @pytest.mark.parametrize("source", ["doc_comment", "plan_decision_answer"])
 def test_a_scan_fact_for_a_comment_or_answer_writes_no_note(db, source):
     from jobs.corrections_recording import _record_fact

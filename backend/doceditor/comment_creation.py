@@ -160,7 +160,7 @@ async def create_validated_comment(request, client_id):
         author=request.author, user_id=request.user_id, prepare=prepare, worker=partial(create_in_db, request),
     )
     if request.author_kind == "user":
-        from jobs.corrections_realtime import notify
+        from jobs.corrections_recording import notify_doc_comment
 
-        notify("doc_comment", str(result[0]["id"]))
+        notify_doc_comment(str(result[0]["id"]))
     return result

@@ -132,6 +132,16 @@ def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object)
         logger.exception("corrections classifier admission notification failed")
 
 
+def notify_doc_comment(comment_id: str) -> None:
+    """Hand the worker a committed user comment; best effort, never failing the comment."""
+    from jobs.corrections_realtime import notify
+
+    try:
+        notify("doc_comment", comment_id)
+    except Exception:
+        logger.exception("corrections classifier comment notification failed")
+
+
 def notify_decision_answer(decision_id: str, other_text: object) -> None:
     """Hand the worker a committed decision answer that carries free text; best effort, never failing the answer.
 
