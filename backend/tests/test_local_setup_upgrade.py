@@ -47,6 +47,36 @@ def legacy(monkeypatch, tmp_path):
     return root
 
 
+def _insert_model(model_id: str, litellm_model: str, provider_model_id: str) -> None:
+    from infra.database import get_db
+
+    db = get_db()
+    db.execute(
+        """INSERT INTO models (id, provider, provider_model_id, litellm_model, display_name,
+               backend, source, enabled, available, created_at, updated_at)
+           VALUES (?, 'omlx', ?, ?, 'Qwen', 'network', 'discovered', 1, 1, 'now', 'now')""",
+        (model_id, provider_model_id, litellm_model),
+    )
+    db.commit()
+    db.close()
+
+
+def _discover_model(server_id: str, provider_model_id: str) -> None:
+    """Record a model the way oMLX discovery does: one row per model, its transport rewritten."""
+    from infra.database import get_db
+    from llm.catalog_network_models import _upsert_network_model
+
+    db = get_db()
+    _upsert_network_model(db, "omlx", {
+        "provider_model_id": provider_model_id,
+        "litellm_model": f"omlx@{server_id}/{provider_model_id}",
+        "display_name": "Qwen", "description": None, "context_window": 32768,
+        "supports_vision": 0, "metadata_json": "{}",
+    }, "now")
+    db.commit()
+    db.close()
+
+
 def _managed_dir() -> Path:
     from llm.local_setup_managed import managed_omlx_paths
 
@@ -251,17 +281,7 @@ def upgrade_env(legacy, isolated_db, monkeypatch):
         return server_id, 8210
 
     async def discover(server_id):
-        from infra.database import get_db
-
-        db = get_db()
-        db.execute(
-            """INSERT INTO models (id, provider, provider_model_id, litellm_model, display_name,
-                   backend, source, enabled, available, created_at, updated_at)
-               VALUES (?, 'omlx', ?, ?, 'Qwen', 'network', 'discovered', 1, 1, 'now', 'now')""",
-            ("managed-qwen", MODEL.model, f"omlx@{server_id}/{MODEL.model}"),
-        )
-        db.commit()
-        db.close()
+        _discover_model(server_id, MODEL.model)
         events.append("discover")
         return {"ok": True}
 
@@ -292,10 +312,21 @@ async def test_v040_install_keeps_its_starter_ready_with_no_question_and_no_down
     old = await run_in_db(network_discovery.upsert_server,
         provider="omlx", instance_id="127.0.0.1:8000", instance_name="This Mac",
         host="127.0.0.1", port=8000, status="online", kind="managed")
+    starter = f"omlx@{old}/{MODEL.model}"
+    await run_in_db(_insert_model, "legacy-qwen", starter, MODEL.model)
     # CORSIA's own service is not the person's oMLX: setup asks nothing.
     assert apply_foreign_omlx_choice(consent_existing=False, manage_existing=None) is None
 
     moved = await upgrade_legacy_omlx()
+
+    # A thread bound to the v0.4 starter, by row id or old selector, runs on the managed server.
+    from llm.resolution import resolve_execution_target
+
+    managed = (await run_in_db(resolve_execution_target, "legacy-qwen")).transport_model
+    assert not managed.startswith(f"omlx@{old}/")
+    for binding in ("legacy-qwen", starter):
+        target = await run_in_db(resolve_execution_target, binding)
+        assert (target.catalog_id, target.available, target.transport_model) == ("legacy-qwen", True, managed)
 
     assert [(item.repository, item.outcome) for item in moved] == [(MODEL.repository, "moved")]
     assert upgrade_env == ["stop service", "start managed", "discover", f"configure {MODEL.repository}"]
