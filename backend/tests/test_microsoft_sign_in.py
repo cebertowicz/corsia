@@ -142,6 +142,7 @@ async def _connect(fake: FakeMicrosoft, *, kind: str = "work", tenant: str | Non
     return account_id
 
 
+
 def _accounts() -> list[dict[str, object]]:
     db = get_db()
     try:

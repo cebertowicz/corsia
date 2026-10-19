@@ -35,7 +35,6 @@ def _agent_thread_id(user: dict) -> str:
         db.close()
 
 
-
 @router.post("/connect")
 async def connect(request: Request, user: dict = Depends(require_user)) -> dict[str, Any]:
     """Start setup or reauthenticate one visible Microsoft account row."""
@@ -46,7 +45,6 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
         body = {}
     account_id = _body_field(body, "account_id")
     person = is_person_session(user)
-
     adding_thread_id = None if person else await run_in_db(_agent_thread_id, user)
     try:
         url, signing_in = await oauth.start_sign_in(
