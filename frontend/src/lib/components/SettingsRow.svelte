@@ -11,6 +11,7 @@
 		subTone = 'quiet',
 		trailing = '',
 		chevron = false,
+		ariaLabel,
 		expanded,
 		stackActions = false,
 		mark = null,
@@ -19,13 +20,16 @@
 		onMenuSelect,
 		actions,
 	}: {
-		name: string;
+		/** A plain name or a title snippet for a row that needs its own safe truncation. */
+		name: string | Snippet;
 		/** The second line. A snippet draws a two-tone line: it takes the tone's colour, and a part of it can set its own. */
 		sub?: string | Snippet;
 		/** A second line stating a status takes that status's text colour (Needs you is `attention`). */
 		subTone?: 'quiet' | 'failed' | 'attention';
 		trailing?: string;
 		chevron?: boolean;
+		/** Accessible title when the visual name is a custom snippet. */
+		ariaLabel?: string;
 		/** An opening row reports whether its details are showing; the chevron turns down with them. */
 		expanded?: boolean;
 		/** The actions drop below the copy when the row is too narrow for both, so a long second line is not cut to make room for them. */
@@ -40,6 +44,7 @@
 	} = $props();
 
 	const menu = createRowMenu<string>(() => menuItems.length > 0 && !!onMenuSelect);
+	const rowName = $derived(typeof name === 'string' ? name : 'Settings item');
 
 	function select(id: string) {
 		menu.close();
@@ -50,15 +55,15 @@
 {#snippet content()}
 	{#if mark}<span class="mark" style:background={mark} aria-hidden="true"></span>{/if}
 	<span class="copy">
-		<span class="name">{name}</span>
+		<span class="name">{#if typeof name === 'string'}{name}{:else}{@render name()}{/if}</span>
 		{#if sub}<span class="sub" class:multi={typeof sub !== 'string'} class:failed={subTone === 'failed'} class:attention={subTone === 'attention'}>{#if typeof sub === 'string'}{sub}{:else}{@render sub()}{/if}</span>{/if}
 	</span>
 	{#if trailing}<span class="trailing">{trailing}</span>{/if}
 {/snippet}
 
-<div class="settings-row" class:stack={stackActions} data-settings-row={name} {...menu.rowHandlers(name)}>
+<div class="settings-row" class:stack={stackActions} data-settings-row={rowName} {...menu.rowHandlers(rowName)}>
 	{#if onOpen}
-		<button type="button" class="face open" aria-expanded={expanded} onclick={onOpen}>{@render content()}</button>
+		<button type="button" class="face open" aria-label={ariaLabel} aria-expanded={expanded} onclick={onOpen}>{@render content()}</button>
 	{:else}
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div class="face" tabindex={menuItems.length ? 0 : undefined}>{@render content()}</div>
@@ -69,7 +74,7 @@
 	{/if}
 </div>
 {#if menu.open}
-	<Menu ariaLabel={`Actions for ${name}`} items={menuItems} x={menu.open.x} y={menu.open.y} onSelect={select} onClose={menu.close} />
+	<Menu ariaLabel={`Actions for ${rowName}`} items={menuItems} x={menu.open.x} y={menu.open.y} onSelect={select} onClose={menu.close} />
 {/if}
 
 <style>

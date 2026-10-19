@@ -1,61 +1,143 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
-import { loginByUrl, openSettings } from './support/corsia';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { loginByUrl, openSettings, openSettingsSection } from './support/corsia';
 
-const outputDir = process.env.CORSIA_CAPTURE_DIR ?? 'test-results/connected-apps-section';
+const outputDir = process.env.CORSIA_CAPTURE_DIR ?? 'test-results/google-account-rows';
 const captureEnabled = process.env.CORSIA_CAPTURE_CONNECTED_APPS === '1';
 
-test.describe('Connected apps Settings section capture', () => {
+type AccountState = 'typical' | 'needs-sign-in' | 'signed-out' | 'long';
+type Account = {
+	id: string;
+	provider: 'google';
+	address: string;
+	capabilities: ('mail' | 'calendar' | 'files')[];
+	state: 'connected' | 'needs_sign_in' | 'signed_out';
+	reach: { mode: 'all' | 'selected'; project_ids: string[]; outside_projects: boolean };
+};
+
+const onlyCorsia = { mode: 'selected' as const, project_ids: [], outside_projects: false };
+const allProjects = { mode: 'all' as const, project_ids: [], outside_projects: false };
+const healthy: Account = { id: 'google-work', provider: 'google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'], state: 'connected', reach: onlyCorsia };
+const personal: Account = { id: 'google-personal', provider: 'google', address: 'sam@example.com', capabilities: ['mail', 'calendar', 'files'], state: 'connected', reach: allProjects };
+
+function accountsFor(state: AccountState): Account[] {
+	if (state === 'needs-sign-in') return [{ ...healthy, state: 'needs_sign_in' }, personal];
+	if (state === 'signed-out') return [{ ...healthy, state: 'signed_out' }, personal];
+	if (state === 'long') return [
+		{ ...healthy, address: 'shared.prefix.very-long-work-address@example.com' },
+		{ ...personal, address: 'shared.prefix.very-long-personal-address@example.com' },
+	];
+	return [healthy, personal];
+}
+
+async function capture(page: Page, testInfo: TestInfo, name: string) {
+	mkdirSync(outputDir, { recursive: true });
+	await page.screenshot({ path: join(outputDir, `${name}-${testInfo.project.name}.png`), fullPage: true, animations: 'disabled' });
+}
+
+async function openConnectedApps(page: Page) {
+	await openSettings(page);
+	await openSettingsSection(page, 'Connected apps');
+	await expect(page.getByRole('heading', { name: 'Connected apps' })).toBeVisible();
+}
+
+test.describe('Google account rows capture', () => {
 	test.skip(!captureEnabled, 'Capture-only proof; enable explicitly when producing the evidence pack.');
-	// Four full-page states run in each browser project; the default 30 seconds can expire mid-capture and leave stale proof behind.
 	test.setTimeout(120_000);
 
-	test('captures the Settings section states', async ({ page }) => {
-		mkdirSync(outputDir, { recursive: true });
-		let state: 'empty' | 'apps' = 'empty';
-		await page.route('**/api/mcp/servers**', async (route) => {
-			if (route.request().method() !== 'GET') return route.continue();
-			const servers = state === 'empty' ? [] : [
-				{ id: 'notes', name: 'Notes', state: 'working', tool_count: 2, reach: { mode: 'all', project_ids: [], outside_projects: false } },
-				{ id: 'linear', name: 'Linear', state: 'awaiting_approval', reach: { mode: 'all', project_ids: [], outside_projects: false } },
-			];
-			await route.fulfill({ json: { servers, sign_in_here: false } });
-		});
-
-		for (const theme of ['light', 'dark'] as const) {
-			for (const viewport of [1440, 393]) {
-				state = 'empty';
-				await page.setViewportSize({ width: viewport, height: 980 });
-				await page.emulateMedia({ colorScheme: theme });
-				await loginByUrl(page, { waitForComposer: false });
-				await openSettings(page);
-				const appsButton = viewport > 768
-					? page.getByRole('button', { name: 'Connected apps' })
-					: page.getByRole('button', { name: 'Apps' });
-				await appsButton.click();
-				await expect(page.getByRole('heading', { name: 'Connected apps' })).toBeVisible();
-				await expect(page.getByText('No connected apps yet.')).toBeVisible();
-				await page.screenshot({ path: join(outputDir, `connected-apps-empty-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
-
-				state = 'apps';
-				await page.reload();
-				await openSettings(page);
-				await (viewport > 768
-					? page.getByRole('button', { name: 'Connected apps' })
-					: page.getByRole('button', { name: 'Apps' })).click();
-				await expect(page.getByText('Connected · 2 actions · All projects')).toBeVisible();
-				await expect(page.getByText('Waiting for your approval')).toBeVisible();
-				await page.screenshot({ path: join(outputDir, `connected-apps-after-approve-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
-
-				if (viewport > 768) await page.getByRole('button', { name: 'System' }).click();
-				else {
-					await page.getByRole('main').getByRole('button', { name: 'Settings' }).click();
-					await page.getByRole('button', { name: 'System' }).click();
+	for (const theme of ['light', 'dark'] as const) {
+		test(`captures account states in ${theme}`, async ({ page }, testInfo) => {
+			let state: AccountState = 'typical';
+			let failNextList = false;
+			await page.route('**/api/mcp/servers**', async (route) => {
+				if (route.request().method() !== 'GET') return route.continue();
+				if (failNextList) {
+					failNextList = false;
+					return route.fulfill({ status: 503, json: { detail: 'offline' } });
 				}
-				await expect(page.getByRole('heading', { name: 'Connected apps' })).toHaveCount(0);
-				await page.screenshot({ path: join(outputDir, `settings-system-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
-			}
-		}
-	});
+				await route.fulfill({ json: {
+					accounts: accountsFor(state),
+					servers: [{ id: 'notes', name: 'Notes', state: 'working', tool_count: 2, reach: allProjects }],
+					sign_in_here: false,
+				} });
+			});
+			await page.route('**/api/mcp/accounts/**', async (route) => {
+				const request = route.request();
+				if (new URL(request.url()).pathname.endsWith('/sign-out')) return route.fulfill({ json: { row: { ...healthy, state: 'signed_out' }, revocation: 'provider_unreachable' } });
+				if (request.method() === 'DELETE') return route.fulfill({ json: { id: 'google-work', removed: true, revocation: 'provider_unreachable' } });
+				if (request.method() === 'PUT') return route.fulfill({ json: { row: { ...healthy, reach: allProjects } } });
+				await route.continue();
+			});
+			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }] } }));
+			await page.emulateMedia({ colorScheme: theme });
+			await loginByUrl(page, { waitForComposer: false });
+			await openConnectedApps(page);
+			const viewport = page.viewportSize()!.width;
+			const width = viewport > 768 ? '1440' : '393';
+			await expect(page.getByRole('button', { name: 'Google — sam.work@example.com' })).toBeVisible();
+			await expect(page.getByText('Connected · Only CORSIA')).toBeVisible();
+			await capture(page, testInfo, `01-migrated-two-accounts-${width}-${theme}`);
+
+			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
+			await expect(page.getByText('Reaches — Email, Calendar, Files')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Where it works…' })).toBeVisible();
+			await capture(page, testInfo, `02-open-actions-${width}-${theme}`);
+
+			await page.getByRole('button', { name: 'Where it works…' }).click();
+			const whereSheet = page.locator('.modal').filter({ hasText: 'Where Google — sam.work@example.com works' });
+			await expect(whereSheet).toBeVisible();
+			await capture(page, testInfo, `04-where-it-works-${width}-${theme}`);
+			await whereSheet.getByRole('button', { name: 'Cancel' }).click();
+
+			await page.getByRole('button', { name: 'Sign out' }).click();
+			const signOutDialog = page.locator('.modal').filter({ hasText: 'Sign out of Google — sam.work@example.com?' });
+			await expect(signOutDialog).toBeVisible();
+			await capture(page, testInfo, `06-sign-out-confirm-${width}-${theme}`);
+			await signOutDialog.getByRole('button', { name: 'Sign out' }).click();
+			await expect(page.getByText('couldn’t reach Google')).toBeVisible();
+			await capture(page, testInfo, `20-signed-out-google-step-${width}-${theme}`);
+
+			state = 'needs-sign-in';
+			await page.reload();
+			await openConnectedApps(page);
+			await expect(page.getByText('Needs you to sign in · Only CORSIA')).toBeVisible();
+			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
+			await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+			await capture(page, testInfo, `11-needs-sign-in-${width}-${theme}`);
+
+			state = 'signed-out';
+			await page.reload();
+			await openConnectedApps(page);
+			await expect(page.getByText('Signed out · Only CORSIA')).toBeVisible();
+			await capture(page, testInfo, `21-signed-out-deliberate-${width}-${theme}`);
+
+			state = 'long';
+			await page.reload();
+			await openConnectedApps(page);
+			await expect(page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com' })).toBeVisible();
+			await capture(page, testInfo, `24-same-prefix-long-closed-${width}-${theme}`);
+			await page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com' }).click();
+			await capture(page, testInfo, `17-long-open-${width}-${theme}`);
+
+			state = 'typical';
+			await page.reload();
+			await openConnectedApps(page);
+			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
+			await page.getByRole('button', { name: 'Remove' }).click();
+			const removeDialog = page.locator('.modal').filter({ hasText: 'Remove Google — sam.work@example.com?' });
+			await expect(removeDialog).toBeVisible();
+			await capture(page, testInfo, `13-remove-confirm-${width}-${theme}`);
+			await removeDialog.getByRole('button', { name: 'Cancel' }).click();
+
+			await page.evaluate(() => { window.location.hash = 'connected-apps/google-work'; });
+			await expect(page.getByRole('button', { name: 'Where it works…' })).toBeFocused();
+			await capture(page, testInfo, `18-chat-link-focus-${width}-${theme}`);
+
+			failNextList = true;
+			await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+			await expect(page.getByText('Showing last known items.')).toBeVisible();
+			await capture(page, testInfo, `offline-${width}-${theme}`);
+		});
+	}
 });
