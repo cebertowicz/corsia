@@ -61,6 +61,8 @@ export interface NetworkServer {
 	last_seen_at?: string | null;
 	discovered_at?: string | null;
 	metadata?: NetworkServerMetadata;
+	/** The backend's fact: a non-External server on loopback, so its models are local without a mark. */
+	on_this_mac?: boolean;
 	/** The person marked this machine as theirs, so its models count as local. */
 	private?: boolean;
 	has_key?: boolean;

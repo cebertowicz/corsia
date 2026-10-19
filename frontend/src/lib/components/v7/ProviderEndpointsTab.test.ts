@@ -41,7 +41,7 @@ describe('ProviderEndpointsTab private machine', () => {
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('true'); expect(text()).toContain(DESCRIPTION);
 	});
 	it('managed oMLX on this Mac: the line, no switch', () => {
-		render(server({ endpoints: [endpoint('127.0.0.1', 'local')] }));
+		render(server({ endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: true }));
 		expect(text()).toContain(THIS_MAC); expect(toggle()).toBeNull(); expect(text()).not.toContain('Private machine');
 	});
 	it('External on loopback: the switch, address alone does not count', () => {

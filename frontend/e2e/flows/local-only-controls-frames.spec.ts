@@ -42,12 +42,12 @@ const endpoint = (id: string, host: string, kind: 'local' | 'lan') => ({ id, ser
 const server = (id: string, over: Record<string, unknown>) => ({
 	id, provider: 'omlx', instance_id: id, instance_name: id, kind: 'managed', port: 8000, status: 'online', source: 'auto',
 	latency_ms: 4, memory_total_mb: null, memory_used_mb: null, gpu_info: null, active_host: null, api_base: null, mgmt_base: null,
-	loaded_models: [], metadata: {}, ...over,
+	loaded_models: [], metadata: {}, on_this_mac: false, ...over,
 });
 const servers = {
 	remoteOff: server('srv-studio', { instance_name: 'Studio mini', endpoints: [endpoint('e1', '192.168.1.20', 'lan')], active_host: '192.168.1.20', private: false }),
 	remoteOn: server('srv-studio', { instance_name: 'Studio mini', endpoints: [endpoint('e1', '192.168.1.20', 'lan')], active_host: '192.168.1.20', private: true }),
-	thisMac: server('srv-local', { instance_name: 'oMLX', endpoints: [endpoint('e2', '127.0.0.1', 'local')], active_host: '127.0.0.1' }),
+	thisMac: server('srv-local', { instance_name: 'oMLX', on_this_mac: true, endpoints: [endpoint('e2', '127.0.0.1', 'local')], active_host: '127.0.0.1' }),
 	loopback: server('srv-lms', { provider: 'external', kind: 'external', instance_name: 'LM Studio', port: 1234, dialect: 'openai',
 		endpoints: [endpoint('e3', '127.0.0.1', 'local')], active_host: '127.0.0.1', private: false, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
 };

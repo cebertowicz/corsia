@@ -9,8 +9,7 @@
 	const privateMachine = $derived(saved ?? server.private ?? false);
 	let busy = $state(false);
 	let error = $state('');
-	// The endpoint list marks this Mac's own address `local`; a managed oMLX there needs no mark.
-	const onThisMac = $derived(server.provider === 'omlx' && server.kind !== 'external' && (server.endpoints ?? []).some((endpoint) => endpoint.kind === 'local'));
+	const onThisMac = $derived(server.on_this_mac === true);
 	async function savePrivate(value: boolean) {
 		if (busy) return;
 		busy = true; error = '';
@@ -70,7 +69,7 @@
 		display: inline-flex; align-items: center; gap: 8px;
 	}
 	.row code { font-family: 'SF Mono', monospace; font-size: var(--text-footnote); color: var(--text-secondary); }
-	.note { margin: 8px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.note { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.private-machine { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; }
 	.private-machine > div { min-width: 0; }
 	.private-machine span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
