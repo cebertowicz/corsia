@@ -74,19 +74,33 @@ def test_remote_access_never_reuses_or_adds_to_a_funnel_port():
     remote = REMOTE_ACCESS.read_text(encoding="utf-8")
     facts = remote.split("## Facts that shape every step", 1)[1].split("## Commands", 1)[0]
     states = remote.split("## States", 1)[1].split("## When CORSIA's port changes", 1)[0]
+    row_1 = next(line for line in states.splitlines() if line.startswith("| 1 |"))
     row_5 = next(line for line in states.splitlines() if line.startswith("| 5 |"))
+    row_0a = next(line for line in states.splitlines() if line.startswith("| 0a |"))
+    after_change = remote.split("## After this reference changes", 1)[1]
 
     # A webhook path mapped by `tailscale funnel --set-path` targets CORSIA's port
     # but is public; neither may count as CORSIA's mapping.
     assert "its `/` path targets `http://127.0.0.1:[port]`" in facts
     assert "and Funnel is off for its https port" in facts
     assert "`AllowFunnel`" in facts
-    assert "When you cannot tell whether Funnel is on for a port, treat it as on." in facts
+    assert "no `AllowFunnel`, or no entry for that port, means off" in facts
+    assert "When you cannot tell whether Funnel is on for a port, treat it as on" in facts
     assert "with Funnel off" in row_5
     assert "Never pick a port with Funnel on" in row_5
-    assert "| 0a | The address answers, but through a port with Funnel on |" in states
     assert "open to the internet (Funnel), so CORSIA uses port [https port]" in states
-    assert "a port with Funnel on that targets the old port is not CORSIA's" in remote
+    assert "A `/` on a port with Funnel on that targets the old port is row 0a's case." in remote
+
+    # Row 1 routes into 0a and 0a exits to row 5 without looping back to row 1.
+    assert "or to row 0a when it answers through a port with Funnel on" in row_1
+    assert "Then go to row 5 without checking the address again" in row_0a
+    assert "I didn't set up" not in row_0a
+    # Installs the earlier flow already exposed get CORSIA's `/` taken off,
+    # leaving the port's other paths, once this reference changes.
+    assert "tailscale serve --https=[Funnel port] --set-path=/ off" in remote
+    assert "confirm `/` is gone and the port's other paths are unchanged" in row_0a
+    assert "When a System-change notice lists this file and the `Remote access` task is done" in after_change
+    assert "goes to row 0a" in after_change
 
 
 def test_settings_keys_is_spelled_by_the_one_constant():
