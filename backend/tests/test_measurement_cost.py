@@ -343,10 +343,13 @@ RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and ch
 @pytest.mark.parametrize(
     ("usage_id", "model", "source", "cache_read", "expected"),
     [
-        (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract writer, proven by id shape
+        (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract turn writer, proven by id shape
         (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 0, "ok"),
+        (RECEIPT_ID, "codex/gpt-6.1-sol", "checkpoint", 5, "ok"),             # post-contract checkpoint writer
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "checkpoint", 5, "contract_unproven"),
         ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # direct uuid4()[:12] write: era unknown
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # not a lowercase hex digest
+        ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", "checkpoint", 0, "contract_unproven"),
         ("0123456789abcdef0123456", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),   # wrong length
         (None, "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),
         (RECEIPT_ID, "codex/gpt-6.1-sol", CC, 0, "contract_unproven"),         # contradictory source: still Unknown
