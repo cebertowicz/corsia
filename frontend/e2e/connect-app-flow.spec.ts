@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
-import { createSession, lastUserMessage, loginByUrl, openSettings, saveEvidenceScreenshot, userMessages } from './support/corsia';
+import { createSession, lastUserMessage, loginByUrl, openSettings, saveEvidenceScreenshot, TEST_SESSION_TOKEN, userMessages } from './support/corsia';
 import { readMockCallCount, seedMockResponses } from './support/mock';
 
 const viewports = [
@@ -29,7 +29,14 @@ for (const viewport of viewports) {
 		test(`Connect an app captures the reviewed states at ${viewport.name} ${theme}`, async ({ page }, testInfo) => {
 			let pendingConnect: Route | null = null;
 			const messages: Record<string, unknown>[] = [];
-			const corsiaThreadId = await createSession(page.request, `Connect app fixture ${viewport.name} ${theme}`);
+			const corsiaThreadId = await createSession(page.request, `CORSIA Google connect ${viewport.name} ${theme}`);
+			// Designation is a person decision. The disposable harness provisions a
+			// browser session precisely for that protected route; its API token is
+			// deliberately insufficient.
+			const designated = await page.request.put(`/api/corsia-agent?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`, {
+				data: { thread_id: corsiaThreadId },
+			});
+			expect(designated.ok(), await designated.text()).toBeTruthy();
 			page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
 				const frame = JSON.parse(String(payload));
 				if (frame.type === 'message') messages.push(frame);
@@ -44,10 +51,7 @@ for (const viewport of viewports) {
 				await route.fulfill({ json: { servers: [] } });
 			});
 			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }] } }));
-			await page.route('**/api/corsia-agent**', (route) => route.fulfill({ json: {
-				target: { thread_id: corsiaThreadId, model: process.env.CORSIA_E2E_MODEL ?? 'mock/test-model', updated_at: '2026-10-16T00:00:00Z' },
-				first_run_pending: false,
-			} }));
+			// The real designation above makes this the actual CORSIA thread.
 			await page.route('**/api/system/update-status**', (route) => route.fulfill({ json: {
 				branch: 'dev', current_sha: 'fixture', remote_sha: 'fixture', commits_behind: 0, available: false, checked_at: 1, error: null,
 			} }));
@@ -131,7 +135,9 @@ for (const viewport of viewports) {
 			await expect(userMessages(page)).toHaveCount(1);
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeEmpty();
 			await expect.poll(() => messages.filter((frame) => frame.content === 'Connect a Google account for all my projects').length).toBe(1);
-			await expect(page.getByText("Let's connect a Google account for all your projects. Which account should agents use?")).toBeVisible();
+			const googleReply = page.locator('main .message.assistant').filter({ hasText: "Let's connect a Google account for all your projects. Which account should agents use?" });
+			await expect(googleReply).toHaveCount(1);
+			await expect(googleReply).toBeVisible();
 			await expect.poll(() => readMockCallCount(page.request), { timeout: 20_000 }).toBe(2);
 			await capture(page, testInfo, `google-reply-${viewport.name}-${theme}`, { fullPage: false });
 		});
