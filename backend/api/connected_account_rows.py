@@ -24,6 +24,7 @@ accounts_router = APIRouter()
 NOT_FOUND = "That Google account isn't connected."
 NOT_SIGNED_IN = "That Google account is already signed out."
 NOT_YOURS = "This Google account is available only in CORSIA. Ask the person who connected it to change Where it works."
+PERSON_ONLY_CONTROLS = "Only the signed-in person can sign out or remove a Google account; open Connected apps."
 PERSON_ONLY = "Only the signed-in person can widen where an account works; open Connected apps."
 INVALID_REACH = "Where it works needs a valid choice of places."
 EMPTY_REACH = "Where it works needs at least one place."
@@ -54,8 +55,9 @@ def list_account_rows(thread_id: str | None, *, db: sqlite3.Connection) -> list[
     ]
 
 
-def _authorize(account_id: str, user: dict) -> None:
-    """404 for an unknown or non-Google id; for an agent, 403 unless the account reaches its thread."""
+def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> None:
+    """404 for an unknown or non-Google id; then, for an agent, 403 at once when the control is
+    ``person_only`` (Sign out, Remove), else 403 unless the account reaches its thread (Where it works)."""
     from connections.connected_accounts import (
         GOOGLE_PROVIDER, ConnectedAccountError, account_reaches_thread, get_account,
     )
@@ -69,6 +71,8 @@ def _authorize(account_id: str, user: dict) -> None:
             raise refusal(NOT_FOUND, 404) from None
         if is_person_session(user):
             return
+        if person_only:
+            raise refusal(PERSON_ONLY_CONTROLS, 403)
         from api.connected_apps import _agent_thread  # Imported here: that module includes this one's router.
 
         thread_id, _scope = _agent_thread(user, db)
@@ -111,7 +115,7 @@ async def sign_out_account(account_id: str, user: dict = Depends(require_user)) 
     """Sign out one account. Returns its updated row and the fixed revocation cause."""
     from connections.google.account_actions import sign_out_google_account
 
-    await run_in_db(_authorize, account_id, user)
+    await run_in_db(lambda: _authorize(account_id, user, person_only=True))
     try:
         result = await sign_out_google_account(account_id, actor=audit_actor(user))
     except Exception as exc:
@@ -124,7 +128,7 @@ async def remove_account(account_id: str, user: dict = Depends(require_user)) ->
     """Remove one account and everything local to it. Returns ``removed`` and the fixed revocation cause."""
     from connections.google.account_actions import remove_google_account
 
-    await run_in_db(_authorize, account_id, user)
+    await run_in_db(lambda: _authorize(account_id, user, person_only=True))
     try:
         result = await remove_google_account(account_id, actor=audit_actor(user))
     except Exception as exc:

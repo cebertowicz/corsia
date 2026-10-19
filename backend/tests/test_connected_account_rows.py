@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import connected_account_rows, connected_apps
-from api.connected_account_rows import NOT_FOUND, NOT_YOURS, PERSON_ONLY
+from api.connected_account_rows import NOT_FOUND, NOT_YOURS, PERSON_ONLY, PERSON_ONLY_CONTROLS
 from auth_fixtures import OWNER_USER
 from connections.app_reach import AppReach
 from connections.app_lifecycle import create_app
@@ -241,11 +241,39 @@ def test_an_unknown_or_non_google_id_is_a_fixed_404(api, method, path, body):
     assert db.execute("SELECT COUNT(*) FROM connected_accounts WHERE id='other-1'").fetchone()[0] == 1
 
 
-def test_an_agent_cannot_sign_out_or_remove_an_account_that_does_not_reach_its_thread(api):
+@pytest.mark.parametrize("reaches_thread", [True, False])
+def test_an_agent_cannot_sign_out_or_remove_any_account_and_nothing_changes(api, reaches_thread):
     client, who, revoked = api
-    account_id = _account("person@example.com")
+    reach = AppReach(mode="selected", project_ids=frozenset(("project-a" if reaches_thread else "project-b",)), outside_projects=False)
+    account_id = _account("person@example.com", reach=reach)
+    before = get_account(account_id, db=get_db())
     who["user"] = AGENT
 
     for response in (client.post(f"/api/mcp/accounts/{account_id}/sign-out"), client.delete(f"/api/mcp/accounts/{account_id}")):
-        assert response.status_code == 403 and response.json()["detail"] == NOT_YOURS
-    assert revoked == [] and get_account(account_id, db=get_db())["state"] == "connected"
+        assert response.status_code == 403 and response.json()["detail"] == PERSON_ONLY_CONTROLS
+        assert response.headers["X-Corsia-Agent-Remedy"] == PERSON_ONLY_CONTROLS
+    assert revoked == [] and _stored_entries(account_id) == 1
+    assert get_account(account_id, db=get_db()) == before
+    db = get_db()
+    assert db.execute("SELECT COUNT(*) FROM connected_account_audit WHERE account_id=?", (account_id,)).fetchone()[0] == 0
+
+    who["user"] = PERSON
+    assert client.post(f"/api/mcp/accounts/{account_id}/sign-out").json()["row"]["state"] == "signed_out"
+    assert client.delete(f"/api/mcp/accounts/{account_id}").json()["removed"] is True
+
+
+def test_an_agent_gets_the_404_before_the_person_only_refusal(api):
+    client, who, _revoked = api
+    who["user"] = AGENT
+    for response in (client.post("/api/mcp/accounts/no-such-id/sign-out"), client.delete("/api/mcp/accounts/no-such-id")):
+        assert response.status_code == 404 and response.json()["detail"] == NOT_FOUND
+
+
+def test_an_agent_cannot_change_where_an_account_it_cannot_reach_works(api):
+    client, who, _revoked = api
+    account_id = _account("person@example.com")  # Only CORSIA: no project reaches it.
+    who["user"] = AGENT
+
+    response = client.put(f"/api/mcp/accounts/{account_id}/reach", json={"reach": {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}})
+
+    assert response.status_code == 403 and response.json()["detail"] == NOT_YOURS
