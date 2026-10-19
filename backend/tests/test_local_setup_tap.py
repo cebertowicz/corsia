@@ -43,8 +43,7 @@ def test_an_outdated_omlx_owned_by_setup_refreshes_the_tap_then_upgrades(monkeyp
     monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
     monkeypatch.setattr(local_setup_ownership.shutil, "which",
                         lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
+    monkeypatch.setattr(local_setup_ownership, "command_output", lambda _command: "omlx 0.7.0")
 
     local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=False)
 
@@ -63,8 +62,7 @@ def test_a_broken_omlx_owned_by_setup_refreshes_the_tap_then_reinstalls(monkeypa
     monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
     monkeypatch.setattr(local_setup_ownership.shutil, "which",
                         lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
+    monkeypatch.setattr(local_setup_ownership, "command_output", lambda _command: "omlx 0.7.0")
 
     local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
 
@@ -74,20 +72,6 @@ def test_a_broken_omlx_owned_by_setup_refreshes_the_tap_then_reinstalls(monkeypa
         ["/opt/bin/brew", "reinstall", "jundot/omlx/omlx"],
     ]
 
-
-def test_a_stale_marker_does_not_authorize_repairing_a_different_omlx(monkeypatch, tmp_path):
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/usr/local/bin/omlx")
-    monkeypatch.setattr(
-        local_setup_ownership, "command_output",
-        lambda command: "jundot/omlx 0.7.0" if command[1:3] == ["list", "--versions"] else "/opt/homebrew/opt/omlx",
-        raising=False,
-    )
-
-    assert local_setup_ownership.existing_install_is_foreign() is True
 
 
 @pytest.mark.parametrize(("broken", "action"), [(False, "update"), (True, "reinstall")])
@@ -105,8 +89,7 @@ def test_a_failed_owned_omlx_repair_names_only_the_last_homebrew_stderr_line(
         raise subprocess.CalledProcessError(1, command, stderr="first failure\nlast failure")
 
     monkeypatch.setattr(local_setup_ownership, "run_command", failed)
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
+    monkeypatch.setattr(local_setup_ownership, "command_output", lambda _command: "omlx 0.7.0")
 
     with pytest.raises(RuntimeError, match=rf"Homebrew couldn't {action} oMLX: last failure\. Try again\."):
         local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=broken)
@@ -138,7 +121,7 @@ def test_a_conflicting_tap_remote_reports_only_homebrews_last_line(monkeypatch, 
     monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
     monkeypatch.setattr(local_setup_ownership.shutil, "which",
                         lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True)
+    monkeypatch.setattr(local_setup_ownership, "command_output", lambda _command: "omlx 0.7.0")
 
     def conflicting_remote(command):
         raise subprocess.CalledProcessError(1, command, stderr="old detail\ntap remote differs")
@@ -155,8 +138,7 @@ def test_an_empty_homebrew_stderr_has_no_raw_command_in_the_card_message(monkeyp
     monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
     monkeypatch.setattr(local_setup_ownership.shutil, "which",
                         lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
+    monkeypatch.setattr(local_setup_ownership, "command_output", lambda _command: "omlx 0.7.0")
 
     def failed(command):
         if command[1] == "tap":

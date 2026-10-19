@@ -2,10 +2,8 @@
 
 A fresh oMLX has no key: its admin routes answer 401 to everyone and sign-in is
 refused (``POST /admin/api/login`` returns 400). Setup gives it a key CORSIA
-generated and registered first; when a leftover settings file already holds a
-key, setup registers and signs in with that one instead
-(``own_omlx_admin_key``). It then sets oMLX's ``skip_api_key_verification``
-once, in the same write as the starter settings (see ``local_setup``). oMLX
+generated and registered first. It then confirms that the managed server remains
+loopback-only before oMLX applies ``skip_api_key_verification``. oMLX
 honors that flag only on a loopback-only bind (``omlx/utils/network.py``,
 ``network_auth_error``), so it opens the admin and ``/v1`` routes to this Mac
 alone, and CORSIA keeps calling ``/v1`` with the Bearer it already used.

@@ -224,7 +224,9 @@ async def ask(server_id: str, port: int) -> LocalModel:
             model = await local_model.ask_recommender(server_id)
         except PickUnavailable as first:
             log.info("oMLX recommender unavailable (%s); asking once more when oMLX is ready", first)
-            await ls._wait_for_health(port)
+            from llm.local_setup_runtime import wait_for_health
+
+            await wait_for_health(port)
             model = await local_model.ask_recommender(server_id)
     except asyncio.CancelledError:
         _settle(NOT_CHECKED)

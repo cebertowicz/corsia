@@ -12,7 +12,8 @@ from typing import Callable
 from llm import local_setup as ls
 from llm import local_setup_prepare as prepare
 from llm.local_model import LocalModel, omlx_has_recommender, record_set_up
-from llm.local_setup_ownership import managed_omlx_paths, retire_legacy_owned_omlx_service
+from llm.local_setup_managed import managed_omlx_paths
+from llm.local_setup_ownership import retire_legacy_owned_omlx_service
 
 
 async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:

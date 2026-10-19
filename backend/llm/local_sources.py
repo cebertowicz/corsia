@@ -10,7 +10,8 @@ import re
 from typing import Any
 
 from llm.catalog import list_models
-from llm.local_setup_ownership import installed_omlx, is_corsia_managed_server
+from llm.local_setup_managed import is_corsia_managed_server
+from llm.local_setup_ownership import installed_omlx
 from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"

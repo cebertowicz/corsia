@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import signal
 import subprocess
 import tempfile
@@ -45,8 +46,8 @@ _SECRET_VALUE = re.compile(
 )
 
 NO_INTERNET = "no internet connection"
-DOWNLOAD_UNAVAILABLE = "the download service didn't answer"
-DOWNLOAD_REFUSED = "this computer couldn't download the installer"
+DOWNLOAD_UNAVAILABLE = "the download service temporarily cannot answer"
+DOWNLOAD_REFUSED = "the download site refused the request"
 DOWNLOAD_UNVERIFIED = "the download didn't verify"
 TIMED_OUT = "it took too long"
 INSTALLER_STOPPED = "the installer stopped"
@@ -62,6 +63,7 @@ class InstallJob:
 
     state: str = "running"
     reason: str | None = None
+    ref: str = field(default_factory=lambda: f"cli-{secrets.token_hex(8)}")
     path_shadowed_by: str | None = None
     task: asyncio.Task | None = None
     # Cancel: the installer runs in its own process group so the whole tree can be stopped. `lock` orders
@@ -79,8 +81,9 @@ _jobs: dict[str, InstallJob] = {}
 def _status(vendor: str) -> dict[str, str | None]:
     """Return the public state shape for one vendor's installation job."""
     job = _jobs.get(vendor)
-    return ({"state": job.state, "reason": job.reason, "path_shadowed_by": job.path_shadowed_by}
-            if job else {"state": "idle", "reason": None, "path_shadowed_by": None})
+    return ({"state": job.state, "reason": job.reason, "ref": job.ref if job.state == "failed" else None,
+             "path_shadowed_by": job.path_shadowed_by}
+            if job else {"state": "idle", "reason": None, "ref": None, "path_shadowed_by": None})
 
 
 def _installer_request(vendor: str) -> urllib.request.Request:
@@ -100,7 +103,12 @@ def _download_script(vendor: str) -> Path:
     except TimeoutError as exc:
         raise InstallerFailure(TIMED_OUT) from exc
     except urllib.error.HTTPError as exc:
-        reason = DOWNLOAD_REFUSED if 400 <= exc.code < 500 else DOWNLOAD_UNAVAILABLE
+        if exc.code in (403, 404):
+            reason = DOWNLOAD_REFUSED
+        elif exc.code in (408, 429):
+            reason = DOWNLOAD_UNAVAILABLE
+        else:
+            reason = DOWNLOAD_UNAVAILABLE
         raise InstallerFailure(reason) from exc
     except (urllib.error.URLError, OSError) as exc:
         raise InstallerFailure(NO_INTERNET) from exc

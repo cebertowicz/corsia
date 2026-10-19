@@ -28,7 +28,7 @@ from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
-from llm.local_setup_ownership import foreign_omlx_process, stop_foreign_omlx_process
+from llm.local_setup_ownership import apply_foreign_omlx_choice, foreign_omlx_process
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -299,13 +299,10 @@ async def local_download(request: Request) -> dict | Response:
         body = LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
-    foreign_pid = foreign_omlx_process()
-    if foreign_pid is not None:
-        if not body.consent_existing:
-            return JSONResponse(status_code=409, content={"code": "consent_required"})
-        # Legacy frontend payload: true means Stop mine; false means Keep both running.
-        if body.manage_existing is True and not stop_foreign_omlx_process(foreign_pid):
-            return JSONResponse(status_code=409, content={"code": "foreign_omlx_changed"})
+    if refusal := apply_foreign_omlx_choice(
+        consent_existing=body.consent_existing, manage_existing=body.manage_existing,
+    ):
+        return JSONResponse(status_code=409, content={"code": refusal})
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()

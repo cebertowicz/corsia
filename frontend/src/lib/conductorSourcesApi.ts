@@ -56,12 +56,13 @@ export async function linkCli(t: string, vendor: string): Promise<{ ok: boolean;
 }
 
 export type CliInstallState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
-export interface CliInstall { state: CliInstallState; reason: string | null; path_shadowed_by: string | null }
+export interface CliInstall { state: CliInstallState; reason: string | null; ref: string | null; path_shadowed_by: string | null }
 
 function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
 	return {
 		state: (body?.state as CliInstallState) ?? 'failed',
 		reason: (body?.reason as string | null) ?? null,
+		ref: (body?.ref as string | null) ?? null,
 		path_shadowed_by: (body?.path_shadowed_by as string | null) ?? null,
 	};
 }

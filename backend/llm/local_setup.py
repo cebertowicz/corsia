@@ -323,42 +323,6 @@ def flight_task() -> asyncio.Task | None:
     return _flight.task
 
 
-async def resume_pending_setup() -> bool:
-    """Re-follow a persisted oMLX task after a backend restart, without posting a duplicate."""
-    if _running():
-        return True
-    operation = local_setup_operation.read()
-    if operation is None:
-        return False
-    if operation.kind not in {"setup", "starter", "settings"}:
-        log.warning("discarding unreadable local setup recovery record")
-        local_setup_operation.clear()
-        return False
-    if not await asyncio.to_thread(local_memory_ok):
-        log.warning("discarding local setup recovery record: this Mac has too little memory for a local model")
-        local_setup_operation.clear()
-        return False
-    model = operation.model
-
-    _flight.result = None
-    _flight.model = model
-    _flight.kind = operation.kind
-    _flight.stage = "Waiting to resume local model setup"
-
-    async def resume() -> dict:
-        if operation.kind == "settings":
-            from llm.local_settings_download import resume as resume_settings_download
-
-            return await resume_settings_download(model)
-        await local_setup_operation.wait_for_lock(_flight)
-        return await _run_flight(model=model)
-
-    _flight.task = asyncio.create_task(resume())
-    _flight.task.add_done_callback(_observe_setup_task)
-    _flight.task.add_done_callback(lambda _task: _notify_models_changed())
-    _emit("resumed", model=model.repository, kind=operation.kind)
-    return True
-
 
 async def begin_local_setup(
     *,
@@ -374,6 +338,8 @@ async def begin_local_setup(
     if _running():
         return _in_progress_result()
     if local_setup_operation.read() is not None:
+        from llm.local_setup_recovery import resume_pending_setup
+
         if await resume_pending_setup():
             return _in_progress_result()
         return local_setup_error("CORSIA could not resume the local model setup safely.")
@@ -400,6 +366,8 @@ async def begin_local_setup(
     if _running():
         return _in_progress_result()
     if not _claim_operation("setup"):
+        from llm.local_setup_recovery import resume_pending_setup
+
         await resume_pending_setup()
         return _in_progress_result()
     _flight.stage = "Installing"

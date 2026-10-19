@@ -591,7 +591,7 @@ def test_preview_layout_moves_every_state_entry_but_app_metadata(tmp_path):
         "worktree_reaper",
         "reviewer",
         "local_setup_installed_omlx",
-        "local_setup_existing_omlx_consented",
+        "managed-omlx",
         "local-setup-operation.json",
     }
     for name in state_entries:

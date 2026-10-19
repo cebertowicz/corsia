@@ -47,39 +47,6 @@ def test_a_working_omlx_is_present(leftover, monkeypatch):
     assert own.installed_omlx() == str(leftover)
 
 
-def test_a_broken_leftover_requires_consent_without_being_executed(leftover, monkeypatch):
-    monkeypatch.setattr(own, "marker_path", lambda: leftover.parent / "owned")
-    monkeypatch.setattr(own, "consent_marker_path", lambda: leftover.parent / "consented")
-    monkeypatch.setattr(own, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
-
-    assert own.existing_omlx_requires_consent() is True
-
-
-def test_setup_owned_or_previously_consented_omlx_does_not_reprompt(monkeypatch, tmp_path):
-    owned = tmp_path / "owned"
-    consented = tmp_path / "consented"
-    monkeypatch.setattr(own, "marker_path", lambda: owned)
-    monkeypatch.setattr(own, "consent_marker_path", lambda: consented)
-    monkeypatch.setattr(own.shutil, "which", lambda name: "/opt/bin/omlx" if name == "omlx" else None)
-    monkeypatch.setattr(own, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
-
-    assert own.existing_omlx_requires_consent() is True
-    owned.write_text("installed by corsia local setup\n", encoding="utf-8")
-    assert own.existing_omlx_requires_consent() is False
-    owned.unlink()
-    own.record_existing_omlx_consent()
-    assert consented.exists()
-    assert own.existing_omlx_requires_consent() is False
-
-
-def test_existing_omlx_consent_predicate_never_executes_omlx(monkeypatch, tmp_path):
-    monkeypatch.setattr(own, "marker_path", lambda: tmp_path / "owned")
-    monkeypatch.setattr(own, "consent_marker_path", lambda: tmp_path / "consented")
-    monkeypatch.setattr(own.shutil, "which", lambda name: "/opt/bin/omlx" if name == "omlx" else None)
-    monkeypatch.setattr(own, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
-
-    assert own.existing_omlx_requires_consent() is True
-
 
 def test_a_slow_omlx_is_present_and_not_cached(leftover, monkeypatch):
     _probe(monkeypatch, subprocess.TimeoutExpired("omlx", 15))
@@ -98,11 +65,9 @@ def test_setup_installs_over_a_leftover_and_links_it_over_the_stray_entry_point(
 
     monkeypatch.setattr(own, "run_command", run)
     monkeypatch.setattr(own, "command_output", lambda command: "omlx 0.7.1")
-    monkeypatch.setattr(own, "mark_installed_by_setup", lambda: commands.append(["mark"]))
-
     own.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
 
-    assert commands[-2:] == [["link", "--overwrite", "omlx"], ["mark"]]
+    assert commands[-1] == ["link", "--overwrite", "omlx"]
     assert ["install", own.OMLX_FORMULA] in commands
 
 

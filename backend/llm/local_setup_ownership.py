@@ -14,14 +14,13 @@ import re
 import shutil
 import subprocess
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from llm.local_setup_managed import MANAGED_DIR
+
 MARKER_NAME = "local_setup_installed_omlx"
 OMLX_FORMULA = "jundot/omlx/omlx"
-_MANAGED_DIR = "managed-omlx"
-_MANAGED_PORTS = range(8210, 8310)
 
 log = logging.getLogger(__name__)
 
@@ -32,50 +31,6 @@ def marker_path() -> Path:
 
     return Path(STATE_ROOT) / MARKER_NAME
 
-
-@dataclass(frozen=True)
-class ManagedOmlxPaths:
-    """Filesystem and port that belong exclusively to CORSIA's managed oMLX."""
-
-    base_path: Path
-    model_dir: Path
-    settings_path: Path
-    port: int
-
-
-def managed_omlx_paths() -> ManagedOmlxPaths:
-    """Return CORSIA-owned oMLX paths and a durable private loopback port.
-
-    The base and model paths live under the state root. A first launch chooses a
-    free port, then writes it in this private settings file so retries and
-    restarts address the same managed process.
-    """
-    from infra.config import STATE_ROOT
-    from llm.providers.omlx_process import port_is_free
-
-    base = Path(STATE_ROOT) / _MANAGED_DIR
-    models = base / "models"
-    settings = base / "settings.json"
-    try:
-        raw = json.loads(settings.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raw = {}
-    raw = raw if isinstance(raw, dict) else {}
-    server = raw.get("server") if isinstance(raw.get("server"), dict) else {}
-    configured = server.get("port")
-    if isinstance(configured, int) and configured in _MANAGED_PORTS:
-        port = configured
-    else:
-        port = next((candidate for candidate in _MANAGED_PORTS if port_is_free(candidate)), None)
-        if port is None:
-            raise RuntimeError("CORSIA couldn't reserve a private port for its local model server. Try again.")
-    base.mkdir(parents=True, exist_ok=True)
-    models.mkdir(parents=True, exist_ok=True)
-    raw["server"] = {**server, "port": port}
-    model = raw.get("model") if isinstance(raw.get("model"), dict) else {}
-    raw["model"] = {**model, "model_dir": str(models)}
-    settings.write_text(json.dumps(raw, sort_keys=True), encoding="utf-8")
-    return ManagedOmlxPaths(base, models, settings, port)
 
 
 _BROKEN_RETURN_CODES = (126, 127)
@@ -187,35 +142,6 @@ def retire_legacy_owned_omlx_service() -> bool:
     return True
 
 
-def is_corsia_managed_server(server: dict, metadata: dict | None = None) -> bool:
-    """Whether a network row is exactly CORSIA's private managed oMLX process.
-
-    Rows from v0.3/v0.4 named an oMLX install without proving its process or
-    files were CORSIA's. They are deliberately excluded; setup replaces them
-    with this state-root identity after it launches the supervised subprocess.
-    """
-    from infra.config import STATE_ROOT
-
-    if (
-        server.get("provider") != "omlx"
-        or server.get("kind") != "managed"
-        or server.get("instance_id") != "corsia-managed"
-    ):
-        return False
-    if metadata is None:
-        raw = server.get("metadata_json")
-        try:
-            metadata = json.loads(raw) if isinstance(raw, str) else {}
-        except ValueError:
-            return False
-    if not isinstance(metadata, dict) or metadata.get("corsia_managed") is not True:
-        return False
-    base = Path(STATE_ROOT) / _MANAGED_DIR
-    return (
-        metadata.get("base_path") == str(base)
-        and metadata.get("model_dir") == str(base / "models")
-    )
-
 
 def legacy_omlx_settings_file() -> Path:
     """Read the old CORSIA service settings only after ownership is proven."""
@@ -235,7 +161,7 @@ def foreign_omlx_process() -> int | None:
         return None
     from infra.config import STATE_ROOT
 
-    managed_base = str(Path(STATE_ROOT) / _MANAGED_DIR)
+    managed_base = str(Path(STATE_ROOT) / MANAGED_DIR)
     matches: list[int] = []
     for line in result.stdout.splitlines():
         parts = line.strip().split(maxsplit=1)
@@ -257,6 +183,58 @@ def stop_foreign_omlx_process(pid: int) -> bool:
     except (OSError, ProcessLookupError):
         return False
     return True
+
+
+def foreign_omlx_choice_path() -> Path:
+    """The private state record for an explicit foreign-process choice."""
+    from infra.config import STATE_ROOT
+
+    return Path(STATE_ROOT) / "foreign-omlx-choice.json"
+
+
+def _remembered_foreign_omlx_choice(pid: int) -> bool | None:
+    """Return Keep both for any later process; Stop mine only for its chosen PID."""
+    try:
+        value = json.loads(foreign_omlx_choice_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("stop"), bool):
+        return None
+    # Keep both is consent about the person's oMLX. Stop mine authorizes a
+    # destructive action, so it must never survive a process identity change.
+    if value["stop"] is False:
+        return False
+    return True if value.get("pid") == pid else None
+
+
+def _remember_foreign_omlx_choice(pid: int, *, stop: bool) -> None:
+    path = foreign_omlx_choice_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"pid": pid, "stop": stop}), encoding="utf-8")
+
+
+def apply_foreign_omlx_choice(*, consent_existing: bool, manage_existing: bool | None) -> str | None:
+    """Apply the explicit or remembered choice about a foreign oMLX.
+
+    Return a safe refusal code, or ``None`` when managed setup may proceed.
+    Keep both survives a restart; stopping requires the originally chosen PID.
+    """
+    pid = foreign_omlx_process()
+    if pid is None:
+        return None
+    stop = _remembered_foreign_omlx_choice(pid)
+    # An explicit current choice supersedes a remembered Keep both or Stop mine.
+    if consent_existing and manage_existing is not None:
+        stop = manage_existing
+        _remember_foreign_omlx_choice(pid, stop=stop)
+    elif stop is None:
+        if not consent_existing:
+            return "consent_required"
+        stop = False
+        _remember_foreign_omlx_choice(pid, stop=stop)
+    if stop and not stop_foreign_omlx_process(pid):
+        return "foreign_omlx_changed"
+    return None
 
 
 def homebrew_failure_message(action: str, exc: OSError | subprocess.SubprocessError) -> str:

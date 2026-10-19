@@ -14,6 +14,7 @@ from contextlib import contextmanager
 import json
 import os
 import sys
+import tempfile
 import urllib.error
 from pathlib import Path
 from typing import Any, Iterator
@@ -21,7 +22,7 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
-DEFAULT_OUTPUT = Path("/tmp/corsia-setup-proof-hjvrzO/cli-proof.json")
+# Output defaults to a fresh temporary directory in main().
 SOURCES = (("claude-code", "Claude Code"), ("codex", "Codex"))
 
 
@@ -31,7 +32,7 @@ def _write(path: Path, proof: dict[str, Any]) -> None:
 
 
 def _prepare_environment(home: Path, runtime: Path) -> None:
-    """Constrain every process-owned writable root to this run's temporary HOME."""
+    """Constrain every process-owned writable root to this run's unique temporary HOME."""
     for directory in (home, runtime / "workspace", runtime / "state", home / "tmp",
                       home / ".cache", home / ".config", home / ".local/share"):
         directory.mkdir(parents=True, exist_ok=True)
@@ -50,6 +51,30 @@ def _prepare_environment(home: Path, runtime: Path) -> None:
     })
 
 
+def _outside_write_snapshot(original_home: Path) -> dict[Path, tuple[int, int]]:
+    """Capture metadata for vendor-relevant locations outside the proof HOME, never their contents."""
+    roots = (
+        original_home / ".claude", original_home / ".codex", original_home / ".npm",
+        original_home / ".local/share/claude", original_home / ".cache/claude",
+        original_home / ".cache/codex", Path("/usr/local/bin"), Path("/opt/homebrew/bin"),
+    )
+    snapshot: dict[Path, tuple[int, int]] = {}
+    for root in roots:
+        try:
+            if root.exists():
+                stat = root.stat()
+                snapshot[root] = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            continue
+    return snapshot
+
+
+def _outside_writes(before: dict[Path, tuple[int, int]], original_home: Path) -> list[str]:
+    """Return changed watched locations; any entry is a failed isolation proof."""
+    after = _outside_write_snapshot(original_home)
+    return [str(path) for path in sorted(set(before) | set(after)) if before.get(path) != after.get(path)]
+
+
 def _absent_rows(root: Path) -> list[dict[str, str]]:
     """Resolve both vendor binaries only within a fresh empty search root."""
     from connections import binary_from_config
@@ -65,14 +90,14 @@ def _absent_rows(root: Path) -> list[dict[str, str]]:
     return rows
 
 
-def _existing_binary(provider: str) -> str | None:
-    """Locate a vendor only for its own safe sign-in probe, never for install."""
+def _binary(provider: str, candidate_roots: tuple[Path, ...] | None = None) -> str | None:
+    """Locate one vendor binary, optionally only within proof-owned roots."""
     from connections import binary_from_config
 
-    return binary_from_config(provider, {})
+    return binary_from_config(provider, {}, candidate_roots=candidate_roots)
 
 
-async def _auth_checks() -> tuple[dict[str, str], list[str]]:
+async def _auth_checks(candidate_roots: tuple[Path, ...] | None = None) -> tuple[dict[str, str], list[str]]:
     """Run each actual vendor auth check without keeping its output."""
     from connections import _codex_sign_in_state
     from connections.claude_discovery import auth_status_state
@@ -80,7 +105,7 @@ async def _auth_checks() -> tuple[dict[str, str], list[str]]:
     checks: dict[str, str] = {}
     limits: list[str] = []
     for provider, _name in SOURCES:
-        binary = _existing_binary(provider)
+        binary = _binary(provider, candidate_roots)
         if binary is None:
             checks[provider] = "not_proven_here: binary_not_found"
             continue
@@ -158,8 +183,10 @@ async def _install_with_route(vendor: str, roots: tuple[Path, ...]) -> dict[str,
 
 
 async def _run(output: Path, *, install: bool) -> int:
-    home = output.parent.resolve()
-    runtime = home / "runs" / uuid4().hex
+    original_home = Path.home()
+    run_root = output.parent.resolve() / f"cli-proof-{uuid4().hex}"
+    home = run_root / "home"
+    runtime = home / "runtime"
     # Backend imports require explicit roots even while HOME still names the
     # existing-install account for its read-only vendor check.
     for directory in (runtime / "workspace", runtime / "state"):
@@ -174,25 +201,30 @@ async def _run(output: Path, *, install: bool) -> int:
     existing_auth, existing_limits = await _auth_checks()
     _prepare_environment(home, runtime)
     roots = (runtime / "empty-bin",)
+    installed_roots = (home / ".local/bin",)
 
     proof: dict[str, Any] = {
         "sources": _absent_rows(runtime),
-        "existing_install_auth_checks": existing_auth,
-        "temporary_home_auth_checks": {},
+        "before_install_host_auth_checks": existing_auth,
+        "before_install_temporary_home_auth_checks": {},
+        "post_install_auth_checks": {},
+        "installed_binaries": {},
         "installer": {},
         "outside_write_accounting": {
-            "home": str(home),
+            "home": "<unique temporary child HOME>",
             "writes_outside_home": [],
-            "status": "not_proven_here",
-            "limit": "The proof confines its environment and every expected writable root to HOME; it cannot observe arbitrary OS-wide writes by vendor child processes.",
+            "status": "pending",
+            "watched_paths": ["~/.claude", "~/.codex", "~/.npm", "~/.local/share/claude", "~/.cache/claude", "~/.cache/codex", "/usr/local/bin", "/opt/homebrew/bin"],
+            "limit": "Only metadata on these watched directories is compared. Nested-file and arbitrary OS-wide writes are not observable here.",
         },
         "limitations": [],
     }
     _write(output, proof)
 
     auth, limitations = await _auth_checks()
-    proof["temporary_home_auth_checks"] = auth
+    proof["before_install_temporary_home_auth_checks"] = auth
     proof["limitations"] = list(dict.fromkeys([*existing_limits, *limitations]))
+    outside_before = _outside_write_snapshot(original_home)
     if install:
         for vendor, _name in SOURCES:
             try:
@@ -201,16 +233,25 @@ async def _run(output: Path, *, install: bool) -> int:
                 proof["installer"][vendor] = {"state": "not_proven_here", "reason": type(exc).__name__}
     else:
         proof["installer"] = {provider: {"state": "not_run", "reason": "skipped_by_argument"} for provider, _ in SOURCES}
+    if install:
+        proof["post_install_auth_checks"] = {provider: "not proven here: host review blocks reading CLI credential config"
+                                              for provider, _ in SOURCES}
+        proof["installed_binaries"] = {provider: binary.name for provider, _ in SOURCES
+                                       if (binary := _binary(provider, installed_roots)) is not None}
+        proof["limitations"].append("Post-install CLI auth is not proven here: host review blocks reading CLI credential config.")
+    outside_writes = _outside_writes(outside_before, original_home)
+    proof["outside_write_accounting"]["writes_outside_home"] = outside_writes
+    proof["outside_write_accounting"]["status"] = "failed" if outside_writes else "passed_for_watched_directory_metadata"
     _write(output, proof)
-    return 0
+    return 1 if outside_writes else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--skip-installs", action="store_true")
     args = parser.parse_args()
-    output = args.output.resolve()
+    output = (args.output.resolve() if args.output else Path(tempfile.mkdtemp(prefix="corsia-setup-proof-")) / "cli-proof.json")
     if not output.is_relative_to(Path("/tmp").resolve()):
         raise SystemExit("output must be under /tmp")
     return asyncio.run(_run(output, install=not args.skip_installs))

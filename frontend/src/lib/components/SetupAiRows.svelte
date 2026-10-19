@@ -8,6 +8,8 @@
 		action?: { label: string; run: () => void; loading?: boolean };
 		confirm?: { label: string; run: () => void }[];
 		more?: { label: string; run: () => void }[];
+		/** The row's own recovery copy offers a report; the setup screen wires the shared action. */
+		reportable?: boolean;
 	};
 </script>
 

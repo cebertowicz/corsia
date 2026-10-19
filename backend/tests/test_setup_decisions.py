@@ -235,7 +235,8 @@ def test_read_facts_takes_omlx_from_its_source_and_the_email_from_the_profile(mo
         {"source": "omlx", "omlx_settings": {"differences": list(DIFFERENCE), "fingerprint": "f"}},
     ])
 
-    assert asyncio.run(setup.read_facts()) == setup.Facts(DIFFERENCE, True, True, (), "you@gmail.com")
+    # An unmarked oMLX source is the person's external server, so setup leaves it untouched.
+    assert asyncio.run(setup.read_facts()) == setup.Facts(DIFFERENCE, True, True, (), "you@gmail.com", False, True)
 
 
 @pytest.mark.parametrize("settings,expected", [(None, None), ([], ())])

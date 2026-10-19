@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm import local_downloads, local_setup, local_setup_ownership, local_sources
+from llm import local_downloads, local_setup, local_sources
 from llm.local_model import LocalModel
 
 
@@ -47,7 +47,7 @@ def test_failed_settings_download_projects_a_durable_retry_target(monkeypatch, t
     monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership: {"state": "ready"})
     monkeypatch.setattr(local_setup, "setup_kind", lambda: "settings")
     monkeypatch.setattr(local_setup, "setup_stage", lambda: None)
-    monkeypatch.setattr(local_setup_ownership, "existing_install_is_foreign", lambda: False)
+    # The source reflects only CORSIA's managed local oMLX row.
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
 
     source = local_sources.omlx_source((set(), set()))

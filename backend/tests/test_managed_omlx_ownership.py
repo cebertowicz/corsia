@@ -9,7 +9,7 @@ import pytest
 async def test_register_managed_server_retires_all_prior_omlx_rows(isolated_db) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
-    from llm.local_setup_ownership import is_corsia_managed_server, managed_omlx_paths
+    from llm.local_setup_managed import is_corsia_managed_server, managed_omlx_paths
     from llm.local_setup_runtime import register_managed_server
 
     legacy_managed = await run_in_db(discovery.upsert_server,
@@ -96,7 +96,7 @@ def test_catalog_never_routes_a_foreign_omlx_row(isolated_db) -> None:
 
 def test_only_state_root_row_is_corsia_managed() -> None:
     from infra.config import STATE_ROOT
-    from llm.local_setup_ownership import is_corsia_managed_server
+    from llm.local_setup_managed import is_corsia_managed_server
 
     base = STATE_ROOT / "managed-omlx"
     row = {

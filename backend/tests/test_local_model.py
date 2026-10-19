@@ -307,8 +307,8 @@ def test_turning_the_switch_off_while_checking_stops_the_pick_and_downloads_noth
 
     # Welcome's waiting request answers too, so nothing is left hanging on a stopped pick.
     assert view == answered == {"state": "not_checked", "model": None, "message": None}
-    # Prepare started that oMLX, so it stops it; nothing was downloaded or written.
-    assert mac.commands == [["omlx", "stop"]]
+    # Prepare owns this private managed server, so it stops that exact server id.
+    assert mac.stopped == ["srv"]
     assert mac.downloads == [] and mac.omlx.puts() == [] and local_setup_operation.read() is None
 
 
@@ -318,30 +318,17 @@ def test_turning_the_switch_off_after_the_pick_forgets_it(monkeypatch):
 
     view = asyncio.run(prepare.stop_prepare())
 
-    assert view["state"] == "not_checked" and mac.commands == [["omlx", "stop"]] and mac.downloads == []
+    assert view["state"] == "not_checked" and mac.stopped == ["srv"] and mac.downloads == []
 
 
-def test_the_switch_leaves_an_omlx_that_was_already_answering_running(monkeypatch):
+def test_the_switch_stops_only_its_private_managed_server(monkeypatch):
     mac = _mac(monkeypatch, 64)
 
-    async def answering(_port):
-        return True
-
-    monkeypatch.setattr(local_setup, "_omlx_answers", answering)
     asyncio.run(_prepared())
     asyncio.run(prepare.stop_prepare())
 
-    assert mac.commands == []
+    assert mac.stopped == ["srv"]
 
-
-def test_welcome_never_starts_a_second_omlx_beside_the_persons_own(monkeypatch):
-    mac = _mac(monkeypatch, 64)
-    monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: True)
-
-    view = asyncio.run(_prepared())
-
-    assert view == {"state": "own_omlx", "model": None, "message": None}
-    assert mac.started == [] and mac.omlx.calls == []
 
 
 @pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])

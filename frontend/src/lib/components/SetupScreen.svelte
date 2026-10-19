@@ -55,6 +55,9 @@
 		{ label: 'Work folder', icon: 'computer', state: page === 'folder' ? 'current' : page === 'models' ? 'done' : 'todo' },
 		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
+	function withReportAction(row: AiRow): AiRow {
+		return row.reportable ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport() }] } : row;
+	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || local?.setup_error || localStartError) ? [{ label: 'Local model', state: local?.setup_error || localStartError ? 'error' as const : 'busy' as const,
 			meta: local?.setup_error || localStartError ? 'Couldn’t download' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
@@ -67,10 +70,10 @@
 			if (!source) return { key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', meta: '', busy: true };
 			const view = connectFlow.row(source);
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
-			return { key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined };
+			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, freeDisk: status.free_disk_gb,
-			start: () => void startLocal(), stop: () => void stopLocal(), stopOther: () => void chooseOther(true), check: () => void checkLocal() }));
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, freeDisk: status.free_disk_gb,
+			start: () => void startLocal(), stop: () => void stopLocal(), stopOther: () => void chooseOther(true), check: () => void checkLocal() })));
 		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
@@ -190,7 +193,16 @@
 		await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
-	$effect(() => { if (!connectFlow.active && !downloading) return; const timer = setInterval(() => { void connectFlow.tick(); if (get(token)) void refreshSources(); else void readLocalProgress(); }, POLL_MS); return () => clearInterval(timer); });
+	$effect(() => {
+		// Authenticated source/catalog state arrives through models_updated. Poll only the two setup-owned jobs
+		// that have no event while running: CLI install/sign-in, and the pre-account local downloader.
+		if (!connectFlow.active && (!downloading || get(token))) return;
+		const timer = setInterval(() => {
+			if (connectFlow.active) void connectFlow.tick();
+			if (!get(token) && downloading) void readLocalProgress();
+		}, POLL_MS);
+		return () => clearInterval(timer);
+	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
 	onMount(() => {
 		if (!startConnect) void (resume ? resumeSetup() : readStatus());
@@ -206,7 +218,7 @@
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
 		{:else if page === 'account' && canConnect}<Button variant="chip" onclick={() => { remote.reset(); page = 'connect'; }}>Connect to CORSIA on another computer</Button>
-		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>
+		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}

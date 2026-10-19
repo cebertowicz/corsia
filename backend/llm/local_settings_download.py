@@ -123,13 +123,17 @@ async def begin(model: LocalModel) -> dict:
     if ls._running():
         return ls._in_progress_result()
     if local_setup_operation.read() is not None:
-        if await ls.resume_pending_setup():
+        from llm.local_setup_recovery import resume_pending_setup
+
+        if await resume_pending_setup():
             return ls._in_progress_result()
         return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
     if not await asyncio.to_thread(ls.local_memory_ok):
         return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
     if not ls._claim_operation("settings", model):
-        await ls.resume_pending_setup()
+        from llm.local_setup_recovery import resume_pending_setup
+
+        await resume_pending_setup()
         return ls._in_progress_result()
     ls._flight.result = None
     ls._flight.stage = "Preparing download"

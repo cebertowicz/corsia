@@ -28,7 +28,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		const meta = cause === 'disk_full' ? `Couldn’t download the local model: the disk is full. Free up ${source?.bytes_to_free ? `${Math.ceil(source.bytes_to_free / 1e9)} GB` : size}, then retry.`
 			: cause === 'start_failed' ? `The local model downloaded but couldn’t start. Retry, or save a report.${reference}`
 			: 'Couldn’t download the local model. Check your internet connection, then retry.';
-		return { ...row, meta, error: true, action: { label: 'Retry', run: start } };
+		return { ...row, meta, error: true, reportable: cause === 'start_failed', action: { label: 'Retry', run: start } };
 	}
 	if (pick?.state === 'failed') return { ...row, meta: 'Couldn’t find a local model that fits this computer. Retry.', error: true, action: { label: 'Retry', run: check } };
 	return { ...row, meta: `Free and private. Runs on this computer, even offline.${size ? ` ${size} download.` : ''}`, action: { label: 'Download', run: start } };

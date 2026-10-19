@@ -31,7 +31,7 @@ def _is_routable_model(row: dict | None) -> bool:
     identity, separator, _model = litellm_model.partition("/")
     if not separator or not identity.startswith("omlx@"):
         return False
-    from llm.local_setup_ownership import is_corsia_managed_server
+    from llm.local_setup_managed import is_corsia_managed_server
     from llm.network_discovery import get_server
 
     server = get_server(identity.removeprefix("omlx@")) or {}
