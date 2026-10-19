@@ -24,9 +24,11 @@ AGENT_FRAMING = (
 )
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
-    "the current source. Acknowledge what you agree with, resolve it once done, and reply "
-    "only to ask a question, give a reason for declining, or show evidence that a point is "
-    "mistaken."
+    "the current source. Acknowledge what you agree with and make the change. Leave the "
+    "user's comment open for them to resolve, above all one you replied to; resolve it "
+    "yourself only when they asked you to, or when you made exactly the change it asked for "
+    "and had nothing to say. Reply only to ask a question, give a reason for declining, or "
+    "show evidence that a point is mistaken."
 )
 AGENT_EDIT_FRAMING = (
     "Another agent changed this directly and it is already applied. Treat it as evidence, "

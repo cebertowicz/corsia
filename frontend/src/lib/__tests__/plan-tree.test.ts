@@ -114,6 +114,20 @@ describe('PlanTree — same renderer contract', () => {
 		expect(rowTitled('Review brief')!.querySelector('.node-details')).toBeNull();
 	});
 
+	it('still offers Open on a paused ask that left Needs you', () => {
+		const artifact: OperatorArtifactLink = {
+			id: 'ask-1', role: 'attention', integration: 'workspace', type: 'document',
+			external_id: 'brief.md', title: 'Review brief', path: '/brief.md', state: 'active',
+			attention_state: 'deferred',
+		};
+		component = mount(PlanTree, {
+			target: host,
+			props: withFolds({ nodes: [node({ id: 'ask', title: 'Review brief', artifacts: [artifact] })], onOpenArtifact: vi.fn() }),
+		});
+		flushSync();
+		expect(rowTitled('Review brief')!.querySelector('.ask-open')).not.toBeNull();
+	});
+
 	it('does not offer Open after an ask is cleared', () => {
 		const artifact: OperatorArtifactLink = {
 			id: 'ask-1', role: 'attention', integration: 'workspace', type: 'document',

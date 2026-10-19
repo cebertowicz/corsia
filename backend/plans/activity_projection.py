@@ -341,7 +341,10 @@ def _scope(kind: str, owner_id: str, label: str, actor: PlanActor, *, db) -> dic
         str(item["artifact_id"])
         for item in decision_facts
         if item["answerable"] and str(item["plan_id"]) in eligible_tree
-        and not operator_display_state.plan_defers_asks(plan_index[str(item["plan_id"])]["state"])
+        and not operator_display_state.ask_deferred(
+            plan_paused=operator_display_state.plan_defers_asks(plan_index[str(item["plan_id"])]["state"]),
+            node_paused=item["node_paused"],
+        )
     })
     target = {"kind": kind, "id": owner_id, "label": label}
     revision_source = {

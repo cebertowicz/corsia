@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import plans.ask_endings as ask_endings
+import plans.operator_display_state as operator_display_state
 import plans.service as service
 from plans.node_states import open_user_block_sql
 
@@ -137,13 +138,14 @@ def ask_attention_state_sql(artifact_id_sql: str, *, node_id_sql: str | None = N
     without it, the scalar summarizes every open ask for the artifact.
     """
     node_scope = "" if node_id_sql is None else f" AND ask.node_id={node_id_sql}"
-    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id", by="all")
+    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id, p.state AS plan_state", by="all")
     where = f"ask.owner_id={artifact_id_sql}{node_scope}"
     return f"""CASE
         WHEN EXISTS (
             SELECT 1 FROM ({asks}) ask
             LEFT JOIN plan_ask_deferrals deferred ON deferred.hold_id=ask.hold_id
             WHERE {where} AND deferred.hold_id IS NULL
+              AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
         ) THEN 'raised'
         WHEN EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where}) THEN 'deferred'
         ELSE 'cleared'

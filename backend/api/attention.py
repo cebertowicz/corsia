@@ -158,6 +158,9 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
 
     A decision is listed only where Activity would count it, so the dock and
     Activity's awaiting count never disagree about an archived plan or project.
+    Annotation marks a non-ask item whose every live link is paused, so the dock
+    never shows it until resume; a paused document or image ask never reaches
+    here, because ``list_raised`` already drops it.
     """
     _db = db or get_db()
     try:
