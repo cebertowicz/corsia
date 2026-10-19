@@ -2,7 +2,8 @@
 
 Delivery owns whether a batch reached its recipient. Completion records it,
 settles the review requests it answers, and writes the correction notes the
-delivery completes in the same transaction (``core.correction_notes``).
+delivery completes in the same transaction (``core.correction_notes``, which
+rolls a failing note back alone so the delivery still commits).
 """
 
 from __future__ import annotations

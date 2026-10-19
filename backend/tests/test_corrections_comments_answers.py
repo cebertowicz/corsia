@@ -127,7 +127,7 @@ def test_user_comment_records_one_fact_and_one_lone_batch_note(db):
         "chip": None, "kind": "correction_note", "note_key": f"doc-feedback:{batch['id']}",
         "correction_subjects": [subject], "reoffer_unwritten": True,
     }
-    assert summary.startswith("Correction batch recorded on your artifact") and "1 comments" in summary
+    assert summary.startswith("Correction batch recorded on your artifact") and "1 comment," in summary
 
 
 def test_ask_round_comments_record_each_fact_and_one_batch_note_with_all_subjects(db):

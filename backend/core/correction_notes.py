@@ -16,15 +16,19 @@ A new note joins its recipient's queued turn-starting input as a passive
 digest when there is one, and otherwise queues its own wake. Either way every
 ``queue_*`` function returns the recipients, and its trigger drives them once
 its write commits (``plans.public.drive_threads``); no trigger can skip that.
+The answer and delivery hooks run on the person's own write and never fail it:
+a failing note rolls back alone and is logged.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+
+from loguru import logger
 
 from core.correction_targets import comment_target_sql
 from core.corrections_recording import (
@@ -38,6 +42,7 @@ from core.corrections_recording import (
     subject_key,
     version_key,
 )
+from infra.database import write_transaction
 
 NOTE_KIND = "correction_note"
 QUOTE_CHARS = 160
@@ -157,18 +162,9 @@ def _append_note(
         return False
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note
 
-    append_thread_context_note(
-        db,
-        thread_id=thread_id,
-        summary=summary,
-        details={
-            "chip": None,
-            "kind": NOTE_KIND,
-            "note_key": note_key,
-            "correction_subjects": subjects,
-            REOFFER_UNWRITTEN: True,
-        },
-    )
+    append_thread_context_note(db, thread_id=thread_id, summary=summary, details={
+        "chip": None, "kind": NOTE_KIND, "note_key": note_key, "correction_subjects": subjects, REOFFER_UNWRITTEN: True,
+    })
     return True
 
 
@@ -291,22 +287,35 @@ def queue_comment_notes(db: sqlite3.Connection, comment_ids: Iterable[str]) -> t
     return tuple(dict.fromkeys(woken))
 
 
+def _isolated(db: sqlite3.Connection, scope: str, queue: Callable[[], tuple[str, ...]]) -> tuple[str, ...]:
+    """Run a hook on the person's own write so a failing note rolls back alone and never fails that write."""
+    try:
+        with write_transaction(db, scope=scope):
+            return queue()
+    except Exception:
+        logger.exception("correction notes: {} failed; the person's write stands without its note", scope)
+        return ()
+
+
 def queue_round_notes(db: sqlite3.Connection, artifact_id: str, hold_ids: Iterable[str]) -> tuple[str, ...]:
-    """Write the note of each round these just-answered asks ended."""
+    """Write the note of each round these just-answered asks ended; never fails the answer."""
     from plans.public import ask_rounds
 
-    rounds = ask_rounds(db, artifact_id)
+    def queue() -> tuple[str, ...]:
+        rounds = ask_rounds(db, artifact_id)
+        units = [("review-round", str(r["hold_id"])) for r in rounds if r["hold_id"] in answered and r["answered"]]
+        return tuple(dict.fromkeys(_queue_units(db, artifact_id, units, rounds)))
+
     answered = set(hold_ids)
-    units = [("review-round", str(r["hold_id"])) for r in rounds if r["hold_id"] in answered and r["answered"]]
-    return tuple(dict.fromkeys(_queue_units(db, artifact_id, units, rounds)))
+    return _isolated(db, "correction_round_notes", queue)
 
 
 def queue_batch_notes(db: sqlite3.Connection, batch_id: str) -> tuple[str, ...]:
-    """Write the notes a just-delivered batch completes."""
-    rows = db.execute(
-        "SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=? AND event IS NULL", (batch_id,),
-    ).fetchall()
-    return queue_comment_notes(db, [str(row[0]) for row in rows])
+    """Write the notes a just-delivered batch completes; never fails the delivery."""
+    sql = "SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=? AND event IS NULL"
+    return _isolated(db, "correction_batch_notes", lambda: queue_comment_notes(
+        db, [str(row[0]) for row in db.execute(sql, (batch_id,)).fetchall()],
+    ))
 
 
 def _queue_units(db: sqlite3.Connection, artifact_id: str, units: Iterable[Unit], rounds: list) -> list[str]:
@@ -347,7 +356,7 @@ def _write_comment_note(
     artifact = get_artifact(artifact_id, db=db) or {}
     path = artifact.get("path") or artifact_id
     lines = [
-        f"Correction batch recorded on your artifact {artifact_id} ({path}; {len(comments)} comments, "
+        f"Correction batch recorded on your artifact {artifact_id} ({path}; {len(comments)} comment{'' if len(comments) == 1 else 's'}, "
         f"sent {_local_clock(comments[0].created_at)}–{_local_clock(comments[-1].created_at)}):"
     ]
     lines.extend(f"- “{_quote(comment.anchor_text or '(no anchor)')}” — “{_quote(comment.body)}”" for comment in comments)
