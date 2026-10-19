@@ -27,7 +27,7 @@ Only when no agents' account exists and the person chose to create one, never on
 
 ## Posting as the person
 
-Only when the person chose to post as themselves and no agents' account exists (`not_installed`, the table's last row): shells then use the person's own `gh` setup, so this is not a fallback from an agents' account. If one exists, it stays in charge; removing it is the person's choice. Never `connect` here: CORSIA's device-code sign-in is for the agents' account and refuses the person's own login on purpose. Check with `gh auth status`.
+Only when the person chose to post as themselves and no agents' account exists (`not_installed`, the table's last row): shells then use the person's own `gh` setup, so this is not a fallback from an agents' account. If one exists, it stays in charge; removing it is the person's choice. Never `connect` here: CORSIA's device-code sign-in is for the agents' account and refuses the person's own login on purpose. Problem reports and feature requests to CORSIA never go out this way: they need an agents' account. Check with `gh auth status`.
 
 - **Signed in:** post `Your agents will post as [login].` Done.
 - **`gh` missing:** install it: post `I'll install the GitHub CLI. You'll see one request to approve.`, then `request_host_access` for exactly `brew install gh` and run it once approved.

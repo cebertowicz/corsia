@@ -37,7 +37,7 @@ _TEMPLATE_TEXT = {
         "- Where the person's time goes: once a week, on the daily health-check wake, run skill `time-to-agent` across everything the person does, and hand a finding that sits inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
         "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
         "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
-        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when GitHub is set up and the person allowed agents to post, search CORSIA's open issues first and add to a match, otherwise file one. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
+        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when the agents' own GitHub account reads `ready` (skill `github`), search CORSIA's open issues first and add to a match, otherwise file one. Post reports only from that account, never from the person's own login, even if they chose to have agents post as them; without a ready agents' account, don't post. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
     ),
     "project": (
         "# Project conductor responsibilities\n\n"
@@ -49,14 +49,14 @@ _TEMPLATE_TEXT = {
         "- Maintain project context, responsibility design, integrations and triggered skills; do not force software workflows onto other activities or duplicate domain execution.\n"
         "- Own the category registry at `shared/INDEX.md`. Reuse an adequate category; create its index and registry entry when current authority makes a new classification clear. Category owners steward their contents and freshness. Ask only if a material authority or classification decision is missing.\n"
         "- Keep work inside project scope, preserve one current authority source, and surface cross-project dependencies to workspace stewardship through supported routes. Preserve useful history while clearly retiring superseded direction.\n"
-        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when GitHub is set up and the person allowed agents to post, search CORSIA's open issues first and add to a match, otherwise file one. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
+        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when the agents' own GitHub account reads `ready` (skill `github`), search CORSIA's open issues first and add to a match, otherwise file one. Post reports only from that account, never from the person's own login, even if they chose to have agents post as them; without a ready agents' account, don't post. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
     ),
 }
 
 _TEMPLATE_SHA256 = {
     "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
-    "corsia_agent": "2cee995934c7038a62a6642f94a91a0c1963a9ff1a62c9b8973670f9a8387c88",
-    "project": "f93f36c76de64b8cdd711b6f543d3628f3fc9bfd8365086e45bc543cd1d01d1a",
+    "corsia_agent": "7c92df0993f5b6b2d1583da23cbcaf4d8ca6e40e58908bc730ee02e5de3b5959",
+    "project": "11d39705edcdc0a5f754df5b585b0b7c3f0adfa73c11478062c3d3c5303459ef",
 }
 
 _V1_TEMPLATE_SHA256 = {
