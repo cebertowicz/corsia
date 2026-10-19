@@ -16,6 +16,7 @@ from core.workflow_verdicts import MIXED, KpiRow
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from model_identity_fixtures import seed_identity_catalog, seed_manifest
 from tests.plan_writer_authorizer import raw_plan_seed
+from tests.verdict_calibration_helpers import calibration_script
 
 NOW = datetime(2026, 10, 19, tzinfo=timezone.utc)
 OPUS = "claude-opus-5-5"
@@ -93,17 +94,6 @@ def correction(db, message_id: str, node_id: str, *, at: str = "2026-10-06T00:00
 def runs_of(snapshot, workflow: str = "sdlc-process"):
     (history,) = [item for item in snapshot.workflows if item.ref == workflow]
     return {run.run_id: run for run in history.runs}, history
-
-
-def calibration_script():
-    import importlib.util
-
-    path = Path(__file__).resolve().parents[2] / "scripts" / "verdict_calibration.py"
-    spec = importlib.util.spec_from_file_location("verdict_calibration", path)
-    assert spec and spec.loader
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
-    return script
 
 
 def test_a_run_is_the_outermost_node_carrying_its_workflow_and_only_judged_versions_count(db) -> None:

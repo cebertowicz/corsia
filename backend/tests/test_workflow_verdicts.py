@@ -4,12 +4,10 @@ The rule tests build runs directly; ``test_workflow_verdict_read.py`` builds the
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -21,6 +19,7 @@ from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
+from tests.verdict_calibration_helpers import calibration_script
 
 NOW = datetime(2026, 10, 19, tzinfo=timezone.utc)
 GROUP = ("model-a", "standard", "M")
@@ -175,7 +174,11 @@ def test_baseline_is_the_nearest_version_with_the_minimum_in_shared_groups() -> 
     assert plan_for(source).skipped == ("v1",) and verdict(source).inputs["skipped"] == ["v1"]
 
 
-# First-use stability across the bounded reader is covered by test_workflow_verdict_read.py.
+def test_a_rolled_back_version_keeps_its_full_history_place_in_the_order() -> None:
+    # v1 first ran outside the read window, then v2 shipped, then v1 came back: in-window runs alone show v2 first.
+    source = replace(history(runs("v2", 1, started=40, ended=30), runs("v1", 1, started=20, ended=10)),
+                     first_uses={"v1": _at(400), "v2": _at(40)})
+    assert source.versions() == ["v1", "v2"]
 
 
 def test_calibration_splits_use_all_history_for_their_baseline() -> None:
@@ -183,12 +186,7 @@ def test_calibration_splits_use_all_history_for_their_baseline() -> None:
     ordered = sorted(source.runs, key=lambda run: (run.started_at, run.run_id))
     halves = [replace(run, version="a" if index % 2 == 0 else "b") for index, run in enumerate(ordered)]
     split = replace(source, runs=tuple(halves))
-    path = Path(__file__).resolve().parents[2] / "scripts" / "verdict_calibration.py"
-    spec = importlib.util.spec_from_file_location("verdict_calibration", path)
-    assert spec and spec.loader
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
-    calls, _ = script.splits(source, NOW)
+    calls, _ = calibration_script().splits(source, NOW)
     assert freeze_plan(split, "b", baseline_as_of=NOW).baseline == "a"
     assert any(call != "too_few" for found in calls.values() for call, _ in found)
 

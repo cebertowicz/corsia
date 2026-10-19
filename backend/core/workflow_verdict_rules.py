@@ -51,13 +51,11 @@ class WorkflowHistory:
     first_uses: Mapping[str, str] = field(default_factory=dict)
 
     def versions(self) -> list[str]:
-        """Judged versions by first use (v1, v2, ...)."""
-        first: dict[str, str] = {}
-        for run in sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id)):
-            first.setdefault(run.version, run.started_at)
-        return list(first)
+        """Judged versions by first use (v1, v2, ...), the same first use ``first_use`` reports."""
+        return sorted({run.version for run in self.runs}, key=lambda version: (parse_ts(self.first_use(version)), version))
 
     def first_use(self, version: str) -> str:
+        """Earliest use over full history when the reader carried it, else over these runs (calibration splits)."""
         return self.first_uses.get(version) or min(
             (run.started_at for run in self.runs if run.version == version), key=parse_ts)
 
