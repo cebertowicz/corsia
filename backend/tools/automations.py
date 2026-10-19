@@ -227,10 +227,11 @@ class AutomationScheduleTool(Tool):
                 "workflow": {
                     "type": "string",
                     "description": (
-                        "script kind: optional. The workflow: name of a synced measures.yaml whose "
-                        "SKILL.md names you as corsia.workflow.owner; each measure line is recorded "
-                        "with this workflow_ref. A refusal lists the workflows you own. Leave it out "
-                        "for agent-level measures."
+                        "script kind: optional. The `workflow:` value of a measures.yaml you synced; "
+                        "that file's sibling SKILL.md frontmatter must name you as "
+                        "`corsia: {workflow: {owner: <your thread id>}}`. Each accepted measure line "
+                        "is recorded with this workflow_ref. A refusal lists the workflows you own. "
+                        "Leave it out for agent-level measures."
                     ),
                 },
                 "timeout_seconds": {
