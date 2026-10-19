@@ -160,16 +160,16 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 12131,
+      "bytes": 14090,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "30f47f7348f1b46cbf7342a380b13c824c179124e16f953a277e18067ce90326"
+      "sha256": "3a2beff663d80cb5970a42d23293e8f659bd40f54ab9f5ebb202f3e73f936746"
     },
     {
-      "bytes": 17594,
+      "bytes": 17410,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "7d5e7448f89867b1b8a51aae0a142e88e8f1f3cec63679f0254783ac9f8ecf3e"
+      "sha256": "2c0dfc8002d61de0f441618dcec737e6648657d8cbcefdb4def2ef48b21b70aa"
     },
     {
       "bytes": 642,
@@ -182,12 +182,6 @@
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/local-model-offer.md",
       "sha256": "cfb14d9355aacbf0da15522c15f06f524037da6092db7ce9daa568cc76e29e47"
-    },
-    {
-      "bytes": 694,
-      "kind": "skill",
-      "path": "skills/conductor-bootstrap/references/omlx-setting.md",
-      "sha256": "30c746accd265006079ab9f1194a4c47b37569db8c6fa9b776c51182a9f7e304"
     },
     {
       "bytes": 5753,
@@ -268,10 +262,10 @@
       "sha256": "eb4d36a083dfcd4a8c10d9f54d1e96f2216ca51d43e25229a7220a183cede3b3"
     },
     {
-      "bytes": 4501,
+      "bytes": 4852,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "91229e10b84343cff5b24355a540a28a7f103fa1db73139e72f73f54d24e4f4e"
+      "sha256": "d35210a0d2d7fcbe2c6b94fd40d9d1495d52920c2b50482eec98a4b8deed4802"
     },
     {
       "bytes": 9080,

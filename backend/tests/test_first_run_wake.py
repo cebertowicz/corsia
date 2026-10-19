@@ -471,14 +471,18 @@ class TestAppPath:
 
         assert "setup adds no models to it: don't make the offer" in local_offer
         assert "download lands in the person's oMLX" not in local_offer
-        assert "When `harness_ready` is empty, omit the first sentence" in reference
+        assert "When it is empty, leave out the first sentence." in reference
         assert "if you have a [Claude | ChatGPT] subscription" in reference
-        assert "Sign in to [Claude Code | Codex] in Settings › Accounts, then tell me when it's done." in reference
+        assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in reference
+        assert "Sign in to [Claude Code | Codex] in Settings › Providers, then tell me when it's done." in reference
         assert "If it shows the source is ready, carry on." in reference
         assert "If it is still unsigned, once post" in reference
-        assert "already `failed` in these initial facts was shown by the screens: say nothing about it" in reference
-        assert "first time a later read shows it done or failed" in reference
-        assert "handle that reply first, then post its `message` and the fix it names" in reference
+        assert "Never read the local download yourself." in reference
+        assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
+        assert "when your question is still unanswered, end your turn: that question stays open" in reference
+        assert "make no plan call for a step (no `start`, no `mark_done`)" in reference
+        assert "already shows that same outcome, say nothing" in reference
+        assert "Done for now. Anything I skipped, ask me any time and I'll set it up." in reference
 
     # The reference lists each fact as a top-level key; a parenthesised gloss may name nested keys
     # (`setup.setup_decisions`, the `user_profile` fields), which are not facts of their own.
