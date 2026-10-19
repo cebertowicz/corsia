@@ -195,6 +195,30 @@ def test_a_version_rolled_back_before_its_minimum_is_changed_again_by_the_versio
     assert current.successor("v2") is None and current.successor("v1") == ("v2", _at(20))
 
 
+def test_a_successor_is_whichever_version_ran_next_after_its_last_run() -> None:
+    back_to_middle = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                             runs("v3", 1, count=3, started=12, ended=10), runs("v2", 1, count=3, started=8, ended=6))
+    assert back_to_middle.successor("v2") is None and back_to_middle.successor("v3") == ("v2", _at(8))
+    returned_then_new = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                                runs("v1", 1, count=3, started=12, ended=10), runs("v3", 1, count=3, started=8, ended=6))
+    assert returned_then_new.successor("v2") == ("v1", _at(12))
+
+
+def test_changed_again_is_never_stored_so_a_version_back_in_use_is_still_judged(monkeypatch) -> None:
+    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
+    db = sqlite3.connect(":memory:")
+    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    during_v1 = [runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                 runs("v1", 1, count=3, started=12, ended=10)]
+    early = next(e for e in compute(Snapshot(NOW.isoformat(), (history(*during_v1),))) if e.plan.version == "v2")
+    assert early.verdict.word == "changed_early" and evaluator.write_verdicts(db, [early]) == 0
+    back = history(*during_v1, runs("v2", 1, count=20, started=9, ended=5))
+    assert back.successor("v2") is None
+    later = next(e for e in compute(Snapshot(NOW.isoformat(), (back,), {early.plan.subject: early.plan}))
+                 if e.plan.version == "v2")
+    assert later.verdict.word in {"keep", "revert"} and evaluator.write_verdicts(db, [later]) == 1
+
+
 def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
     source = history(
         runs("v1", 0, started=80, ended=50),

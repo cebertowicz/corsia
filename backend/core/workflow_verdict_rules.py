@@ -60,12 +60,8 @@ class WorkflowHistory:
         return min((run.started_at for run in self.runs if run.version == version), key=parse_ts)
 
     def successor(self, version: str) -> tuple[str, str] | None:
-        """The version that replaced ``version`` and when: the next by first use, or for the newest the
-        version a rollback returned to after its last run; None while it is still the one in use."""
-        order = self.versions()
-        index = order.index(version)
-        if index + 1 < len(order):
-            return order[index + 1], self.first_use(order[index + 1])
+        """The version that replaced ``version`` and when: the first other version to run after its last run,
+        whether newer or rolled back to; None while it is still the one in use."""
         ordered = sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id))
         last = max(i for i, run in enumerate(ordered) if run.version == version)
         after = next((run for run in ordered[last + 1:] if run.version != version), None)
@@ -103,7 +99,7 @@ class FrozenPlan:
 
 @dataclass(frozen=True)
 class Verdict:
-    word: str  # keep, revert, changed_early (stored); collecting, not_enough_data (computed on read)
+    word: str  # keep, revert (stored); changed_early, collecting, not_enough_data (computed on read)
     reason: str
     look: int
     calls: tuple[MeasureCall, ...] = ()
