@@ -77,6 +77,25 @@ export function requestConnectedApp(id: string) {
 	change((s) => ({ section: 'connected-apps', connectedAppId: id, anchor: 'connected-apps', fromProject: null, project: null, openRequest: s.openRequest + 1 }));
 }
 
+/** Routes chat links to one connected-app row while the home route is mounted. */
+export function listenForConnectedAppLinks(openSettings: () => void): () => void {
+	const openConnectedAppFromHash = () => {
+		const match = window.location.hash.match(/^#connected-apps\/([^/]+)$/);
+		if (!match) return;
+		let id: string;
+		try {
+			id = decodeURIComponent(match[1]);
+		} catch {
+			return; // An invalid URL fragment cannot identify a connected app.
+		}
+		requestConnectedApp(id);
+		openSettings();
+	};
+	openConnectedAppFromHash();
+	window.addEventListener('hashchange', openConnectedAppFromHash);
+	return () => window.removeEventListener('hashchange', openConnectedAppFromHash);
+}
+
 /** The workspace gear: Settings at its first section. */
 export function openWorkspaceSettings(anchor: string | null = null) {
 	requestSettingsSection('providers', anchor);
