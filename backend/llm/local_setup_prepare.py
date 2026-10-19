@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 from dataclasses import dataclass, field
 
 from llm import local_model
@@ -27,8 +26,7 @@ log = logging.getLogger(__name__)
 
 #: Under 24 GiB: no local model, so Welcome shows no switch.
 LOW_MEMORY = "low_memory"
-#: An oMLX CORSIA doesn't manage is here; prepare never starts a second one.
-OWN_OMLX = "own_omlx"
+
 NOT_CHECKED = "not_checked"
 CHECKING = "checking"
 PICKED = "picked"
@@ -52,8 +50,8 @@ class _Prepare:
     message: str | None = None
     # The pick is the starter model because the recommender had no usable row.
     fallback: bool = False
-    # Whether prepare started the oMLX it set up, so turning the switch off stops it.
-    started_omlx: bool = False
+    # The supervised CORSIA process prepare started, if it remains safe to stop.
+    server_id: str | None = None
     # Requests waiting for the pick to leave checking; ``_settle`` wakes them.
     waiters: list[asyncio.Future] = field(default_factory=list)
 
@@ -119,9 +117,7 @@ async def pick_view() -> dict:
         return _view(CHECKING)
     if _prepare.state != NOT_CHECKED:
         return _view(_prepare.state, _prepare.model, _prepare.message)
-    # Read only before prepare touches oMLX: mid-install, CORSIA's own oMLX is not marked yet.
-    if await asyncio.to_thread(ls.existing_install_is_foreign):
-        return _view(OWN_OMLX)
+
     set_up = await asyncio.to_thread(local_model.set_up_model)
     return _view(PICKED, set_up) if set_up is not None else _view(NOT_CHECKED)
 
@@ -178,12 +174,13 @@ async def stop_prepare() -> dict:
     if task is not None and not task.done():
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-    if _prepare.started_omlx:
-        try:
-            await asyncio.to_thread(ls._run, ["omlx", "stop"])
-        except (OSError, subprocess.SubprocessError):
-            log.warning("Could not stop the oMLX that local model prepare started", exc_info=True)
-    _prepare.task, _prepare.started_omlx = None, False
+    if _prepare.server_id is not None:
+        from llm.providers.omlx_supervisor import stop_server
+
+        result = await stop_server({"server_id": _prepare.server_id})
+        if not result.get("ok"):
+            log.warning("Could not stop the CORSIA local model server: %s", result.get("message"))
+    _prepare.task, _prepare.server_id = None, None
     _settle(NOT_CHECKED)
     return await pick_view()
 
@@ -193,10 +190,8 @@ async def _run() -> None:
     from llm.local_setup_new_omlx import start_managed_omlx
 
     try:
-        port = await asyncio.to_thread(ls.own_omlx_port)
-        # An earlier try may have started it; an oMLX that already answered is not prepare's to stop.
-        _prepare.started_omlx = _prepare.started_omlx or not await ls._omlx_answers(port)
         server_id, port = await start_managed_omlx(lambda _stage: None)
+        _prepare.server_id = server_id
         await ask(server_id, port)
     except asyncio.CancelledError:
         _settle(NOT_CHECKED)

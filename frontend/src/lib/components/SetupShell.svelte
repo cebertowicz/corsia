@@ -209,8 +209,8 @@
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
 			{#key page}
-				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
-					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
+				<section class="pane-scene" class:hero={mark} data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+					{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<header><h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body" use:scrollCue>{@render children?.()}</div>
 				</section>
@@ -241,12 +241,13 @@
 	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
 	.pane-scenes { display: grid; flex: 1; min-height: 0; }
-	.pane-scene { grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+	.pane-scene { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
-	.mark { width: var(--space-5); height: var(--space-5); }
+	.mark { position: absolute; width: 44%; height: 70%; object-fit: contain; right: 0; top: 12%; }
+	.hero .body, .hero .lede, .hero header { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
 	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
-	.lede { max-width: calc(var(--space-8) * 9); margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
+	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
 	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; scrollbar-width: thin; }
 	/* The attributes are set by the scrollCue action, which Svelte cannot see: without :global it prunes the rule as unused. */
 	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
@@ -266,6 +267,14 @@
 		.pane { padding-top: var(--space-8); }
 		.lede { margin-top: var(--space-2); }
 		.body { margin-top: var(--space-3); padding-bottom: var(--space-2); }
+	}
+	@media (max-width: 60em) {
+		.mark { display: none; }
+		.hero .body, .hero .lede, .hero header { width: 100%; padding-right: 0; }
+	}
+	@media (max-width: 40em) {
+		.rail { display: none; }
+		.primary-action { flex-direction: column; align-items: flex-end; }
 	}
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }

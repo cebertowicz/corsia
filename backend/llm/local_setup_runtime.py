@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -52,14 +53,37 @@ async def wait_for_health(port: int) -> None:
     )
 
 
-async def register_loopback_server(*, port: int, api_key: str | None = None) -> str:
-    """Register a healthy loopback oMLX through the existing manual path."""
-    from api.network_server_helpers import _add_omlx_server
+async def register_managed_server(*, port: int, base_path: str, model_dir: str) -> tuple[str, str]:
+    """Create CORSIA's sole managed oMLX row and retire legacy managed rows.
 
-    result = await _add_omlx_server(SimpleNamespace(
-        hostname=LOCAL_HOST, port=port, name=LOCAL_SERVER_NAME, api_key=api_key,
-    ))
-    return str(result["server_id"])
+    User-owned oMLX instances are never retained as managed servers. The generated
+    credential stays in the server key store and is passed only to CORSIA's owned
+    subprocess through its supervisor configuration.
+    """
+    from infra.db_async import run_in_db
+    from infra.key_store_servers import resolve_server, set_server_key
+    from llm import network_discovery as discovery
+
+    def persist() -> tuple[str, str]:
+        # v0.3/v0.4 managed rows named an arbitrary local oMLX. They cannot
+        # prove CORSIA owns its process, base path, or models, so setup replaces
+        # those rows. Explicit External providers are person-configured and
+        # observe-only; their remote/local model routes must survive.
+        for server in discovery.get_servers(provider="omlx"):
+            if server.get("kind") != "external" and server.get("instance_id") != "corsia-managed":
+                discovery.remove_server(str(server["id"]))
+        server_id = discovery.upsert_server(
+            provider="omlx", instance_id="corsia-managed", instance_name=LOCAL_SERVER_NAME,
+            host=LOCAL_HOST, port=port, status="offline", kind="managed", source="corsia",
+        )
+        credential = resolve_server(server_id) or secrets.token_urlsafe(32)
+        set_server_key(server_id, credential)
+        discovery.set_server_metadata(
+            server_id, base_path=base_path, model_dir=model_dir, corsia_managed=True,
+        )
+        return server_id, credential
+
+    return await run_in_db(persist)
 
 
 async def configure_global(server_id: str) -> None:
@@ -174,13 +198,11 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
     """Apply only compatible benchmark performance fields in one model-settings write."""
     writer_attempted = False
     try:
-        from llm import own_omlx_management
         from llm.local_model import omlx_has_recommender
         from llm.local_setup_auth import omlx_version
         from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
 
-        if own_omlx_management.uses_mine():
-            return OptimalResult("no_omlx")
+
         if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
             return OptimalResult("unsupported")
         inputs = await _read_optimal_inputs(server_id, model)
@@ -201,8 +223,7 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
             return OptimalResult("offline")
         if not compatible:
             return OptimalResult("not_found")
-        if own_omlx_management.active():
-            own_omlx_management.record_originals({}, {model.model: {key: current.get(key) for key in compatible}})
+
         try:
             # The benchmark decides TurboQuant here, so CORSIA's default must not switch it on.
             corsia = {key: value for key, value in (await model_settings_payload(server_id, model)).items()

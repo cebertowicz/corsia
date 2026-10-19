@@ -27,14 +27,12 @@ from llm.local_setup_auth import (  # noqa: F401
     SKIP_AUTH_SETTING,
     UPDATE_OMLX_MESSAGE,
     _omlx_supports_loopback_auth,
-    foreign_omlx_failure,
     omlx_version,
     registered_local_key,
     secure_local_omlx,
 )
 from llm.local_setup_ownership import ensure_omlx as _ensure_omlx
-from llm.local_setup_ownership import existing_install_is_foreign
-from llm.local_setup_ownership import omlx_log_detail, own_omlx_admin_key, own_omlx_port, require_free_disk
+from llm.local_setup_ownership import require_free_disk
 from llm.local_setup_ownership import run_command as _run
 from llm.local_profiles import format_size
 from llm import local_setup_cancel, local_setup_download, local_setup_operation
@@ -52,8 +50,6 @@ from llm.local_setup_runtime import (
     configure_global as _configure_global,
     configure_model_settings as _configure_model_settings,
     omlx_answers as _omlx_answers,
-    register_loopback_server as _register_loopback_server,
-    wait_for_health as _wait_for_health,
 )
 
 EVENT_CATEGORY = "local_setup"
@@ -193,20 +189,36 @@ async def cancel_local_setup() -> dict:
 
 
 def setup_status() -> dict[str, Any]:
-    """The flight record exactly as it stands: no inference from other state.
-
-    ``downloading`` is a wait that outlived the foreground budget while oMLX
-    keeps downloading; it is not a failure.
-    """
+    """Bounded live state for setup and first-run download presentation."""
+    result = _flight.result
+    model = _flight.model
+    stage = setup_stage() if _running() else None
     if _running():
         state = "downloading" if _flight.following else "running"
-        return {"state": state, "stage": setup_stage(), "result": None}
-    if _flight.result is None:
-        return {"state": "idle", "stage": None, "result": None}
-    if _flight.result.get("downloading"):
-        return {"state": "downloading", "stage": None, "result": _flight.result}
-    state = "succeeded" if _flight.result.get("ok") else "failed"
-    return {"state": state, "stage": None, "result": _flight.result}
+    elif result is None:
+        state = "idle"
+    elif result.get("downloading"):
+        state = "downloading"
+    else:
+        # Success follows a completed catalog refresh, so this model is usable.
+        state = "ready" if result.get("ok") else "failed"
+    percent = None
+    if stage:
+        import re
+
+        match = re.search(r"(\d{1,3})%", stage)
+        percent = min(100, int(match.group(1))) if match else None
+    return {
+        "state": state,
+        "model": model.view() if model else None,
+        "percent": percent,
+        "eta_seconds": _flight.download_eta_seconds,
+        "download_size": format_size(model.download_size_bytes) if model else None,
+        "stalled": _flight.download_stalled,
+        "cause": result.get("cause") if result else None,
+        "ref": result.get("ref") if result else None,
+        "bytes_to_free": result.get("bytes_to_free") if result else None,
+    }
 
 
 def _emit(action: str, **properties: object) -> None:
@@ -240,15 +252,35 @@ def _notify_models_changed() -> None:
     notify_models_changed()
 
 
-async def _run_flight(*, model: LocalModel | None = None, into_own_omlx: bool = False,
-                      on_stage: Callable[[str], None] | None = None) -> dict:
-    """Run the one setup flight and record its terminal result.
+async def _notify_terminal_setup_download(result: dict) -> None:
+    """Wake first-run chat for terminal setup flights; Settings downloads never wake it."""
+    if _flight.kind != "setup":
+        return
+    model = _flight.model
+    if result.get("downloading"):
+        outcome = "not_loaded"
+    elif result.get("ok"):
+        outcome = "ready"
+    else:
+        outcome = "start_failed" if model is None else "failed"
+    flight_id = (local_setup_operation.read() or local_setup_operation.Operation.for_model(
+        model or LocalModel("local-model", 0, 0), "setup",
+    )).task_id or (model.repository if model else "local-model")
+    try:
+        from onboarding.local_download_wake import notify_terminal_setup_download
 
-    Every setup entry path leaves an oMLX it did not install untouched and uses it.
-    ``model`` is a resumed or starter flight's; otherwise CORSIA's own oMLX picks
-    it. ``into_own_omlx`` downloads ``model`` into the person's oMLX and writes
-    nothing to it; ``on_stage`` also receives each stage (the installer prints them).
-    """
+        await notify_terminal_setup_download(
+            flight_id, outcome, model=model.repository if model else None,
+            cause=result.get("cause"), ref=result.get("ref"),
+            bytes_to_free=result.get("bytes_to_free"),
+        )
+    except Exception:
+        log.exception("Couldn't notify first-run chat of terminal local setup download")
+
+
+async def _run_flight(*, model: LocalModel | None = None,
+                      on_stage: Callable[[str], None] | None = None) -> dict:
+    """Run the one setup flight against CORSIA's managed oMLX process."""
     events: list[str] = []
 
     def report(stage: str) -> None:
@@ -260,15 +292,7 @@ async def _run_flight(*, model: LocalModel | None = None, into_own_omlx: bool = 
 
     _flight.following = False
     try:
-        if into_own_omlx and model is not None:
-            result = await download_into_own_omlx(report, events, model)
-        elif await asyncio.to_thread(existing_install_is_foreign):
-            failure = await asyncio.to_thread(foreign_omlx_failure)
-            if failure:
-                raise RuntimeError(failure)
-            result = await adopt_existing_omlx(report, events)
-        else:
-            result = await _setup_new_omlx(report, events, model)
+        result = await _setup_new_omlx(report, events, model)
     except asyncio.CancelledError:
         _release_operation_lock()
         raise
@@ -276,8 +300,10 @@ async def _run_flight(*, model: LocalModel | None = None, into_own_omlx: bool = 
         result = {**_stopped_following(_flight.model, events), "next_action": f"Run `{SETUP_COMMAND}` to follow it again."}
     except Exception as exc:
         log.exception("Local setup failed")
-        result = {**local_setup_error(_failure_message(exc)), "progress": events}
+        result = {**local_setup_error(_failure_message(exc)), "progress": events,
+                  "cause": type(exc).__name__}
         _emit("failed", error_type=type(exc).__name__)
+    await _notify_terminal_setup_download(result)
     return local_setup_operation.finish(_flight, result)
 
 
@@ -325,7 +351,7 @@ async def resume_pending_setup() -> bool:
 
             return await resume_settings_download(model)
         await local_setup_operation.wait_for_lock(_flight)
-        return await _run_flight(model=model, into_own_omlx=operation.kind == "starter")
+        return await _run_flight(model=model)
 
     _flight.task = asyncio.create_task(resume())
     _flight.task.add_done_callback(_observe_setup_task)
@@ -384,8 +410,6 @@ async def begin_local_setup(
     return _in_progress_result(notice=notice)
 
 
-from llm.local_setup_existing import (  # noqa: E402  (reads this module's names at call time)
-    adopt_existing_omlx, begin_add_starter_model, download_into_own_omlx,
-)
+
 from llm.local_settings_download import begin as begin_settings_download  # noqa: E402
 from llm.local_setup_new_omlx import _setup_new_omlx  # noqa: E402  (reads this module's names at call time)

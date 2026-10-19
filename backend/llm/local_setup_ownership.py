@@ -14,56 +14,68 @@ import re
 import shutil
 import subprocess
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 MARKER_NAME = "local_setup_installed_omlx"
-CONSENT_MARKER_NAME = "local_setup_existing_omlx_consented"
 OMLX_FORMULA = "jundot/omlx/omlx"
-DEFAULT_PORT = 8000
+_MANAGED_DIR = "managed-omlx"
+_MANAGED_PORTS = range(8210, 8310)
 
 log = logging.getLogger(__name__)
 
 
 def marker_path() -> Path:
+    """Legacy v0.4 ownership marker, retained only to migrate CORSIA's old service."""
     from infra.config import STATE_ROOT
 
     return Path(STATE_ROOT) / MARKER_NAME
 
 
-def consent_marker_path() -> Path:
-    from infra.config import STATE_ROOT
+@dataclass(frozen=True)
+class ManagedOmlxPaths:
+    """Filesystem and port that belong exclusively to CORSIA's managed oMLX."""
 
-    return Path(STATE_ROOT) / CONSENT_MARKER_NAME
-
-
-def mark_installed_by_setup() -> None:
-    """Record, durably, that local setup itself installed oMLX."""
-    path = marker_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("installed by corsia local setup\n", encoding="utf-8")
+    base_path: Path
+    model_dir: Path
+    settings_path: Path
+    port: int
 
 
-def record_existing_omlx_consent(*, manage: bool | None = None) -> None:
-    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root.
+def managed_omlx_paths() -> ManagedOmlxPaths:
+    """Return CORSIA-owned oMLX paths and a durable private loopback port.
 
-    ``manage`` is the person's choice between the two (``own_omlx_management``):
-    True is "Let CORSIA manage it", also consent to read that oMLX's admin key and
-    change the settings shown first; False is "Use mine", where the key is never
-    read and nothing is offered or written. None is a consent given where those
-    choices weren't shown, which records neither.
+    The base and model paths live under the state root. A first launch chooses a
+    free port, then writes it in this private settings file so retries and
+    restarts address the same managed process.
     """
-    path = consent_marker_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("consented to existing oMLX\n", encoding="utf-8")
-    if manage is None:
-        return
-    from llm import own_omlx_management
+    from infra.config import STATE_ROOT
+    from llm.providers.omlx_process import port_is_free
 
-    if manage:
-        own_omlx_management.consent()
+    base = Path(STATE_ROOT) / _MANAGED_DIR
+    models = base / "models"
+    settings = base / "settings.json"
+    try:
+        raw = json.loads(settings.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    server = raw.get("server") if isinstance(raw.get("server"), dict) else {}
+    configured = server.get("port")
+    if isinstance(configured, int) and configured in _MANAGED_PORTS:
+        port = configured
     else:
-        own_omlx_management.choose_use_mine()
+        port = next((candidate for candidate in _MANAGED_PORTS if port_is_free(candidate)), None)
+        if port is None:
+            raise RuntimeError("CORSIA couldn't reserve a private port for its local model server. Try again.")
+    base.mkdir(parents=True, exist_ok=True)
+    models.mkdir(parents=True, exist_ok=True)
+    raw["server"] = {**server, "port": port}
+    model = raw.get("model") if isinstance(raw.get("model"), dict) else {}
+    raw["model"] = {**model, "model_dir": str(models)}
+    settings.write_text(json.dumps(raw, sort_keys=True), encoding="utf-8")
+    return ManagedOmlxPaths(base, models, settings, port)
 
 
 _BROKEN_RETURN_CODES = (126, 127)
@@ -98,20 +110,6 @@ def _is_broken_leftover(path: str) -> bool:
     return broken
 
 
-def existing_omlx_requires_consent() -> bool:
-    """Whether setup must ask before inspecting a pre-existing oMLX.
-
-    This deliberately checks only PATH and CORSIA's ownership/consent markers.
-    In particular, it must not execute oMLX before the person has consented;
-    a broken leftover follows the same consent journey and is repaired after
-    that consent by local setup.
-    """
-    return bool(
-        shutil.which("omlx")
-        and not marker_path().exists()
-        and not consent_marker_path().exists()
-    )
-
 
 def installed_omlx() -> str | None:
     """The working ``omlx`` on PATH, or None when it is absent or a broken leftover."""
@@ -145,16 +143,120 @@ def command_output(command: list[str]) -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=30).stdout.strip()
 
 
-def setup_owns_current_omlx(brew: str, omlx: str) -> bool:
-    """Whether the marked oMLX executable is inside the installed formula's keg.
 
-    A ``brew`` call that fails raises ``OSError`` or ``SubprocessError``: the
-    answer is unknown, and each caller decides what unknown means for it.
+def setup_owns_current_omlx(brew: str, omlx: str) -> bool:
+    """Whether the marked executable resolves inside CORSIA's old Homebrew keg.
+
+    The marker alone is not ownership proof: it could survive a user replacing
+    the binary. The old install is migratable only when Homebrew still reports
+    the formula and the current executable resolves below that formula's keg.
     """
     if not command_output([brew, "list", "--versions", OMLX_FORMULA]):
         return False
     prefix = command_output([brew, "--prefix", OMLX_FORMULA])
     return bool(prefix) and Path(omlx).resolve().is_relative_to(Path(prefix).resolve())
+
+
+def legacy_setup_owns_current_omlx() -> bool:
+    """Whether the prior Homebrew service is positively identified as CORSIA's."""
+    brew, omlx = shutil.which("brew"), installed_omlx()
+    if not marker_path().exists() or not brew or not omlx:
+        return False
+    try:
+        return setup_owns_current_omlx(brew, omlx)
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def retire_legacy_owned_omlx_service() -> bool:
+    """Stop only the prior service that the v0.3/v0.4 proof identifies as ours.
+
+    A failure leaves the private managed launch safe: its port and paths are
+    distinct, and the old instance remains excluded from CORSIA's catalog.
+    """
+    if not legacy_setup_owns_current_omlx():
+        return False
+    brew = shutil.which("brew")
+    if not brew:
+        return False
+    try:
+        run_command([brew, "services", "stop", OMLX_FORMULA])
+    except (OSError, subprocess.SubprocessError) as error:
+        log.warning("could not retire CORSIA's old oMLX service: %s", error)
+        return False
+    return True
+
+
+def is_corsia_managed_server(server: dict, metadata: dict | None = None) -> bool:
+    """Whether a network row is exactly CORSIA's private managed oMLX process.
+
+    Rows from v0.3/v0.4 named an oMLX install without proving its process or
+    files were CORSIA's. They are deliberately excluded; setup replaces them
+    with this state-root identity after it launches the supervised subprocess.
+    """
+    from infra.config import STATE_ROOT
+
+    if (
+        server.get("provider") != "omlx"
+        or server.get("kind") != "managed"
+        or server.get("instance_id") != "corsia-managed"
+    ):
+        return False
+    if metadata is None:
+        raw = server.get("metadata_json")
+        try:
+            metadata = json.loads(raw) if isinstance(raw, str) else {}
+        except ValueError:
+            return False
+    if not isinstance(metadata, dict) or metadata.get("corsia_managed") is not True:
+        return False
+    base = Path(STATE_ROOT) / _MANAGED_DIR
+    return (
+        metadata.get("base_path") == str(base)
+        and metadata.get("model_dir") == str(base / "models")
+    )
+
+
+def legacy_omlx_settings_file() -> Path:
+    """Read the old CORSIA service settings only after ownership is proven."""
+    return Path.home() / ".omlx" / "settings.json"
+
+
+def foreign_omlx_process() -> int | None:
+    """Return one positively identified non-CORSIA ``omlx serve`` PID, if any.
+
+    This examines process commands only. It never reads a person's oMLX settings,
+    registers their server, or treats an ambiguous process list as consent to stop.
+    """
+    try:
+        result = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True,
+                                text=True, timeout=2, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    from infra.config import STATE_ROOT
+
+    managed_base = str(Path(STATE_ROOT) / _MANAGED_DIR)
+    matches: list[int] = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) != 2 or "omlx serve" not in parts[1] or managed_base in parts[1]:
+            continue
+        try:
+            matches.append(int(parts[0]))
+        except ValueError:
+            continue
+    return matches[0] if len(matches) == 1 else None
+
+
+def stop_foreign_omlx_process(pid: int) -> bool:
+    """Terminate only the currently re-identified foreign oMLX process."""
+    if foreign_omlx_process() != pid:
+        return False
+    try:
+        os.kill(pid, 15)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
 
 
 def homebrew_failure_message(action: str, exc: OSError | subprocess.SubprocessError) -> str:
@@ -185,14 +287,12 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
                 run_command([brew, "link", "--overwrite", "omlx"])
         except (OSError, subprocess.SubprocessError) as exc:
             raise RuntimeError(homebrew_failure_message("install", exc)) from exc
-        mark_installed_by_setup()
         return
     brew = shutil.which("brew")
-    omlx = installed_omlx()
-    if not needs_repair or not marker_path().exists() or not brew or not omlx:
+    if not needs_repair or not brew:
         return
     try:
-        if not setup_owns_current_omlx(brew, omlx):
+        if not command_output([brew, "list", "--versions", OMLX_FORMULA]):
             return
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(homebrew_failure_message("check", exc)) from exc
@@ -206,52 +306,6 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
         action = "reinstall" if broken else "update"
         raise RuntimeError(homebrew_failure_message(action, exc)) from exc
 
-
-_foreign_cache: dict[tuple, bool] = {}
-
-
-def existing_install_is_foreign() -> bool:
-    """True unless the marked PATH oMLX resolves under setup's installed formula.
-
-    Two ``brew`` calls decide it, so the answer is cached per marker mtime and
-    resolved ``omlx`` path: a reinstall or a moved binary re-checks. A failed
-    ``brew`` call reads as foreign for that read only and is not cached.
-    """
-    omlx = installed_omlx()
-    if not omlx or not marker_path().exists():
-        return omlx is not None
-    brew = shutil.which("brew")
-    if not brew:
-        return True
-    key = (marker_path().stat().st_mtime_ns, str(Path(omlx).resolve()), brew)
-    # Read once: another thread may clear the cache between a check and an index.
-    foreign = _foreign_cache.get(key)
-    if foreign is None:
-        try:
-            foreign = not setup_owns_current_omlx(brew, omlx)
-        except (OSError, subprocess.SubprocessError):
-            return True
-        _foreign_cache.clear()
-        _foreign_cache[key] = foreign
-    return foreign
-
-
-def own_omlx_settings_file() -> Path:
-    """Where the person's own oMLX keeps ``settings.json``.
-
-    oMLX's macOS app writes a one-line ``base-path`` file when the person moves
-    its data root, and the file lives there; otherwise it is under ``~/.omlx``
-    (oMLX v0.7.0 ``omlx/settings.py``: bootstrap file 46-49, resolution 52-71,
-    ``settings.json`` joined to the base path at 1076). An ``OMLX_BASE_PATH``
-    environment variable wins in oMLX but is that process's own, so not visible here.
-    """
-    bootstrap = Path.home() / "Library" / "Application Support" / "oMLX" / "base-path"
-    try:
-        moved = bootstrap.read_text(encoding="utf-8").strip()
-    except OSError:
-        moved = ""
-    base = Path(moved).expanduser() if moved else Path.home() / ".omlx"
-    return base / "settings.json"
 
 
 class DiskSpaceError(RuntimeError):
@@ -324,44 +378,6 @@ def require_free_disk(download_bytes: int, model_dir: Path | None, repository: s
             f"This download needs {needed / 1000**3:.0f} GB of free disk space and this computer has "
             f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.")
 
-
-def own_omlx_port(settings_file: Path | None = None) -> int:
-    """The port the person's own oMLX serves on: its settings file, else 8000.
-
-    oMLX keeps it at ``server.port`` of that file (v0.7.0 ``omlx/settings.py``:
-    ``ServerSettings.port`` default 8000 at 190-194, read from the file's
-    ``server`` section at 1110) and a ``--port`` flag or ``OMLX_PORT`` can override
-    it for one launch (``omlx/cli.py:499``, ``omlx/settings.py:1174``), which this
-    cannot see. Only that one field is read; nothing else in the file (it also
-    holds the server's api_key) is kept, logged or returned, and nothing is written.
-    """
-    port = _settings_section(settings_file or own_omlx_settings_file(), "server").get("port")
-    if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535:
-        return port
-    return DEFAULT_PORT
-
-
-def own_omlx_admin_key(settings_file: Path | None = None) -> str | None:
-    """The admin key oMLX already holds, from its settings file, else None.
-
-    A settings file left by the person's earlier oMLX keeps that oMLX's key, and
-    admin sign-in accepts only it (v0.7.0 ``omlx/admin/routes.py`` ``login``,
-    1906-1939; ``AuthSettings.api_key`` at ``omlx/settings.py:649``), so setup
-    signs in with it rather than a new one. An ``OMLX_API_KEY`` set for one launch
-    (``omlx/settings.py:1269``) is not visible here. Only ``auth.api_key`` is read;
-    it goes to the caller alone, is never logged, and nothing is written.
-    """
-    key = _settings_section(settings_file or own_omlx_settings_file(), "auth").get("api_key")
-    return key if isinstance(key, str) and key else None
-
-
-def _settings_section(path: Path, name: str) -> dict:
-    """One top-level section of oMLX's settings file, or {} when it cannot be read."""
-    try:
-        section = json.loads(path.read_text(encoding="utf-8")).get(name)
-    except (OSError, ValueError, AttributeError):
-        return {}
-    return section if isinstance(section, dict) else {}
 
 
 _LOG_ERROR = re.compile(r"^(ERROR|CRITICAL)\b| - (ERROR|CRITICAL) - |^\w*(Error|Exception):")

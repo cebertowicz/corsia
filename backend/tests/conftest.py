@@ -381,14 +381,6 @@ def _omlx_admin_request_bound_before_any_patch():
     yield
 
 
-@pytest.fixture(autouse=True)
-def _no_cached_omlx_ownership_between_tests():
-    """The foreign-oMLX answer is cached process-wide; each test decides it afresh."""
-    ownership = sys.modules.get("llm.local_setup_ownership")
-    if ownership is not None:
-        ownership._foreign_cache.clear()
-    yield
-
 
 @pytest.fixture(autouse=True)
 def _no_local_model_between_tests(monkeypatch, tmp_path_factory):

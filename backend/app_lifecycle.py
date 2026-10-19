@@ -160,8 +160,12 @@ async def lifespan(app: FastAPI):
         await start_documents()
         from llm.local_model import backfill_legacy_record
         from llm.local_setup import resume_pending_setup
+        from onboarding.local_download_wake import resume_pending_local_download
         await asyncio.to_thread(backfill_legacy_record)
         await resume_pending_setup()
+        # A terminal setup download may have been persisted before a backend restart.
+        # The retry owner starts only when that outbox has rows and is joined on shutdown.
+        await resume_pending_local_download()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(

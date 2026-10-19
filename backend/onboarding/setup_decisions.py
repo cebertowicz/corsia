@@ -314,7 +314,6 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
     raising it runs on.
     """
     from infra.db_async import run_in_db, run_off_db
-    from llm import own_omlx_management
 
     from onboarding.project_discovery import Roots, session_apps
 
@@ -330,8 +329,11 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
         for row in rows:
             if row.get("source") == "omlx" and row.get("omlx_settings") is not None:
                 omlx = tuple((row["omlx_settings"] or {}).get("differences") or ())
-                managed = (row.get("omlx_management") or {}).get("state") == "managed"
-                use_mine = await run_off_db(own_omlx_management.uses_mine)
+                management_state = (row.get("omlx_management") or {}).get("state")
+                managed = management_state == "managed"
+                # The source snapshot is the canonical live ownership view. Its non-managed
+                # states intentionally suppress the retired first-run oMLX settings decision.
+                use_mine = management_state != "managed"
     works = await web_search_works() if probe_web_search else False
     card = await run_in_db(import_card, agent_model, ready_sources(rows)) if agent_model else None
     return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email), managed, use_mine,

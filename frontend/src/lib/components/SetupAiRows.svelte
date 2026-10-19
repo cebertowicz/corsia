@@ -49,7 +49,7 @@
 
 <style>
 	/* Rows keep the narrow window's width in a wide one, so an action stays beside its text. */
-	.rows { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 10); }
+	.rows { display: flex; flex-direction: column; gap: var(--space-4); width: 100%; }
 	.item :global(.row-actions) { width: calc(var(--space-8) * 3); justify-content: flex-end; }
 	.disclosure { display: grid; grid-template-rows: 1fr; overflow: hidden; }
 	.detail { margin: var(--space-2) 0 0; font-size: var(--text-subhead); color: var(--text-secondary); line-height: var(--lh-normal); text-wrap: pretty; }

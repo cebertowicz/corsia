@@ -7,20 +7,16 @@ through the module at call time so one set of names is patched and observed.
 from __future__ import annotations
 
 import asyncio
-import secrets
 from typing import Callable
 
 from llm import local_setup as ls
 from llm import local_setup_prepare as prepare
 from llm.local_model import LocalModel, omlx_has_recommender, record_set_up
+from llm.local_setup_ownership import managed_omlx_paths, retire_legacy_owned_omlx_service
 
 
 async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
-    """Install, start and secure CORSIA's own oMLX; return its server id and port.
-
-    Prepare and the flight share it. An oMLX older than the recommender is
-    updated with the same repair as one older than loopback auth.
-    """
+    """Start CORSIA's supervised oMLX on its private state-root paths and port."""
     report("Installing")
     version = await asyncio.to_thread(ls.omlx_version)
     needs_repair = (not await asyncio.to_thread(ls._omlx_supports_loopback_auth)
@@ -31,24 +27,24 @@ async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
         await asyncio.to_thread(ls._ensure_omlx, report)
     if not await asyncio.to_thread(ls._omlx_supports_loopback_auth):
         raise RuntimeError(ls.UPDATE_OMLX_MESSAGE)
+    # The old Homebrew service is stopped only after its marker and resolved
+    # formula location prove CORSIA installed it. A user-owned oMLX is untouched.
+    await asyncio.to_thread(retire_legacy_owned_omlx_service)
+    paths = await asyncio.to_thread(managed_omlx_paths)
+    from llm.local_setup_runtime import register_managed_server
+    from llm.providers.omlx_supervisor import start_server
+
+    server_id, key = await register_managed_server(
+        port=paths.port, base_path=str(paths.base_path), model_dir=str(paths.model_dir),
+    )
     report("Starting")
-    # `omlx start` runs `omlx serve` as a brew service on its default 127.0.0.1. It takes
-    # no address (`serve --host` would write one into oMLX's settings), so
-    # secure_local_omlx proves the bind is loopback before the skip flag is set.
-    # It serves on the port in oMLX's settings file (a leftover one may set any
-    # port), so the port is read from there, never assumed.
-    await asyncio.to_thread(ls._run, ["omlx", "start"])
-    port = await asyncio.to_thread(ls.own_omlx_port)
-    await ls._wait_for_health(port)
-    # A leftover settings file may already hold an admin key, and oMLX signs in
-    # with no other, so that key wins over the registered one or a new one.
-    key = (await asyncio.to_thread(ls.own_omlx_admin_key)
-           or await ls.registered_local_key(ls.LOCAL_HOST, port) or secrets.token_urlsafe(32))
-    server_id = await ls._register_loopback_server(port=port, api_key=key)
+    started = await start_server({"server_id": server_id})
+    if not started.get("ok"):
+        raise RuntimeError(str(started.get("message") or "CORSIA couldn't start its local model server."))
     report("Configuring")
     await ls.secure_local_omlx(server_id, key)
     await ls._configure_global(server_id)
-    return server_id, port
+    return server_id, paths.port
 
 
 async def _setup_new_omlx(report: Callable[[str], None], events: list[str],

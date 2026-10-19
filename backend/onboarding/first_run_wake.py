@@ -22,8 +22,7 @@ APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "gmail_eligible", "web_search_ready", "github_ready", "own_omlx_source",
-    "setup", "user_profile",
+    "tool_attempts", "other_omlx", "bound_model", "web_search_ready", "github_ready", "setup", "user_profile",
 })
 UNAVAILABLE_READS = {
     "your_model": "none; omit task 1's bracket",
@@ -36,9 +35,12 @@ UNAVAILABLE_READS = {
     "sources_missing": "tool model_sources, once, without recheck",
     "agents_found": "none; leave OpenClaw and Hermes Agent out of step 4",
     "local_download": "corsia_api GET /api/providers/local/setup",
+    "setup_handoff": "setup progress handoff saved before model binding",
+    "tool_attempts": "setup progress handoff saved before model binding",
+    "other_omlx": "setup progress handoff saved before model binding",
+    "bound_model": "setup progress handoff saved before model binding",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
-    "own_omlx_source": "local oMLX ownership and source read, once",
     "user_profile": "preferred-name read from the workspace profile",
 }
 
@@ -103,53 +105,46 @@ def _app_harness_ready(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _app_sources_missing(snapshot: dict[str, Any]) -> dict[str, str]:
-    """The CLI sources F8 can offer, from the snapshot that owns their states."""
-    states = {row.get("source"): row.get("state") for row in snapshot["sources"]}
-    return {
-        name: state for name, source in (("claude_code", "claude-code"), ("codex", "codex"))
-        if (state := states.get(source)) in {"not_installed", "needs_auth"}
-    }
+    """The subscription rows the app chat may offer, from the source snapshot that owns their state."""
+    missing: dict[str, str] = {}
+    for name, source in (("claude_code", "claude-code"), ("codex", "codex")):
+        row = next((item for item in snapshot["sources"] if item.get("source") == source), {})
+        state = row.get("state")
+        if row.get("limited") is True:
+            missing[name] = "limited"
+        elif state in {"not_installed", "needs_auth", "unusable", "limited"}:
+            missing[name] = str(state)
+        elif state == "unverified":
+            missing[name] = "unusable"
+    return missing
 
 
 def _app_agents_found() -> list[str]:
-    """Which of OpenClaw and Hermes Agent have a config here: a stat, never a read, since the person has not said yes."""
-    from pathlib import Path
+    """Tools with importable context, found by stat only and independent of provider readiness."""
+    from onboarding import agent_import
+    from onboarding.project_discovery import Roots
 
-    from tools import mcp_import_agents
-
-    home = Path.home()
-    return [source for source in mcp_import_agents.SOURCES if mcp_import_agents.config_path(source, home).is_file()]
+    return agent_import.found_tools(Roots.for_user())
 
 
 def _app_local_download() -> dict[str, Any]:
-    """The local setup flight in the compact form the app first-run guidance reads."""
-    from llm.local_setup import setup_status
+    """The current local-model state through the canonical, safe projection."""
+    from onboarding.local_download_state import current
 
-    status = setup_status()
-    state = status["state"]
-    if state in {"running", "downloading"}:
-        return {"state": "downloading", "progress": status["stage"]}
-    if state == "succeeded":
-        return {"state": "done"}
-    if state == "failed":
-        return {"state": "failed", "message": status["result"].get("message")}
-    return {"state": "none"}
+    return current()
 
 
 def _app_github_ready(snapshot: dict[str, Any]) -> bool:
     return any(snapshot[key].get("state") == "ready" for key in ("github_agent", "github"))
 
 
-def _own_omlx_source() -> bool:
-    from llm.local_setup_ownership import existing_install_is_foreign
-    from llm.network_discovery import get_servers
+def _app_setup_handoff() -> dict[str, Any] | None:
+    """The validated setup-only facts that the first-run wake cannot reconstruct live."""
+    from infra import setup_progress
 
-    if not existing_install_is_foreign():
-        return False
-    return any(
-        server.get("kind") != "external" and server.get("status") == "online"
-        for server in get_servers(provider="omlx")
-    )
+    record = setup_progress.read() or {}
+    handoff = record.get("handoff")
+    return handoff if isinstance(handoff, dict) else None
 
 
 def _app_user_profile() -> dict[str, str | None]:
@@ -221,7 +216,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
         "web_search_ready": setup_decisions.web_search_works,
-        "own_omlx_source": lambda: run_off_db(_own_omlx_source),
+        "setup_handoff": lambda: run_in_db(_app_setup_handoff),
         "setup": lambda: _app_setup(model),
         "user_profile": lambda: run_off_db(_app_user_profile),
     })
@@ -236,17 +231,32 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         harness_ready = _unavailable("harness_ready")
         sources_missing = _unavailable("sources_missing")
         github_ready = _unavailable("github_ready")
+    handoff = reads["setup_handoff"]
+    if isinstance(handoff, dict) and "unavailable" not in handoff:
+        tool_attempts = handoff.get("tools")
+        if isinstance(tool_attempts, dict):
+            tool_attempts = {
+                "claude_code": tool_attempts.get("claude-code"),
+                "codex": tool_attempts.get("codex"),
+            }
+        other_omlx = handoff.get("other_omlx")
+        bound_model = handoff.get("bound_model")
+    elif isinstance(handoff, dict):
+        unavailable = _unavailable("tool_attempts")
+        tool_attempts = other_omlx = bound_model = unavailable
+    else:
+        tool_attempts = other_omlx = bound_model = None
     return {
         "first_run_path": "app",
         "harness_ready": harness_ready,
         "sources_missing": sources_missing,
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
-        # Every install is offered Google setup; the key stays for the first-run reference's gate.
-        "gmail_eligible": True,
+        "tool_attempts": tool_attempts,
+        "other_omlx": other_omlx,
+        "bound_model": bound_model,
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,
-        "own_omlx_source": reads["own_omlx_source"],
         "setup": reads["setup"],
         "user_profile": reads["user_profile"],
     }

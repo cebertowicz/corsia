@@ -7,6 +7,7 @@ import re
 import sqlite3
 from collections.abc import Callable, Sequence
 from typing import Any
+from pathlib import Path
 
 from connections.account_readiness import AccountReadiness
 
@@ -90,8 +91,11 @@ def resolve_builtin_binary(provider: str, *, db=None) -> tuple[dict, str | None]
     return cfg, binary_from_config(provider, cfg)
 
 
-def binary_from_config(provider: str, cfg: dict) -> str | None:
-    """A built-in CLI's executable for an already-read connection config, or None if missing."""
+def binary_from_config(provider: str, cfg: dict, *, candidate_roots: tuple[Path, ...] | None = None) -> str | None:
+    """Resolve a CLI; tests may supply search roots without changing this machine's installs.
+
+    The injected roots are a Python-only seam, never a persisted setting or environment override.
+    """
     import os
     import shutil
 
@@ -99,9 +103,12 @@ def binary_from_config(provider: str, cfg: dict) -> str | None:
     manual = cfg.get("binary")
     if manual and os.path.isfile(manual) and os.access(manual, os.X_OK):
         return manual
-    found = shutil.which(name)
+    search_path = None if candidate_roots is None else os.pathsep.join(str(root) for root in candidate_roots)
+    found = shutil.which(name, path=search_path)
     if found:
         return found
+    if candidate_roots is not None:
+        candidates = [str(root / name) for root in candidate_roots]
     for c in candidates:
         p = os.path.expanduser(c)
         if os.path.isfile(p) and os.access(p, os.X_OK):

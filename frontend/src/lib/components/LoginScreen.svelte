@@ -5,10 +5,13 @@
 	import { connectionError } from '$lib/stores/connection';
 	import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
 	import { Button } from '$lib/components/ui';
+	import SetupShell from './SetupShell.svelte';
+	import { saveSetupReport } from '$lib/setupReport';
 
 	interface Props { onNoAccount?: () => void; }
-	const { onNoAccount } = $props<Props>();
-	type Phase = 'checking' | 'no-account' | 'form';
+	const { onNoAccount }: Props = $props();
+	type Phase = 'checking' | 'no-account' | 'form' | 'error';
+	let reportError = $state('');
 
 	let phase = $state<Phase>('checking');
 	let username = $state('');
@@ -21,8 +24,11 @@
 	// answer 403 to anyone else, who keeps the `corsia user add` guidance.
 	async function setupCapable(): Promise<boolean> {
 		try {
-			return (await fetch('/api/setup/status')).ok;
+			const response = await fetch('/api/setup/status');
+			if (!response.ok && response.status !== 403 && response.status !== 409) throw new Error('setup status');
+			return response.ok;
 		} catch {
+			phase = 'error';
 			return false;
 		}
 	}
@@ -35,9 +41,7 @@
 			phase = data.has_users ? 'form' : 'no-account';
 			if (!data.has_users && (await setupCapable())) onNoAccount?.();
 		} catch {
-			// Can't tell whether an account exists; fail open to the form so a
-			// reachable login endpoint still lets the user try to sign in.
-			phase = 'form';
+			phase = 'error';
 		}
 	}
 
@@ -105,6 +109,11 @@
 	});
 </script>
 
+{#if phase === 'error'}
+	<SetupShell steps={[]} page="error" title="CORSIA couldn’t start" lede={reportError || 'Something went wrong while starting. Retry, or save a report to send.'} primary={{ label: 'Retry' }} onPrimary={checkAgain}>
+		{#snippet secondary()}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/snippet}
+	</SetupShell>
+{:else}
 <div class="login-screen">
 	<div class="login-card">
 		<img class="login-logo" src="/icons/corsia-mark.svg" alt="CORSIA" />
@@ -143,6 +152,7 @@
 		{/if}
 	</div>
 </div>
+{/if}
 
 <style>
 	.login-screen {

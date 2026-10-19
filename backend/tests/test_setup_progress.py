@@ -21,6 +21,15 @@ JSON_HEADERS = {**HOST, "Content-Type": "application/json"}
 ACCOUNT = {"name": "First", "username": "first", "password": "a-long-enough-password"}
 
 
+HANDOFF = {
+    "tools": {
+        "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
+        "codex": {"attempt": "none"},
+    },
+    "other_omlx": "kept_both",
+}
+
+
 @pytest.fixture
 def facts(monkeypatch):
     """The eligibility facts `_setup_status` reads now; a test changes them to prove they are not stored."""
@@ -129,10 +138,65 @@ def test_an_account_made_by_the_cli_has_no_setup_to_resume(client):
     assert _progress(client, token)["setup_completed"] is True
 
 
+def test_pre_account_local_download_status_exposes_only_the_safe_projection(client, monkeypatch):
+    monkeypatch.setattr("onboarding.local_download_state.current", lambda: {
+        "state": "failed", "cause": "disk_full", "bytes_to_free": 1024,
+    })
+
+    response = client.get("/api/setup/local-download", headers=HOST)
+
+    assert response.status_code == 200
+    assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}
+
+
+@pytest.mark.asyncio
+async def test_local_download_requires_a_foreign_process_choice_and_only_stops_the_verified_pid(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    started = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: 42)
+    monkeypatch.setattr(setup_api, "stop_foreign_omlx_process", lambda pid: pid == 42)
+    monkeypatch.setattr("llm.local_setup.begin_local_setup", started)
+
+    assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
+    kept = client.post("/api/setup/local-download", json={"consent_existing": True, "manage_existing": False}, headers=JSON_HEADERS)
+    assert kept.status_code == 200 and kept.json() == {"ok": True}
+    stopped = client.post("/api/setup/local-download", json={"consent_existing": True, "manage_existing": True}, headers=JSON_HEADERS)
+    assert stopped.status_code == 200 and stopped.json() == {"ok": True}
+    assert started.await_count == 2
+
+
 def test_before_an_account_only_the_local_choice_is_taken(client):
     assert _put(client, {"step": "models"}).status_code == 422
+    assert _put(client, {"handoff": HANDOFF}).status_code == 422
     assert _put(client, {"completed": True}).status_code == 422
     assert setup_progress.read() is None
+
+
+def test_handoff_can_be_written_before_binding_then_replaced_on_success(client):
+    token = _create_account(client)
+
+    assert _put(client, {"handoff": HANDOFF}, token).status_code == 200
+    assert setup_progress.read()["handoff"] == HANDOFF
+    completed_handoff = {**HANDOFF, "bound_model": {"model": "claude-code/sonnet", "source": "claude-code"}}
+    assert _put(client, {"completed": True, "handoff": completed_handoff}, token).status_code == 200
+
+    assert setup_progress.read()["handoff"] == completed_handoff
+    # A stale tab cannot change either completion or the handoff after the bind succeeded.
+    assert _put(client, {"handoff": HANDOFF}, token).status_code == 200
+    assert setup_progress.read()["handoff"] == completed_handoff
+
+
+@pytest.mark.parametrize("handoff", [
+    {**HANDOFF, "tools": {"claude-code": {"attempt": "none"}}},
+    {**HANDOFF, "tools": {"claude-code": {"attempt": "install_failed"}, "codex": {"attempt": "none"}}},
+    {**HANDOFF, "tools": {"claude-code": {"attempt": "none", "cause": "other"}, "codex": {"attempt": "none"}}},
+])
+def test_handoff_refuses_missing_tool_or_unsafe_failure_shape(client, handoff):
+    token = _create_account(client)
+
+    assert _put(client, {"handoff": handoff}, token).status_code == 422
+    assert "handoff" not in (setup_progress.read() or {})
 
 
 def test_after_an_account_a_write_needs_a_session(client):
@@ -179,6 +243,13 @@ def test_update_reads_and_writes_inside_one_write_transaction(isolated_db, monke
 
 
 ALL_PICKS = {"claude": True, "chatgpt": False, "key": True}
+HANDOFF = {
+    "tools": {
+        "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
+        "codex": {"attempt": "none"},
+    },
+    "other_omlx": "kept_both",
+}
 
 
 def test_welcome_picks_survive_the_account_and_a_reload(client):

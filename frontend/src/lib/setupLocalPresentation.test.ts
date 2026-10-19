@@ -32,14 +32,11 @@ describe('local setup presentation', () => {
 			.toBe('Download paused. It will resume when progress returns.');
 	});
 
-	it('says when their own oMLX is too old to check, with no Try again in the line', () => {
-		const own = (cannotCheck: string | null) => downloading({
-			setup_downloading: false, omlx_management: { state: 'managed', cannot_check: cannotCheck, required_version: '0.7.1rc1', restores: [], forgets_key: true } });
-		expect(setupSourceMeta(own('0.6.2'), '', '30 GB'))
-			.toBe('CORSIA couldn’t check which local AI model fits this computer: your oMLX is older than 0.7.1rc1. Updating oMLX lets CORSIA check.');
-		expect(setupSourceMeta(own(null), '', '30 GB')).toBe('Free and private, and works offline. 30 GB download.');
-		expect(setupSourceMeta(own(null), '', '')).toBe('Free and private, and works offline.');
-		expect(setupSourceMeta(own('0.6.2'), 'failed', '30 GB')).toBe('Download needs attention');
+	it('keeps local-model setup state separate from any other oMLX installation', () => {
+		const local = downloading({ setup_downloading: false });
+		expect(setupSourceMeta(local, '', '30 GB')).toBe('Free and private, and works offline. 30 GB download.');
+		expect(setupSourceMeta(local, '', '')).toBe('Free and private, and works offline.');
+		expect(setupSourceMeta(local, 'failed', '30 GB')).toBe('Download needs attention');
 	});
 });
 

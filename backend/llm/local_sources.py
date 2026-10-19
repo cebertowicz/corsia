@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from llm.catalog import list_models
-from llm.local_setup_ownership import installed_omlx
+from llm.local_setup_ownership import installed_omlx, is_corsia_managed_server
 from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
@@ -93,7 +93,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         return result
     name = "Local model"
     servers = [s for s in get_servers(provider="omlx")
-               if s.get("kind") != "external" and s.get("status") != "disabled"]
+               if is_corsia_managed_server(s) and s.get("status") != "disabled"]
     if not servers:
         if installed_omlx() is None:
             result = starter_source("not_installed", "oMLX is not installed", "Install oMLX")
@@ -145,62 +145,10 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
     return result
 
 
-_UNSET = object()
-
-
-def _restore_lines(values: dict[str, Any], model: str | None = None) -> list[str]:
-    from onboarding import setup_strings as text
-
-    lines = []
-    for key, value in sorted(values.items()):
-        label = text.OMLX_LABELS.get(key, key)
-        shown = text.omlx_value(value)
-        lines.append(text.OMLX_RESTORE_MODEL.format(label=label, model=model, value=shown) if model
-                     else text.OMLX_RESTORE.format(label=label, value=shown))
-    return lines
-
-
-def omlx_management(record: Any = _UNSET) -> dict[str, Any]:
-    """Whether CORSIA manages the person's own oMLX, and what stopping puts back.
-
-    ``restore_failed`` covers a stop that did not finish, so Settings offers it again.
-    ``cannot_check`` is their oMLX's version while CORSIA manages one too old to recommend.
-    ``forgets_key``: stopping removes the admin key, which CORSIA stored only to manage it.
-    ``starter_note``: why the starter model was downloaded, when their oMLX had no pick;
-    ``starter_name`` is that model's name, for the background download's label.
-    A restore record the person never chose management for reads as not managed.
-    """
-    from llm import local_model, own_omlx_management
-    from llm.local_setup_prepare import fallback_note
-
-    if record is _UNSET:
-        record = own_omlx_management.read()
-    if record is None or (record.active and not record.consented):
-        return {"state": "not_managed", "cannot_check": None, "required_version": local_model.OMLX_PIN,
-                "restores": [], "forgets_key": False, "starter_note": None, "starter_name": None}
-    restores = [*_restore_lines(record.originals_global),
-                *(line for model, values in sorted(record.originals_models.items())
-                  for line in _restore_lines(values, model))]
-    starter = record.model if record.manages and record.fallback else None
-    return {"state": "managed" if record.manages else "restore_failed",
-            "cannot_check": record.cannot_check if record.manages else None,
-            "required_version": local_model.OMLX_PIN, "restores": restores,
-            "forgets_key": record.key_registered,
-            "starter_note": fallback_note(starter) if starter else None,
-            "starter_name": starter.display_name if starter else None}
-
 
 def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
-    """The local source row, with which flight a download or failure belongs to.
-
-    ``omlx_settings`` is set only for the person's own oMLX: None when unknown,
-    ``[]`` when its settings match CORSIA's recommended ones, else the differences.
-    ``omlx_management`` is likewise only theirs (``omlx_management()``).
-    """
+    """The CORSIA-managed local source row and its active download state."""
     from llm.local_setup import flight_model, setup_kind, setup_stage
-    from llm.local_setup_ownership import existing_install_is_foreign
-    from llm import own_omlx_management
-    from llm.omlx_global_settings import differences, fingerprint
 
     result = _omlx_state(membership)
     flying = result.get("setup_downloading") or result.get("setup_error")
@@ -230,12 +178,4 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
                 "percent": None,
                 "failed": True,
             }
-    own = existing_install_is_foreign()
-    ids = [s["id"] for s in get_servers(provider="omlx")
-           if s.get("kind") != "external" and s.get("status") == "online"] if own else []
-    record = own_omlx_management.read() if own else None
-    entries = differences(ids, record) if own and len(ids) == 1 else None
-    result["omlx_settings"] = ({"differences": entries, "fingerprint": fingerprint(ids[0], entries)}
-                               if entries else entries)
-    result["omlx_management"] = omlx_management(record) if own else None
     return result
