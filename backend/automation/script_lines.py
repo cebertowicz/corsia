@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from automation import script_schedules as store
+from infra.measure_admission import UNNAMED_LINE
 
 MAX_MEASURE_LINES = 200
-UNNAMED_LINE = "(measure line)"
 
 
 @dataclass(frozen=True)

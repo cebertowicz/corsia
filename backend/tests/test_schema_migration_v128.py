@@ -1,4 +1,4 @@
-"""Schema 126 -> 127: declared measure registry and per-agent, per-day intake counters."""
+"""Schema 126 -> 127: declared measure registry, per-agent per-day intake counters, a schedule's last measures."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ def _key(db: sqlite3.Connection) -> list[str]:
     return [row[1] for row in sorted(db.execute("PRAGMA table_info(outcome_event_counters)"), key=lambda row: row[5]) if row[5]]
 
 
-def _index_sql(db: sqlite3.Connection) -> str | None:
-    row = db.execute("SELECT sql FROM sqlite_master WHERE name='idx_outcome_events_agent_observed'").fetchone()
+def _index_sql(db: sqlite3.Connection, name: str = "idx_outcome_events_agent_observed") -> str | None:
+    row = db.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()
     return " ".join(row[0].split()) if row else None
 
 
@@ -52,8 +52,7 @@ def _wound_back_to_v126(*, registry_present: bool = False) -> sqlite3.Connection
     db.execute("INSERT INTO outcome_event_counters VALUES ('attribute_dropped','github.pr.opened',3)")
     if not registry_present:
         db.execute("DROP TABLE measure_definitions")
-        db.execute("DROP TABLE measure_namespaces")
-        db.execute("DROP TABLE measure_workflows")
+        db.execute("ALTER TABLE automation_schedules DROP COLUMN last_measures")
     db.execute("DROP INDEX idx_outcome_events_agent_observed")
     db.execute("PRAGMA user_version=126")
     db.commit()
@@ -68,10 +67,13 @@ def test_the_step_is_registered_at_126() -> None:
 def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -> None:
     with closing(_fresh()) as fresh, closing(_wound_back_to_v126()) as db:
         migrate_126_to_127(db)
-        for table in ("outcome_event_counters", "measure_definitions", "measure_namespaces", "measure_workflows"):
+        for table in ("outcome_event_counters", "measure_definitions", "automation_schedules"):
             assert _columns(db, table) == _columns(fresh, table)
+        assert ("last_measures", "TEXT") in _columns(db, "automation_schedules")
         assert _key(db) == _key(fresh) == ["agent_thread_id", "day", "event_name", "counter"]
-        assert _index_sql(db) == _index_sql(fresh) and _index_sql(db) is not None
+        for index in ("idx_outcome_events_agent_observed", "idx_measure_definitions_kind_name"):
+            assert _index_sql(db, index) == _index_sql(fresh, index) and _index_sql(db, index) is not None
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name IN ('measure_namespaces','measure_workflows')").fetchone()
         assert db.execute("SELECT counter,event_name,agent_thread_id,day,n FROM outcome_event_counters ORDER BY counter").fetchall() == [
             ("attribute_dropped", "github.pr.opened", "", "0000-00-00", 3),
             ("duplicate_ignored", "github.pr.opened", "", "0000-00-00", 7),
@@ -86,11 +88,13 @@ def test_the_step_runs_after_the_startup_schema_pass_and_again() -> None:
         assert db.execute("SELECT sum(n) FROM outcome_event_counters").fetchone()[0] == 10
 
 
-def test_the_counter_check_admits_the_five_new_counters() -> None:
+def test_the_counter_check_admits_the_four_new_counters_and_nothing_unwritten() -> None:
     with closing(_wound_back_to_v126()) as db:
         migrate_126_to_127(db)
-        for counter in ("name_undeclared", "namespace_not_owned", "rate_limited", "record_refused", "unversioned"):
+        for counter in ("name_undeclared", "namespace_not_owned", "record_refused", "unversioned"):
             db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES (?,?,?,?)", (counter, "mail.triaged", "a", "2026-01-01"))
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES ('rate_limited','mail.triaged','a','2026-01-01')")
 
 
 def test_the_runner_takes_a_126_database_to_current_and_stays_there() -> None:

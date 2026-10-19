@@ -1,6 +1,7 @@
 """Declared measure intake: a script run's measure lines through the one admission function."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 from pathlib import Path
@@ -11,8 +12,8 @@ from automation import script_schedules as store
 from automation.schedules import get as get_schedule
 from automation.script_readings import build_report, emit_report
 from automation.script_sandbox import ScriptRun
-from infra.measure_admission import admit
-from infra.measure_registry import REGISTRY, sync
+from infra.measure_admission import NOT_YOURS, UNDECLARED, admit
+from infra.measure_registry import REGISTRY, WorkflowOwner, sync
 from infra.measure_status import status
 from infra.schema import SCHEMA_SQL
 
@@ -20,10 +21,11 @@ QG, OTHER = "agent-qg", "agent-other"
 T0 = "2026-01-01T12:00:00+00:00"
 FIXTURE = Path(__file__).parent / "fixtures" / "measures" / "qg_measures.yaml"
 GOOD = {"pr": "907", "head_sha": "abfa9122", "model": "m", "reviewer_version": "r1", "verdict": "block", "blocks": 2, "flags": 1}
+VERSION = "0123abcd+4567ef01"  # what the runner resolves for llm-pr-review before settling
 
 
 def world(tmp_path: Path) -> sqlite3.Connection:
-    """A disposable database where agent-qg owns a copy of QG's file and its workflow."""
+    """A disposable database where agent-qg owns a copy of QG's file and its workflow (a thread-scope skill)."""
     REGISTRY.reset()
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
@@ -32,9 +34,10 @@ def world(tmp_path: Path) -> sqlite3.Connection:
         db.execute("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES (?,?,?,?)", (thread, "user", T0, T0))
     folder = tmp_path / ".threads" / QG / "skills" / "llm-pr-review"
     folder.mkdir(parents=True)
-    (folder / "SKILL.md").write_text(f"---\nname: llm-pr-review\ncorsia:\n  workflow:\n    owner: {QG}\n---\n")
+    (folder / "SKILL.md").write_text("---\nname: llm-pr-review\n---\n")
     (folder / "measures.yaml").write_text(FIXTURE.read_text())
-    sync(db, owner_thread_id=QG, path=str(folder / "measures.yaml"), text=FIXTURE.read_text())
+    owners = {"llm-pr-review": WorkflowOwner(folder, QG)}
+    sync(db, owner_thread_id=QG, path=str(folder / "measures.yaml"), text=FIXTURE.read_text(), workflows=owners)
     return db
 
 
@@ -44,10 +47,17 @@ def schedule(db: sqlite3.Connection, tmp_path: Path, *, workflow: str | None = "
     return store.create_script(QG, "project-1", script_path=path, script_sha256=store.file_sha256(path), cadence_seconds=600, series=[], timeout_seconds=30, now=T0, workflow=workflow, db=db)
 
 
+def stamp_for(sched) -> tuple[str, str] | None:
+    """The runner's resolved stamp: llm-pr-review is agent-qg's; any other workflow is no one's here."""
+    workflow = (sched.payload or {}).get("workflow")
+    return (workflow, VERSION) if workflow == "llm-pr-review" and sched.thread_id == QG else None
+
+
 def run_script(db: sqlite3.Connection, sched, lines: list[dict], run_id: str) -> None:
-    """One script run: the runner stamps its own run id, then settles the rows."""
+    """One script run: the runner stamps its own run id and resolved workflow, then settles the rows."""
     stdout = "".join(json.dumps({"measure": line}) + "\n" for line in lines).encode()
-    emit_report(db, get_schedule(sched.id, db=db), build_report(sched, ScriptRun(0, stdout, b"", False), run_id=run_id), now=T0)
+    report = build_report(sched, ScriptRun(0, stdout, b"", False), run_id=run_id)
+    emit_report(db, get_schedule(sched.id, db=db), dataclasses.replace(report, workflow_stamp=stamp_for(sched)), now=T0)
 
 
 def line(event: str, attributes: dict) -> dict:
@@ -72,6 +82,7 @@ def test_script_good_and_maybe_lines_land_and_status_shows_the_drop(tmp_path: Pa
     assert all(row[1:6] == ("agent", "agent_recorded", "caller", QG, "project-1") for row in landed)
     stored = json.loads(landed[0][6])
     assert stored["run_id"] == f"script:{sched.id}:uuid-1" and stored["workflow_ref"] == "llm-pr-review"
+    assert stored["workflow_version"] == VERSION
     shown = status(db, QG)["events"]["qa.review.completed"]
     assert shown["today"] == {"rows": 2, "counters": {"attribute_dropped": 1}}
     assert shown["last_7_days"] == shown["today"]
@@ -103,23 +114,40 @@ def test_rerun_inserts_run_keyed_events_again_and_identity_keyed_events_once(tmp
 def test_script_cannot_forge_run_id_or_workflow(tmp_path: Path) -> None:
     db = world(tmp_path)
     sched = schedule(db, tmp_path)
-    run_script(db, sched, [line("qa.review.completed", {**GOOD, "run_id": "forged", "workflow_ref": "elsewhere", "corsia.run_id": "forged"})], "uuid-1")
+    forged = {**GOOD, "run_id": "forged", "workflow_ref": "elsewhere", "workflow_version": "v0", "corsia.run_id": "forged"}
+    run_script(db, sched, [line("qa.review.completed", forged)], "uuid-1")
     stored = json.loads(rows(db)[0][6])
-    assert stored["run_id"] == f"script:{sched.id}:uuid-1" and stored["workflow_ref"] == "llm-pr-review"
-    assert counter(db, "attribute_dropped") == 3  # run_id and workflow_ref (the server's own stamps), and corsia.run_id (undeclared)
+    assert stored["run_id"] == f"script:{sched.id}:uuid-1" and stored["workflow_ref"] == "llm-pr-review" and stored["workflow_version"] == VERSION
+    assert counter(db, "attribute_dropped") == 4  # the server's three stamps, and corsia.run_id (undeclared)
 
 
 def test_script_workflow_the_agent_does_not_own_stamps_nothing(tmp_path: Path) -> None:
     db = world(tmp_path)
     run_script(db, schedule(db, tmp_path, workflow="someone-elses"), [line("qa.review.completed", GOOD)], "uuid-1")
-    assert "workflow_ref" not in json.loads(rows(db)[0][6])
+    stored = json.loads(rows(db)[0][6])
+    assert "workflow_ref" not in stored and "workflow_version" not in stored
+    assert counter(db, "unversioned") == 1
 
 
 def test_undeclared_name_inserts_nothing_and_is_counted(tmp_path: Path) -> None:
     db = world(tmp_path)
     run_script(db, schedule(db, tmp_path), [line("qa.reveiw.completed", GOOD)], "uuid-1")
     assert rows(db) == [] and counter(db, "name_undeclared") == 1
+    assert [tuple(row) for row in db.execute("SELECT DISTINCT event_name FROM outcome_event_counters")] == [(UNDECLARED,)]
     assert status(db, QG)["recent_refusals"][0].startswith('"qa.reveiw.completed" is not declared in your measures.yaml (declared: qa.audit.label, qa.escape.found, qa.review.completed')
+
+
+def test_printed_names_never_become_counter_rows(tmp_path: Path) -> None:
+    """Counter rows stay within (declared events + fixed labels) x counters, whatever a script prints."""
+    db = world(tmp_path)
+    printed = [line(f"qa.made.up{n}", GOOD) for n in range(30)]
+    printed += [line(f"zz.foreign{n}", GOOD) for n in range(30)]
+    printed += [{"event.name": f"qa.bad{n}", "attributes": [n]} for n in range(30)]  # malformed: refused before admission
+    printed += [{"event.name": "qa.review.completed", "attributes": [1]}]  # malformed, but a declared name keeps its label
+    run_script(db, schedule(db, tmp_path), printed, "uuid-1")
+    labels = {row[0] for row in db.execute("SELECT event_name FROM outcome_event_counters")}
+    assert labels == {UNDECLARED, "(measure line)", "qa.review.completed"}
+    assert counter(db, "name_undeclared") == 60 and counter(db, "record_refused") == 31
 
 
 def test_another_agents_namespace_is_refused_and_counted(tmp_path: Path) -> None:
@@ -127,6 +155,7 @@ def test_another_agents_namespace_is_refused_and_counted(tmp_path: Path) -> None
     refused = admit(db, owner_thread_id=OTHER, event_name="qa.review.completed", attributes=GOOD, run_id="r")
     assert refused.result is None and refused.refusal.startswith('Namespace "qa" belongs to another agent (thread agent-qg); you own no namespace yet')
     assert counter(db, "namespace_not_owned") == 1 and rows(db) == []
+    assert [tuple(row) for row in db.execute("SELECT event_name, agent_thread_id FROM outcome_event_counters")] == [(NOT_YOURS, OTHER)]
 
 
 def test_missing_dedupe_attribute_is_refused_with_the_prescribed_text(tmp_path: Path) -> None:
@@ -158,7 +187,7 @@ def test_invalid_attribute_values_keep_the_row_and_explain_each_drop(tmp_path: P
 def test_registry_loads_from_the_database_after_a_restart(tmp_path: Path) -> None:
     db = world(tmp_path)
     REGISTRY.reset()
-    admitted = admit(db, owner_thread_id=QG, event_name="qa.review.completed", attributes=GOOD, run_id="r", workflow="llm-pr-review")
+    admitted = admit(db, owner_thread_id=QG, event_name="qa.review.completed", attributes=GOOD, run_id="r", workflow_ref="llm-pr-review", workflow_version=VERSION)
     assert admitted.refusal is None and json.loads(rows(db)[0][6])["workflow_ref"] == "llm-pr-review"
 
 

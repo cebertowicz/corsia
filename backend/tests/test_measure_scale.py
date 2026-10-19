@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from infra.measure_registry import _LATEST
+from infra.measure_registry import _OWNER_ROWS, NAMESPACE_ROWS
 from infra.measure_status import COUNTERS_SQL, ROWS_SQL, status
 from infra.schema import SCHEMA_SQL
 
@@ -47,10 +47,15 @@ def test_the_counter_read_is_a_primary_key_range_on_the_agent_and_day() -> None:
     assert not [step for step in steps if step.startswith("SCAN")]
 
 
-def test_the_latest_versions_read_seeks_by_the_primary_key() -> None:
-    steps = plan(world(), _LATEST, (AGENT,))
+def test_the_owner_rows_read_seeks_by_the_primary_key() -> None:
+    steps = plan(world(), _OWNER_ROWS, (AGENT,))
     assert not [step for step in steps if step.startswith("SCAN") and "measure_definitions" in step and "PRIMARY KEY" not in step]
     assert any("USING INDEX sqlite_autoindex_measure_definitions_1 (owner_thread_id=?)" in step or "USING PRIMARY KEY (owner_thread_id=?" in step for step in steps)
+
+
+def test_the_in_transaction_namespace_read_is_an_index_range_on_kind_and_name() -> None:
+    steps = plan(world(), NAMESPACE_ROWS, ("qa.", "qa/"))
+    assert steps == ["SEARCH measure_definitions USING INDEX idx_measure_definitions_kind_name (kind=? AND name>? AND name<?)"]
 
 
 def test_status_counts_rows_by_when_they_were_observed_and_only_inside_the_window() -> None:

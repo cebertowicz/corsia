@@ -12,6 +12,7 @@ from infra.db_async import run_in_db
 from infra.measure_registry import sync
 from infra.measure_status import status
 from tools.base import Tool
+from tools.workflow_owners import workflow_owners
 
 
 def _context(kwargs: dict[str, Any]):
@@ -23,7 +24,7 @@ async def _sync(kwargs: dict[str, Any]) -> str:
     context = _context(kwargs)
     if isinstance(context, str):
         return context
-    thread_id, _ = context
+    thread_id, actor_row = context
     path = kwargs.get("path")
     if not isinstance(path, str):
         return "Error: path is required"
@@ -31,7 +32,12 @@ async def _sync(kwargs: dict[str, Any]) -> str:
         target, text = await asyncio.to_thread(_read_declaration, path)
 
         def load() -> dict[str, Any]:
-            return sync(get_db(), owner_thread_id=thread_id, path=str(target), text=text)
+            db = get_db()
+            try:
+                owners = workflow_owners(thread_id, actor_row.get("project_id"), db)
+                return sync(db, owner_thread_id=thread_id, path=str(target), text=text, workflows=owners)
+            finally:
+                db.close()
 
         return json.dumps(await run_in_db(load), sort_keys=True)
     except (OSError, ValueError) as exc:
@@ -54,8 +60,9 @@ class MeasureSyncTool(Tool):
     @property
     def description(self) -> str:
         return ("Load a measures.yaml into the KPI registry. A workflow's file sits beside its skill's "
-                "SKILL.md (<skill dir>/measures.yaml), agent-level measures go in "
-                ".threads/<agent>/measures.yaml, and only the file's owner can sync it. Validates names, "
+                "SKILL.md (<skill dir>/measures.yaml) and syncs only for that workflow's owner: the thread "
+                "whose own skill it is, or the `owner:` under `workflow:` in its corsia.yaml. Agent-level "
+                "measures go in .threads/<agent>/measures.yaml. Validates names, "
                 "attributes, KPIs and views, then returns added, changed or unchanged. Run it after every "
                 "change; nothing takes effect until sync succeeds.")
 

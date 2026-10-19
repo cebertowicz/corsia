@@ -15,6 +15,8 @@ _RESERVED = {"corsia", "github", "measurement", "test", "script", "agent", "otel
 # the registry adds them to each event's specs, and admission removes them from an emitter's attributes.
 STAMPED_ATTRIBUTES = ("run_id", "workflow_ref", "workflow_version")
 _KINDS = {"id", "login", "count", "num"}
+# How far back an emitter may date an event, in days: the default, and the bounds a file may set.
+KEEP_DAYS_DEFAULT, KEEP_DAYS_MAX = 400, 800
 
 Item = tuple[str, str, dict[str, Any]]
 _BOOL = "tag:yaml.org,2002:bool"
@@ -29,6 +31,17 @@ _Loader.yaml_implicit_resolvers = {
     for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 _Loader.add_implicit_resolver(_BOOL, re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF"))
+
+
+def keep_days(spec: dict[str, Any]) -> int:
+    """An event's ``keep_days``, or ValueError when it is not a whole number of days from 1 to 800.
+
+    Sync refuses a bad value with its line; the registry uses this same check to skip a bad stored spec.
+    """
+    value = spec.get("keep_days", KEEP_DAYS_DEFAULT)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= KEEP_DAYS_MAX:
+        raise ValueError(f"keep_days must be a whole number of days from 1 to {KEEP_DAYS_MAX}, not {value!r}")
+    return value
 
 
 def load(text: str) -> Any:
@@ -126,6 +139,10 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
             raise fail(lines, path + ("attributes", key), f'attribute kind "{kind}" is not allowed; use id, login, count, num or enum.')
     if any(key != "run_id" and key not in attrs for key in dedupe):
         raise fail(lines, path + ("dedupe",), f"event {name} dedupe names an undeclared attribute.")
+    try:
+        keep_days(spec)
+    except ValueError as exc:
+        raise fail(lines, path + ("keep_days",), f"event {name} {exc}; the default is {KEEP_DAYS_DEFAULT}.") from None
 
 
 def _check_version_attr(data: dict[str, Any], events: dict[str, dict[str, Any]], lines: Lines) -> None:

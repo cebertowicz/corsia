@@ -10,12 +10,16 @@ import pytest
 
 from automation.schedules import get as get_schedule
 from automation.script_readings import build_report
-from automation.script_runner import settle
+from automation.script_runner import _stamped, settle
 from automation.script_sandbox import ScriptRun
+from core.skill_scanning import scan_scope
+from core.skills_registry import SkillResolution
 from infra import database
 from infra.config import WORKSPACE
 from infra.measure_registry import REGISTRY
 from tools.automations import AutomationListTool, AutomationScheduleTool
+from tests.skill_sidecar_helpers import POINTER
+from tools import workflow_task_fields
 from tools.measures import MeasureStatusTool, MeasureSyncTool
 
 AGENT = "agent-tool-qg"
@@ -25,8 +29,12 @@ NOW = "2026-01-01T12:00:00+00:00"
 
 
 @pytest.fixture
-def agent(isolated_db):
-    """A thread in a project, its own workflow skill folder inside the workspace, and a clean registry."""
+def agent(isolated_db, monkeypatch):
+    """A thread in a project, its own workflow skill (steps in corsia.yaml) inside the workspace, and a clean registry.
+
+    The test project has no planning folder, so skill resolution would skip thread roots; the
+    thread's skills folder is scanned for real and handed to the real owner rule instead.
+    """
     REGISTRY.reset()
     with database.write_transaction(None, scope="measure_tool_seed") as db:
         db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project-tool','Tool','t','t')")
@@ -34,8 +42,13 @@ def agent(isolated_db):
     root = WORKSPACE / ".threads" / AGENT
     skill = root / "skills" / "llm-pr-review"
     skill.mkdir(parents=True)
-    (skill / "SKILL.md").write_text(f"---\nname: llm-pr-review\ncorsia:\n  workflow:\n    owner: {AGENT}\n---\n")
+    (skill / "SKILL.md").write_text(f"---\nname: llm-pr-review\ndescription: Review a PR.\n{POINTER}---\n# Review\n")
+    (skill / "corsia.yaml").write_text("workflow:\n  steps:\n    - {id: review, title: Review it, required: true, check: reviewed}\n")
     (skill / "measures.yaml").write_text(FIXTURE.read_text())
+    monkeypatch.setattr(
+        workflow_task_fields, "resolve_effective_skills",
+        lambda **_kwargs: SkillResolution(scan_scope(root, "thread", AGENT), [], []),
+    )
     script = root / "measure.py"
     script.write_text("print('x')")
     yield skill / "measures.yaml", script
@@ -62,12 +75,12 @@ async def test_measure_sync_loads_the_file_and_automation_schedule_then_accepts_
 
 
 @pytest.mark.asyncio
-async def test_automation_schedule_refuses_a_workflow_no_sync_declared_through_the_tool(agent) -> None:
+async def test_automation_schedule_refuses_a_workflow_that_is_not_one_of_the_agents_skills_through_the_tool(agent) -> None:
     _, script = agent
     refused = await AutomationScheduleTool().execute(
-        _thread_id=AGENT, kind="script", script_path=str(script), cadence_seconds=300, workflow="llm-pr-review",
+        _thread_id=AGENT, kind="script", script_path=str(script), cadence_seconds=300, workflow="other-flow",
     )
-    assert refused.startswith('Error: workflow "llm-pr-review" is not declared by any synced measures.yaml')
+    assert refused.startswith("Error: workflow other-flow is not one of your workflow skills (yours: llm-pr-review)")
 
 
 @pytest.mark.asyncio
@@ -103,7 +116,10 @@ async def test_the_file_is_resolved_and_read_off_the_event_loop(agent, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_measure_status_and_automation_list_show_a_settled_run_through_their_tools(agent) -> None:
+async def test_measure_status_and_automation_list_show_a_settled_run_through_their_tools(agent, monkeypatch) -> None:
+    import tools.workflow_owners as owners
+
+    monkeypatch.setattr(owners, "_workflow_version", lambda skill: f"v-{skill.name}")  # the test workspace has no Git
     measures, script = agent
     ok(await MeasureSyncTool().execute(_thread_id=AGENT, path=str(measures)))
     schedule_id = ok(await AutomationScheduleTool().execute(
@@ -111,15 +127,17 @@ async def test_measure_status_and_automation_list_show_a_settled_run_through_the
     ))["schedule"]["id"]
     sched = get_schedule(schedule_id, db=database.get_db())
     stdout = "".join(json.dumps({"measure": {"event.name": "qa.review.completed", "attributes": attributes}}) + "\n" for attributes in (GOOD, {**GOOD, "pr": "908", "verdict": "maybe"}))
-    settle(sched, build_report(sched, ScriptRun(0, stdout.encode(), b"", False), run_id="uuid-1"), NOW, None)
+    report = await _stamped(sched, build_report(sched, ScriptRun(0, stdout.encode(), b"", False), run_id="uuid-1"))
+    assert report.workflow_stamp == ("llm-pr-review", "v-llm-pr-review")  # resolved through the real owner rule
+    settle(sched, report, NOW, None)
     shown = ok(await MeasureStatusTool().execute(_thread_id=AGENT))
     today = shown["events"]["qa.review.completed"]["last_7_days"]
     assert today["rows"] == 2 and today["counters"] == {"attribute_dropped": 1}
     assert shown["recent_refusals"][0].startswith('qa.review.completed: attribute "verdict" value "maybe" is not one of pass, block, stop, error')
     assert [item["path"] for item in shown["synced_files"]] == [str(measures.resolve())]
     listed = ok(await AutomationListTool().execute(_thread_id=AGENT))["schedules"]
-    assert listed[0]["payload"]["last_measures"] == "measures: 2 recorded, 0 refused (measure_status)"
-    assert listed[0]["payload"]["workflow_stale"] is False
+    assert listed[0]["last_measures"] == "measures: 2 recorded, 0 refused (measure_status)"
+    assert listed[0]["workflow_stale"] is False and "workflow_stale" not in listed[0]["payload"]
 
 
 @pytest.mark.asyncio

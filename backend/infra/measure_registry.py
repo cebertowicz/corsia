@@ -6,15 +6,17 @@ import json
 import sqlite3
 import threading
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from infra.database import write_transaction
-from infra.measure_validation import STAMPED_ATTRIBUTES, Lines, load, validate
+from infra.measure_validation import STAMPED_ATTRIBUTES, Lines, keep_days, load, validate
 from infra.outcome_event_attributes import AttributeSpec
 
 REFUSAL_LIMIT = 20
@@ -22,16 +24,56 @@ _INSERT = (
     "INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) "
     "VALUES (?,?,?,?,?,?,?,?,?)"
 )
-_LATEST = (
-    "SELECT d.kind,d.name,d.version,d.spec_json,d.removed,d.file_path FROM measure_definitions d "
-    "WHERE d.owner_thread_id=? AND d.version=(SELECT max(version) FROM measure_definitions "
-    "WHERE owner_thread_id=d.owner_thread_id AND kind=d.kind AND name=d.name)"
+# The owner's rows, one PK index range; the latest version per name is picked in Python.
+_OWNER_ROWS = "SELECT kind,name,version,spec_json,removed,file_path FROM measure_definitions WHERE owner_thread_id=?"
+# The one read inside the sync transaction: every event row in a namespace, a range on idx_measure_definitions_kind_name.
+NAMESPACE_ROWS = (
+    "SELECT owner_thread_id,name,version,spec_json,removed,file_path,file_sha256 FROM measure_definitions "
+    "WHERE kind='event' AND name>=? AND name<?"
 )
-_NO_OWNER = (
-    "measure_sync: workflow {workflow} has no owner, so its measures.yaml can't be synced. "
-    "Add `corsia: {{workflow: {{owner: <your thread id>}}}}` to its SKILL.md frontmatter, "
-    "or keep your measures in your own .threads folder."
+_CONFLICT = "measure_sync: another sync of this file ran at the same time; run measure_sync again."
+# Why an agent may not use a workflow; each caller says what was refused.
+_NO_OWNER = "workflow {workflow} has no owner. Add `owner: <your thread id>` under `workflow:` in its corsia.yaml."
+_NOT_EFFECTIVE = "workflow {workflow} is not one of your workflow skills (yours: {mine}). Name a workflow skill you own."
+_OTHER_OWNER = "workflow {workflow} is owned by another agent (thread {owner}); only its owner can use it."
+_KEY_CONFLICT = (
+    "workflow {workflow} is in thread {owner}'s own skills, but its owner key names thread {named}; "
+    "only {owner} can use it. Remove the owner key, or set it to {owner}."
 )
+_NOT_BESIDE = "measure_sync: workflow {workflow}'s measures.yaml syncs only from beside its SKILL.md ({folder}/measures.yaml), not {path}."
+
+
+@dataclass(frozen=True)
+class WorkflowOwner:
+    """One effective workflow skill as the owner rule reads it (built by ``tools.workflow_owners``).
+
+    ``owner`` is the skill's thread for a thread-scope skill and its ``workflow.owner`` key
+    otherwise; ``named`` is a thread-scope skill's owner key when it names another thread.
+    """
+
+    skill_dir: Path
+    owner: str | None
+    named: str | None = None
+    skill: Any = None
+
+
+def owned_by(workflows: Mapping[str, WorkflowOwner], agent: str) -> list[str]:
+    """The effective workflows ``agent`` owns, by name."""
+    return sorted(name for name, entry in workflows.items() if entry.owner == agent and entry.named is None)
+
+
+def workflow_problem(workflows: Mapping[str, WorkflowOwner], agent: str, workflow: str) -> str | None:
+    """Why ``agent`` may not use ``workflow``, or None when it owns it."""
+    entry = workflows.get(workflow)
+    if entry is None:
+        return _NOT_EFFECTIVE.format(workflow=workflow, mine=", ".join(owned_by(workflows, agent)) or "none")
+    if entry.named is not None:
+        return _KEY_CONFLICT.format(workflow=workflow, owner=entry.owner, named=entry.named)
+    if entry.owner is None:
+        return _NO_OWNER.format(workflow=workflow)
+    if entry.owner != agent:
+        return _OTHER_OWNER.format(workflow=workflow, owner=entry.owner)
+    return None
 
 
 @dataclass(frozen=True)
@@ -48,8 +90,10 @@ class RegistryState:
     """One complete read of the declarations; the registry swaps whole states, never edits one."""
 
     events: dict[str, DeclaredEvent] = field(default_factory=dict)
-    namespaces: dict[str, str] = field(default_factory=dict)
-    workflows: dict[str, str] = field(default_factory=dict)
+
+    def namespaces_of(self, agent: str) -> list[str]:
+        """The namespaces ``agent`` holds: the ones its live events are in."""
+        return sorted({name.split(".", 1)[0] for name, event in self.events.items() if event.owner == agent})
 
 
 class MeasureRegistry:
@@ -67,14 +111,6 @@ class MeasureRegistry:
     @property
     def events(self) -> dict[str, DeclaredEvent]:
         return (self._state or RegistryState()).events
-
-    @property
-    def namespaces(self) -> dict[str, str]:
-        return (self._state or RegistryState()).namespaces
-
-    @property
-    def workflows(self) -> dict[str, str]:
-        return (self._state or RegistryState()).workflows
 
     def ensure_loaded(self, db: sqlite3.Connection) -> RegistryState:
         """The current state, loading it first when nothing has; callers that read twice keep the one state."""
@@ -103,7 +139,13 @@ class MeasureRegistry:
 
 
 REGISTRY = MeasureRegistry()
-_STAMPED_SPECS = {name: AttributeSpec("id") for name in STAMPED_ATTRIBUTES}
+_STAMPED_SPECS = {
+    "run_id": AttributeSpec("id"),
+    "workflow_ref": AttributeSpec("id"),
+    # The resolver's version: a Git SHA (with a dirty mark) or a System manifest id, longer than an id allows.
+    "workflow_version": AttributeSpec("text", max_chars=400),
+}
+assert set(_STAMPED_SPECS) == set(STAMPED_ATTRIBUTES)
 
 
 def _read_state(db: sqlite3.Connection) -> RegistryState:
@@ -115,14 +157,17 @@ def _read_state(db: sqlite3.Connection) -> RegistryState:
         "WHERE kind='event' GROUP BY owner_thread_id,name)"
     )
     for owner, name, raw in rows:
-        spec = json.loads(raw)
-        specs = {**_attribute_specs(spec["attributes"]), **_STAMPED_SPECS}
-        events[name] = DeclaredEvent(owner, specs, tuple(spec["dedupe"]), spec["attributes"], int(spec.get("keep_days", 400)))
-    return RegistryState(
-        events=events,
-        namespaces=dict(db.execute("SELECT namespace, owner_thread_id FROM measure_namespaces")),
-        workflows=dict(db.execute("SELECT workflow, owner_thread_id FROM measure_workflows")),
-    )
+        try:
+            events[name] = _declared(owner, json.loads(raw))
+        except (KeyError, TypeError, ValueError) as exc:
+            # One bad stored spec is skipped, so it can't stop intake for every other agent.
+            logger.warning("measure registry skipped {} of {}: {}", name, owner, exc)
+    return RegistryState(events=events)
+
+
+def _declared(owner: str, spec: dict[str, Any]) -> DeclaredEvent:
+    attributes = spec["attributes"]
+    return DeclaredEvent(owner, {**_attribute_specs(attributes), **_STAMPED_SPECS}, tuple(spec["dedupe"]), attributes, keep_days(spec))
 
 
 def _attribute_specs(raw: dict[str, Any]) -> dict[str, AttributeSpec]:
@@ -132,53 +177,45 @@ def _attribute_specs(raw: dict[str, Any]) -> dict[str, AttributeSpec]:
     return result
 
 
-def _skill_frontmatter(path: str) -> dict[str, Any]:
-    """The frontmatter of the SKILL.md beside a declaration file; empty when there is none."""
-    try:
-        meta = yaml.safe_load((Path(path).parent / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1])
-    except (IndexError, OSError, yaml.YAMLError):
-        return {}
-    return meta if isinstance(meta, dict) else {}
-
-
-def _check_workflow_file(path: str, workflow: str, agent: str) -> None:
-    """A workflow file syncs only when its sibling SKILL.md is named for it and names the caller as owner."""
-    meta = _skill_frontmatter(path)
-    corsia = meta.get("corsia")
-    declared = corsia.get("workflow") if isinstance(corsia, dict) else None
-    owner = declared.get("owner") if isinstance(declared, dict) else None
-    if not isinstance(owner, str) or not owner:
-        raise ValueError(_NO_OWNER.format(workflow=workflow))
-    if owner != agent:
-        raise ValueError(f"measure_sync: workflow {workflow} is owned by another agent; only its owner can sync it.")
-    if meta.get("name") != workflow:
-        raise ValueError(
-            f"measure_sync: workflow {workflow} must be the name of the skill it sits in (this SKILL.md is named {meta.get('name')}). "
-            "Change workflow: to the skill's name."
-        )
-
-
 def _check_agent_file(path: str, agent: str) -> None:
     """An agent-level file syncs only from the caller's own .threads folder."""
     folder = Path(path).parent
     if Path(path).name != "measures.yaml" or folder.name != agent or folder.parent.name != ".threads":
         raise ValueError(
             f"measure_sync: an agent-level measures.yaml syncs only from .threads/{agent}/measures.yaml, not {path}. "
-            "Move it there, or add workflow: <skill name> if it belongs to a skill you own."
+            "Move it there, or add workflow: <skill name> if it belongs to a workflow skill you own."
         )
 
 
-def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent: str) -> str:
-    """The §5 text for a namespace that another agent holds."""
-    owned = [row[0] for row in db.execute("SELECT namespace FROM measure_namespaces WHERE owner_thread_id=? ORDER BY namespace", (agent,))]
-    mine = f"you can emit {', '.join(f'{ns}.*' for ns in owned)} only. Use your own namespace, or pick a new one in measures.yaml." if owned else "you own no namespace yet. Pick a new one in measures.yaml and run measure_sync."
+def _check_workflow_file(path: str, workflow: str, agent: str, workflows: Mapping[str, WorkflowOwner]) -> None:
+    """A workflow file syncs only for its owner, from beside that workflow's SKILL.md."""
+    problem = workflow_problem(workflows, agent, workflow)
+    if problem:
+        raise ValueError(f"measure_sync: {problem} Its measures.yaml was not synced; keep agent-level measures in your own .threads folder.")
+    folder = workflows[workflow].skill_dir
+    if Path(path).resolve().parent != folder.resolve():
+        raise ValueError(_NOT_BESIDE.format(workflow=workflow, folder=folder, path=path))
+
+
+def namespace_refusal(namespace: str, holder: str, held: list[str]) -> str:
+    """The §5 text for a namespace that another agent holds; ``held`` is the caller's own namespaces."""
+    mine = f"you can emit {', '.join(f'{ns}.*' for ns in held)} only. Use your own namespace, or pick a new one in measures.yaml." if held else "you own no namespace yet. Pick a new one in measures.yaml and run measure_sync."
     return f'Namespace "{namespace}" belongs to another agent (thread {holder}); {mine}'
 
 
-def _plan(
-    latest: dict[tuple[str, str], tuple[int, str, bool, str]], owner: str, path: str, items: list[tuple[str, str, str]],
-    sha: str, now: str,
-) -> tuple[list[tuple[Any, ...]], list[dict[str, str]]]:
+Latest = dict[tuple[str, str], tuple[int, str, bool, str]]
+
+
+def _latest(rows: Any) -> Latest:
+    """The latest version of each (kind, name) among ``rows``, as (version, spec, removed, file)."""
+    latest: Latest = {}
+    for kind, name, version, spec, removed, file in rows:
+        if (kind, name) not in latest or version > latest[(kind, name)][0]:
+            latest[(kind, name)] = (version, spec, bool(removed), file)
+    return latest
+
+
+def _plan(latest: Latest, owner: str, path: str, items: list[tuple[str, str, str]], sha: str, now: str) -> tuple[list[tuple[Any, ...]], list[dict[str, str]]]:
     """The rows to insert and every item's status, from one read of the owner's latest versions."""
     inserts: list[tuple[Any, ...]] = []
     changes: list[dict[str, str]] = []
@@ -198,8 +235,63 @@ def _plan(
     return inserts, changes
 
 
-def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) -> dict[str, Any]:
-    """Validate and atomically persist a declaration file, then refresh the registry."""
+def _holder_is_gone(connection: sqlite3.Connection, thread_id: str) -> bool:
+    """True when the holder's thread no longer exists, was purged, or the person archived it."""
+    row = connection.execute("SELECT lifecycle_state, archived_reason FROM threads WHERE id=?", (thread_id,)).fetchone()
+    return row is None or row[0] == "purged" or (row[0] == "archived" and row[1] == "user")
+
+
+def _claim_namespace(connection: sqlite3.Connection, namespace: str, owner: str, held: list[str], now: str) -> tuple[list[tuple[Any, ...]], list[str]]:
+    """Refuse a namespace another live agent holds; retire a departed holder's live events in it.
+
+    Holding is derived from live event definitions, so a namespace frees when its holder's file
+    stops declaring it. Returns the retirement rows and a line per takeover for the sync result.
+    """
+    rows = connection.execute(NAMESPACE_ROWS, (f"{namespace}.", f"{namespace}/")).fetchall()  # "/" sorts right after "."
+    latest: dict[tuple[str, str], tuple[Any, ...]] = {}
+    for row in rows:
+        holder, name, version = row[0], row[1], row[2]
+        if holder != owner and ((holder, name) not in latest or version > latest[(holder, name)][2]):
+            latest[(holder, name)] = row
+    live: dict[str, list[tuple[Any, ...]]] = {}
+    for (holder, _name), row in sorted(latest.items()):
+        if not row[4]:
+            live.setdefault(holder, []).append(row)
+    retire: list[tuple[Any, ...]] = []
+    taken: list[str] = []
+    for holder, events in live.items():
+        if not _holder_is_gone(connection, holder):
+            raise ValueError(namespace_refusal(namespace, holder, held))
+        retire += [(holder, "event", name, version + 1, spec, file, sha, now, 1) for _, name, version, spec, _, file, sha in events]
+        taken.append(f"took over namespace {namespace} from {holder}; {len(events)} events retired")
+    return retire, taken
+
+
+def _attempt(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str) -> dict[str, Any]:
+    """Plan from one read outside the transaction, then write the finished rows in one short transaction."""
+    now = datetime.now(timezone.utc).isoformat()
+    latest = _latest(db.execute(_OWNER_ROWS, (owner,)))
+    inserts, changes = _plan(latest, owner, path, items, sha, now)
+    held = sorted({name.split(".", 1)[0] for (kind, name), row in latest.items() if kind == "event" and not row[2]} - {namespace})
+    with write_transaction(db, scope="measure_sync") as connection:
+        retire, taken = _claim_namespace(connection, namespace, owner, held, now)
+        connection.executemany(_INSERT, inserts + retire)
+    result: dict[str, Any] = {"namespace": namespace, "items": changes}
+    if taken:
+        result["namespace_takeover"] = taken
+    return result
+
+
+def sync(
+    db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str,
+    workflows: Mapping[str, WorkflowOwner] | None = None,
+) -> dict[str, Any]:
+    """Validate and persist a declaration file, then refresh the registry.
+
+    ``workflows`` is the caller's effective workflow skills under the owner rule; a file that
+    names a workflow syncs only when the caller owns it. A version conflict with a concurrent
+    sync re-plans once, then refuses.
+    """
     try:
         data = load(text)
     except yaml.YAMLError as exc:
@@ -210,25 +302,17 @@ def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) 
     namespace, items = validate(data, lines)
     workflow = data.get("workflow")
     if workflow:
-        _check_workflow_file(path, workflow, owner_thread_id)
+        _check_workflow_file(path, workflow, owner_thread_id, workflows or {})
     else:
         _check_agent_file(path, owner_thread_id)
     sha = hashlib.sha256(text.encode()).hexdigest()
-    now = datetime.now(timezone.utc).isoformat()
     normalized = [(kind, name, json.dumps(spec, sort_keys=True, separators=(",", ":"))) for kind, name, spec in items]
-    with write_transaction(db, scope="measure_sync") as connection:
-        # Read under the write lock, so a concurrent sync of the same file never plans from a stale read.
-        latest = {(kind, name): (version, spec, bool(removed), file) for kind, name, version, spec, removed, file in connection.execute(_LATEST, (owner_thread_id,))}
-        inserts, changes = _plan(latest, owner_thread_id, path, normalized, sha, now)
-        holder = connection.execute("SELECT owner_thread_id FROM measure_namespaces WHERE namespace=?", (namespace,)).fetchone()
-        if holder and holder[0] != owner_thread_id:
-            raise ValueError(namespace_refusal(connection, namespace, holder[0], owner_thread_id))
-        if workflow:
-            connection.execute("INSERT OR IGNORE INTO measure_workflows(workflow,owner_thread_id) VALUES (?,?)", (workflow, owner_thread_id))
-            claimed = connection.execute("SELECT owner_thread_id FROM measure_workflows WHERE workflow=?", (workflow,)).fetchone()[0]
-            if claimed != owner_thread_id:
-                raise ValueError(f"measure_sync: workflow {workflow} is already owned by another agent (thread {claimed}); use a skill name of your own.")
-        connection.execute("INSERT OR IGNORE INTO measure_namespaces(namespace,owner_thread_id) VALUES (?,?)", (namespace, owner_thread_id))
-        connection.executemany(_INSERT, inserts)
+    for attempt in (1, 2):
+        try:
+            result = _attempt(db, owner_thread_id, path, namespace, normalized, sha)
+            break
+        except sqlite3.IntegrityError:
+            if attempt == 2:
+                raise ValueError(_CONFLICT) from None
     REGISTRY.rebuild(db)
-    return {"namespace": namespace, "items": changes}
+    return result

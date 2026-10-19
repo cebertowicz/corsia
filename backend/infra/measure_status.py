@@ -17,6 +17,22 @@ COUNTERS_SQL = (
     "SELECT event_name, counter, sum(n) FROM outcome_event_counters "
     "WHERE agent_thread_id=? AND day >= ? GROUP BY event_name, counter"
 )
+# The agent's definition rows, one primary-key range; the latest version per item is picked in Python.
+DEFINITIONS_SQL = "SELECT kind, name, version, removed, file_path, file_sha256, synced_at FROM measure_definitions WHERE owner_thread_id=?"
+
+
+def synced_files(db: sqlite3.Connection, agent_thread_id: str) -> list[dict[str, str]]:
+    """The files that still define something live, each with its last sync, newest first."""
+    latest: dict[tuple[str, str], tuple[int, bool, str]] = {}
+    last_sync: dict[str, tuple[str, str]] = {}
+    for kind, name, version, removed, path, sha, synced in db.execute(DEFINITIONS_SQL, (agent_thread_id,)):
+        if (kind, name) not in latest or version > latest[(kind, name)][0]:
+            latest[(kind, name)] = (version, bool(removed), path)
+        if path not in last_sync or synced > last_sync[path][1]:
+            last_sync[path] = (sha, synced)
+    active = {path for _, removed, path in latest.values() if not removed}
+    files = sorted(active, key=lambda path: last_sync[path][1], reverse=True)
+    return [{"path": path, "sha256": last_sync[path][0], "synced_at": last_sync[path][1]} for path in files]
 
 
 def status(db: sqlite3.Connection, agent_thread_id: str) -> dict[str, Any]:
@@ -33,20 +49,17 @@ def status(db: sqlite3.Connection, agent_thread_id: str) -> dict[str, Any]:
     for per_event in events.values():
         for window in _WINDOW_DAYS:
             per_event.setdefault(window, {"rows": 0, "counters": {}})
-    files = db.execute(
-        "SELECT file_path, file_sha256, max(synced_at) FROM measure_definitions WHERE owner_thread_id=? GROUP BY file_path, file_sha256 ORDER BY max(synced_at) DESC",
-        (agent_thread_id,),
-    ).fetchall()
     result: dict[str, Any] = {
         "events": {name: events[name] for name in sorted(events)},
         "recent_refusals": list(REGISTRY.refusals.get(agent_thread_id, ())),
         "refusals_note": f"The last {REFUSAL_LIMIT} refusal texts are held in memory and are lost when CORSIA restarts; the counters above are kept.",
-        "synced_files": [{"path": path, "sha256": sha, "synced_at": synced} for path, sha, synced in files],
+        "synced_files": synced_files(db, agent_thread_id),
     }
     unversioned = sum(window["counters"].get("unversioned", 0) for per_event in events.values() for window in [per_event["last_7_days"]])
     if unversioned:
         result["unversioned"] = (
-            f"{unversioned} rows unversioned in the last 7 days: their schedule's workflow is no longer yours, "
-            "so they carry no workflow version. Sync that workflow's measures.yaml again, or register the schedule with a workflow you own."
+            f"{unversioned} rows unversioned in the last 7 days: their schedule names a workflow that is no longer yours, "
+            "or whose version Git could not read, so they carry no workflow version. Register the schedule with a workflow "
+            "you own (automation_list shows workflow_stale), or commit the workflow skill."
         )
     return result

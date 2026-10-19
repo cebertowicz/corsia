@@ -1,7 +1,10 @@
-"""Schema 126 -> 127: declared measure definitions and per-agent, per-day intake counters.
+"""Schema 126 -> 127: declared measure definitions, per-agent per-day intake counters, and a
+script schedule's last measure summary.
 
 The counters are keyed agent, day, event, counter so one agent's recent window is a single
 index range; ``idx_outcome_events_agent_observed`` serves the same read over its rows.
+``idx_measure_definitions_kind_name`` serves sync's one in-transaction read, a namespace's
+event rows.
 
 The DDL is copied rather than imported from ``infra.outcome_events_schema`` so this step
 keeps producing the shape it was written for. The registry tables are created only when
@@ -20,7 +23,7 @@ _COUNTERS_127_DDL = """
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
             'name_undeclared', 'namespace_not_owned',
-            'rate_limited', 'record_refused', 'unversioned')),
+            'record_refused', 'unversioned')),
         event_name TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL DEFAULT '',
         day TEXT NOT NULL DEFAULT '0000-00-00',
@@ -45,16 +48,8 @@ _REGISTRY_127_DDL = (
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS measure_namespaces (
-        namespace TEXT PRIMARY KEY,
-        owner_thread_id TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS measure_workflows (
-        workflow TEXT PRIMARY KEY,
-        owner_thread_id TEXT NOT NULL
-    )
+    CREATE INDEX IF NOT EXISTS idx_measure_definitions_kind_name
+        ON measure_definitions(kind, name)
     """,
 )
 
@@ -74,6 +69,9 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='outcome_events'"
     ).fetchone():
         conn.execute(_AGENT_OBSERVED_INDEX_DDL)
+    schedule_columns = {row[1] for row in conn.execute("PRAGMA table_info(automation_schedules)")}
+    if schedule_columns and "last_measures" not in schedule_columns:
+        conn.execute("ALTER TABLE automation_schedules ADD COLUMN last_measures TEXT")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(outcome_event_counters)")}
     if "agent_thread_id" in columns:
         return

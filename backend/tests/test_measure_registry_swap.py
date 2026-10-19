@@ -1,6 +1,7 @@
 """The registry swaps whole states: a settle during a rebuild, or a racing first load, never sees a partial one.
 
-Two syncs of one file serialize, so neither plans from a read the other has already changed.
+Two syncs of one file plan outside the transaction; the primary key refuses the one that planned
+from stale versions, and it re-plans once.
 """
 from __future__ import annotations
 
@@ -107,46 +108,69 @@ def test_a_first_load_waits_for_the_load_already_running_instead_of_reading_a_pa
     second_db.close()
 
 
-def test_a_sync_that_read_the_old_versions_holds_the_lock_so_a_concurrent_removal_cannot_be_lost(tmp_path: Path, monkeypatch) -> None:
+def test_two_concurrent_syncs_of_one_file_end_with_one_gapless_version_sequence_and_one_retry(tmp_path: Path, monkeypatch) -> None:
+    """The first sync plans from v1 while the second commits v2; the first's insert collides on the
+    primary key, rolls back, re-plans from v2 and writes v3. Nothing is lost, duplicated or skipped."""
     path = tmp_path / "sync.db"
     seed = connect(path)
     seed.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
     REGISTRY.reset()
-    wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
-    sync(seed, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
+    sync(seed, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     gate, reached = threading.Event(), threading.Event()
     real_plan = registry._plan
+    plans: list[str] = []
 
     def pausing_plan(*args):
-        if threading.current_thread().name == "stale":
+        name = threading.current_thread().name
+        plans.append(name)
+        if name == "first" and plans.count("first") == 1:
             reached.set()
             assert gate.wait(WAIT)
         return real_plan(*args)
 
     monkeypatch.setattr(registry, "_plan", pausing_plan)
-    order: list[str] = []
+    results: dict[str, dict] = {}
 
     def run(text: str) -> None:
         connection = connect(path)
         try:
-            sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=text)
-            order.append(threading.current_thread().name)
+            results[threading.current_thread().name] = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=text)
         finally:
             connection.close()
 
-    stale = threading.Thread(target=run, args=(wider,), name="stale", daemon=True)
-    stale.start()
-    assert reached.wait(WAIT)  # it has read v1 of every name and is planning
-    remover = threading.Thread(target=run, args=(MEASURES,), name="remover", daemon=True)
-    remover.start()
-    remover.join(0.5)
+    first = threading.Thread(target=run, args=(MEASURES.replace("min_n: 20", "min_n: 30"),), name="first", daemon=True)
+    first.start()
+    assert reached.wait(WAIT)  # it has read v1 and is planning v2, outside any transaction
+    second = threading.Thread(target=run, args=(MEASURES.replace("min_n: 20", "min_n: 40"),), name="second", daemon=True)
+    second.start()
+    second.join(WAIT)
     try:
-        assert remover.is_alive()  # the removal waits for the write lock instead of committing under the stale plan
+        assert not second.is_alive()  # planning holds no lock: the second sync commits v2 at once
     finally:
         gate.set()
-        stale.join(WAIT)
-        remover.join(WAIT)
-    assert order == ["stale", "remover"]
-    latest = seed.execute("SELECT removed FROM measure_definitions WHERE name='mail.sorted' ORDER BY version DESC LIMIT 1").fetchone()
-    assert latest == (1,)  # the later commit's file wins
+        first.join(WAIT)
+    assert plans == ["first", "second", "first"]  # the first re-planned exactly once
+    assert results["second"]["items"][1]["status"] == "changed v1→v2"
+    assert results["first"]["items"][1]["status"] == "changed v2→v3"
+    rows = seed.execute("SELECT version, json_extract(spec_json, '$.min_n') FROM measure_definitions WHERE name='replied_share' ORDER BY version").fetchall()
+    assert rows == [(1, 20), (2, 40), (3, 30)]
+    assert seed.execute("SELECT version FROM measure_definitions WHERE name='mail.triaged'").fetchall() == [(1,)]
     seed.close()
+
+
+def test_a_second_collision_refuses_the_sync_and_writes_nothing(tmp_path: Path, monkeypatch) -> None:
+    connection = connect(tmp_path / "sync.db")
+    connection.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    REGISTRY.reset()
+    calls: list[int] = []
+
+    def colliding(*_args):
+        calls.append(1)
+        raise sqlite3.IntegrityError("UNIQUE constraint failed")
+
+    monkeypatch.setattr(registry, "_claim_namespace", colliding)
+    with pytest.raises(ValueError, match=r"^measure_sync: another sync of this file ran at the same time; run measure_sync again\.$"):
+        sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
+    assert len(calls) == 2 and not connection.in_transaction
+    assert connection.execute("SELECT count(*) FROM measure_definitions").fetchone()[0] == 0
+    connection.close()

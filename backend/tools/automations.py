@@ -49,20 +49,40 @@ _SERIES_ITEM = _schema(
 )
 
 
-def _check_workflow(thread_id: str, workflow: Any) -> None:
-    """Refuse a script schedule's workflow that is unknown or not the owner's."""
-    from infra.measure_admission import workflow_refusal
+def _check_workflow(thread_id: str, project_id: str | None, workflow: Any) -> None:
+    """Refuse a script schedule's workflow that is not one of the owner's own workflow skills."""
+    from infra.measure_registry import workflow_problem
+    from tools.workflow_owners import workflow_owners
 
     db = get_db()
     try:
-        refusal = workflow_refusal(db, thread_id, str(workflow))
+        problem = workflow_problem(workflow_owners(thread_id, project_id, db), thread_id, str(workflow))
     finally:
         db.close()
-    if refusal:
-        raise ValueError(refusal)
+    if problem:
+        raise ValueError(f"{problem} The schedule was not registered; leave workflow out for agent-level measures.")
 
 
-def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
+def _listed(thread_id: str, project_id: str | None, items: list) -> list[dict]:
+    """Each schedule as a dict; a script schedule naming a workflow also shows workflow_stale,
+    true when that workflow is no longer one the owner may use (read live, never stored)."""
+    from infra.measure_registry import workflow_problem
+    from tools.workflow_owners import workflow_owners
+
+    listed = [asdict(item) for item in items]
+    named = [entry for entry in listed if (entry.get("payload") or {}).get("workflow") and entry["kind"] == script_schedules.SCRIPT_KIND]
+    if named:
+        db = get_db()
+        try:
+            owners = workflow_owners(thread_id, project_id, db)
+        finally:
+            db.close()
+        for entry in named:
+            entry["workflow_stale"] = workflow_problem(owners, thread_id, str(entry["payload"]["workflow"])) is not None
+    return listed
+
+
+def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: str | None = None) -> dict:
     """Register one model-free script run for the current thread."""
     from infra.config import WORKSPACE
 
@@ -71,7 +91,7 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
             raise ValueError(f"{name} is required for a script schedule")
     series = script_schedules.parse_series(params.get("series", []))
     if params.get("workflow") is not None:
-        _check_workflow(thread_id, params["workflow"])
+        _check_workflow(thread_id, project_id, params["workflow"])
     path, sha256 = script_schedules.pin_script(
         str(params["script_path"]), workspace=WORKSPACE,
     )
@@ -96,7 +116,7 @@ def _operate(thread_id, actor_row, operation: str, params: dict):
     if operation == "schedule":
         scope_id = actor_row["project_id"] or "__workspace__"
         if params.get("kind") == script_schedules.SCRIPT_KIND:
-            return _script_schedule(thread_id, scope_id, params)
+            return _script_schedule(thread_id, scope_id, params, actor_row["project_id"])
         for name in ("spec", "max_runs"):
             if params.get(name) is None:
                 raise ValueError(f"{name} is required for a clock or cadence schedule")
@@ -125,14 +145,15 @@ def _operate(thread_id, actor_row, operation: str, params: dict):
             )
         }
     return {
-        "schedules": [
-            asdict(item)
-            for item in schedules.list_for_actor(
+        "schedules": _listed(
+            thread_id,
+            actor_row["project_id"],
+            schedules.list_for_actor(
                 thread_id=thread_id,
                 actor_id=thread_id,
                 db=get_db(),
-            )
-        ]
+            ),
+        )
     }
 
 
@@ -228,10 +249,10 @@ class AutomationScheduleTool(Tool):
                 "workflow": {
                     "type": "string",
                     "description": (
-                        "script kind: optional. The `workflow:` value of a measures.yaml you synced; "
-                        "that file's sibling SKILL.md frontmatter must name you as "
-                        "`corsia: {workflow: {owner: <your thread id>}}`. Each accepted measure line "
-                        "is recorded with this workflow_ref. A refusal lists the workflows you own. "
+                        "script kind: optional. The name of a workflow skill you own: one in your own "
+                        ".threads skills, or one whose corsia.yaml sets `owner:` under `workflow:` to "
+                        "your thread id. Each accepted measure line is recorded with this workflow_ref "
+                        "and the skill's current version. A refusal lists the workflows you own. "
                         "Leave it out for agent-level measures."
                     ),
                 },
@@ -279,9 +300,9 @@ class AutomationListTool(Tool):
         return (
             "List automation schedules owned by the current thread. A script "
             "schedule shows state, last_status (ok, breach, no_data, error, "
-            "timeout, hash_mismatch, interrupted), last_error and last_run_at; its "
-            "payload shows last_measures (measure lines recorded and refused) and "
-            "workflow_stale (true when its workflow is no longer yours)."
+            "timeout, hash_mismatch, interrupted), last_error, last_run_at, "
+            "last_measures (the last run's measure lines recorded and refused) and, "
+            "when it names a workflow, workflow_stale (true when that workflow is no longer yours)."
         )
 
     @property

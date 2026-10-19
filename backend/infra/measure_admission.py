@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import Any
 
 from host_access.credential_sanitizer import contains_credential
@@ -12,6 +13,11 @@ from infra.measure_validation import STAMPED_ATTRIBUTES
 from infra.outcome_event_input import OutcomeInputRefusal
 from infra.outcome_events import RecordResult, count_outcome_event, record_outcome_event
 
+# Counter labels for names an agent didn't declare: a printed name never becomes a counter row,
+# so an agent's counter rows per day stay within (declared events + these labels) x counters.
+UNNAMED_LINE = "(measure line)"
+UNDECLARED = "(undeclared)"
+NOT_YOURS = "(not yours)"
 _KIND_RULES = {
     "id": "1 to 200 characters from letters, digits and _ . : # / @ + -, and not a credential",
     "login": "1 to 200 characters from letters, digits and _ . : # / @ + -, and not a credential",
@@ -29,26 +35,24 @@ class Admission:
 
 def admit(
     db: sqlite3.Connection, *, owner_thread_id: str, event_name: str, attributes: dict[str, Any],
-    project_id: str | None = None, run_id: str | None = None, workflow: str | None = None, ts: str | None = None,
+    project_id: str | None = None, run_id: str | None = None, workflow_ref: str | None = None,
+    workflow_version: str | None = None, ts: str | None = None,
 ) -> Admission:
     """Admit one script-run record for the stamped agent, or count and explain its refusal.
 
-    ``run_id`` and ``workflow`` are the runner's own stamps; the agent can't set them.
+    ``run_id``, ``workflow_ref`` and ``workflow_version`` are the runner's own stamps, resolved
+    before settling; the agent can't set them.
     """
     state = REGISTRY.ensure_loaded(db)
-    refuse = _Refuser(db, owner_thread_id, event_name)
     entry = state.events.get(event_name)
     if entry is None:
         names = sorted(name for name, declared in state.events.items() if declared.owner == owner_thread_id)
-        return refuse("name_undeclared", f'"{event_name}" is not declared in your measures.yaml (declared: {", ".join(names) or "none"}); the record was dropped. Declare it and run measure_sync.')
+        return _refuse(db, owner_thread_id, UNDECLARED, "name_undeclared", f'"{_shown(event_name)}" is not declared in your measures.yaml (declared: {", ".join(names) or "none"}); the record was dropped. Declare it and run measure_sync.')
     if entry.owner != owner_thread_id:
-        return refuse("namespace_not_owned", f"{namespace_refusal(db, event_name.split('.', 1)[0], entry.owner, owner_thread_id)} The record was dropped.")
-    stamps: dict[str, str] = {}
-    if run_id:
-        stamps["run_id"] = run_id
-    unversioned = bool(workflow) and state.workflows.get(workflow) != owner_thread_id
-    if workflow and not unversioned:
-        stamps["workflow_ref"] = workflow
+        refusal = namespace_refusal(event_name.split(".", 1)[0], entry.owner, state.namespaces_of(owner_thread_id))
+        return _refuse(db, owner_thread_id, NOT_YOURS, "namespace_not_owned", f"{refusal} The record was dropped.")
+    refuse = partial(_refuse, db, owner_thread_id, event_name)
+    stamps = {key: value for key, value in (("run_id", run_id), ("workflow_ref", workflow_ref), ("workflow_version", workflow_version)) if value}
     stripped = [key for key in attributes if key in STAMPED_ATTRIBUTES]
     merged = {**{k: v for k, v in attributes.items() if k not in STAMPED_ATTRIBUTES}, **stamps}
     late = _time_problem(event_name, ts, entry)
@@ -68,8 +72,6 @@ def admit(
         return refuse("record_refused", text)
     if result.inserted and stripped:
         count_outcome_event(db, "attribute_dropped", event_name, len(stripped), agent_thread_id=owner_thread_id)
-    if result.inserted and unversioned:
-        count_outcome_event(db, "unversioned", event_name, agent_thread_id=owner_thread_id)  # the schedule's workflow is no longer the agent's
     dropped = (*stripped, *result.dropped_keys) if result.inserted else ()
     notes = tuple(_drop_text(event_name, entry, name, attributes.get(name)) for name in dropped)
     for note in notes:
@@ -78,36 +80,21 @@ def admit(
 
 
 def refuse_line(db: sqlite3.Connection, owner: str, text: str, *, event_name: str, count: int = 1) -> None:
-    """Count and note a measure line that was refused before it reached admission (a malformed line, or past the cap)."""
-    count_outcome_event(db, "record_refused", event_name, count, agent_thread_id=owner)
+    """Count and note a measure line that was refused before it reached admission (a malformed line, or past the cap).
+
+    The counter carries ``event_name`` only when the owner declared it, else :data:`UNNAMED_LINE`.
+    """
+    entry = REGISTRY.ensure_loaded(db).events.get(event_name)
+    label = event_name if entry is not None and entry.owner == owner else UNNAMED_LINE
+    count_outcome_event(db, "record_refused", label, count, agent_thread_id=owner)
     REGISTRY.note(owner, text)  # in memory only: a rolled-back settle leaves a harmless note
 
 
-def workflow_is_owned(db: sqlite3.Connection, owner: str, workflow: str) -> bool:
-    """True when ``workflow`` is one of the agent's own synced workflows."""
-    return REGISTRY.ensure_loaded(db).workflows.get(workflow) == owner
-
-
-def workflow_refusal(db: sqlite3.Connection, owner: str, workflow: str) -> str | None:
-    """The text refusing a schedule's ``workflow`` that is unknown or not the agent's, naming the ones it owns."""
-    workflows = REGISTRY.ensure_loaded(db).workflows
-    if workflows.get(workflow) == owner:
-        return None
-    mine = ", ".join(sorted(ref for ref, holder in workflows.items() if holder == owner)) or "none"
-    why = "is owned by another agent" if workflow in workflows else "is not declared by any synced measures.yaml"
-    return f'workflow "{workflow}" {why}; the schedule was not registered. Use a workflow you own (yours: {mine}), or leave workflow out.'
-
-
-class _Refuser:
-    """Counts a refusal once and keeps its text for ``measure_status``."""
-
-    def __init__(self, db: sqlite3.Connection, owner: str, event_name: str) -> None:
-        self.db, self.owner, self.event_name = db, owner, event_name
-
-    def __call__(self, counter: str, text: str) -> Admission:
-        count_outcome_event(self.db, counter, self.event_name, agent_thread_id=self.owner)
-        REGISTRY.note(self.owner, text)
-        return Admission(None, text)
+def _refuse(db: sqlite3.Connection, owner: str, label: str, counter: str, text: str) -> Admission:
+    """Count a refusal once under ``label`` and keep its text for ``measure_status``."""
+    count_outcome_event(db, counter, label, agent_thread_id=owner)
+    REGISTRY.note(owner, text)
+    return Admission(None, text)
 
 
 def _time_problem(event_name: str, ts: str | None, entry: DeclaredEvent) -> str | None:

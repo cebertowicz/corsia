@@ -49,7 +49,7 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
             'name_undeclared', 'namespace_not_owned',
-            'rate_limited', 'record_refused', 'unversioned')),
+            'record_refused', 'unversioned')),
         event_name TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL DEFAULT '',
         day TEXT NOT NULL DEFAULT '0000-00-00',
@@ -68,12 +68,6 @@ OUTCOME_EVENTS_SCHEMA_SQL = """
         removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1)),
         PRIMARY KEY (owner_thread_id, kind, name, version)
     );
-    CREATE TABLE IF NOT EXISTS measure_namespaces (
-        namespace TEXT PRIMARY KEY,
-        owner_thread_id TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS measure_workflows (
-        workflow TEXT PRIMARY KEY,
-        owner_thread_id TEXT NOT NULL
-    );
+    CREATE INDEX IF NOT EXISTS idx_measure_definitions_kind_name
+        ON measure_definitions(kind, name);
 """

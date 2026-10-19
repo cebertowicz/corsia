@@ -62,6 +62,9 @@ class RunReport:
     measure_refusals: list[LineRefusal] = field(default_factory=list)
     measures_over_cap: int = 0
     run_id: str | None = None
+    # (workflow_ref, workflow_version) the runner resolved before settling; None when the
+    # schedule names no workflow or its owner no longer owns it.
+    workflow_stamp: tuple[str, str | None] | None = None
 
 
 def classify(series: store.Series, value: float) -> str:
@@ -282,7 +285,7 @@ def emit_report(
     noted = _note_readings(db, schedule, report, registered, now)
     store.finish_run(
         schedule.id, ran_at=now, status=status, error=report.error,
-        noted=noted, payload_patch=measures.payload, db=db,
+        noted=noted, last_measures=measures.line, db=db,
     )
     return woken
 
