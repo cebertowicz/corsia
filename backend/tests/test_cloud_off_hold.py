@@ -137,7 +137,7 @@ async def test_a_cloud_off_send_is_held_not_failed_and_names_the_cause(world, tu
     turn_ends.assert_awaited_once()
     kwargs = turn_ends.await_args.kwargs
     assert kwargs["outcome"] == "error" and kwargs["turn_id"] == "m1-turn"
-    assert "cloud models are off in this project" in kwargs["error"] and CLOUD in kwargs["error"]
+    assert "this project uses local models only" in kwargs["error"] and CLOUD in kwargs["error"]
     world["executed"].assert_not_awaited()
 
 

@@ -61,7 +61,7 @@ def _refusal_message(reason_key: str, details: dict[str, object]) -> str:
         return "This thread's model is unavailable, so a checkpoint cannot run now."
     if reason_key == "project_cloud_off":
         return (
-            "Cloud models are off in this project, so a checkpoint cannot run on this "
+            "This project uses local models only, so a checkpoint cannot run on this "
             "thread's model. Continue working."
         )
     if reason_key == "warm_capture_refused":

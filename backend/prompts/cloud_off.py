@@ -6,7 +6,7 @@ no text here tells an agent to do it.
 
 from __future__ import annotations
 
-HOLD_PHRASE = "cloud models are off in this project"
+HOLD_PHRASE = "this project uses local models only"
 
 _USE_READY_LOCAL = "Use a ready local model"
 _STAY_INLINE = "stay on your current model and do the work inline, or check model_catalog later."
@@ -23,7 +23,7 @@ HOLD_ACTION = (
 
 def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:
     """Return the agent-facing recovery text for a ``project_cloud_off`` refusal."""
-    text = f"project_cloud_off: This project has cloud models turned off, so {selector} can't run here. "
+    text = f"project_cloud_off: This project uses local models only, so {selector} can't run here. "
     text += f"{_USE_READY_LOCAL}: {', '.join(ready_local)}." if ready_local else NO_LOCAL_READY_TEXT
     return f"{text} Local workers run one at a time." if spawn else text
 

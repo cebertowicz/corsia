@@ -36,7 +36,7 @@ def _warm_suppressed(suppression: str) -> dict:
     return {
         "ok": False, "skipped": True,
         "reason": suppression,
-        "message": ("Cloud models are off in this project, so this thread was not warmed"
+        "message": ("This project uses local models only, so this thread was not warmed"
                     if suppression == "project_cloud_off"
                     else "Warm suppressed while the session has active delivery work"),
     }

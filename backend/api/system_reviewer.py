@@ -32,7 +32,7 @@ WORKSPACE_SCOPE = "agents outside a project"
 _REASON_WORDS = {
     "usage_limited": "usage limit",
     "account_project_denied": "no account is allowed for this project",
-    "project_cloud_off": "cloud models are off in this project",
+    "project_cloud_off": "this project uses local models only",
     "account_not_configured": "no signed-in account",
     "account_model_not_discovered": "the account doesn't offer this model",
     "discovered_model_unavailable": "the account doesn't offer this model",

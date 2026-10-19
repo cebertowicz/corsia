@@ -60,7 +60,7 @@ class CheckpointTargetLimited(CheckpointNotAdmitted):
 
 #: What a person is told when a checkpoint is refused because the project has cloud models off.
 CLOUD_OFF_CHECKPOINT_MESSAGE = (
-    "Cloud models are off in this project. Switch this chat to a local model to checkpoint it."
+    "This project uses local models only. Switch this chat to a local model to checkpoint it."
 )
 
 

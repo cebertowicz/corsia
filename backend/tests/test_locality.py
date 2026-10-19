@@ -86,7 +86,7 @@ def test_locality_refusal_reads_private_mark_and_project_policy(isolated_db):
 def test_project_cloud_off_text_is_governance_wording():
     from prompts.cloud_off import project_cloud_off_text
 
-    head = "project_cloud_off: This project has cloud models turned off, so codex/gpt-5.6-terra can't run here. "
+    head = "project_cloud_off: This project uses local models only, so codex/gpt-5.6-terra can't run here. "
     assert project_cloud_off_text("codex/gpt-5.6-terra", ["omlx@local/a", "omlx@local/b"]) == (
         head + "Use a ready local model: omlx@local/a, omlx@local/b."
     )
@@ -107,7 +107,7 @@ def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
     )
     assert HOLD_ACTION == action
     assert held_error("codex/gpt-5.6-terra") == (
-        "Held: cloud models are off in this project, so codex/gpt-5.6-terra can't run here. " + action
+        "Held: this project uses local models only, so codex/gpt-5.6-terra can't run here. " + action
     )
     assert ACCOUNT_HOLD_COPY["project_cloud_off"][1] == action
     assert "current model" not in held_error("codex/gpt-5.6-terra")

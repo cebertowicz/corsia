@@ -303,7 +303,7 @@ def test_cache_warm_is_not_run_for_a_cloud_off_thread(world):
 
     assert refused == {
         "ok": False, "skipped": True, "reason": "project_cloud_off",
-        "message": "Cloud models are off in this project, so this thread was not warmed",
+        "message": "This project uses local models only, so this thread was not warmed",
     }
     allowed = _load_warm_target("t-on", "user-1")
     assert not isinstance(allowed, dict) or allowed.get("reason") != "project_cloud_off"
@@ -363,7 +363,7 @@ def test_manual_checkpoint_http_refusal_is_the_exact_pinned_body(world, launch, 
     assert response.json() == {"detail": {
         "reason": "project_cloud_off",
         "message": (
-            "Cloud models are off in this project. "
+            "This project uses local models only. "
             "Switch this chat to a local model to checkpoint it."
         ),
     }}
@@ -392,7 +392,7 @@ async def test_agent_checkpoint_tool_refuses_with_its_own_text_and_makes_no_call
     )
 
     assert result == (
-        "Cloud models are off in this project, so a checkpoint cannot run on this "
+        "This project uses local models only, so a checkpoint cannot run on this "
         "thread's model. Continue working."
     )
     assert emitted[0][1:3] == ("refused", "project_cloud_off")
