@@ -63,8 +63,9 @@ class MeasureSyncTool(Tool):
                 "SKILL.md (<skill dir>/measures.yaml) and syncs only for that workflow's owner: the thread "
                 "whose own skill it is, or the `owner:` under `workflow:` in its corsia.yaml. Agent-level "
                 "measures go in .threads/<agent>/measures.yaml. Validates names, "
-                "attributes, KPIs and views, then returns added, changed or unchanged. Run it after every "
-                "change; nothing takes effect until sync succeeds.")
+                "attributes, KPIs and views, then returns each item as added, changed, unchanged or removed, "
+                "plus a namespace_takeover list when it retired a departed holder's live events. Run it after "
+                "every change; nothing takes effect until sync succeeds.")
 
     @property
     def parameters(self) -> dict[str, Any]:

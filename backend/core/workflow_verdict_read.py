@@ -16,6 +16,7 @@ import sqlite3
 from collections import defaultdict
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
@@ -26,6 +27,7 @@ from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
+from tools.workflow_owners import thread_workflow_owners
 from tools.workflow_task_fields import judged_version
 
 MODEL_SHARE = 0.8  # design §3.3: the run's own fresh tokens on one identity
@@ -108,22 +110,29 @@ def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
 
 
 def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], dict[str, str]]:
-    """Each workflow's measure definitions, every version, and its owner: the files whose events name it."""
+    """Each workflow's definition history, attributed through its live owner and sidecar path.
+
+    ``measure_definitions`` keeps declaration history, but never a workflow-owner registry. The
+    effective owner rule remains ``tools.workflow_owners``: a definition counts only while its
+    owner's current workflow skill still names the same ``measures.yaml`` beside its SKILL.md.
+    """
     rows = [dict(row) for row in db.execute(
         "SELECT owner_thread_id, kind, name, version, spec_json, file_path, synced_at, removed FROM measure_definitions"
     ).fetchall()]
-    workflow_of: dict[tuple[str, str], str] = {}
-    for row in rows:
-        spec = json.loads(row["spec_json"])
-        if row["kind"] == "event" and isinstance(spec, dict) and spec.get("_workflow"):
-            workflow_of[(row["owner_thread_id"], row["file_path"])] = str(spec["_workflow"])
+    workflow_of: dict[tuple[str, str], tuple[str, str]] = {}
+    for owner in {str(row["owner_thread_id"]) for row in rows}:
+        for workflow, entry in thread_workflow_owners(owner, db).items():
+            if entry.owner != owner or entry.named is not None:
+                continue
+            workflow_of[(owner, str(entry.skill_dir / "measures.yaml"))] = (workflow, owner)
     by_workflow: dict[str, list[Definition]] = defaultdict(list)
     owners: dict[str, str] = {}
     for row in rows:
-        workflow = workflow_of.get((row["owner_thread_id"], row["file_path"]))
-        if workflow is None:
+        association = workflow_of.get((row["owner_thread_id"], str(Path(row["file_path"]))))
+        if association is None:
             continue
-        owners[workflow] = row["owner_thread_id"]
+        workflow, owner = association
+        owners[workflow] = owner
         by_workflow[workflow].append(Definition(row["kind"], row["name"], int(row["version"]),
                                                 json.loads(row["spec_json"]), row["synced_at"],
                                                 bool(row["removed"]), row["file_path"]))

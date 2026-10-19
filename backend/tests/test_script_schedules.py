@@ -204,6 +204,18 @@ async def test_in_bounds_reading_is_a_passive_note_not_a_wake(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_run_without_settled_measures_keeps_the_prior_measure_summary(tmp_path, monkeypatch):
+    db = _db()
+    schedule = _register(db, tmp_path)
+    db.execute("UPDATE automation_schedules SET last_measures='measures: 2 recorded, 0 refused (measure_status)'")
+    _use_run(monkeypatch, _run())
+
+    await _settle_all(db, T0)
+
+    assert schedules.get(schedule.id, db=db).last_measures == "measures: 2 recorded, 0 refused (measure_status)"
+
+
+@pytest.mark.asyncio
 async def test_unbounded_series_never_wakes_or_notes(tmp_path, monkeypatch):
     db = _db()
     _register(db, tmp_path, series=[store.Series("calls", "")])

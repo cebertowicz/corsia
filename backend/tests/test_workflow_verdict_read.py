@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +19,21 @@ from tests.plan_writer_authorizer import raw_plan_seed
 
 NOW = datetime(2026, 10, 19, tzinfo=timezone.utc)
 OPUS = "claude-opus-5-5"
+
+
+@pytest.fixture(autouse=True)
+def live_workflow_owners(monkeypatch):
+    """Verdicts associate definitions through the shipped live owner rule, never stored metadata."""
+    from core import workflow_verdict_read
+
+    def owners(thread_id, _db):
+        if thread_id != "owner":
+            return {}
+        return {"sdlc-process": SimpleNamespace(
+            skill_dir=Path("/workflows/sdlc-process"), owner="owner", named=None,
+        )}
+
+    monkeypatch.setattr(workflow_verdict_read, "thread_workflow_owners", owners)
 
 
 @pytest.fixture
@@ -132,7 +149,7 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
 
 
 def _definitions(db) -> None:
-    event = {"attributes": {"pr": "id"}, "dedupe": ["pr"], "_workflow": "sdlc-process"}
+    event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
     kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": True,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
     rows = [("event", "qg.escape", 1, event, "2026-09-01T00:00:00Z"),
@@ -140,7 +157,7 @@ def _definitions(db) -> None:
             ("kpi", "escapes", 2, {**kpi, "review": 0.5}, "2026-10-10T00:00:00Z")]
     for kind, name, version, spec, synced in rows:
         db.execute("INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,"
-                   "file_sha256,synced_at) VALUES ('owner',?,?,?,?,'measures.yaml','sha',?)",
+                   "file_sha256,synced_at) VALUES ('owner',?,?,?,?,'/workflows/sdlc-process/measures.yaml','sha',?)",
                    (kind, name, version, json.dumps(spec), synced))
 
 
