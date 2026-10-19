@@ -472,3 +472,84 @@ async def test_upgrade_waits_for_no_running_setup_flight(upgrade_env, legacy) ->
         local_setup_operation.unlock(held)
     assert upgrade_env == []
     assert (legacy / "models" / MODEL.repository).is_dir()
+
+
+async def _legacy_row_with_binding():
+    """CORSIA's earlier service's row on its settings port, with the starter bound to it."""
+    from infra.db_async import run_in_db
+    from llm import network_discovery
+
+    old = await run_in_db(network_discovery.upsert_server,
+        provider="omlx", instance_id="127.0.0.1:8000", instance_name="This Mac",
+        host="127.0.0.1", port=8000, status="online", kind="managed")
+    await run_in_db(_insert_model, "legacy-qwen", f"omlx@{old}/{MODEL.model}", MODEL.model)
+    return old
+
+
+@pytest.mark.asyncio
+async def test_the_earlier_service_stays_routable_until_its_upgrade_succeeds(
+        upgrade_env, legacy, monkeypatch) -> None:
+    from infra.db_async import run_in_db
+    from llm import network_discovery
+    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_upgrade import done_path, upgrade_legacy_omlx
+    from llm.resolution import resolve_execution_target
+
+    old = await _legacy_row_with_binding()
+    _cross_volume(monkeypatch)
+    real_copy = shutil.copytree
+
+    def copy_fails(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", copy_fails)
+
+    # A start whose every move fails: startup keeps the row, the old service runs again.
+    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert [item.outcome for item in await upgrade_legacy_omlx()] == ["failed"]
+    assert upgrade_env == ["stop service", "restart service"]
+    assert (await run_in_db(network_discovery.get_server, old))["status"] != "removed"
+    target = await run_in_db(resolve_execution_target, "legacy-qwen")
+    assert (target.available, target.transport_model) == (True, f"omlx@{old}/{MODEL.model}")
+
+    # A later start with room: the managed server registers, the row retires, the binding follows.
+    monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", real_copy)
+    upgrade_env.clear()
+    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert [item.outcome for item in await upgrade_legacy_omlx()] == ["moved"]
+    assert done_path().exists()
+    assert (await run_in_db(network_discovery.get_server, old))["status"] == "removed"
+    target = await run_in_db(resolve_execution_target, "legacy-qwen")
+    assert target.available is True
+    assert not target.transport_model.startswith(f"omlx@{old}/")
+    # Once upgraded, startup keeps nothing back.
+    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_loopback_omlx_still_retires_while_the_upgrade_is_pending(upgrade_env, legacy) -> None:
+    from infra.db_async import run_in_db
+    from llm import network_discovery
+    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_upgrade import done_path
+
+    old = await _legacy_row_with_binding()
+    foreign = await run_in_db(network_discovery.upsert_server,
+        provider="omlx", instance_id="127.0.0.1:9000", instance_name="Someone's oMLX",
+        host="127.0.0.1", port=9000, status="online", kind="managed")
+
+    assert not done_path().exists()
+    assert await run_in_db(retire_unowned_local_omlx_rows) == [foreign]
+    assert (await run_in_db(network_discovery.get_server, old))["status"] != "removed"
+
+
+@pytest.mark.asyncio
+async def test_without_corsias_install_marker_every_loopback_omlx_retires(legacy, isolated_db) -> None:
+    from infra.db_async import run_in_db
+    from llm.local_setup_ownership import marker_path
+    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+
+    assert not marker_path().exists()
+    old = await _legacy_row_with_binding()
+
+    assert await run_in_db(retire_unowned_local_omlx_rows) == [old]

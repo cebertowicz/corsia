@@ -63,6 +63,30 @@ def legacy_model_dir() -> Path:
     return settings.parent / "models"
 
 
+#: oMLX's own default port, used when the old settings file names none.
+_OMLX_DEFAULT_PORT = 8000
+
+
+def pending_legacy_port() -> int | None:
+    """The port CORSIA's old service serves on while its upgrade has not finished, else None.
+
+    Until then its row is the person's only route to their local model, so
+    startup keeps it; a successful upgrade retires it when the managed server
+    registers.
+    """
+    from llm.local_setup_ownership import legacy_omlx_settings_file, legacy_setup_owns_current_omlx
+
+    if done_path().exists() or not legacy_setup_owns_current_omlx():
+        return None
+    try:
+        raw = json.loads(legacy_omlx_settings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    server = raw.get("server") if isinstance(raw, dict) else None
+    port = server.get("port") if isinstance(server, dict) else None
+    return port if isinstance(port, int) and not isinstance(port, bool) else _OMLX_DEFAULT_PORT
+
+
 def recorded_models(legacy_dir: Path) -> list[LocalModel]:
     """The models CORSIA's own records say CORSIA downloaded.
 

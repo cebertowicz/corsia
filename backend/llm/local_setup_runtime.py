@@ -53,7 +53,7 @@ async def wait_for_health(port: int) -> None:
     )
 
 
-def retire_unowned_local_omlx_rows() -> list[str]:
+def retire_unowned_local_omlx_rows(*, keep_pending_legacy: bool = True) -> list[str]:
     """Remove every oMLX row on this Mac's loopback that CORSIA does not own.
 
     v0.3/v0.4 registered whatever oMLX answered on this Mac. Such a row cannot
@@ -62,16 +62,26 @@ def retire_unowned_local_omlx_rows() -> list[str]:
     the same model on the managed server once that lists it. An oMLX on another
     machine and an External provider are the person's and stay. The rule is
     ``is_retired_local_omlx``; this runs at startup and when setup registers its
-    server. Blocking: run it on the database thread.
+    server. At startup, CORSIA's own earlier service keeps its row until its
+    upgrade finishes (``pending_legacy_port``); registering the managed server
+    passes ``keep_pending_legacy=False`` and retires it. Blocking: run it on the
+    database thread.
     """
     from llm import network_discovery as discovery
     from llm.local_setup_managed import is_retired_local_omlx
+    from llm.local_setup_upgrade import pending_legacy_port
     from llm.network_endpoints import get_endpoints
 
+    servers = discovery.get_servers(provider="omlx")
+    keep_port = pending_legacy_port() if keep_pending_legacy and servers else None
     retired: list[str] = []
-    for server in discovery.get_servers(provider="omlx"):
+    for server in servers:
         hosts = [str(endpoint.get("host") or "") for endpoint in get_endpoints(str(server["id"]))]
-        if is_retired_local_omlx(server, hosts) and discovery.remove_server(str(server["id"])):
+        if not is_retired_local_omlx(server, hosts):
+            continue
+        if keep_port is not None and server.get("port") == keep_port:
+            continue
+        if discovery.remove_server(str(server["id"])):
             retired.append(str(server["id"]))
     if retired:
         log.info("retired %d oMLX row(s) on this Mac that CORSIA does not manage", len(retired))
@@ -90,7 +100,7 @@ async def register_managed_server(*, port: int, base_path: str, model_dir: str) 
     from llm.local_setup_managed import MANAGED_INSTANCE_ID
 
     def persist() -> tuple[str, str]:
-        retire_unowned_local_omlx_rows()
+        retire_unowned_local_omlx_rows(keep_pending_legacy=False)
         server_id = discovery.upsert_server(
             provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name=LOCAL_SERVER_NAME,
             host=LOCAL_HOST, port=port, status="offline", kind="managed", source="corsia",
