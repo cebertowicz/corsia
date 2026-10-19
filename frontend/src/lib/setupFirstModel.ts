@@ -50,6 +50,7 @@ export async function bindSetupFirstModel(session: string, tested: TestedProvide
 	const selector = getModelDispatchId(model);
 	const binding = { model: selector, source: model.connection ?? model.provider ?? '' };
 	await beforeBind?.(binding);
-	await saveThreadModel(thread, selector, session, 'setup');
+	const saved = await saveThreadModel(thread, selector, session, 'setup');
+	if (saved.kind !== 'committed' || saved.model !== selector) throw new Error('Model binding is not complete');
 	return binding;
 }
