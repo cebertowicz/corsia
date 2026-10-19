@@ -24,7 +24,7 @@
 				toasts.show("Couldn't open CORSIA's chat. Try again.", 'error');
 				return;
 			}
-			if (!await chatPanel.setAndSend(request.text)) {
+			if (!await chatPanel.setAndSend(request.text, true)) {
 				console.warn('CORSIA request was not sent; its text remains in the composer');
 			}
 		} finally {

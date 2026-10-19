@@ -3,6 +3,7 @@ import {
 	loadConnectedApps,
 	loadConnectedAppsRows,
 	needsManualGoogleStep,
+	startAppSignIn,
 	removeAccount,
 	saveAccountReach,
 	signOutOfAccount,
@@ -68,6 +69,16 @@ describe('the account controls', () => {
 		expect(call.body).toEqual({ account_id: 'acc 1' });
 	});
 
+	it('uses the approved Google fallback when an account sign-in cannot start', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
+		await expect(startAccountSignIn('acc 1')).rejects.toThrow("Couldn't start Google sign-in. Try again.");
+	});
+
+	it('uses the neighbouring generic fallback when an app sign-in cannot start', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => '', clone() { return this; }, json: async () => null }));
+		await expect(startAppSignIn('app-1')).rejects.toThrow("Couldn't start the sign-in. Try again.");
+	});
+
 	it('signs one account out and returns its updated row and the revocation cause', async () => {
 		const fetchMock = answer({ row: { ...account, state: 'signed_out' }, revocation: 'revoked' });
 
@@ -104,7 +115,7 @@ describe('the account controls', () => {
 		refuse('Only the signed-in person can widen where an account works; open Connected apps.');
 		await expect(saveAccountReach('acc 1', account.reach)).rejects.toThrow('Only the signed-in person can widen where an account works; open Connected apps.');
 		refuse('connected_account_gone');
-		await expect(signOutOfAccount('acc 1')).rejects.toThrow('Could not change this Google account. Try again.');
+		await expect(signOutOfAccount('acc 1')).rejects.toThrow("Couldn't change this Google account. Try again.");
 	});
 });
 

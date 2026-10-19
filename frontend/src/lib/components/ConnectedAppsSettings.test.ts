@@ -403,6 +403,23 @@ describe('WhereItWorks', () => {
 		expect(host.textContent).toContain("GitHub will move from Garden plan to Q4 launch, with its sign-in and key. Agents in Garden plan won't be able to use it.");
 	});
 
+	it('uses account-specific lines when widening and moving a Google account', async () => {
+		projects.set([{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }, { id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }]);
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }, { id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }] }) })));
+		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		(host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+		flushSync();
+		expect(host.textContent).toContain('CORSIA and agents in Garden plan will be able to use sam.work@example.com.');
+		unmount(component);
+		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const, reach: { mode: 'selected', project_ids: ['garden'], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		([...host.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Garden plan')) as HTMLInputElement).click();
+		([...host.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Q4 launch')) as HTMLInputElement).click();
+		flushSync();
+		expect(host.textContent).toContain("Google — sam.work@example.com will move from Garden plan to Q4 launch, with its sign-in. Agents in Garden plan won't be able to use it.");
+	});
+
 	it('saves All projects in the shape the server accepts', async () => {
 		const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ ...awaiting, state: 'working', revision: 2 }) }));
 		vi.stubGlobal('fetch', fetch);

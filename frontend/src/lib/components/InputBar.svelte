@@ -316,14 +316,14 @@
 
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
-
-	export async function setAndSend(text: string): Promise<boolean> {
-		inputText = text;
+	export async function setAndSend(text: string, preserveDraft = false): Promise<boolean> {
+		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments] } : null, draftThreadId = boundThreadId;
+		inputText = text; if (preserveDraft) pendingAttachments = [];
 		if (inputEl) inputEl.textContent = text;
-		await tick();
-		return await handleSend();
+		await tick(); const sent = await handleSend();
+		if (draft) { restoreComposerDraft(draft); if (draftThreadId) drafts.saveCurrentDraft(draftThreadId); }
+		return sent;
 	}
-
 	export async function setText(text: string) {
 		inputText = text;
 		pendingAttachments = [];

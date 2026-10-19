@@ -114,7 +114,7 @@ function url(path: string): string {
 	return `${path}?token=${encodeURIComponent(auth ?? '')}`;
 }
 
-const ACCOUNT_FAILED = 'Could not change this Google account. Try again.';
+const ACCOUNT_FAILED = "Couldn't change this Google account. Try again.";
 
 async function response<T>(path: string, init?: RequestInit, fallback = 'Could not update this app. Try again.'): Promise<T> {
 	const result = await fetch(url(path), init);
@@ -145,7 +145,7 @@ export function startAccountSignIn(id: string): Promise<{ url: string; account_i
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ account_id: id }),
-	}, 'Could not start the sign-in. Try again.');
+	}, "Couldn't start Google sign-in. Try again.");
 }
 
 export function signOutOfAccount(id: string): Promise<AccountSignOutResult> {
@@ -174,7 +174,7 @@ export async function startAppSignIn(id: string): Promise<SignInStart> {
 	if (result.ok) return result.json() as Promise<SignInStart>;
 	const body = await result.clone().json().catch(() => null);
 	if (typeof body?.detail?.failure_class === 'string') throw new SignInStartError(body.detail.failure_class);
-	throw new Error(await plainResponseError(result, 'Could not start the sign-in. Try again.'));
+	throw new Error(await plainResponseError(result, "Couldn't start the sign-in. Try again."));
 }
 
 export function appSignInStatus(id: string): Promise<SignInStatus> {

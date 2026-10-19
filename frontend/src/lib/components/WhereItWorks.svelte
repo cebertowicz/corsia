@@ -29,8 +29,14 @@
 		}
 		const from = originalNames.join(', ');
 		const to = selectedNames.join(', ');
-		if (originalNames.length === 0) return `Agents in ${to} will be able to use ${app.name}.`;
-		return `${appName} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;
+		if (originalNames.length === 0) {
+			return app.kind === 'account'
+				? `CORSIA and agents in ${to} will be able to use ${app.address}.`
+				: `Agents in ${to} will be able to use ${app.name}.`;
+		}
+		return app.kind === 'account'
+			? `${appName} will move from ${from} to ${to}, with its sign-in. Agents in ${from} won't be able to use it.`
+			: `${appName} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;
 	});
 	const disabledLine = $derived(approve ? 'Select at least one project.' : `Select at least one project, or remove ${appName}.`);
 	/** The one effect line: what the choice does, or the plain reason the button is off. Never an error colour. */

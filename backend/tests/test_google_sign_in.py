@@ -54,6 +54,7 @@ class FakeGoogle:
         self.refresh_status = 200
         self.scope = " ".join(oauth.SCOPES)
         self.id_token: str | None = None
+        self.email = EMAIL
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
@@ -75,7 +76,7 @@ class FakeGoogle:
                 grant["id_token"] = self.id_token
             return httpx.Response(200, json=grant)
         if url == oauth.PROFILE_URL:
-            return httpx.Response(200, json={"emailAddress": EMAIL})
+            return httpx.Response(200, json={"emailAddress": self.email})
         return httpx.Response(200, json={"ok": True})
 
 
@@ -444,6 +445,25 @@ async def test_existing_needs_sign_in_account_returns_its_row_link_without_a_sec
     assert url.startswith(oauth.AUTH_URL) and signing_in == account_id
 
 
+async def test_reconnect_wrong_identity_names_the_saved_address_in_browser_copy(google, conductor, client_file):
+    account_id = await _connect(google, conductor, client_file)
+    db = get_db()
+    try:
+        db.execute("UPDATE connected_accounts SET state='needs_sign_in' WHERE id=?", (account_id,))
+        db.commit()
+    finally:
+        db.close()
+    google.email = "wrong@example.test"
+    url, _ = await oauth.start_sign_in(actor=("person", "person"), account_id=account_id)
+    query = parse_qs(urlparse(url).query)
+    google.challenge = query["code_challenge"][0]
+    state = query["state"][0]
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert response.status_code == 400
+    assert f"That's a different Google account. Go back to CORSIA and sign in again as {EMAIL}." in html.unescape(response.text)
+
+
 async def test_a_file_that_is_not_a_client_is_refused_without_echo(google, conductor, tmp_path):
     bad = tmp_path / "other.json"
     bad.write_text(json.dumps({"web": {"client_secret": SECRET}}))
@@ -567,7 +587,7 @@ async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
         ),
         oauth.GoogleSignInError(
             oauth.WRONG_ACCOUNT.format(signed_in="wrong@example.test", address="right@example.test"),
-            browser_message="That's a different Google account from the one you were adding. Go back to CORSIA and try again.",
+            browser_message="That's a different Google account. Go back to CORSIA and sign in again as right@example.test.",
         ),
     )
     async with _http() as http:

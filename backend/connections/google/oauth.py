@@ -307,7 +307,7 @@ def _store(
             if not _same_identity(account, email, provider_subject):
                 raise GoogleSignInError(
                     WRONG_ACCOUNT.format(signed_in=email, address=account["address"]),
-                    browser_message="That's a different Google account from the one you were adding. Go back to CORSIA and try again.",
+                    browser_message=f"That's a different Google account. Go back to CORSIA and sign in again as {account['address']}.",
                 )
         store_google_credentials(pending.account_id, bundle, db=conn)
         if not pending.adding:

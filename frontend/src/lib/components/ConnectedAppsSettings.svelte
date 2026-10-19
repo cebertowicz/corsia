@@ -61,9 +61,6 @@
 		if (row.state === 'failed' || (row.sign_in?.status === 'failed' && !row.sign_in.signed_in)) return 'failed';
 		return row.state === 'working' ? 'quiet' : 'attention';
 	}
-	function failureLine(failure: string | null | undefined): string {
-		return ({ cannot_start: "app didn't start", timed_out: 'no response', protocol_error: 'not compatible', name_collision: 'clashes with another app' }[failure ?? ''] ?? 'unknown reason');
-	}
 	function needsPlace(app: ConnectedApp): boolean {
 		return app.state === 'awaiting_approval' && app.reach.mode === 'selected' && app.reach.project_ids.length === 0 && !app.reach.outside_projects;
 	}
