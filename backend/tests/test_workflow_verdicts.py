@@ -168,12 +168,22 @@ def test_harm_in_one_group_is_worse_even_when_pooled_is_better() -> None:
 
 # --- baseline and frozen plan (§3.4) -------------------------------------------------------------------------
 
-def test_baseline_is_the_nearest_version_with_the_minimum_in_shared_groups() -> None:
-    other = ("model-b", "hard", "L+")
-    source = history(runs("v0", 1, started=40, ended=30), runs("v1", 1, started=29, ended=25, group=other),
+def test_baseline_is_the_nearest_version_with_the_minimum_settled_runs() -> None:
+    source = history(runs("v0", 1, started=40, ended=30), runs("v1", 1, count=5, started=29, ended=25),
                      runs("v2", 1, started=20, ended=10))
     assert choose_baseline(source, "v2", 20, 3, NOW) == ("v0", ("v1",))
     assert plan_for(source).skipped == ("v1",) and verdict(source).inputs["skipped"] == ["v1"]
+
+
+def test_a_later_run_in_a_new_group_never_changes_the_frozen_baseline() -> None:
+    other = ("model-b", "hard", "L+")
+    before = [runs("v0", 1, started=40, ended=30), runs("v1", 1, started=29, ended=25, group=other),
+              runs("v2", 1, started=20, ended=10)]
+    later = runs("v2", 1, count=1, started=5, ended=4, group=other)
+    plans = {(freeze_plan(source, "v2").baseline, freeze_plan(source, "v2").skipped)
+             for source in (history(*before), history(*before, later))}
+    assert plans == {("v1", ())}
+    assert verdict(history(*before)).reason == "no_shared_groups"
 
 
 def test_a_rolled_back_version_keeps_its_full_history_place_in_the_order() -> None:

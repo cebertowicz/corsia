@@ -186,11 +186,11 @@ def baseline_runs(history: WorkflowHistory, version: str, minimum: int, window: 
 def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window: int, now: datetime
                     ) -> tuple[str | None, tuple[str, ...]]:
     """The version ``version`` replaced, or failing that the latest-run earlier version, with the minimum
-    settled runs in groups shared with ``version``."""
-    groups = {run.group for run in _side(history, version)}
+    settled runs at ``now``. ``version``'s own groups are unknown at first use, so shared groups are left to
+    the comparison (``no_shared_groups``)."""
     skipped: list[str] = []
     for candidate in history.predecessors(version):
-        if sum(run.group in groups for run in baseline_runs(history, candidate, minimum, window, now)) >= minimum:
+        if len(baseline_runs(history, candidate, minimum, window, now)) >= minimum:
             return candidate, tuple(skipped)
         skipped.append(candidate)
     return None, tuple(skipped)
