@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from infra.measure_registry import _OWNER_ROWS, NAMESPACE_ROWS
-from infra.measure_status import COUNTERS_SQL, ROWS_SQL, status
+from infra.measure_status import COUNTERS_SQL, ROWS_SQL, status, synced_files
 from infra.schema import SCHEMA_SQL
 
 AGENT, OTHER = "agent-a", "agent-b"
@@ -72,6 +72,22 @@ def test_status_counts_rows_by_when_they_were_observed_and_only_inside_the_windo
     shown = status(db, AGENT)["events"]["mail.triaged"]
     assert shown["today"] == {"rows": 2, "counters": {"attribute_dropped": 2}}
     assert shown["last_7_days"] == {"rows": 3, "counters": {"attribute_dropped": 5}}
+
+
+def test_synced_files_lists_only_files_that_still_define_something_live() -> None:
+    db = world()
+    rows = (  # (name, version, removed, file, synced_at)
+        ("mail.moved", 1, 0, "/a.yaml", "2026-01-01"),
+        ("mail.moved", 2, 0, "/b.yaml", "2026-01-02"),  # moved: /a.yaml no longer defines it
+        ("mail.gone", 1, 0, "/c.yaml", "2026-01-01"),
+        ("mail.gone", 2, 1, "/c.yaml", "2026-01-03"),  # removed: /c.yaml defines nothing live
+    )
+    db.executemany(
+        "INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) "
+        "VALUES (?,'event',?,?,'{}',?,'sha',?,?)",
+        [(AGENT, name, version, file, synced, removed) for name, version, removed, file, synced in rows],
+    )
+    assert [item["path"] for item in synced_files(db, AGENT)] == ["/b.yaml"]
 
 
 @pytest.mark.parametrize("sql", [ROWS_SQL, COUNTERS_SQL])
