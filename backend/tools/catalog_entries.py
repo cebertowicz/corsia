@@ -9,6 +9,7 @@ from __future__ import annotations
 from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
+from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
 
@@ -313,6 +314,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="List this thread's schedules",
         activity="Listing automations",
     ),
+    **MEASUREMENT_CATALOG_ENTRIES,
     "restart_resume": _Entry(
         "delegation", status="substrate", authority="restart-continuity",
         summary="Resume this turn after the pending system restart",

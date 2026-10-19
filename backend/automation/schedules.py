@@ -42,6 +42,7 @@ class Schedule:
     last_status: str | None = None
     last_error: str | None = None
     noted_at: str | None = None
+    last_measures: str | None = None
 
 
 def _parse(value: str) -> datetime:

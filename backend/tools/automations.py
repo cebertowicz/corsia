@@ -29,14 +29,69 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
-def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
+_SERIES_ITEM = _schema(
+    {
+        "key": {"type": "string"},
+        "unit": {"type": "string"},
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "worse": {
+            "type": "string", "enum": ["up", "down"],
+            "description": "Which direction is worse; recorded but not acted on yet.",
+        },
+        "reduce": {
+            "type": "string",
+            "enum": ["last", "mean", "max"],
+            "description": "How a period's readings reduce; recorded but not acted on yet (default last).",
+        },
+    },
+    ["key"],
+)
+
+
+def _check_workflow(thread_id: str, project_id: str | None, workflow: Any) -> None:
+    """Refuse a script schedule's workflow that is not one of the owner's own workflow skills."""
+    from infra.measure_registry import workflow_problem
+    from tools.workflow_owners import workflow_owners
+
+    db = get_db()
+    try:
+        problem = workflow_problem(workflow_owners(thread_id, project_id, db), thread_id, str(workflow))
+    finally:
+        db.close()
+    if problem:
+        raise ValueError(f"{problem} The schedule was not registered; leave workflow out for agent-level measures.")
+
+
+def _listed(thread_id: str, project_id: str | None, items: list) -> list[dict]:
+    """Each schedule as a dict; a script schedule naming a workflow also shows workflow_stale,
+    true when that workflow is no longer one the owner may use (read live, never stored)."""
+    from infra.measure_registry import workflow_problem
+    from tools.workflow_owners import workflow_owners
+
+    listed = [asdict(item) for item in items]
+    named = [entry for entry in listed if (entry.get("payload") or {}).get("workflow") and entry["kind"] == script_schedules.SCRIPT_KIND]
+    if named:
+        db = get_db()
+        try:
+            owners = workflow_owners(thread_id, project_id, db)
+        finally:
+            db.close()
+        for entry in named:
+            entry["workflow_stale"] = workflow_problem(owners, thread_id, str(entry["payload"]["workflow"])) is not None
+    return listed
+
+
+def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: str | None = None) -> dict:
     """Register one model-free script run for the current thread."""
     from infra.config import WORKSPACE
 
-    for name in ("script_path", "cadence_seconds", "series"):
+    for name in ("script_path", "cadence_seconds"):
         if params.get(name) is None:
             raise ValueError(f"{name} is required for a script schedule")
-    series = script_schedules.parse_series(params["series"])
+    series = script_schedules.parse_series(params.get("series", []))
+    if params.get("workflow") is not None:
+        _check_workflow(thread_id, project_id, params["workflow"])
     path, sha256 = script_schedules.pin_script(
         str(params["script_path"]), workspace=WORKSPACE,
     )
@@ -50,6 +105,7 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
         timeout_seconds=params.get(
             "timeout_seconds", script_schedules.DEFAULT_TIMEOUT_SECONDS,
         ),
+        workflow=params.get("workflow"),
         now=datetime.now(timezone.utc).isoformat(),
         db=None,
     )
@@ -60,7 +116,7 @@ def _operate(thread_id, actor_row, operation: str, params: dict):
     if operation == "schedule":
         scope_id = actor_row["project_id"] or "__workspace__"
         if params.get("kind") == script_schedules.SCRIPT_KIND:
-            return _script_schedule(thread_id, scope_id, params)
+            return _script_schedule(thread_id, scope_id, params, actor_row["project_id"])
         for name in ("spec", "max_runs"):
             if params.get(name) is None:
                 raise ValueError(f"{name} is required for a clock or cadence schedule")
@@ -89,14 +145,15 @@ def _operate(thread_id, actor_row, operation: str, params: dict):
             )
         }
     return {
-        "schedules": [
-            asdict(item)
-            for item in schedules.list_for_actor(
+        "schedules": _listed(
+            thread_id,
+            actor_row["project_id"],
+            schedules.list_for_actor(
                 thread_id=thread_id,
                 actor_id=thread_id,
                 db=get_db(),
-            )
-        ]
+            ),
+        )
     }
 
 
@@ -133,7 +190,11 @@ class AutomationScheduleTool(Tool):
             "cadence with no model turn, in your own sandbox: use it to watch "
             "a number (a count, a duration, a cost) cheaply. The script prints "
             "one JSON object per line, {\"series\": \"<key>\", \"value\": "
-            "<number>}, for each series you registered, and exits 0. You are "
+            "<number>}, for each series you registered, and exits 0. It may also "
+            "print measure lines for events declared in a measures.yaml you "
+            "synced with measure_sync: {\"measure\": {\"event.name\": \"<event>\", "
+            "\"attributes\": {<name>: <value>}, \"time\": \"<ISO 8601, optional>\"}}; "
+            "measure_status shows what was recorded or refused and why. You are "
             "woken once per series per day when a reading leaves its min/max, "
             "the script fails or times out, or the file changes after "
             "registration; readings inside bounds reach you as a passive "
@@ -177,32 +238,23 @@ class AutomationScheduleTool(Tool):
                 },
                 "series": {
                     "type": "array",
-                    "minItems": 1,
+                    "minItems": 0,
                     "maxItems": script_schedules.MAX_SERIES,
                     "description": (
                         "script kind: the readings the script may print. min "
                         "and max are your own bounds; a reading outside them wakes you; a series with no bounds never wakes you."
                     ),
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "key": {"type": "string"},
-                            "unit": {"type": "string"},
-                            "min": {"type": "number"},
-                            "max": {"type": "number"},
-                            "worse": {
-                                "type": "string", "enum": ["up", "down"],
-                                "description": "Which direction is worse; recorded but not acted on yet.",
-                            },
-                            "reduce": {
-                                "type": "string",
-                                "enum": ["last", "mean", "max"],
-                                "description": "How a period's readings reduce; recorded but not acted on yet (default last).",
-                            },
-                        },
-                        "required": ["key"],
-                    },
+                    "items": _SERIES_ITEM,
+                },
+                "workflow": {
+                    "type": "string",
+                    "description": (
+                        "script kind: optional. The name of a workflow skill you own: one in your own "
+                        ".threads skills, or one whose corsia.yaml sets `owner:` under `workflow:` to "
+                        "your thread id. Each accepted measure line is recorded with this workflow_ref "
+                        "and the skill's current version. A refusal lists the workflows you own. "
+                        "Leave it out for agent-level measures."
+                    ),
                 },
                 "timeout_seconds": {
                     "type": "integer",
@@ -248,7 +300,9 @@ class AutomationListTool(Tool):
         return (
             "List automation schedules owned by the current thread. A script "
             "schedule shows state, last_status (ok, breach, no_data, error, "
-            "timeout, hash_mismatch, interrupted), last_error and last_run_at."
+            "timeout, hash_mismatch, interrupted), last_error, last_run_at, "
+            "last_measures (the last run's measure lines recorded and refused) and, "
+            "when it names a workflow, workflow_stale (true when that workflow is no longer yours)."
         )
 
     @property

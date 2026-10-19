@@ -1,4 +1,4 @@
-"""Schema 127 -> 128: connected accounts and legacy Google migration."""
+"""Schema 127 -> 128: declared measure registry, per-agent per-day intake counters, a schedule's last measures."""
 
 from __future__ import annotations
 
@@ -7,288 +7,113 @@ from contextlib import closing
 
 import pytest
 
-from connections.connected_accounts import google_accounts, resolve_google_credentials
-from google_account_helpers import ONLY_CORSIA_REACH
-from infra import key_store, key_store_values
 from infra.database import initialize_schema
-from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
-from infra.migration_127_to_128_connected_accounts import migrate_127_to_128
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_127_to_128_measure_registry import migrate_127_to_128
 from infra.schema import SCHEMA_VERSION
-from infra.settings import get_setting, set_setting
+
+_OLD_COUNTERS = """
+    CREATE TABLE outcome_event_counters (
+        counter    TEXT NOT NULL CHECK (counter IN (
+                     'duplicate_ignored', 'attribute_dropped', 'mapping_failed')),
+        event_name TEXT NOT NULL,
+        n          INTEGER NOT NULL DEFAULT 0 CHECK (n >= 0),
+        PRIMARY KEY (counter, event_name)
+    )
+"""
 
 
-ACCOUNT = "person@example.test"
-CURSOR = {"account": ACCOUNT, "floor_at": "old-floor", "history_id": "old-history", "last_success_at": "old-success"}
+def _columns(db: sqlite3.Connection, table: str) -> list[tuple[str, str]]:
+    return [(row[1], row[2]) for row in db.execute(f"PRAGMA table_info({table})")]
+
+
+def _key(db: sqlite3.Connection) -> list[str]:
+    """The counters' primary key columns in key order."""
+    return [row[1] for row in sorted(db.execute("PRAGMA table_info(outcome_event_counters)"), key=lambda row: row[5]) if row[5]]
+
+
+def _index_sql(db: sqlite3.Connection, name: str = "idx_outcome_events_agent_observed") -> str | None:
+    row = db.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()
+    return " ".join(row[0].split()) if row else None
 
 
 def _fresh() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
     initialize_schema(db)
     return db
 
 
-def _dev_127() -> sqlite3.Connection:
-    """Reconstruct dev schema 127, including the presence-focus tables and user-comments index, in memory."""
+def _wound_back_to_v127(*, registry_present: bool = False) -> sqlite3.Connection:
+    """A fresh current database wound back to schema 127, with two old counter totals."""
     db = _fresh()
-    db.execute("DROP TABLE connected_account_reach")
-    db.execute("DROP TABLE connected_account_audit")
-    db.execute("DROP TABLE connected_account_migration_journal")
-    db.execute("DROP TABLE connected_accounts")
+    db.execute("DROP TABLE outcome_event_counters")
+    db.execute(_OLD_COUNTERS)
+    db.execute("INSERT INTO outcome_event_counters VALUES ('duplicate_ignored','github.pr.opened',7)")
+    db.execute("INSERT INTO outcome_event_counters VALUES ('attribute_dropped','github.pr.opened',3)")
+    if not registry_present:
+        db.execute("DROP TABLE measure_definitions")
+        db.execute("ALTER TABLE automation_schedules DROP COLUMN last_measures")
+    db.execute("DROP INDEX idx_outcome_events_agent_observed")
+    # Step 127's comments index is part of a 127 database.
+    assert _index_sql(db, "idx_doc_comments_user_created") is not None
     db.execute("PRAGMA user_version=127")
     db.commit()
     return db
 
 
-def google_account(*, db):  # type: ignore[no-untyped-def]
-    """The single account a legacy migration may create, or None."""
-    accounts = google_accounts(db=db)
-    assert len(accounts) <= 1
-    return accounts[0] if accounts else None
-
-
-def _seed_legacy(db: sqlite3.Connection) -> None:
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, "client-id", db=db)
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, "client-secret", db=db)
-    key_store.set_managed_value(key_store.GOOGLE_REFRESH_TOKEN, "refresh-token", db=db)
-    set_setting("google_account", {"email": ACCOUNT, "status": "connected"}, db=db)
-    set_setting("gmail_poll_cursor", CURSOR, db=db)
-
-
-def test_v127_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 128
+def test_the_step_is_registered_at_127() -> None:
+    assert SCHEMA_VERSION == 129
     assert MIGRATIONS[127] is migrate_127_to_128
-    assert 128 not in MIGRATIONS
 
 
-def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> None:
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 127, 128)
-        account = google_account(db=db)
-        assert account is not None
-        assert account["address"] == ACCOUNT
-        assert account["reach"] == ONLY_CORSIA_REACH
-        assert account["cursor"] == CURSOR
-        assert resolve_google_credentials(str(account["id"]), db=db) == {
-            "client_id": "client-id", "client_secret": "client-secret", "refresh_token": "refresh-token",
-        }
-        assert get_setting("google_account", db=db) is None
-        assert get_setting("gmail_poll_cursor", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] == account["id"]
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-
-
-def test_migration_rekeys_owned_threads_and_binds_open_google_drafts() -> None:
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        db.execute(
-            "INSERT INTO threads(id,user_id,created_at,updated_at) VALUES (?,?,?,?)",
-            ("owner-thread", "owner", "t", "t"),
-        )
-        db.execute(
-            "INSERT INTO artifact_identities(id,integration,type,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
-            ("email-artifact", "gmail", "email-thread", "raw-thread", "t", "t"),
-        )
-        db.execute(
-            "INSERT INTO artifact_registrations(id,artifact_id,parent_thread_id,created_at,updated_at) VALUES (?,?,?,?,?)",
-            ("email-owner", "email-artifact", "owner-thread", "t", "t"),
-        )
-        db.execute(
-            "INSERT INTO connection_rules(id,connector,fact,value,destination_thread_id,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?)",
-            ("gmail-thread-rule", "gmail", "thread_id", "raw-thread", "owner-thread", "t", "t"),
-        )
-        db.execute(
-            "INSERT INTO connection_rules(id,connector,fact,value,destination_thread_id,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?)",
-            ("gmail-label-rule", "gmail", "label", "inbox", "owner-thread", "t", "t"),
-        )
-        for kind in ("email", "invite"):
-            db.execute(
-                "INSERT INTO action_drafts(id,thread_id,kind,path,target_json,recorded_revision,recorded_at,created_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (f"{kind}-draft", "owner-thread", kind, f"{kind}.md", "{}", "r1", "t", "t"),
-            )
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        migrate_to_current(db, SCHEMA_VERSION)
-
-        account = google_account(db=db)
-        assert account is not None
-        account_id = str(account["id"])
-        assert db.execute(
-            "SELECT external_id FROM artifact_identities WHERE id='email-artifact'",
-        ).fetchone()[0] == f"google:{account_id}:thread:raw-thread"
-        assert db.execute(
-            "SELECT parent_thread_id FROM artifact_registrations WHERE artifact_id='email-artifact'",
-        ).fetchone()[0] == "owner-thread"
-        assert db.execute(
-            "SELECT value FROM connection_rules WHERE id='gmail-thread-rule'",
-        ).fetchone()[0] == f"google:{account_id}:thread:raw-thread"
-        assert db.execute(
-            "SELECT value FROM connection_rules WHERE id='gmail-label-rule'",
-        ).fetchone()[0] == "inbox"
-        assert [row[0] for row in db.execute(
-            "SELECT target_json FROM action_drafts ORDER BY id",
-        )] == [
-            f'{{"account_id":"{account_id}"}}', f'{{"account_id":"{account_id}"}}',
+def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -> None:
+    with closing(_fresh()) as fresh, closing(_wound_back_to_v127()) as db:
+        migrate_127_to_128(db)
+        for table in ("outcome_event_counters", "measure_definitions", "automation_schedules"):
+            assert _columns(db, table) == _columns(fresh, table)
+        assert ("last_measures", "TEXT") in _columns(db, "automation_schedules")
+        assert _key(db) == _key(fresh) == ["agent_thread_id", "day", "event_name", "counter"]
+        for index in ("idx_outcome_events_agent_observed", "idx_measure_definitions_kind_name"):
+            assert _index_sql(db, index) == _index_sql(fresh, index) and _index_sql(db, index) is not None
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name IN ('measure_namespaces','measure_workflows')").fetchone()
+        assert db.execute("SELECT counter,event_name,agent_thread_id,day,n FROM outcome_event_counters ORDER BY counter").fetchall() == [
+            ("attribute_dropped", "github.pr.opened", "", "0000-00-00", 3),
+            ("duplicate_ignored", "github.pr.opened", "", "0000-00-00", 7),
         ]
 
 
-def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_startup() -> None:
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        db.execute("DELETE FROM key_store_entries WHERE name=?", (key_store.GOOGLE_REFRESH_TOKEN,))
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 128)
-        account = google_account(db=db)
-        assert account is not None
-        assert account["address"] == ACCOUNT
-        assert account["cursor"] == CURSOR
-        assert account["state"] == "needs_sign_in"
-        assert resolve_google_credentials(str(account["id"]), db=db) is None
-        assert get_setting("google_account", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+def test_the_step_runs_after_the_startup_schema_pass_and_again() -> None:
+    with closing(_wound_back_to_v127(registry_present=True)) as db:
+        migrate_127_to_128(db)
+        migrate_127_to_128(db)
+        assert {name for name, _ in _columns(db, "outcome_event_counters")} >= {"agent_thread_id", "day"}
+        assert db.execute("SELECT sum(n) FROM outcome_event_counters").fetchone()[0] == 10
 
 
-def test_addressless_legacy_data_is_retired_and_journaled_without_an_account() -> None:
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        set_setting("google_account", {"status": "connected"}, db=db)
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 128)
-        assert google_account(db=db) is None
-        assert get_setting("google_account", db=db) is None
-        assert get_setting("gmail_poll_cursor", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] is None
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-
-
-def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(monkeypatch) -> None:
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        monkeypatch.setattr(key_store_values, "put", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
-        with pytest.raises(MigrationError):
-            migrate_to_current(db, SCHEMA_VERSION)
-
-        assert get_setting("google_account", db=db) == {"email": ACCOUNT, "status": "connected"}
-        assert get_setting("gmail_poll_cursor", db=db) == CURSOR
-        assert set(key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db)) == set(key_store.GOOGLE_ENTRIES)
-        assert db.execute("SELECT COUNT(*) FROM connected_accounts").fetchone()[0] == 0
-
-
-def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:
-    db.execute(
-        "INSERT INTO email_screens(account,message_id,status,screened_at) VALUES (?,?,'unavailable','t')",
-        (account, message_id),
-    )
-
-
-def test_stored_screens_are_rekeyed_to_the_new_account_and_strays_dropped() -> None:
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        _screen(db, ACCOUNT.upper(), "m1")  # Address case differs from the setting's.
-        _screen(db, "someone-else@example.test", "m2")
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        migrate_to_current(db, SCHEMA_VERSION)
-
-        account = google_account(db=db)
-        assert account is not None
-        rows = db.execute("SELECT account, message_id FROM email_screens ORDER BY message_id").fetchall()
-        assert [tuple(row) for row in rows] == [(account["id"], "m1")]
-
-
-def test_screens_without_a_legacy_account_are_dropped() -> None:
-    with closing(_dev_127()) as db:
-        _screen(db, ACCOUNT, "m1")
-        db.execute("PRAGMA user_version=127")
-        db.commit()
-
-        migrate_to_current(db, SCHEMA_VERSION)
-
-        assert db.execute("SELECT COUNT(*) FROM email_screens").fetchone()[0] == 0
-
-
-def test_dev_127_upgrades_to_the_complete_connected_accounts_schema() -> None:
-    with closing(_dev_127()) as db:
-        migrate_to_current(db, SCHEMA_VERSION)
-
-        expected_columns = {
-            "connected_accounts": {
-                "id", "provider", "provider_subject", "address", "capabilities_json", "state",
-                "reach_mode", "outside_projects", "credential_key", "cursor_json", "created_by_kind",
-                "created_by_id", "signed_in_by_kind", "signed_in_by_id", "created_at", "updated_at",
-            },
-            "connected_account_reach": {"account_id", "project_id"},
-            "connected_account_audit": {
-                "id", "created_at", "account_id", "actor_kind", "actor_id", "action", "revocation_cause",
-            },
-            "connected_account_migration_journal": {"migration_key", "completed_at", "account_id"},
-        }
-        for table, columns in expected_columns.items():
-            actual = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
-            assert actual == columns
-
-
-def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
-    """Remove deletes the account row; its audit and migration records must outlive it."""
-    from connections.google import account_actions
-
-    with closing(_dev_127()) as db:
-        _seed_legacy(db)
-        migrate_to_current(db, SCHEMA_VERSION)
-        account = google_account(db=db)
-        assert account is not None
-        account_id = str(account["id"])
-
-        db.execute("PRAGMA foreign_keys=ON")
-        account_actions._remove_locally(account_id, ("person", "owner"), db=db)
-
-        assert db.execute("SELECT COUNT(*) FROM connected_accounts WHERE id=?", (account_id,)).fetchone()[0] == 0
-        assert db.execute(
-            "SELECT action FROM connected_account_audit WHERE account_id=? ORDER BY id", (account_id,),
-        ).fetchall()[-1][0] == "remove"
-        assert db.execute(
-            "SELECT account_id FROM connected_account_migration_journal WHERE migration_key=?", ("google-singleton-v1",),
-        ).fetchone()[0] == account_id
-        for table in ("connected_account_audit", "connected_account_migration_journal"):
-            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []
-
-
-def test_fresh_install_has_final_history_tables_and_audit_causes() -> None:
-    with closing(_fresh()) as db:
-        for table in ("connected_account_audit", "connected_account_migration_journal"):
-            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []
-        row = ("t", "account", "person", "owner", "remove")
-        db.execute(
-            "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
-            "VALUES (?,?,?,?,?,?)", (*row, "not_signed_in"),
-        )
+def test_the_counter_check_admits_the_four_new_counters_and_nothing_unwritten() -> None:
+    with closing(_wound_back_to_v127()) as db:
+        migrate_127_to_128(db)
+        for counter in ("name_undeclared", "namespace_not_owned", "record_refused", "unversioned"):
+            db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES (?,?,?,?)", (counter, "mail.triaged", "a", "2026-01-01"))
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute(
-                "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
-                "VALUES (?,?,?,?,?,?)", (*row, "manual_only"),
-            )
+            db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES ('rate_limited','mail.triaged','a','2026-01-01')")
 
 
-# The transient train-only history schema never reached a development build; migration 127→128 does not repair it.
+def test_the_runner_takes_a_127_database_to_current_and_stays_there() -> None:
+    with closing(_wound_back_to_v127()) as db:
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 127, SCHEMA_VERSION)
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
+def test_measure_definitions_carries_a_removed_flag_that_admits_only_zero_or_one() -> None:
+    with closing(_wound_back_to_v127()) as db:
+        migrate_127_to_128(db)
+        assert ("removed", "INTEGER") in _columns(db, "measure_definitions")
+        row = ("a", "event", "mail.x", 1, "{}", "/p", "sha", "t")
+        db.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?,1)", row)
+        db.execute("INSERT INTO measure_definitions(owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at) VALUES (?,?,?,?,?,?,?,?)", (*row[:2], "mail.y", *row[3:]))
+        assert db.execute("SELECT removed FROM measure_definitions ORDER BY name").fetchall() == [(1,), (0,)]
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?,2)", (*row[:2], "mail.z", *row[3:]))

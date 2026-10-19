@@ -1,4 +1,4 @@
-"""Schema 127 -> 128: introduce connected accounts and migrate legacy Google."""
+"""Schema 128 -> 129: introduce connected accounts and migrate legacy Google."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def _clear_legacy(conn: sqlite3.Connection) -> None:
 
 
 
-def migrate_127_to_128(conn: sqlite3.Connection) -> None:
+def migrate_128_to_129(conn: sqlite3.Connection) -> None:
     """Move one usable legacy Google singleton atomically into its account row.
 
     The surrounding migration runner owns the transaction and journaled schema

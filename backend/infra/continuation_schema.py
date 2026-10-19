@@ -56,7 +56,8 @@ CONTINUATION_SCHEMA_SQL = """
         running_since TEXT,
         last_status TEXT,
         last_error TEXT,
-        noted_at TEXT
+        noted_at TEXT,
+        last_measures TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_automation_schedules_due
         ON automation_schedules(state, next_run_at);
