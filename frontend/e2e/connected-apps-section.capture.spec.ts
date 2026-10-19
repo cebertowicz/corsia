@@ -50,7 +50,7 @@ test.describe('Connected apps Settings section capture', () => {
 
 				if (viewport > 768) await page.getByRole('button', { name: 'System' }).click();
 				else {
-					await page.getByRole('button', { name: 'Settings' }).click();
+					await page.getByRole('main').getByRole('button', { name: 'Settings' }).click();
 					await page.getByRole('button', { name: 'System' }).click();
 				}
 				await expect(page.getByRole('heading', { name: 'Connected apps' })).toHaveCount(0);
