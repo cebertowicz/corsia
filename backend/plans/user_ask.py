@@ -118,21 +118,33 @@ def raised_asks(db, artifact_id: str) -> list:
     ).fetchall()
 
 
-def answered_ask_round(db, artifact_id: str, at: str):
-    """The review round the person answered that something made at ``at`` fell inside, or None.
+def ask_rounds(db, artifact_id: str) -> list:
+    """Every review round the person was asked on this artifact, newest raise first.
 
-    A round runs from its raise to the answer's clearance. A hold the agent
-    withdrew or a task ended is not an answered round.
+    A round runs from its raise to its clearance (``cleared_at`` is None while it
+    is open). ``answered`` is whether the person's answer ended it; a hold the
+    agent withdrew or a task ended is not answered.
     """
     return db.execute(
-        """SELECT h.id AS hold_id, h.created_at AS raised_at, h.cleared_at AS answered_at
-             FROM plan_node_holds h JOIN plan_node_events e ON e.id=h.clearance_event_id
+        """SELECT h.id AS hold_id, h.created_at AS raised_at, h.cleared_at,
+                  COALESCE(json_extract(e.payload_json, '$.detail.answered_by')='user', 0) AS answered
+             FROM plan_node_holds h LEFT JOIN plan_node_events e ON e.id=h.clearance_event_id
             WHERE h.kind='blocked' AND h.owner_kind='user' AND h.owner_id=?
-              AND h.created_at < ? AND ? <= h.cleared_at
-              AND json_extract(e.payload_json, '$.detail.answered_by')='user'
-            ORDER BY h.created_at DESC, h.id DESC LIMIT 1""",
-        (artifact_id, at, at),
-    ).fetchone()
+            ORDER BY h.created_at DESC, h.id DESC""",
+        (artifact_id,),
+    ).fetchall()
+
+
+def round_at(rounds: list, at: str):
+    """The round of ``ask_rounds`` open when something was made at ``at``, or None.
+
+    That is the newest raised before ``at`` and not cleared before it, so when
+    several asks clear together each moment still belongs to exactly one round.
+    """
+    return next(
+        (r for r in rounds if r["raised_at"] < at and (r["cleared_at"] is None or at <= r["cleared_at"])),
+        None,
+    )
 
 
 def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:

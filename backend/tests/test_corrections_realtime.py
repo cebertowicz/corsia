@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from jobs import corrections_dispatch, corrections_runtime
+from jobs import corrections_runtime
 
 
 def _candidate(message_id: str = "owner-message"):
@@ -710,7 +710,7 @@ async def test_unreadable_fact_is_written_with_its_reason_and_not_counted(isolat
     from jobs.corrections_activation import weekly_correction_figure
 
     ids = _seed_owner_messages(1)
-    candidate = await asyncio.to_thread(corrections_realtime.candidate_for_message, ids[0])
+    candidate = await asyncio.to_thread(corrections_realtime.candidate_for_source, "message", ids[0])
     ScriptedChild.calls = [OnnxMessageFailed("child_error"), OnnxMessageFailed("child_error")]
 
     assert (await worker._classify(candidate)).kind in {"recorded", "unreadable"}
@@ -772,7 +772,7 @@ def test_full_arrival_queue_keeps_send_admission_and_owes_the_scan(worker):
     worker.queue = asyncio.Queue(maxsize=1)
     worker.queue.put_nowait(("message", "already-queued", 0.0))
 
-    worker.notify("dropped")
+    worker.notify("message", "dropped")
 
     state = worker.snapshot()
     assert state["dropped_arrivals"] == 1
@@ -825,7 +825,7 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", locked)
     processed = []
-    monkeypatch.setattr(corrections_dispatch, "candidate_for_message", lambda message_id: processed.append(message_id))
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: processed.append(message_id))
 
     worker.scan = "owed"
     worker.queue.put_nowait(("message", "arrival", 0.0))
@@ -839,12 +839,12 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
 async def test_a_failing_arrival_owes_the_scan_and_the_next_arrival_still_runs(worker, monkeypatch):
     from jobs import corrections_realtime
 
-    def candidate(message_id):
+    def candidate(_kind, message_id):
         if message_id == "first":
             raise RuntimeError("database is locked")
         return None
 
-    monkeypatch.setattr(corrections_dispatch, "candidate_for_message", candidate)
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", candidate)
     monkeypatch.setattr(worker, "_scan_pass", AsyncMock(side_effect=lambda: worker._finish_scan()))
     worker.queue.put_nowait(("message", "first", 0.0))
     worker.queue.put_nowait(("message", "second", 0.0))
@@ -870,8 +870,8 @@ async def test_worker_task_that_dies_keeps_the_scan_owed_and_notify_restarts_it(
     assert (worker.scan, worker.held_reason) == ("owed", "worker error: RuntimeError")
 
     seen = []
-    monkeypatch.setattr(corrections_dispatch, "candidate_for_message", lambda message_id: seen.append(message_id))
-    corrections_realtime.notify("after-crash")
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: seen.append(message_id))
+    corrections_realtime.notify("message", "after-crash")
     await worker.task
 
     assert seen == ["after-crash"]
@@ -1061,7 +1061,7 @@ async def test_an_arrival_queued_during_the_backfill_pause_is_picked_up_at_once(
     worker.task = asyncio.create_task(worker._scan_pass())
     await paused.wait()
     started = asyncio.get_running_loop().time()
-    worker.notify("fresh-arrival")
+    worker.notify("message", "fresh-arrival")
     await asyncio.wait_for(asyncio.shield(worker.task), timeout=1.0)
 
     assert asyncio.get_running_loop().time() - started < 1.0
@@ -1076,13 +1076,13 @@ async def test_one_worker_processes_arrival_queued_during_startup_scan(worker, m
         worker.queue.put_nowait(("message", "during-startup", 0.0))
         worker._finish_scan()
 
-    async def arrival(_worker, source_kind, message_id, enqueued_at):
+    async def arrival(source_kind, message_id, enqueued_at):
         assert source_kind == "message"
         processed.append(message_id)
         worker.queue.task_done()
 
     monkeypatch.setattr(worker, "_scan_pass", scan)
-    monkeypatch.setattr(corrections_dispatch, "dispatch_arrival", arrival)
+    monkeypatch.setattr(worker, "_arrival", arrival)
     worker.scan = "owed"
 
     await worker.run()
@@ -1133,7 +1133,7 @@ async def test_shutdown_cancels_the_worker_kills_the_child_and_owes_later_arriva
     assert child.killed and child.closed
     assert worker.child is None and worker.child_manifest is None
 
-    corrections_realtime.notify("arrived-during-shutdown")
+    corrections_realtime.notify("message", "arrived-during-shutdown")
 
     assert worker.task is None
     assert worker.queue.qsize() == 0
@@ -1263,7 +1263,7 @@ async def test_recorded_newest_messages_do_not_hide_older_pending_ones(isolated_
 
     # The 22 newest are already recorded: more than one 20-message page.
     for message_id in ids[-22:]:
-        candidate = await asyncio.to_thread(corrections_realtime.candidate_for_message, message_id)
+        candidate = await asyncio.to_thread(corrections_realtime.candidate_for_source, "message", message_id)
         assert await corrections_realtime.record_classification(candidate, _result())
     assert _recorded_message_ids() == set(ids[-22:])
 

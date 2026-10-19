@@ -1,15 +1,30 @@
-"""Agent-only correction triage notes and their idempotency rules."""
+"""Agent-only correction triage notes: the one owner of what each note covers and whether it wakes.
+
+A chat message or a decision answer gets its own note. A comment is noted with
+its review unit, written once every comment in the unit has a fact:
+
+- ``review-round:<hold>``: the comments made while an ask was open, once the
+  person answered it (``plans.public.round_at`` picks the one round);
+- ``doc-feedback:<batch>``: any other comment, with its newest delivered batch.
+
+Every trigger (a fact landing by arrival or scan, a batch delivered, an ask
+answered) re-derives the unit here, so whichever lands last writes the note.
+A new note wakes its recipient unless the caller will not drive it. When this
+transaction already queued the recipient an input, the note joins that input's
+batch as a passive digest instead of starting a turn of its own.
+"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 
 from core.corrections_recording import (
     ACTIVE_VERSION_SETTING,
     CORRECTION_EVENT,
+    LABEL_CORRECTION,
     ClassifierVersion,
     CorrectionCandidate,
     is_owner_authored_message,
@@ -53,11 +68,9 @@ def note_text(message_id: str, content: str, created_at: str) -> str:
 
 
 def _decision_note_text(candidate: CorrectionCandidate) -> str:
-    decision_id = candidate.source_id.rsplit(":", 1)[0]
-    answer = candidate.content.rsplit("Owner answer:", 1)[-1]
     return (
-        f"Correction recorded on your plan decision {decision_id}, sent "
-        f"{_local_clock(candidate.created_at)}: “{_quote(answer)}”\n"
+        f"Correction recorded on your plan decision {candidate.source_ref}, sent "
+        f"{_local_clock(candidate.created_at)}: “{_quote(candidate.quote or '')}”\n"
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
         "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
@@ -103,12 +116,38 @@ def _newer_owner_message(db: sqlite3.Connection, candidate: CorrectionCandidate)
     return any(is_owner_authored_message(role=row[0], content=row[1], metadata=row[2]) for row in rows)
 
 
+def input_floor(db: sqlite3.Connection) -> int:
+    """The newest message row; take it when a transaction starts and pass it to the writers below."""
+    return int(db.execute("SELECT COALESCE(MAX(rowid), 0) FROM messages").fetchone()[0])
+
+
+def _wake(
+    db: sqlite3.Connection, target: str, note_key: str, *, floor: int, wakes: list[str] | None,
+) -> None:
+    """The one wake rule for a new note; ``wakes`` is None when the caller will not drive."""
+    from infra.passive_changes import materialize_pending_digest
+
+    if db.execute(
+        "SELECT 1 FROM messages WHERE rowid>? AND thread_id=? AND delivery_state='queued' LIMIT 1",
+        (floor, target),
+    ).fetchone() is not None:
+        # That input's digest was cut before this note; ride its batch, whoever drives it.
+        materialize_pending_digest(db, target)
+        return
+    if wakes is None:
+        return
+    admitted = materialize_pending_digest(db, target, wake_id=f"correction-wake:{note_key}")
+    if admitted is not None and not admitted.duplicate:
+        wakes.append(target)
+
+
 def _append_note(
     db: sqlite3.Connection, *, thread_id: str, note_key: str, summary: str, subjects: list[str],
-) -> str | None:
-    """Append one note per durable note key, returning it only on first insertion."""
+) -> bool:
+    """Append one note per durable note key; True only on first insertion."""
     if not _has_target(db, thread_id):
-        return None
+        return False
+    # Linear in this thread's journal rows (16 ms at 50k); see the PR's scale budget.
     exists = db.execute(
         """SELECT 1 FROM context_change_journal
            WHERE object_kind='thread_context' AND object_id=?
@@ -116,7 +155,7 @@ def _append_note(
         (thread_id, note_key),
     ).fetchone()
     if exists is not None:
-        return None
+        return False
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note
 
     append_thread_context_note(
@@ -131,82 +170,161 @@ def _append_note(
             REOFFER_UNWRITTEN: True,
         },
     )
-    return note_key
+    return True
 
 
-def queue_correction_note(
-    db: sqlite3.Connection,
-    candidate: CorrectionCandidate,
-    version: ClassifierVersion,
-    event_id: str,
-) -> str | None:
-    """Journal a singular note for chat or decision sources, never per comment."""
-    if candidate.source_kind == "doc_comment" or not _first_record(db, candidate, event_id):
-        return None
-    if candidate.source_kind != "message" and not candidate.arrived:
-        return None  # A scan never notes a decision answer; only its arrival does.
-    if not candidate.arrived and (not _is_active(db, version) or _newer_owner_message(db, candidate)):
-        return None
-    subject = subject_key(candidate.source_kind, candidate.source_id)
+def queue_fact_notes(
+    db: sqlite3.Connection, candidate: CorrectionCandidate, label: str, version: ClassifierVersion,
+    event_id: str, *, floor: int, wakes: list[str] | None,
+) -> None:
+    """Write the notes a just-recorded fact completes, in the fact's transaction.
+
+    A scan's fact notes only under the active version, so the activation
+    backfill never notes, and a message only while it is still the person's latest word.
+    """
+    if not candidate.arrived and (
+        not _is_active(db, version)
+        or (candidate.source_kind == "message" and _newer_owner_message(db, candidate))
+    ):
+        return
+    if candidate.source_kind == "doc_comment":
+        queue_comment_notes(db, [candidate.source_id], floor=floor, wakes=wakes)
+        return
+    if label != LABEL_CORRECTION or not _first_record(db, candidate, event_id):
+        return
     if candidate.source_kind == "plan_decision_answer":
-        return _append_note(
-            db,
-            thread_id=candidate.thread_id,
-            note_key=f"decision-answer:{candidate.source_id}",
-            summary=_decision_note_text(candidate),
-            subjects=[subject],
-        )
-    return _append_note(
-        db,
-        thread_id=candidate.thread_id,
-        note_key=f"message:{candidate.source_id}",
-        summary=note_text(candidate.source_id, candidate.content, candidate.created_at),
-        subjects=[subject],
-    )
+        note_key = f"decision-answer:{candidate.source_id}"
+        summary = _decision_note_text(candidate)
+    else:
+        note_key = f"message:{candidate.source_id}"
+        summary = note_text(candidate.source_id, candidate.content, candidate.created_at)
+    subjects = [subject_key(candidate.source_kind, candidate.source_id)]
+    if _append_note(db, thread_id=candidate.thread_id, note_key=note_key, summary=summary, subjects=subjects):
+        # The person's chat message is itself the thread's input; its note rides that conversation.
+        if candidate.source_kind != "message":
+            _wake(db, candidate.thread_id, note_key, floor=floor, wakes=wakes)
 
 
-_COMMENT_COLUMNS = """c.id,c.anchor_text,c.body,c.created_at,
+_COMMENT_COLUMNS = """c.id,c.artifact_id,c.anchor_text,c.body,c.created_at,
     (SELECT COUNT(*) FROM outcome_events e WHERE e.event_name=:event
        AND e.subject_key='doc-comment:' || c.id AND e.retracted_at IS NULL) AS facts,
     EXISTS (SELECT 1 FROM outcome_events e WHERE e.event_name=:event
        AND e.subject_key='doc-comment:' || c.id AND e.retracted_at IS NULL
        AND json_extract(e.attributes,'$.label')='correction') AS positive"""
-_NO_UPPER_BOUND = "9999-12-31T23:59:59Z"
 
 
-def _positive_once_complete(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
-    """The positive comments once every selected comment has a fact; none while one is pending."""
-    if any(not row["facts"] for row in rows):
-        return []
-    return [row for row in rows if row["positive"]]
-
-
-def queue_review_round_note(
-    db: sqlite3.Connection, *, artifact_id: str, note_key: str, raised_at: str, recipient_id: str,
-    answered_at: str | None = None,
-) -> str | None:
-    """Write one note for a round's positive user comments, once per ``note_key``.
-
-    The round is the user comments after ``raised_at`` (to ``answered_at`` when
-    the round has ended). It waits while any of them has no fact; the final fact retries.
-    """
-    rows = _positive_once_complete(db.execute(
+def _comments(db: sqlite3.Connection, where: str, params: dict) -> list[sqlite3.Row]:
+    return db.execute(
         f"""SELECT {_COMMENT_COLUMNS} FROM doc_comments c
-            WHERE c.artifact_id=:artifact AND c.author_kind='user'
-              AND c.created_at>:since AND c.created_at<=:until
-            ORDER BY c.created_at,c.id""",
-        {"event": CORRECTION_EVENT, "artifact": artifact_id, "since": raised_at,
-         "until": answered_at or _NO_UPPER_BOUND},
-    ).fetchall())
-    return _write_comment_note(db, artifact_id, rows, note_key, recipient_id)
+            WHERE c.author_kind='user' AND {where} ORDER BY c.created_at,c.id""",
+        {"event": CORRECTION_EVENT, **params},
+    ).fetchall()
+
+
+def _delivered_batches(db: sqlite3.Connection, comment_ids: Sequence[str]) -> dict[str, sqlite3.Row]:
+    """Each comment's newest delivered user batch."""
+    rows = db.execute(
+        """SELECT i.comment_id,b.id,b.recipient_id,b.updated_at
+           FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id
+           WHERE i.comment_id IN (SELECT value FROM json_each(?)) AND i.event IS NULL
+             AND b.state='delivered' AND b.author_kind='user'
+           ORDER BY b.updated_at,b.id""",
+        (json.dumps(list(comment_ids)),),
+    ).fetchall()
+    return {str(row["comment_id"]): row for row in rows}
+
+
+Unit = tuple[str, str]
+"""A review unit as ``(kind, id)``: ``("review-round", hold)`` or ``("doc-feedback", batch)``."""
+
+
+def _unit_of(comment: sqlite3.Row, rounds: list, batches: dict[str, sqlite3.Row]) -> Unit | None:
+    """The one membership rule: a comment's review unit, or None while it has none to note yet.
+
+    It belongs to the round of the ask open when it was made; with none open, or
+    one withdrawn rather than answered, to its delivered batch.
+    """
+    from plans.public import round_at
+
+    asked = round_at(rounds, str(comment["created_at"]))
+    if asked is not None and asked["cleared_at"] is None:
+        return None  # Its round is still open: the answer notes it.
+    if asked is not None and asked["answered"]:
+        return ("review-round", str(asked["hold_id"]))
+    batch = batches.get(str(comment["id"]))
+    return ("doc-feedback", str(batch["id"])) if batch is not None else None
+
+
+def queue_comment_notes(
+    db: sqlite3.Connection, comment_ids: Iterable[str], *, floor: int, wakes: list[str] | None,
+) -> None:
+    """Write the note of each review unit these comments belong to, once it is complete."""
+    from plans.public import ask_rounds
+
+    seeds = _comments(db, "c.id IN (SELECT value FROM json_each(:ids))", {"ids": json.dumps(list(comment_ids))})
+    batches = _delivered_batches(db, [str(row["id"]) for row in seeds])
+    for artifact_id in dict.fromkeys(str(row["artifact_id"]) for row in seeds):
+        rounds = ask_rounds(db, artifact_id)
+        units = {_unit_of(row, rounds, batches) for row in seeds if row["artifact_id"] == artifact_id}
+        _queue_units(db, artifact_id, sorted(unit for unit in units if unit), rounds, floor=floor, wakes=wakes)
+
+
+def queue_round_notes(
+    db: sqlite3.Connection, artifact_id: str, hold_ids: Iterable[str], *, floor: int,
+    wakes: list[str] | None,
+) -> None:
+    """Write the note of each round these just-answered asks ended."""
+    from plans.public import ask_rounds
+
+    rounds = ask_rounds(db, artifact_id)
+    answered = set(hold_ids)
+    units = [("review-round", str(r["hold_id"])) for r in rounds if r["hold_id"] in answered and r["answered"]]
+    _queue_units(db, artifact_id, units, rounds, floor=floor, wakes=wakes)
+
+
+def queue_batch_notes(
+    db: sqlite3.Connection, batch_id: str, *, floor: int, wakes: list[str] | None,
+) -> None:
+    """Write the notes a just-delivered batch completes."""
+    rows = db.execute(
+        "SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=? AND event IS NULL", (batch_id,),
+    ).fetchall()
+    queue_comment_notes(db, [str(row[0]) for row in rows], floor=floor, wakes=wakes)
+
+
+def _queue_units(
+    db: sqlite3.Connection, artifact_id: str, units: Iterable[Unit], rounds: list, *, floor: int,
+    wakes: list[str] | None,
+) -> None:
+    for unit in units:
+        kind, unit_id = unit
+        if kind == "review-round":
+            hold = next(r for r in rounds if r["hold_id"] == unit_id)
+            members = _comments(
+                db, "c.artifact_id=:artifact AND c.created_at>:since AND c.created_at<=:until",
+                {"artifact": artifact_id, "since": hold["raised_at"], "until": hold["cleared_at"]},
+            )
+        else:
+            members = _comments(
+                db, "c.id IN (SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=:batch AND event IS NULL)",
+                {"batch": unit_id},
+            )
+        batches = _delivered_batches(db, [str(row["id"]) for row in members])
+        members = [row for row in members if _unit_of(row, rounds, batches) == unit]
+        delivered = [batches[str(row["id"])] for row in members if str(row["id"]) in batches]
+        if not members or not delivered or any(not row["facts"] for row in members):
+            continue  # Not delivered yet, or a fact is pending: that delivery or fact retries.
+        recipient = str(max(delivered, key=lambda row: (row["updated_at"], row["id"]))["recipient_id"] or "")
+        positive = [row for row in members if row["positive"]]
+        note_key = f"{kind}:{unit_id}"
+        if positive and _write_comment_note(db, artifact_id, positive, note_key, recipient):
+            _wake(db, recipient, note_key, floor=floor, wakes=wakes)
 
 
 def _write_comment_note(
     db: sqlite3.Connection, artifact_id: str, rows: list[sqlite3.Row], note_key: str, recipient_id: str,
-) -> str | None:
-    """Append the batch note naming ``rows`` to ``recipient_id`` once per ``note_key``."""
-    if not rows:
-        return None
+) -> bool:
+    """Append the unit note naming ``rows`` to ``recipient_id`` once per ``note_key``."""
     from registry.models import get_artifact
 
     artifact = get_artifact(artifact_id, db=db) or {}
@@ -229,70 +347,6 @@ def _write_comment_note(
         summary="\n".join(lines),
         subjects=[f"doc-comment:{row['id']}" for row in rows],
     )
-
-
-def queue_feedback_batch_note(db: sqlite3.Connection, batch) -> str | None:
-    """Write the delivered lone-comment batch note for its stored owner recipient.
-
-    It waits while any selected comment has no fact; the final fact retries.
-    """
-    values = dict(batch)
-    if values.get("author_kind") != "user" or not values.get("recipient_id"):
-        return None
-    if values.get("recipient_id") == "ui":
-        return None
-    # A raised ask owns this feedback as a review round; its answer writes that note.
-    from plans.public import raised_asks
-    if raised_asks(db, str(values["artifact_id"])):
-        return None
-    rows = _positive_once_complete(db.execute(
-        f"""SELECT {_COMMENT_COLUMNS}
-            FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id
-            WHERE i.batch_id=:batch AND i.event IS NULL AND c.author_kind='user'
-            ORDER BY c.created_at,c.id""",
-        {"event": CORRECTION_EVENT, "batch": values["id"]},
-    ).fetchall())
-    return _write_comment_note(
-        db, str(values["artifact_id"]), rows, f"doc-feedback:{values['id']}",
-        str(values["recipient_id"]),
-    )
-
-
-def queue_late_comment_note(
-    db: sqlite3.Connection, candidate: CorrectionCandidate, event_id: str,
-) -> tuple[str, str] | None:
-    """Retry the note a comment's answered round or delivered batch waited on its final fact.
-
-    Only a live arrival's first fact retries; a backfill never notes. Returns the
-    recipient and key on first insertion, so a replay queues no second wake.
-    """
-    from plans.public import answered_ask_round
-
-    if not candidate.arrived or not _first_record(db, candidate, event_id):
-        return None
-    comment = db.execute(
-        "SELECT artifact_id,created_at FROM doc_comments WHERE id=? AND author_kind='user'",
-        (candidate.source_id,),
-    ).fetchone()
-    batch = db.execute(
-        """SELECT b.* FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id
-           WHERE i.comment_id=? AND i.event IS NULL AND b.state='delivered' AND b.author_kind='user'
-           ORDER BY b.updated_at DESC, b.id DESC LIMIT 1""",
-        (candidate.source_id,),
-    ).fetchone()
-    if comment is None or batch is None:
-        return None  # Not delivered yet: its delivery tries the note.
-    recipient = str(batch["recipient_id"] or "")
-    answered = answered_ask_round(db, str(comment["artifact_id"]), str(comment["created_at"]))
-    if answered is None:
-        key = queue_feedback_batch_note(db, batch)
-    else:
-        key = queue_review_round_note(
-            db, artifact_id=str(comment["artifact_id"]), note_key=f"review-round:{answered['hold_id']}",
-            raised_at=str(answered["raised_at"]), recipient_id=recipient,
-            answered_at=str(answered["answered_at"]),
-        )
-    return (recipient, key) if key is not None else None
 
 
 def noted_subjects(metadata: object) -> tuple[str, ...]:

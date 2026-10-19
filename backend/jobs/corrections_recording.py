@@ -6,13 +6,10 @@ from dataclasses import dataclass, replace
 import json
 from typing import TYPE_CHECKING
 
-from loguru import logger
-
 from core.corrections_input import owner_text
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
-    LABEL_CORRECTION,
     LABEL_UNREADABLE,
     ClassifierVersion,
     CorrectionCandidate,
@@ -24,6 +21,7 @@ from core.corrections_recording import (
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import (
     PendingCandidateKey,
+    ScanCursor,
     hydrate_candidates,
     pending_candidate_keys,
     pending_source_candidate_keys,
@@ -54,13 +52,14 @@ def _record_fact(
     candidate: CorrectionCandidate,
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, list[str]]:
     """Write one versioned local-classifier fact in its own transaction.
 
-    A new correction queues its triage note in the same transaction; a comment's
-    fact also retries the round or batch note that waited for it.
+    The notes it completes are written in the same transaction, so a failing
+    note rolls the fact back and the source stays pending for the scan to retry.
+    Returns whether the fact was new and the threads its notes woke.
     """
-    from core.correction_notes import queue_correction_note, queue_late_comment_note
+    from core.correction_notes import input_floor, queue_fact_notes
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -68,6 +67,7 @@ def _record_fact(
     if set(attributes) != set(FACT_KEYS):
         raise RuntimeError("correction fact attributes are incomplete")
     with write_transaction(None, scope="record_correction_fact") as db:
+        floor = input_floor(db)
         result = record_outcome_event(
             db,
             dedupe_key=dedupe_key(candidate, version),
@@ -82,29 +82,24 @@ def _record_fact(
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
-        note: tuple[str, str] | None = None
+        wakes: list[str] = []
         if result.inserted and result.event_id:
-            if candidate.source_kind == "doc_comment":
-                try:
-                    note = queue_late_comment_note(db, candidate, result.event_id)
-                except Exception:  # A fact is never lost to its note.
-                    logger.exception("late comment correction note failed")
-            elif classification["label"] == LABEL_CORRECTION:
-                note_key = queue_correction_note(db, candidate, version, result.event_id)
-                note = None if note_key is None else (candidate.thread_id, note_key)
-        if note is not None and candidate.source_kind != "message":
-            from infra.passive_changes import materialize_pending_digest
-
-            admitted = materialize_pending_digest(db, note[0], wake_id=f"correction-wake:{note[1]}")
-            if admitted is None or admitted.duplicate:
-                note = None
-        return result.inserted, note[0] if note is not None else None
+            queue_fact_notes(
+                db, candidate, str(classification["label"]), version, result.event_id, floor=floor, wakes=wakes,
+            )
+        return result.inserted, wakes
 
 
 def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
     """Hydrate one newly arrived correction source or return no human candidate."""
     if source_kind == "message":
         return candidate_for_message(source_id)
+    candidate = source_candidate(source_kind, source_id)
+    return replace(candidate, arrived=True) if candidate is not None else None
+
+
+def source_candidate(source_kind: str, source_id: str) -> CorrectionCandidate | None:
+    """Read one comment or decision-answer source as the scan sees it, or None."""
     from infra.database import get_db
 
     db = get_db()
@@ -127,7 +122,7 @@ def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidat
                 owner_text(content), str(row['created_at']),
             )
         if source_kind == "plan_decision_answer":
-            from plans.public import decision_identity_row
+            from plans.public import answer_note, decision_identity_row
 
             row = decision_identity_row(db, source_id)
             if row is None:
@@ -136,13 +131,13 @@ def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidat
                 body = json.loads(row['metadata']).get('plan_decision', {})
             except (TypeError, ValueError):
                 return None
-            answer = body.get('answer') if isinstance(body, dict) else None
-            text = answer.get('text') if isinstance(answer, dict) else None
-            thread_id, revision, answered_at = (
-                body.get('thread_id'), body.get('revision'), body.get('answered_at'),
-            ) if isinstance(body, dict) else (None, None, None)
+            if not isinstance(body, dict):
+                return None
+            # Plans' own test of whether an answer carries the person's words.
+            text = answer_note(body.get('answer'))
+            thread_id, revision, answered_at = body.get('thread_id'), body.get('revision'), body.get('answered_at')
             if (
-                body.get('state') != 'answered' or not isinstance(text, str) or not text.strip()
+                body.get('state') != 'answered' or text is None
                 or not isinstance(thread_id, str) or not thread_id or revision is None
                 or not isinstance(answered_at, str) or not answered_at
             ):
@@ -158,6 +153,7 @@ def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidat
             return CorrectionCandidate(
                 "plan_decision_answer", f"{source_id}:{revision}", thread_id,
                 project[0] if project else None, owner_text(content), answered_at,
+                quote=text, source_ref=source_id,
             )
         return None
     finally:
@@ -188,11 +184,12 @@ async def _record_and_drive(
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
 ) -> bool:
-    inserted, wake_target = await run_in_db(_record_fact, candidate, classification, version)
-    if wake_target is not None:
+    inserted, wakes = await run_in_db(_record_fact, candidate, classification, version)
+    if wakes:
         from infra.thread_execution import drive_idle_thread
 
-        await drive_idle_thread(wake_target)
+        for thread_id in wakes:
+            await drive_idle_thread(thread_id)
     return inserted
 
 
@@ -245,7 +242,7 @@ class _PendingBatch:
 
 
 async def next_pending_batch(
-    version: ClassifierVersion, batch_size: int, before: tuple[str, ...] | None,
+    version: ClassifierVersion, batch_size: int, before: ScanCursor | None,
     *, since: str | None = None,
 ) -> _PendingBatch:
     """Globally select keys before reading the bounded classifier inputs."""

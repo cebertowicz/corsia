@@ -224,7 +224,9 @@ def _clear_attention(
 
     with write_transaction(db, scope="clear_attention") as _db, \
             plans_public.collect_wake_recipients(_db, drives):
-        message_floor = _db.execute("SELECT COALESCE(MAX(rowid), 0) FROM messages").fetchone()[0]
+        from core.correction_notes import input_floor, queue_round_notes
+
+        floor = input_floor(_db)
         row = _identity_row(artifact_id, _db)
         identity = _identity(row)
         record = AR.register_or_resolve(identity, db=_db)
@@ -259,23 +261,9 @@ def _clear_attention(
         plans_public.ask_cleared(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )
-        if answer is not None and answer.correction_note is not None:
-            target, note_key = answer.correction_note
-            already_queued = _db.execute(
-                """SELECT 1 FROM messages WHERE rowid>? AND thread_id=?
-                   AND delivery_state='queued' LIMIT 1""",
-                (message_floor, target),
-            ).fetchone()
-            # Only a caller that will drive the target gets the wake; otherwise the
-            # note rides the target's next input.
-            if already_queued is None and idle_drives is not None:
-                from infra.passive_changes import materialize_pending_digest
-
-                admitted = materialize_pending_digest(
-                    _db, target, wake_id=f"correction-wake:{note_key}",
-                )
-                if admitted is not None and not admitted.duplicate:
-                    idle_drives.append(target)
+        if answer is not None:
+            # The rounds the answer ended, now that their holds are cleared as answered.
+            queue_round_notes(_db, str(row["id"]), answer.hold_ids, floor=floor, wakes=idle_drives)
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",

@@ -108,9 +108,11 @@ def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict
 
 @dataclass(frozen=True)
 class CorrectionCandidate:
-    """One persisted user message eligible to be checked.
+    """One persisted owner source (message, comment or decision answer) eligible to be checked.
 
-    ``arrived`` marks a message classified as it arrives, not by a later scan.
+    ``arrived`` marks a source classified as it arrives, not by a later scan.
+    ``quote`` is the person's own words a triage note quotes when ``content``
+    wraps them in classifier context; ``source_ref`` is the source the note names.
     """
 
     source_kind: str
@@ -121,6 +123,8 @@ class CorrectionCandidate:
     created_at: str
     context: tuple[tuple[str, str], ...] = ()
     arrived: bool = False
+    quote: str | None = None
+    source_ref: str | None = None
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
 ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"

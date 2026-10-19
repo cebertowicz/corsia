@@ -252,7 +252,7 @@ def answer(decision_id: str, *, option_id=None, option_ids=None, other_text=None
         )
         if decision_fields.answer_note(chosen):
             from infra.write_effects import after_commit
-            from jobs.corrections_dispatch import notify_from_thread
+            from jobs.corrections_handoff import notify_from_thread
 
             after_commit(db, lambda: notify_from_thread("plan_decision_answer", decision["id"]))
         decision_delivery.append_answer_input(db, decision, chosen)

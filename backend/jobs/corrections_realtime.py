@@ -57,11 +57,7 @@ from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
 from jobs.corrections_recording import (
-    candidate_for_message,
-    candidate_for_source,
-    record_classification,
-    record_unreadable,
-    unreadable_messages,
+    candidate_for_source, record_classification, record_unreadable, unreadable_messages,
 )
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
@@ -105,11 +101,12 @@ class CorrectionsWorker:
         previous, previous_reason = self.state, self.reason
         self.state, self.reason = state, reason
         if state == "ready" and previous != "ready":
-            self._owe()
+            self.owe_scan()
         if state == "failed" and (previous, previous_reason) != (state, reason):
             self._notice_failed_state(failure_version)
 
-    def _owe(self) -> None:
+    def owe_scan(self) -> None:
+        """Idle to owed: an arrival the queue could not take is left for the next pass."""
         if self.scan == "idle":
             self.scan = "owed"
 
@@ -234,17 +231,19 @@ class CorrectionsWorker:
             if manifest is None:
                 return outcome
 
-    def clock(self) -> float:
-        return _clock()
-
-    async def classify_arrival(self, candidate: CorrectionCandidate) -> ClassificationOutcome:
-        return await self._classify(candidate)
-
-    def release_hold(self) -> None:
-        self._release_hold()
-
-    def owe_scan(self) -> None:
-        self._owe()
+    async def _arrival(self, source_kind: str, source_id: str, enqueued_at: float) -> None:
+        started_at = _clock()
+        self.queue_delay_ms = (started_at - enqueued_at) * 1000
+        try:
+            candidate = await run_in_db(candidate_for_source, source_kind, source_id)
+            if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
+                self._release_hold()
+        except Exception:
+            logger.exception("corrections classifier arrival failed; the scan will read it")
+            self.owe_scan()
+        finally:
+            self.service_time_ms = (_clock() - started_at) * 1000
+            self.queue.task_done()
 
     async def _scan_pass(self) -> None:
         self.scan = "running"
@@ -297,13 +296,16 @@ class CorrectionsWorker:
                     await asyncio.wait_for(self.arrived.wait(), self.call_seconds)
         return "yielded"
 
-    async def scan_pass(self) -> None:
-        await self._scan_pass()
-
     async def run(self) -> None:
-        from jobs.corrections_dispatch import run_dispatch
-
-        await run_dispatch(self)
+        while True:
+            try:
+                source_kind, source_id, enqueued_at = self.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                if self.scan == "idle" or self.held_reason is not None:
+                    return
+                await self._scan_pass()
+                continue
+            await self._arrival(source_kind, source_id, enqueued_at)
 
     def _start_task(self, coroutine) -> None:
         if self.task is not None and not self.task.done():
@@ -323,16 +325,14 @@ class CorrectionsWorker:
             self._set("unavailable", f"worker error: {type(error).__name__}")
         self._hold(f"worker error: {type(error).__name__}")
 
-    def notify(self, source_kind: str, source_id: str | None = None) -> None:
-        if source_id is None:
-            source_kind, source_id = "message", source_kind
+    def notify(self, source_kind: str, source_id: str) -> None:
         if self.stopping:
-            self._owe()
+            self.owe_scan()
             return
         try:
             self.queue.put_nowait((source_kind, source_id, _clock()))
         except asyncio.QueueFull:
-            self._owe()
+            self.owe_scan()
             self.dropped_arrivals += 1
             logger.warning("corrections classifier arrival queue is full; scan is owed")
             return
@@ -367,7 +367,7 @@ async def _startup_worker() -> None:
         logger.exception("corrections activation notice retry failed; the next startup retries it")
     await WORKER.run()
 
-def notify(source_kind: str, source_id: str | None = None) -> None:
+def notify(source_kind: str, source_id: str) -> None:
     WORKER.notify(source_kind, source_id)
 
 def startup_scan() -> None:

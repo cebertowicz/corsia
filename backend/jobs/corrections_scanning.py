@@ -31,17 +31,13 @@ class PendingCandidateKey:
     created_at: str
 
 
-def _before_params(before: tuple[str, ...] | None) -> dict[str, str | None]:
-    """Normalize the old two-part cursor while scans move to typed sources."""
-    if before is None:
-        return {"before_created_at": None, "before_source_kind": None, "before_source_id": None}
-    if len(before) == 2:
-        return {
-            "before_created_at": before[0], "before_source_kind": "message", "before_source_id": before[1],
-        }
-    return {
-        "before_created_at": before[0], "before_source_kind": before[1], "before_source_id": before[2],
-    }
+ScanCursor = tuple[str, str, str]
+"""The last selected ``(created_at, source_kind, source_id)``; the scan reads strictly before it."""
+
+
+def _before_params(before: ScanCursor | None) -> dict[str, str | None]:
+    created_at, source_kind, source_id = before if before is not None else (None, None, None)
+    return {"before_created_at": created_at, "before_source_kind": source_kind, "before_source_id": source_id}
 
 
 def _before_clause(source_kind: str, id_expression: str, created_expression: str = "created_at") -> str:
@@ -56,7 +52,7 @@ def _before_clause(source_kind: str, id_expression: str, created_expression: str
 
 def pending_candidate_keys(
     version: ClassifierVersion, batch_size: int, owner_user_id: str,
-    before: tuple[str, ...] | None = None, since: str | None = None,
+    before: ScanCursor | None = None, since: str | None = None,
 ) -> list[PendingCandidateKey]:
     """Read one owner's pending message keys without projecting message content."""
     from infra.database import get_db
@@ -108,12 +104,12 @@ def pending_candidate_keys(
 
 def pending_source_candidate_keys(
     version: ClassifierVersion, batch_size: int,
-    before: tuple[str, ...] | None = None, since: str | None = None,
+    before: ScanCursor | None = None, since: str | None = None,
 ) -> list[PendingCandidateKey]:
     """Read pending comments and free-text decision answers without their text.
 
     The source tables remain canonical.  This scan only selects identities, then
-    ``candidate_for_source`` rechecks the source and builds the bounded input.
+    ``source_candidate`` rechecks the source and builds the bounded input.
     """
     from infra.database import get_db
     from plans.public import DECISION_TYPE
@@ -160,8 +156,9 @@ def pending_source_candidate_keys(
             FROM artifact_identities
             WHERE integration='local' AND type=:decision_type AND state='active'
               AND json_extract(metadata,'$.plan_decision.state')='answered'
-              AND typeof(json_extract(metadata,'$.plan_decision.answer.text'))='text'
-              AND length(trim(json_extract(metadata,'$.plan_decision.answer.text'))) > 0
+              -- A coarse prefilter, never narrower than Plans' ``answer_note``, which
+              -- ``source_candidate`` applies to each selected answer.
+              AND COALESCE(json_extract(metadata,'$.plan_decision.answer.text'),'')<>''
               AND {_before_clause('plan_decision_answer', 'external_id', decision_created_at)}
               AND (:since_created_at IS NULL
                    OR json_extract(metadata,'$.plan_decision.answered_at') >= :since_created_at)
@@ -194,9 +191,9 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
         candidates: list[CorrectionCandidate] = []
         for key in keys:
             if key.source_kind != "message":
-                from jobs.corrections_recording import candidate_for_source
+                from jobs.corrections_recording import source_candidate
 
-                candidate = candidate_for_source(key.source_kind, key.source_id)
+                candidate = source_candidate(key.source_kind, key.source_id)
                 if candidate is not None:
                     candidates.append(candidate)
                 continue

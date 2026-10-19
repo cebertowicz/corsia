@@ -258,6 +258,9 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
     if changed.rowcount == 0:
         return False, ()
     batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+    from core.correction_notes import input_floor
+
+    floor = input_floor(db)
     delivered = feedback_delivery.deliver_claimed(db, batch)
     review_woken: tuple[str, ...] = ()
     if delivered.reason is not None:
@@ -270,7 +273,7 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
     else:
         from doceditor.feedback_completion import complete_delivered_batch
 
-        review_woken = complete_delivered_batch(db, batch, delivered, now)
+        review_woken = complete_delivered_batch(db, batch, delivered, now, floor)
     return True, delivered.woken_threads + review_woken
 
 

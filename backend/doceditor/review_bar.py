@@ -46,7 +46,7 @@ class ReviewAnswer:
     note: str | None = None
     counts: dict = field(default_factory=dict)
     feedback_task: str | None = None
-    correction_note: tuple[str, str] | None = None
+    hold_ids: tuple[str, ...] = ()
 
     def payload(self) -> dict:
         return {
@@ -201,31 +201,7 @@ def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer
         db, author_kind="user", author_id=USER_AUTHOR_ID,
         artifact_id=artifact_id, reason="send",
     )
-    batch = db.execute(
-        """SELECT id,recipient_id FROM doc_feedback_batches
-           WHERE author_kind='user' AND author_id=? AND artifact_id=? AND state='delivered'
-           ORDER BY updated_at DESC,id DESC LIMIT 1""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchone()
-    correction_note = None
-    if batch is not None:
-        try:
-            from core.correction_notes import queue_review_round_note
-
-            note_key = queue_review_round_note(
-                db,
-                artifact_id=artifact_id,
-                note_key=f"review-round:{asks[0]['hold_id']}",
-                raised_at=since,
-                recipient_id=str(batch["recipient_id"]),
-            )
-            if note_key is not None:
-                correction_note = (str(batch["recipient_id"]), note_key)
-        except Exception:
-            # Clearing an answered ask and delivering its feedback are never held by corrections.
-            import logging
-
-            logging.getLogger(__name__).exception("review-round correction note failed")
     return ReviewAnswer(
-        verdict, note, counts, _feedback_task(db, artifact_id, since), correction_note,
+        verdict, note, counts, _feedback_task(db, artifact_id, since),
+        tuple(str(ask["hold_id"]) for ask in asks),
     )
