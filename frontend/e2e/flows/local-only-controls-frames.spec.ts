@@ -17,7 +17,7 @@ const REFERENCE_ONLY = process.env.LOCAL_ONLY_FRAMES_MODE === 'reference';
 
 const surfaces = (projectName: string) => projectName === 'chromium-desktop'
 	? ([['1440', 1440, 900, 'light'], ['1440', 1440, 900, 'dark']] as const)
-	: ([['390', 390, 844, 'light'], ['390', 390, 844, 'dark']] as const);
+	: ([['393', 393, 844, 'light'], ['393', 393, 844, 'dark']] as const);
 
 const capsule = { context_window_max: 200000, supports_vision: true, supports_tools: true, supports_reasoning: true, reasoning_config: null };
 const modelRow = (over: Record<string, unknown>) => ({ desc: '', size: '', speed: '', capabilities: capsule, available: true, ...over });
