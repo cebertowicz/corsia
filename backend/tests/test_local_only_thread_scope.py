@@ -547,12 +547,14 @@ async def test_delegate_task_refuses_a_cloud_worker_for_a_local_only_parent(
     finally:
         db.close()
     spawned: list[str] = []
+    started_turns: list[str] = []
 
     async def create(**_kwargs):
         spawned.append("child")
         return {"id": "child"}
 
     async def send(*_args, **_kwargs):
+        started_turns.append("turn")
         return type("Sent", (), {"driver": "turn", "duplicate": False})()
 
     monkeypatch.setattr(
@@ -578,6 +580,13 @@ async def test_delegate_task_refuses_a_cloud_worker_for_a_local_only_parent(
     if refused:
         assert result == "Error: cloud"
         assert spawned == []
+        assert started_turns == []
+        db = get_db()
+        try:
+            assert db.execute("SELECT id FROM threads WHERE id='child'").fetchone() is None
+        finally:
+            db.close()
     else:
         assert result["ok"] is True
         assert spawned == ["child"]
+        assert started_turns == ["turn"]
