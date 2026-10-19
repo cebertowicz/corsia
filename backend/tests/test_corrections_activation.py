@@ -35,6 +35,44 @@ def test_backfill_switches_the_active_version_once_after_completion(isolated_db)
     )
 
 
+def test_activation_records_when_the_version_became_active(isolated_db):
+    from core.corrections_recording import active_since
+    from infra.database import get_db
+    from jobs.corrections_activation import complete_backfill
+
+    before = datetime.now(timezone.utc)
+    complete_backfill(_version(), owner_user_id="owner", weeks=13, before_count=None, after_count=4)
+    db = get_db()
+    try:
+        since = active_since(db)
+        assert active_since(db, _version("v2")) is None  # only the active version has a start
+    finally:
+        db.close()
+
+    assert since is not None and datetime.fromisoformat(since) >= before
+
+
+def test_the_activation_figure_compares_chat_messages_only(isolated_db, monkeypatch):
+    import asyncio
+
+    from jobs import corrections_activation
+
+    calls = []
+
+    def figure(version, *, since, weeks, messages_only=False):
+        calls.append((version.version, messages_only))
+        return 1.0
+
+    monkeypatch.setattr(corrections_activation, "weekly_correction_figure", figure)
+    monkeypatch.setattr("jobs.corrections_recording.owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(corrections_activation, "tell_conductor_about_activation", lambda _version: asyncio.sleep(0))
+    monkeypatch.setattr(corrections_activation, "retry_pending_activation_notice", lambda: asyncio.sleep(0))
+    corrections_activation.complete_backfill(_version(), owner_user_id="owner", weeks=7, before_count=None, after_count=1)
+
+    assert asyncio.run(corrections_activation.activate_after_backfill(_version("v2"))) != "activation record unreadable"
+    assert calls == [("v1", True), ("v2", True)]
+
+
 def test_measurement_helper_keeps_old_version_until_new_backfill_completes(isolated_db):
     from core.corrections_recording import active_corrections_version
     from jobs.corrections_activation import complete_backfill
@@ -115,7 +153,7 @@ def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
     asyncio.run(corrections_activation.tell_conductor_about_activation(version))
 
     assert sent[0].startswith("Corrections classifier version v1 was installed and activated.")
-    assert "moved from 3.4 to 4.0" in sent[0]
+    assert "moved from 3.4 to 4.0" in sent[0] and "compares chat messages only" in sent[0]
     assert sent[0].count("v1") == 1  # the version reads once, in the prefix
 
 

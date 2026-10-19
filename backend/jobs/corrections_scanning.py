@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from core.corrections_input import CONTEXT_HEAD_CHARS, CONTEXT_ROWS, CONTEXT_TAIL_CHARS, owner_text, shape_context
 from core.corrections_recording import (
     COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
     DECISION_SUBJECT_PREFIX,
+    LABEL_CORRECTION,
     MESSAGE_SUBJECT_PREFIX,
     ClassifierVersion,
     CorrectionCandidate,
@@ -218,5 +220,61 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
                 context=shape_context(preceding),
             ))
         return candidates
+    finally:
+        db.close()
+
+
+class CompletedUnit(NamedTuple):
+    """A review unit the scan's recovery re-notes; the last one read is the next page's cursor."""
+
+    completed_at: str
+    kind: str
+    unit_id: str
+
+
+def completed_unit_keys(since: str, limit: int, after: CompletedUnit | None = None) -> list[CompletedUnit]:
+    """Answered rounds and delivered batches completed since ``since`` with a positive comment and no note.
+
+    Oldest first, strictly after ``after``. A unit whose facts are still pending
+    or whose target is gone stays selected until the window passes it; writing
+    its note is ``correction_notes.write_unit_notes``'s call.
+    """
+    from infra.database import get_db
+    from plans.public import ANSWERED_ROUNDS_SQL
+
+    positive = """EXISTS (SELECT 1 FROM outcome_events e INDEXED BY idx_outcome_events_subject
+                            WHERE e.subject_key=:comment_prefix || {comment} AND e.event_name=:event
+                              AND e.retracted_at IS NULL AND json_extract(e.attributes,'$.label')=:label)"""
+    db = get_db()
+    try:
+        rows = db.execute(
+            f"""WITH rounds AS ({ANSWERED_ROUNDS_SQL}),
+               units AS (
+                 SELECT r.cleared_at AS completed_at, 'review-round' AS kind, r.hold_id AS unit_id FROM rounds r
+                  WHERE EXISTS (SELECT 1 FROM doc_comments c
+                                 WHERE c.artifact_id=r.artifact_id AND c.author_kind='user'
+                                   AND c.created_at>r.raised_at AND c.created_at<=r.cleared_at
+                                   AND {positive.format(comment='c.id')})
+                 UNION ALL
+                 SELECT b.updated_at, 'doc-feedback', b.id FROM doc_feedback_batches b
+                  WHERE b.author_kind='user' AND b.state='delivered' AND b.updated_at >= :since
+                    AND EXISTS (SELECT 1 FROM doc_feedback_batch_items i
+                                 WHERE i.batch_id=b.id AND i.event IS NULL
+                                   AND {positive.format(comment='i.comment_id')}))
+               SELECT completed_at, kind, unit_id FROM units u
+                WHERE (:after_at IS NULL OR (completed_at, kind, unit_id) > (:after_at, :after_kind, :after_id))
+                  AND NOT EXISTS (SELECT 1 FROM context_change_journal j  -- idx_context_changes_note_key
+                                   WHERE j.object_kind='thread_context'
+                                     AND json_extract(j.details_json, '$.note_key')=u.kind || ':' || u.unit_id)
+                ORDER BY completed_at, kind, unit_id LIMIT :limit""",
+            {
+                "since": since, "limit": limit, "event": CORRECTION_EVENT, "label": LABEL_CORRECTION,
+                "comment_prefix": COMMENT_SUBJECT_PREFIX,
+                "after_at": after.completed_at if after else None,
+                "after_kind": after.kind if after else None,
+                "after_id": after.unit_id if after else None,
+            },
+        ).fetchall()
+        return [CompletedUnit(str(row[0]), str(row[1]), str(row[2])) for row in rows]
     finally:
         db.close()

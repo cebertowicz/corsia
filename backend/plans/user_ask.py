@@ -121,6 +121,16 @@ def raised_asks(db, artifact_id: str) -> list:
 #: The newest asks ``ask_rounds`` reads per artifact: a bound on the answer path.
 ASK_ROUNDS_LIMIT = 50
 
+#: Each user ask the person answered at or after ``:since``, as
+#: ``(hold_id, artifact_id, raised_at, cleared_at)``: the rounds of ``ask_rounds``
+#: across artifacts, for a caller's CTE (the corrections scan's recovery). It
+#: reads the user-ask partial index (``idx_plan_holds_user_ask_rounds``).
+ANSWERED_ROUNDS_SQL = """
+    SELECT h.id AS hold_id, h.owner_id AS artifact_id, h.created_at AS raised_at, h.cleared_at
+      FROM plan_node_holds h JOIN plan_node_events e ON e.id=h.clearance_event_id
+     WHERE h.kind='blocked' AND h.owner_kind='user' AND h.cleared_at >= :since
+       AND json_extract(e.payload_json, '$.detail.answered_by')='user'"""
+
 
 def ask_rounds(db, artifact_id: str) -> list:
     """The newest ``ASK_ROUNDS_LIMIT`` review rounds the person was asked on this artifact, newest raise first.
@@ -138,6 +148,14 @@ def ask_rounds(db, artifact_id: str) -> list:
             ORDER BY h.created_at DESC, h.id DESC LIMIT ?""",
         (artifact_id, ASK_ROUNDS_LIMIT),
     ).fetchall()
+
+
+def asked_artifact(db, hold_id: str) -> str | None:
+    """The artifact a user ask (one review round of ``ask_rounds``) was raised on, or None."""
+    row = db.execute(
+        "SELECT owner_id FROM plan_node_holds WHERE id=? AND kind='blocked' AND owner_kind='user'", (hold_id,),
+    ).fetchone()
+    return str(row[0]) if row is not None else None
 
 
 def round_at(rounds: list, at: str):

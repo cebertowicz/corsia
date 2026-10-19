@@ -94,11 +94,13 @@ from plans.activity_projection import (
 from plans.user_ask import (
     ASKABLE_TYPES,
     ASK_ENDINGS,
+    ANSWERED_ROUNDS_SQL,
     AskRelease,
     ask_attention_state,
     ask_attention_state_sql,
     ask_linked_sql,
     ask_rounds,
+    asked_artifact,
     cleared as ask_cleared,
     defer_asks,
     open_ask_artifacts,

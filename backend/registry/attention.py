@@ -184,9 +184,8 @@ def clear_attention(
 
     A review ``verdict`` (with its optional ``note`` and the ``hold_ids`` the
     person answered) rides only on ``answer``.
-    ``drives`` collects the threads this write gave work to (an answered ask's
-    asker, a correction note's recipient), for the caller to drive once the
-    write has committed. A verdict always needs it: its notes must be driven.
+    ``drives`` collects the threads this write gave a plan wake (an answered
+    ask's asker), for the caller to drive once the write has committed.
     """
     if outcome not in CLEAR_OUTCOMES:
         raise AttentionError(f"unknown clearing outcome {outcome!r}")
@@ -194,8 +193,6 @@ def clear_attention(
         raise AttentionError("a verdict or note goes only with the answer outcome")
     if note is not None and verdict is None:
         raise AttentionError("a note needs a verdict")
-    if verdict is not None and drives is None:
-        raise ValueError("a verdict needs drives: the threads its answer wakes must be driven")
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
         verdict=verdict, note=note, hold_ids=hold_ids, require_hold_ids=require_hold_ids,
@@ -262,11 +259,12 @@ def _clear_attention(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )
         if answer is not None:
-            from core.correction_notes import queue_round_notes
+            from infra.write_effects import after_commit
+            from jobs.corrections_realtime import notify
 
-            assert drives is not None  # clear_attention refuses a verdict without drives
-            # The rounds the answer ended, now that their holds are cleared as answered.
-            drives.extend(queue_round_notes(_db, str(row["id"]), answer.hold_ids))
+            # The rounds the answer ended: the corrections worker writes their notes once this commits.
+            for hold_id in answer.hold_ids:
+                after_commit(_db, lambda hold_id=hold_id: notify("review-round", hold_id))
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",

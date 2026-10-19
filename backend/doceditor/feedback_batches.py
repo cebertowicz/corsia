@@ -268,9 +268,19 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
             (delivered.reason, now, batch_id),
         )
     else:
-        from doceditor.feedback_completion import complete_delivered_batch
+        if delivered.outcome is None:
+            raise RuntimeError("successful feedback delivery has no typed outcome")
+        db.execute(
+            """UPDATE doc_feedback_batches
+               SET delivered_node_id=?,delivery_outcome=?,updated_at=? WHERE id=?""",
+            (delivered.node_id, delivered.outcome, now, batch_id),
+        )
+        db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
+        review_woken = review_requests.settle_for_batch(db, batch)
+        from infra.write_effects import after_commit
+        from jobs.corrections_realtime import notify
 
-        review_woken = complete_delivered_batch(db, batch, delivered, now)
+        after_commit(db, lambda: notify("doc-feedback", batch_id))  # the worker writes its correction notes
     return True, delivered.woken_threads + review_woken
 
 

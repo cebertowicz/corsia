@@ -318,13 +318,9 @@ def _roster_content(db: sqlite3.Connection, thread_id: str, roster_change: sqlit
 
 
 def materialize_pending_digest(
-    db: sqlite3.Connection,
-    thread_id: str,
-    *,
-    admit_while_fenced: bool = False,
-    wake_id: str | None = None,
+    db: sqlite3.Connection, thread_id: str, *, admit_while_fenced: bool = False,
 ) -> AcceptedInput | None:
-    """Pull relevant unseen changes into one passive FIFO input; ``wake_id`` makes it a turn-starting wake."""
+    """Pull relevant unseen changes into one passive FIFO input."""
     if thread_id == "ui":  # Reserved user principal, never a runnable thread.
         return None
     session = db.execute(
@@ -366,11 +362,13 @@ def materialize_pending_digest(
             role="system",
             content=content,
             intent="queue_after_turn",
-            message_id=wake_id or f"context-digest:{thread_id}:{after + 1}:{through}{clock_suffix}",
+            message_id=(
+                f"context-digest:{thread_id}:{after + 1}:{through}{clock_suffix}"
+            ),
             metadata={
                 "type": "context_event",
                 "event_type": "context.digest",
-                "event_disposition": "wake" if wake_id else "passive",
+                "event_disposition": "passive",
                 "summary": digest_summary(content, events),
                 "context_events": events,
                 "journal_from_seq": after + 1,

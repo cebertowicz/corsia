@@ -18,10 +18,10 @@ from doceditor import feedback_batches
 from infra.database import get_db
 from infra.schema import SCHEMA_SQL
 from plans import decisions
-from tests.test_correction_notes import THREAD, _named, _notes, _version, agent  # noqa: F401 - shared fixture
+from tests.test_correction_notes import THREAD, _activate, _named, _notes, _version, agent  # noqa: F401 - shared fixture
 from tests.test_plan_decision_answer import _human, _raised_decision
 from tests.test_plan_decisions import _mid, _seed
-from tests.test_review_bar_answer import _answer, _ask
+from tests.test_review_bar_answer import _answer as _clear_with_answer, _ask
 
 CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
 UNREADABLE = {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "timeout"}
@@ -29,11 +29,15 @@ OPTIONS = [
     {"id": "A", "label": "Ship 2026", "detail": "Matches the draft."},
     {"id": "B", "label": "Ship 2027", "detail": "Matches the plan."},
 ]
+#: The keys commits handed the corrections worker, in order, until ``_worker_takes`` runs them.
+QUEUED: list[tuple[str, str]] = []
 
 
 @pytest.fixture
 def db(isolated_db, monkeypatch):
     monkeypatch.setattr("infra.passive_changes.clock_event", lambda *_args: None)
+    QUEUED.clear()
+    monkeypatch.setattr("jobs.corrections_realtime.notify", lambda kind, key: QUEUED.append((kind, key)))
     connection = get_db()
     seed_thread(connection, "owner", title="Style")
     connection.commit()
@@ -60,8 +64,27 @@ def _seed_decision(db, decision_id="dec", *, thread="owner", text="Use 2027, not
     db.commit()
 
 
+def _worker_takes(db) -> None:
+    """The worker takes each queued unit key and writes the notes it owes, as ``_arrival`` does."""
+    from core.corrections_recording import UNIT_KINDS
+    from jobs.corrections_recording import write_unit
+
+    db.commit()
+    while QUEUED:
+        kind, key = QUEUED.pop(0)
+        if kind in UNIT_KINDS:
+            write_unit(kind, key)
+
+
+def _answer(db, artifact_id, verdict, note=None):
+    """The person answers the ask; the worker then takes the rounds it ended."""
+    result = _clear_with_answer(db, artifact_id, verdict, note)
+    _worker_takes(db)
+    return result
+
+
 def _record(db, source_kind, source_id, *, arrived=True, payload=CORRECTION, version=None):
-    """One fact for a hydrated source; returns ``(inserted, woken_threads)``."""
+    """One fact for a hydrated source; returns whether it was inserted."""
     from jobs.corrections_recording import _record_fact, candidate_for_source
 
     db.commit()
@@ -107,7 +130,7 @@ def _user_comment(db, artifact):
 def _deliver_batch(db):
     batch = batches(db)[0]
     assert feedback_batches.close_batch(db, batch["id"], "send")[0]
-    db.commit()
+    _worker_takes(db)
     return batch
 
 
@@ -115,7 +138,8 @@ def test_user_comment_records_one_fact_and_one_lone_batch_note(db):
     artifact = seed_document(db, "owner", name="p.md")
     comment = _user_comment(db, artifact)
 
-    assert _record(db, "doc_comment", comment) == (True, [])  # undelivered: no unit to note yet
+    assert _record(db, "doc_comment", comment) is True  # undelivered: no unit to note yet
+    assert _correction_notes(db) == []
     batch = _deliver_batch(db)
 
     (subject, attributes), = _facts(db)
@@ -130,12 +154,48 @@ def test_user_comment_records_one_fact_and_one_lone_batch_note(db):
     assert summary.startswith("Correction batch recorded on your artifact") and "1 comment," in summary
 
 
+def test_a_delivery_only_hands_the_worker_its_key_once_it_commits(db):
+    from infra.database import write_transaction
+
+    comment = _user_comment(db, seed_document(db, "owner", name="p.md"))
+    _record(db, "doc_comment", comment)
+    batch = batches(db)[0]
+
+    with pytest.raises(RuntimeError, match="rolled back"):
+        with write_transaction(db, scope="test_delivery") as connection:
+            assert feedback_batches.close_batch(connection, batch["id"], "send")[0]
+            raise RuntimeError("rolled back")
+    assert QUEUED == []
+
+    assert feedback_batches.close_batch(db, batch["id"], "send")[0]
+    db.commit()
+    # The delivery writes no note; the worker, sole writer, does once it takes the key.
+    assert QUEUED == [("doc-feedback", batch["id"])] and _correction_notes(db) == []
+    _worker_takes(db)
+    assert [details["note_key"] for details, _ in _correction_notes(db)] == [f"doc-feedback:{batch['id']}"]
+
+
+def test_an_answer_only_hands_the_worker_its_rounds_and_writes_no_note(db):
+    artifact = seed_document(db, "owner", name="p.md")
+    _ask(db, artifact)
+    _record(db, "doc_comment", _user_comment(db, artifact))
+
+    _clear_with_answer(db, artifact, "changes_requested")
+
+    hold = db.execute("SELECT id FROM plan_node_holds WHERE owner_kind='user'").fetchone()[0]
+    # The answer also delivered the round's batch; its comment is still noted with the round.
+    assert ("review-round", hold) in QUEUED and _correction_notes(db) == []
+    _worker_takes(db)
+    assert [details["note_key"] for details, _ in _correction_notes(db)] == [f"review-round:{hold}"]
+
+
 def test_ask_round_comments_record_each_fact_and_one_batch_note_with_all_subjects(db):
     artifact = seed_document(db, "owner", name="p.md")
     _ask(db, artifact)
     comments = [_user_comment(db, artifact) for _ in range(3)]
     for comment in comments:
-        assert _record(db, "doc_comment", comment) == (True, [])  # the round is still open
+        assert _record(db, "doc_comment", comment) is True  # the round is still open
+    assert _correction_notes(db) == []
 
     _answer(db, artifact, "changes_requested")
 
@@ -173,18 +233,18 @@ def test_comment_and_answer_replay_are_deduplicated(db):
     comment = _user_comment(db, artifact)
     _seed_decision(db)
 
-    assert _record(db, "doc_comment", comment)[0]
-    assert not _record(db, "doc_comment", comment)[0]
-    assert _record(db, "doc_comment", comment, version=_version("v2"))[0]
+    assert _record(db, "doc_comment", comment)
+    assert not _record(db, "doc_comment", comment)
+    assert _record(db, "doc_comment", comment, version=_version("v2"))
     batch = _deliver_batch(db)
-    from core.correction_notes import queue_batch_notes
+    from jobs.corrections_recording import write_unit
 
-    assert queue_batch_notes(db, batch["id"]) == ()  # the delivery replay writes nothing
+    write_unit("doc-feedback", batch["id"])  # the delivery replay writes nothing
 
-    assert _record(db, "plan_decision_answer", "dec") == (True, ["owner"])
-    assert _record(db, "plan_decision_answer", "dec") == (False, [])
+    assert _record(db, "plan_decision_answer", "dec") is True
+    assert _record(db, "plan_decision_answer", "dec") is False
     # A later classifier version records its own fact and never a second note.
-    assert _record(db, "plan_decision_answer", "dec", version=_version("v2")) == (True, [])
+    assert _record(db, "plan_decision_answer", "dec", version=_version("v2")) is True
 
     assert len(_facts(db)) == 4
     assert [details["note_key"] for details, _ in _correction_notes(db)] == [
@@ -195,7 +255,7 @@ def test_comment_and_answer_replay_are_deduplicated(db):
 @pytest.mark.parametrize("source", ["doc_comment", "plan_decision_answer"])
 @pytest.mark.parametrize("target", ["missing", "archived", "ui"])
 def test_missing_archived_or_ui_target_keeps_fact_without_note(db, source, target):
-    from core.correction_notes import queue_batch_notes
+    from jobs.corrections_recording import write_unit
 
     thread = {"missing": "gone", "archived": "owner", "ui": "ui"}[target]
     if target == "archived":
@@ -205,19 +265,18 @@ def test_missing_archived_or_ui_target_keeps_fact_without_note(db, source, targe
         outcome = _record(db, "doc_comment", comment)
         batch_id = batches(db)[0]["id"]
         db.execute("UPDATE doc_feedback_batches SET recipient_id=?,state='delivered' WHERE id=?", (thread, batch_id))
-        assert queue_batch_notes(db, batch_id) == ()
+        db.commit()
+        write_unit("doc-feedback", batch_id)
     else:
         _seed_decision(db, thread=thread)
         outcome = _record(db, "plan_decision_answer", "dec")
 
-    assert outcome == (True, []) and len(_facts(db)) == 1
+    assert outcome is True and len(_facts(db)) == 1
     assert _correction_notes(db) == [] and _wakes(db) == []
 
 
 @pytest.mark.parametrize("active", [False, True])
 def test_scan_facts_note_only_under_the_active_version(db, active):
-    from core.corrections_recording import ACTIVE_VERSION_SETTING, version_key
-    from infra.settings import set_setting
     from jobs.corrections_recording import _record_fact
     from jobs.corrections_scanning import hydrate_candidates, pending_source_candidate_keys
 
@@ -225,15 +284,14 @@ def test_scan_facts_note_only_under_the_active_version(db, active):
     batch = _deliver_batch(db)  # the batch left before the scan found its comment
     _seed_decision(db)
     if active:  # a later scan pass; without it, the activation backfill
-        set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(_version())}, db=db)
-    db.commit()
+        _activate(db, "2000-01-01T00:00:00+00:00")
 
     candidates = hydrate_candidates(pending_source_candidate_keys(_version(), 10))
 
     assert {(item.source_kind, item.arrived) for item in candidates} == {
         ("doc_comment", False), ("plan_decision_answer", False),
     }
-    assert all(_record_fact(item, CORRECTION, _version())[0] for item in candidates)
+    assert all(_record_fact(item, CORRECTION, _version()) for item in candidates)
     assert {subject for subject, _ in _facts(db)} == {f"doc-comment:{comment}", "plan-decision-answer:dec:7"}
     expected = {f"doc-feedback:{batch['id']}", "decision-answer:dec:7"} if active else set()
     assert {details["note_key"] for details, _ in _correction_notes(db)} == expected
@@ -250,7 +308,7 @@ def test_decision_other_text_records_fact_and_note_with_question(db):
     assert "B — Ship 2027 — Matches the plan." in candidate.content
     assert candidate.content.endswith("Owner answer: Use 2027, not 2026.")
 
-    assert _record(db, "plan_decision_answer", "dec") == (True, ["owner"])
+    assert _record(db, "plan_decision_answer", "dec") is True
 
     (subject, attributes), = _facts(db)
     assert subject == "plan-decision-answer:dec:7" and attributes["source_id"] == "dec:7"
@@ -279,7 +337,7 @@ def test_decision_listed_pick_without_text_records_nothing(db):
 def test_decision_answer_is_enqueued_only_when_it_carries_text(monkeypatch, answer, enqueued):
     seen = []
     monkeypatch.setattr(
-        "jobs.corrections_handoff.notify_from_thread", lambda kind, source: seen.append((kind, source)),
+        "jobs.corrections_realtime.notify", lambda kind, source: seen.append((kind, source)),
     )
     connection = sqlite3.connect(":memory:", check_same_thread=False)
     connection.row_factory = sqlite3.Row
@@ -327,54 +385,47 @@ async def test_typed_source_arrival_is_classified_as_arrived_through_the_shared_
     assert worker.queue.empty()
 
 
-def test_note_appended_during_running_turn_still_wakes(agent, main_db):
+def test_a_note_written_during_a_running_turn_rides_the_next_input_and_starts_no_turn(agent, main_db):
     _seed_decision(main_db, thread=THREAD)
     assert agent.say("m1", "Start the work.") is not None  # a turn is now running
 
-    assert _record(main_db, "plan_decision_answer", "dec") == (True, [THREAD])
+    assert _record(main_db, "plan_decision_answer", "dec") is True
 
-    wake = main_db.execute(
-        "SELECT id,role,delivery_state,content,metadata FROM messages WHERE id LIKE 'correction-wake:%'"
-    ).fetchone()
-    assert wake["id"] == f"correction-wake:{THREAD}:decision-answer:dec:7" and wake["delivery_state"] == "queued"
-    assert wake["role"] == "system" and not wake["content"].startswith("[EVENT")
-    metadata = json.loads(wake["metadata"])
-    assert (metadata["type"], metadata["event_disposition"]) == ("context_event", "wake")
-    assert [event["chip"] for event in metadata["context_events"]] == [None] * len(metadata["context_events"])
-    items = agent.deliver()  # the running turn ends; the hidden wake is its successor
-    assert _named(items) == [wake["id"]] and _notes(items) == ["plan-decision-answer:dec:7"]
+    assert _wakes(main_db) == []
+    assert agent.deliver() is None  # the running turn ends with no successor of its own
+    assert _notes(agent.say("m2")) == ["plan-decision-answer:dec:7"]
 
 
-def test_note_replay_and_batch_close_queue_one_wake(db):
+def _queued(db) -> list[str]:
+    return [row[0] for row in db.execute("SELECT id FROM messages WHERE delivery_state='queued' ORDER BY seq")]
+
+
+def test_notes_queue_no_input_of_their_own(db):
     _seed_decision(db)
-    for version in ("v1", "v1", "v2"):
-        _record(db, "plan_decision_answer", "dec", version=_version(version))
-    assert _wakes(db) == ["correction-wake:owner:decision-answer:dec:7"]
-
     artifact = seed_document(db, "owner", name="p.md")
     _ask(db, artifact)
-    comments = [_user_comment(db, artifact) for _ in range(2)]
-    for comment in comments:
+    for comment in [_user_comment(db, artifact) for _ in range(2)]:
         _record(db, "doc_comment", comment)
-    _answer(db, artifact, "changes_requested")
+    _clear_with_answer(db, artifact, "changes_requested")  # the answer's own inputs, before any note
+    before = _queued(db)
 
-    # The answer's own wake already carries the batch note, so it adds no second one.
-    assert _wakes(db) == ["correction-wake:owner:decision-answer:dec:7"]
-    carrying = [
-        row[0] for row in db.execute(
-            "SELECT metadata FROM messages WHERE id LIKE 'context-digest:%' AND delivery_state='queued'"
-        ) if "review-round:" in row[0]
+    for version in ("v1", "v1", "v2"):
+        _record(db, "plan_decision_answer", "dec", version=_version(version))
+    _worker_takes(db)  # the round's note
+
+    assert sorted(details["note_key"].split(":")[0] for details, _ in _correction_notes(db)) == [
+        "decision-answer", "review-round",
     ]
-    assert len(carrying) == 1
+    assert _queued(db) == before and _wakes(db) == []
 
 
-def test_backfill_note_less_fact_queues_no_wake(db):
+def test_backfill_facts_write_no_note(db):
     _seed_decision(db)
     comment = _user_comment(db, seed_document(db, "owner", name="p.md"))
 
-    assert _record(db, "plan_decision_answer", "dec", arrived=False) == (True, [])
-    assert _record(db, "doc_comment", comment, arrived=False) == (True, [])
+    assert _record(db, "plan_decision_answer", "dec", arrived=False) is True
+    assert _record(db, "doc_comment", comment, arrived=False) is True
     assert _record(db, "plan_decision_answer", "dec", arrived=False, payload={**CORRECTION, "label": "not_correction"},
-                   version=_version("v2")) == (True, [])
+                   version=_version("v2")) is True
 
     assert _wakes(db) == [] and _correction_notes(db) == []

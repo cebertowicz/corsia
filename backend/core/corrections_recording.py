@@ -20,6 +20,8 @@ MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
 SOURCE_KINDS = ("message", "doc_comment", "plan_decision_answer")
+# The review units a comment is noted with (``core.correction_notes``); the worker takes their keys as it takes sources.
+UNIT_KINDS = ("review-round", "doc-feedback")
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
 # A healthy, self-tested classifier failed twice on this one input; Measurement never counts it.
@@ -162,6 +164,19 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
         return CorruptActivation(type(error).__name__)
     finally:
         db.close()
+
+
+def active_since(db, version: ClassifierVersion | None = None) -> str | None:
+    """When the active version (or ``version``, only if it is the active one) became active, else None."""
+    from infra.settings import get_setting
+
+    active = get_setting(ACTIVE_VERSION_SETTING, db=db)
+    key = active.get("key") if isinstance(active, dict) else None
+    if key is None or (version is not None and key != version_key(version)):
+        return None
+    activation = (get_setting(ACTIVATIONS_SETTING, db=db) or {}).get(key)
+    since = activation.get("activated_at") if isinstance(activation, dict) else None
+    return since if isinstance(since, str) and since else None
 
 
 def subject_key(source_kind: str, source_id: str) -> str:

@@ -1,16 +1,11 @@
-"""One target rule for a comment correction, and every trigger drives the note's recipient.
+"""One target rule for a comment correction.
 
 The target is the agent that was handed the person's feedback, which can differ
 from the document's current owner. The scan, the candidate and the note all
-read that one rule, and each trigger returns the note's recipient to drive.
+read that one rule.
 """
 
 from __future__ import annotations
-
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
-import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from tests.test_correction_notes import _version  # noqa: F401
@@ -20,6 +15,7 @@ from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fix
     _deliver_batch,
     _record,
     _user_comment,
+    _worker_takes,
     db,
 )
 
@@ -36,7 +32,7 @@ def _deliver_all(db) -> None:
 
     for batch in batches(db, state="open"):
         assert feedback_batches.close_batch(db, batch["id"], "send")[0]
-    db.commit()
+    _worker_takes(db)
 
 
 def test_a_reply_to_an_agent_comment_targets_the_owner_not_the_comment_author(db):
@@ -78,7 +74,7 @@ def test_a_comment_handed_out_before_the_owner_changed_stays_with_its_recipient(
     db.commit()
 
     assert _candidate_thread(comment) == "owner"  # the agent that got the feedback, not the new owner
-    assert _record(db, "doc_comment", comment) == (True, ["owner"])
+    assert _record(db, "doc_comment", comment) is True
     (details, _summary), = _correction_notes(db)
     assert details["note_key"] == f"doc-feedback:{batch['id']}"
 
@@ -119,32 +115,3 @@ def test_the_scan_selects_exactly_the_comments_that_have_a_candidate(db):
     hydrated = {source for source in [*comments, str(agent_row["id"])] if _candidate_thread(source) is not None}
 
     assert scanned == hydrated == {comments[0], comments[1]}
-
-
-def test_batch_completion_returns_the_note_recipient_to_drive(db, monkeypatch):
-    from doceditor import feedback_completion, review_requests
-
-    monkeypatch.setattr(review_requests, "settle_for_batch", lambda *_args: ())
-    artifact = seed_document(db, "owner", name="p.md")
-    comment = _user_comment(db, artifact)
-    _record(db, "doc_comment", comment)
-    batch = batches(db, state="open")[0]
-    db.execute("UPDATE doc_feedback_batches SET state='delivered' WHERE id=?", (batch["id"],))
-
-    woken = feedback_completion.complete_delivered_batch(
-        db, batch, SimpleNamespace(node_id=None, outcome="node"), "2026-10-19T00:00:00Z",
-    )
-
-    assert woken == ("owner",) and len(_correction_notes(db)) == 1
-
-
-@pytest.mark.asyncio
-async def test_recording_a_fact_drives_every_thread_its_notes_woke(monkeypatch):
-    from jobs import corrections_recording
-
-    drive = AsyncMock()
-    monkeypatch.setattr("plans.public.drive_threads", drive)
-    monkeypatch.setattr(corrections_recording, "_record_fact", lambda *_args: (True, ["owner"]))
-
-    assert await corrections_recording._record_and_drive(object(), CORRECTION, _version()) is True
-    drive.assert_awaited_once_with(["owner"])

@@ -41,33 +41,41 @@ def complete_backfill(
             "after_count": after_count,
             "version": version_attributes(version),
             "conductor_told_at": None,
+            # A scan fact notes only a source made after this (``core.correction_notes``).
+            "activated_at": datetime.now(timezone.utc).isoformat(),
         }
         set_setting(ACTIVATIONS_SETTING, activations, db=db)
         set_setting(ACTIVE_VERSION_SETTING, {"key": key}, db=db)
     return True
 
 
-def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: int) -> float:
+def weekly_correction_figure(
+    version: ClassifierVersion, *, since: str, weeks: int, messages_only: bool = False,
+) -> float:
     """Return the bounded-window weekly correction figure for one full version.
 
-    Message and document-comment ``correction`` facts count. Decision answers
-    remain triage-visible but are excluded from served correction rates.
+    Message and document-comment ``correction`` facts count, one per comment.
+    Decision answers remain triage-visible but are excluded from served
+    correction rates. ``messages_only`` counts chat messages alone: the
+    like-for-like figure two versions are compared on.
     """
-    from core.corrections_recording import CORRECTION_EVENT, DECISION_SUBJECT_PREFIX, LABEL_CORRECTION
+    from core.corrections_recording import (
+        CORRECTION_EVENT, DECISION_SUBJECT_PREFIX, LABEL_CORRECTION, MESSAGE_SUBJECT_PREFIX,
+    )
     from infra.database import get_db
 
     version_filter, version_params = version_match_sql("e", version)
+    sources = "e.subject_key LIKE :message_prefix || '%'" if messages_only else "e.subject_key NOT LIKE :decision_prefix || '%'"
     db = get_db()
     try:
         row = db.execute(
             f"""SELECT COUNT(*) FROM outcome_events e
                WHERE e.event_name=:event AND e.retracted_at IS NULL AND e.ts >= :since
-                 AND {version_filter}
-                 AND e.subject_key NOT LIKE :decision_prefix || '%'
+                 AND {version_filter} AND {sources}
                  AND json_extract(e.attributes, '$.label')=:label""",
             {
                 **version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION,
-                "decision_prefix": DECISION_SUBJECT_PREFIX,
+                "decision_prefix": DECISION_SUBJECT_PREFIX, "message_prefix": MESSAGE_SUBJECT_PREFIX,
             },
         ).fetchone()
         return int(row[0]) / weeks
@@ -107,7 +115,8 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
     else:
         detail = installed + (
             f"Corrections for the last {activation['weeks']} weeks were re-read with it; "
-            f"the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
+            f"the weekly figure for chat-message corrections moved from {old:.1f} to {activation['after_count']:.1f}. "
+            "It compares chat messages only, so a change in which sources are read does not move it."
         )
     from events.delivery import deliver_to_thread
 
@@ -164,11 +173,12 @@ async def activate_after_backfill(version: ClassifierVersion) -> str:
         return "activation record unreadable"
     weeks = BASELINE_PERIODS + 1
     since = measurement_window_start().isoformat()
+    # Like for like: both versions' chat-message figures (``before_count``/``after_count``).
     before = (
-        await run_in_db(weekly_correction_figure, old_version, since=since, weeks=weeks)
+        await run_in_db(weekly_correction_figure, old_version, since=since, weeks=weeks, messages_only=True)
         if old_version is not None else None
     )
-    after = await run_in_db(weekly_correction_figure, version, since=since, weeks=weeks)
+    after = await run_in_db(weekly_correction_figure, version, since=since, weeks=weeks, messages_only=True)
     activated = await run_in_db(
         complete_backfill,
         version,

@@ -86,7 +86,7 @@ def agent(main_db, monkeypatch):
             from jobs.corrections_recording import _record_fact, candidate_for_message
 
             main_db.commit()
-            return _record_fact(candidate_for_message(message_id), payload, version or _version())[0]
+            return _record_fact(candidate_for_message(message_id), payload, version or _version())
 
         def write(self, outcome: str, error=None) -> None:
             """The provider write of the running turn's batch, and its outcome."""
@@ -278,7 +278,7 @@ def test_no_target_gives_no_note(main_db, target):
     main_db.commit()
     candidate = CorrectionCandidate("message", "c1", thread, None, "Wrong file.", "2026-10-16T20:00:00Z", arrived=True)
 
-    assert _record_fact(candidate, CORRECTION, _version())[0]
+    assert _record_fact(candidate, CORRECTION, _version())
     assert _journal(main_db) == []
 
 
@@ -311,26 +311,44 @@ def test_a_backfill_before_activation_never_notes(agent, main_db):
     agent.say("c1", "Wrong file.")
     main_db.commit()
 
-    assert _record_fact(_scanned("c1"), CORRECTION, _version())[0]
+    assert _record_fact(_scanned("c1"), CORRECTION, _version())
     assert _journal(main_db) == []
 
 
-def test_a_scan_catch_up_notes_only_the_latest_owner_message(agent, main_db):
-    from core.corrections_recording import ACTIVE_VERSION_SETTING, version_key
+def _activate(main_db, at: str) -> None:
+    from core.corrections_recording import ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING, version_key
     from infra.settings import set_setting
+
+    key = version_key(_version())
+    set_setting(ACTIVATIONS_SETTING, {key: {"activated_at": at}}, db=main_db)
+    set_setting(ACTIVE_VERSION_SETTING, {"key": key}, db=main_db)
+    main_db.commit()
+
+
+def test_a_scan_catch_up_notes_only_the_latest_owner_message(agent, main_db):
     from jobs.corrections_recording import _record_fact
 
     agent.say("c1", "Wrong file.", at="2026-10-16T20:00:00Z")
     agent.deliver()
     agent.say("c2", "And the date is wrong.", at="2026-10-16T20:01:00Z")
-    set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(_version())}, db=main_db)
-    main_db.commit()
+    _activate(main_db, "2026-10-16T19:00:00+00:00")
 
     # Behind a newer owner message: no note. The latest one: one catch-up note.
-    assert _record_fact(_scanned("c1"), CORRECTION, _version())[0]
+    assert _record_fact(_scanned("c1"), CORRECTION, _version())
     assert _journal(main_db) == []
-    assert _record_fact(_scanned("c2"), CORRECTION, _version())[0]
+    assert _record_fact(_scanned("c2"), CORRECTION, _version())
     assert [entry["correction_subjects"] for entry in _journal(main_db)] == [["message:c2"]]
+
+
+def test_the_first_scan_after_an_upgrade_notes_no_message_made_before_activation(agent, main_db):
+    from jobs.corrections_recording import _record_fact
+
+    # The person's latest word, but sent before the version became active: history, not news.
+    agent.say("c1", "Wrong file.", at="2026-10-16T20:00:00Z")
+    _activate(main_db, "2026-10-16T20:00:00+00:00")
+
+    assert _record_fact(_scanned("c1"), CORRECTION, _version())
+    assert _journal(main_db) == []
 
 
 def test_a_lesson_placed_in_the_turn_the_note_arrived_is_stamped_with_it(agent, main_db):

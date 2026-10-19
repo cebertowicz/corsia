@@ -561,6 +561,7 @@ def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
         db, state="active", external_id="delegated-selected-wake.md",
         before_block=queue_worker_news,
     )
+    db.commit()  # the answer owns its write transaction, as the API's does
 
     attention.clear_attention(
         ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", drives=[], db=db,

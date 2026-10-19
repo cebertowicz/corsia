@@ -2,7 +2,7 @@
 
 The owner comments and presses Changes requested within seconds, while the
 classifier may be unloaded or queued, so the final fact retries the round's
-or batch's note key and wakes the corrected agent once.
+or batch's note key and the note rides the corrected agent's next input.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fix
     _record,
     _user_comment,
     _wakes,
+    _worker_takes,
     db,
 )
 
@@ -29,14 +30,14 @@ NOT_CORRECTION = {**CORRECTION, "label": "not_correction"}
 
 
 def _riding(db, note_key: str) -> int:
-    """Queued passive digests carrying ``note_key``: the note rides input already queued for its target."""
+    """Queued passive digests carrying ``note_key``."""
     return db.execute(
         "SELECT COUNT(*) FROM messages WHERE id LIKE 'context-digest:%' AND delivery_state='queued'"
         " AND metadata LIKE ?", (f"%{note_key}%",),
     ).fetchone()[0]
 
 
-def test_late_fact_after_answer_writes_one_round_note_riding_the_answers_wake(db):
+def test_late_fact_after_answer_writes_one_round_note_without_a_wake(db):
     artifact = seed_document(db, "owner", name="p.md")
     _ask(db, artifact)
     comment = _user_comment(db, artifact)
@@ -44,17 +45,17 @@ def test_late_fact_after_answer_writes_one_round_note_riding_the_answers_wake(db
     _answer(db, artifact, "changes_requested")
     assert _correction_notes(db) == [] and _wakes(db) == []  # the fact is still pending
 
-    assert _record(db, "doc_comment", comment) == (True, ["owner"])
+    assert _record(db, "doc_comment", comment) is True
 
     (details, summary), = _correction_notes(db)
     assert details["note_key"].startswith("review-round:")
     assert details["correction_subjects"] == [f"doc-comment:{comment}"]
     assert "Re-check the whole artifact" in summary
-    # The answer already queued the owner's wake, so the note joins it instead of adding one.
-    assert _wakes(db) == [] and _riding(db, details["note_key"]) == 1
-    # A replay under another classifier version adds neither a second note nor a second carrier.
-    assert _record(db, "doc_comment", comment, version=_version("v2")) == (True, [])
-    assert len(_correction_notes(db)) == 1 and _riding(db, details["note_key"]) == 1
+    # No wake: it rides the owner's next input, not the answer's already queued one.
+    assert _wakes(db) == [] and _riding(db, details["note_key"]) == 0
+    # A replay under another classifier version adds no second note.
+    assert _record(db, "doc_comment", comment, version=_version("v2")) is True
+    assert len(_correction_notes(db)) == 1
 
 
 def test_two_late_facts_for_one_round_note_once_after_the_last(db):
@@ -63,13 +64,13 @@ def test_two_late_facts_for_one_round_note_once_after_the_last(db):
     first, second = _user_comment(db, artifact), _user_comment(db, artifact)
     _answer(db, artifact, "changes_requested")
 
-    assert _record(db, "doc_comment", first) == (True, [])  # the second is still pending
+    assert _record(db, "doc_comment", first) is True  # the second is still pending
     assert _correction_notes(db) == [] and _wakes(db) == []
 
-    assert _record(db, "doc_comment", second) == (True, ["owner"])
+    assert _record(db, "doc_comment", second) is True
     (details, _summary), = _correction_notes(db)
     assert sorted(details["correction_subjects"]) == sorted(f"doc-comment:{c}" for c in (first, second))
-    assert _wakes(db) == [] and _riding(db, details["note_key"]) == 1
+    assert _wakes(db) == []
 
 
 def test_negative_late_fact_with_no_other_positive_writes_no_note(db):
@@ -79,7 +80,7 @@ def test_negative_late_fact_with_no_other_positive_writes_no_note(db):
     _answer(db, artifact, "changes_requested")
 
     _record(db, "doc_comment", first, payload=NOT_CORRECTION)
-    assert _record(db, "doc_comment", second, payload=NOT_CORRECTION) == (True, [])
+    assert _record(db, "doc_comment", second, payload=NOT_CORRECTION) is True
 
     assert len(_facts(db)) == 2 and _correction_notes(db) == [] and _wakes(db) == []
 
@@ -90,12 +91,11 @@ def test_late_fact_for_a_delivered_lone_batch_writes_one_note(db):
     batch = _deliver_batch(db)  # delivered before the classifier answered
     assert _correction_notes(db) == []
 
-    assert _record(db, "doc_comment", comment) == (True, ["owner"])
+    assert _record(db, "doc_comment", comment) is True
 
     (details, _summary), = _correction_notes(db)
     assert details["note_key"] == f"doc-feedback:{batch['id']}"
-    # The delivery queued the owner's turn; the note rides it.
-    assert _wakes(db) == [] and _riding(db, details["note_key"]) == 1
+    assert _wakes(db) == []
 
 
 def test_a_backfill_fact_never_notes_a_delivered_batch(db):
@@ -103,13 +103,13 @@ def test_a_backfill_fact_never_notes_a_delivered_batch(db):
     comment = _user_comment(db, artifact)
     _deliver_batch(db)
 
-    assert _record(db, "doc_comment", comment, arrived=False) == (True, [])
+    assert _record(db, "doc_comment", comment, arrived=False) is True
 
     assert _correction_notes(db) == [] and _wakes(db) == []
 
 
 def _answered_round_with_no_other_input(db, monkeypatch):
-    """A round whose answer queues no input of its own, so only the correction wake could drive."""
+    """A round whose answer queues no input of its own."""
     monkeypatch.setattr("plans.plan_wake.append", lambda *_args, **_kwargs: None)  # the asker gets no wake
     artifact = seed_document(db, "owner", name="q.md")
     _ask(db, artifact)
@@ -118,23 +118,13 @@ def _answered_round_with_no_other_input(db, monkeypatch):
     return artifact
 
 
-def test_an_answer_without_drives_is_refused_before_it_writes(db, monkeypatch):
+def test_an_answer_with_no_other_input_notes_without_a_wake(db, monkeypatch):
     artifact = _answered_round_with_no_other_input(db, monkeypatch)
 
-    with pytest.raises(ValueError, match="a verdict needs drives"):
-        attention.clear_attention(artifact, outcome="answer", verdict="changes_requested", db=db)
+    attention.clear_attention(artifact, outcome="answer", verdict="changes_requested", db=db)
+    _worker_takes(db)
 
-    assert _correction_notes(db) == [] and _wakes(db) == []
-
-
-def test_answer_with_a_driver_queues_one_wake_and_names_the_target(db, monkeypatch):
-    artifact = _answered_round_with_no_other_input(db, monkeypatch)
-    drives: list[str] = []
-
-    attention.clear_attention(
-        artifact, outcome="answer", verdict="changes_requested", db=db, drives=drives,
-    )
-    db.commit()
-
+    # The note waits for the owner's next input: no note starts a turn.
     (details, _summary), = _correction_notes(db)
-    assert drives == ["owner"] and _wakes(db) == [f"correction-wake:owner:{details['note_key']}"]
+    assert details["note_key"].startswith("review-round:") and _wakes(db) == []
+    assert db.execute("SELECT COUNT(*) FROM messages WHERE delivery_state='queued'").fetchone()[0] == 0

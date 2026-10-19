@@ -8,8 +8,12 @@ yet delivered (or offered again until their triage is written), and the
 context-digest inputs that already carry them. An old note's key is its
 subject, which is the key a chat-message note is written under today.
 
+It stamps the active classifier version's ``activated_at`` when its record has
+none, so the first scan after this upgrade notes no history: a scan fact notes
+only a source made after it (``core.correction_notes``).
+
 It then adds the index on a note's key and the index on an artifact's user
-asks, which the note path reads on the answer and delivery requests.
+asks, which the note path reads.
 
 Runs inside the runner's transaction; it never commits or rolls back.
 """
@@ -18,6 +22,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 
 from infra.context_change_schema import NOTE_KEY_INDEX_SQL
 from infra.plan_ask_schema import ASK_ROUNDS_INDEX_SQL
@@ -26,6 +31,8 @@ from infra.plan_ask_schema import ASK_ROUNDS_INDEX_SQL
 _NOTE_KIND = "correction_note"
 _OLD_KEY = "correction_subject"
 _OLD_KEY_PATTERN = f'"{_OLD_KEY}"'  # the quoted key, so the plural never matches
+_ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"
+_ACTIVATIONS_SETTING = "corrections_classifier_activations"
 
 
 def _rewritten(details: object) -> bool:
@@ -72,8 +79,32 @@ def _rewrite_digests(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE messages SET metadata=? WHERE rowid=?", (json.dumps(metadata), rowid))
 
 
+def _setting(conn: sqlite3.Connection, key: str) -> dict | None:
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    try:
+        value = json.loads(row[0]) if row is not None else None
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _stamp_activation(conn: sqlite3.Connection) -> None:
+    active = _setting(conn, _ACTIVE_VERSION_SETTING) or {}
+    activations = _setting(conn, _ACTIVATIONS_SETTING)
+    record = activations.get(active.get("key")) if activations is not None else None
+    if not isinstance(record, dict) or record.get("activated_at"):
+        return
+    now = datetime.now(UTC).isoformat()
+    record["activated_at"] = now
+    conn.execute(
+        "UPDATE settings SET value=?, updated_at=? WHERE key=?", (json.dumps(activations), now, _ACTIVATIONS_SETTING),
+    )
+
+
 def migrate_126_to_127(conn: sqlite3.Connection) -> None:
-    """Rewrite old-shape correction notes, then add the note-key and user-ask indexes."""
+    """Rewrite old-shape correction notes, stamp the activation, then add the note-key and user-ask indexes."""
+    if _has_table(conn, "settings"):
+        _stamp_activation(conn)
     if _has_table(conn, "context_change_journal"):
         _rewrite_journal(conn)
         conn.execute(NOTE_KEY_INDEX_SQL)

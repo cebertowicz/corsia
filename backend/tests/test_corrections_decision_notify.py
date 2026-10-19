@@ -1,7 +1,8 @@
 """A decision answer commits on a DB thread; its arrival reaches the corrections worker on the app loop.
 
-The worker's queue, event and task are loop-bound, so the commit effect hops to
-the application loop, and with no loop the scan is owed and recovers the answer.
+The worker's queue, event and task are bound to the loop it started on, so its
+``notify`` hops a commit effect from a DB pool thread onto that loop, and with
+no loop the scan is owed and recovers the answer.
 """
 
 from __future__ import annotations
@@ -36,8 +37,7 @@ def _isolated_worker(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_answer_through_run_in_db_notifies_the_worker_on_the_app_loop(db, monkeypatch):
-    from infra import app_loop
+async def test_answer_through_run_in_db_notifies_the_worker_on_its_loop(db, monkeypatch):
     from infra.db_async import run_in_db
 
     worker = _isolated_worker(monkeypatch)
@@ -46,7 +46,7 @@ async def test_answer_through_run_in_db_notifies_the_worker_on_the_app_loop(db, 
     monkeypatch.setattr(
         worker, "notify", lambda *args: (notified_on.append(threading.get_ident()), real_notify(*args)),
     )
-    monkeypatch.setattr(app_loop, "_LOOP", asyncio.get_running_loop())
+    worker.loop = asyncio.get_running_loop()  # what ``startup`` captures
     _plan, _source, decision = _raised_decision(db)
 
     await run_in_db(lambda: _answer(db, decision))
@@ -54,7 +54,8 @@ async def test_answer_through_run_in_db_notifies_the_worker_on_the_app_loop(db, 
         await asyncio.sleep(0)
 
     assert worker.queue.get_nowait()[:2] == ("plan_decision_answer", decision["id"])
-    assert notified_on == [threading.get_ident()]  # the loop's thread, not the DB pool's
+    # Called on the DB pool's thread, it hopped once and enqueued on the loop's.
+    assert len(notified_on) == 2 and notified_on[0] != notified_on[1] == threading.get_ident()
 
 
 def test_answer_with_no_app_loop_owes_the_scan_which_recovers_the_answer(db, monkeypatch):

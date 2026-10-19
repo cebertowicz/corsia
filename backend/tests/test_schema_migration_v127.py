@@ -1,4 +1,5 @@
-"""Schema 126 -> 127: old correction notes move to the plural subjects contract, and two indexes land."""
+"""Schema 126 -> 127: old correction notes move to the plural subjects contract, the active
+classifier version gets the start time a scan fact notes after, and two indexes land."""
 
 from __future__ import annotations
 
@@ -82,6 +83,43 @@ def test_the_step_adds_the_indexes_a_fresh_schema_has() -> None:
         assert _index_sql(db) == {}
         migrate_126_to_127(db)
         assert _index_sql(db) == _index_sql(fresh) and len(_index_sql(fresh)) == len(_INDEXES)
+
+
+def _settings(db: sqlite3.Connection, active: dict, activations: dict) -> None:
+    for key, value in (("corrections_classifier_active_version", active),
+                       ("corrections_classifier_activations", activations)):
+        db.execute("INSERT INTO settings(key,value,updated_at) VALUES (?,?,'t')", (key, json.dumps(value)))
+
+
+def _activations(db: sqlite3.Connection) -> dict:
+    row = db.execute("SELECT value FROM settings WHERE key='corrections_classifier_activations'").fetchone()
+    return json.loads(row[0])
+
+
+def test_the_upgrade_stamps_the_active_version_so_the_first_scan_notes_no_history() -> None:
+    from core.corrections_recording import active_since
+
+    with closing(_wound_back_to_v126()) as db:
+        _settings(db, {"key": "v1"}, {"v1": {"after_count": 4}, "v0": {"after_count": 3}})
+        assert active_since(db) is None
+
+        migrate_126_to_127(db)
+        stamped = _activations(db)
+        migrate_126_to_127(db)
+
+        assert stamped["v1"]["activated_at"] and "activated_at" not in stamped["v0"]  # only the active one
+        assert _activations(db) == stamped  # a second run keeps the first stamp
+        assert active_since(db) == stamped["v1"]["activated_at"]
+
+
+def test_the_upgrade_leaves_a_stamped_or_absent_activation_alone() -> None:
+    with closing(_wound_back_to_v126()) as db:
+        _settings(db, {"key": "v1"}, {"v1": {"activated_at": "2026-10-01T00:00:00+00:00"}})
+        migrate_126_to_127(db)
+        assert _activations(db) == {"v1": {"activated_at": "2026-10-01T00:00:00+00:00"}}
+    with closing(_wound_back_to_v126()) as db:
+        migrate_126_to_127(db)  # no classifier was ever activated
+        assert db.execute("SELECT COUNT(*) FROM settings WHERE key LIKE 'corrections_%'").fetchone()[0] == 0
 
 
 def test_the_step_is_safe_to_run_again_and_leaves_new_notes_alone() -> None:

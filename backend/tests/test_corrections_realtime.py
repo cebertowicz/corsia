@@ -768,7 +768,8 @@ async def test_inference_runs_outside_a_database_write_transaction(isolated_db, 
 # ---- scan status -------------------------------------------------------------------------
 
 
-def test_full_arrival_queue_keeps_send_admission_and_owes_the_scan(worker):
+@pytest.mark.asyncio
+async def test_full_arrival_queue_keeps_send_admission_and_owes_the_scan(worker):
     worker.queue = asyncio.Queue(maxsize=1)
     worker.queue.put_nowait(("message", "already-queued", 0.0))
 

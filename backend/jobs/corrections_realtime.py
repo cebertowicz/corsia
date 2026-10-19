@@ -23,7 +23,7 @@ Scan state (``scan``)::
 
     from                         event                                      to
     idle                         ready, startup, or dropped arrival          owed
-    idle                         arrival error or notify while stopping        owed
+    idle                         arrival error, or notify while stopping/no loop owed
     owed                         worker starts a pass                         running
     running                      pass finishes                                idle
     running                      yields to an arrival or must reselect        owed
@@ -34,10 +34,10 @@ Scan state (``scan``)::
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
 
-An outage writes no fact and keeps the source pending. A deterministic startup
-failure is retained per process in ``failed_versions``. A scan activates only after
-it reaches the end using its originally selected manifest; a deterministic failure
-ends the pass unactivated, and the next pass re-selects (or the state is failed).
+A unit key (``UNIT_KINDS``) only writes notes; a finished pass first recovers missed ones. An outage
+writes no fact and keeps the source pending. A deterministic startup failure is retained per process in
+``failed_versions``. A scan activates only after it reaches the end using its originally selected
+manifest; a deterministic failure ends the pass unactivated, and the next pass re-selects (or fails).
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from datetime import timezone
 from typing import Any
 
 from loguru import logger
@@ -52,11 +53,11 @@ from loguru import logger
 from core.corrections_classifier import CORRECTIONS_SPEC
 from core.onnx_asset import AssetError, AssetManifest, cleanup_staging
 from core.onnx_child import OnnxChild
-from core.corrections_recording import ClassifierVersion, CorrectionCandidate
+from core.corrections_recording import UNIT_KINDS, ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts
+from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts, write_unit
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
 QUEUE_SIZE = 256
@@ -77,6 +78,7 @@ class CorrectionsWorker:
         self.arrived = asyncio.Event()
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None  # the loop ``startup`` runs the worker on
         self.child: OnnxChild | None = None
         self.child_manifest: AssetManifest | None = None
         self.stopping = False
@@ -101,12 +103,11 @@ class CorrectionsWorker:
         previous, previous_reason = self.state, self.reason
         self.state, self.reason = state, reason
         if state == "ready" and previous != "ready":
-            self.owe_scan()
+            self._owe()
         if state == "failed" and (previous, previous_reason) != (state, reason):
             self._notice_failed_state(failure_version)
 
-    def owe_scan(self) -> None:
-        """Idle to owed: an arrival the queue could not take is left for the next pass."""
+    def _owe(self) -> None:
         if self.scan == "idle":
             self.scan = "owed"
 
@@ -231,12 +232,14 @@ class CorrectionsWorker:
         started_at = _clock()
         self.queue_delay_ms = (started_at - enqueued_at) * 1000
         try:
+            if source_kind in UNIT_KINDS:  # a completed review unit's key: write the notes it owes
+                return await run_in_db(write_unit, source_kind, source_id)
             candidate = await run_in_db(candidate_for_source, source_kind, source_id)
             if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
                 self._release_hold()
         except Exception:
             logger.exception("corrections classifier arrival failed; the scan will read it")
-            self.owe_scan()
+            self._owe()
         finally:
             self.service_time_ms = (_clock() - started_at) * 1000
             self.queue.task_done()
@@ -258,10 +261,8 @@ class CorrectionsWorker:
 
     async def _scan(self) -> str:
         """Walk and activate one immutable manifest's measurement window."""
-        from datetime import timezone
-
         from jobs.corrections_activation import measurement_window_start
-        from jobs.corrections_recording import next_pending_batch
+        from jobs.corrections_recording import next_pending_batch, recover_unit_notes
 
         manifest = await self._select_manifest()
         if manifest is None:
@@ -272,9 +273,9 @@ class CorrectionsWorker:
         while self.queue.empty():
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
+                await recover_unit_notes(cutoff.isoformat())  # the unit keys the worker never took
                 return await activate_after_backfill(version)
-            tail = batch.selected_keys[-1]
-            before = (tail.created_at, tail.source_kind, tail.source_id)
+            before = (tail := batch.selected_keys[-1]).created_at, tail.source_kind, tail.source_id
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
@@ -322,13 +323,17 @@ class CorrectionsWorker:
         self._hold(f"worker error: {type(error).__name__}")
 
     def notify(self, source_kind: str, source_id: str) -> None:
-        if self.stopping:
-            self.owe_scan()
+        """Take a source or unit key from any thread: a DB pool thread's commit effect hops onto the loop."""
+        if (loop := self.loop) is not None and not loop.is_closed() and asyncio._get_running_loop() is not loop:
+            loop.call_soon_threadsafe(self.notify, source_kind, source_id)
+            return
+        if self.stopping or asyncio._get_running_loop() is None:  # no loop to take it: the scan's recovery reads it
+            self._owe()
             return
         try:
             self.queue.put_nowait((source_kind, source_id, _clock()))
         except asyncio.QueueFull:
-            self.owe_scan()
+            self._owe()
             self.dropped_arrivals += 1
             logger.warning("corrections classifier arrival queue is full; scan is owed")
             return
@@ -336,7 +341,7 @@ class CorrectionsWorker:
         self._start_task(self.run())
 
     def startup(self) -> None:
-        self.stopping = False
+        self.stopping, self.loop = False, asyncio.get_running_loop()
         cleanup_staging(asset_root())
         self._release_hold()
         self.scan = "owed"

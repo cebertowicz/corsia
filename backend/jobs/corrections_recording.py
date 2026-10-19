@@ -23,6 +23,7 @@ from infra.db_async import run_in_db
 from jobs.corrections_scanning import (
     PendingCandidateKey,
     ScanCursor,
+    completed_unit_keys,
     hydrate_candidates,
     pending_candidate_keys,
     pending_source_candidate_keys,
@@ -30,6 +31,9 @@ from jobs.corrections_scanning import (
 
 if TYPE_CHECKING:
     from core.corrections_classifier import Classification
+
+#: Units ``recover_unit_notes`` reads per page.
+UNIT_PAGE = 20
 
 
 def owner_user_ids() -> list[str]:
@@ -53,14 +57,13 @@ def _record_fact(
     candidate: CorrectionCandidate,
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
-) -> tuple[bool, list[str]]:
+) -> bool:
     """Write one versioned local-classifier fact in its own transaction.
 
     The notes it completes are written in the same transaction, so a failing
     note rolls the fact back and the source stays pending for the scan to retry.
-    Returns whether the fact was new and the threads its notes woke.
     """
-    from core.correction_notes import queue_fact_notes
+    from core.correction_notes import write_fact_notes
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -82,9 +85,45 @@ def _record_fact(
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
-        if not (result.inserted and result.event_id):
-            return result.inserted, []
-        return True, list(queue_fact_notes(db, candidate, str(classification["label"]), version, result.event_id))
+        if result.inserted and result.event_id:
+            write_fact_notes(db, candidate, str(classification["label"]), version, result.event_id)
+        return result.inserted
+
+
+def write_unit(kind: str, unit_id: str) -> None:
+    """Write the notes one completed review unit owes, in the worker's own transaction."""
+    from core.correction_notes import write_unit_notes
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="write_correction_unit_notes") as db:
+        write_unit_notes(db, kind, unit_id)
+
+
+def _active_since() -> str | None:
+    from core.corrections_recording import active_since
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return active_since(db)
+    finally:
+        db.close()
+
+
+async def recover_unit_notes(window_start: str) -> None:
+    """Write the notes of each unit completed since activation whose positive facts have none yet.
+
+    The scan's recovery for a unit key the worker never took or failed on; it
+    reads no further back than the scan's own ``window_start``.
+    """
+    activated = await run_in_db(_active_since)
+    if activated is None:
+        return  # No active version: no note is owed.
+    since, after = max(activated, window_start), None
+    while keys := await run_in_db(completed_unit_keys, since, UNIT_PAGE, after):
+        for unit in keys:
+            await run_in_db(write_unit, unit.kind, unit.unit_id)
+        after = keys[-1]
 
 
 def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
@@ -176,33 +215,23 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
     return replace(candidates[0], arrived=True) if candidates else None
 
 
-async def _record_and_drive(
-    candidate: CorrectionCandidate,
-    classification: dict[str, str | int | bool],
-    version: ClassifierVersion,
-) -> bool:
-    from plans.public import drive_threads
-
-    inserted, woken = await run_in_db(_record_fact, candidate, classification, version)
-    await drive_threads(woken)
-    return inserted
-
-
 async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:
     """Record a scored fact; ``failure_reason`` is ``none``."""
-    return await _record_and_drive(candidate, {
+    classification = {
         "label": result.label,
         "truncated": result.truncated,
         "original_tokens": result.original_tokens,
         "failure_reason": "none",
-    }, result.version)
+    }
+    return await run_in_db(_record_fact, candidate, classification, result.version)
 
 
 async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierVersion, reason: str) -> bool:
     """Record an input a healthy model failed on twice, with that failure's kind."""
-    return await _record_and_drive(candidate, {
+    classification = {
         "label": LABEL_UNREADABLE, "truncated": False, "original_tokens": 0, "failure_reason": reason,
-    }, version)
+    }
+    return await run_in_db(_record_fact, candidate, classification, version)
 
 
 def unreadable_facts(db, version: ClassifierVersion) -> int:

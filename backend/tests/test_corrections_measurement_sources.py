@@ -32,12 +32,14 @@ def test_measurement_excludes_decision_answers_from_correction_rates(db):
     db.commit()
     from jobs.corrections_recording import _record_fact, candidate_for_message
 
-    assert _record_fact(candidate_for_message("m"), CORRECTION, _version())[0]
+    assert _record_fact(candidate_for_message("m"), CORRECTION, _version())
     _record(db, "doc_comment", comment)
     _record(db, "plan_decision_answer", "dec")
     _record(db, "plan_decision_answer", "dec", payload=UNREADABLE, version=_version("v2"))
 
     assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 2
+    # Like for like across versions: the chat message alone.
+    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1, messages_only=True) == 1
     assert unreadable_facts(db, _version("v2")) == 0
     assert any(subject == "plan-decision-answer:dec:7" for subject, _ in _facts(db))  # triage still sees it
 
