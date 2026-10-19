@@ -29,6 +29,26 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
+_SERIES_ITEM = _schema(
+    {
+        "key": {"type": "string"},
+        "unit": {"type": "string"},
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "worse": {
+            "type": "string", "enum": ["up", "down"],
+            "description": "Which direction is worse; recorded but not acted on yet.",
+        },
+        "reduce": {
+            "type": "string",
+            "enum": ["last", "mean", "max"],
+            "description": "How a period's readings reduce; recorded but not acted on yet (default last).",
+        },
+    },
+    ["key"],
+)
+
+
 def _check_workflow(thread_id: str, workflow: Any) -> None:
     """Refuse a script schedule's workflow that is unknown or not the owner's."""
     from infra.measure_admission import workflow_refusal
@@ -203,26 +223,7 @@ class AutomationScheduleTool(Tool):
                         "script kind: the readings the script may print. min "
                         "and max are your own bounds; a reading outside them wakes you; a series with no bounds never wakes you."
                     ),
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "key": {"type": "string"},
-                            "unit": {"type": "string"},
-                            "min": {"type": "number"},
-                            "max": {"type": "number"},
-                            "worse": {
-                                "type": "string", "enum": ["up", "down"],
-                                "description": "Which direction is worse; recorded but not acted on yet.",
-                            },
-                            "reduce": {
-                                "type": "string",
-                                "enum": ["last", "mean", "max"],
-                                "description": "How a period's readings reduce; recorded but not acted on yet (default last).",
-                            },
-                        },
-                        "required": ["key"],
-                    },
+                    "items": _SERIES_ITEM,
                 },
                 "workflow": {
                     "type": "string",
