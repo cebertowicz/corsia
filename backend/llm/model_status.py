@@ -97,22 +97,27 @@ def _network_server_status() -> dict[str, str]:
     return status
 
 
-def _private_server_ids() -> set[str]:
-    """Read each network server's private mark once for one catalog build."""
+def _server_locality() -> tuple[set[str], set[str]]:
+    """Read each network server's private mark and loopback fact once for one catalog build."""
     try:
+        from llm.locality import server_on_this_mac
         from llm.network_discovery import get_servers, parse_server_metadata
 
-        return {
-            str(server["id"])
-            for server in get_servers()
-            if (metadata := parse_server_metadata(str(server["id"]), server.get("metadata_json")))
-            and metadata.get("private") is True
-        }
+        private: set[str] = set()
+        local: set[str] = set()
+        for server in get_servers():
+            server_id = str(server["id"])
+            metadata = parse_server_metadata(server_id, server.get("metadata_json"))
+            if metadata and metadata.get("private") is True:
+                private.add(server_id)
+            if server_on_this_mac(server):
+                local.add(server_id)
+        return private, local
     except Exception as error:
         from loguru import logger
 
-        logger.warning(f"network private-mark lookup failed; treating all servers as unmarked: {error}")
-        return set()
+        logger.warning(f"network locality lookup failed; treating all servers as non-local: {error}")
+        return set(), set()
 
 
 def _loaded_model_ids_fn():
@@ -259,6 +264,7 @@ def _public_status_entry(
     status: str,
     status_reason: str | None,
     private_servers: set[str],
+    local_servers: set[str],
 ) -> dict:
     """Project one catalog row for every public consumer."""
     capabilities = _capabilities_for_row(
@@ -282,7 +288,9 @@ def _public_status_entry(
     }
     from llm.locality import row_is_local
 
-    entry["is_local"] = row_is_local(entry, private_servers=private_servers)
+    entry["is_local"] = row_is_local(
+        entry, private_servers=private_servers, local_servers=local_servers,
+    )
     if status_reason:
         entry["status_reason"] = status_reason
     if harness in ("claude-code", "codex"):
@@ -334,17 +342,18 @@ def catalog_base_rows() -> list[dict]:
 
     cloud_active = _cloud_providers_active()
     server_status = _network_server_status()
-    private_servers = _private_server_ids()
+    private_servers, local_servers = _server_locality()
     loaded_ids_fn = _loaded_model_ids_fn()
     rows: list[dict] = []
     for row in model_catalog.get_model_status_catalog_rows():
-        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers)
+        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, private_servers, local_servers)
         if entry is not None:
             rows.append(entry)
     return rows
 
 
-def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn, private_servers) -> dict | None:
+def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn,
+                  private_servers, local_servers) -> dict | None:
     """One catalog row's public entry; ``None`` for an inactive cloud provider."""
     from llm.context_window import resolve_window_for_row
 
@@ -379,5 +388,5 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn, private
     return _public_status_entry(
         row, harness=harness, provider=provider, backend=backend, meta=meta,
         context_window=context_window, status=status, status_reason=status_reason,
-        private_servers=private_servers,
+        private_servers=private_servers, local_servers=local_servers,
     )

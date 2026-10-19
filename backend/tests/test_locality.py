@@ -17,23 +17,34 @@ def _row(**overrides) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("row", "private_servers", "api_base", "expected"),
+    ("row", "private_servers", "local_servers", "expected"),
     [
-        (_row(), set(), "http://127.0.0.1:8000/v1", True),
-        (_row(), set(), "http://192.168.1.2:8000/v1", False),
-        (_row(), {"local"}, "http://192.168.1.2:8000/v1", True),
-        (_row(selector="external@cloud/model", litellm_model="external@cloud/model", connection="external", provider="external"), set(), "http://127.0.0.1:8000/v1", False),
-        (_row(selector="external@cloud/model", litellm_model="external@cloud/model", connection="external", provider="external"), {"cloud"}, "https://example.test/v1", True),
-        (_row(backend="api", selector="anthropic/model", litellm_model="anthropic/model", connection="anthropic", provider="anthropic"), set(), None, False),
-        (_row(connection="codex", provider="codex"), set(), "http://127.0.0.1:8000/v1", False),
+        (_row(), set(), {"local"}, True),
+        (_row(), set(), set(), False),
+        (_row(), {"local"}, set(), True),
+        (_row(selector="external@cloud/model", litellm_model="external@cloud/model", connection="external", provider="external"), set(), set(), False),
+        (_row(selector="external@cloud/model", litellm_model="external@cloud/model", connection="external", provider="external"), {"cloud"}, set(), True),
+        (_row(backend="api", selector="anthropic/model", litellm_model="anthropic/model", connection="anthropic", provider="anthropic"), set(), set(), False),
+        (_row(connection="codex", provider="codex"), set(), {"local"}, False),
     ],
 )
-def test_row_is_local_matrix(monkeypatch, row, private_servers, api_base, expected):
+def test_row_is_local_matrix(row, private_servers, local_servers, expected):
+    from llm.locality import row_is_local
+
+    assert row_is_local(row, private_servers=private_servers, local_servers=local_servers) is expected
+
+
+@pytest.mark.parametrize(
+    ("api_base", "expected"),
+    [("http://127.0.0.1:8000/v1", True), ("http://192.168.1.2:8000/v1", False), (None, False)],
+)
+def test_serverless_network_row_reads_its_endpoint(monkeypatch, api_base, expected):
     from llm import capabilities
     from llm.locality import row_is_local
 
     monkeypatch.setattr(capabilities, "make_provider_params", lambda _model: {"api_base": api_base})
-    assert row_is_local(row, private_servers=private_servers) is expected
+    row = _row(selector="lmstudio/model", litellm_model="lmstudio/model", provider="lmstudio", connection="lmstudio")
+    assert row_is_local(row) is expected
 
 
 def test_row_is_local_fails_closed_when_endpoint_cannot_be_read(monkeypatch):
@@ -41,7 +52,7 @@ def test_row_is_local_fails_closed_when_endpoint_cannot_be_read(monkeypatch):
     from llm.locality import row_is_local
 
     monkeypatch.setattr(capabilities, "make_provider_params", lambda _model: (_ for _ in ()).throw(ValueError()))
-    assert row_is_local(_row()) is False
+    assert row_is_local(_row(selector="lmstudio/model", litellm_model="lmstudio/model")) is False
 
 
 def _project(db, project_id="project"):

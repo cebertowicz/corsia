@@ -18,3 +18,10 @@ PROJECT_REPO_POLICY_TABLE_SQL = """
         PRIMARY KEY (project_id, repo_name)
     )
 """
+
+PROJECT_INFERENCE_POLICY_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS project_inference_policies (
+        project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1))
+    )
+"""

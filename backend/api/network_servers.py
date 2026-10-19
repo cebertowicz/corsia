@@ -32,6 +32,7 @@ from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
+from llm.locality import server_on_this_mac
 from llm.providers import for_provider
 
 # Every route here, including the included job and lifecycle routers, can
@@ -55,12 +56,14 @@ _SECRET_META_KEYS = ("api_key", "token", "secret")
 def _public_server_view(row: dict, keys: dict[str, str] | None = None) -> dict:
     """Return ``row`` without credential-bearing metadata, annotated for the UI."""
     # Unreadable metadata is logged by the one parser; the view then shows none.
-    meta = nd.parse_server_metadata(str(row.get("id")), row.pop("metadata_json", None)) or {}
+    stored_metadata = row.pop("metadata_json", None)
+    meta = nd.parse_server_metadata(str(row.get("id")), stored_metadata) or {}
     for field in _SECRET_META_KEYS:
         meta.pop(field, None)
     stored = (keys if keys is not None else server_keys([str(row.get("id"))])).get(str(row.get("id")))
     row["metadata"] = meta
     row["private"] = bool(meta.get("private"))
+    row["on_this_mac"] = server_on_this_mac({**row, "metadata_json": stored_metadata})
     row["has_key"] = bool(stored)
     row["masked_key"] = mask_key(stored) if stored else ""
     return row
