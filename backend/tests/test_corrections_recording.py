@@ -148,7 +148,7 @@ async def test_unreadable_fact_names_its_failure_and_a_scored_fact_has_none(isol
         _record_fact(candidate, {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "none"}, _version())
     with pytest.raises(ValueError):
         _record_fact(candidate, {"label": "correction", "truncated": False, "original_tokens": 3, "failure_reason": "rss"}, _version())
-    assert _record_fact(candidate, {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "timeout"}, _version())
+    assert _record_fact(candidate, {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "timeout"}, _version())[0]
 
     db = _db()
     try:
@@ -178,9 +178,9 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
     def candidate(message_id, created_at):
         return CorrectionCandidate("message", message_id, "thread", "project", "x", created_at)
 
-    assert _record_fact(candidate("recent", recent), unreadable, _version())
-    assert _record_fact(candidate("recent", recent), unreadable, newer)  # re-read by a newer version
-    assert _record_fact(candidate("old", "2000-01-01T00:00:00Z"), unreadable, _version())  # outside the window
+    assert _record_fact(candidate("recent", recent), unreadable, _version())[0]
+    assert _record_fact(candidate("recent", recent), unreadable, newer)[0]  # re-read by a newer version
+    assert _record_fact(candidate("old", "2000-01-01T00:00:00Z"), unreadable, _version())[0]  # outside the window
 
     db = _db()
     try:
@@ -210,7 +210,7 @@ async def test_fact_carries_the_verified_asset_result_without_message_text(isola
     finally:
         db.close()
     candidate = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
-    assert _record_fact(candidate, {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}, _version())
+    assert _record_fact(candidate, {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}, _version())[0]
 
     db = _db()
     try:
@@ -238,8 +238,8 @@ async def test_same_message_and_version_is_recorded_once_when_scan_and_notify_ra
         db.close()
     candidate = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
     payload = {"label": "not_correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
-    assert _record_fact(candidate, payload, _version())
-    assert not _record_fact(candidate, payload, _version())
+    assert _record_fact(candidate, payload, _version())[0]
+    assert not _record_fact(candidate, payload, _version())[0]
 
 
 def test_only_send_thread_input_calls_the_corrections_admission_hook():
@@ -328,8 +328,8 @@ def test_measurement_figure_excludes_comment_and_decision_facts(isolated_db):
 
     timestamp = datetime.now(timezone.utc).isoformat()
     payload = {"label": "correction", "truncated": False, "original_tokens": 1, "failure_reason": "none"}
-    assert _record_fact(CorrectionCandidate("message", "message", "thread", "project", "Wrong.", timestamp), payload, _version())
-    assert _record_fact(CorrectionCandidate("doc_comment", "comment", "thread", "project", "Wrong.", timestamp), payload, _version())
-    assert _record_fact(CorrectionCandidate("plan_decision_answer", "decision:7", "thread", "project", "Wrong.", timestamp), payload, _version())
+    assert _record_fact(CorrectionCandidate("message", "message", "thread", "project", "Wrong.", timestamp), payload, _version())[0]
+    assert _record_fact(CorrectionCandidate("doc_comment", "comment", "thread", "project", "Wrong.", timestamp), payload, _version())[0]
+    assert _record_fact(CorrectionCandidate("plan_decision_answer", "decision:7", "thread", "project", "Wrong.", timestamp), payload, _version())[0]
 
     assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 2

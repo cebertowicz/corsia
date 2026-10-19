@@ -105,7 +105,6 @@ def _newer_owner_message(db: sqlite3.Connection, candidate: CorrectionCandidate)
 
 def _append_note(
     db: sqlite3.Connection, *, thread_id: str, note_key: str, summary: str, subjects: list[str],
-    legacy_subject: bool = False,
 ) -> str | None:
     """Append one note per durable note key, returning it only on first insertion."""
     if not _has_target(db, thread_id):
@@ -127,11 +126,8 @@ def _append_note(
         details={
             "chip": None,
             "kind": NOTE_KIND,
-            **(
-                {"correction_subject": subjects[0]}
-                if legacy_subject
-                else {"note_key": note_key, "correction_subjects": subjects}
-            ),
+            "note_key": note_key,
+            "correction_subjects": subjects,
             REOFFER_UNWRITTEN: True,
         },
     )
@@ -164,7 +160,6 @@ def queue_correction_note(
         note_key=f"message:{candidate.source_id}",
         summary=note_text(candidate.source_id, candidate.content, candidate.created_at),
         subjects=[subject],
-        legacy_subject=True,
     )
 
 
@@ -243,7 +238,7 @@ def queue_feedback_batch_note(db: sqlite3.Connection, batch) -> str | None:
 
 
 def noted_subjects(metadata: object) -> tuple[str, ...]:
-    """The corrections a passive digest's notes name, accepting old singular notes."""
+    """The corrections a passive digest's notes name from its plural contract."""
     if isinstance(metadata, str):
         try:
             metadata = json.loads(metadata)
@@ -259,7 +254,4 @@ def noted_subjects(metadata: object) -> tuple[str, ...]:
             plural = details.get("correction_subjects")
             if isinstance(plural, list):
                 subjects.extend(subject for subject in plural if isinstance(subject, str) and subject)
-            subject = details.get("correction_subject")
-            if isinstance(subject, str) and subject:
-                subjects.append(subject)
     return tuple(subjects)

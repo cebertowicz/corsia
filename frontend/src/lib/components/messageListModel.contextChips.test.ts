@@ -193,7 +193,7 @@ describe('a correction note is for the agent only', () => {
 		+ 'Proposed tier: none yet; you set it.';
 	const note = ev('n', NOTE, {
 		chip: null, object_kind: 'thread_context', change_kind: 'note',
-		details: { kind: 'correction_note', correction_subject: 'message:c1', reoffer_unwritten: true },
+		details: { kind: 'correction_note', note_key: 'message:c1', correction_subjects: ['message:c1'], reoffer_unwritten: true },
 	});
 	/** The lone-note digest as `materialize_pending_digest` stores it: its summary is the note's first line. */
 	function noteDigest(id: string, state: string, events = [note]) {

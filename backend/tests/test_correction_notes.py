@@ -16,8 +16,8 @@ THREAD = "main-1"
 CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
 NOT_CORRECTION = {**CORRECTION, "label": "not_correction"}
 NOTE_DETAILS = {
-    "chip": None, "kind": "correction_note", "correction_subject": "message:c1",
-    "reoffer_unwritten": True,
+    "chip": None, "kind": "correction_note", "note_key": "message:c1",
+    "correction_subjects": ["message:c1"], "reoffer_unwritten": True,
 }
 
 
@@ -86,7 +86,7 @@ def agent(main_db, monkeypatch):
             from jobs.corrections_recording import _record_fact, candidate_for_message
 
             main_db.commit()
-            return _record_fact(candidate_for_message(message_id), payload, version or _version())
+            return _record_fact(candidate_for_message(message_id), payload, version or _version())[0]
 
         def write(self, outcome: str, error=None) -> None:
             """The provider write of the running turn's batch, and its outcome."""
@@ -278,7 +278,7 @@ def test_no_target_gives_no_note(main_db, target):
     main_db.commit()
     candidate = CorrectionCandidate("message", "c1", thread, None, "Wrong file.", "2026-10-16T20:00:00Z", arrived=True)
 
-    assert _record_fact(candidate, CORRECTION, _version())
+    assert _record_fact(candidate, CORRECTION, _version())[0]
     assert _journal(main_db) == []
 
 
@@ -311,7 +311,7 @@ def test_a_backfill_before_activation_never_notes(agent, main_db):
     agent.say("c1", "Wrong file.")
     main_db.commit()
 
-    assert _record_fact(_scanned("c1"), CORRECTION, _version())
+    assert _record_fact(_scanned("c1"), CORRECTION, _version())[0]
     assert _journal(main_db) == []
 
 
@@ -327,10 +327,10 @@ def test_a_scan_catch_up_notes_only_the_latest_owner_message(agent, main_db):
     main_db.commit()
 
     # Behind a newer owner message: no note. The latest one: one catch-up note.
-    assert _record_fact(_scanned("c1"), CORRECTION, _version())
+    assert _record_fact(_scanned("c1"), CORRECTION, _version())[0]
     assert _journal(main_db) == []
-    assert _record_fact(_scanned("c2"), CORRECTION, _version())
-    assert [entry["correction_subject"] for entry in _journal(main_db)] == ["message:c2"]
+    assert _record_fact(_scanned("c2"), CORRECTION, _version())[0]
+    assert [entry["correction_subjects"] for entry in _journal(main_db)] == [["message:c2"]]
 
 
 def test_a_lesson_placed_in_the_turn_the_note_arrived_is_stamped_with_it(agent, main_db):
