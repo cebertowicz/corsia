@@ -38,7 +38,7 @@ const catalogs = {
 	remoteNotPrivate: [cloudRow('opus', 'Opus 5.5'), cloudRow('sonnet', 'Sonnet 5.5'),
 		localRow('qwen', 'Qwen3 8B', 'This Mac'), localRow('llama', 'Llama 3.3 70B', 'Studio mini', { is_local: false })],
 	localDown: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff),
-		localRow('qwen', 'Qwen3 8B', 'This Mac', { status: 'unavailable', status_reason: 'connection_unavailable' })],
+		localRow('qwen', 'Qwen3 8B', 'This Mac', { status: 'unavailable', status_reason: 'missing_context_window' })],
 };
 
 const endpoint = (id: string, host: string, kind: 'local' | 'lan') => ({ id, server_id: id, host, kind, last_ok_at: null, last_latency_ms: kind === 'lan' ? 4 : 1 });
@@ -235,10 +235,11 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				Object.assign(state, { models: catalogs.plain, cloudOff: false });
 				await openSheetInProject(page, await begin(width, height, theme));
 				await page.locator('.model-sheet').getByRole('button', { name: /Opus 5\.5/ }).first().click();
+				await expect(page.locator('button.model-chip')).toContainText('Opus 5.5');
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: true });
-				await page.reload();
-				await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
-				await page.locator('button.model-chip').click();
+				await page.evaluate(async () => (await import('/src/lib/stores/models.ts')).loadModels());
+				await expect(page.locator('button.model-chip')).toBeVisible();
+				if (!(await page.locator('.model-sheet').isVisible())) await page.locator('button.model-chip').click();
 				await expect(page.locator('.model-sheet')).toBeVisible();
 				await shot('sheet-on-cloud-model', size, theme);
 			}
