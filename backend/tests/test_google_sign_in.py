@@ -24,6 +24,7 @@ from connections.google import oauth
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
+from infra.db_async import run_in_db
 from tests.registry_helpers import make_session
 from tools.corsia_api import CorsiaApiTool
 from tools.google_account import GoogleConnectTool, GoogleStatusTool
@@ -290,8 +291,11 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
     assert "If none exists yet, follow skill `google-setup`" in out
     assert "Never create a second project or client when one already exists." in out
     account_id = await _connect(google, conductor, client_file)
-    out = await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id)
-    assert out == f"Error: {EMAIL} is already connected."
+    out = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+    assert out == {
+        "reply": f"{EMAIL} is already connected for all your projects. To change where it works, use Where it works… on its row in Connected apps.",
+        "link": f"#connected-apps/{account_id}",
+    }
     [status] = json.loads(await GoogleStatusTool().execute(_thread_id=conductor))["accounts"]
     assert status["status"] == "connected" and status["email"] == EMAIL
     assert status["account_id"] == account_id and "needs_action" not in status
@@ -301,6 +305,53 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
         again = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert again.status_code == 400 and f"{EMAIL} is already connected." in again.text
     assert [account["id"] for account in _accounts()] == [account_id]
+
+
+@pytest.mark.parametrize(("reach", "projects", "reach_phrase"), [
+    ({"mode": "all", "project_ids": [], "outside_projects": False}, [], " for all your projects"),
+    ({"mode": "selected", "project_ids": ["garden"], "outside_projects": False}, [("garden", "Garden plan")], " for Garden plan"),
+    ({"mode": "selected", "project_ids": ["garden", "launch"], "outside_projects": False}, [("garden", "Garden plan"), ("launch", "Q4 launch")], ""),
+])
+async def test_existing_connected_account_returns_the_b_g1_reply_for_each_reach(
+    google, conductor, client_file, reach, projects, reach_phrase,
+):
+    account_id = await _connect(google, conductor, client_file)
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [(project_id, name, "t", "t") for project_id, name in projects],
+        )
+        db.commit()
+    finally:
+        db.close()
+    from connections.google.account_actions import change_google_account_reach
+
+    await run_in_db(change_google_account_reach, account_id, reach, actor=("person", "person"))
+    result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+
+    assert result == {
+        "reply": f"{EMAIL} is already connected{reach_phrase}. To change where it works, use Where it works… on its row in Connected apps.",
+        "link": f"#connected-apps/{account_id}",
+    }
+    assert [account["id"] for account in _accounts()] == [account_id]
+
+
+async def test_existing_needs_sign_in_account_returns_its_row_link_without_a_second_row(google, conductor, client_file):
+    account_id = await _connect(google, conductor, client_file)
+    google.refresh_status = 400
+    with pytest.raises(google_client.GoogleSignInRejected):
+        await google_client.get_json(account_id, "https://gmail.googleapis.com/gmail/v1/users/me/labels")
+
+    result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+
+    assert result == {
+        "reply": f"{EMAIL} is already connected, but it needs you to sign in again. Use Sign in on its row in Connected apps.",
+        "link": f"#connected-apps/{account_id}",
+    }
+    assert [account["id"] for account in _accounts()] == [account_id]
+    url, signing_in = await oauth.start_sign_in(actor=("person", "person"), account_id=account_id)
+    assert url.startswith(oauth.AUTH_URL) and signing_in == account_id
 
 
 async def test_a_file_that_is_not_a_client_is_refused_without_echo(google, conductor, tmp_path):

@@ -106,3 +106,8 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "then call `browser_open` again" in steps
     assert "@0." not in steps
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
+    assert "To add another account, call `google_connect` with no `account_id`" in steps
+    assert "for a named existing account, call it with that account's `account_id`" in steps
+    assert "relay both verbatim together with `post_update`" in steps
+    assert "the row the link opens provides its next action" in steps
+    assert "ask the person which account they mean" in steps
