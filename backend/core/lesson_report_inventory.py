@@ -38,12 +38,15 @@ def source_record(text: str, path: str) -> dict[str, Any] | None:
 
         metadata, _ = parse_frontmatter(text)
         block = metadata["corsia"]["capture"]
-        return {
+        record = {
             "kind": "capture", "id": capture.id, "version": capture.hash,
             "name": capture.id, "state": block.get("state"), "path": path,
             "owner_id": block.get("owner"), "review_after": block.get("review_after"),
             "raw_sha256": raw_sha256(text.encode()), "source_refs": list(capture.source_refs),
         }
+        if "originating_subjects" in block:
+            record["originating_subjects"] = list(capture.originating_subjects)
+        return record
     return None
 
 
