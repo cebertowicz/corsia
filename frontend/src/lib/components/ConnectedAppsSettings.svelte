@@ -329,7 +329,7 @@
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
 	.heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
-	@media (min-width: 769px) { .heading > div { flex: 1; min-width: 0; } }
+	@media (min-width: 48.0625rem) { .heading > div { flex: 1; min-width: 0; } }
 	.lede, .state, .offline { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
 	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
 	.state, .offline { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
