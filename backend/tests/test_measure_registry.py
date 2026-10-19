@@ -1,15 +1,16 @@
+"""measure_sync: declaration validation, workflow ownership and the can_decide sync test."""
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
-from automation.script_readings import build_report
-from automation.script_sandbox import ScriptRun
-from automation.schedules import Schedule
-from infra.measure_registry import REGISTRY, admit, sync
+from infra.measure_registry import REGISTRY, sync
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 
+FIXTURES = Path(__file__).parent / "fixtures" / "measures"
+OWNER = "agent-qg"
 
 MEASURES = """
 schema: corsia.measures/1
@@ -31,69 +32,165 @@ kpis:
     min_n: 20
 """
 
+# A workflow file whose KPIs the tests vary; the event corroborates, so only the named gate fails.
+SMALL = """schema: corsia.measures/1
+namespace: qa
+{header}events:
+  qa.done:
+    attributes: {{pr: id, verdict: {{enum: [pass, block]}}, cost: num}}
+    dedupe: [pr, run_id]
+{corroborate}kpis:
+{kpis}
+"""
+GOOD_KPI = "  rate:\n    {body}\n"
+
 
 def db() -> sqlite3.Connection:
     connection = sqlite3.connect(":memory:")
     connection.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    REGISTRY.rebuild(connection)
     return connection
 
 
-def test_sync_then_admit_declared_event() -> None:
+def skill_file(tmp_path: Path, text: str, *, owner: str | None = OWNER) -> str:
+    """Write a workflow skill dir whose SKILL.md names its owner, with measures.yaml beside it."""
+    folder = tmp_path / ".threads" / OWNER / "skills" / "llm-pr-review"
+    folder.mkdir(parents=True, exist_ok=True)
+    frontmatter = f"---\nname: llm-pr-review\ncorsia:\n  workflow:\n    owner: {owner}\n---\n" if owner else "---\nname: llm-pr-review\n---\n"
+    (folder / "SKILL.md").write_text(frontmatter)
+    (folder / "measures.yaml").write_text(text)
+    return str(folder / "measures.yaml")
+
+
+def small(kpi_lines: str, *, workflow: bool = True, corroborate: bool = True, extra: str = "") -> str:
+    header = ("workflow: llm-pr-review\n" if workflow else "") + extra
+    kpis = "".join(f"  {line}\n" if line.strip() else "\n" for line in kpi_lines.strip("\n").splitlines())
+    return SMALL.format(header=header, corroborate="    corroborate: plan_node\n" if corroborate else "", kpis=kpis.rstrip("\n"))
+
+
+def refused(tmp_path: Path, text: str) -> str:
+    path = skill_file(tmp_path, text)
+    with pytest.raises(ValueError) as caught:
+        sync(db(), owner_thread_id=OWNER, path=path, text=text)
+    return str(caught.value)
+
+
+def deciding(extra: str = "", *, name: str = "rate") -> str:
+    return (
+        f"{name}:\n  title: Rate\n  unit: percent\n  better: higher\n  formula: share\n"
+        f"  num: {{event: qa.done, attr: verdict, values: [pass]}}\n  min_n: 20\n"
+        f"  target: 0.9\n  review: 0.8\n  can_decide: true\n{extra}"
+    )
+
+
+def test_sync_then_unchanged_resync_and_changed_version() -> None:
     connection = db()
-    result = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
-    assert result["items"][0]["status"] == "added"
-    admitted = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m-1", "action": "replied"}, project_id="project", run_id="run-1")
-    assert admitted.refusal is None
-    assert admitted.result and admitted.result.inserted
-    row = connection.execute("SELECT source,provenance,attribution,agent_thread_id,project_id FROM outcome_events").fetchone()
-    assert row == ("agent", "agent_recorded", "caller", "agent-a", "project")
+    first = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    assert [item["status"] for item in first["items"]] == ["added", "added"]
+    again = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    assert [item["status"] for item in again["items"]] == ["unchanged", "unchanged"]
+    changed = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES.replace("min_n: 20", "min_n: 30"))
+    assert [item["status"] for item in changed["items"]] == ["unchanged", "changed v1→v2"]
 
 
-def test_shared_admission_dedupes_identity_and_allows_otlp_source() -> None:
+def test_namespace_belongs_to_first_syncing_agent() -> None:
     connection = db()
     sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
-    first = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m-1", "action": "replied"}, run_id="run-1")
-    duplicate = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m-1", "action": "replied"}, run_id="run-1")
-    rerun = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m-1", "action": "replied"}, source="otlp", run_id="run-2")
-    assert first.result and first.result.inserted
-    assert duplicate.result and not duplicate.result.inserted
-    assert rerun.result and rerun.result.inserted
-    assert connection.execute("SELECT n FROM outcome_event_counters WHERE counter='duplicate_ignored'").fetchone() == (1,)
+    with pytest.raises(ValueError, match=r'Namespace "mail" belongs to another agent \(thread agent-a\); you own no namespace yet'):
+        sync(connection, owner_thread_id="agent-b", path="/tmp/measures.yaml", text=MEASURES)
 
 
-def test_undeclared_event_is_refused_and_counted() -> None:
-    connection = db()
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
-    admitted = admit(connection, owner_thread_id="agent-a", event_name="mail.unknown", attributes={})
-    assert admitted.result is None
-    assert "not declared" in admitted.refusal
-    assert connection.execute("SELECT n FROM outcome_event_counters WHERE counter='name_undeclared'").fetchone() == (1,)
-
-
-def test_script_measure_line_keeps_runner_identity() -> None:
-    schedule = Schedule(id="schedule", thread_id="agent-a", scope_id="project", kind="script", spec="300", next_run_at="2026-01-01T00:00:00+00:00", max_runs=1, state="active", last_run_at=None, runs=0, created_by_actor="agent-a", created_at="2026-01-01T00:00:00+00:00", updated_at="2026-01-01T00:00:00+00:00", payload={"series": []})
-    report = build_report(schedule, ScriptRun(0, b'{"measure":{"event.name":"mail.triaged","attributes":{"run_id":"forged"}}}\n', b"", False), run_id="runner-uuid")
-    assert report.run_id == "runner-uuid"
-    assert report.measures == [{"event.name": "mail.triaged", "attributes": {"run_id": "forged"}}]
-
-
-def test_unowned_workflow_is_identity_mismatch() -> None:
-    connection = db()
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
-    refused = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m-1"}, workflow_ref="another-workflow")
-    assert refused.result is None
-    assert "owned by another agent" in refused.refusal
-    assert connection.execute("SELECT n FROM outcome_event_counters WHERE counter='identity_mismatch'").fetchone() == (1,)
-
-
-def test_workflow_without_skill_owner_is_refused(tmp_path) -> None:
-    connection = db()
+def test_workflow_without_skill_owner_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "measures.yaml"
-    with pytest.raises(ValueError, match="workflow inbox-triage has no owner"):
-        sync(connection, owner_thread_id="agent-a", path=str(path), text=MEASURES.replace("# agent-level declaration: no workflow", "workflow: inbox-triage"))
+    with pytest.raises(ValueError, match="measure_sync: workflow inbox-triage has no owner, so its measures.yaml can't be synced. Add `owner: <your thread id>`"):
+        sync(db(), owner_thread_id="agent-a", path=str(path), text=MEASURES.replace("# agent-level declaration: no workflow", "workflow: inbox-triage"))
+    skill_file(tmp_path, MEASURES, owner=None)
+    with pytest.raises(ValueError, match="has no owner"):
+        sync(db(), owner_thread_id=OWNER, path=str(tmp_path / ".threads" / OWNER / "skills" / "llm-pr-review" / "measures.yaml"), text=MEASURES.replace("# agent-level declaration: no workflow", "workflow: llm-pr-review"))
 
 
-def test_version_attr_needs_workflow() -> None:
+def test_workflow_owned_by_another_agent_is_refused(tmp_path: Path) -> None:
+    text = small(deciding())
+    path = skill_file(tmp_path, text, owner="someone-else")
+    with pytest.raises(ValueError, match="workflow llm-pr-review is owned by another agent"):
+        sync(db(), owner_thread_id=OWNER, path=path, text=text)
+
+
+def test_qg_declaration_copy_syncs_with_version_attr_can_decide_and_decides_as(tmp_path: Path) -> None:
+    text = (FIXTURES / "qg_measures.yaml").read_text()
+    path = skill_file(tmp_path, text)
     connection = db()
-    with pytest.raises(ValueError, match="version_attr is allowed only"):
-        sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES.replace("workflow: inbox-triage\n", "").replace("events:", "version_attr: revision\nevents:"))
+    result = sync(connection, owner_thread_id=OWNER, path=path, text=text)
+    statuses = {item["name"]: item["status"] for item in result["items"]}
+    assert statuses["qa.review.completed"] == statuses["block_precision"] == statuses["review_cost_per_pr"] == "added"
+    assert {item["status"] for item in result["items"]} == {"added"} and len(result["items"]) == 6 + 7 + 11
+    assert REGISTRY.workflows == {"llm-pr-review": OWNER}
+    REGISTRY.rebuild(connection)  # a restart rebuilds the same workflow ownership from the database
+    assert REGISTRY.workflows == {"llm-pr-review": OWNER} and "qa.escape.found" in REGISTRY.events
+    again = sync(connection, owner_thread_id=OWNER, path=path, text=text)
+    assert {item["status"] for item in again["items"]} == {"unchanged"}
+
+
+def test_version_attr_needs_an_owned_workflow_with_the_prescribed_text(tmp_path: Path) -> None:
+    text = small(deciding(), workflow=False, extra="version_attr: pr\n").replace("can_decide: true\n", "can_decide: false\n")
+    message = refused(tmp_path, text)
+    line = text.splitlines().index("version_attr: pr") + 1
+    assert message == f"measures.yaml line {line}: version_attr is allowed only in a file that names a workflow you own. Add workflow: <name>, or remove version_attr."
+
+
+def test_version_attr_must_name_a_declared_id_attribute(tmp_path: Path) -> None:
+    assert "version_attr nope must name an id attribute declared on an event" in refused(tmp_path, small(deciding(), extra="version_attr: nope\n"))
+    assert "version_attr verdict must name an id attribute" in refused(tmp_path, small(deciding(), extra="version_attr: verdict\n"))
+    path = skill_file(tmp_path, small(deciding(), extra="version_attr: pr\n"))
+    assert sync(db(), owner_thread_id=OWNER, path=path, text=Path(path).read_text())["namespace"] == "qa"
+
+
+def test_decides_as_needs_can_decide_and_a_known_value(tmp_path: Path) -> None:
+    text = small(deciding().replace("  can_decide: true\n", "") + "  decides_as: spend\n")
+    message = refused(tmp_path, text)
+    expected_line = text.splitlines().index("    decides_as: spend") + 1
+    assert message == f"measures.yaml line {expected_line}: kpi rate decides_as needs can_decide: true. Add can_decide: true, or remove decides_as."
+    assert 'kpi rate decides_as "cost" is not one of quality, spend. Use quality or spend.' in refused(tmp_path, small(deciding("  decides_as: cost\n")))
+
+
+def test_can_decide_must_be_a_boolean(tmp_path: Path) -> None:
+    assert "kpi rate can_decide must be true or false" in refused(tmp_path, small(deciding().replace("can_decide: true", "can_decide: yes please")))
+
+
+def test_can_decide_check_1_needs_target_and_review(tmp_path: Path) -> None:
+    no_review = refused(tmp_path, small(deciding().replace("  review: 0.8\n", "")))
+    assert "kpi rate can_decide: true needs target and review; review is missing. Add review: <value>, or set can_decide: false." in no_review
+    neither = refused(tmp_path, small(deciding().replace("  target: 0.9\n  review: 0.8\n", "")))
+    assert "needs target and review; target and review are missing. Add target: <value>, review: <value>, or set can_decide: false." in neither
+    zero = small(deciding().replace("target: 0.9", "target: 0").replace("review: 0.8", "review: 0"))
+    path = skill_file(tmp_path, zero)
+    sync(db(), owner_thread_id=OWNER, path=path, text=zero)  # a zero target is a value, not a missing field
+
+
+def test_can_decide_check_2_needs_a_workflow_version(tmp_path: Path) -> None:
+    carrying = "kpi rate can_decide: true needs a KPI that can carry a workflow version (no operand anchors on a workflow event). Add match … anchor: true on a workflow event, or set can_decide: false."
+    assert carrying in refused(tmp_path, small(deciding(), workflow=False))
+    foreign = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged")
+    assert carrying in refused(tmp_path, small(foreign))
+    anchored = deciding().replace("event: qa.done, attr: verdict, values: [pass]", "event: github.pr.merged, match: [{event: qa.done, on: pr, mode: exists, anchor: true}]")
+    text = small(anchored, corroborate=False)  # a platform numerator, versioned through the anchor on a file event
+    path = skill_file(tmp_path, text)
+    sync(db(), owner_thread_id=OWNER, path=path, text=text)
+
+
+def test_can_decide_check_3_needs_an_independent_basis(tmp_path: Path) -> None:
+    basis = "kpi rate can_decide: true needs a numerator that a CORSIA emitter writes, that declares corroborate, or a KPI that declares coverage (so another agent's audit can label it). Add coverage: {of: …, by: …}, add corroborate to the event, or set can_decide: false."
+    assert basis in refused(tmp_path, small(deciding(), corroborate=False))
+    covered = small(deciding("  coverage: {of: {event: qa.done}, by: run_id}\n"), corroborate=False)
+    path = skill_file(tmp_path, covered)
+    sync(db(), owner_thread_id=OWNER, path=path, text=covered)  # check 3(c): a coverage line makes it auditable
+
+
+def test_can_decide_check_4_allows_two_quality_kpis_per_workflow(tmp_path: Path) -> None:
+    three = small(deciding(name="first") + deciding(name="second") + deciding(name="third"))
+    message = refused(tmp_path, three)
+    line = max(i for i, row in enumerate(three.splitlines(), 1) if "can_decide: true" in row)
+    assert f"measures.yaml line {line}: kpi third can_decide: true with decides_as quality is the third in workflow llm-pr-review; a workflow may have two. Set can_decide: false on one, or set decides_as: spend if it measures cost." == message
+    spend = small(deciding(name="first") + deciding(name="second") + deciding("  decides_as: spend\n", name="third"))
+    path = skill_file(tmp_path, spend)
+    sync(db(), owner_thread_id=OWNER, path=path, text=spend)

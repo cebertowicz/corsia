@@ -9,6 +9,7 @@ from typing import Any
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.measure_registry import sync
+from infra.measure_status import status
 from tools.base import Tool
 
 
@@ -81,8 +82,5 @@ class MeasureStatusTool(Tool):
             return context
         thread_id, _ = context
         def read() -> dict[str, Any]:
-            db = get_db()
-            rows = db.execute("SELECT event_name, counter, sum(n) FROM outcome_event_counters WHERE agent_thread_id=? AND day >= date('now','-6 days') GROUP BY event_name,counter", (thread_id,)).fetchall()
-            definitions = db.execute("SELECT DISTINCT file_path,file_sha256 FROM measure_definitions WHERE owner_thread_id=?", (thread_id,)).fetchall()
-            return {"counters": [{"event_name": row[0], "counter": row[1], "n": row[2]} for row in rows], "synced_files": [{"path": row[0], "sha256": row[1]} for row in definitions]}
+            return status(get_db(), thread_id)
         return json.dumps(await run_in_db(read), sort_keys=True)

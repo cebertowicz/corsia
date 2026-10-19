@@ -1,0 +1,219 @@
+"""Sync-time checks for a ``measures.yaml`` declaration file (Agent KPIs design §4.2, §5)."""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any
+
+import yaml
+
+from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
+
+_NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
+_RESERVED = {"corsia", "github", "measurement", "test", "script", "agent", "otel"}
+_RESERVED_ATTRIBUTES = {"run_id", "workflow_ref", "workflow_version"}
+_KINDS = {"id", "login", "count", "num"}
+
+Item = tuple[str, str, dict[str, Any]]
+_BOOL = "tag:yaml.org,2002:bool"
+
+
+class _Loader(yaml.SafeLoader):
+    """YAML 1.2 booleans: only true and false, so ``on:`` and ``alert: off`` stay plain strings."""
+
+
+_Loader.yaml_implicit_resolvers = {
+    first: [(tag, pattern) for tag, pattern in resolvers if tag != _BOOL]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_Loader.add_implicit_resolver(_BOOL, re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF"))
+
+
+def load(text: str) -> Any:
+    """Parse a declaration file; raises ``yaml.YAMLError`` on invalid YAML."""
+    return yaml.load(text, Loader=_Loader)  # noqa: S506 - a SafeLoader subclass
+
+
+class Lines:
+    """Maps a key path in the YAML text to its line, so a refusal can name it."""
+
+    def __init__(self, text: str) -> None:
+        try:
+            self.root: yaml.Node | None = yaml.compose(text)
+        except yaml.YAMLError:
+            self.root = None
+
+    def line(self, *path: Any) -> int:
+        node, line = self.root, 1
+        for segment in path:
+            if isinstance(node, yaml.MappingNode):
+                found = next(((k, v) for k, v in node.value if getattr(k, "value", None) == segment), None)
+                if found is None:
+                    break
+                node, line = found[1], found[0].start_mark.line + 1
+            elif isinstance(node, yaml.SequenceNode) and isinstance(segment, int) and segment < len(node.value):
+                node = node.value[segment]
+                line = node.start_mark.line + 1
+            else:
+                break
+        return line
+
+
+@dataclass
+class _Context:
+    events: dict[str, dict[str, Any]]
+    workflow: str | None
+    lines: Lines
+    quality: int = 0
+
+
+def fail(lines: Lines, path: tuple[Any, ...], message: str) -> ValueError:
+    return ValueError(f"measures.yaml line {lines.line(*path)}: {message}")
+
+
+def validate(data: dict[str, Any], lines: Lines) -> tuple[str, list[Item]]:
+    """Return the file's namespace and its event, KPI and view declarations, or raise the refusal."""
+    if data.get("schema") != "corsia.measures/1":
+        raise fail(lines, ("schema",), 'schema must be "corsia.measures/1"; use the required schema.')
+    namespace = data.get("namespace")
+    if not isinstance(namespace, str) or not _NAMESPACE.fullmatch(namespace) or namespace in _RESERVED:
+        raise fail(lines, ("namespace",), "namespace must be a non-reserved lowercase name.")
+    workflow = data.get("workflow")
+    if workflow is not None and not isinstance(workflow, str):
+        raise fail(lines, ("workflow",), "workflow must name an owned workflow.")
+    items = _event_items(data, namespace, lines)
+    events = {name: spec for kind, name, spec in items if kind == "event"}
+    _check_version_attr(data, events, lines)
+    context = _Context(events, workflow, lines)
+    for kind, key in (("kpi", "kpis"), ("view", "views")):
+        items.extend(_declarations(data, kind, key, context))
+    return namespace, items
+
+
+def _event_items(data: dict[str, Any], namespace: str, lines: Lines) -> list[Item]:
+    events = data.get("events", {})
+    if not isinstance(events, dict) or not events:
+        raise fail(lines, ("events",), "events must declare at least one event.")
+    if len(events) > 64:
+        raise fail(lines, ("events",), "events allows at most 64 events.")
+    items: list[Item] = []
+    for name, spec in events.items():
+        path = ("events", name)
+        if not isinstance(name, str) or not name.startswith(namespace + "."):
+            raise fail(lines, path, f"event {name} is outside namespace {namespace}; declare only {namespace}.* events.")
+        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days"}:
+            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate or keep_days.")
+        _check_event(name, spec, lines)
+        items.append(("event", name, spec))
+    return items
+
+
+def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
+    attrs, dedupe = spec.get("attributes"), spec.get("dedupe")
+    path = ("events", name)
+    if not isinstance(attrs, dict) or not isinstance(dedupe, list) or not dedupe:
+        raise fail(lines, path, f"event {name} needs attributes and dedupe.")
+    if len(attrs) > 16:
+        raise fail(lines, path + ("attributes",), f"event {name} attributes allows at most 16 attributes.")
+    for key, kind in attrs.items():
+        valid = isinstance(kind, str) and kind in _KINDS
+        valid = valid or (isinstance(kind, dict) and set(kind) == {"enum"} and isinstance(kind["enum"], list) and 0 < len(kind["enum"]) <= 20 and all(isinstance(x, str) for x in kind["enum"]))
+        if key in _RESERVED_ATTRIBUTES:
+            raise fail(lines, path + ("attributes", key), f"attribute {key} is reserved; the server stamps it. Remove it from attributes.")
+        if not valid:
+            raise fail(lines, path + ("attributes", key), f'attribute kind "{kind}" is not allowed; use id, login, count, num or enum.')
+    if any(key != "run_id" and key not in attrs for key in dedupe):
+        raise fail(lines, path + ("dedupe",), f"event {name} dedupe names an undeclared attribute.")
+
+
+def _check_version_attr(data: dict[str, Any], events: dict[str, dict[str, Any]], lines: Lines) -> None:
+    version_attr = data.get("version_attr")
+    if version_attr is None:
+        return
+    if not data.get("workflow"):
+        raise fail(lines, ("version_attr",), "version_attr is allowed only in a file that names a workflow you own. Add workflow: <name>, or remove version_attr.")
+    if not isinstance(version_attr, str) or not any(spec["attributes"].get(version_attr) == "id" for spec in events.values()):
+        raise fail(lines, ("version_attr",), f"version_attr {version_attr} must name an id attribute declared on an event in this file. Declare it as an id, or remove version_attr.")
+
+
+def _declarations(data: dict[str, Any], kind: str, key: str, context: _Context) -> list[Item]:
+    values = data.get(key, {} if kind == "kpi" else [])
+    if kind == "kpi" and not isinstance(values, dict) or kind == "view" and not isinstance(values, list):
+        raise fail(context.lines, (key,), f"{key} is not a valid declaration list.")
+    pairs = values.items() if isinstance(values, dict) else [(item.get("id") if isinstance(item, dict) else None, item) for item in values]
+    items: list[Item] = []
+    for index, (name, spec) in enumerate(pairs):
+        if not name or not isinstance(spec, dict):
+            raise fail(context.lines, (key, name if kind == "kpi" else index), f"{key} contains an invalid declaration.")
+        if kind == "kpi":
+            _check_kpi(str(name), spec, context)
+        items.append((kind, str(name), spec))
+    return items
+
+
+def _event_names(operand: Any) -> list[str]:
+    event = operand.get("event") if isinstance(operand, dict) else None
+    if isinstance(event, str):
+        return [event]
+    return [name for name in event if isinstance(name, str)] if isinstance(event, list) else []
+
+
+def _operand_events(spec: dict[str, Any]) -> list[str]:
+    """The events the KPI reads: its operands, plus any event a ``match`` anchors on."""
+    names: list[str] = []
+    for operand in (spec.get("num"), spec.get("den")):
+        names += _event_names(operand)
+        clauses = operand.get("match") if isinstance(operand, dict) else None
+        for clause in clauses if isinstance(clauses, list) else []:
+            if isinstance(clause, dict) and clause.get("anchor") is True:
+                names += _event_names(clause)
+    return names
+
+
+def _check_kpi(name: str, spec: dict[str, Any], context: _Context) -> None:
+    """The ``can_decide`` sync test (§4.2): each check is a field check, with its §5 refusal."""
+    path = ("kpis", name)
+    deciding, decides_as = spec.get("can_decide", False), spec.get("decides_as")
+    if not isinstance(deciding, bool):
+        raise fail(context.lines, path + ("can_decide",), f"kpi {name} can_decide must be true or false.")
+    if decides_as is not None and decides_as not in ("quality", "spend"):
+        raise fail(context.lines, path + ("decides_as",), f'kpi {name} decides_as "{decides_as}" is not one of quality, spend. Use quality or spend.')
+    if decides_as is not None and not deciding:
+        raise fail(context.lines, path + ("decides_as",), f"kpi {name} decides_as needs can_decide: true. Add can_decide: true, or remove decides_as.")
+    if not deciding:
+        return
+    where = path + ("can_decide",)
+    missing = [field for field in ("target", "review") if field not in spec]
+    if missing:
+        verb = "is" if len(missing) == 1 else "are"
+        raise fail(context.lines, where, f"kpi {name} can_decide: true needs target and review; {' and '.join(missing)} {verb} missing. Add {', '.join(f'{m}: <value>' for m in missing)}, or set can_decide: false.")
+    if not _version_capable(spec, context):
+        raise fail(context.lines, where, f"kpi {name} can_decide: true needs a KPI that can carry a workflow version (no operand anchors on a workflow event). Add match … anchor: true on a workflow event, or set can_decide: false.")
+    if not _has_independent_basis(spec, context):
+        raise fail(context.lines, where, f"kpi {name} can_decide: true needs a numerator that a CORSIA emitter writes, that declares corroborate, or a KPI that declares coverage (so another agent's audit can label it). Add coverage: {{of: …, by: …}}, add corroborate to the event, or set can_decide: false.")
+    if decides_as in (None, "quality"):
+        context.quality += 1
+        if context.quality > 2:
+            ordinal = "the third" if context.quality == 3 else f"number {context.quality}"
+            raise fail(context.lines, where, f"kpi {name} can_decide: true with decides_as quality is {ordinal} in workflow {context.workflow}; a workflow may have two. Set can_decide: false on one, or set decides_as: spend if it measures cost.")
+
+
+def _version_capable(spec: dict[str, Any], context: _Context) -> bool:
+    """The Version rule: an operand declared in a file that names a workflow its owner owns."""
+    if not context.workflow:
+        return False
+    builtin = any(isinstance(spec.get(key), dict) and "builtin" in spec[key] for key in ("num", "den"))
+    return builtin or any(event in context.events for event in _operand_events(spec))
+
+
+def _has_independent_basis(spec: dict[str, Any], context: _Context) -> bool:
+    """Check 3: an emitter CORSIA writes, a corroborate declaration, or a coverage line."""
+    if spec.get("coverage"):
+        return True
+    num = spec.get("num")
+    if isinstance(num, dict) and "builtin" in num:
+        return True
+    names = _event_names(num)
+    return bool(names) and all(
+        name in ATTRIBUTE_ALLOWLISTS or bool(context.events.get(name, {}).get("corroborate")) for name in names
+    )

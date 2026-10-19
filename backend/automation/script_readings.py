@@ -324,7 +324,8 @@ def emit_report(
     """Write a run's events, notes and wakes and settle it; True if the owner was woken."""
     registered = {s.key: s for s in store.series_of(schedule)}
     # Measure refusals are intake data, never script-run errors or wakes.
-    from infra.measure_registry import admit
+    from infra.measure_admission import admit
+    workflow = (schedule.payload or {}).get("workflow")
     for measure in report.measures[:200]:
         event_name = measure.get("event.name")
         attributes = measure.get("attributes", {})
@@ -332,7 +333,8 @@ def emit_report(
             admit(
                 db, owner_thread_id=schedule.thread_id, event_name=event_name,
                 attributes=attributes, project_id=(None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id),
-                run_id=f"script:{schedule.id}:{report.run_id or 'unknown'}",
+                run_id=f"script:{schedule.id}:{report.run_id or 'unknown'}", workflow=workflow,
+                ts=measure.get("time") if isinstance(measure.get("time"), str) else None,
             )
     woken = False
     for signal in report.signals:
