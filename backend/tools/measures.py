@@ -45,11 +45,11 @@ class MeasureSyncTool(Tool):
 
     @property
     def description(self) -> str:
-        return ("Load your measures.yaml declaration into the KPI registry. The file must be "
-                "inside the workspace and owned by your workflow or agent folder. It validates "
-                "names, event attributes, KPI fields and views, then returns added, changed or "
-                "unchanged declarations. Run it after every measures.yaml change; declarations "
-                "do not take effect until sync succeeds.")
+        return ("Load a measures.yaml into the KPI registry. A workflow's file sits beside its skill's "
+                "SKILL.md (<skill dir>/measures.yaml), agent-level measures go in "
+                ".threads/<agent>/measures.yaml, and only the file's owner can sync it. Validates names, "
+                "attributes, KPIs and views, then returns added, changed or unchanged. Run it after every "
+                "change; nothing takes effect until sync succeeds.")
 
     @property
     def parameters(self) -> dict[str, Any]:
