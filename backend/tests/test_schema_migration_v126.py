@@ -63,6 +63,43 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
+def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_startup() -> None:
+    with closing(_fresh()) as db:
+        _seed_legacy(db)
+        db.execute("DELETE FROM key_store_entries WHERE name=?", (key_store.GOOGLE_REFRESH_TOKEN,))
+        db.execute("PRAGMA user_version=125")
+        db.commit()
+
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.to_version) == (True, 126)
+        account = google_account(db=db)
+        assert account is not None
+        assert account["address"] == ACCOUNT
+        assert account["cursor"] == CURSOR
+        assert account["state"] == "needs_sign_in"
+        assert resolve_google_credentials(str(account["id"]), db=db) is None
+        assert get_setting("google_account", db=db) is None
+        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
+def test_addressless_legacy_data_is_retired_and_journaled_without_an_account() -> None:
+    with closing(_fresh()) as db:
+        _seed_legacy(db)
+        set_setting("google_account", {"status": "connected"}, db=db)
+        db.execute("PRAGMA user_version=125")
+        db.commit()
+
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.to_version) == (True, 126)
+        assert google_account(db=db) is None
+        assert get_setting("google_account", db=db) is None
+        assert get_setting("gmail_poll_cursor", db=db) is None
+        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
+        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] is None
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
 def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(monkeypatch) -> None:
     with closing(_fresh()) as db:
         _seed_legacy(db)
