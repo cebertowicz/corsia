@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.migration_126_to_127_measure_registry import migrate_126_to_127
@@ -83,3 +85,15 @@ def test_the_runner_takes_a_126_database_to_current_and_stays_there() -> None:
         assert (result.migrated, result.from_version, result.to_version) == (True, 126, SCHEMA_VERSION)
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
+def test_measure_definitions_carries_a_removed_flag_that_admits_only_zero_or_one() -> None:
+    with closing(_wound_back_to_v126()) as db:
+        migrate_126_to_127(db)
+        assert ("removed", "INTEGER") in _columns(db, "measure_definitions")
+        row = ("a", "event", "mail.x", 1, "{}", "/p", "sha", "t")
+        db.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?,1)", row)
+        db.execute("INSERT INTO measure_definitions(owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at) VALUES (?,?,?,?,?,?,?,?)", (*row[:2], "mail.y", *row[3:]))
+        assert db.execute("SELECT removed FROM measure_definitions ORDER BY name").fetchall() == [(1,), (0,)]
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?,2)", (*row[:2], "mail.z", *row[3:]))

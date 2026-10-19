@@ -223,3 +223,15 @@ def test_a_name_synced_from_another_file_is_not_removed_by_this_one() -> None:
     result = sync(connection, owner_thread_id="agent-a", path="/tmp/other/measures.yaml", text=other)
     assert all(item["status"] == "added" for item in result["items"])
     assert "mail.triaged" in REGISTRY.events and "mail.other" in REGISTRY.events
+
+
+def test_the_removal_row_keeps_the_prior_spec_with_removed_set_and_rebuild_skips_it() -> None:
+    wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
+    connection = db()
+    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=wider)
+    before = connection.execute("SELECT spec_json FROM measure_definitions WHERE name='mail.sorted' AND version=1").fetchone()[0]
+    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    versions = connection.execute("SELECT version, spec_json, removed FROM measure_definitions WHERE name='mail.sorted' ORDER BY version").fetchall()
+    assert versions == [(1, before, 0), (2, before, 1)]
+    REGISTRY.rebuild(connection)
+    assert "mail.sorted" not in REGISTRY.events and "mail.triaged" in REGISTRY.events

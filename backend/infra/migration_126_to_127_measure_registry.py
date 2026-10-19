@@ -37,6 +37,7 @@ _REGISTRY_127_DDL = (
         file_path TEXT NOT NULL,
         file_sha256 TEXT NOT NULL,
         synced_at TEXT NOT NULL,
+        removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1)),
         PRIMARY KEY (owner_thread_id, kind, name, version)
     )
     """,

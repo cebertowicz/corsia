@@ -19,8 +19,10 @@ from infra.outcome_event_attributes import AttributeSpec
 REFUSAL_LIMIT = 20
 # Reserved attributes the server stamps on every declared event; a file cannot declare them.
 _STAMPED = {name: AttributeSpec("id") for name in ("run_id", "workflow_ref", "workflow_version")}
-_REMOVED = "_removed"  # a retired name's newest version: the name stays in history but is no longer declared
-_REMOVED_SPEC = json.dumps({_REMOVED: True})
+_INSERT = (
+    "INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) "
+    "VALUES (?,?,?,?,?,?,?,?,?)"
+)
 _NO_OWNER = (
     "measure_sync: workflow {workflow} has no owner, so its measures.yaml can't be synced. "
     "Add `owner: <your thread id>` under `corsia:` then `workflow:` in its SKILL.md frontmatter, "
@@ -52,14 +54,12 @@ class MeasureRegistry:
         self.namespaces = dict(db.execute("SELECT namespace, owner_thread_id FROM measure_namespaces"))
         rows = db.execute(
             "SELECT owner_thread_id,name,spec_json FROM measure_definitions "
-            "WHERE kind='event' AND (owner_thread_id,name,version) IN "
+            "WHERE kind='event' AND removed=0 AND (owner_thread_id,name,version) IN "
             "(SELECT owner_thread_id,name,max(version) FROM measure_definitions "
             "WHERE kind='event' GROUP BY owner_thread_id,name)"
         )
         for owner, name, raw in rows:
             spec = json.loads(raw)
-            if spec.get(_REMOVED):
-                continue  # retired by a later sync: no longer admitted, its old rows stay readable
             specs = {**_attribute_specs(spec["attributes"]), **_STAMPED}
             self.events[name] = DeclaredEvent(owner, specs, tuple(spec["dedupe"]), spec["attributes"], int(spec.get("keep_days", 400)))
             if spec.get("_workflow"):
@@ -106,15 +106,15 @@ def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent
     return f'Namespace "{namespace}" belongs to another agent (thread {holder}); {mine}'
 
 
-def _no_longer_declared(connection: sqlite3.Connection, owner: str, path: str, kept: set[tuple[str, str]]) -> list[tuple[str, str, int]]:
-    """Names this owner last synced from ``path`` that the new file leaves out, with their next version."""
-    latest: dict[tuple[str, str], tuple[int, str, str]] = {}
-    for kind, name, version, spec_json, file_path in connection.execute(
-        "SELECT kind,name,version,spec_json,file_path FROM measure_definitions WHERE owner_thread_id=? ORDER BY version", (owner,),
+def _no_longer_declared(connection: sqlite3.Connection, owner: str, path: str, kept: set[tuple[str, str]]) -> list[tuple[str, str, int, str]]:
+    """Names this owner last synced from ``path`` that the new file leaves out: next version and last spec."""
+    latest: dict[tuple[str, str], tuple[int, str, str, int]] = {}
+    for kind, name, version, spec_json, file_path, removed in connection.execute(
+        "SELECT kind,name,version,spec_json,file_path,removed FROM measure_definitions WHERE owner_thread_id=? ORDER BY version", (owner,),
     ):
-        latest[(kind, name)] = (version, spec_json, file_path)
-    return [(kind, name, version + 1) for (kind, name), (version, spec_json, file_path) in sorted(latest.items())
-            if file_path == path and (kind, name) not in kept and _REMOVED not in json.loads(spec_json)]
+        latest[(kind, name)] = (version, spec_json, file_path, removed)
+    return [(kind, name, version + 1, spec_json) for (kind, name), (version, spec_json, file_path, removed) in sorted(latest.items())
+            if file_path == path and (kind, name) not in kept and not removed]
 
 
 def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) -> dict[str, Any]:
@@ -142,16 +142,16 @@ def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) 
         connection.execute("INSERT OR IGNORE INTO measure_namespaces(namespace,owner_thread_id) VALUES (?,?)", (namespace, owner_thread_id))
         for kind, name, spec in items:
             normalized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
-            row = connection.execute("SELECT version,spec_json FROM measure_definitions WHERE owner_thread_id=? AND kind=? AND name=? ORDER BY version DESC LIMIT 1", (owner_thread_id, kind, name)).fetchone()
-            if row and row[1] == normalized:
+            row = connection.execute("SELECT version,spec_json,removed FROM measure_definitions WHERE owner_thread_id=? AND kind=? AND name=? ORDER BY version DESC LIMIT 1", (owner_thread_id, kind, name)).fetchone()
+            if row and row[1] == normalized and not row[2]:
                 changes.append({"name": name, "status": "unchanged"})
                 continue
             version = 1 if row is None else row[0] + 1
-            connection.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?)", (owner_thread_id, kind, name, version, normalized, path, sha, now))
-            fresh = row is None or _REMOVED in json.loads(row[1])
+            connection.execute(_INSERT, (owner_thread_id, kind, name, version, normalized, path, sha, now, 0))
+            fresh = row is None or bool(row[2])
             changes.append({"name": name, "status": "added" if fresh else f"changed v{version - 1}→v{version}"})
-        for kind, name, version in _no_longer_declared(connection, owner_thread_id, path, {(kind, name) for kind, name, _ in items}):
-            connection.execute("INSERT INTO measure_definitions VALUES (?,?,?,?,?,?,?,?)", (owner_thread_id, kind, name, version, _REMOVED_SPEC, path, sha, now))
+        for kind, name, version, last_spec in _no_longer_declared(connection, owner_thread_id, path, {(kind, name) for kind, name, _ in items}):
+            connection.execute(_INSERT, (owner_thread_id, kind, name, version, last_spec, path, sha, now, 1))  # keeps the last real spec
             changes.append({"name": name, "status": "removed"})
     REGISTRY.rebuild(db)
     return {"namespace": namespace, "items": changes}
