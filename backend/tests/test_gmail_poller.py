@@ -6,11 +6,11 @@ import asyncio
 
 import pytest
 
+from connections.connected_accounts import corsia_only_reach, create_google_account
 from connections.google import email_screen
 from connections.google import gmail_read
 from events.connectors import gmail_feed as feed
 from events.connectors import gmail_poller as poller
-from infra.settings import get_setting, set_setting
 
 ACCOUNT = "person@example.com"
 OLD_CURSOR = {
@@ -29,6 +29,9 @@ def _poller_state(isolated_db, monkeypatch):
     monkeypatch.setattr(poller, "_status", {
         "state": "starting", "reason": None, "last_success_at": None, "last_error": None,
     })
+    create_google_account(
+        ACCOUNT, reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
+    )
 
 
 def _message(message_id: str = "m1") -> gmail_read.Message:
@@ -42,6 +45,21 @@ def _message(message_id: str = "m1") -> gmail_read.Message:
 
 async def _answer(value):
     return value
+
+
+def _seed_cursor(value: dict) -> None:
+    poller._save_cursor(poller.Cursor(
+        value["account"], value["floor_at"], value["history_id"], value.get("last_success_at"),
+    ))
+
+
+def _stored_cursor() -> dict:
+    cursor = poller._load_stored_cursor(ACCOUNT)
+    assert cursor is not None
+    return {
+        "account": cursor.account, "floor_at": cursor.floor_at,
+        "history_id": cursor.history_id, "last_success_at": cursor.last_success_at,
+    }
 
 
 async def test_first_run_sets_a_profile_floor_without_backfill(monkeypatch):
@@ -60,7 +78,7 @@ async def test_first_run_sets_a_profile_floor_without_backfill(monkeypatch):
 
     await poller.poll_once(ACCOUNT)
 
-    stored = get_setting(poller.CURSOR_SETTING)
+    stored = _stored_cursor()
     assert stored["account"] == ACCOUNT
     assert stored["history_id"] == "profile-history"
     assert stored["floor_at"]
@@ -69,7 +87,7 @@ async def test_first_run_sets_a_profile_floor_without_backfill(monkeypatch):
 
 
 async def test_delivery_uses_flat_facts_and_advances_only_after_handling(monkeypatch):
-    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    _seed_cursor(OLD_CURSOR)
     delivered: list[dict] = []
 
     async def deliver(connector: str, raw: dict):
@@ -97,11 +115,11 @@ async def test_delivery_uses_flat_facts_and_advances_only_after_handling(monkeyp
         "screen_status": "screened", "needs_person": "now", "injection": False,
         "injection_rule": "none", "kind": "scheduling", "screen_model": "local",
     }]
-    assert get_setting(poller.CURSOR_SETTING)["history_id"] == "new-history"
+    assert _stored_cursor()["history_id"] == "new-history"
 
 
 async def test_failed_delivery_holds_the_cursor(monkeypatch):
-    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    _seed_cursor(OLD_CURSOR)
     monkeypatch.setattr(feed, "added_messages", lambda _history: _answer(feed.HistoryPage(("m1",), "new-history")))
     monkeypatch.setattr(feed, "metadata", lambda message_id: _answer(_message(message_id)))
     monkeypatch.setattr(feed, "full_message", lambda message_id: _answer(_message(message_id)))
@@ -113,11 +131,11 @@ async def test_failed_delivery_holds_the_cursor(monkeypatch):
     monkeypatch.setattr(poller, "deliver_platform_event", failed_delivery)
     with pytest.raises(RuntimeError, match="delivery unavailable"):
         await poller.poll_once(ACCOUNT)
-    assert get_setting(poller.CURSOR_SETTING) == OLD_CURSOR
+    assert _stored_cursor() == OLD_CURSOR
 
 
 async def test_a_message_deleted_after_listing_is_skipped(monkeypatch):
-    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    _seed_cursor(OLD_CURSOR)
     delivered: list[str] = []
 
     async def metadata(message_id: str):
@@ -139,7 +157,7 @@ async def test_a_message_deleted_after_listing_is_skipped(monkeypatch):
     await poller.poll_once(ACCOUNT)
 
     assert delivered == ["m1"]
-    assert get_setting(poller.CURSOR_SETTING)["history_id"] == "new-history"
+    assert _stored_cursor()["history_id"] == "new-history"
 
 
 async def test_retry_after_a_partial_page_wakes_each_message_once(monkeypatch):
@@ -152,7 +170,7 @@ async def test_retry_after_a_partial_page_wakes_each_message_once(monkeypatch):
     workspace = mk_session("ws")
     assert set_scope_coordinator(WORKSPACE_SCOPE, workspace)
     assert binder.ensure_designation_rule(connector="gmail", fact="label", value="INBOX") is not None
-    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    _seed_cursor(OLD_CURSOR)
     failing = {"b"}
 
     def message(message_id: str) -> gmail_read.Message:
@@ -186,16 +204,16 @@ async def test_retry_after_a_partial_page_wakes_each_message_once(monkeypatch):
     with pytest.raises(feed.GmailFeedError):
         await poller.poll_once(ACCOUNT)
     assert wakes() == 1
-    assert get_setting(poller.CURSOR_SETTING) == OLD_CURSOR
+    assert _stored_cursor() == OLD_CURSOR
 
     failing.clear()
     await poller.poll_once(ACCOUNT)
     assert wakes() == 2
-    assert get_setting(poller.CURSOR_SETTING)["history_id"] == "new-history"
+    assert _stored_cursor()["history_id"] == "new-history"
 
 
 async def test_expired_history_resets_the_floor_without_a_gap_digest(monkeypatch):
-    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    _seed_cursor(OLD_CURSOR)
     monkeypatch.setattr(poller, "disabled_reason", lambda: _answer(None))
     monkeypatch.setattr(poller.oauth, "account_status", lambda: {"email": ACCOUNT, "status": "connected"})
 
@@ -210,7 +228,7 @@ async def test_expired_history_resets_the_floor_without_a_gap_digest(monkeypatch
     monkeypatch.setattr(poller, "deliver_platform_event", unexpected_delivery)
 
     assert await poller.run_cycle() == poller.POLL_INTERVAL_S
-    stored = get_setting(poller.CURSOR_SETTING)
+    stored = _stored_cursor()
     assert stored["history_id"] == "new-floor"
     assert stored["floor_at"] != OLD_CURSOR["floor_at"]
     assert poller.poller_status()["state"] == "enabled"

@@ -18,12 +18,12 @@ from auth_fixtures import OWNER_SESSION_TOKEN
 from fastapi import FastAPI
 
 from api import google as google_api
+from connections.connected_accounts import google_account
 from connections.google import client as google_client
 from connections.google import oauth
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
-from infra.settings import get_setting
 from tests.registry_helpers import make_session
 from tools.corsia_api import CorsiaApiTool
 from tools.google_account import GoogleConnectTool, GoogleStatusTool
@@ -142,10 +142,14 @@ async def test_callback_completes_the_sign_in_and_stores_all_three_entries(googl
     assert key_store.resolve_google() == {"client_id": CLIENT_ID, "client_secret": SECRET, "refresh_token": REFRESH}
     exchange = google.token_forms[0]
     assert exchange["grant_type"] == "authorization_code" and exchange["code"] == "auth-code"
-    account = get_setting("google_account")
-    assert account["email"] == EMAIL and account["status"] == "connected"
-    assert set(account["scopes"]) == set(oauth.SCOPES)
-    # The settings table carries no value.
+    db = get_db()
+    try:
+        account = google_account(db=db)
+    finally:
+        db.close()
+    assert account is not None
+    assert account["address"] == EMAIL and account["state"] == "connected"
+    # The row carries no credential value.
     assert REFRESH not in json.dumps(account) and SECRET not in json.dumps(account)
 
 

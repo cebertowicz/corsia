@@ -13,7 +13,6 @@ import httpx
 
 from infra import key_store
 from infra.db_async import run_in_db
-from infra.settings import get_setting, set_setting
 
 log = logging.getLogger(__name__)
 
@@ -64,9 +63,17 @@ class GoogleRequestFailed(GoogleError):
 
 
 def _mark_needs_sign_in() -> None:
-    account = get_setting(ACCOUNT_SETTING)
-    if account and account.get("status") != STATUS_NEEDS_SIGN_IN:
-        set_setting(ACCOUNT_SETTING, {**account, "status": STATUS_NEEDS_SIGN_IN})
+    """Mark the single compatibility account without touching legacy settings."""
+    from connections.connected_accounts import google_account, set_state
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        account = google_account(db=db)
+        if account is not None and account["state"] != STATUS_NEEDS_SIGN_IN:
+            set_state(str(account["id"]), STATUS_NEEDS_SIGN_IN, db=db)
+    finally:
+        db.close()
 
 
 async def access_token() -> str:

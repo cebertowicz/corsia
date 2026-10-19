@@ -21,14 +21,11 @@ from urllib.parse import urlencode
 import httpx
 
 from connections.google import client
-from connections.google.client import (
-    ACCOUNT_SETTING, STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed,
-)
+from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
 from infra import key_store
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
-from infra.settings import get_setting, set_setting
-from infra.time import utc_now_iso
+from infra.database import get_db
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
@@ -109,18 +106,28 @@ def read_client_file(raw_path: object) -> tuple[str, str]:
         raise GoogleSignInError(BAD_CLIENT_FILE) from None
 
 
+def _account() -> dict[str, object] | None:
+    from connections.connected_accounts import google_account
+
+    db = get_db()
+    try:
+        return google_account(db=db)
+    finally:
+        db.close()
+
+
 def _stored_client() -> tuple[str, str] | None:
-    stored = key_store.resolve_names([key_store.GOOGLE_CLIENT_ID, key_store.GOOGLE_CLIENT_SECRET])
-    if len(stored) != 2:
+    stored = key_store.resolve_google()
+    if stored is None:
         return None
-    return stored[key_store.GOOGLE_CLIENT_ID], stored[key_store.GOOGLE_CLIENT_SECRET]
+    return stored["client_id"], stored["client_secret"]
 
 
 def connected_email() -> str | None:
-    """The signed-in address when the sign-in is stored and still accepted, else None."""
-    account = get_setting(ACCOUNT_SETTING)
-    if account and account.get("status") == STATUS_CONNECTED and key_store.resolve_google() is not None:
-        return account.get("email")
+    """The signed-in address when the account bundle is stored and accepted."""
+    account = _account()
+    if account and account["state"] == STATUS_CONNECTED and key_store.resolve_google() is not None:
+        return str(account["address"])
     return None
 
 
@@ -174,12 +181,29 @@ def _take_pending(state: object) -> _Pending:
 
 
 def _store(pending: _Pending, refresh_token: str, email: str, scopes: list[str]) -> None:
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, pending.client_id)
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, pending.client_secret)
-    key_store.set_managed_value(key_store.GOOGLE_REFRESH_TOKEN, refresh_token)
-    set_setting(ACCOUNT_SETTING, {
-        "email": email, "scopes": scopes, "connected_at": utc_now_iso(), "status": STATUS_CONNECTED,
-    })
+    """Keep the legacy single-account flow on one connected-account bundle."""
+    from connections.connected_accounts import (
+        corsia_only_reach, create_google_account, store_google_credentials,
+    )
+
+    from connections.connected_accounts import google_account, set_state
+
+    db = get_db()
+    try:
+        account = google_account(db=db)
+        if account is None:
+            account = create_google_account(
+                email, reach=corsia_only_reach(), created_by=("system", "google_oauth"),
+                signed_in_by=("system", "google_oauth"), state=STATUS_CONNECTED, db=db,
+            )
+        else:
+            set_state(str(account["id"]), STATUS_CONNECTED, db=db)
+        store_google_credentials(str(account["id"]), {
+            "client_id": pending.client_id, "client_secret": pending.client_secret,
+            "refresh_token": refresh_token, "scopes": scopes,
+        }, db=db)
+    finally:
+        db.close()
 
 
 async def complete_sign_in(code: object, state: object) -> str:
@@ -216,16 +240,22 @@ async def complete_sign_in(code: object, state: object) -> str:
 
 def account_status() -> dict:
     """The sign-in's state for ``google_status``: never a token or a secret."""
-    account = get_setting(ACCOUNT_SETTING)
+    account = _account()
     if not account or key_store.resolve_google() is None:
         return {"email": None, "scopes": [], "status": "not_connected", "poller_state": None, "last_success_at": None}
     # Imported here: the poller module imports this one.
+    from connections.connected_accounts import google_scopes
     from events.connectors.gmail_poller import poller_status
 
-    status = account.get("status", STATUS_CONNECTED)
+    status = str(account["state"])
     poller = poller_status()
+    db = get_db()
+    try:
+        scopes = google_scopes(str(account["id"]), db=db)
+    finally:
+        db.close()
     result = {
-        "email": account.get("email"), "scopes": account.get("scopes", []),
+        "email": account["address"], "scopes": scopes,
         "status": status,
         "poller_state": poller["state"],
         "last_success_at": poller["last_success_at"],

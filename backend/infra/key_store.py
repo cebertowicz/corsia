@@ -51,7 +51,8 @@ SOURCE_STORE = "keys"
 PROVIDER_PREFIX = "provider-"
 SERVER_PREFIX = "server-"
 GOOGLE_PREFIX = "google-"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX)
+CONNECTED_ACCOUNT_PREFIX = "connected-account--google--"
+RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX)
 #: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
 GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
 GOOGLE_CLIENT_SECRET = f"{GOOGLE_PREFIX}client-secret"
@@ -100,6 +101,7 @@ def is_managed_name(name: str) -> bool:
     return (
         name in BUILTINS
         or name in GOOGLE_ENTRIES
+        or (name.startswith(CONNECTED_ACCOUNT_PREFIX) and bool(name[len(CONNECTED_ACCOUNT_PREFIX):]))
         or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
         or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
         or is_mcp_entry_name(name)
@@ -274,15 +276,19 @@ def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str 
 
 
 def resolve_google(*, db: sqlite3.Connection | None = None) -> dict[str, str] | None:
-    """The Google sign-in's ``client_id``, ``client_secret`` and ``refresh_token``, or None unless all three are set."""
-    stored = resolve_names(GOOGLE_ENTRIES, db=db)
-    if len(stored) != len(GOOGLE_ENTRIES):
+    """The single-account compatibility credential view for Google callers.
+
+    Legacy fixed entry names are deliberately never read after the connected
+    account migration. PR B replaces this temporary accessor with required
+    account selection.
+    """
+    from connections.connected_accounts import google_account, resolve_google_credentials
+
+    conn = _db(db)
+    account = google_account(db=conn)
+    if account is None:
         return None
-    return {
-        "client_id": stored[GOOGLE_CLIENT_ID],
-        "client_secret": stored[GOOGLE_CLIENT_SECRET],
-        "refresh_token": stored[GOOGLE_REFRESH_TOKEN],
-    }
+    return resolve_google_credentials(str(account["id"]), db=conn)
 
 
 def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:

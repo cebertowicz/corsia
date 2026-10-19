@@ -357,6 +357,15 @@ def _reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connec
     return current_thread_id is None
 
 
+def reach_reaches_thread(reach: AppReach, thread_id: str, *, db: sqlite3.Connection) -> bool:
+    """Apply one persisted reach shape to a durable thread, failing closed.
+
+    Connected accounts and hosted apps deliberately share this resolver so a
+    scope rule has the same parent-chain semantics for both row kinds.
+    """
+    return _reach_reaches_thread(reach, thread_id, db=db)
+
+
 def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
     """Whether an app reaches a durable thread scope, resolving no caller input.
 
@@ -368,7 +377,7 @@ def app_reaches_thread(app_id: str, thread_id: str, *, db: sqlite3.Connection) -
         reach = _reach(app_id, db=db)
     except AppReachError:
         return False
-    return _reach_reaches_thread(reach, thread_id, db=db)
+    return reach_reaches_thread(reach, thread_id, db=db)
 
 
 def _reach_scope(reach: AppReach, scope: dict, *, db: sqlite3.Connection) -> bool:

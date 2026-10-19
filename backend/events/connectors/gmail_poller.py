@@ -21,7 +21,6 @@ from connections.google import email_screen, oauth
 from events.connectors import gmail_feed as feed
 from events.platform import deliver_platform_event
 from infra.db_async import run_in_db
-from infra.settings import get_setting, set_setting
 from infra.time import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -69,8 +68,17 @@ def _set_state(state: str, reason: str | None = None) -> None:
 
 
 def _load_stored_cursor(account: str) -> Cursor | None:
-    stored = get_setting(CURSOR_SETTING) or {}
-    if not isinstance(stored, dict) or stored.get("account") != account:
+    """Load the single compatibility account's cursor from its account row."""
+    from connections.connected_accounts import google_account
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        connected = google_account(db=db)
+        stored = connected["cursor"] if connected and connected["address"] == account else None
+    finally:
+        db.close()
+    if not isinstance(stored, dict):
         return None
     floor_at, history_id = stored.get("floor_at"), stored.get("history_id")
     if not isinstance(floor_at, str) or not isinstance(history_id, str) or not history_id:
@@ -80,12 +88,22 @@ def _load_stored_cursor(account: str) -> Cursor | None:
 
 
 def _save_cursor(cursor: Cursor) -> None:
-    set_setting(CURSOR_SETTING, {
-        "account": cursor.account,
-        "floor_at": cursor.floor_at,
-        "history_id": cursor.history_id,
-        "last_success_at": cursor.last_success_at,
-    })
+    from connections.connected_accounts import google_account, set_cursor
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        connected = google_account(db=db)
+        if connected is None or connected["address"] != cursor.account:
+            return
+        set_cursor(str(connected["id"]), {
+            "account": cursor.account,
+            "floor_at": cursor.floor_at,
+            "history_id": cursor.history_id,
+            "last_success_at": cursor.last_success_at,
+        }, db=db)
+    finally:
+        db.close()
 
 
 async def _load_cursor(account: str) -> tuple[Cursor, bool]:
