@@ -3,9 +3,12 @@ import { get } from 'svelte/store';
 
 import {
 	closeSettingsBack,
+	listenForConnectedAppLinks,
 	openProjectSettings,
 	recordSettingsHomeThread,
 	requestSettingsSection,
+	requestAppKey,
+	requestConnectedAppKey,
 	resetSettingsNavigation,
 	returnToProjectPage,
 	openSectionFromProject,
@@ -33,6 +36,43 @@ describe('settings navigation transitions', () => {
 		requestSettingsSection('providers', 'nowhere');
 		selectSettingsSection('keys');
 		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null });
+	});
+
+	it('clears a Connected apps return route when another Settings section is selected', () => {
+		requestConnectedAppKey('Stripe', 'stripe-key', [{ entry: 'stripe-key', name: 'API key' }]);
+		selectSettingsSection('skills');
+		expect(get(settingsNavigation)).toMatchObject({ section: 'skills', connectedAppKey: null, anchor: null });
+	});
+
+	it('requestAppKey opens the first unset key card, else the first, else the Keys section', () => {
+		const refs = [
+			{ entry: 'k1', name: 'ONE', set: true },
+			{ entry: 'k2', name: 'TWO', set: false },
+		];
+		requestAppKey({ name: 'Linear', key_refs: refs });
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: 'key-k2', connectedAppKey: { app: 'Linear', entry: 'k2' } });
+		requestAppKey({ name: 'Linear', key_refs: [refs[0]] });
+		expect(get(settingsNavigation)).toMatchObject({ anchor: 'key-k1' });
+		requestAppKey({ name: 'Files' });
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null, connectedAppKey: null });
+	});
+
+	it('opens a connected app from the initial hash and later hash changes, then cleans up', () => {
+		window.history.replaceState({}, '', '#connected-apps/google%20drive');
+		const openSettings = vi.fn();
+		const stop = listenForConnectedAppLinks(openSettings);
+		expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', connectedAppId: 'google drive', openRequest: 1 });
+
+		window.history.replaceState({}, '', '#connected-apps/google-calendar');
+		window.dispatchEvent(new Event('hashchange'));
+		expect(get(settingsNavigation)).toMatchObject({ connectedAppId: 'google-calendar', openRequest: 2 });
+		expect(openSettings).toHaveBeenCalledTimes(2);
+
+		stop();
+		window.history.replaceState({}, '', '#connected-apps/google-docs');
+		window.dispatchEvent(new Event('hashchange'));
+		expect(openSettings).toHaveBeenCalledTimes(2);
+		window.history.replaceState({}, '', '/');
 	});
 
 	describe('the thread Settings opened over', () => {

@@ -3,6 +3,9 @@ import type { Thread } from '$lib/stores/threads';
 
 type ReadinessThread = Pick<Thread, 'model' | 'pending_model' | 'switch_status'>;
 
+/** What one send did: `sent`, refused silently, or refused after the composer already told the person (`notified`). */
+export type SendOutcome = 'sent' | 'not_sent' | 'notified';
+
 /** A pending model switch whose destination can already run. */
 export function hasReadySwitchDestination(
 	thread: ReadinessThread | undefined,
@@ -25,8 +28,9 @@ export function composerCanSend(
 	thread: ReadinessThread | undefined,
 	activeModel: Model | undefined,
 	models: Model[],
+	allowUnlistedNoModelThread = false,
 ): boolean {
 	if (activeModel && acceptsSend(activeModel)) return true;
-	if (thread && !thread.model && !thread.pending_model) return true;
+	if ((thread || allowUnlistedNoModelThread) && !thread?.model && !thread?.pending_model) return true;
 	return hasReadySwitchDestination(thread, models);
 }

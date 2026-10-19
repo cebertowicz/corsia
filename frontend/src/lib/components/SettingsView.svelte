@@ -20,6 +20,7 @@
 		closeSettingsProject,
 		consumeSettingsOpenRequest,
 		returnToProjectPage,
+		returnToConnectedApps,
 		selectSettingsSection,
 		setSettingsDrill,
 		settingsNavigation,
@@ -38,6 +39,7 @@
 	const section = $derived($settingsNavigation.section);
 	const project = $derived($settingsNavigation.project);
 	const fromProject = $derived($settingsNavigation.fromProject);
+	const connectedAppKey = $derived($settingsNavigation.connectedAppKey);
 	const openRequest = $derived($settingsNavigation.openRequest);
 
 	$effect(() => {
@@ -83,8 +85,11 @@
 	$effect(() => {
 		const phone = $isMobile;
 		const from = fromProject;
+		const key = connectedAppKey;
 		let drill: SettingsDrill | null = null;
-		if (from) {
+		if (key) {
+			drill = { title: phone ? 'Keys' : 'Settings', backLabel: 'Connected apps', onBack: returnToConnectedApps };
+		} else if (from) {
 			drill = { title: phone ? labelOf(section) : 'Settings', backLabel: from.name, onBack: returnToProjectPage };
 		} else if (section === 'projects' && project) {
 			drill = { title: phone ? projectName : 'Settings', backLabel: 'Projects', onBack: closeSettingsProject };

@@ -19,7 +19,7 @@
     "/api/threads/{thread_id}/messages?limit=50&view=focus"
   ],
   "progress_every": 1,
-  "reason": "Restore context snapshot's pre-PR thread-00000 worst-case measurement; delegation status now reads production-shaped seed rows from that same thread, a fixture change rather than a code change.",
+  "reason": "Machine tokens without a thread are now refused on /api/google/status, matching /api/connected-apps; agents are reach-filtered and the person path is unchanged",
   "route_ceilings": {
     "/api/threads/{thread_id}/messages?limit=50&view=focus": {
       "bytes": 131072
@@ -74,7 +74,7 @@
     "/api/costs/summary": {
       "bytes": 10089,
       "statements": 29,
-      "steps": 25890462
+      "steps": 25890470
     },
     "/api/delegation/threads/{thread_id}/status": {
       "bytes": 170857,
@@ -96,10 +96,10 @@
       "statements": 23,
       "steps": 374
     },
-    "/api/google/status": {
-      "bytes": 94,
-      "statements": 2,
-      "steps": 25
+    "/api/fs/browse": {
+      "bytes": 127,
+      "statements": 1,
+      "steps": 15
     },
     "/api/health": {
       "bytes": 15,
@@ -129,12 +129,12 @@
     "/api/measurement/agents": {
       "bytes": 69033,
       "statements": 64,
-      "steps": 2151292
+      "steps": 2151294
     },
     "/api/measurement/cost": {
       "bytes": 1115,
       "statements": 54,
-      "steps": 4971007
+      "steps": 4971010
     },
     "/api/measurement/key-figures": {
       "bytes": 1178,
@@ -154,12 +154,12 @@
     "/api/measurement/models": {
       "bytes": 1489,
       "statements": 93,
-      "steps": 5215062
+      "steps": 5215065
     },
     "/api/measurement/series": {
       "bytes": 51305,
       "statements": 40,
-      "steps": 3558472
+      "steps": 3558473
     },
     "/api/measurement/series/index": {
       "bytes": 6514,
@@ -236,6 +236,11 @@
       "statements": 1,
       "steps": 15
     },
+    "/api/providers/local/downloads": {
+      "bytes": 2,
+      "statements": 1,
+      "steps": 15
+    },
     "/api/providers/local/setup": {
       "bytes": 137,
       "statements": 1,
@@ -282,7 +287,7 @@
       "steps": 15
     },
     "/api/system": {
-      "bytes": 548,
+      "bytes": 602,
       "statements": 1,
       "steps": 15
     },
@@ -302,7 +307,7 @@
       "steps": 15
     },
     "/api/system/update-status": {
-      "bytes": 458,
+      "bytes": 414,
       "statements": 5,
       "steps": 62
     },
@@ -332,7 +337,7 @@
       "steps": 99
     },
     "/api/threads/{thread_id}/context-snapshot/next-turn": {
-      "bytes": 182828,
+      "bytes": 185998,
       "statements": 41,
       "steps": 2022543
     },
@@ -372,7 +377,7 @@
       "steps": 370
     },
     "/api/version": {
-      "bytes": 771,
+      "bytes": 772,
       "statements": 0,
       "steps": 0
     }

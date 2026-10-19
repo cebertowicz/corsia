@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsView from './SettingsView.svelte';
 import { token } from '$lib/stores/auth';
-import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestSettingsSection, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestConnectedAppKey, requestSettingsSection, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { get } from 'svelte/store';
 
 let host: HTMLElement;
@@ -85,6 +85,16 @@ describe('SettingsView navigation', () => {
 		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(true);
 		expect(get(settingsNavigation).drill?.backLabel).toBe('Projects');
 		closeSettingsProject();
+	});
+
+	it('uses the Settings header to return from a Connected apps key card', () => {
+		requestConnectedAppKey('Stripe', 'stripe-key', [{ entry: 'stripe-key', name: 'API key' }]);
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(get(settingsNavigation).drill).toMatchObject({ title: 'Settings', backLabel: 'Connected apps' });
+		get(settingsNavigation).drill?.onBack();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', connectedAppKey: null });
 	});
 
 	it('shows the phone list when Settings opens without a new request', () => {

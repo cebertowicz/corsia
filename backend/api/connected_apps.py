@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from api.connected_app_access import audit_actor as _audit_actor, person_only, refusal as _refusal
 from api.connected_app_rows import _agent_next_step, app_reaches_project, local_app_notice as _local_app_notice, server_row
 from api.connected_app_errors import app_error as _app_error
+from api.connected_account_rows import accounts_router, list_account_rows
 from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
@@ -17,6 +18,7 @@ from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 
 connected_apps_router = APIRouter()
 connected_apps_router.include_router(signin_router)
+connected_apps_router.include_router(accounts_router)
 log = logging.getLogger(__name__)
 BODY_SHAPE = (
     'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '
@@ -58,19 +60,7 @@ def _reaching_thread(user: dict, app_id: str) -> str:
     return thread_id
 
 
-def _agent_reach(thread_id: str, scope: dict, *, db) -> dict[str, object]:
-    """Limit ordinary agents to their place; CORSIA proposes workspace apps for all projects."""
-    from infra.corsia_agent import is_corsia_agent
-
-    if is_corsia_agent(thread_id, db=db):
-        return {"mode": "all", "project_ids": [], "outside_projects": False}
-    project_id = scope["project_id"]
-    return {
-        "mode": "selected",
-        "project_ids": [project_id] if project_id is not None else [],
-        "outside_projects": project_id is None,
-    }
-
+# The shared agent-add reach rule lives with connected accounts so apps and accounts stay equivalent.
 
 def _expected_revision(body: dict[str, Any]) -> int:
     revision = body.get("expected_revision")
@@ -145,6 +135,15 @@ async def list_servers(
     if place is not None and place != "workspace":
         raise _refusal("place must be workspace")
 
+    def read_accounts() -> list[dict[str, object]]:
+        """Google accounts: a person's view (filtered like apps), or an agent's reachable ones."""
+        db = _db()
+        thread_id = None if human else _agent_thread(user, db)[0]
+        rows = list_account_rows(thread_id, db=db)
+        if project is not None:
+            return [row for row in rows if app_reaches_project(row, project)]
+        return [row for row in rows if row["reach"]["mode"] == "all"] if place == "workspace" else rows
+
     def read() -> list[dict[str, object]]:
         from connections.app_reach import app_reaches_thread, list_apps
         from connections.account_policy import project_exists
@@ -166,7 +165,10 @@ async def list_servers(
             for reachable in (app_reaches_thread(app["id"], thread_id, db=db),)
         ]
 
-    return {"servers": await run_in_db(read), "sign_in_here": sign_in_here(request)}
+    return {
+        "servers": await run_in_db(read), "accounts": await run_in_db(read_accounts),
+        "sign_in_here": sign_in_here(request),
+    }
 
 
 def _db():
@@ -201,7 +203,7 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
             from connections.app_lifecycle import create_pending_app
             from infra.corsia_agent import is_corsia_agent
 
-            thread_id, scope = _agent_thread(user, _db())
+            thread_id, _scope = _agent_thread(user, _db())
             if asked_by_thread_id is not None:
                 if not is_corsia_agent(thread_id, db=_db()):
                     raise _refusal("Only the workspace CORSIA agent can name an asking agent.", 403)
@@ -209,18 +211,19 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
                     thread_scope(asked_by_thread_id, db=_db())
                 except AccountAdmissionError:
                     raise _refusal("The asking agent thread no longer exists; use its current thread id.") from None
+            from connections.connected_accounts import reach_for_adding_thread
+
             return create_pending_app(
-                name, config, _agent_reach(thread_id, scope, db=_db()), actor_thread_id=thread_id,
+                name, config, reach_for_adding_thread(thread_id, db=_db()).as_dict(), actor_thread_id=thread_id,
                 asked_by_thread_id=asked_by_thread_id, audit_actor=_audit_actor(user), db=_db(),
             )
     try:
         result = await run_in_db(create)
     except Exception as exc:
         raise _app_error(exc) from None
-    if human:
-        await _run_app_runtime("connect", result["id"])
+    runtime = await _run_app_runtime("connect", result["id"]) if human else {}
     notice = _local_app_notice(config)
-    return {**result, **({"notice": notice} if notice else {})}
+    return {**result, **runtime, **({"notice": notice} if notice else {})}
 
 
 @connected_apps_router.patch("/servers/{app_id}")

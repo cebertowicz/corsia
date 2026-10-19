@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { approveConnectedApp, saveConnectedAppReach, type ConnectedApp } from '$lib/api/connectedApps';
+	import { ALL_PROJECTS_REACH, approveConnectedApp, isOnlyCorsia, saveAccountReach, saveConnectedAppReach, type ConnectedAppsRow } from '$lib/api/connectedApps';
 
-	let { app, approve = false, onClose, onSaved }: { app: ConnectedApp; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedApp) => void } = $props();
-	let mode = $state<'all' | 'selected'>(app.reach.mode);
+	let { app, approve = false, onClose, onSaved }: { app: ConnectedAppsRow; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedAppsRow) => void } = $props();
+	const appName = $derived(app.kind === 'account' ? `Google — ${app.address}` : app.name);
+	/** Only CORSIA is its own reach; the sheet names it before anything is chosen, and a save always replaces it. */
+	const onlyCorsia = $derived(isOnlyCorsia(app.reach));
+	let mode = $state<'all' | 'selected'>(app.reach.mode === 'all' ? 'all' : 'selected');
 	let selected = $state(new Set(app.reach.project_ids));
 	let outsideProjects = $state(app.reach.outside_projects);
 	let saving = $state(false);
@@ -16,7 +19,7 @@
 	const projectNames = $derived($projects.filter((project) => selected.has(project.id)).map((project) => project.name));
 	const selectedNames = $derived([...projectNames, ...(outsideProjects ? ['Outside projects'] : [])]);
 	const allNames = $derived([...$projects.map((project) => project.name), 'Outside projects']);
-	const wideningLine = $derived(`Agents in ${allNames.join(', ')} and any new project will be able to use ${app.name}.`);
+	const wideningLine = $derived(`Agents in ${allNames.join(', ')} and any new project will be able to use ${appName}.`);
 	const originalNames = $derived([
 		...$projects.filter((project) => app.reach.project_ids.includes(project.id)).map((project) => project.name),
 		...(app.reach.outside_projects ? ['Outside projects'] : []),
@@ -24,14 +27,22 @@
 	const narrowingLine = $derived.by(() => {
 		if (app.reach.mode === 'all') {
 			const losing = allNames.filter((name) => !selectedNames.includes(name));
-			return `Agents in ${losing.join(', ')} won't be able to use ${app.name}. New projects won't get it.`;
+			return `Agents in ${losing.join(', ')} won't be able to use ${appName}. New projects won't get it.`;
 		}
 		const from = originalNames.join(', ');
 		const to = selectedNames.join(', ');
-		if (originalNames.length === 0) return `Agents in ${to} will be able to use ${app.name}.`;
-		return `${app.name} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;
+		// The CORSIA agent works outside projects, so it keeps an Only CORSIA account only when Outside projects stays chosen.
+		if (app.kind === 'account' && isOnlyCorsia(app.reach)) {
+			return outsideProjects
+				? `CORSIA and agents in ${to} will be able to use ${app.address}.`
+				: `${appName} will move from CORSIA to ${to}, with its sign-in. CORSIA won't be able to use it.`;
+		}
+		if (originalNames.length === 0) return `Agents in ${to} will be able to use ${appName}.`;
+		return app.kind === 'account'
+			? `${appName} will move from ${from} to ${to}, with its sign-in. Agents in ${from} won't be able to use it.`
+			: `${appName} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;
 	});
-	const disabledLine = $derived(approve ? 'Select at least one project.' : `Select at least one project, or remove ${app.name}.`);
+	const disabledLine = $derived(approve ? 'Select at least one project.' : `Select at least one project, or remove ${appName}.`);
 	/** The one effect line: what the choice does, or the plain reason the button is off. Never an error colour. */
 	const effectLine = $derived(mode === 'all' ? wideningLine : hasSelection ? narrowingLine : disabledLine);
 
@@ -56,9 +67,11 @@
 		error = '';
 		try {
 			const reach = mode === 'all'
-				? { mode: 'all' as const, project_ids: [], outside_projects: false }
+				? ALL_PROJECTS_REACH
 				: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects };
-			onSaved(await (approve ? approveConnectedApp(app, reach) : saveConnectedAppReach(app, reach)));
+			if (approve && app.kind !== 'account') onSaved(await approveConnectedApp(app, reach));
+			else if (app.kind === 'account') onSaved({ ...(await saveAccountReach(app.id, reach)).row, kind: 'account' });
+			else onSaved(await saveConnectedAppReach(app, reach));
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Could not update this app. Try again.';
 		} finally {
@@ -67,8 +80,9 @@
 	}
 </script>
 
-<Modal title={`Where ${app.name} works`} size="sm" {onClose}>
+<Modal title={`Where ${appName} works`} size="sm" {onClose}>
 	<div class="where-it-works">
+		{#if onlyCorsia}<p class="second">Today, only CORSIA can use this account.</p>{/if}
 		<label class="choice">
 			<input type="radio" name="reach" checked={mode === 'all'} onchange={selectAllProjects} />
 			<span class="label">All projects</span>
@@ -88,7 +102,7 @@
 		{/if}
 		<div class="effect">
 			<!-- An app that runs on this Mac carries the server's notice while it waits; it shows when you approve it (B-R22). -->
-			{#if approve && app.notice}<p class="second">{app.notice}</p>{/if}
+			{#if approve && app.kind !== 'account' && app.notice}<p class="second">{app.notice}</p>{/if}
 			<p class="second" role="status">{effectLine}</p>
 			{#if error}<p class="error" role="alert">{error}</p>{/if}
 		</div>

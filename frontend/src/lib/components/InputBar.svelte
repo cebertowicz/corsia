@@ -1,6 +1,7 @@
 <script lang="ts">
 	import './InputBar.css';
 	import { tick, onMount } from 'svelte';
+	import { setContentEditableText } from '$lib/inputText';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId, isThreadTurnActive, threads } from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
@@ -16,8 +17,8 @@
 		uploadThreadAttachment,
 		watchInputBarHeight,
 	} from './inputBarHelpers';
-	import { createComposerDrafts, type ComposerDraft } from './composerDrafts';
-	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination } from './composerSendReadiness';
+	import { createComposerDrafts, sendAndRestoreDraft, type ComposerDraft } from './composerDrafts';
+	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination, type SendOutcome } from './composerSendReadiness';
 	import { activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
 	import { on, sendMessage, stopTurn } from '$lib/ws';
 	import { subagentMeta } from '$lib/stores/subagents';
@@ -26,6 +27,7 @@
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import { updateRestarting } from '$lib/update/store';
 
+	import { corsiaAgentId } from '$lib/utils/conductor';
 		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread }: {
 			threadId?: string | null;
 			onSend: () => void;
@@ -70,7 +72,6 @@
 
 		const hasImageAttachments = $derived(pendingAttachments.some(a => a.is_image));
 		const activeModel = $derived(findModelById($models, $activeModelId));
-
 		$effect(() => {
 		if (!sheetView) return;
 		const onPointerDown = (e: PointerEvent) => {
@@ -174,11 +175,11 @@
 
 	type DeliveryIntent = 'apply_now' | 'queue_after_turn';
 
-	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now') {
-		if (!canSendToModel) return;
+	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now'): Promise<SendOutcome> {
+		if (!canSendToModel) return 'not_sent';
 		const prepared = prepareMessage();
 		const message = prepared instanceof Promise ? await prepared : prepared;
-		if (!message || !canSendToModel) return;
+		if (!message || !canSendToModel) return 'not_sent';
 		const { threadId, content, modelId, attachments } = message;
 		const submittedDraft = currentComposerDraft() ?? {
 			content,
@@ -195,13 +196,14 @@
 			: sendMessage(threadId, content, modelId, attachments, undefined);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
-			return;
+			return 'notified';
 		}
 		drafts.trackSubmit(inputId, threadId, submittedDraft);
 		// Save before onSend, which may synchronously switch threads.
 		drafts.saveCurrentDraft(threadId);
 		resetComposer();
 		onSend();
+		return 'sent';
 	}
 
 	const activeThread = $derived(
@@ -211,7 +213,7 @@
 		boundThreadId ? $subagentMeta.has(boundThreadId) : false,
 	);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, $models));
-	const canSendToModel = $derived(!$updateRestarting && (isSubagentThread || composerCanSend(activeThread, activeModel, $models)));
+	const canSendToModel = $derived(!$updateRestarting && (isSubagentThread || composerCanSend(activeThread, activeModel, $models, boundThreadId !== null && boundThreadId === $corsiaAgentId)));
 	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
 
 	function handleSendButtonClick() {
@@ -316,23 +318,19 @@
 
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
-
-	export async function setAndSend(text: string) {
+	export function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
+		const draft = preserveDraft ? { content: inputText, attachments: [...pendingAttachments] } : null;
+		const draftThreadId = boundThreadId;
 		inputText = text;
+		if (preserveDraft) pendingAttachments = [];
 		if (inputEl) inputEl.textContent = text;
-		await tick();
-		await handleSend();
+		return sendAndRestoreDraft(draft, draftThreadId, tick, handleSend, restoreComposerDraft, drafts.saveCurrentDraft);
 	}
 
 	export async function setText(text: string) {
 		inputText = text;
 		pendingAttachments = [];
-		await tick();
-		if (inputEl) {
-			inputEl.textContent = text;
-			autoResize(inputEl);
-			placeCaretAtEnd(inputEl);
-		}
+		await setContentEditableText(inputEl, text, autoResize, placeCaretAtEnd);
 	}
 </script>
 

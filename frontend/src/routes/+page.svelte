@@ -10,7 +10,7 @@
 	import { sidebarCollapsed } from '$lib/stores/ui';
 	import { isMobile } from '$lib/stores/viewport';
 	import { checkSecurityAlert } from '$lib/stores/connection';
-	import { uiScope, exitScope } from '$lib/stores/uiScope';
+	import { uiScope, exitScope, type UiScope } from '$lib/stores/uiScope';
 	import { enterProjectScope, enterThreadScope } from '$lib/stores/projects';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
@@ -18,11 +18,12 @@
 	import { openThread } from '$lib/stores/openThread';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { closeSettingsBack, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, listenForConnectedAppLinks, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
 	import type ChatPanel from '$lib/components/ChatPanel.svelte';
+	import CorsiaMessageRequestHandler from '$lib/components/CorsiaMessageRequestHandler.svelte';
 	import HomePageView from '$lib/components/HomePageView.svelte';
 	import { docLens, selectedDocId } from '$lib/stores/documentsSurface';
 	import { emitProductEvent } from '$lib/product_events';
@@ -34,16 +35,10 @@
 	import { clearDocPickerTarget, docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { showArtifactThreadRequest } from '$lib/openArtifactInThread';
 	import { canvasCompact, artifactTabSheetOpen } from '$lib/stores/artifactCanvas';
-	import {
-		threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveSurface,
-	} from '$lib/stores/artifactWorkspace';
+	import { threadWorkspaces, emptyWorkspace, getActiveTab, hasChangedTab, setActiveSurface } from '$lib/stores/artifactWorkspace';
 	import { checkThreadRevisions, startDocumentRealtime } from '$lib/documentRealtime';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
-	import {
-		getTurnState,
-		resetTurnState,
-		restoreTurnState,
-	} from '$lib/ws/turnState';
+	import { getTurnState, resetTurnState, restoreTurnState } from '$lib/ws/turnState';
 	import { cancelThreadTypewriters } from '$lib/ws/typewriter';
 
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
@@ -120,10 +115,11 @@
 		resetSurface('activity');
 	}
 
-	async function goConductor(): Promise<boolean> {
+	async function goConductor(isActive: () => boolean = () => true, scope: UiScope | null = $uiScope): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
-		conductorLookup = await fetchScopeTarget($token, $uiScope);
+		conductorLookup = await fetchScopeTarget($token, scope);
+		if (!isActive()) return false;
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
 			if ('reasoning_effort' in target) reasoningEffort.set(target.reasoning_effort ?? null);
@@ -133,9 +129,10 @@
 		// A user with no conductor has nothing to land on, so the chat surface stays.
 		if (conductorLookup.kind === 'absent') { resetSurface('chat'); return true; }
 		// Unresolved lookup: keep the surface, leave the rail retryable.
-		toasts.show(`Couldn't load ${$uiScope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
+		toasts.show(`Couldn't load ${scope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
+
 	$effect(() => {
 		const [t, scope, authenticated] = [$token, $uiScope, $isAuthenticated];
 		conductorLookup = { kind: 'unknown' };
@@ -448,7 +445,8 @@
 	}
 
 	onMount(() => {
-		return registerHomeLifecycle({
+		const stopConnectedAppLinks = listenForConnectedAppLinks(openSettings);
+		const stop = registerHomeLifecycle({
 			token: () => $token,
 			activeThreadId: () => get(activeThreadId),
 			activeView: () => activeView,
@@ -465,6 +463,7 @@
 			on,
 			connect,
 		});
+		return () => { stopConnectedAppLinks(); stop(); };
 	});
 </script>
 
@@ -474,7 +473,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-
+<CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} />
 <HomePageView
 	isAuthenticated={$isAuthenticated} {activeView} bind:sidebarOpen bind:chatPanelRef
 	{conductorThreadId} {conductorKnownAbsent} {systemStatus} {isDraggingOver} {paneConfig}
