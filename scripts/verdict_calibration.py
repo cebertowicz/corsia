@@ -33,7 +33,9 @@ os.environ.setdefault("CORSIA_ANALYTICS_DISABLE", "1")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from core.workflow_verdict_read import price_snapshot, read_snapshot  # noqa: E402
-from core.workflow_verdict_rules import WorkflowHistory, baseline_runs, compute, decide, freeze_plan  # noqa: E402
+from core.workflow_verdict_rules import (  # noqa: E402
+    WorkflowHistory, baseline_runs, compute, decide, first_uses_of, freeze_plan,
+)
 from core.workflow_verdicts import measure_call, parse_ts  # noqa: E402
 
 CALIBRATED = ("sdlc-process", "decision-brief")
@@ -69,7 +71,8 @@ def splits(history: WorkflowHistory, now: datetime) -> tuple[dict, list[tuple[st
         own = sorted((r for r in history.runs if r.version == version), key=lambda r: (parse_ts(r.started_at), r.run_id))
         for block in BLOCKS:
             halves = [replace(run, version="a" if (index // block) % 2 == 0 else "b") for index, run in enumerate(own)]
-            split = replace(history, ref=f"{history.ref}#{version}#{block}", runs=tuple(halves))
+            split = replace(history, ref=f"{history.ref}#{version}#{block}", runs=tuple(halves),
+                            first_uses=first_uses_of(halves))
             if {run.version for run in halves} != {"a", "b"}:
                 continue
             plan = freeze_plan(split, "b", baseline_as_of=now)

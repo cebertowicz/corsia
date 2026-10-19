@@ -13,7 +13,8 @@ import pytest
 
 import core.workflow_verdict_evaluator as evaluator
 from core.workflow_verdict_rules import (
-    Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, freeze_plan,
+    Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, first_uses_of,
+    freeze_plan,
 )
 from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
@@ -51,7 +52,8 @@ def runs(version: str, corrections: int | list[int], *, count: int = 20, group=G
 
 
 def history(*sides: list[Run], definitions=()) -> WorkflowHistory:
-    return WorkflowHistory("sdlc-process", "owner", tuple(run for side in sides for run in side), tuple(definitions))
+    every = tuple(run for side in sides for run in side)
+    return WorkflowHistory("sdlc-process", "owner", every, tuple(definitions), first_uses=first_uses_of(every))
 
 
 def plan_for(source: WorkflowHistory, version: str = "v2", *extra: PlannedMeasure) -> FrozenPlan:
@@ -185,7 +187,7 @@ def test_calibration_splits_use_all_history_for_their_baseline() -> None:
     source = history(runs("v1", 1, count=80, started=90, ended=30))
     ordered = sorted(source.runs, key=lambda run: (run.started_at, run.run_id))
     halves = [replace(run, version="a" if index % 2 == 0 else "b") for index, run in enumerate(ordered)]
-    split = replace(source, runs=tuple(halves))
+    split = replace(source, runs=tuple(halves), first_uses=first_uses_of(halves))
     calls, _ = calibration_script().splits(source, NOW)
     assert freeze_plan(split, "b", baseline_as_of=NOW).baseline == "a"
     assert any(call != "too_few" for found in calls.values() for call, _ in found)

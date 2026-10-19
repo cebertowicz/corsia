@@ -55,9 +55,17 @@ class WorkflowHistory:
         return sorted({run.version for run in self.runs}, key=lambda version: (parse_ts(self.first_use(version)), version))
 
     def first_use(self, version: str) -> str:
-        """Earliest use over full history when the reader carried it, else over these runs (calibration splits)."""
-        return self.first_uses.get(version) or min(
-            (run.started_at for run in self.runs if run.version == version), key=parse_ts)
+        """Earliest use over full history, as whoever built this history carried it in ``first_uses``."""
+        return self.first_uses[version]
+
+
+def first_uses_of(runs: Sequence[Run]) -> dict[str, str]:
+    """First use per version when ``runs`` are the whole history of those versions (calibration splits, tests)."""
+    first: dict[str, str] = {}
+    for run in runs:
+        if run.version not in first or parse_ts(run.started_at) < parse_ts(first[run.version]):
+            first[run.version] = run.started_at
+    return first
 
 
 @dataclass(frozen=True)
