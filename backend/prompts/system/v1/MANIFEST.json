@@ -57,11 +57,11 @@
       "sha256": "658f0483112dd30bc4e183811fb22444732fa34b2ff42ac955a277175b9ae10c"
     },
     {
-      "bytes": 856,
+      "bytes": 1053,
       "kind": "context",
       "path": "context/roles/corsia_agent/00-operating-model.md",
       "role": "corsia_agent",
-      "sha256": "33a8d6359786e2644ed7749f7aeac428ebe9e4eed8196de80ecccad8eba98f94"
+      "sha256": "d4097981f9e25556be1323dcd0a18e08fc2a25770f44a44f09e467ead40187fe"
     },
     {
       "bytes": 728,
@@ -160,10 +160,10 @@
       "sha256": "d43c234e3a0c5213b63ffde54a3efac22648b1aeb3d795f548b722b17cc03882"
     },
     {
-      "bytes": 2766,
+      "bytes": 2980,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/browser-person-steps.md",
-      "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
+      "sha256": "7bc53033fe1f5e568166db9d2455384a9ba36a0c059744233f1916a4c8a8c246"
     },
     {
       "bytes": 12131,
@@ -290,6 +290,12 @@
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
+    },
+    {
+      "bytes": 5204,
+      "kind": "skill",
+      "path": "skills/microsoft-setup/SKILL.md",
+      "sha256": "577e52a684ac155af6a2ba31c5b741809920e84ab56c268fbc5bd40a18094374"
     },
     {
       "bytes": 2630,
