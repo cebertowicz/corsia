@@ -226,7 +226,11 @@ SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status); CREATE TABLE IF NOT EXISTS project_inference_policies (project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE, cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1)));
+    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+    CREATE TABLE IF NOT EXISTS project_inference_policies (
+        project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1))
+    );
     {PROJECT_REPO_POLICY_TABLE_SQL};
     {HOST_ACCESS_LEASE_SCHEMA_SQL}
     {MANAGED_PROCESS_SCHEMA_SQL}

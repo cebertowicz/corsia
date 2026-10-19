@@ -41,11 +41,6 @@ router = APIRouter(
     tags=["network-servers"],
     dependencies=[Depends(require_user)],
 )
-private_router = APIRouter(
-    prefix="/api/network-servers",
-    tags=["network-servers"],
-    dependencies=[Depends(require_user)],
-)
 router.include_router(network_server_billing_router)
 router.include_router(network_server_jobs_router)
 router.include_router(network_server_lifecycle_router)
@@ -278,7 +273,6 @@ class PrivateBody(BaseModel):
     private: StrictBool
 
 
-@private_router.put("/{server_id}/private")
 @router.put("/{server_id}/private")
 async def set_server_private(
     server_id: str, body: PrivateBody, user: dict = Depends(require_user),

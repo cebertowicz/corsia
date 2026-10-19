@@ -36,13 +36,15 @@ def row_is_local(row: dict, *, private_servers: set[str] | None = None) -> bool:
     server_id = _server_id(row)
     if server_id and server_id in (private_servers or set()):
         return True
-    if provider == "external" or connection == "external":
+    selector = str(row.get("litellm_model") or row.get("selector") or "")
+    if "external" in {provider, connection} or selector.startswith("external@"):
+        # A loopback External can be a proxy to a cloud API; only the mark counts.
         return False
 
     try:
         from llm.capabilities import make_provider_params
 
-        api_base = make_provider_params(str(row.get("litellm_model") or row.get("selector") or "")).get("api_base")
+        api_base = make_provider_params(selector).get("api_base")
         return endpoint_on_this_mac(api_base)
     except Exception as error:
         from loguru import logger
