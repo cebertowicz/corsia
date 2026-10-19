@@ -288,6 +288,8 @@ def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client
     )
 
     assert response.status_code == 201
+    assert response.json()["state"] == "disconnected"
+    assert response.json()["failure_class"] is None
     assert response.json()["notice"] == (
         "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
         "Connect only apps you trust."
@@ -301,8 +303,9 @@ def test_persisted_route_changes_use_the_stable_app_runtime_seam(connected_apps_
     client, _db, actor = connected_apps_client
     actions: list[tuple[str, str]] = []
 
-    async def record(action: str, app_id: str) -> None:
+    async def record(action: str, app_id: str) -> dict[str, object]:
         actions.append((action, app_id))
+        return {"state": "working", "state_since": "t", "tool_count": 1, "failure_class": None}
 
     async def restart_after_saved_write(app_id: str) -> None:
         await record("restart", app_id)

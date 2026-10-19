@@ -81,12 +81,21 @@ export function signOutOfApp(id: string): Promise<SignOutResult> {
 	return response(`/api/mcp/servers/${encodeURIComponent(id)}/sign-out`, { method: 'POST' });
 }
 
-export function createConnectedApp(input: Pick<ConnectedApp, 'name' | 'reach'> & { config: Record<string, unknown> }): Promise<ConnectedApp> {
-	return response('/api/mcp/servers', {
+/** A fixed connected-app startup class that the form can describe without exposing a server error. */
+export class ConnectAppError extends Error {
+	constructor(readonly failureClass: string) { super(failureClass); }
+}
+
+export async function createConnectedApp(input: Pick<ConnectedApp, 'name' | 'reach'> & { config: Record<string, unknown> }): Promise<ConnectedApp> {
+	const result = await fetch(url('/api/mcp/servers'), {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...input, key_refs: [] }),
 	});
+	if (result.ok) return result.json() as Promise<ConnectedApp>;
+	const body = await result.clone().json().catch(() => null);
+	if (typeof body?.detail?.failure_class === 'string') throw new ConnectAppError(body.detail.failure_class);
+	throw new Error('Couldn\'t connect. Try again.');
 }
 
 export function approveConnectedApp(app: Pick<ConnectedApp, 'id' | 'revision'>, reach?: ConnectedApp['reach']): Promise<ConnectedApp> {

@@ -111,17 +111,19 @@ describe('ConnectAppFlow', () => {
 		expect(host.textContent).toContain('Files: Connected · 46 actions');
 	});
 
-	it('shows a connection error without leaving the final step', async () => {
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({ detail: 'The app did not answer' }) })));
+	it('shows the fixed failure class and lets the person correct What it runs', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ id: 'files', name: 'Files', state: 'failed', failure_class: 'timed_out', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: true } }) })));
 		render();
 		press('Continue');
 		type('Name', 'Files');
 		type('What it runs', 'npx -y @example/app');
 		press('Continue');
 		press('Connect');
-		await vi.waitFor(() => expect(host.textContent).toContain('The app did not answer'));
-		expect(host.textContent).toContain('Where it works');
-		expect(host.textContent).toContain('Check the command, then try again.');
+		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't connect: no response"));
+		expect(host.textContent).toContain("The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what.");
+		expect(host.textContent).toContain('Try again');
+		press('Back');
+		await vi.waitFor(() => expect(host.querySelector('input[aria-label="What it runs"]')).toBe(document.activeElement));
 	});
 
 	it('opens CORSIA with the Google request instead of starting OAuth', () => {

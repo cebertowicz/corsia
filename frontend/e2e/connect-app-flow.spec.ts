@@ -16,6 +16,7 @@ async function capture(page: Page, testInfo: TestInfo, name: string): Promise<vo
 		const versionOverlay = page.locator('.version-overlay');
 		await expect(versionOverlay).toContainText(`f ${captureBuild}`);
 		await expect(versionOverlay).not.toContainText('⇢');
+		await expect(versionOverlay).not.toContainText('†');
 	}
 	if (!captureDir) return saveEvidenceScreenshot(page, testInfo, name, { fullPage: false });
 	mkdirSync(captureDir, { recursive: true });
@@ -99,11 +100,16 @@ for (const viewport of viewports) {
 			await expect(dialog.getByRole('button', { name: 'Connect', exact: true })).toBeDisabled();
 			await expect.poll(() => pendingConnect).not.toBeNull();
 			await capture(page, testInfo, `mac-checking-${viewport.name}-${theme}`, { fullPage: false });
-			await pendingConnect!.fulfill({ status: 400, json: { detail: 'The app did not answer' } });
-			await expect(dialog.getByText('The app did not answer')).toBeVisible();
+			await pendingConnect!.fulfill({ json: {
+				id: 'files', name: 'Files', state: 'failed', failure_class: 'timed_out', revision: 1,
+				reach: { mode: 'all', project_ids: [], outside_projects: true },
+			} });
+			await expect(dialog.getByText("Couldn't connect: no response")).toBeVisible();
+			await expect(dialog.getByText("The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what.")).toBeVisible();
 			await capture(page, testInfo, `mac-no-answer-${viewport.name}-${theme}`, { fullPage: false });
 
 			await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+			await expect(dialog.getByLabel('What it runs')).toBeFocused();
 			await dialog.getByRole('button', { name: 'Back', exact: true }).click();
 			await dialog.getByLabel('Google (email, calendar and files)').click();
 			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();

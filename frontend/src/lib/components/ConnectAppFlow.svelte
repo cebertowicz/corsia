@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { loadProjects, projects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { createConnectedApp, type ConnectedApp } from '$lib/api/connectedApps';
+	import { ConnectAppError, createConnectedApp, type ConnectedApp } from '$lib/api/connectedApps';
 	import { requestCorsiaMessage } from '$lib/corsiaRequest';
 
 	let { onClose, onConnected }: { onClose: () => void; onConnected: (app: ConnectedApp) => void } = $props();
@@ -17,6 +18,8 @@
 	let outsideProjects = $state(true);
 	let submitting = $state(false);
 	let error = $state('');
+	let recovery = $state('');
+	let setupInput = $state<HTMLInputElement | undefined>(undefined);
 	let result = $state<ConnectedApp | null>(null);
 
 	void loadProjects();
@@ -33,13 +36,31 @@
 	const reachLine = $derived(mode === 'all'
 		? `Agents in ${allNames.join(', ')} and any new project will be able to use it.`
 		: `Only agents in ${selectedNames.join(', ')} will be able to use it.`);
-	const recoveryHint = $derived(error
-		? kind === 'local' ? 'Check the command, then try again.' : 'Check the address, then try again.'
-		: '');
+	function connectFailure(failureClass: string): { line: string; recovery: string } {
+		const app = name.trim() || 'This app';
+		switch (failureClass) {
+			case 'cannot_start': return { line: "Couldn't connect: app didn't start", recovery: "The app didn't start on this computer. Go back and compare What it runs with the app's setup instructions, then try again. If it still won't start, it may need something that isn't installed on your computer; its setup instructions say what." };
+			case 'timed_out': return kind === 'local'
+				? { line: "Couldn't connect: no response", recovery: "The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what." }
+				: { line: "Couldn't connect: no response", recovery: `${app} didn't respond within 10 seconds. Try again; if it keeps happening, ${app} may be down.` };
+			case 'protocol_error': return { line: "Couldn't connect: not compatible", recovery: `${app} answered, but not in a way CORSIA understands. It may not be made for AI agents, or it may need an update. Check with its maker for an update.` };
+			case 'name_collision': return { line: "Couldn't connect: clashes with another app", recovery: `CORSIA can't tell this app apart from another connected app. Go back and choose a different name, then try again.` };
+			default: return { line: "Couldn't connect. Try again.", recovery: '' };
+		}
+	}
 
 	function selectKind(next: AppKind): void {
 		kind = next;
 		error = '';
+		recovery = '';
+	}
+
+	async function backToSetup(): Promise<void> {
+		step = 'setup';
+		error = '';
+		recovery = '';
+		await tick();
+		setupInput?.focus();
 	}
 
 	function continueFromWhat(): void {
@@ -95,15 +116,24 @@
 		submitting = true;
 		error = '';
 		try {
-			result = await createConnectedApp({
+			const created = await createConnectedApp({
 				name: name.trim(),
 				config: kind === 'local' ? { command: command.trim() } : { url: address.trim() },
 				reach,
 			});
-			onConnected(result);
+			if (created.state === 'failed') {
+				const failure = connectFailure(created.failure_class ?? '');
+				error = failure.line;
+				recovery = failure.recovery;
+				return;
+			}
+			result = created;
+			onConnected(created);
 			step = 'result';
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : "Couldn't connect. Try again.";
+			const failure = cause instanceof ConnectAppError ? connectFailure(cause.failureClass) : { line: "Couldn't connect. Try again.", recovery: '' };
+			error = failure.line;
+			recovery = failure.recovery;
 		} finally {
 			submitting = false;
 		}
@@ -126,11 +156,11 @@
 			<section aria-labelledby="connect-app-setup">
 				<h2 class="step-heading" id="connect-app-setup">Set it up</h2>
 				{#if kind === 'local'}
-					<label class="field"><span>What it runs</span><small>Paste what the app's setup instructions say to run</small><input aria-label="What it runs" value={command} oninput={(event) => command = event.currentTarget.value} placeholder="npx -y @example/app" /></label>
+					<label class="field"><span>What it runs</span><small>Paste what the app's setup instructions say to run</small><input bind:this={setupInput} aria-label="What it runs" value={command} oninput={(event) => command = event.currentTarget.value} placeholder="npx -y @example/app" /></label>
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
 					<p class="notice">It can do anything you can do on this computer, except open CORSIA's own files and saved keys. Connect only apps you trust.</p>
 				{:else}
-					<label class="field"><span>Web address</span><small>Paste the address from the app's setup instructions</small><input aria-label="Web address" value={address} oninput={(event) => suggestName(event.currentTarget.value)} placeholder="https://mcp.example.com" /></label>
+					<label class="field"><span>Web address</span><small>Paste the address from the app's setup instructions</small><input bind:this={setupInput} aria-label="Web address" value={address} oninput={(event) => suggestName(event.currentTarget.value)} placeholder="https://mcp.example.com" /></label>
 					<label class="field"><span>Name</span><small>What you'll see in CORSIA</small><input aria-label="Name" value={name} oninput={(event) => name = event.currentTarget.value} /></label>
 				{/if}
 			</section>
@@ -154,7 +184,7 @@
 		{:else if result}
 			<section aria-live="polite"><h2>{result.name}: {result.state === 'working' ? `Connected${result.tool_count ? ` · ${result.tool_count} actions` : ''}` : result.state === 'needs_sign_in' ? 'Needs you to sign in' : result.state === 'needs_token' ? 'Needs a key' : 'Connected'}</h2></section>
 		{/if}
-		{#if error}<p class="error" role="alert">{error}</p><p class="recovery">{recoveryHint}</p>{/if}
+		{#if error}<p class="error" role="alert">{error}</p>{#if recovery}<p class="recovery">{recovery}</p>{/if}{/if}
 	</div>
 	{#snippet foot()}
 		<div class="actions">
@@ -163,7 +193,7 @@
 			{:else if step === 'setup'}
 				<Button onclick={() => { step = 'what'; error = ''; }}>Back</Button><Button variant="primary" onclick={continueFromSetup}>Continue</Button>
 			{:else if step === 'where'}
-				<Button onclick={() => { step = 'setup'; error = ''; }}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>Connect</Button>
+				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Try again' : 'Connect'}</Button>
 			{:else}
 				<Button variant="primary" onclick={onClose}>Done</Button>
 			{/if}
