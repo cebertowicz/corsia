@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import resource
 import threading
 import time
-from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
+from multiprocessing.context import SpawnProcess
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,6 +22,13 @@ from core.onnx_asset import (
     load_tokenizer,
     open_session,
 )
+
+# Spawn, never the Linux default fork: a forked child inherits every open parent socket
+# (listeners, keep-alive connections, websockets), so the peer never sees a FIN after the
+# parent closes one while this long-lived child still holds a copy.
+_SPAWN = multiprocessing.get_context("spawn")
+Pipe = _SPAWN.Pipe
+Process = _SPAWN.Process
 
 RSS_POLL_SECONDS = 0.05
 CLOSE_JOIN_SECONDS = 1.0
@@ -94,7 +102,7 @@ class OnnxChild:
         self._target = target
         self._target_args = target_args
         self._lock = threading.Lock()
-        self._process: Process | None = None
+        self._process: SpawnProcess | None = None
         self._connection: Connection[Any, Any] | None = None
         self._killed = False
         self.loaded = False
@@ -234,7 +242,7 @@ class OnnxChild:
         self._process, self._connection, self.loaded = None, None, False
 
 
-def _child_rss_bytes(process: Process | None) -> int:
+def _child_rss_bytes(process: SpawnProcess | None) -> int:
     """Read the child RSS or fail rather than permit an uncapped process to continue."""
     if process is None:
         raise RuntimeError("child has no process")

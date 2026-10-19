@@ -354,3 +354,68 @@ def test_child_that_does_not_exit_stays_an_unavailable_error(monkeypatch, tmp_pa
         child.ensure_loaded()
 
     assert raised.value.kind == "transient"
+
+
+def _hold_open_after_ready(connection, _manifest_path, _spec):
+    """A module-level child target (picklable under spawn) that stays alive and silent."""
+    connection.send({"ready": True})
+    connection.poll(30)
+
+
+def _loaded_real_child(tmp_path):
+    import dataclasses
+
+    from core.onnx_asset import load_manifest
+    from core.onnx_child import OnnxChild
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = dataclasses.replace(
+        _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()}), rss_limit_bytes=1 << 40,
+    )
+    child = OnnxChild(load_manifest(path, spec), spec, target=_hold_open_after_ready)
+    child.ensure_loaded()
+    return child
+
+
+def _peer_sees_eof_after_parent_closes(child_start_context, monkeypatch, tmp_path) -> bool:
+    import socket
+
+    from core import onnx_child
+
+    monkeypatch.setattr(onnx_child, "Process", child_start_context.Process)
+    monkeypatch.setattr(onnx_child, "Pipe", child_start_context.Pipe)
+    parent_end, peer_end = socket.socketpair()
+    peer_end.settimeout(2.0)
+    child = None
+    try:
+        # The child starts while the parent holds a live socket, as the backend does
+        # with its listener and every open HTTP or websocket connection.
+        child = _loaded_real_child(tmp_path)
+        parent_end.close()
+        try:
+            return peer_end.recv(1) == b""
+        except socket.timeout:
+            return False
+    finally:
+        peer_end.close()
+        if child is not None:
+            child.close()
+
+
+def test_onnx_child_does_not_inherit_parent_sockets(monkeypatch, tmp_path):
+    """A parent socket closed while the child lives must still reach its peer as EOF."""
+    from core import onnx_child
+
+    assert _peer_sees_eof_after_parent_closes(
+        onnx_child._SPAWN, monkeypatch, tmp_path,
+    ), "the child kept a copy of the parent's socket open"
+
+
+def test_fork_start_method_is_what_leaks_the_socket(monkeypatch, tmp_path):
+    """Control: under fork the same child holds the socket open and the peer never sees EOF."""
+    import multiprocessing
+
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("this platform has no fork start method")
+
+    assert not _peer_sees_eof_after_parent_closes(multiprocessing.get_context("fork"), monkeypatch, tmp_path)
