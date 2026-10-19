@@ -1,4 +1,4 @@
-"""Schema 125 -> 126: introduce connected accounts and migrate legacy Google."""
+"""Schema 126 -> 127: introduce connected accounts and migrate legacy Google."""
 
 from __future__ import annotations
 
@@ -13,7 +13,11 @@ from connections.connected_accounts import (
     corsia_only_reach,
 )
 from infra import key_store, key_store_values
-from infra.connected_accounts_schema import CONNECTED_ACCOUNTS_SCHEMA_SQL
+from infra.connected_accounts_schema import (
+    AUDIT_TABLE_SQL,
+    CONNECTED_ACCOUNTS_SCHEMA_SQL,
+    JOURNAL_TABLE_SQL,
+)
 from infra.settings import get_setting
 from infra.time import utc_now_iso
 
@@ -54,7 +58,41 @@ def _clear_legacy(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM settings WHERE key IN (?,?)", (LEGACY_ACCOUNT_SETTING, LEGACY_CURSOR_SETTING))
 
 
-def migrate_125_to_126(conn: sqlite3.Connection) -> None:
+def _normalize_history_tables(conn: sqlite3.Connection) -> None:
+    """Replace transient train history DDL with the final no-FK, current-cause shape."""
+    tables = (
+        ("connected_account_audit", AUDIT_TABLE_SQL),
+        ("connected_account_migration_journal", JOURNAL_TABLE_SQL),
+    )
+    for table, create in tables:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        if row is None:
+            continue
+        sql = str(row[0])
+        has_foreign_keys = bool(conn.execute(f"PRAGMA foreign_key_list({table})").fetchall())
+        has_old_audit_cause = table == "connected_account_audit" and "not_signed_in" not in sql
+        if not has_foreign_keys and not has_old_audit_cause:
+            continue
+
+        columns = [column[1] for column in conn.execute(f"PRAGMA table_info({table})")]
+        copied_columns = ",".join(columns)
+        select_columns = ",".join(
+            "CASE WHEN revocation_cause='manual_only' THEN 'not_signed_in' ELSE revocation_cause END"
+            if column == "revocation_cause" else column
+            for column in columns
+        )
+        old_table = f"{table}_transient_train"
+        conn.execute(f"ALTER TABLE {table} RENAME TO {old_table}")
+        conn.execute(create)
+        conn.execute(f"INSERT INTO {table}({copied_columns}) SELECT {select_columns} FROM {old_table}")
+        conn.execute(f"DROP TABLE {old_table}")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_connected_account_audit_account ON connected_account_audit(account_id, id)"
+    )
+
+
+def migrate_126_to_127(conn: sqlite3.Connection) -> None:
     """Move one usable legacy Google singleton atomically into its account row.
 
     The surrounding migration runner owns the transaction and journaled schema
@@ -63,6 +101,7 @@ def migrate_125_to_126(conn: sqlite3.Connection) -> None:
     bundle resolves. A failed bundle write therefore leaves the old path intact.
     """
     conn.executescript(CONNECTED_ACCOUNTS_SCHEMA_SQL)
+    _normalize_history_tables(conn)
     if conn.execute(
         "SELECT 1 FROM connected_account_migration_journal WHERE migration_key=?", (JOURNAL_KEY,),
     ).fetchone() is not None:

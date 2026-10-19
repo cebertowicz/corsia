@@ -3,12 +3,16 @@
 
 	import { readSystemVersion, restartSystem, waitForSystemRestart } from '$lib/stores/settingsSystemRestart';
 	import { logout } from '$lib/stores/auth';
+	import { toasts } from '$lib/stores/toast';
 	import { themeSetting, type ThemeSetting } from '$lib/stores/theme';
 	import { Button } from '$lib/components/ui';
 	import FocusModeSetting from './FocusModeSetting.svelte';
 	import SettingsUpdate from './SettingsUpdate.svelte';
 	import { updateInFlight } from '$lib/update/store';
 	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
+	import SettingsDevices from './SettingsDevices.svelte';
+	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
+	import { connectOpen } from '$lib/stores/remoteConnect';
 	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
@@ -78,8 +82,28 @@
 		}
 	}
 
-	let accountConfirm = $state<'logout' | null>(null);
+	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
+	// Only the desktop app can connect to, or leave, another computer; a browser and the phone app have no shell.
+	const shell = shellInfo();
+	const remoteName = shell?.mode === 'remote' ? shell.name : null;
+
+	/** Signs this app out, then forgets the computer; the shell opens Welcome. Nothing on the other computer changes. */
+	async function disconnect() {
+		accountInProgress = true;
+		try {
+			await logout();
+			await disconnectRemote();
+		} catch {
+			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
+			settingsError = message;
+			// Signing out comes first, so this page may already be replaced by sign-in; a toast outlives it.
+			toasts.show(message, 'error', 8000);
+		} finally {
+			accountConfirm = null;
+			accountInProgress = false;
+		}
+	}
 
 	function memoryColor(pressure: string): string {
 		if (pressure === 'critical') return 'var(--red)';
@@ -165,8 +189,37 @@
 			</div>
 		</div>
 
+		{#if remoteName}
+			<div class="service-row" data-testid="account-computer">
+				<span class="service-name">Computer</span>
+				<span class="service-status">Connected to {remoteName}</span>
+				<div class="service-actions">
+					{#if accountConfirm !== 'disconnect'}
+						<Button size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
+					{:else}
+						<Button variant="danger" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
+						<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
+					{/if}
+				</div>
+				{#if accountConfirm === 'disconnect'}
+					<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
+						<span class="confirm-text">Disconnect from {remoteName}?</span>
+						<span class="service-status">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
+					</div>
+				{/if}
+			</div>
+		{:else if shell}
+			<div class="service-row" data-testid="account-computer">
+				<span class="service-name">Computer</span>
+				<span class="service-status">This computer</span>
+				<div class="service-actions"><Button size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button></div>
+			</div>
+		{/if}
+
 	</div>
 </div>
+
+<SettingsDevices />
 
 {#if systemStatus?.memory}
 	<div class="settings-card">
@@ -215,6 +268,8 @@
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
 	.confirm-text { font-size: var(--text-subhead); color: var(--text-secondary); }
+	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: calc(var(--space-1) / 2); order: -1; }
+	.service-row:has(.confirm-block) { flex-wrap: wrap; }
 	.status-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
 	.status-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-subhead); }
 	.status-label { color: var(--text-muted); width: 120px; flex-shrink: 0; }

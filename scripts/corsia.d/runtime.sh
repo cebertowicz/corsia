@@ -20,7 +20,7 @@ require_no_extra_lifecycle_args() {
 }
 
 # Once the CORSIA app adopts an install it runs its own service on that state
-# root and records it in service.json (its app folder, platform_paths). A second
+# root and records it in service.json (its app folder, service_file). A second
 # backend on the same state root would share one database, so start and restart
 # from a source checkout refuse. The app runs this same script on that root and
 # is never refused. A missing file, or one without state_dir, leaves the install
@@ -31,7 +31,8 @@ refuse_if_app_owns_install() {
     verdict="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
 import os, sys
 sys.path.insert(0, sys.argv[1])
-from infra.platform_paths import SERVICE_FILE, app_metadata_dir, service_file_state_dir
+from infra.platform_paths import app_metadata_dir
+from infra.service_file import SERVICE_FILE, service_file_state_dir
 path = app_metadata_dir() / SERVICE_FILE
 try:
     claimed = service_file_state_dir(path)
@@ -647,7 +648,7 @@ start_backend() {
     cd "$BACKEND_DIR"
     env -u CORSIA_RESTART_BACKEND_PORT -u CORSIA_RESTART_OPERATION_ID \
         -u CORSIA_TEST_MODE -u CORSIA_ALLOW_HOME_WORKSPACE_IN_CI \
-        BACKEND_PORT="$BACKEND_PORT" \
+        CORSIA_DEVICES_DISABLE=1 BACKEND_PORT="$BACKEND_PORT" \
         nohup "$PYTHON" -m uvicorn main:app --host "$bind" --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
 }
 

@@ -1,5 +1,7 @@
 import { StateField, StateEffect } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
+import { visibleRegion, type Box } from './visible-region';
+import { widgetTarget } from './widget-scroll';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -71,27 +73,45 @@ const STEADY_CHECKS = 2;
 /** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
 export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 
-// The scrolling pane can clip an editor that grows to the full content height.
-const clipping = new Set(['auto', 'scroll', 'hidden', 'clip']);
+const QUOTE_MARGIN = 8;
+const within = (box: Box | null, band: Box) => !!box && box.top >= band.top && box.bottom <= band.bottom;
 
-function visibleBand(view: EditorView) {
-	let top = 0;
-	let bottom = view.dom.ownerDocument.defaultView?.innerHeight ?? window.innerHeight;
-	for (let element: HTMLElement | null = view.scrollDOM; element; element = element.parentElement) {
-		if (!clipping.has(getComputedStyle(element).overflowY)) continue;
-		const rect = element.getBoundingClientRect();
-		top = Math.max(top, rect.top);
-		bottom = Math.min(bottom, rect.bottom);
-	}
-	return { top, bottom };
+// Where a target is drawn now: a text position, or its row in a table (a diagram, whole). Null while it is not drawn.
+const boxAt = (current: EditorView, target: number, widget: ReturnType<typeof widgetTarget>): Box | null => widget ? widget.box(current) : current.coordsAtPos(Math.min(target, current.state.doc.length));
+
+/**
+ * Whether a sheet or keyboard movement has just covered the text at `from`: the reader had it in view before, inside `before` (the
+ * band as of the last movement), and the band now leaves it out. Text the reader had scrolled out of view is not covered by a movement.
+ * Returns the band now, which is the next movement's `before`.
+ */
+export function coveredByMove(view: EditorView, from: number, before: Box | null): { band: Box; covered: boolean } {
+	const { band } = visibleRegion(view);
+	const target = Math.min(from, view.state.doc.length), box = boxAt(view, target, widgetTarget(view, target));
+	return { band, covered: !!before && within(box, before) && !within(box, band) };
 }
 
 export function scrollToRange(view: EditorView, from: number, _to: number, origin: ScrollOrigin = 'navigation') {
 	const target = Math.min(from, view.state.doc.length);
-	const start = view.coordsAtPos(target);
-	const band = visibleBand(view);
-	if (origin === 'comment-save' && start && start.top >= band.top && start.bottom <= band.bottom) return;
-	const jump = () => view.dispatch({ effects: EditorView.scrollIntoView(target, origin === 'quote-tap' ? { y: 'start', yMargin: 8 } : { y: 'center' }) });
+	const widget = widgetTarget(view, target);
+	const quote = origin === 'quote-tap';
+	const boxOf = (current: EditorView) => boxAt(current, target, widget);
+	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
+	// whole replaced block, which centres on the block's middle. Anything else, and a widget not drawn yet, goes to CodeMirror.
+	const jump = () => {
+		if (widget?.box(view)) {
+			view.requestMeasure({
+				key: widget,
+				read: (current) => ({ box: widget.box(current), ...visibleRegion(current) }),
+				write: ({ box, band, scroller }, current) => {
+					widget.reveal(current);
+					if (box) scroller.scrollTop += box.top - (quote ? band.top + QUOTE_MARGIN : (band.top + band.bottom - (box.bottom - box.top)) / 2);
+				},
+			});
+			return;
+		}
+		view.dispatch({ effects: EditorView.scrollIntoView(widget?.start ?? target, quote || widget ? { y: 'start', yMargin: QUOTE_MARGIN } : { y: 'center' }) });
+	};
 	const nextFrame = (run: () => void) => view.dom.ownerDocument.defaultView?.requestAnimationFrame(() => {
 		if (view.dom.isConnected) run();
 	});
@@ -102,9 +122,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 		view.requestMeasure({
 			key: scrollToRange,
 			read(current) {
-				const coords = current.coordsAtPos(Math.min(target, current.state.doc.length));
-				const box = visibleBand(current);
-				return !!coords && coords.top >= box.top && coords.bottom <= box.bottom;
+				return within(boxOf(current), visibleRegion(current).band);
 			},
 			write(onScreen) {
 				if (onScreen) {

@@ -87,7 +87,7 @@ EXPECTED_OMLX = {
     "task_title": OMLX_TASK,
     "title": "Change one oMLX setting for CORSIA?",
     "context": (
-        "Your oMLX runs the local models on this Mac. It's set to work on 4 requests at once. "
+        "Your oMLX runs the local models on this computer. It's set to work on 4 requests at once. "
         "At 1, oMLX finishes one request before it starts the next, so each one gets the model's "
         "full speed and memory instead of sharing them. I'd change only this one setting."
     ),

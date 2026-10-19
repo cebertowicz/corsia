@@ -3,6 +3,8 @@
 		key: string; name: string; meta: string;
 		pill?: { state: 'success' | 'loading'; label: string };
 		busy?: boolean; error?: boolean; detail?: string;
+		/** The spinner stays beside the action (an install under way, with Cancel) instead of giving way to it. */
+		spinning?: boolean;
 		action?: { label: string; run: () => void; loading?: boolean };
 		confirm?: { label: string; run: () => void }[];
 		more?: { label: string; run: () => void }[];
@@ -32,7 +34,7 @@
 		<section class="item" aria-label={row.name}>
 			<ListRow name={row.name} meta={[row.meta]} centered>
 				{#snippet actions()}
-					{#if row.action}<Button variant="chip" size="sm" loading={row.action.loading} disabled={row.action.loading} onclick={row.action.run}>{row.action.label}</Button>
+					{#if row.action}{#if row.spinning}<Spinner size={14} />{/if}<Button variant="chip" size="sm" loading={row.action.loading} disabled={row.action.loading} onclick={row.action.run}>{row.action.label}</Button>
 					{:else if row.pill}<StatePill look="dot" state={row.pill.state} label={row.pill.label} />
 					{:else if row.busy}<Spinner size={14} />{/if}
 				{/snippet}

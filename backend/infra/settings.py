@@ -160,6 +160,19 @@ def get_feature_flags() -> dict:
     return get_setting("features") or {}
 
 
+DEVICE_SETTING_KEY = "devices"
+
+
+def get_devices_enabled(*, db: sqlite3.Connection | None = None) -> bool:
+    """Return the explicitly persisted Devices listener switch state."""
+    return (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("enabled") is True
+
+
+def set_devices_enabled(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
+    """Persist the dedicated Devices switch through its one writer."""
+    set_setting(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
+
+
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Deep-merge updates into an existing setting."""
     with write_transaction(db, scope="save_setting_merge") as conn:

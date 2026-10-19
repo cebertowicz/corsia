@@ -73,6 +73,28 @@ describe('pending-edit marker display', () => {
 		expect(buttons[0].querySelector('.ctx-source-pending')?.textContent).toBe(PENDING_EDIT_LABEL);
 	});
 
+	it('adds row tags to an actionable source accessible name', () => {
+		const skill = {
+			id: 'skill:workspace:workspace::deploy-check', layer: 'workspace', category: 'Workspace',
+			label: 'deploy-check', fullLabel: 'deploy-check', stableReference: '', status: 'included',
+			reason: '', ownerSurface: '', ownerLabel: '', actionLabel: 'Show details', statusLabel: '',
+			statusClass: '', deltaLabel: '', countLabel: '', tokenCount: 1, tokenLabel: '1 token',
+			tags: ['name only'], kind: 'skill' as const,
+		};
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(ContextSheetSources, {
+			target: host,
+			props: { snapshot: {
+				sources: [skill],
+				sourceGroups: [{ id: 'workspace', category: 'Workspace', sources: [skill], instructions: [], skills: [skill], instructionsTokenLabel: '', skillsTokenLabel: '1 token', tokenCount: 1, deltaLabel: '', countLabel: '', tokenLabel: '1 token' }],
+			}, expandedGroups: { workspace: true }, onOpenSource: () => {} },
+		});
+		flushSync();
+
+		expect(host.querySelector('button.ctx-source-row')?.getAttribute('aria-label')).toBe('Show details for deploy-check, name only');
+	});
+
 	it('shows the exact text on an edited row only', () => {
 		expect(PENDING_EDIT_LABEL).toBe('Edited · applies at next checkpoint');
 		render([row('edited', { edited_since_install: true }), row('same', { edited_since_install: false })]);

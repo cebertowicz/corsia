@@ -14,6 +14,21 @@ from test_cc_tool_failure_fence import _live_with_result_step
 from test_cc_tool_result_echo_binding import _seed_thread
 
 
+@pytest.fixture(autouse=True)
+def restore_process_owner_admission():
+    """Return the process-wide owner to its prior admission state after each test."""
+    from tools import shell
+
+    owner = shell.PROCESS_OWNER
+    closed_turns = owner._closed_turns.copy()
+    closed_leases = owner._closed_leases.copy()
+    closing_threads = owner._closing_threads.copy()
+    yield
+    owner._closed_turns = closed_turns
+    owner._closed_leases = closed_leases
+    owner._closing_threads = closing_threads
+
+
 class _Harness:
     """One live CC handle whose terminal write refuses while ``locked`` is set."""
 

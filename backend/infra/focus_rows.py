@@ -20,6 +20,10 @@ ACTIVITY_SYSTEM_TYPES = (
     "context_event", "activity_receipt", "subagent_ref", "subagent_done", "send_ref",
     "artifact_removed", "model_switch", "account_switch",
 )
+# System rows the transcript never draws: a `seed` is a session's starting context.
+# One is not visible, so it never splits a run or holds back an error's recovery,
+# and a Focus read neither counts it in a run nor sends it (`NEVER_DRAWN_FILTER`).
+NEVER_DRAWN_SYSTEM_TYPES = ("seed",)
 # Rows that end a turn with an error. One stays visible until the agent's next turn
 # starts with nothing to read in between; that start writes `recovered: true` on it.
 ERROR_SYSTEM_TYPES = (
@@ -59,7 +63,7 @@ def is_focus_visible(row: dict) -> bool:
         if kind == "result":
             # A provider result splits only as an error with something to read.
             return meta.get("is_error") is True and bool(row.get("content"))
-        return kind not in ACTIVITY_SYSTEM_TYPES
+        return kind not in ACTIVITY_SYSTEM_TYPES and kind not in NEVER_DRAWN_SYSTEM_TYPES
     return False
 
 
@@ -112,6 +116,7 @@ def _meta_json_type(path: str) -> str:
 
 
 _ACTIVITY_TYPE_LIST = _sql_list(ACTIVITY_SYSTEM_TYPES)
+_NEVER_DRAWN_TYPE_LIST = _sql_list(NEVER_DRAWN_SYSTEM_TYPES)
 _ERROR_TYPE_LIST = _sql_list(ERROR_SYSTEM_TYPES)
 _TYPE_SQL = _meta_text("$.type")
 
@@ -126,9 +131,14 @@ CASE WHEN (CASE role
         WHEN {_TYPE_SQL} IN ({_ERROR_TYPE_LIST}) THEN {_meta_json_type("$.recovered")} != 'true'
         WHEN {_TYPE_SQL} = 'result'
             THEN {_meta_json_type("$.is_error")} = 'true' AND COALESCE(content, '') != ''
-        ELSE {_TYPE_SQL} NOT IN ({_ACTIVITY_TYPE_LIST}) END
+        ELSE {_TYPE_SQL} NOT IN ({_ACTIVITY_TYPE_LIST},{_NEVER_DRAWN_TYPE_LIST}) END
     ELSE 0 END) THEN 1 ELSE 0 END
 """
+
+# A `WHERE` clause continuation that drops the rows the transcript never draws.
+NEVER_DRAWN_FILTER = (
+    f"AND NOT (role = 'system' AND {_TYPE_SQL} IN ({_NEVER_DRAWN_TYPE_LIST})) "
+)
 
 
 def focus_kind_sql(weight_sql: str) -> str:

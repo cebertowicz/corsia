@@ -70,7 +70,7 @@
     "backend/host_access/supervisor.py::approve_and_activate": 165,
     "backend/host_access/supervisor.py::request_reviewed_lease": 94,
     "backend/host_access/supervisor.py::review_host_action": 205,
-    "backend/infra/context_usage_attribution.py::merge_context_usage_with_snapshot": 92,
+    "backend/infra/context_usage_attribution.py::merge_context_usage_with_snapshot": 89,
     "backend/infra/host_access_leases.py::record_action_review": 116,
     "backend/infra/host_access_leases.py::request_lease": 120,
     "backend/infra/project_repo_policy.py::fast_forward_repo": 180,

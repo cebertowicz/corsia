@@ -4,9 +4,11 @@
  */
 export const OWN_OMLX_FOUND = 'CORSIA found oMLX on this computer. Both choices use it.';
 export const MANAGE_LABEL = 'Let CORSIA manage it';
-export const MANAGE_META = 'Recommended. CORSIA keeps your oMLX’s settings right for the model it sets up.';
+export const MANAGE_META = 'Recommended. CORSIA sets up oMLX for the model it installs. You can put your own settings back in Settings any time.';
 export const USE_MINE_LABEL = 'Use mine';
-export const USE_MINE_META = 'CORSIA uses your models and changes nothing. Change settings in oMLX’s own admin page.';
+export const USE_MINE_META = 'CORSIA uses your models as they are and changes nothing in oMLX.';
+/** The one control that opens the terms (`MANAGE_DISCLOSURE`) in a popover, at every window size. */
+export const TERMS_LABEL = 'What CORSIA changes';
 /** The disclosure's lead, set in bold before `MANAGE_DISCLOSURE`. */
 export const MANAGE_DISCLOSURE_LEAD = 'Letting CORSIA manage it';
 export const MANAGE_DISCLOSURE = 'means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer), Native MTP and Thinking. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.';

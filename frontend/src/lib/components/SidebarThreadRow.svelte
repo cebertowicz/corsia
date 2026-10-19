@@ -75,11 +75,29 @@
 	const updateSummary = $derived(planState?.latest_update?.summary);
 	// What the user owes takes the second line, in place of the update summary; the mark owns it either way.
 	const needsYou = $derived(isYourMove(planState));
+
+	// The swipe transforms are composited layers (about three per row), so a row carries them only while it is
+	// being swiped, is open, or is still sliding shut. A row at rest has none, so the windowed list can mount
+	// rows without the compositor allocating layers for each (long frames on scroll in WebKit).
+	const SETTLE_MS = 300; // longer than --dur-standard; covers a tap that never moved, which has no transitionend
+	const atRest = $derived(!swiping && transformX === 0);
+	let settling = $state(false);
+	const engaged = $derived(settling || !atRest);
+	$effect(() => {
+		if (!atRest) { settling = true; return; }
+		if (!settling) return;
+		const timer = setTimeout(() => { settling = false; }, SETTLE_MS);
+		return () => clearTimeout(timer);
+	});
+	function onSlideEnd(e: TransitionEvent) {
+		if (atRest && e.propertyName === 'transform' && e.target === e.currentTarget) settling = false;
+	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="thread-item-wrapper"
+	class:engaged
 	ontouchstart={(e: TouchEvent) => onTouchStart(e, thread.id)}
 	ontouchend={onTouchEnd}
 >
@@ -88,7 +106,7 @@
 		class:armed={pinArmed}
 		class:moving={swiping}
 		tabindex="-1"
-		style={`transform: translate3d(${leftZoneX}px, 0, 0)`}
+		style={engaged ? `transform: translate3d(${leftZoneX}px, 0, 0)` : undefined}
 		ontouchstart={(e: TouchEvent) => e.stopPropagation()}
 		ontouchend={(e: TouchEvent) => onPin(thread.id, e)}
 		onclick={(e: MouseEvent) => onPin(thread.id, e)}
@@ -99,7 +117,7 @@
 	<div
 		class="right-zone-group"
 		class:moving={swiping}
-		style={`transform: translate3d(${rightZoneX}px, 0, 0)`}
+		style={engaged ? `transform: translate3d(${rightZoneX}px, 0, 0)` : undefined}
 	>
 		<button
 			class="action-zone archive-zone"
@@ -129,7 +147,8 @@
 		class="thread-item press-tint"
 		class:active={isActive}
 		class:swiping={swiping && isSwipeGesture}
-		style={`transform: translate3d(${transformX}px, 0, 0)`}
+		style={engaged ? `transform: translate3d(${transformX}px, 0, 0)` : undefined}
+		ontransitionend={onSlideEnd}
 		onclick={() => onSelect(thread.id)}
 		oncontextmenu={(e: MouseEvent) => onOpenContextMenu(e, thread.id)}
 	>
@@ -202,23 +221,26 @@
 		padding: 0; z-index: 0;
 		transition: transform var(--dur-standard) var(--ease-ios-sheet),
 		            filter var(--dur-tight) ease-out;
-		backface-visibility: hidden;
 	}
 	.action-zone.moving { transition: filter var(--dur-tight) ease-out; }
 	.action-zone .zone-label { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.01em; }
+	/* At rest the zones sit just outside the wrapper by position alone; while engaged they take their place
+	   and the inline transform slides them in. */
 	.left-zone {
-		left: 0; width: 80px;
+		right: 100%; width: 80px;
 		background: var(--accent-fill); color: var(--accent-on-fill);
 		border-top-left-radius: var(--radius-sm);
 		border-bottom-left-radius: var(--radius-sm);
 	}
 	.right-zone-group {
-		position: absolute; top: 0; bottom: 0; right: 0;
+		position: absolute; top: 0; bottom: 0; left: 100%;
 		display: flex; z-index: 0;
 		width: 144px;
 		transition: transform var(--dur-standard) var(--ease-ios-sheet);
-		backface-visibility: hidden;
 	}
+	.engaged .left-zone { right: auto; left: 0; }
+	.engaged .right-zone-group { left: auto; right: 0; }
+	.engaged .action-zone, .engaged .right-zone-group, .engaged .thread-item { backface-visibility: hidden; }
 	.right-zone-group.moving { transition: none; }
 	.archive-zone {
 		position: relative; width: 72px;
@@ -241,8 +263,6 @@
 		position: relative; z-index: 1;
 		transition: transform var(--dur-standard) var(--ease-ios-sheet),
 		            background var(--dur-standard) ease-out;
-		transform: translate3d(0, 0, 0);
-		backface-visibility: hidden;
 		-webkit-user-select: none;
 		user-select: none;
 		-webkit-touch-callout: none;

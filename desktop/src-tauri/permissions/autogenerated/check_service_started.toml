@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-service-started"
+description = "Enables the check_service_started command without any pre-configured scope."
+commands.allow = ["check_service_started"]
+
+[[permission]]
+identifier = "deny-check-service-started"
+description = "Denies the check_service_started command without any pre-configured scope."
+commands.deny = ["check_service_started"]

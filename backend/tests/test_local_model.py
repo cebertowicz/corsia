@@ -16,7 +16,7 @@ import pytest
 from llm import local_model, local_setup, local_setup_operation, local_sources
 from llm import local_setup_prepare as prepare
 from llm.local_model import LocalModel
-from llm.local_profiles import MODEL_SETTINGS
+from llm.local_profiles import MODEL_SETTINGS, STARTER_MODEL
 from omlx_recommender_fixtures import FIXTURE, THINKING, best_rows as _best, mac_with as _mac
 from omlx_recommender_fixtures import fresh_local_setup  # noqa: F401
 
@@ -81,11 +81,11 @@ def test_welcome_shows_the_recommenders_pick_for_each_memory_size(monkeypatch, g
         assert mac.started == [] and mac.omlx.calls == []
         return
     repository, window, name = PICKS[gib]
-    size = next(row["download_bytes"] for row in _best(gib) if row["repo_id"] == repository)
-    assert view == {"state": "picked", "message": None, "model": {
-        "name": name, "repository": repository, "download_size_bytes": size,
-        "download_size_gb": round(size / 1000**3, 1), "context_window": window,
-    }}
+    row = next(row for row in _best(gib) if row["repo_id"] == repository)
+    model = local_model.from_recommendation(row)
+    assert model is not None
+    assert (model.repository, model.context_window, model.display_name) == (repository, window, name)
+    assert view == {"state": "picked", "message": None, "model": model.view()}
     # Welcome only picks: it asks once and downloads nothing.
     assert mac.omlx.asks() == 1 and mac.downloads == [] and mac.omlx.puts() == []
 
@@ -123,31 +123,105 @@ def test_the_flight_asks_the_recommender_itself_when_welcome_did_not(monkeypatch
     assert [model.repository for model in mac.downloads] == ["Jundot/Qwen3.8-27B-oQ4e-mtp"]
 
 
-def test_the_pick_skips_rows_below_32k_and_caps_the_window_at_256k():
+def test_recommender_metadata_survives_in_the_structured_settings_view():
+    row = next(row for row in _best(24) if row["repo_id"] == "Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp")
+
+    model = local_model.from_recommendation(row)
+
+    assert model is not None
+    assert model.level == row["level"] and model.fp16 is row["fp16"]
+    assert model.relative_speed == row["relative_speed"]
+    assert model.view() == {
+        "name": model.display_name, "repository": row["repo_id"], "model": model.model,
+        "download_size_bytes": row["download_bytes"],
+        "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
+        "context_window": row["max_context"], "quantization_bits": row["level"],
+        "relative_speed": row["relative_speed"],
+    }
+    restored = local_model.from_recommendation(local_model.to_record(model))
+    assert restored == model and restored.view() == model.view()
+    assert local_setup_operation.Operation.for_model(model, "settings").model.view() == model.view()
+
+
+def test_recommendation_rows_below_32k_are_unusable_and_the_window_caps_at_256k():
     rows = [
         {"repo_id": "org/short-oQ4e", "download_bytes": 10, "max_context": 32_767},
         {"repo_id": "org/broken", "download_bytes": True, "max_context": 65_536},
         {"repo_id": "no-owner", "download_bytes": 10, "max_context": 65_536},
         {"repo_id": "org/Long-Model-oQ4e-mtp", "download_bytes": 10, "max_context": 1_048_576},
     ]
-    assert local_model.pick({"sections": {"best": rows}}) == LocalModel("org/Long-Model-oQ4e-mtp", 10, 262_144)
-    assert local_model.pick({"sections": {"best": rows[:3]}}) is None
-    assert local_model.pick({"sections": {}}) is None and local_model.pick([]) is None
+    usable = [model for row in rows if (model := local_model.from_recommendation(row)) is not None]
+    assert usable == [LocalModel("org/Long-Model-oQ4e-mtp", 10, 262_144)]
 
 
-def test_when_nothing_reaches_32k_welcome_says_so_and_get_started_downloads_nothing(monkeypatch):
+def _no_row_reaches_32k(monkeypatch):
     short = [{**row, "max_context": 16_384} for row in _best(48)]
-    mac = _mac(monkeypatch, 48, answers=[{"sections": {"best": short}}] * 2)
+    return _mac(monkeypatch, 48, answers=[{"sections": {"best": short}}] * 2)
+
+
+def test_when_oMLX_recommends_nothing_welcome_offers_the_starter_model_and_says_why(monkeypatch):
+    _no_row_reaches_32k(monkeypatch)
 
     view = asyncio.run(_prepared())
-    assert view == {"state": "none_fits", "model": None, "message": prepare.NO_LOCAL_MODEL}
+
+    assert view["state"] == "picked" and view["model"]["repository"] == STARTER_MODEL.repository
+    assert view["model"]["name"] == "Ternary Bonsai 2"
+    assert view["message"] == "oMLX didn’t recommend a model for this computer, so CORSIA chose Ternary Bonsai 2."
+
+
+def test_the_starter_names_itself_from_its_profile_and_keeps_the_name_through_its_records():
+    assert STARTER_MODEL.name == "Ternary Bonsai 2" and STARTER_MODEL.display_name == "Ternary Bonsai 2"
+    # The name is the profile's, never the repository id's, and the records that carry the model keep it.
+    assert LocalModel(STARTER_MODEL.repository, 1, 32_768).display_name == "Ternary Bonsai 2 27B"
+    assert local_model.from_recommendation(local_model.to_record(STARTER_MODEL)).display_name == "Ternary Bonsai 2"
+    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "starter")
+    assert operation.model.display_name == "Ternary Bonsai 2"
+
+
+def test_a_recommender_with_no_usable_row_downloads_the_starter_and_writes_no_effort_level(monkeypatch):
+    mac = _no_row_reaches_32k(monkeypatch)
+    monkeypatch.setitem(THINKING, STARTER_MODEL.model, True)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    asyncio.run(_prepared())
 
     result = asyncio.run(_flown())
 
-    assert result["ok"] is True and result["skipped"] == "none_fits"
-    assert result["message"] == prepare.NO_LOCAL_MODEL
-    assert mac.downloads == [] and mac.omlx.puts() == []
-    assert local_model.set_up_model() is None and local_setup_operation.read() is None
+    assert result["ok"] is True and "skipped" not in result
+    assert [model.repository for model in mac.downloads] == [STARTER_MODEL.repository]
+    [(path, settings)] = mac.omlx.puts()
+    assert path == f"/models/{STARTER_MODEL.model}/settings"
+    assert settings["max_context_window"] == STARTER_MODEL.context_window
+    # Bonsai thinks by default and has an on/off toggle only: nothing is written to turn it on, and no effort level.
+    assert not {"enable_thinking", "reasoning_effort"} & set(settings)
+    assert local_model.set_up_model() == STARTER_MODEL
+
+
+def test_a_flight_that_found_no_row_itself_downloads_the_starter(monkeypatch):
+    mac = _no_row_reaches_32k(monkeypatch)
+    monkeypatch.setitem(THINKING, STARTER_MODEL.model, True)
+
+    result = asyncio.run(_flown())
+
+    assert result["ok"] is True and [model.repository for model in mac.downloads] == [STARTER_MODEL.repository]
+
+
+def test_a_pick_the_recommender_made_carries_no_starter_note(monkeypatch):
+    _mac(monkeypatch, 48)
+
+    view = asyncio.run(_prepared())
+
+    assert view["message"] is None and prepare._prepare.fallback is False
+
+
+@pytest.mark.parametrize("failure", [httpx.ConnectError("offline"), 504], ids=["offline", "hub-timeout"])
+def test_a_recommender_that_cannot_answer_is_couldnt_check_never_the_starter(monkeypatch, failure):
+    mac = _mac(monkeypatch, 48, answers=[failure, failure])
+
+    view = asyncio.run(_prepared())
+
+    assert view["state"] == "failed" and view["model"] is None
+    assert prepare.fallback_note(STARTER_MODEL) not in str(view["message"])
+    assert mac.downloads == [] and prepare._prepare.fallback is False
 
 
 @pytest.mark.parametrize("first", [504, 503, 502, httpx.ConnectError("connection refused")],
@@ -167,7 +241,7 @@ def test_a_second_failure_shows_cant_check_then_try_again_picks(monkeypatch):
     view = asyncio.run(_prepared())
 
     assert view["state"] == "failed" and view["model"] is None
-    assert "HTTP 504" in view["message"] and mac.downloads == []
+    assert "Couldn't get model recommendations from oMLX" in view["message"] and mac.downloads == []
     # Try again starts the pick afresh.
     assert asyncio.run(_prepared())["state"] == "picked" and mac.omlx.asks() == 3
 
@@ -187,7 +261,7 @@ def test_a_flight_whose_recommender_never_answers_fails_without_downloading(monk
 
     result = asyncio.run(_flown())
 
-    assert result["ok"] is False and "HTTP 502" in result["message"]
+    assert result["ok"] is False and "Couldn't get model recommendations from oMLX" in result["message"]
     assert mac.downloads == [] and local_setup_operation.read() is None
 
 
@@ -196,7 +270,7 @@ def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):
 
     view = asyncio.run(_prepared())
 
-    assert view["state"] == "failed" and "HTTP 404" in view["message"]
+    assert view["state"] == "failed" and "Couldn't get model recommendations from oMLX" in view["message"]
 
 
 def test_overlapping_prepare_requests_start_one_task(monkeypatch):

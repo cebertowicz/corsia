@@ -71,8 +71,11 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # which neither a zero cache nor a matching total disproves. A Codex row is
 # priced only when its id is a 24-hex receipt id: ``_receipt_id`` (turn usage,
 # #1626, 2026-09-11) and the checkpoint writer (#1764, 2026-09-15) are the
-# only writers of that shape, both later than the contract, whereas direct writes
-# use ``uuid4()[:12]`` (hyphenated, so never 24 hex). An External conversation row
+# only writers of that shape, both later than the contract. The checkpoint Codex
+# path is per-call and disjoint: ``subagents.codex_app_server_notifications.record_usage``
+# emits ``CumulativeTurnVolume.observe`` deltas as ``TokenUsage.ledger_row()``, and
+# ``core.checkpoint_codex_result.CodexCheckpointCapture.publish_calls`` writes each
+# one. Direct writes use ``uuid4()[:12]`` (hyphenated, so never 24 hex). An External conversation row
 # is disjoint from 2026-09-17: the native path normalizes OpenAI-compatible
 # usage into disjoint buckets in ``infra.provider_usage.from_litellm``, present in
 # this repository's first commit, and the later rows carry cache reads larger
@@ -86,7 +89,7 @@ _TOTAL_AGREES = (
 # ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'.
 _CONTRACT_PROVEN = (
     f"(CASE WHEN COALESCE(u.source,'')='{CLAUDE_CODE_SOURCE}' AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
-    f"WHEN COALESCE(u.source,'')='{CODEX_SOURCE}' AND COALESCE(u.model,'') LIKE 'codex/%' "
+    f"WHEN COALESCE(u.source,'') IN ('{CODEX_SOURCE}','checkpoint') AND COALESCE(u.model,'') LIKE 'codex/%' "
     f"AND length(u.id)=24 AND u.id NOT GLOB '*[^0-9a-f]*' THEN 1 "
     f"WHEN COALESCE(u.source,'')='conversation' AND COALESCE(u.model,'') LIKE 'external@%' "
     f"AND u.created_at>='2026-09-17' THEN 1 "

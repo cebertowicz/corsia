@@ -67,7 +67,8 @@
     ],
     "macOS": {
       "minimumSystemVersion": "15.0",
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
     }
   }
 }

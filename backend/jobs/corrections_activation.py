@@ -96,12 +96,13 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
             logger.warning("corrections activation conductor notice skipped: {}", gap)
         return
     old = activation["before_count"]
+    installed = f"Corrections classifier version {version.version} was installed and activated. "
     if old is None:
-        detail = f"Corrections are now counted for the last {activation['weeks']} weeks."
+        detail = installed + f"Corrections are now counted for the last {activation['weeks']} weeks."
     else:
-        detail = (
-            f"Corrections for the last {activation['weeks']} weeks were re-read with classifier "
-            f"version {version.version}; the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
+        detail = installed + (
+            f"Corrections for the last {activation['weeks']} weeks were re-read with it; "
+            f"the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
         )
     from events.delivery import deliver_to_thread
 

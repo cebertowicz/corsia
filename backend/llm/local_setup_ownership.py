@@ -285,34 +285,43 @@ def download_complete(folder: Path, download_bytes: int) -> bool:
     return _present_bytes(folder) >= download_bytes
 
 
-def require_free_disk(download_bytes: int, model_dir: Path | None, repository: str) -> None:
-    """Raise DiskSpaceError when ``model_dir``'s volume lacks room for what is still to download.
+def download_disk_space(download_bytes: int, model_dir: Path | None, repository: str) -> dict[str, int | str]:
+    """Describe the actual remaining download space requirement without guessing.
 
-    ``model_dir`` is the directory oMLX reports it downloads to. oMLX writes into
-    ``<model_dir>/<repository>`` and resumes there, skipping files it already holds
-    (oMLX ``omlx/admin/hf_downloader.py``, ``retry_download`` and ``start_download``), so the
-    bytes already present are credited and the 10% margin applies to the remainder only.
-    The nearest existing parent stands in until oMLX has created the directory. With no
-    ``model_dir``, or when free space can't be read, the check is skipped with a warning
-    (oMLX reports a full disk itself).
+    oMLX resumes inside ``<model_dir>/<repository>``, so present partial bytes are
+    credited and the existing 10% safety margin applies only to the remainder.
     """
     if model_dir is None:
-        log.warning("Free disk space check skipped: oMLX reported no model directory")
-        return
+        return {"state": "unknown"}
     path = model_dir
     try:
         while not path.exists() and path != path.parent:
             path = path.parent
         free = shutil.disk_usage(path).free
         remaining = max(0, download_bytes - _present_bytes(model_dir / repository))
-    except OSError as exc:
-        log.warning("Free disk space check skipped for %s: %s", path, exc)
+    except OSError:
+        return {"state": "unknown"}
+    required = int(remaining * 1.1)
+    return {
+        "state": "ready" if free >= required else "insufficient",
+        "free_bytes": free,
+        "remaining_bytes": remaining,
+        "required_bytes": required,
+    }
+
+
+def require_free_disk(download_bytes: int, model_dir: Path | None, repository: str) -> None:
+    """Raise DiskSpaceError when oMLX's download volume lacks room for the remainder."""
+    space = download_disk_space(download_bytes, model_dir, repository)
+    if space["state"] == "unknown":
+        log.warning("Free disk space check skipped: oMLX download directory is unavailable")
         return
-    needed = int(remaining * 1.1)
-    if free < needed:
+    free = int(space["free_bytes"])
+    needed = int(space["required_bytes"])
+    if space["state"] == "insufficient":
         short = (needed - free) / 1000**3
         raise DiskSpaceError(
-            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this Mac has "
+            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this computer has "
             f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.")
 
 

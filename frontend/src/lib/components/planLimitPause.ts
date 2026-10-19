@@ -2,6 +2,7 @@ import { PLAN_LIMIT_REASON } from '$lib/stores/overageSetting';
 import type { TranscriptMessage } from './messageListModel';
 import { isKnownFutureInput, sourceMembers, sourceRange, type SourcePlacementContext } from './contextEventModel';
 import type { TranscriptEntry, TranscriptFoldEntry, TranscriptMessageEntry, TranscriptPauseEntry } from './transcriptFocusModel';
+import { isNeverDrawn } from './transcriptRowKinds';
 
 export type PlanLimitPauseDescriptor = {
 	stoppedTurnId: string;
@@ -28,7 +29,7 @@ function ownersOf(row: TranscriptMessage): string[] {
 }
 
 function isSource(row: TranscriptMessage): boolean {
-	return row.metadata?.type !== 'seed' && !(row.role === 'user' && row.metadata?.routed_event);
+	return !isNeverDrawn(row) && !(row.role === 'user' && row.metadata?.routed_event);
 }
 
 function isEligible(row: TranscriptMessage): boolean {

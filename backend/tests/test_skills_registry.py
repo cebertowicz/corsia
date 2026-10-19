@@ -74,40 +74,46 @@ def test_unclosed_frontmatter_with_heading_body_fails_validation():
 
 
 def test_validates_standard_skill_and_corsia_metadata():
-    from core.skill_validation import validate_skill_text
+    from core.skill_validation import validate_skill_bundle
 
-    result = validate_skill_text(
+    result = validate_skill_bundle(
         """---
 name: code-review
 description: Use when reviewing code for defects.
-corsia:
-  handler:
-    kind: cli
-    command: scripts/corsia review-pr
-  model_profile: coding-high
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: '1'
 ---
 # Code review
-"""
+""",
+        {
+            "corsia.yaml": (
+                "handler:\n  kind: cli\n  command: scripts/corsia review-pr\n"
+                "model_profile: coding-high\n"
+            )
+        },
     )
 
     assert result.ok
     assert result.name == "code-review"
     assert result.description == "Use when reviewing code for defects."
-    assert result.metadata["corsia"]["handler"]["kind"] == "cli"
+    assert result.corsia["handler"]["kind"] == "cli"
+    assert "corsia" not in result.metadata
 
 
 def test_rejects_missing_description_and_invalid_corsia_handler():
-    from core.skill_validation import validate_skill_text
+    from core.skill_validation import validate_skill_bundle
 
-    result = validate_skill_text(
+    result = validate_skill_bundle(
         """---
 name: broken
-corsia:
-  handler:
-    kind: quantum
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: '1'
 ---
 # Broken
-"""
+""",
+        {"corsia.yaml": "handler:\n  kind: quantum\n"},
     )
 
     assert not result.ok
@@ -316,14 +322,15 @@ def test_invalid_workflow_is_visible_through_existing_skill_diagnostics(tmp_path
         """---
 name: workflow-broken
 description: Broken workflow metadata.
-corsia:
-  workflow:
-    steps:
-      - id: build
-        unexpected: value
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: '1'
 ---
 # Broken workflow
 """,
+    )
+    (workspace / "skills/workflow-broken/corsia.yaml").write_text(
+        "workflow:\n  steps:\n    - id: build\n      unexpected: value\n", encoding="utf-8",
     )
 
     sources = skill_context_sources(

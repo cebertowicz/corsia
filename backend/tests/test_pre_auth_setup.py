@@ -20,7 +20,7 @@ from api import setup as setup_api  # noqa: E402
 from api import system as system_api  # noqa: E402
 from infra import accounts, token_admin  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
-from omlx_recommender_fixtures import fresh_local_setup  # noqa: E402,F401
+from omlx_recommender_fixtures import best_rows, fresh_local_setup  # noqa: E402,F401
 
 
 LOOPBACK_BASE = "http:" + f"//127.0.0.1:{DEFAULT_BACKEND_PORT}"
@@ -473,6 +473,23 @@ def test_status_names_a_ready_cli_source_from_the_stored_check(monkeypatch, stat
     assert setup_api._ready_ai() == expected
 
 
+@pytest.mark.parametrize(
+    ("checked", "expected"),
+    [
+        ({}, True),
+        ({"claude-code": "t1"}, True),
+        ({"claude-code": "t1", "codex": "t2"}, False),
+    ],
+)
+def test_status_says_the_install_check_is_pending_until_both_tools_have_a_result(monkeypatch, checked, expected):
+    from connections import models as connection_models
+    from connections import source_state
+
+    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
+    monkeypatch.setattr(source_state, "row_state", lambda row: {"checked_at": checked.get(row["provider"])})
+    assert setup_api._ai_check_pending() is expected
+
+
 def test_routes_are_registered():
     from main import app
 
@@ -520,11 +537,11 @@ def test_welcome_picks_then_get_started_downloads_that_model_through_the_setup_r
     # The POST answers once oMLX has picked: Welcome has no event to wait on before the account.
     picked = welcome.call("POST", "/api/setup/local-model").json()
     assert welcome.call("GET", "/api/setup/local-model").json() == picked
+    row = next(row for row in best_rows(48) if row["repo_id"] == "Jundot/Qwen3.8-27B-oQ4e-mtp")
     assert picked == {"state": "picked", "message": None, "model": {
-        "name": "Qwen3.8 27B", "repository": "Jundot/Qwen3.8-27B-oQ4e-mtp",
-        "download_size_bytes": picked["model"]["download_size_bytes"],
-        "download_size_gb": round(picked["model"]["download_size_bytes"] / 1000**3, 1),
-        "context_window": 262_144,
+        "name": "Qwen3.8 27B", "repository": row["repo_id"], "model": "Qwen3.8-27B-oQ4e-mtp",
+        "download_size_bytes": row["download_bytes"], "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
+        "context_window": 262_144, "quantization_bits": row["level"], "relative_speed": row["relative_speed"],
     }}
     # Welcome only picked; nothing downloaded and nothing was written to oMLX.
     assert mac.downloads == [] and mac.omlx.puts() == []

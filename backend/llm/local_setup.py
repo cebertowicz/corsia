@@ -273,29 +273,23 @@ async def _run_flight(*, model: LocalModel | None = None, into_own_omlx: bool = 
         _release_operation_lock()
         raise
     except StillDownloading:
-        name = _flight.model.display_name if _flight.model else "The local model"
-        _emit("downloading_stopped", model=_flight.model.repository if _flight.model else None)
-        result = {
-            "ok": True, "downloading": True,
-            "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.",
-            "next_action": f"Run `{SETUP_COMMAND}` to follow it again.",
-            "progress": events,
-        }
+        result = {**_stopped_following(_flight.model, events), "next_action": f"Run `{SETUP_COMMAND}` to follow it again."}
     except Exception as exc:
         log.exception("Local setup failed")
         result = {**local_setup_error(_failure_message(exc)), "progress": events}
         _emit("failed", error_type=type(exc).__name__)
-    _flight.result = result
-    _flight.stage = None
-    _flight.following = False
-    if result.get("ok") and not result.get("downloading"):
-        local_setup_operation.clear()
-    elif not result.get("downloading"):
-        # A terminal oMLX error cannot be followed. Removing its stale task id
-        # lets an explicit retry create one new task instead of replaying it.
-        local_setup_operation.clear()
-    _release_operation_lock()
-    return result
+    return local_setup_operation.finish(_flight, result)
+
+
+def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
+    """The result when the follow window ended while oMLX keeps downloading (setup and Settings)."""
+    _emit("downloading_stopped", model=model.repository if model else None)
+    name = model.display_name if model else "The local model"
+    return {
+        "ok": True, "downloading": True,
+        "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.",
+        "progress": events,
+    }
 
 
 def flight_task() -> asyncio.Task | None:
@@ -310,7 +304,7 @@ async def resume_pending_setup() -> bool:
     operation = local_setup_operation.read()
     if operation is None:
         return False
-    if operation.kind not in {"setup", "starter"}:
+    if operation.kind not in {"setup", "starter", "settings"}:
         log.warning("discarding unreadable local setup recovery record")
         local_setup_operation.clear()
         return False
@@ -326,12 +320,11 @@ async def resume_pending_setup() -> bool:
     _flight.stage = "Waiting to resume local model setup"
 
     async def resume() -> dict:
-        while _flight.operation_lock is None:
-            lock = local_setup_operation.try_lock()
-            if lock is not None:
-                _flight.operation_lock = lock
-                break
-            await asyncio.sleep(0.25)
+        if operation.kind == "settings":
+            from llm.local_settings_download import resume as resume_settings_download
+
+            return await resume_settings_download(model)
+        await local_setup_operation.wait_for_lock(_flight)
         return await _run_flight(model=model, into_own_omlx=operation.kind == "starter")
 
     _flight.task = asyncio.create_task(resume())
@@ -394,4 +387,5 @@ async def begin_local_setup(
 from llm.local_setup_existing import (  # noqa: E402  (reads this module's names at call time)
     adopt_existing_omlx, begin_add_starter_model, download_into_own_omlx,
 )
+from llm.local_settings_download import begin as begin_settings_download  # noqa: E402
 from llm.local_setup_new_omlx import _setup_new_omlx  # noqa: E402  (reads this module's names at call time)

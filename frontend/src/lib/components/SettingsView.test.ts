@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsView from './SettingsView.svelte';
 import { token } from '$lib/stores/auth';
-import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestConnectedAppKey, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestSettingsSection, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { get } from 'svelte/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
+const scrollIntoView = Element.prototype.scrollIntoView;
 
 beforeEach(() => {
 	token.set('test-token');
@@ -24,6 +25,8 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+	Element.prototype.scrollIntoView = scrollIntoView;
 	token.set(null);
 	resetSettingsNavigation();
 });
@@ -84,16 +87,6 @@ describe('SettingsView navigation', () => {
 		closeSettingsProject();
 	});
 
-	it('uses the Settings header to return from a Connected apps key card', () => {
-		requestConnectedAppKey('Stripe', 'stripe-key', [{ entry: 'stripe-key', name: 'API key' }]);
-		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
-		flushSync();
-
-		expect(get(settingsNavigation).drill).toMatchObject({ title: 'Settings', backLabel: 'Connected apps' });
-		get(settingsNavigation).drill?.onBack();
-		expect(get(settingsNavigation)).toMatchObject({ section: 'connected-apps', connectedAppKey: null });
-	});
-
 	it('shows the phone list when Settings opens without a new request', () => {
 		openProjectSettings('p-garden');
 		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
@@ -106,5 +99,23 @@ describe('SettingsView navigation', () => {
 		flushSync();
 
 		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(false);
+	});
+
+	it('mounts a phone section only once it is open, so an anchor scrolls in shown content', () => {
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+		const shownWhenScrolled: boolean[] = [];
+		Element.prototype.scrollIntoView = function (this: Element) {
+			shownWhenScrolled.push(!!this.closest('.settings-content')?.classList.contains('mobile-section'));
+		};
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(host.querySelector('.section-host')).toBeNull();
+		unmount(component);
+		component = null;
+
+		requestSettingsSection('system', 'update');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(shownWhenScrolled).toEqual([true]);
 	});
 });

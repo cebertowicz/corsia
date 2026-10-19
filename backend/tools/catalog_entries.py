@@ -6,6 +6,7 @@ the packs and lookups that read them.
 
 from __future__ import annotations
 
+from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
 
@@ -152,11 +153,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "projects", status="substrate", authority="workspace-write",
         summary="Create a new project workspace",
         activity="Creating project",
-    ),
-    "project_discovery_list": _Entry(
-        "projects", authority="consented-history-read",
-        summary="List the folders the user works in, after their consent decision",
-        activity="Finding projects",
     ),
     "worktree_create": _Entry(
         "projects", status="substrate", authority="repository-worktree-write",
@@ -397,4 +393,5 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Releasing artifact",
     ),
     **HOST_ACCESS_CATALOG_ENTRIES,
+    **CONSENT_CATALOG_ENTRIES,
 }

@@ -250,11 +250,13 @@ export async function saveThreadModel(
 	threadId: string,
 	modelId: string,
 	token: string,
+	/** 'setup' marks the model setup itself gave the first chat; a person's own pick sends nothing. */
+	source?: 'setup',
 ): Promise<ThreadModelSaveResult> {
 	const res = await fetch(`/api/threads/${threadId}?token=${token}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ model: modelId }),
+		body: JSON.stringify({ model: modelId, ...(source ? { source } : {}) }),
 	});
 	const body = await res.json().catch(() => null);
 	if (!res.ok) {

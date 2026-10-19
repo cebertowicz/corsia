@@ -1,169 +1,102 @@
-"""Schema 125 -> 126: connected accounts and legacy Google migration."""
+"""Schema 125 -> 126: presence visit rows gain focus spans, without touching old rows."""
 
 from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
 
-import pytest
-
-from connections.connected_accounts import corsia_only_reach, google_accounts, resolve_google_credentials
-from infra import key_store, key_store_values
 from infra.database import initialize_schema
-from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
-from infra.migration_125_to_126_connected_accounts import migrate_125_to_126
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_125_to_126_presence_focus import migrate_125_to_126
+from infra.presence_rollup_schema import PRESENCE_ROLLUP_TABLES, PRESENCE_ROLLUP_TRIGGERS
 from infra.schema import SCHEMA_VERSION
-from infra.settings import get_setting, set_setting
+
+_FOCUS_COLUMNS = {"thread_presence": ("focus_spans", "focus_since"), "presence_visits": ("focus_spans",)}
 
 
-ACCOUNT = "person@example.test"
-CURSOR = {"account": ACCOUNT, "floor_at": "old-floor", "history_id": "old-history", "last_success_at": "old-success"}
+def _columns(db: sqlite3.Connection, table: str) -> list[tuple[str, str]]:
+    return [(row[1], row[2]) for row in db.execute(f"PRAGMA table_info({table})")]
 
 
 def _fresh() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
     initialize_schema(db)
     return db
 
 
-def google_account(*, db):  # type: ignore[no-untyped-def]
-    """The single account a legacy migration may create, or None."""
-    accounts = google_accounts(db=db)
-    assert len(accounts) <= 1
-    return accounts[0] if accounts else None
+def _wound_back_to_v125() -> sqlite3.Connection:
+    """A fresh current database wound back to schema 125, with one open and one finished visit."""
+    db = _fresh()
+    for trigger in PRESENCE_ROLLUP_TRIGGERS:
+        db.execute(f"DROP TRIGGER {trigger}")
+    for table in PRESENCE_ROLLUP_TABLES:
+        if not table.startswith("idx_"):
+            db.execute(f"DROP TABLE {table}")
+    for table, columns in _FOCUS_COLUMNS.items():
+        for column in columns:
+            db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    db.execute("PRAGMA user_version=125")
+    db.execute("INSERT INTO threads(id,user_id,created_at,updated_at) VALUES ('t1','u','t','t')")
+    db.execute(
+        "INSERT INTO thread_presence(user_id,thread_id,present,last_entered_at,last_confirmed_at,updated_at) "
+        "VALUES ('u','t1',1,'a','a','a')"
+    )
+    db.execute(
+        "INSERT INTO presence_visits(user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+        "VALUES ('u','chat','t1','a','b',60,1,'navigated')"
+    )
+    db.commit()
+    return db
 
 
-def _seed_legacy(db: sqlite3.Connection) -> None:
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, "client-id", db=db)
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, "client-secret", db=db)
-    key_store.set_managed_value(key_store.GOOGLE_REFRESH_TOKEN, "refresh-token", db=db)
-    set_setting("google_account", {"email": ACCOUNT, "status": "connected"}, db=db)
-    set_setting("gmail_poll_cursor", CURSOR, db=db)
-
-
-def test_v125_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 128
+def test_the_step_is_registered_at_125() -> None:
+    assert SCHEMA_VERSION == 127
     assert MIGRATIONS[125] is migrate_125_to_126
 
 
-def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        db.execute("PRAGMA user_version=125")
-        db.commit()
+def test_the_step_matches_a_fresh_schema_and_leaves_old_rows_unfocused() -> None:
+    with closing(_fresh()) as fresh, closing(_wound_back_to_v125()) as db:
+        migrate_125_to_126(db)
 
+        for table in _FOCUS_COLUMNS:
+            assert sorted(_columns(db, table)) == sorted(_columns(fresh, table))
+        # NULL spans mean the visit predates focus tracking and counts whole.
+        assert db.execute("SELECT focus_spans, focus_since FROM thread_presence").fetchall() == [(None, None)]
+        assert db.execute("SELECT focus_spans FROM presence_visits").fetchall() == [(None,)]
+
+
+def _schema_objects(db: sqlite3.Connection) -> set[tuple[str, str]]:
+    return {(row[0], row[1]) for row in db.execute(
+        "SELECT type, name FROM sqlite_master WHERE name LIKE '%presence_focus%' OR name LIKE '%presence_visits_rollup%'")}
+
+
+def test_the_step_adds_the_empty_attention_rollup_the_fresh_schema_has() -> None:
+    with closing(_fresh()) as fresh, closing(_wound_back_to_v125()) as db:
+        assert _schema_objects(db) == set()
+        migrate_125_to_126(db)
+
+        assert _schema_objects(db) == _schema_objects(fresh) != set()
+        for table in ("presence_focus_rollup", "presence_focus_sets", "presence_focus_set_members", "presence_focus_rollup_state"):
+            assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_the_step_is_safe_to_run_again() -> None:
+    with closing(_wound_back_to_v125()) as db:
+        migrate_125_to_126(db)
+        migrate_125_to_126(db)
+        assert {name for name, _ in _columns(db, "thread_presence")} >= {"focus_spans", "focus_since"}
+
+
+def test_the_runner_takes_a_125_database_to_current_and_stays_there() -> None:
+    with closing(_wound_back_to_v125()) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 125, 128)
-        account = google_account(db=db)
-        assert account is not None
-        assert account["address"] == ACCOUNT
-        assert account["reach"] == corsia_only_reach().as_dict()
-        assert account["cursor"] == CURSOR
-        assert resolve_google_credentials(str(account["id"]), db=db) == {
-            "client_id": "client-id", "client_secret": "client-secret", "refresh_token": "refresh-token",
-        }
-        assert get_setting("google_account", db=db) is None
-        assert get_setting("gmail_poll_cursor", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] == account["id"]
+
+        assert (result.migrated, result.from_version, result.to_version) == (True, 125, SCHEMA_VERSION)
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
-def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_startup() -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        db.execute("DELETE FROM key_store_entries WHERE name=?", (key_store.GOOGLE_REFRESH_TOKEN,))
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 128)
-        account = google_account(db=db)
-        assert account is not None
-        assert account["address"] == ACCOUNT
-        assert account["cursor"] == CURSOR
-        assert account["state"] == "needs_sign_in"
-        assert resolve_google_credentials(str(account["id"]), db=db) is None
-        assert get_setting("google_account", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-
-
-def test_addressless_legacy_data_is_retired_and_journaled_without_an_account() -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        set_setting("google_account", {"status": "connected"}, db=db)
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 128)
-        assert google_account(db=db) is None
-        assert get_setting("google_account", db=db) is None
-        assert get_setting("gmail_poll_cursor", db=db) is None
-        assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] is None
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-
-
-def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(monkeypatch) -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-
-        monkeypatch.setattr(key_store_values, "put", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
-        with pytest.raises(MigrationError):
-            migrate_to_current(db, SCHEMA_VERSION)
-
-        assert get_setting("google_account", db=db) == {"email": ACCOUNT, "status": "connected"}
-        assert get_setting("gmail_poll_cursor", db=db) == CURSOR
-        assert set(key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db)) == set(key_store.GOOGLE_ENTRIES)
-        assert db.execute("SELECT COUNT(*) FROM connected_accounts").fetchone()[0] == 0
-
-
-def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:
-    db.execute(
-        "INSERT INTO email_screens(account,message_id,status,screened_at) VALUES (?,?,'unavailable','t')",
-        (account, message_id),
-    )
-
-
-def test_stored_screens_are_rekeyed_to_the_new_account_and_strays_dropped() -> None:
-    with closing(_fresh()) as db:
-        _seed_legacy(db)
-        _screen(db, ACCOUNT.upper(), "m1")  # Address case differs from the setting's.
-        _screen(db, "someone-else@example.test", "m2")
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-
-        migrate_to_current(db, SCHEMA_VERSION)
-
-        account = google_account(db=db)
-        assert account is not None
-        rows = db.execute("SELECT account, message_id FROM email_screens ORDER BY message_id").fetchall()
-        assert [tuple(row) for row in rows] == [(account["id"], "m1")]
-
-
-def test_screens_without_a_legacy_account_are_dropped() -> None:
-    with closing(_fresh()) as db:
-        _screen(db, ACCOUNT, "m1")
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-
-        migrate_to_current(db, SCHEMA_VERSION)
-
-        assert db.execute("SELECT COUNT(*) FROM email_screens").fetchone()[0] == 0
-
-
-def test_account_history_tables_carry_no_foreign_keys() -> None:
-    """Remove deletes the account row; its audit and migration records must outlive it."""
-    with closing(_fresh()) as db:
-        db.execute("DROP TABLE connected_account_audit")
-        db.execute("DROP TABLE connected_account_migration_journal")
-        db.execute("PRAGMA user_version=125")
-        db.commit()
-        migrate_to_current(db, SCHEMA_VERSION)
-        for table in ("connected_account_audit", "connected_account_migration_journal"):
-            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []
+def test_the_step_leaves_a_database_without_the_presence_tables_alone() -> None:
+    with closing(sqlite3.connect(":memory:")) as db:
+        migrate_125_to_126(db)
+        assert db.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0

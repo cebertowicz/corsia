@@ -46,6 +46,8 @@ class Management:
     active: bool = True
     #: The model CORSIA downloaded into their oMLX, the only one whose settings it writes.
     model: LocalModel | None = None
+    #: ``model`` is the starter because their oMLX's recommender had no pick (setup says so).
+    fallback: bool = False
     originals_global: dict[str, Any] = field(default_factory=dict)
     #: oMLX model id -> that model's values before CORSIA's first change to each.
     originals_models: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -100,6 +102,7 @@ def read() -> Management | None:
     return Management(
         active=raw.get("active") is True,
         model=model,
+        fallback=raw.get("fallback") is True,
         originals_global=globals_ if isinstance(globals_, dict) else {},
         originals_models=_originals_models(raw),
         key_registered=raw.get("key_registered") is True,
@@ -175,6 +178,16 @@ def record_originals(global_values: dict[str, Any], model_values: dict[str, dict
             originals_global={**global_values, **record.originals_global},
             originals_models=models,
         ))
+
+
+def forget_model_originals(model_id: str) -> None:
+    """Remove restored-model bookkeeping after its Settings-owned download is deleted."""
+    with _LOCK:
+        record = read()
+        if record is None or model_id not in record.originals_models:
+            return
+        originals = {key: value for key, value in record.originals_models.items() if key != model_id}
+        _write(replace(record, originals_models=originals))
 
 
 def begin_stop() -> Management | None:

@@ -105,4 +105,22 @@ describe('toast anchor', () => {
 		anchor.register(column({ left: 1440, right: 1700 }));
 		expect(get(anchor)).toBeNull();
 	});
+
+	it('centres on the window when a drawer leaves only a sliver of the column on screen', () => {
+		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 393 });
+		const anchor = createToastAnchorStore();
+		// Pane open on a phone: the main column slides left and 31px of it stays visible.
+		anchor.register(column({ left: -331, right: 31 }));
+		expect(get(anchor)).toBeNull();
+		// The nav drawer open: the column slides right and 59px of it stays visible.
+		anchor.register(column({ left: 334, right: 727 }));
+		expect(get(anchor)).toBeNull();
+	});
+
+	it('hands back to the main area when the chat column is too narrow to hold a toast', () => {
+		const anchor = createToastAnchorStore();
+		anchor.register(column({ left: 280, right: 1440 }));
+		anchor.register(column({ left: 1380, right: 1440 }));
+		expect(get(anchor)).toEqual({ x: 860, width: 1160 });
+	});
 });

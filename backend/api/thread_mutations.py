@@ -64,6 +64,9 @@ async def _patch_model(thread_id: str, user_id: str, body: dict):
         or checkpoint_choice not in {"current", "target"}
     ):
         raise HTTPException(422, "checkpoint_model must be current or target")
+    source = body.get("source")
+    if "source" in body and source != "setup":
+        raise HTTPException(422, "source must be setup when given")
     from connections.harness_refresh import prepare_selection
 
     await prepare_selection(model)
@@ -82,6 +85,7 @@ async def _patch_model(thread_id: str, user_id: str, body: dict):
             actor_id=user_id,
             reason="harness_model_switch",
             checkpoint_override=checkpoint_choice,
+            setup_selection=source == "setup",
             **({"account_id": body["account_id"]} if body.get("account_id") is not None else {}),
         )
     except (ModelSwitchPreparationError, ModelSwitchConflict) as exc:

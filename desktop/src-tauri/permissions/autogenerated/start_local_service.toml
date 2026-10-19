@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-local-service"
+description = "Enables the start_local_service command without any pre-configured scope."
+commands.allow = ["start_local_service"]
+
+[[permission]]
+identifier = "deny-start-local-service"
+description = "Denies the start_local_service command without any pre-configured scope."
+commands.deny = ["start_local_service"]
