@@ -106,8 +106,9 @@ def main(argv: list[str] | None = None) -> int:
     snapshot = price_snapshot(db, read_snapshot(db, now=now))
     histories = list(snapshot.workflows)
     calibrated = [history for history in histories if history.ref in CALIBRATED]
-    if not calibrated:
-        raise SystemExit("missing calibrated workflow history for calibration")
+    no_history = [ref for ref in CALIBRATED if ref not in {history.ref for history in calibrated}]
+    if no_history:
+        raise SystemExit("missing calibrated workflow history for calibration: " + ", ".join(no_history))
     missing_definitions = [
         history.ref for history in calibrated
         if not history.owner or not assert_evaluator_fields(

@@ -49,10 +49,13 @@ class WorkflowHistory:
     version_attr: str | None = None  # not persisted by measure_sync yet, so the read side passes None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
 
+    def _in_start_order(self) -> list[Run]:
+        return sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id))
+
     def versions(self) -> list[str]:
         """Judged versions by first use (v1, v2, ...)."""
         first: dict[str, str] = {}
-        for run in sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id)):
+        for run in self._in_start_order():
             first.setdefault(run.version, run.started_at)
         return list(first)
 
@@ -62,10 +65,18 @@ class WorkflowHistory:
     def successor(self, version: str) -> tuple[str, str] | None:
         """The version that replaced ``version`` and when: the first other version to run after its last run,
         whether newer or rolled back to; None while it is still the one in use."""
-        ordered = sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id))
+        ordered = self._in_start_order()
         last = max(i for i, run in enumerate(ordered) if run.version == version)
         after = next((run for run in ordered[last + 1:] if run.version != version), None)
         return (after.version, after.started_at) if after is not None else None
+
+    def predecessors(self, version: str) -> list[str]:
+        """The other versions that ran before ``version``'s first use, latest run first: the one it replaced,
+        then the one before that. The reverse of ``successor``: after v1, v2, back to v1, then v3, v3 replaced
+        v1, so v1 comes before v2."""
+        ordered = self._in_start_order()
+        first = next(i for i, run in enumerate(ordered) if run.version == version)
+        return list(dict.fromkeys(run.version for run in reversed(ordered[:first])))
 
 
 @dataclass(frozen=True)
@@ -174,11 +185,11 @@ def baseline_runs(history: WorkflowHistory, version: str, minimum: int, window: 
 
 def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window: int, now: datetime
                     ) -> tuple[str | None, tuple[str, ...]]:
-    """The nearest earlier version with the minimum settled runs in groups shared with ``version``."""
-    order = history.versions()
+    """The version ``version`` replaced, or failing that the latest-run earlier version, with the minimum
+    settled runs in groups shared with ``version``."""
     groups = {run.group for run in _side(history, version)}
     skipped: list[str] = []
-    for candidate in reversed(order[:order.index(version)]):
+    for candidate in history.predecessors(version):
         if sum(run.group in groups for run in baseline_runs(history, candidate, minimum, window, now)) >= minimum:
             return candidate, tuple(skipped)
         skipped.append(candidate)

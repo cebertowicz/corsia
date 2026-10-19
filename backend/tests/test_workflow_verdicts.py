@@ -17,6 +17,7 @@ from core.workflow_verdict_rules import (
 )
 from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
+    parse_ts,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 from tests.verdict_calibration_helpers import calibration_script
@@ -202,6 +203,22 @@ def test_a_successor_is_whichever_version_ran_next_after_its_last_run() -> None:
     returned_then_new = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
                                 runs("v1", 1, count=3, started=12, ended=10), runs("v3", 1, count=3, started=8, ended=6))
     assert returned_then_new.successor("v2") == ("v1", _at(12))
+
+
+def test_after_a_rollback_the_baseline_is_the_version_actually_replaced() -> None:
+    source = history(runs("v1", 1, started=90, ended=80), runs("v2", 2, started=70, ended=60),
+                     runs("v1", 1, started=50, ended=45), runs("v3", 1, started=40, ended=30))
+    assert source.predecessors("v3") == ["v1", "v2"] and source.successor("v1") == ("v3", _at(40))
+    assert choose_baseline(source, "v3", 20, 3, parse_ts(source.first_use("v3"))) == ("v1", ())
+
+
+def test_a_baseline_settling_after_first_use_never_changes_the_frozen_plan() -> None:
+    # v1's runs end two days before v2's first use, so they settle only later; v0 stays the baseline.
+    source = history(runs("v0", 0, started=90, ended=70), runs("v1", 1, started=60, ended=38),
+                     runs("v2", 0, started=40, ended=30))
+    plans = {at: next(e.plan for e in compute(Snapshot(at, (source,))) if e.plan.version == "v2")
+             for at in (_at(37), NOW.isoformat())}
+    assert {(plan.baseline, plan.skipped) for plan in plans.values()} == {("v0", ("v1",))}
 
 
 def test_changed_again_is_never_stored_so_a_version_back_in_use_is_still_judged(monkeypatch) -> None:

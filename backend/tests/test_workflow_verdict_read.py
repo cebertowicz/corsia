@@ -27,12 +27,13 @@ def live_workflow_owners(monkeypatch):
     """Verdicts associate definitions through the shipped live owner rule, never stored metadata."""
     from core import workflow_verdict_read
 
+    owned = {"owner": "sdlc-process", "brief-owner": "decision-brief"}
+
     def owners(thread_id, _db):
-        if thread_id != "owner":
+        if thread_id not in owned:
             return {}
-        return {"sdlc-process": SimpleNamespace(
-            skill_dir=Path("/workflows/sdlc-process"), owner="owner", named=None,
-        )}
+        workflow = owned[thread_id]
+        return {workflow: SimpleNamespace(skill_dir=Path(f"/workflows/{workflow}"), owner=thread_id, named=None)}
 
     monkeypatch.setattr(workflow_verdict_read, "thread_workflow_owners", owners)
 
@@ -149,7 +150,7 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
         ("m1", True, "c1"), ("m2", False, "c1")]
 
 
-def _definitions(db, *, can_decide: bool = True) -> None:
+def _definitions(db, *, can_decide: bool = True, workflow: str = "sdlc-process", owner: str = "owner") -> None:
     event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
     kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": can_decide,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
@@ -158,8 +159,8 @@ def _definitions(db, *, can_decide: bool = True) -> None:
             ("kpi", "escapes", 2, {**kpi, "review": 0.5}, "2026-10-10T00:00:00Z")]
     for kind, name, version, spec, synced in rows:
         db.execute("INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,"
-                   "file_sha256,synced_at) VALUES ('owner',?,?,?,?,'/workflows/sdlc-process/measures.yaml','sha',?)",
-                   (kind, name, version, json.dumps(spec), synced))
+                   "file_sha256,synced_at) VALUES (?,?,?,?,?,?,'sha',?)",
+                   (owner, kind, name, version, json.dumps(spec), f"/workflows/{workflow}/measures.yaml", synced))
 
 
 def test_the_frozen_plan_uses_the_definitions_in_force_at_the_versions_first_run(db) -> None:
@@ -221,6 +222,9 @@ def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -
 def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only(db, isolated_db, capsys) -> None:
     script = calibration_script()
     _definitions(db)
+    _definitions(db, workflow="decision-brief", owner="brief-owner")
+    for index in range(4):
+        node(db, f"b{index}", workflow="decision-brief", created=f"2026-10-0{index + 1}T00:00:00Z")
     for index in range(66):
         version, day = ("v1", 1 + index % 9) if index < 44 else ("v2", 10 + index % 5)
         node(db, f"r{index}", version=version, created=f"2026-10-{day:02d}T00:00:00Z",
@@ -245,9 +249,19 @@ def test_calibration_script_refuses_when_a_calibrated_workflow_lacks_owner_kpi_d
         calibration_script().main([str(isolated_db)])
 
 
+def test_calibration_script_names_every_calibrated_workflow_with_no_runs(db, isolated_db) -> None:
+    _definitions(db)
+    node(db, "sdlc-run")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing calibrated workflow history for calibration: decision-brief$"):
+        calibration_script().main([str(isolated_db)])
+
+
 def test_calibration_script_refuses_when_no_owner_kpi_can_decide(db, isolated_db) -> None:
     _definitions(db, can_decide=False)
+    _definitions(db, workflow="decision-brief", owner="brief-owner")
     node(db, "sdlc-run")
+    node(db, "brief-run", workflow="decision-brief")
     db.commit()
     with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE: sdlc-process"):
         calibration_script().main([str(isolated_db)])
