@@ -43,7 +43,7 @@ def review_kind_from_facts(
 
 
 def plan_defers_asks(plan_state: str) -> bool:
-    """The one rule: a paused plan defers every ask it owns on the person until resume.
+    """A paused plan defers every ask it owns on the person until resume (``ask_deferred``).
 
     Admission still reads a raised review or decision as such and the person can
     still answer it; only the attention it raises (needs-you marks, counts, the
@@ -106,7 +106,7 @@ def needs_user_from_facts(
 ) -> bool:
     """Return whether compact node facts expose a concrete user action now.
 
-    Every plan-owned ask is deferred under a pause (``plan_defers_asks``).
+    Every plan-owned ask is deferred under a plan or item pause (``ask_deferred``).
     """
     if state in TERMINAL_DISPLAY or ask_deferred(plan_paused=plan_paused, node_paused=node_paused):
         return False

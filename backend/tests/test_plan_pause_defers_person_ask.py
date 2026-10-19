@@ -8,8 +8,6 @@ unpaused sibling ask keeps counting. Every kind pauses alike, a decision include
 
 from __future__ import annotations
 
-import pytest
-
 from api import attention
 from plans import (
     activity_projection,
@@ -23,6 +21,7 @@ from plans import (
     service,
     status,
     user_ask,
+    user_steering,
 )
 from plans.boundary import PlanActor
 from plans.pause_authority import reaches_paused_agent
@@ -45,24 +44,19 @@ def _lifecycle(db, plan_id: str, operation: str) -> None:
     db.commit()
 
 
-def _node_lifecycle(db, plan_id: str, node_id: str, operation: str) -> None:
+def _node_lifecycle(db, plan_id: str, node_id: str, operation: str, **params) -> None:
     revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (node_id,)).fetchone()[0]
     boundary.mutate(
         plan_id, operation,
-        {"node_id": node_id, "expected_revision": revision},
+        {"node_id": node_id, "expected_revision": revision, **params},
         actor=_human(), provenance=f"api.plans.{operation}", mutation_id=_mid(), db=db,
     )
     db.commit()
 
 
-def _agent_lifecycle(db, plan_id: str, node_id: str, operation: str, **params) -> None:
-    revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (node_id,)).fetchone()[0]
-    boundary.mutate(
-        plan_id, operation,
-        {"node_id": node_id, "expected_revision": revision, **params},
-        actor=_human(), provenance=f"test.{operation}", mutation_id=_mid(), db=db,
-    )
-    db.commit()
+def _pane_row(db, node_id: str) -> dict:
+    pane = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]
+    return next(node for node in pane["nodes"] if node["id"] == node_id)
 
 
 def _payload_awaiting(db) -> int:
@@ -167,6 +161,8 @@ def test_pause_node_defers_a_decision_and_resume_restores_it(db):
     assert _decision_surfaces(db, plan.id, decision, sibling) == (
         1, 1, 1, [sibling["id"]], {sibling["node_id"]}, [sibling["node_id"]],
     )
+    assert _pane_row(db, decision["node_id"])["status_reason"] == user_steering.USER_PAUSE_REASON
+    assert _pane_row(db, sibling["node_id"])["status_reason"] is None
     # Deferred, not removed: still raised and answerable, and its node unmoved.
     assert decision["id"] in {
         item["id"] for item in decision_projection.raised_decisions([plan.id], db=db)
@@ -245,8 +241,8 @@ def test_pause_node_defers_a_human_review_and_keeps_its_sibling(db):
     sibling = _task(plan.id, "Visible review", assignee="user", db=db)
     db.commit()
     for node in (paused, sibling):
-        _agent_lifecycle(db, plan.id, node.id, "activate")
-        _agent_lifecycle(db, plan.id, node.id, "request_review", evidence="Ready")
+        _node_lifecycle(db, plan.id, node.id, "activate")
+        _node_lifecycle(db, plan.id, node.id, "request_review", evidence="Ready")
 
     _node_lifecycle(db, plan.id, paused.id, "pause_node")
     state = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"]
@@ -264,9 +260,13 @@ def test_paused_only_human_review_leaves_chat_list_unowed(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     review = _task(plan.id, "Paused review", assignee="user", db=db)
     db.commit()
-    _agent_lifecycle(db, plan.id, review.id, "activate")
-    _agent_lifecycle(db, plan.id, review.id, "request_review", evidence="Ready")
+    _node_lifecycle(db, plan.id, review.id, "activate")
+    _node_lifecycle(db, plan.id, review.id, "request_review", evidence="Ready")
     _node_lifecycle(db, plan.id, review.id, "pause_node")
+    row = _pane_row(db, review.id)
+    assert row["display"]["label_key"] == "waiting"
+    # The row names the pause, not the review it defers.
+    assert row["status_reason"] == user_steering.USER_PAUSE_REASON
 
     state = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"]
     assert state["state"] == "paused"

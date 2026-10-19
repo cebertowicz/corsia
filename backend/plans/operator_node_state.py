@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
-from plans import admission, node_states, operator_stopped, service, wait_causes
+from plans import admission, node_states, operator_stopped, service, user_steering, wait_causes
 from plans.admission_projection import executor_of
 from plans import operator_node_facts as facts
 from plans.operator_display_state import (
@@ -15,8 +15,8 @@ from plans.operator_display_state import (
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
-#: PLANS-CANONICAL-STATE-MATRIX display matrix. A review raised before a node
-#: pause stays current; a whole-plan pause defers its ask (``plan_defers_asks``).
+#: PLANS-CANONICAL-STATE-MATRIX display matrix. A review raised before a pause
+#: stays current while a plan or item pause defers its ask (``ask_deferred``).
 CURRENT_CONDITIONS = frozenset({"running", "waiting", "blocked", "review"})
 ATTEMPT_HISTORY_LIMIT = 20
 _EMPTY_ATTEMPTS = {"attempt_count": 0, "friction_count": 0, "revision_round": 0}
@@ -142,6 +142,9 @@ def _status_reason(
         return stopped
     if sequenced_after is not None:
         return sequenced_after
+    if execution["condition"] == "review" and node_paused(execution):
+        # Pausing a raised review defers its ask, so the row names the pause.
+        return user_steering.placed_pause(execution["causes"]).get("reason")
     if execution["condition"] not in _REASONED_CONDITIONS or _child_plan_working(execution):
         return None
     # A whole-plan pause is named once in the plan header, not on every row.
@@ -153,7 +156,6 @@ def _status_reason(
         ),
         None,
     )
-
 
 
 def _needs_user(node: dict, review: dict | None, execution: dict) -> bool:

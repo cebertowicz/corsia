@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plans import hierarchy, node_states, operator_display_state, service
-from plans.user_ask import ask_attention_state_sql, askable_sql, link_open_ask_sql
+from plans.user_ask import ask_attention_state_sql, askable_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
 
@@ -20,12 +20,12 @@ LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.
 
 
 def deferred_attention_artifact_ids(artifact_ids, *, db) -> set[str]:
-    """Plan attention artifacts whose every live link defers their Needs-you state.
+    """Raised non-ask attention artifacts whose every open-node link is paused.
 
-    A link is live while it can still ask: for a document or image, an open ask
-    on its node (``user_ask.open_asks_sql``); for anything else, an open node.
-    One live link on a node that is not paused keeps the artifact raised, as
-    ``ask_attention_state_sql`` does; a link on a settled node never counts.
+    A document or image ask is never named here: ``ask_attention_state_sql``
+    owns its deferral, and ``registry.attention.list_raised`` already drops one
+    that is not raised. For anything else, one link on an open node that is not
+    paused keeps the artifact raised; a link on a settled node never counts.
     """
     identities = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
     deferred: set[str] = set()
@@ -38,8 +38,7 @@ def deferred_attention_artifact_ids(artifact_ids, *, db) -> set[str]:
                   CROSS JOIN plan_nodes node ON node.id=link.node_id
                   CROSS JOIN plans plan ON plan.id=node.plan_id
                  WHERE link.role='attention' AND link.artifact_id IN ({marks})
-                   AND CASE WHEN {askable_sql('ident')} THEN {link_open_ask_sql('link')}
-                       ELSE {node_states.open_sql('node')} END
+                   AND NOT {askable_sql('ident')} AND {node_states.open_sql('node')}
                  GROUP BY link.artifact_id
                 HAVING MIN({operator_display_state.ask_deferred_sql('node.id', plan_state_sql='plan.state')})=1""",
             chunk,
