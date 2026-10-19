@@ -108,13 +108,12 @@ def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent
 
 def _no_longer_declared(connection: sqlite3.Connection, owner: str, path: str, kept: set[tuple[str, str]]) -> list[tuple[str, str, int, str]]:
     """Names this owner last synced from ``path`` that the new file leaves out: next version and last spec."""
-    latest: dict[tuple[str, str], tuple[int, str, str, int]] = {}
-    for kind, name, version, spec_json, file_path, removed in connection.execute(
-        "SELECT kind,name,version,spec_json,file_path,removed FROM measure_definitions WHERE owner_thread_id=? ORDER BY version", (owner,),
-    ):
-        latest[(kind, name)] = (version, spec_json, file_path, removed)
-    return [(kind, name, version + 1, spec_json) for (kind, name), (version, spec_json, file_path, removed) in sorted(latest.items())
-            if file_path == path and (kind, name) not in kept and not removed]
+    latest = connection.execute(
+        "SELECT d.kind,d.name,d.version,d.spec_json FROM measure_definitions d JOIN "
+        "(SELECT kind,name,max(version) AS version FROM measure_definitions WHERE owner_thread_id=? GROUP BY kind,name) m "
+        "USING (kind,name,version) WHERE d.owner_thread_id=? AND d.file_path=? AND d.removed=0 ORDER BY d.kind,d.name", (owner, owner, path),
+    )
+    return [(kind, name, version + 1, spec_json) for kind, name, version, spec_json in latest if (kind, name) not in kept]
 
 
 def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) -> dict[str, Any]:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -32,8 +31,11 @@ async def _sync(kwargs: dict[str, Any]) -> str:
         if not target.is_relative_to(WORKSPACE.resolve()) or target.name != "measures.yaml":
             raise ValueError("path must be a measures.yaml file inside the workspace")
         text = target.read_text(encoding="utf-8")
-        result = await run_in_db(partial(sync, owner_thread_id=thread_id, path=str(target), text=text))
-        return json.dumps(result, sort_keys=True)
+
+        def load() -> dict[str, Any]:
+            return sync(get_db(), owner_thread_id=thread_id, path=str(target), text=text)
+
+        return json.dumps(await run_in_db(load), sort_keys=True)
     except (OSError, ValueError) as exc:
         return f"Error: {exc}"
 
