@@ -27,7 +27,7 @@ SIGN_IN_RECOVERY = (
     'Google rejected the saved sign-in. Sign-ins for a project in Testing expire after 7 days: '
     'if the Audience page of the OAuth consent screen in Google Cloud shows Testing, ask the person '
     'to publish their app "In production", keeping the same project. Then call google_connect with '
-    'this account_id and relay its reply and link to the person.'
+    'this account_id and post its reply verbatim followed by its link as [Open it in Connected apps](<link>).'
 )
 NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."

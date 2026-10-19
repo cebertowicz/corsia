@@ -29,7 +29,8 @@ CHOOSE = (
 UNKNOWN = "No Google account matches {selector!r}. Pass account_id as one of: {choices}."
 SIGNED_OUT = (
     "{address} is signed out. Ask the person to use Sign in on its row in Connected apps, or call "
-    "google_connect with this account_id and relay its reply and link to the person."
+    "google_connect with this account_id and post its reply verbatim followed by its link as "
+    "[Open it in Connected apps](<link>)."
 )
 UNAVAILABLE = "{address} isn't available right now. Try again later."
 ACCOUNT_PARAM = {

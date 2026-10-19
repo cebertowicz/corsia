@@ -12,7 +12,9 @@ import json
 import logging
 from typing import Any
 
-from connections.connected_accounts import ConnectedAccountError, get_account, resolve_google_credentials
+from connections.connected_accounts import (
+    ConnectedAccountError, get_account, reach_for_adding_thread, resolve_google_credentials,
+)
 from connections.google import oauth
 from connections.google.client import GoogleError, STATUS_CONNECTED
 from infra.database import get_db
@@ -43,7 +45,29 @@ def _reach_phrase(account: dict[str, object], db) -> str:  # type: ignore[no-unt
     return f" for {project['name']}" if project is not None else ""
 
 
-def _existing_account_reply(account_id: str) -> tuple[str, str]:
+def _requested_scope_reply(account: dict[str, object], thread_id: str, db) -> str | None:  # type: ignore[no-untyped-def]
+    """A fixed B-G1 reply when this conversation cannot add the account at its own scope."""
+    try:
+        requested = reach_for_adding_thread(thread_id, db=db)
+    except ConnectedAccountError:
+        return None
+    reach = account["reach"]
+    if not isinstance(reach, dict):
+        return None
+    if requested.mode == "all":
+        if reach.get("mode") != "all":
+            return oauth.CONNECTED_NOT_FOR_ALL.format(address=account["address"])
+        return None
+    project_id = next(iter(requested.project_ids))
+    if reach.get("mode") == "all" or project_id in reach.get("project_ids", []):
+        return None
+    project = db.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
+    if project is None:
+        return None
+    return oauth.CONNECTED_NOT_FOR_PROJECT.format(address=account["address"], project=project["name"])
+
+
+def _existing_account_reply(account_id: str, thread_id: str) -> tuple[str, str]:
     """Build the row-directed B-G1 tool result without starting another OAuth flow."""
     db = get_db()
     try:
@@ -54,7 +78,9 @@ def _existing_account_reply(account_id: str) -> tuple[str, str]:
         if account["state"] == "removing":
             raise oauth.GoogleSignInError(oauth.GONE)
         if account["state"] == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is not None:
-            reply = oauth.ALREADY_CONNECTED.format(address=account["address"], reach=_reach_phrase(account, db))
+            reply = _requested_scope_reply(account, thread_id, db) or oauth.ALREADY_CONNECTED.format(
+                address=account["address"], reach=_reach_phrase(account, db),
+            )
         else:
             reply = oauth.ALREADY_NEEDS_SIGN_IN.format(address=account["address"])
         return reply, f"#connected-apps/{account['id']}"
@@ -62,8 +88,8 @@ def _existing_account_reply(account_id: str) -> tuple[str, str]:
         db.close()
 
 
-async def _account_reply(account_id: str) -> tuple[str, str]:
-    return await run_in_db(_existing_account_reply, account_id)
+async def _account_reply(account_id: str, thread_id: str) -> tuple[str, str]:
+    return await run_in_db(_existing_account_reply, account_id, thread_id)
 
 
 async def _designated(kwargs: dict[str, Any]) -> str | None:
@@ -92,8 +118,9 @@ class GoogleConnectTool(Tool):
             "calling google_connect. Without account_id, this tool starts the person's Google sign-in and "
             "returns a URL for the person to open; they sign in and click Allow in their own browser, and "
             "the token never reaches you. With account_id, it returns {reply, link} for that existing "
-            "account: relay both verbatim to the person, and its Connected apps row provides the next "
-            "action. Omit account_id to add another account, which agents can use where this conversation works. "
+            "account: post its reply verbatim with post_update followed by [Open it in Connected apps](<link>); "
+            "its Connected apps row provides the next action. Omit account_id to add another account, which agents "
+            "can use where this conversation works. "
             "Google asks them to allow Gmail, Calendar, Drive, Docs and Sheets in one go. Gmail "
             "and Calendar are required; the others are optional, and google_status lists what "
             "they allowed. The Google tools here use email and calendar. Pass client_file, the "
@@ -113,7 +140,7 @@ class GoogleConnectTool(Tool):
                 },
                 "account_id": {
                     "type": "string",
-                    "description": "An account_id from google_status. It returns that existing account's reply and Connected apps link; omit to add an account.",
+                    "description": "An account_id from google_status. Post its returned reply verbatim with post_update followed by [Open it in Connected apps](<link>); omit to add an account.",
                 },
             },
         }
@@ -127,7 +154,7 @@ class GoogleConnectTool(Tool):
             return f"Error: {oauth.UNKNOWN_ACCOUNT}"
         try:
             if account_id:
-                reply, link = await _account_reply(account_id.strip())
+                reply, link = await _account_reply(account_id.strip(), thread_id)
                 return json.dumps({"reply": reply, "link": link})
             url, signing_in = await oauth.start_sign_in(
                 kwargs.get("client_file"), actor=("agent", thread_id),

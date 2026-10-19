@@ -73,6 +73,14 @@ ALREADY_NEEDS_SIGN_IN = (
     "{address} is already connected, but it needs you to sign in again. Use Sign in on its row in "
     "Connected apps."
 )
+CONNECTED_NOT_FOR_PROJECT = (
+    "{address} is connected, but not for {project}. To add {project}, use Where it works… on its row in "
+    "Connected apps."
+)
+CONNECTED_NOT_FOR_ALL = (
+    "{address} is connected, but not for all your projects. To make it work for all of them, use Where it works… "
+    "on its row in Connected apps."
+)
 STILL_CONNECTED = "{address} is already connected."
 WRONG_ACCOUNT = (
     "You signed in as {signed_in}, but this sign-in is for {address}. Call google_connect again and "
@@ -250,8 +258,31 @@ def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> N
 
     for account in google_accounts(db=conn):
         if _same_identity(account, email, provider_subject):
-            text = ALREADY_CONNECTED if account["state"] == STATUS_CONNECTED else ALREADY_NEEDS_SIGN_IN
-            raise GoogleSignInError(text.format(address=account["address"], reach=""))
+            if account["state"] != STATUS_CONNECTED or pending.adding_thread_id is None:
+                raise GoogleSignInError(ALREADY_NEEDS_SIGN_IN.format(address=account["address"]))
+            from connections.connected_accounts import reach_for_adding_thread
+
+            try:
+                requested = reach_for_adding_thread(pending.adding_thread_id, db=conn)
+            except ConnectedAccountError:
+                requested = None
+            reach = account["reach"]
+            if not isinstance(reach, dict):
+                raise GoogleSignInError(ALREADY_CONNECTED.format(address=account["address"], reach=""))
+            if requested is not None and requested.mode == "all" and reach.get("mode") != "all":
+                raise GoogleSignInError(CONNECTED_NOT_FOR_ALL.format(address=account["address"]))
+            if requested is not None and requested.mode == "selected" and (
+                reach.get("mode") != "all"
+                and next(iter(requested.project_ids)) not in reach.get("project_ids", [])
+            ):
+                project = conn.execute(
+                    "SELECT name FROM projects WHERE id=?", (next(iter(requested.project_ids)),),
+                ).fetchone()
+                if project is not None:
+                    raise GoogleSignInError(CONNECTED_NOT_FOR_PROJECT.format(
+                        address=account["address"], project=project["name"],
+                    ))
+            raise GoogleSignInError(ALREADY_CONNECTED.format(address=account["address"], reach=""))
     fields = {
         "created_by": pending.actor, "signed_in_by": pending.actor, "provider_subject": provider_subject,
         "account_id": pending.account_id, "state": STATUS_CONNECTED,

@@ -328,6 +328,13 @@ async def test_existing_connected_account_returns_the_b_g1_reply_for_each_reach(
     from connections.google.account_actions import change_google_account_reach
 
     await run_in_db(change_google_account_reach, account_id, reach, actor=("person", "person"))
+    if reach["mode"] == "selected":
+        db = get_db()
+        try:
+            db.execute("UPDATE threads SET project_id='garden' WHERE id=?", (conductor,))
+            db.commit()
+        finally:
+            db.close()
     result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
 
     assert result == {
@@ -335,6 +342,70 @@ async def test_existing_connected_account_returns_the_b_g1_reply_for_each_reach(
         "link": f"#connected-apps/{account_id}",
     }
     assert [account["id"] for account in _accounts()] == [account_id]
+
+
+async def test_existing_connected_account_reply_names_when_the_calling_scope_is_not_covered(
+    google, conductor, client_file,
+):
+    """B-G1 distinguishes the account's reach from the scope this conversation asks for."""
+    account_id = await _connect(google, conductor, client_file)
+    db = get_db()
+    try:
+        db.executemany(
+            "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [("garden", "Garden plan", "t", "t"), ("launch", "Q4 launch", "t", "t")],
+        )
+        db.commit()
+    finally:
+        db.close()
+    from connections.google.account_actions import change_google_account_reach
+
+    workspace_reply = f"{EMAIL} is already connected for all your projects. To change where it works, use Where it works… on its row in Connected apps."
+    needs_sign_in_reply = f"{EMAIL} is already connected, but it needs you to sign in again. Use Sign in on its row in Connected apps."
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == workspace_reply
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET project_id='launch' WHERE id=?", (conductor,))
+        db.commit()
+    finally:
+        db.close()
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == workspace_reply
+
+    await run_in_db(
+        change_google_account_reach,
+        account_id,
+        {"mode": "selected", "project_ids": ["garden"], "outside_projects": False},
+        actor=("person", "person"),
+    )
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == (
+        f"{EMAIL} is connected, but not for Q4 launch. To add Q4 launch, use Where it works… on its row in Connected apps."
+    )
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET project_id=NULL WHERE id=?", (conductor,))
+        db.commit()
+    finally:
+        db.close()
+    all_projects_reply = (
+        f"{EMAIL} is connected, but not for all your projects. To make it work for all of them, use Where it works… on its row in Connected apps."
+    )
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == all_projects_reply
+
+    _, state = await _start(google, conductor, None)
+    async with _http() as http:
+        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert duplicate.status_code == 400 and all_projects_reply in duplicate.text
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET project_id='launch' WHERE id=?", (conductor,))
+        db.execute("UPDATE connected_accounts SET state='needs_sign_in' WHERE id=?", (account_id,))
+        db.commit()
+    finally:
+        db.close()
+    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == needs_sign_in_reply
 
 
 async def test_existing_needs_sign_in_account_returns_its_row_link_without_a_second_row(google, conductor, client_file):
@@ -394,7 +465,7 @@ async def test_no_token_or_secret_reaches_any_output_or_log(google, conductor, c
         'Google rejected the saved sign-in. Sign-ins for a project in Testing expire after 7 days: '
         'if the Audience page of the OAuth consent screen in Google Cloud shows Testing, ask the person '
         'to publish their app "In production", keeping the same project. Then call google_connect with '
-        'this account_id and relay its reply and link to the person.'
+        'this account_id and post its reply verbatim followed by its link as [Open it in Connected apps](<link>).'
     )
     captured = capsys.readouterr()
     outputs.extend([caplog.text, captured.out, captured.err])
