@@ -176,14 +176,13 @@ def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent
 
 
 def _plan(
-    latest: dict[tuple[str, str], tuple[int, str, bool, str]], owner: str, path: str, items: list[tuple[str, str, dict[str, Any]]],
+    latest: dict[tuple[str, str], tuple[int, str, bool, str]], owner: str, path: str, items: list[tuple[str, str, str]],
     sha: str, now: str,
 ) -> tuple[list[tuple[Any, ...]], list[dict[str, str]]]:
     """The rows to insert and every item's status, from one read of the owner's latest versions."""
     inserts: list[tuple[Any, ...]] = []
     changes: list[dict[str, str]] = []
-    for kind, name, spec in items:
-        normalized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
+    for kind, name, normalized in items:
         row = latest.get((kind, name))
         if row and row[1] == normalized and not row[2]:
             changes.append({"name": name, "status": "unchanged"})
@@ -216,9 +215,11 @@ def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) 
         _check_agent_file(path, owner_thread_id)
     sha = hashlib.sha256(text.encode()).hexdigest()
     now = datetime.now(timezone.utc).isoformat()
-    latest = {(kind, name): (version, spec, bool(removed), file) for kind, name, version, spec, removed, file in db.execute(_LATEST, (owner_thread_id,))}
-    inserts, changes = _plan(latest, owner_thread_id, path, items, sha, now)
+    normalized = [(kind, name, json.dumps(spec, sort_keys=True, separators=(",", ":"))) for kind, name, spec in items]
     with write_transaction(db, scope="measure_sync") as connection:
+        # Read under the write lock, so a concurrent sync of the same file never plans from a stale read.
+        latest = {(kind, name): (version, spec, bool(removed), file) for kind, name, version, spec, removed, file in connection.execute(_LATEST, (owner_thread_id,))}
+        inserts, changes = _plan(latest, owner_thread_id, path, normalized, sha, now)
         holder = connection.execute("SELECT owner_thread_id FROM measure_namespaces WHERE namespace=?", (namespace,)).fetchone()
         if holder and holder[0] != owner_thread_id:
             raise ValueError(namespace_refusal(connection, namespace, holder[0], owner_thread_id))

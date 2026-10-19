@@ -1,4 +1,7 @@
-"""The registry swaps whole states: a settle during a rebuild, or a racing first load, never sees a partial one."""
+"""The registry swaps whole states: a settle during a rebuild, or a racing first load, never sees a partial one.
+
+Two syncs of one file serialize, so neither plans from a read the other has already changed.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import infra.measure_registry as registry
 from infra.measure_admission import admit
 from infra.measure_registry import REGISTRY, sync
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
@@ -101,3 +105,48 @@ def test_a_first_load_waits_for_the_load_already_running_instead_of_reading_a_pa
     assert first_result[0] is second_result[0]  # one load served both
     first_db.close()
     second_db.close()
+
+
+def test_a_sync_that_read_the_old_versions_holds_the_lock_so_a_concurrent_removal_cannot_be_lost(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "sync.db"
+    seed = connect(path)
+    seed.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    REGISTRY.reset()
+    wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
+    sync(seed, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
+    gate, reached = threading.Event(), threading.Event()
+    real_plan = registry._plan
+
+    def pausing_plan(*args):
+        if threading.current_thread().name == "stale":
+            reached.set()
+            assert gate.wait(WAIT)
+        return real_plan(*args)
+
+    monkeypatch.setattr(registry, "_plan", pausing_plan)
+    order: list[str] = []
+
+    def run(text: str) -> None:
+        connection = connect(path)
+        try:
+            sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=text)
+            order.append(threading.current_thread().name)
+        finally:
+            connection.close()
+
+    stale = threading.Thread(target=run, args=(wider,), name="stale", daemon=True)
+    stale.start()
+    assert reached.wait(WAIT)  # it has read v1 of every name and is planning
+    remover = threading.Thread(target=run, args=(MEASURES,), name="remover", daemon=True)
+    remover.start()
+    remover.join(0.5)
+    try:
+        assert remover.is_alive()  # the removal waits for the write lock instead of committing under the stale plan
+    finally:
+        gate.set()
+        stale.join(WAIT)
+        remover.join(WAIT)
+    assert order == ["stale", "remover"]
+    latest = seed.execute("SELECT removed FROM measure_definitions WHERE name='mail.sorted' ORDER BY version DESC LIMIT 1").fetchone()
+    assert latest == (1,)  # the later commit's file wins
+    seed.close()
