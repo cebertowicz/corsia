@@ -93,3 +93,36 @@ def test_a_backfill_fact_never_notes_a_delivered_batch(db):
     assert _record(db, "doc_comment", comment, arrived=False) == (True, None)
 
     assert _correction_notes(db) == [] and _wakes(db) == []
+
+
+def _answered_round_with_no_other_input(db, monkeypatch):
+    """A round whose answer queues no input of its own, so only the correction wake could drive."""
+    monkeypatch.setattr("plans.public.ask_cleared", lambda *_args, **_kwargs: None)
+    artifact = seed_document(db, "owner", name="q.md")
+    _ask(db, artifact)
+    _record(db, "doc_comment", _user_comment(db, artifact))
+    _deliver_batch(db)  # delivered during the raised ask, so the answer closes no batch of its own
+    return artifact
+
+
+def test_answer_without_a_driver_appends_the_note_but_queues_no_wake(db, monkeypatch):
+    artifact = _answered_round_with_no_other_input(db, monkeypatch)
+
+    _answer(db, artifact, "changes_requested")  # no idle_drives: nothing would drive the target
+
+    assert len(_correction_notes(db)) == 1 and _wakes(db) == []
+
+
+def test_answer_with_a_driver_queues_one_wake_and_names_the_target(db, monkeypatch):
+    from registry import attention
+
+    artifact = _answered_round_with_no_other_input(db, monkeypatch)
+    drives: list[str] = []
+
+    attention.clear_attention(
+        artifact, outcome="answer", verdict="changes_requested", db=db, idle_drives=drives,
+    )
+    db.commit()
+
+    (details, _summary), = _correction_notes(db)
+    assert drives == ["owner"] and _wakes(db) == [f"correction-wake:{details['note_key']}"]

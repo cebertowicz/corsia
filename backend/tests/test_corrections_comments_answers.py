@@ -275,7 +275,9 @@ def test_decision_listed_pick_without_text_records_nothing(db):
 )
 def test_decision_answer_is_enqueued_only_when_it_carries_text(monkeypatch, answer, enqueued):
     seen = []
-    monkeypatch.setattr("jobs.corrections_realtime.notify", lambda kind, source: seen.append((kind, source)))
+    monkeypatch.setattr(
+        "jobs.corrections_dispatch.notify_from_thread", lambda kind, source: seen.append((kind, source)),
+    )
     connection = sqlite3.connect(":memory:", check_same_thread=False)
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA_SQL)

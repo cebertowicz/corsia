@@ -266,13 +266,15 @@ def _clear_attention(
                    AND delivery_state='queued' LIMIT 1""",
                 (message_floor, target),
             ).fetchone()
-            if already_queued is None:
+            # Only a caller that will drive the target gets the wake; otherwise the
+            # note rides the target's next input.
+            if already_queued is None and idle_drives is not None:
                 from infra.passive_changes import materialize_pending_digest
 
                 admitted = materialize_pending_digest(
                     _db, target, wake_id=f"correction-wake:{note_key}",
                 )
-                if admitted is not None and not admitted.duplicate and idle_drives is not None:
+                if admitted is not None and not admitted.duplicate:
                     idle_drives.append(target)
     if db is None or not db.in_transaction:
         emit_product_event(

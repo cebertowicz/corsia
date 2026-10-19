@@ -37,6 +37,27 @@ async def dispatch_arrival(worker, source_kind: str, source_id: str, enqueued_at
         worker.queue.task_done()
 
 
+def notify_from_thread(source_kind: str, source_id: str) -> None:
+    """Hand an arrival to the worker on the application loop from a DB thread.
+
+    The worker's queue, event and task are loop-bound, so a commit effect on a
+    DB pool thread must not touch them. With no loop running (startup not yet
+    reached or shutdown done) the arrival is owed to the scan instead, which the
+    next startup runs.
+    """
+    from infra import app_loop
+    from jobs import corrections_realtime as realtime
+
+    async def _notify() -> None:
+        realtime.notify(source_kind, source_id)
+
+    try:
+        app_loop.submit(_notify())
+    except app_loop.AppLoopUnavailable:
+        logger.info("no application loop for a {} arrival; the scan is owed", source_kind)
+        realtime.WORKER.owe_scan()
+
+
 async def run_dispatch(worker) -> None:
     """Consume arrivals until the queue is empty, then run the worker's scan pass."""
     while True:
