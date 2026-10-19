@@ -483,7 +483,7 @@ async def test_scan_ends_unactivated_on_mid_pass_version_failure_then_activates_
     async def next_batch(version, *_args, **_kwargs):
         calls[version.version] += 1
         if calls[version.version] == 1:
-            return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)], candidates=[candidate])
+            return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.source_id)], candidates=[candidate])
         return SimpleNamespace(selected_keys=[], candidates=[])
 
     activate = AsyncMock(return_value="done")
@@ -548,7 +548,7 @@ async def test_only_version_failing_during_a_scan_fails_with_one_notice_and_no_a
         return _selection(_manifest())
 
     async def next_batch(*_args, **_kwargs):
-        return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)], candidates=[candidate])
+        return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.source_id)], candidates=[candidate])
 
     activate = AsyncMock(return_value="done")
     monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
@@ -980,7 +980,7 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
     async def classify(candidate, *_args):
         from jobs.corrections_runtime import ClassificationOutcome
 
-        calls.append(candidate.message_id)
+        calls.append(candidate.source_id)
         worker.queue.put_nowait(("fresh-arrival", 0.0))
         return ClassificationOutcome("recorded")
 
@@ -996,7 +996,7 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
 
 def _one_candidate_batch(candidate):
     return SimpleNamespace(
-        selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)],
+        selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.source_id)],
         candidates=[candidate],
     )
 

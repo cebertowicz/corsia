@@ -48,7 +48,7 @@ def owner_user_ids() -> list[str]:
         db.close()
 
 
-def _record_fact(
+def _record_fact_with_wake(
     candidate: CorrectionCandidate,
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
@@ -174,12 +174,21 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
     return replace(candidates[0], arrived=True) if candidates else None
 
 
+def _record_fact(
+    candidate: CorrectionCandidate,
+    classification: dict[str, str | int | bool],
+    version: ClassifierVersion,
+) -> bool:
+    """Compatibility test seam: record one fact and report only insertion."""
+    return _record_fact_with_wake(candidate, classification, version)[0]
+
+
 async def _record_and_drive(
     candidate: CorrectionCandidate,
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
 ) -> bool:
-    inserted, wake_target = await run_in_db(_record_fact, candidate, classification, version)
+    inserted, wake_target = await run_in_db(_record_fact_with_wake, candidate, classification, version)
     if wake_target is not None:
         from infra.thread_execution import drive_idle_thread
 

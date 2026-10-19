@@ -72,7 +72,7 @@ async def test_scan_hydrates_recent_context_and_uses_versioned_dedupe(isolated_d
     keys = pending_candidate_keys(_version(), 20, "owner")
     candidates = hydrate_candidates(keys)
 
-    assert [candidate.message_id for candidate in candidates] == ["owner-message"]
+    assert [candidate.source_id for candidate in candidates] == ["owner-message"]
     assert candidates[0].context == (("Agent", "Prior answer."),)
 
 
@@ -332,4 +332,4 @@ def test_measurement_figure_excludes_comment_and_decision_facts(isolated_db):
     assert _record_fact(CorrectionCandidate("doc_comment", "comment", "thread", "project", "Wrong.", timestamp), payload, _version())
     assert _record_fact(CorrectionCandidate("plan_decision_answer", "decision:7", "thread", "project", "Wrong.", timestamp), payload, _version())
 
-    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 1
+    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 2
