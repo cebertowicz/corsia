@@ -70,6 +70,42 @@ def test_first_run_hands_phone_access_to_the_remote_access_reference():
     assert "report the actual output" in remote
 
 
+def test_remote_access_never_reuses_or_adds_to_a_funnel_port():
+    remote = REMOTE_ACCESS.read_text(encoding="utf-8")
+    facts = remote.split("## Facts that shape every step", 1)[1].split("## Commands", 1)[0]
+    states = remote.split("## States", 1)[1].split("## When CORSIA's port changes", 1)[0]
+    row_1 = next(line for line in states.splitlines() if line.startswith("| 1 |"))
+    row_5 = next(line for line in states.splitlines() if line.startswith("| 5 |"))
+    row_0a = next(line for line in states.splitlines() if line.startswith("| 0a |"))
+    row_1b = next(line for line in states.splitlines() if line.startswith("| 1b |"))
+    internet_check = remote.split("## Internet check, once per install", 1)[1]
+
+    # A webhook path mapped by `tailscale funnel --set-path` targets CORSIA's port
+    # but is public; neither may count as CORSIA's mapping.
+    assert "its `/` path targets `http://127.0.0.1:[port]`" in facts
+    assert "and Funnel is off for its https port" in facts
+    assert "`AllowFunnel`" in facts
+    assert "no `AllowFunnel`, or no entry for that port, means off" in facts
+    assert "When you cannot tell whether Funnel is on for a port, treat it as on" in facts
+    assert "with Funnel off" in row_5
+    assert "Never pick a port with Funnel on" in row_5
+    assert "open to the internet (Funnel), so CORSIA uses port [https port]" in states
+    assert "A `/` on a port with Funnel on that targets the old port is row 0a's case." in remote
+
+    # Row 1 routes into 0a and 0a exits to row 5 without looping back to row 1.
+    assert "or to row 0a when it answers through a port with Funnel on" in row_1
+    assert "Then go to row 5 without checking the address again" in row_0a
+    # Installs the earlier flow already exposed get CORSIA's `/` taken off,
+    # leaving the port's other paths, once this reference changes.
+    assert "tailscale serve --https=[Funnel port] --set-path=/ off" in remote
+    assert "confirm `/` is gone and the port's other paths are unchanged" in row_0a
+    assert "it carries no `Internet check done` note" in internet_check
+    assert "goes to row 0a" in internet_check
+    assert "Whatever the outcome, add the note `Internet check done`" in internet_check
+    # An unreadable configuration closes with its own reason, not "ports in use".
+    assert "`Couldn't read Tailscale settings`" in row_1b
+
+
 def test_settings_keys_is_spelled_by_the_one_constant():
     from infra.ui_labels import SETTINGS_KEYS
 
