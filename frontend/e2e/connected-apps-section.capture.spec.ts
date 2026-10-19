@@ -48,7 +48,11 @@ test.describe('Connected apps Settings section capture', () => {
 				await expect(page.getByText('Waiting for your approval')).toBeVisible();
 				await page.screenshot({ path: join(outputDir, `connected-apps-after-approve-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
 
-				await page.getByRole('button', { name: 'System' }).click();
+				if (viewport > 768) await page.getByRole('button', { name: 'System' }).click();
+				else {
+					await page.getByRole('button', { name: 'Settings' }).click();
+					await page.getByRole('button', { name: 'System' }).click();
+				}
 				await expect(page.getByRole('heading', { name: 'Connected apps' })).toHaveCount(0);
 				await page.screenshot({ path: join(outputDir, `settings-system-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
 			}
