@@ -72,9 +72,11 @@ export async function loadPastFirstRunLanding(page: Page, load: () => Promise<un
 /**
  * Opens the signed-in shell for a spec that then picks its own thread. The
  * conductor landing, and with it a composer at the root, exists only while the
- * workspace's first run is pending. One spec's agent hand-off ends that for every
- * later spec, so a spec must not read the composer as its ready signal: it waits
- * for the landing only when one is coming, and the shell is its proof otherwise.
+ * workspace's first run is pending. Every spec file starts with it pending (see
+ * `support/test.ts`), and a test of the file that hands the first run off ends it
+ * for the tests after it, so a spec must not read the composer as its ready
+ * signal: it waits for the landing when the product says one is coming, and the
+ * shell is its proof otherwise.
  */
 export async function openAppPastLanding(page: Page) {
 	await loadPastFirstRunLanding(page, () => openAppByUrl(page));

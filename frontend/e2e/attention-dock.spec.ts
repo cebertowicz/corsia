@@ -1,6 +1,6 @@
+import { test } from "./support/test";
 import {
   expect,
-  test,
   type APIRequestContext,
   type Page,
 } from "@playwright/test";

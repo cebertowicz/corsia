@@ -160,44 +160,26 @@ test.describe('@flow:chat @surface:chat same-boundary mid-turn Send', () => {
 		// The batch publishes twice: once claimed (queued, no sequence), once
 		// settled (delivered, sequenced). The durable-order proof is the
 		// settled receipt, so that is the one this must pin.
-		// A passive context digest rides in the next batch as its own row when a context source changed
-		// since the thread last saw it, so the pin is on B and C, which must stay adjacent and in order.
-		const isDigest = (message: Record<string, unknown>) => String(message.content).startsWith('[PASSIVE CONTEXT DIGEST]');
-		const matchingReceipts = () => messagesAddedReceipts.filter(receipt => {
-			const inputs = receipt.messages.filter(message => !isDigest(message));
-			return receipt.sessionId === sessionId
-				&& inputs.length === 2
-				&& inputs[0]?.content === messageB
-				&& inputs[1]?.content === messageC
-				&& receipt.messages.every(message => message.delivery_state === 'delivered');
-		});
+		const matchingReceipts = () => messagesAddedReceipts.filter(receipt =>
+			receipt.sessionId === sessionId
+			&& receipt.messages.length === 2
+			&& receipt.messages[0]?.content === messageB
+			&& receipt.messages[1]?.content === messageC
+			&& receipt.messages.every(message => message.delivery_state === 'delivered'),
+		);
 		await releaseMockGate(request, completionGate);
-		try {
-			await expect.poll(matchingReceipts).toHaveLength(1);
-		} catch (error) {
-			// Name every batch this page received, so a missing settled receipt shows what arrived instead.
-			const seen = messagesAddedReceipts
-				.filter(receipt => receipt.sessionId === sessionId)
-				.map(receipt => receipt.messages.map(message => `${String(message.content).slice(0, 24)}:${String(message.delivery_state)}:${String(message.seq)}`));
-			throw new Error(`${(error as Error).message}\nmessages_added batches received for this session: ${JSON.stringify(seen)}`);
-		}
+		await expect.poll(matchingReceipts).toHaveLength(1);
 		const [batchReceipt] = matchingReceipts();
 		if (!batchReceipt) throw new Error('Missing B/C messages_added receipt after release');
-		const batchInputs = batchReceipt.messages.filter(message => !isDigest(message));
-		expect(batchInputs.map(message => message.content)).toEqual([messageB, messageC]);
-		const [receiptB, receiptC] = batchInputs;
+		expect(batchReceipt.messages.map(message => message.content)).toEqual([messageB, messageC]);
+		const [receiptB, receiptC] = batchReceipt.messages;
 		if (!receiptB || !receiptC) throw new Error('Expected two B/C messages_added rows');
 		const bSeq = Number(receiptB.seq);
 		const cSeq = Number(receiptC.seq);
 		const bRevision = Number(receiptB.delivery_revision);
 		const cRevision = Number(receiptC.delivery_revision);
 		expect(bSeq).toBeGreaterThan(0);
-		// B and C are adjacent in the order; the only rows that may sit between them are the batch's own digest rows.
-		const positionB = batchReceipt.messages.indexOf(receiptB);
-		const positionC = batchReceipt.messages.indexOf(receiptC);
-		const between = batchReceipt.messages.slice(positionB + 1, positionC);
-		expect(between.every(isDigest)).toBe(true);
-		expect(cSeq).toBe(bSeq + 1 + between.length);
+		expect(cSeq).toBe(bSeq + 1);
 		expect(bRevision).toBeGreaterThan(0);
 		expect(cRevision).toBe(bRevision);
 

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection } from '../support/corsia';
 
 const SHOTS = process.env.ADD_LOCAL_MODEL_SHOTS_DIR;

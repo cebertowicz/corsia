@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type FullConfig } from '@playwright/test';
+import { captureSeed, SEED_ENABLED } from './support/backendSeed';
 import { openAppByUrl } from './support/corsia';
 
 const e2eRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,8 @@ async function globalSetup(config: FullConfig) {
 	fs.mkdirSync(stateRoot, { recursive: true });
 
 	await warmDevServer(config.projects[0]?.use.baseURL);
+	// Warm-up only read, so this is the state a person's first load finds. Each spec file starts from it again.
+	if (SEED_ENABLED) await captureSeed();
 }
 
 export default globalSetup;

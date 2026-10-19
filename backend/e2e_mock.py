@@ -14,6 +14,7 @@ from loguru import logger
 
 import e2e_mock_calls as mock_calls
 import e2e_pressure_fixture as pressure_fixture
+import e2e_reset
 from e2e_mock_responses import _make_chunk, _make_non_streaming
 
 _mock_replies: list[dict] = []
@@ -178,13 +179,12 @@ async def _skip_harness_discovery() -> list:
 
 @contextmanager
 def mock_engine():
-    """Patch completion, model availability and the comment idle window (a run outlasts 30 min)."""
+    """Patch completion and model availability."""
     from llm import model_status
     production_active_providers = model_status._cloud_providers_active
     with (
         patch("llm.base.acompletion", new=_mock_acompletion),
         patch("app_lifecycle._startup_harness_discovery", new=_skip_harness_discovery),
-        patch("doceditor.feedback_batches.USER_IDLE", new=24 * 60 * 60),
         patch.object(
             model_status,
             "_cloud_providers_active",
@@ -361,6 +361,35 @@ async def inject_message(token: str, body: dict) -> dict:
                     "metadata": metadata, "created_at": now},
     })
     return {"ok": True, "message_id": mid}
+
+
+@router.post("/seed")
+async def capture_seed() -> dict:
+    """Record the running app's state as the seed ``POST /api/test/reset`` returns to.
+
+    The suite calls it once, after warm-up and before its first spec.
+    """
+    await asyncio.to_thread(e2e_reset.capture_seed)
+    return {"ok": True, "boot_id": e2e_reset.BOOT_ID}
+
+
+@router.post("/reset")
+async def reset_to_seed() -> dict:
+    """Restart this backend from the captured seed: database, state root, workspace and all in-memory state.
+
+    The response comes back first; the caller polls ``GET /api/test/boot-id`` until it names a new process.
+    """
+    try:
+        e2e_reset.restart_from_seed()
+    except RuntimeError as refused:
+        raise HTTPException(409, str(refused)) from refused
+    return {"ok": True, "restarting_boot_id": e2e_reset.BOOT_ID}
+
+
+@router.get("/boot-id")
+async def read_boot_id() -> dict:
+    """Name the serving process; it changes once ``POST /api/test/reset`` has replaced it."""
+    return {"boot_id": e2e_reset.BOOT_ID}
 
 
 @router.post("/mock-gates/{gate_name}/release")

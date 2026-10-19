@@ -1,36 +1,24 @@
 import { test as base } from '@playwright/test';
-import { TEST_TOKEN } from './corsia';
-import { recordNetworkDiagnostics } from './networkDiagnostics';
+import { resetBackendToSeed, SEED_ENABLED } from './backendSeed';
 
-async function threadIds(request: import('@playwright/test').APIRequestContext): Promise<string[]> {
-	const response = await request.get('/api/threads', { params: { token: TEST_TOKEN } });
-	if (!response.ok()) return [];
-	return ((await response.json()).threads as { id: string }[]).map((thread) => thread.id);
-}
+const filesReset = new Set<string>();
 
 /**
- * `test` for every spec. The suite runs serially against one backend and one database, and the sidebar lists
- * "Needs you" rows first and windows its rows above 150, so conversations a spec leaves behind push the next spec's
- * fresh conversation out of the mounted rows. After each test this deletes the conversations that test created.
- * Conversations that exist before a test starts (a `beforeAll`, an earlier test of a serial file) are kept.
+ * `test` for every spec. The suite runs its files serially against one backend, so each file starts from the seed
+ * captured before the first spec (see `global-setup.ts`): the first test of a file returns the backend to it, with
+ * the first run pending and no thread, comment batch, setting or session an earlier file left. Tests of one file
+ * share that state. A file whose every test needs the seed (each ends the first run, say) sets `seedPerTest`.
  */
-export const test = base.extend<{ deleteCreatedThreads: void; networkDiagnostics: void }>({
-	// Declared after `request`, so it tears down before the request context disposes a hung request's socket.
-	networkDiagnostics: [
-		async ({ request }, use, testInfo) => {
-			void request;
-			await use();
-			await recordNetworkDiagnostics(testInfo);
-		},
-		{ auto: true },
-	],
-	deleteCreatedThreads: [
-		async ({ request }, use) => {
-			const before = new Set(await threadIds(request));
-			await use();
-			for (const id of await threadIds(request)) {
-				if (!before.has(id)) await request.delete(`/api/threads/${id}`, { params: { token: TEST_TOKEN } });
+export const test = base.extend<{ seedPerTest: boolean; seededBackend: void }>({
+	seedPerTest: [false, { option: true }],
+	seededBackend: [
+		async ({ seedPerTest }, use, testInfo) => {
+			const file = `${testInfo.project.name}:${testInfo.file}`;
+			if (SEED_ENABLED && (seedPerTest || !filesReset.has(file))) {
+				await resetBackendToSeed();
+				filesReset.add(file);
 			}
+			await use();
 		},
 		{ auto: true },
 	],
