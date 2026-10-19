@@ -28,6 +28,8 @@ export interface SettingsNavigation {
 	homeThread: string | null;
 	/** An element in the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 	anchor: string | null;
+	/** A connected-account row to disclose and focus after a chat link opens Connected apps. */
+	connectedAppId: string | null;
 	/** A key card opened from Connected apps; it supplies the scoped header return and every referenced key's app-qualified label. */
 	connectedAppKey: { app: string; entry: string; refs: { entry: string; name: string }[] } | null;
 }
@@ -41,7 +43,7 @@ export interface SettingsNavigation {
  * requestProviderCard         requestSettingsSection('providers') (and providerCardRequest)
  * openSectionFromProject      section, anchor, fromProject=project; project cleared (no openRequest bump: already inside Settings)
  * returnToProjectPage         section=projects, project=fromProject.id, fromProject cleared, anchor cleared
- * selectSettingsSection       section; project, fromProject, pending anchor and Connected-apps return cleared
+ * selectSettingsSection       section; project, fromProject and any pending anchor cleared
  * openSettingsProject         project (a row in the Projects list); pending anchor cleared
  * closeSettingsProject        project cleared; pending anchor cleared
  * setSettingsDrill            drill
@@ -52,7 +54,7 @@ export interface SettingsNavigation {
  */
 const initial = (): SettingsNavigation => ({
 	section: 'providers', project: null, fromProject: null, drill: null,
-	openRequest: 0, homeThread: null, anchor: null, connectedAppKey: null,
+	openRequest: 0, homeThread: null, anchor: null, connectedAppId: null, connectedAppKey: null,
 });
 const state = writable<SettingsNavigation>(initial());
 export const settingsNavigation: Readable<SettingsNavigation> = { subscribe: state.subscribe };
@@ -66,10 +68,34 @@ export const providerCardRequest = writable<string | null>(null);
 
 export function requestSettingsSection(section: SettingsSection, anchor: string | null = null) {
 	change((s) => ({
-		section, anchor, fromProject: null, connectedAppKey: null,
+		section, anchor, connectedAppId: null, connectedAppKey: null, fromProject: null,
 		project: section === 'projects' ? s.project : null,
 		openRequest: s.openRequest + 1,
 	}));
+}
+
+/** A chat link opens one account in its only settings home and puts its scope action next. */
+export function requestConnectedApp(id: string) {
+	change((s) => ({ section: 'connected-apps', connectedAppId: id, anchor: 'connected-apps', fromProject: null, project: null, openRequest: s.openRequest + 1 }));
+}
+
+/** Routes chat links to one connected-app row while the home route is mounted. */
+export function listenForConnectedAppLinks(openSettings: () => void): () => void {
+	const openConnectedAppFromHash = () => {
+		const match = window.location.hash.match(/^#connected-apps\/([^/]+)$/);
+		if (!match) return;
+		let id: string;
+		try {
+			id = decodeURIComponent(match[1]);
+		} catch {
+			return; // An invalid URL fragment cannot identify a connected app.
+		}
+		requestConnectedApp(id);
+		openSettings();
+	};
+	openConnectedAppFromHash();
+	window.addEventListener('hashchange', openConnectedAppFromHash);
+	return () => window.removeEventListener('hashchange', openConnectedAppFromHash);
 }
 
 /** The workspace gear: Settings at its first section. */

@@ -18,7 +18,7 @@
 	import { openThread } from '$lib/stores/openThread';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { closeSettingsBack, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, listenForConnectedAppLinks, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
@@ -445,7 +445,8 @@
 	}
 
 	onMount(() => {
-		return registerHomeLifecycle({
+		const stopConnectedAppLinks = listenForConnectedAppLinks(openSettings);
+		const stop = registerHomeLifecycle({
 			token: () => $token,
 			activeThreadId: () => get(activeThreadId),
 			activeView: () => activeView,
@@ -462,6 +463,7 @@
 			on,
 			connect,
 		});
+		return () => { stopConnectedAppLinks(); stop(); };
 	});
 </script>
 
@@ -470,8 +472,6 @@
 </svelte:head>
 
 <svelte:window onkeydown={handleKeydown} />
-
-
 <CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} active={() => pageActive} />
 
 <HomePageView
