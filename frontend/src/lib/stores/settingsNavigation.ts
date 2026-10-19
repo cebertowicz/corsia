@@ -28,6 +28,8 @@ export interface SettingsNavigation {
 	homeThread: string | null;
 	/** An element in the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 	anchor: string | null;
+	/** A connected-account row to disclose and focus after a chat link opens Connected apps. */
+	connectedAppId: string | null;
 }
 
 /*
@@ -50,7 +52,7 @@ export interface SettingsNavigation {
  */
 const initial = (): SettingsNavigation => ({
 	section: 'providers', project: null, fromProject: null, drill: null,
-	openRequest: 0, homeThread: null, anchor: null,
+	openRequest: 0, homeThread: null, anchor: null, connectedAppId: null,
 });
 const state = writable<SettingsNavigation>(initial());
 export const settingsNavigation: Readable<SettingsNavigation> = { subscribe: state.subscribe };
@@ -64,10 +66,15 @@ export const providerCardRequest = writable<string | null>(null);
 
 export function requestSettingsSection(section: SettingsSection, anchor: string | null = null) {
 	change((s) => ({
-		section, anchor, fromProject: null,
+		section, anchor, connectedAppId: null, fromProject: null,
 		project: section === 'projects' ? s.project : null,
 		openRequest: s.openRequest + 1,
 	}));
+}
+
+/** A chat link opens one account in its only settings home and puts its scope action next. */
+export function requestConnectedApp(id: string) {
+	change((s) => ({ section: 'connected-apps', connectedAppId: id, anchor: 'connected-apps', fromProject: null, project: null, openRequest: s.openRequest + 1 }));
 }
 
 /** The workspace gear: Settings at its first section. */
