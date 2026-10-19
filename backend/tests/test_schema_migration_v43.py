@@ -19,7 +19,7 @@ def _columns(db) -> set[str]:
 def test_fresh_schema_has_checkpoint_snapshot_columns():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 129
+        assert SCHEMA_VERSION == 130
         assert {"artifact_snapshot_json", "plan_status_snapshot_json"} <= _columns(db)
 
 

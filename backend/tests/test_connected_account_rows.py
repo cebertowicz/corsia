@@ -175,8 +175,11 @@ def test_the_manual_step_causes_are_exactly_the_provider_failures():
     assert account_actions.MANUAL_STEP_CAUSES == {
         "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected",
     }
-    assert REVOCATION_CAUSES - account_actions.MANUAL_STEP_CAUSES == {"revoked", "not_signed_in"}
-    assert "manual_only" not in REVOCATION_CAUSES
+    assert REVOCATION_CAUSES == {
+        "revoked", "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected", "not_signed_in",
+        "manual_only", "app_registration_not_allowed", "admin_approval_required", "consent_cancelled",
+        "refresh_token_invalid", "provider_unavailable", "input_refusal",
+    }
 
 
 def test_an_agent_cannot_widen_where_an_account_works_but_can_narrow_it(api):
@@ -244,13 +247,13 @@ def test_an_agent_narrowing_to_no_place_is_refused_like_any_empty_choice(api):
 @pytest.mark.parametrize("method,path,body", [
     ("post", "/sign-out", None), ("delete", "", None), ("put", "/reach", {"reach": ALL}),
 ])
-def test_an_unknown_or_non_google_id_is_a_fixed_404(api, method, path, body):
+def test_an_unknown_or_unsupported_provider_id_is_a_fixed_404(api, method, path, body):
     client, _who, _revoked = api
     db = get_db()
     db.execute(
         "INSERT INTO connected_accounts(id,provider,address,capabilities_json,state,reach_mode,credential_key,"
-        "created_by_kind,created_by_id,created_at,updated_at) VALUES ('other-1','microsoft','m@example.com','[]',"
-        "'connected','selected','connected-account--microsoft--other-1','system','test','t','t')",
+        "created_by_kind,created_by_id,created_at,updated_at) VALUES ('other-1','other','m@example.com','[]',"
+        "'connected','selected','connected-account--other--other-1','system','test','t','t')",
     )
     db.commit()
     for account_id in ("no-such-id", "other-1"):

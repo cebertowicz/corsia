@@ -59,16 +59,18 @@ export function isOnlyCorsia(reach: AccountReach): boolean {
 	return reach.mode === 'corsia';
 }
 
-/** One signed-in provider account (today Google). Never holds a credential, a key name, a token or provider text. */
+/** One signed-in provider account. Never holds a credential, a key name, a token or provider text. */
 export interface ConnectedAccount {
 	kind: 'account';
 	id: string;
-	provider: 'google';
-	/** Display only: the address can change at Google. */
+	provider: 'google' | 'microsoft';
+	/** Display only: the address can change at the provider. */
 	address: string;
 	/** Stable ids; the screen words them: `mail` is Email, `calendar` Calendar, `files` Files. */
 	capabilities: ('mail' | 'calendar' | 'files')[];
 	state: AccountState;
+	account_kind?: 'personal' | 'work' | null;
+	cause?: string | null;
 	reach: AccountReach;
 }
 

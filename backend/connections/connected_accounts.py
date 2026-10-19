@@ -17,13 +17,18 @@ from infra.database import write_transaction
 from infra.time import utc_now_iso
 
 GOOGLE_PROVIDER = "google"
+MICROSOFT_PROVIDER = "microsoft"
 GOOGLE_CAPABILITIES = ("mail", "calendar", "files")
+MICROSOFT_CAPABILITIES = ("mail", "calendar", "files")
 GOOGLE_STATES = frozenset(("connected", "needs_sign_in", "signed_out"))
+MICROSOFT_STATES = GOOGLE_STATES
+MICROSOFT_KINDS = frozenset(("personal", "work"))
 #: Account-only reach mode: the designated CORSIA agent alone. Only the legacy migration writes it.
 ONLY_CORSIA = "corsia"
 AUDIT_ACTIONS = frozenset(("connect", "sign_in", "sign_out", "remove"))
 REVOCATION_CAUSES = frozenset((
-    "revoked", "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected", "not_signed_in",
+    "revoked", "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected", "not_signed_in", "manual_only",
+    "app_registration_not_allowed", "admin_approval_required", "consent_cancelled", "refresh_token_invalid", "provider_unavailable", "input_refusal",
 ))
 Actor = tuple[Literal["person", "agent", "system"], str]
 log = logging.getLogger(__name__)
@@ -64,10 +69,7 @@ def _account_reach(account_id: str, *, db: sqlite3.Connection) -> AppReach:
             "SELECT project_id FROM connected_account_reach WHERE account_id=?", (account_id,),
         )
     )
-    return AppReach(
-        mode=row["reach_mode"], project_ids=project_ids,
-        outside_projects=bool(row["outside_projects"]),
-    )
+    return AppReach(mode=row["reach_mode"], project_ids=project_ids, outside_projects=bool(row["outside_projects"]))
 
 
 def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
@@ -95,23 +97,29 @@ def get_account(account_id: str, *, db: sqlite3.Connection) -> dict[str, object]
         raise ConnectedAccountError("invalid connected account")
     return {
         "id": row["id"], "provider": row["provider"], "provider_subject": row["provider_subject"],
+        "account_kind": row["account_kind"] if "account_kind" in row.keys() else None,
+        "state_cause": row["state_cause"] if "state_cause" in row.keys() else None,
         "address": row["address"], "capabilities": capabilities, "state": row["state"],
         "reach": _account_reach(account_id, db=db).as_dict(), "credential_key": row["credential_key"],
         "cursor": cursor, "created_by": (row["created_by_kind"], row["created_by_id"]),
-        "signed_in_by": (
-            (row["signed_in_by_kind"], row["signed_in_by_id"])
-            if row["signed_in_by_kind"] is not None else None
-        ),
+        "signed_in_by": (row["signed_in_by_kind"], row["signed_in_by_id"])
+        if row["signed_in_by_kind"] is not None else None,
         "created_at": row["created_at"], "updated_at": row["updated_at"],
     }
 
 
-def google_accounts(*, db: sqlite3.Connection) -> list[dict[str, object]]:
-    """Every Google account, oldest first; never credential material."""
+def provider_accounts(provider: str, *, db: sqlite3.Connection) -> list[dict[str, object]]:
+    """Every account of one provider, oldest first; never credential material."""
     rows = db.execute(
-        "SELECT id FROM connected_accounts WHERE provider=? ORDER BY created_at,id", (GOOGLE_PROVIDER,),
+        "SELECT id FROM connected_accounts WHERE provider=? ORDER BY created_at,id", (provider,),
     ).fetchall()
     return [get_account(row["id"], db=db) for row in rows]
+
+
+def google_accounts(*, db: sqlite3.Connection) -> list[dict[str, object]]:
+    """Every Google account, oldest first; never credential material."""
+    return provider_accounts(GOOGLE_PROVIDER, db=db)
+
 
 
 def is_connected(account_id: str, *, db: sqlite3.Connection) -> bool:
@@ -213,6 +221,7 @@ def create_google_account(
     return _on_db(db, lambda conn: get_account(identity, db=conn))
 
 
+
 def backfill_google_subject(
     account_id: str, provider_subject: str, *, db: sqlite3.Connection | None = None,
 ) -> None:
@@ -312,7 +321,6 @@ def google_scopes(account_id: str, *, db: sqlite3.Connection) -> list[str]:
     scopes = bundle.get("scopes") if bundle is not None and _valid_bundle(bundle) else None
     return sorted(scope for scope in scopes if isinstance(scope, str)) if isinstance(scopes, list) else []
 
-
 def set_state(account_id: str, state: str, *, db: sqlite3.Connection | None = None) -> None:
     """Update one account's lifecycle state; callers own the provider operation."""
     if state not in GOOGLE_STATES:
@@ -337,10 +345,8 @@ def mark_signed_in(
         ).rowcount != 1:
             raise ConnectedAccountError("connected account not found")
 
-
 def mark_needs_sign_in(account_id: str, refresh_token: str | None = None, *, db: sqlite3.Connection | None = None) -> bool:
-    """Mark only this connected account ``needs_sign_in``; given the refused refresh token,
-    only while the row still holds it, so a refusal racing a new sign-in never undoes it."""
+    """Mark one account needs-sign-in only if the refused refresh token still matches it."""
     with write_transaction(db, scope="connected_account_needs_sign_in") as conn:
         if refresh_token is not None:
             current = resolve_google_credentials(account_id, db=conn)

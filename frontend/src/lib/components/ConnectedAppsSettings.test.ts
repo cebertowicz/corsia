@@ -323,6 +323,13 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('.capability-label')?.textContent).toBe('Reaches');
 	});
 
+	it('renders a Microsoft account with its provider title', async () => {
+		const microsoft = { ...googleAccount, id: 'microsoft-work', provider: 'microsoft' as const, address: 'alex@contoso.example', account_kind: 'work' as const };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [microsoft] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
+	});
+
 	it('keeps same-prefix Google account titles distinct while preserving their domains', async () => {
 		const accounts = [
 			{ ...googleAccount, id: 'google-work', address: 'shared.prefix.very-long-work-address@example.com' },

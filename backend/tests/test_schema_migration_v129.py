@@ -56,9 +56,9 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v128_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 129
+    assert SCHEMA_VERSION == 130
     assert MIGRATIONS[128] is migrate_128_to_129
-    assert 129 not in MIGRATIONS
+    assert 129 in MIGRATIONS
 
 
 def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> None:
@@ -67,7 +67,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        result = migrate_to_current(db, SCHEMA_VERSION)
+        result = migrate_to_current(db, 129)
         assert (result.migrated, result.from_version, result.to_version) == (True, 128, 129)
         account = google_account(db=db)
         assert account is not None
@@ -81,7 +81,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         assert get_setting("gmail_poll_cursor", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
 
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert not migrate_to_current(db, 129).migrated
 
 
 def test_migration_rekeys_owned_threads_and_binds_open_google_drafts() -> None:
@@ -118,7 +118,7 @@ def test_migration_rekeys_owned_threads_and_binds_open_google_drafts() -> None:
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        migrate_to_current(db, SCHEMA_VERSION)
+        migrate_to_current(db, 129)
 
         account = google_account(db=db)
         assert account is not None
@@ -149,7 +149,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        result = migrate_to_current(db, SCHEMA_VERSION)
+        result = migrate_to_current(db, 129)
         assert (result.migrated, result.to_version) == (True, 129)
         account = google_account(db=db)
         assert account is not None
@@ -159,7 +159,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         assert resolve_google_credentials(str(account["id"]), db=db) is None
         assert get_setting("google_account", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert not migrate_to_current(db, 129).migrated
 
 
 def test_addressless_legacy_data_is_retired_without_an_account() -> None:
@@ -169,14 +169,14 @@ def test_addressless_legacy_data_is_retired_without_an_account() -> None:
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        result = migrate_to_current(db, SCHEMA_VERSION)
+        result = migrate_to_current(db, 129)
         assert (result.migrated, result.to_version) == (True, 129)
         assert google_account(db=db) is None
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
 
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert not migrate_to_current(db, 129).migrated
 
 
 def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(monkeypatch) -> None:
@@ -187,7 +187,7 @@ def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(mon
 
         monkeypatch.setattr(key_store_values, "put", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
         with pytest.raises(MigrationError):
-            migrate_to_current(db, SCHEMA_VERSION)
+            migrate_to_current(db, 129)
 
         assert get_setting("google_account", db=db) == {"email": ACCOUNT, "status": "connected"}
         assert get_setting("gmail_poll_cursor", db=db) == CURSOR
@@ -206,7 +206,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
 
         monkeypatch.setattr(key_store_values, "put", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
         with pytest.raises(MigrationError):
-            migrate_to_current(db, SCHEMA_VERSION)
+            migrate_to_current(db, 129)
 
         assert db.execute("PRAGMA user_version").fetchone()[0] == 126
         assert db.execute(
@@ -217,7 +217,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 129
+        assert migrate_to_current(db, 129).to_version == 129
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:
@@ -235,7 +235,7 @@ def test_stored_screens_are_rekeyed_to_the_new_account_and_strays_dropped() -> N
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        migrate_to_current(db, SCHEMA_VERSION)
+        migrate_to_current(db, 129)
 
         account = google_account(db=db)
         assert account is not None
@@ -249,14 +249,14 @@ def test_screens_without_a_legacy_account_are_dropped() -> None:
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        migrate_to_current(db, SCHEMA_VERSION)
+        migrate_to_current(db, 129)
 
         assert db.execute("SELECT COUNT(*) FROM email_screens").fetchone()[0] == 0
 
 
 def test_dev_128_upgrades_to_the_complete_connected_accounts_schema() -> None:
     with closing(_dev_128()) as db:
-        migrate_to_current(db, SCHEMA_VERSION)
+        migrate_to_current(db, 129)
 
         expected_columns = {
             "connected_accounts": {
@@ -281,7 +281,7 @@ def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
 
     with closing(_dev_128()) as db:
         _seed_legacy(db)
-        migrate_to_current(db, SCHEMA_VERSION)
+        migrate_to_current(db, 129)
         account = google_account(db=db)
         assert account is not None
         account_id = str(account["id"])
@@ -304,10 +304,14 @@ def test_fresh_install_has_final_history_tables_and_audit_causes() -> None:
             "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
             "VALUES (?,?,?,?,?,?)", (*row, "not_signed_in"),
         )
+        db.execute(
+            "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
+            "VALUES (?,?,?,?,?,?)", (*row, "manual_only"),
+        )
         with pytest.raises(sqlite3.IntegrityError):
             db.execute(
                 "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
-                "VALUES (?,?,?,?,?,?)", (*row, "manual_only"),
+                "VALUES (?,?,?,?,?,?)", (*row, "provider_response_text"),
             )
 
 

@@ -33,28 +33,42 @@ CHANGE_FAILED = "Couldn't change this Google account. Try again."
 def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[str, object]:
     """One account's value-free list row."""
     from connections.connected_accounts import resolve_google_credentials
+    from connections.microsoft.accounts import resolve_microsoft_credentials
 
     state = str(account["state"])
-    if state == "connected" and resolve_google_credentials(str(account["id"]), db=db) is None:
+    provider = str(account["provider"])
+    credentials = (
+        resolve_google_credentials(str(account["id"]), db=db) if provider == "google"
+        else resolve_microsoft_credentials(str(account["id"]), db=db) if provider == "microsoft" else None
+    )
+    if state == "connected" and credentials is None:
         state = "needs_sign_in"
-    return {
-        "kind": "account", "id": account["id"], "provider": account["provider"], "address": account["address"],
+    row = {
+        "kind": "account", "id": account["id"], "provider": provider, "address": account["address"],
         "capabilities": account["capabilities"], "state": state, "reach": account["reach"],
     }
+    if provider == "microsoft":
+        row.update({
+            "title": f"Microsoft — {account['address']}", "account_kind": account["account_kind"],
+            "cause": account["state_cause"],
+        })
+    return row
 
 
 def list_account_rows(thread_id: str | None, *, db: sqlite3.Connection) -> list[dict[str, object]]:
     """Every Google account for the person (``thread_id`` None); for an agent only those that reach its thread."""
     from connections.google.accounts import visible_google_accounts
+    from connections.microsoft.accounts import visible_microsoft_accounts
 
-    return [account_row(account, db=db) for account in visible_google_accounts(thread_id, db=db)]
+    accounts = visible_google_accounts(thread_id, db=db) + visible_microsoft_accounts(thread_id, db=db)
+    return [account_row(account, db=db) for account in accounts]
 
 
 def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> None:
     """404 unless the caller may see the account, so an agent gets the same answer for an id outside
     its reach as for an unknown one; then, for an agent, 403 when the control is ``person_only``
     (Sign out, Remove)."""
-    from connections.google.accounts import visible_google_account
+    from connections.connected_accounts import ConnectedAccountError, account_reaches_thread, get_account
 
     db = get_db()
     try:
@@ -63,7 +77,11 @@ def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> Non
             from api.connected_apps import _agent_thread  # Imported here: that module includes this one's router.
 
             thread_id, _scope = _agent_thread(user, db)
-        if visible_google_account(account_id, thread_id, db=db) is None:
+        try:
+            get_account(account_id, db=db)
+        except ConnectedAccountError:
+            raise refusal(NOT_FOUND, 404) from None
+        if thread_id is not None and not account_reaches_thread(account_id, thread_id, db=db):
             raise refusal(NOT_FOUND, 404)
         if thread_id is not None and person_only:
             raise refusal(PERSON_ONLY_CONTROLS, 403)
@@ -99,14 +117,27 @@ def _error(exc: Exception) -> Exception:
     return fixed.get(str(exc)) or refusal(CHANGE_FAILED)
 
 
+def _provider(account_id: str) -> str:
+    from connections.connected_accounts import get_account
+
+    db = get_db()
+    try:
+        return str(get_account(account_id, db=db)["provider"])
+    finally:
+        db.close()
+
+
 @accounts_router.post("/accounts/{account_id}/sign-out")
 async def sign_out_account(account_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Sign out one account. Returns its updated row and the fixed revocation cause."""
-    from connections.google.account_actions import sign_out_google_account
-
     await run_in_db(lambda: _authorize(account_id, user, person_only=True))
     try:
-        result = await sign_out_google_account(account_id, actor=audit_actor(user))
+        if await run_in_db(_provider, account_id) == "microsoft":
+            from connections.microsoft.account_actions import sign_out_microsoft_account
+            result = await sign_out_microsoft_account(account_id, actor=audit_actor(user))
+        else:
+            from connections.google.account_actions import sign_out_google_account
+            result = await sign_out_google_account(account_id, actor=audit_actor(user))
     except Exception as exc:
         raise _error(exc) from None
     return {"row": await run_in_db(_row, account_id), "revocation": result["revocation"]}
@@ -115,11 +146,14 @@ async def sign_out_account(account_id: str, user: dict = Depends(require_user)) 
 @accounts_router.delete("/accounts/{account_id}")
 async def remove_account(account_id: str, user: dict = Depends(require_user)) -> dict[str, object]:
     """Remove one account and everything local to it. Returns ``removed`` and the fixed revocation cause."""
-    from connections.google.account_actions import remove_google_account
-
     await run_in_db(lambda: _authorize(account_id, user, person_only=True))
     try:
-        result = await remove_google_account(account_id, actor=audit_actor(user))
+        if await run_in_db(_provider, account_id) == "microsoft":
+            from connections.microsoft.account_actions import remove_microsoft_account
+            result = await remove_microsoft_account(account_id, actor=audit_actor(user))
+        else:
+            from connections.google.account_actions import remove_google_account
+            result = await remove_google_account(account_id, actor=audit_actor(user))
     except Exception as exc:
         raise _error(exc) from None
     return {"id": account_id, "removed": True, "revocation": result["revocation"]}

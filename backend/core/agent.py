@@ -245,6 +245,7 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(ModelSourcesTool())
     agent.tools.register(GitHubAgentAccountTool())
     _register_google_tools(agent)
+    _register_microsoft_tools(agent)
 
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
@@ -262,6 +263,13 @@ def _register_google_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(CalendarListTool())
     agent.tools.register(CalendarDraftInviteTool())
     agent.tools.register(CalendarSendInviteTool())
+
+
+def _register_microsoft_tools(agent: CORSIAAgent) -> None:
+    from tools.microsoft_account import MicrosoftConnectTool, MicrosoftStatusTool
+
+    agent.tools.register(MicrosoftConnectTool())
+    agent.tools.register(MicrosoftStatusTool())
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:
