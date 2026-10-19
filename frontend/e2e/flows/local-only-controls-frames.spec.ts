@@ -247,6 +247,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				] as const) {
 					Object.assign(state, { models, cloudOff: true, canAddLocal });
 					await openSheetInProject(page, await begin(width, height, theme));
+					if (canAddLocal) await expect(page.locator('.model-sheet').getByRole('button', { name: 'Add a local model' })).toBeVisible();
 					await shot(name, size, theme);
 				}
 
