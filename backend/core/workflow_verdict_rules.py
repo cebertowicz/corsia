@@ -59,6 +59,18 @@ class WorkflowHistory:
     def first_use(self, version: str) -> str:
         return min((run.started_at for run in self.runs if run.version == version), key=parse_ts)
 
+    def successor(self, version: str) -> tuple[str, str] | None:
+        """The version that replaced ``version`` and when: the next by first use, or for the newest the
+        version a rollback returned to after its last run; None while it is still the one in use."""
+        order = self.versions()
+        index = order.index(version)
+        if index + 1 < len(order):
+            return order[index + 1], self.first_use(order[index + 1])
+        ordered = sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id))
+        last = max(i for i, run in enumerate(ordered) if run.version == version)
+        after = next((run for run in ordered[last + 1:] if run.version != version), None)
+        return (after.version, after.started_at) if after is not None else None
+
 
 @dataclass(frozen=True)
 class FrozenPlan:
@@ -180,8 +192,9 @@ def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window
 def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
     """Freeze definitions and baseline eligibility at the version's first use (design §3.4)."""
     subject = f"workflow:{history.ref}@{version}"
-    first_use = parse_ts(history.first_use(version))
-    in_force = definitions_in_force(history.definitions, history.first_use(version))
+    started = history.first_use(version)
+    first_use = parse_ts(started)
+    in_force = definitions_in_force(history.definitions, started)
     kpis, refusals, minimum = assert_evaluator_fields(in_force, history.ref, history.version_attr)
     measures = (*BUILTINS, *kpis)
     window = max(measure.window_days for measure in measures)
@@ -247,8 +260,11 @@ def sides(history: WorkflowHistory, plan: FrozenPlan) -> tuple[list[Run], list[R
     return old, new
 
 
-def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime, replaced_by: str | None = None) -> Verdict:
-    """Collecting, Changed again, Not enough data, or the verdict at look 1 or look 2."""
+def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
+           replaced_by: tuple[str, str] | None = None) -> Verdict:
+    """Collecting, Changed again, Not enough data, or the verdict at look 1 or look 2.
+
+    ``replaced_by`` is the replacing version and when it took over (``WorkflowHistory.successor``)."""
     if plan.baseline is None:
         return Verdict("not_enough_data", "no_baseline", 0, (), {"minimum": plan.minimum, "skipped": list(plan.skipped)})
     window = max(m.window_days for m in plan.measures)
@@ -263,13 +279,14 @@ def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime, replaced_b
     first = _prefix(plan, deciding, new, old, plan.minimum, now)
     inputs = {"baseline": plan.baseline, "skipped": list(plan.skipped)}
     if replaced_by is not None:
-        cutoff, own = parse_ts(history.first_use(replaced_by)), _side(history, plan.version)
+        successor, cutoff = replaced_by[0], parse_ts(replaced_by[1])
+        own = _side(history, plan.version)
         reached = first is not None and max(parse_ts(r.started_at) for r in new[:first]) < cutoff
         pending = any(not r.settled(window, now) for r in own if parse_ts(r.started_at) < cutoff)
         if not reached and not pending:
             k = sum(1 for r in own if parse_ts(r.started_at) < cutoff)
             return Verdict("changed_early", "replaced_before_look_1", 0, (),
-                           {**inputs, "version": plan.version, "k": k, "next": replaced_by})
+                           {**inputs, "version": plan.version, "k": k, "next": successor})
     if first is None:
         counted = [c for c in overall if c.role != "shown" and c.call not in BLOCKED | {"unknown"}]
         groups = sorted({g for c in counted for g in c.groups})
@@ -291,14 +308,13 @@ def compute(snapshot: Snapshot) -> list[Evaluation]:
     """Every judged version's evaluation; a version with a reached verdict is never recomputed."""
     now, evaluations = parse_ts(snapshot.now), []
     for history in snapshot.workflows:
-        order = history.versions()
-        for index, version in enumerate(order):
+        for version in history.versions():
             subject = f"workflow:{history.ref}@{version}"
             if subject in snapshot.reached:
                 continue
             existing = snapshot.plans.get(subject)
             plan = existing or freeze_plan(history, version)
-            replaced_by = order[index + 1] if index + 1 < len(order) else None
+            replaced_by = history.successor(version)
             evaluations.append(Evaluation(subject, history.owner, plan, decide(history, plan, now, replaced_by),
                                           existing is None))
     return evaluations

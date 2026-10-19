@@ -140,7 +140,7 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
 
 
 def _recorded(db: sqlite3.Connection) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
-    """All recorded plan and reached state; one event per version keeps this read bounded in practice."""
+    """All recorded plan and reached state; one event per version, so the read grows with recorded versions."""
     plans, reached = {}, set()
     for row in db.execute("""
         SELECT subject_key, event_name, attributes FROM outcome_events

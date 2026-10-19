@@ -61,7 +61,8 @@ def plan_for(source: WorkflowHistory, version: str = "v2", *extra: PlannedMeasur
 
 
 def verdict(source: WorkflowHistory, *extra: PlannedMeasure, version: str = "v2", replaced_by: str | None = None):
-    return decide(source, plan_for(source, version, *extra), NOW, replaced_by)
+    replaced = (replaced_by, source.first_use(replaced_by)) if replaced_by is not None else None
+    return decide(source, plan_for(source, version, *extra), NOW, replaced)
 
 
 def corrections_call(new: list[Run], old: list[Run], minimum: int = 20):
@@ -181,6 +182,17 @@ def test_a_rolled_back_version_keeps_its_full_history_place_in_the_order() -> No
         runs("v1", 1, started=20, ended=10),
     )
     assert source.versions() == ["v1", "v2"]
+
+
+def test_a_version_rolled_back_before_its_minimum_is_changed_again_by_the_version_it_returned_to() -> None:
+    source = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                     runs("v1", 1, count=3, started=12, ended=10))
+    assert source.successor("v2") == ("v1", _at(12))
+    result = next(item for item in compute(Snapshot(NOW.isoformat(), (source,))) if item.plan.version == "v2")
+    assert (result.verdict.word, result.verdict.reason) == ("changed_early", "replaced_before_look_1")
+    assert {key: result.verdict.inputs[key] for key in ("k", "next")} == {"k": 4, "next": "v1"}
+    current = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15))
+    assert current.successor("v2") is None and current.successor("v1") == ("v2", _at(20))
 
 
 def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
