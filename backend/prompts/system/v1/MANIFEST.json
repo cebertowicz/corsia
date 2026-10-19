@@ -57,11 +57,11 @@
       "sha256": "658f0483112dd30bc4e183811fb22444732fa34b2ff42ac955a277175b9ae10c"
     },
     {
-      "bytes": 1053,
+      "bytes": 1050,
       "kind": "context",
       "path": "context/roles/corsia_agent/00-operating-model.md",
       "role": "corsia_agent",
-      "sha256": "d4097981f9e25556be1323dcd0a18e08fc2a25770f44a44f09e467ead40187fe"
+      "sha256": "adde73e71b092f8a52eb83c38fcb7cee8bf52844f12684f5dcec52d4a499accf"
     },
     {
       "bytes": 728,
@@ -292,10 +292,16 @@
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
     },
     {
-      "bytes": 5204,
+      "bytes": 5335,
       "kind": "skill",
       "path": "skills/microsoft-setup/SKILL.md",
-      "sha256": "577e52a684ac155af6a2ba31c5b741809920e84ab56c268fbc5bd40a18094374"
+      "sha256": "3bd1da0346f2b496017520086cc0014d5d4a472c10868a4dcb3d8cfa619efae5"
+    },
+    {
+      "bytes": 1552,
+      "kind": "skill",
+      "path": "skills/microsoft-setup/references/stop-messages.md",
+      "sha256": "2b2b8e25f11153bf1025352e3b98f708449791f27bdfc0a7511ba6c53f5a2aa6"
     },
     {
       "bytes": 2630,
