@@ -120,32 +120,6 @@ def test_settled_means_terminal_and_past_the_window_and_failed_runs_are_not_outc
     assert runs["open"].terminal_at is None and not runs["open"].settled(0, NOW)
 
 
-def test_read_snapshot_excludes_nodes_outside_its_bounded_history(db) -> None:
-    node(db, "old", created="2025-10-04T00:00:00Z", ended="2025-10-05T00:00:00Z")
-    node(db, "current")
-    runs, _ = runs_of(read_snapshot(db, now=NOW))
-    assert set(runs) == {"current"}
-
-
-def test_read_snapshot_does_not_treat_a_window_edge_child_as_a_run_root(db) -> None:
-    root_created = (NOW - timedelta(days=400)).isoformat()
-    node(db, "old-root", created=root_created, ended=root_created)
-    node(db, "recent-child", parent="old-root")
-    snapshot = read_snapshot(db, now=NOW)
-    assert snapshot.workflows == ()
-
-
-def test_read_snapshot_uses_the_longest_owner_declared_follow_up_window(db) -> None:
-    _definitions(db, settle_days=30)
-    created = (NOW - timedelta(days=370)).isoformat()
-    ended = (NOW - timedelta(days=369)).isoformat()
-    node(db, "within-owner-window", created=created, ended=ended)
-    edge_created = (NOW - timedelta(days=390)).isoformat()
-    edge_ended = (NOW - timedelta(days=389)).isoformat()
-    node(db, "at-owner-window-edge", created=edge_created, ended=edge_ended)
-    runs, _ = runs_of(read_snapshot(db, now=NOW))
-    assert set(runs) == {"within-owner-window", "at-owner-window-edge"}
-
 
 def test_the_group_is_the_runs_own_model_difficulty_and_size_band(db) -> None:
     node(db, "opus", difficulty="hard", size="XL")
@@ -176,12 +150,10 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
         ("m1", True, "c1"), ("m2", False, "c1")]
 
 
-def _definitions(db, *, settle_days: int | None = None) -> None:
+def _definitions(db) -> None:
     event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
     kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": True,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
-    if settle_days is not None:
-        kpi["settle_days"] = settle_days
     rows = [("event", "qg.escape", 1, event, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 1, {**kpi, "review": 0.2}, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 2, {**kpi, "review": 0.5}, "2026-10-10T00:00:00Z")]
@@ -202,33 +174,6 @@ def test_the_frozen_plan_uses_the_definitions_in_force_at_the_versions_first_run
     assert (v1.definition_version, v1.margin_gap) == (1, pytest.approx(0.1))
     assert (v2.definition_version, v2.margin_gap) == (2, pytest.approx(0.4))
 
-
-def test_bounded_snapshot_keeps_the_versions_true_first_use_and_frozen_plan(db) -> None:
-    early_v1 = (NOW - timedelta(days=360)).isoformat()
-    early_v2 = (NOW - timedelta(days=350)).isoformat()
-    recent_v1 = (NOW - timedelta(days=101)).isoformat()
-    recent_v2 = (NOW - timedelta(days=100)).isoformat()
-    for index in range(20):
-        node_id = f"early-v1-{index}"
-        node(db, node_id, created=early_v1, ended=early_v1)
-        usage(db, f"usage-{node_id}", node_id)
-    node(db, "early-v2", version="v2", created=early_v2, ended=early_v2)
-    usage(db, "usage-early-v2", "early-v2")
-    node(db, "recent-v1", created=recent_v1, ended=recent_v1)
-    usage(db, "usage-recent-v1", "recent-v1")
-    node(db, "recent-v2", version="v2", created=recent_v2, ended=recent_v2)
-    usage(db, "usage-recent-v2", "recent-v2")
-    _, before = runs_of(read_snapshot(db, now=NOW))
-    first = freeze_plan(before, "v2")
-    subject = "workflow:sdlc-process@v2"
-    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
-               "attributes) VALUES ('planned','planned','measurement.verdict.planned','corsia','instrumented',?,?,?,?)",
-               (early_v2, early_v2, subject, json.dumps({"plan": first.encoded()})))
-    after_snapshot = read_snapshot(db, now=NOW + timedelta(days=20))
-    _, after = runs_of(after_snapshot)
-    assert first.baseline == "v1" and after.first_use("v2") == early_v2
-    assert after_snapshot.plans[subject] == first
-    assert next(item for item in compute(after_snapshot) if item.subject == subject).plan == first
 
 
 def test_reached_verdicts_remain_skipped_after_their_event_ages_past_the_read_window(db) -> None:

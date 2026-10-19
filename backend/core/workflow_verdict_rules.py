@@ -48,24 +48,16 @@ class WorkflowHistory:
     definitions: tuple[Definition, ...] = ()
     version_attr: str | None = None  # not persisted by measure_sync yet, so the read side passes None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
-    first_uses: Mapping[str, str] = field(default_factory=dict)
 
     def versions(self) -> list[str]:
-        """Judged versions by first use (v1, v2, ...), the same first use ``first_use`` reports."""
-        return sorted({run.version for run in self.runs}, key=lambda version: (parse_ts(self.first_use(version)), version))
+        """Judged versions by first use (v1, v2, ...)."""
+        first: dict[str, str] = {}
+        for run in sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id)):
+            first.setdefault(run.version, run.started_at)
+        return list(first)
 
     def first_use(self, version: str) -> str:
-        """Earliest use over full history, as whoever built this history carried it in ``first_uses``."""
-        return self.first_uses[version]
-
-
-def first_uses_of(runs: Sequence[Run]) -> dict[str, str]:
-    """First use per version when ``runs`` are the whole history of those versions (calibration splits, tests)."""
-    first: dict[str, str] = {}
-    for run in runs:
-        if run.version not in first or parse_ts(run.started_at) < parse_ts(first[run.version]):
-            first[run.version] = run.started_at
-    return first
+        return min((run.started_at for run in self.runs if run.version == version), key=parse_ts)
 
 
 @dataclass(frozen=True)
@@ -132,10 +124,6 @@ def definitions_in_force(definitions: Sequence[Definition], at: str) -> list[Def
     return [item for item in latest.values() if not item.removed]
 
 
-def kpi_window_days(spec: Mapping[str, object]) -> int:
-    """The owner-declared KPI follow-up window in whole days."""
-    return int(spec.get("settle_days") or 0)  # type: ignore[call-overload]
-
 
 def assert_evaluator_fields(definitions: Sequence[Definition], workflow: str, version_attr: str | None = None
                             ) -> tuple[tuple[PlannedMeasure, ...], tuple[tuple[str, str], ...], int]:
@@ -158,7 +146,7 @@ def assert_evaluator_fields(definitions: Sequence[Definition], workflow: str, ve
             refusals.append((item.name, refusal))
             continue
         gap = abs(float(spec["target"]) - float(spec["review"]))  # type: ignore[arg-type]
-        measures.append(PlannedMeasure(item.name, role, str(spec["better"]), "kpi", kpi_window_days(spec),  # type: ignore[call-overload]
+        measures.append(PlannedMeasure(item.name, role, str(spec["better"]), "kpi", int(spec.get("settle_days") or 0),  # type: ignore[call-overload]
                                        item.version, margin_gap=gap, coverage=bool(spec.get("coverage"))))
         minimum = max(minimum, int(spec.get("min_n") or 0))  # type: ignore[call-overload]
     return tuple(measures), tuple(refusals), minimum

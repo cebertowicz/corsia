@@ -56,12 +56,10 @@ class AttributedFact:
     node_id: str | None
 
 
-def attributed_facts(db: sqlite3.Connection, *, since: str | None = None) -> list[AttributedFact]:
-    """Readable correction facts since ``since``, attributed to their plan node or None (Unattributed)."""
-    sql = _ATTRIBUTED_SQL + (f" AND {_ts('m.created_at')} >= {_ts(':since')}" if since is not None else "")
-    rows = db.execute(sql, {
+def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
+    """Every readable correction fact with the plan node it is attributed to, or None (Unattributed)."""
+    rows = db.execute(_ATTRIBUTED_SQL, {
         "event": CORRECTION_EVENT, "correction": LABEL_CORRECTION, "not_correction": LABEL_NOT_CORRECTION,
-        "since": since,
     }).fetchall()
     facts = []
     for row in rows:

@@ -13,8 +13,7 @@ import pytest
 
 import core.workflow_verdict_evaluator as evaluator
 from core.workflow_verdict_rules import (
-    Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, first_uses_of,
-    freeze_plan,
+    Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, freeze_plan,
 )
 from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
@@ -52,8 +51,7 @@ def runs(version: str, corrections: int | list[int], *, count: int = 20, group=G
 
 
 def history(*sides: list[Run], definitions=()) -> WorkflowHistory:
-    every = tuple(run for side in sides for run in side)
-    return WorkflowHistory("sdlc-process", "owner", every, tuple(definitions), first_uses=first_uses_of(every))
+    return WorkflowHistory("sdlc-process", "owner", tuple(run for side in sides for run in side), tuple(definitions))
 
 
 def plan_for(source: WorkflowHistory, version: str = "v2", *extra: PlannedMeasure) -> FrozenPlan:
@@ -177,17 +175,32 @@ def test_baseline_is_the_nearest_version_with_the_minimum_in_shared_groups() -> 
 
 
 def test_a_rolled_back_version_keeps_its_full_history_place_in_the_order() -> None:
-    # v1 first ran outside the read window, then v2 shipped, then v1 came back: in-window runs alone show v2 first.
-    source = replace(history(runs("v2", 1, started=40, ended=30), runs("v1", 1, started=20, ended=10)),
-                     first_uses={"v1": _at(400), "v2": _at(40)})
+    source = history(
+        runs("v1", 1, started=400, ended=390),
+        runs("v2", 1, started=40, ended=30),
+        runs("v1", 1, started=20, ended=10),
+    )
     assert source.versions() == ["v1", "v2"]
+
+
+def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
+    source = history(
+        runs("v1", 1, started=80, ended=70),
+        runs("v2", 1, started=40, ended=35),
+        runs("v3", 1, started=30, ended=20),
+    )
+    early = Snapshot(_at(37), (source,))
+    later = Snapshot(NOW.isoformat(), (source,))
+    early_plan = next(item.plan for item in compute(early) if item.subject == "workflow:sdlc-process@v2")
+    later_plan = next(item.plan for item in compute(later) if item.subject == "workflow:sdlc-process@v2")
+    assert early_plan == later_plan
 
 
 def test_calibration_splits_use_all_history_for_their_baseline() -> None:
     source = history(runs("v1", 1, count=80, started=90, ended=30))
     ordered = sorted(source.runs, key=lambda run: (run.started_at, run.run_id))
     halves = [replace(run, version="a" if index % 2 == 0 else "b") for index, run in enumerate(ordered)]
-    split = replace(source, runs=tuple(halves), first_uses=first_uses_of(halves))
+    split = replace(source, runs=tuple(halves))
     calls, _ = calibration_script().splits(source, NOW)
     assert freeze_plan(split, "b", baseline_as_of=NOW).baseline == "a"
     assert any(call != "too_few" for found in calls.values() for call, _ in found)
