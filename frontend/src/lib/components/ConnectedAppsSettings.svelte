@@ -280,18 +280,14 @@
 				{#each rows as row (row.id)}
 					{#if isAccount(row)}
 						<div class="item account-item" data-connected-account-id={row.id} data-settings-anchor={accountAnchor(row.id)} use:settingsAnchor={accountAnchor(row.id)}>
-							<button class="account-face" class:open={openId === row.id} aria-label={accountName(row)} aria-expanded={openId === row.id} onclick={() => openId = openId === row.id ? null : row.id}>
-								<span class="account-copy">
-									{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>
-									{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">Google — </span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}
-									<span class="sub" class:attention={tone(row) === 'attention'}>{`${accountStateLine(row)} · ${placeLine(row)}`}</span>
-								</span>
-								<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-							</button>
+							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">Google — </span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
+							<SettingsRow name={accountTitle} ariaLabel={accountName(row)} subTone={tone(row)} chevron expanded={openId === row.id} onOpen={() => openId = openId === row.id ? null : row.id}>
+								{#snippet sub()}{accountStateLine(row)}<span class="place">{` · ${placeLine(row)}`}</span>{/snippet}
+							</SettingsRow>
 							{#if openId === row.id}
 								<div class="details">
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
-									<p class="capabilities">Reaches: {capabilityLabels(row)}</p>
+									<p class="capabilities">Reaches — {capabilityLabels(row)}</p>
 									{#if row.state === 'needs_sign_in'}<p class="impact">Google signed you out, so agents can’t use this account until you sign in again.</p>{/if}
 									{#if manualStep?.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
 									<div class="actions account-actions">
@@ -333,6 +329,7 @@
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
 	.heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+	@media (min-width: 769px) { .heading > div { flex: 1; min-width: 0; } }
 	.lede, .state, .offline { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
 	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
 	.state, .offline { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
@@ -348,21 +345,11 @@
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.manual-removal { margin: var(--space-3) var(--space-2) 0; color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact, .capabilities { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
-	.account-item { border-radius: var(--radius-sm); }
-	@media (hover: hover) { .account-item:hover { background: var(--bg-hover); } }
-	.account-face { width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--space-3); min-height: var(--list-row-min-height); padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-	.account-face:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.account-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
 	.account-closed-name, .account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); }
 	.account-closed-name { display: flex; column-gap: 0; overflow: hidden; white-space: nowrap; }
 	.account-provider, .account-local-prefix, .account-local-suffix, .account-domain { flex: 0 0 auto; }
 	.account-local-prefix { overflow: hidden; text-overflow: clip; }
 	.account-open-name { overflow-wrap: anywhere; }
-	.sub { font-size: var(--text-caption); color: var(--text-tertiary); overflow-wrap: anywhere; }
-	.sub.attention { color: var(--amber-text); }
-	.chev { flex-shrink: 0; color: var(--text-tertiary); transition: transform var(--dur-tight); }
-	.account-face[aria-expanded='true'] .chev { transform: rotate(90deg); }
-	@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
 	.account-action { position: relative; display: inline-flex; }
 	.account-action::after { content: ''; position: absolute; inset: calc(-1 * var(--space-2)); }
 	.account-action :global(button) { position: relative; z-index: 1; }

@@ -311,12 +311,12 @@ describe('ConnectedAppsSettings', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [{ ...awaiting, state: 'working' }], accounts: [googleAccount, { ...googleAccount, id: 'google-personal', address: 'sam@example.com' }] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull());
-		const names = [...host.querySelectorAll('[aria-label^="Google —"], [data-settings-row] .name')].map((node) => node.getAttribute('aria-label') ?? node.textContent);
+		const names = [...host.querySelectorAll<HTMLElement>('[data-settings-row]')].map((row) => row.querySelector<HTMLButtonElement>('button')?.ariaLabel ?? row.querySelector('.name')?.textContent);
 		expect(names).toEqual(['Google — sam.work@example.com', 'Google — sam@example.com', 'GitHub']);
 		expect(host.textContent).toContain('Connected · Only CORSIA');
 		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
 		flushSync();
-		expect(host.textContent).toContain('Reaches: Email, Calendar, Files');
+		expect(host.textContent).toContain('Reaches — Email, Calendar, Files');
 	});
 
 	it('keeps account rows visible with the approved offline message after a failed refresh', async () => {
