@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from api.connected_app_access import audit_actor as _audit_actor, person_only, refusal as _refusal
 from api.connected_app_rows import _agent_next_step, app_reaches_project, local_app_notice as _local_app_notice, server_row
 from api.connected_app_errors import app_error as _app_error
+from api.connected_account_rows import accounts_router, list_account_rows
 from api.connected_app_signin import sign_in_here, signin_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
@@ -17,6 +18,7 @@ from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 
 connected_apps_router = APIRouter()
 connected_apps_router.include_router(signin_router)
+connected_apps_router.include_router(accounts_router)
 log = logging.getLogger(__name__)
 BODY_SHAPE = (
     'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '
@@ -145,6 +147,15 @@ async def list_servers(
     if place is not None and place != "workspace":
         raise _refusal("place must be workspace")
 
+    def read_accounts() -> list[dict[str, object]]:
+        """Google accounts: a person's view (filtered like apps), or an agent's reachable ones."""
+        db = _db()
+        thread_id = None if human else _agent_thread(user, db)[0]
+        rows = list_account_rows(thread_id, db=db)
+        if project is not None:
+            return [row for row in rows if app_reaches_project(row, project)]
+        return [row for row in rows if row["reach"]["mode"] == "all"] if place == "workspace" else rows
+
     def read() -> list[dict[str, object]]:
         from connections.app_reach import app_reaches_thread, list_apps
         from connections.account_policy import project_exists
@@ -166,7 +177,10 @@ async def list_servers(
             for reachable in (app_reaches_thread(app["id"], thread_id, db=db),)
         ]
 
-    return {"servers": await run_in_db(read), "sign_in_here": sign_in_here(request)}
+    return {
+        "servers": await run_in_db(read), "accounts": await run_in_db(read_accounts),
+        "sign_in_here": sign_in_here(request),
+    }
 
 
 def _db():
