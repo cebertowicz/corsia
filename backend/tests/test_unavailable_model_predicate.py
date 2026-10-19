@@ -52,7 +52,7 @@ async def test_available_but_unloaded_network_model_releases_its_held_head(
 
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
     set_model_available("omlx@srv/m", 1)
-    monkeypatch.setattr("llm.model_status._network_server_status", lambda: {"srv": "online"})
+    monkeypatch.setattr("llm.model_status._network_server_status", lambda *_a: {"srv": "online"})
     monkeypatch.setattr("llm.model_status._loaded_model_ids_fn", lambda: lambda _sid: set())
     assert resolve_execution_target("omlx@srv/m").available is True
     statuses = {row["id"]: row["status"] for row in get_model_status_rows()}
@@ -104,7 +104,7 @@ async def test_unavailable_cloud_row_stays_held(isolated_db, monkeypatch, driven
 async def test_offline_network_server_stays_held(isolated_db, monkeypatch, driven) -> None:
     import infra.unavailable_model_recovery as recovery
 
-    monkeypatch.setattr("llm.model_status._network_server_status", lambda: {"srv": "offline"})
+    monkeypatch.setattr("llm.model_status._network_server_status", lambda *_a: {"srv": "offline"})
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
 
     await recovery._resume_held_heads()

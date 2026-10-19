@@ -134,6 +134,11 @@ def _held_error(thread_id: str, target: ExecutionTarget) -> str:
     from infra.held_admission import limited_admission
 
     reason = target.availability_reason or "model_unavailable"
+    if reason == "project_cloud_off":
+        # The person's own setting, not an outage: name it so nobody reads it as one.
+        from prompts.cloud_off import held_error
+
+        return held_error(target.catalog_id)
     try:
         limit = limited_admission(thread_id, target.catalog_id)
     except Exception:

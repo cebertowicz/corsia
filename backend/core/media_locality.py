@@ -17,7 +17,8 @@ def media_locality_refusal_text(delivery: Any, model: str | None) -> str | None:
     if not message_id or not model:
         return None
     from infra.database import get_db
-    from llm.locality import project_cloud_off_text, thread_locality_refusal
+    from llm.locality import thread_locality_refusal
+    from prompts.cloud_off import project_cloud_off_text
 
     db = get_db()
     try:

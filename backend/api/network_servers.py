@@ -32,7 +32,7 @@ from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
-from llm.locality import server_on_this_mac
+from llm.locality import server_locality
 from llm.providers import for_provider
 
 # Every route here, including the included job and lifecycle routers, can
@@ -62,8 +62,10 @@ def _public_server_view(row: dict, keys: dict[str, str] | None = None) -> dict:
         meta.pop(field, None)
     stored = (keys if keys is not None else server_keys([str(row.get("id"))])).get(str(row.get("id")))
     row["metadata"] = meta
-    row["private"] = bool(meta.get("private"))
-    row["on_this_mac"] = server_on_this_mac({**row, "metadata_json": stored_metadata})
+    # Locality comes from the one owner; endpoints the route already loaded are not read again.
+    facts = server_locality({**row, "metadata_json": stored_metadata}, row.get("endpoints"))
+    row["private"] = facts.private
+    row["on_this_mac"] = facts.on_this_mac
     row["has_key"] = bool(stored)
     row["masked_key"] = mask_key(stored) if stored else ""
     return row
@@ -173,8 +175,7 @@ async def server_detail(server_id: str):
 
     network = await run_in_db(_network_view, server_id)
     return {
-        **_public_server_view(server),
-        **network,
+        **_public_server_view({**server, **network}),
         **(await run_in_db(billing_views, [server_id]))[server_id],
         "loaded_models": loaded,
         "available_models": disk,
@@ -286,6 +287,12 @@ async def set_server_private(
     if not server:
         raise HTTPException(404, detail="Server not found")
     await run_in_db(nd.set_server_metadata, server_id, private=body.private)
+    # The mark decides which rows a cloud-off project may use: refresh catalogs, resume held heads.
+    notify_models_changed()
+    emit_product_event(
+        "server", "private.changed",
+        properties={"server_id": server_id, "private": body.private},
+    )
     return {"server_id": server_id, "private": body.private}
 
 

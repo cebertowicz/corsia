@@ -400,14 +400,15 @@ async def test_agent_checkpoint_tool_refuses_with_its_own_text_and_makes_no_call
 
 
 @pytest.mark.asyncio
-async def test_foreground_send_still_refuses_through_the_shared_helper(world):
+async def test_foreground_send_resolves_cloud_off_as_a_held_state_through_the_shared_helper(world):
     from infra import send_target
 
     _thread("t-off", OFF)
     _thread("t-on", ON)
 
-    with pytest.raises(send_target.TargetUnavailable) as refused:
-        await send_target.resolve_target(SONNET, thread_id="t-off")
+    off = await send_target.resolve_target(SONNET, thread_id="t-off")
+    on = await send_target.resolve_target(SONNET, thread_id="t-on")
 
-    assert "project_cloud_off" in refused.value.detail
-    assert (await send_target.resolve_target(SONNET, thread_id="t-on")).catalog_id == SONNET
+    assert (off.available, off.availability_reason) == (False, "project_cloud_off")
+    assert send_target.classify_target_admission(off) == "wait"
+    assert on.catalog_id == SONNET and send_target.classify_target_admission(on) == "run"

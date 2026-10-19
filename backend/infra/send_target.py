@@ -55,6 +55,13 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
     it. Admission classifies a resolved target as runnable, model-recoverable,
     or visibly failed below.
 
+    A project that turned cloud models off is neither: the person chose it, and
+    it lifts when they turn it back on or move the thread to a local model. So it
+    resolves to a target whose availability reason is the refusal
+    (``project_cloud_off``), which admission holds at the FIFO head like any other
+    recoverable model state. It never raises, so a race between the setting and a
+    claim lands in the same hold.
+
     ``ValueError`` means the catalog row cannot describe a deliverable target.
     That never clears by retrying and must not become queued work.
     """
@@ -69,19 +76,32 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
-    """Resolve one target and enforce the project's cloud-model policy."""
+    """Resolve one target, marked unavailable when its project forbids the model."""
     from infra.database import get_db
-    from llm.locality import thread_locality_refusal
 
     db = get_db()
     try:
-        target = model_resolution.resolve_execution_target(model, db=db)
-        refusal = thread_locality_refusal(model, thread_id=thread_id, db=db)
-        if refusal:
-            raise ModelUnavailableError(model, refusal)
-        return target
+        return scoped_target(model, thread_id=thread_id, db=db)
     finally:
         db.close()
+
+
+def scoped_target(model: str, *, thread_id: str | None, db) -> ExecutionTarget:
+    """The one resolver of a thread's runnable target: catalog truth, then its project's policy.
+
+    Send and the claim's release predicate both read it, so a held input is released by
+    exactly the state that held it. The policy wins over the row's own reason: it is the
+    person's setting, and it is the cause that lifts first.
+    """
+    from dataclasses import replace
+
+    from llm.locality import thread_locality_refusal
+
+    target = model_resolution.resolve_execution_target(model, db=db)
+    refusal = thread_locality_refusal(model, thread_id=thread_id, db=db)
+    if refusal:
+        return replace(target, available=False, availability_reason=refusal)
+    return target
 
 
 TargetAdmission = Literal["run", "wait", "fail"]
@@ -101,21 +121,21 @@ def classify_target_admission(target: ExecutionTarget) -> TargetAdmission:
     return "wait"
 
 
-def model_admission(model: str, *, db=None) -> TargetAdmission:
+def model_admission(model: str, *, db=None, thread_id: str | None = None) -> TargetAdmission:
     """Classify the current catalog target from a claim transaction.
 
     Permanent resolution errors release an existing hold for the normal driver
-    to fail visibly; only the classifier's ``wait`` outcome preserves it.
+    to fail visibly; only the classifier's ``wait`` outcome preserves it. With a
+    ``thread_id`` the target is the one send resolves, so the thread's project
+    policy keeps its hold exactly as it created it.
     """
     try:
-        return classify_target_admission(
-            model_resolution.resolve_execution_target(model, db=db)
-        )
+        return classify_target_admission(scoped_target(model, thread_id=thread_id, db=db))
     except (ModelUnavailableError, ValueError):
         return "fail"
 
 
-def lifted_hold_ids(rows, model: str, *, db) -> frozenset[str]:
+def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> frozenset[str]:
     """Ids among ``rows`` that the idle claim should release and take.
 
     Hold and release use ``classify_target_admission`` through the same model
@@ -132,7 +152,9 @@ def lifted_hold_ids(rows, model: str, *, db) -> frozenset[str]:
     account_held = frozenset(str(row['id']) for row in rows
                             if row['write_outcome'] == 'proved_no_write'
                             and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
-    return account_held | (held if held and model_admission(model, db=db) != 'wait' else frozenset())
+    return account_held | (
+        held if held and model_admission(model, db=db, thread_id=thread_id) != 'wait' else frozenset()
+    )
 
 
 def boundary_account_lifted_ids(db, thread_id: str, turn, rows) -> frozenset[str]:

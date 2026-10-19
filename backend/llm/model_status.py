@@ -82,42 +82,37 @@ def _cloud_providers_active() -> set[str]:
     return active
 
 
-def _network_server_status() -> dict[str, str]:
-    """Read each network server's current status for one catalog build."""
-    status: dict[str, str] = {}
+def _network_servers() -> list[dict]:
+    """Read the network servers once for one catalog build."""
     try:
         from llm.network_discovery import get_servers
 
-        for server in get_servers():
-            status[str(server["id"])] = server["status"]
+        return get_servers()
     except Exception as error:
         from loguru import logger
 
-        logger.warning(f"network discovery lookup failed; treating all servers as offline: {error}")
-    return status
+        logger.warning(f"network discovery lookup failed; treating all servers as offline and non-local: {error}")
+        return []
 
 
-def _server_locality() -> tuple[set[str], set[str]]:
-    """Read each network server's private mark and loopback fact once for one catalog build."""
-    try:
-        from llm.locality import server_on_this_mac
-        from llm.network_discovery import get_servers, parse_server_metadata
+def _network_server_status(servers: list[dict]) -> dict[str, str]:
+    """Each network server's current status for one catalog build."""
+    return {str(server["id"]): server["status"] for server in servers}
 
-        private: set[str] = set()
-        local: set[str] = set()
-        for server in get_servers():
-            server_id = str(server["id"])
-            metadata = parse_server_metadata(server_id, server.get("metadata_json"))
-            if metadata and metadata.get("private") is True:
-                private.add(server_id)
-            if server_on_this_mac(server):
-                local.add(server_id)
-        return private, local
-    except Exception as error:
-        from loguru import logger
 
-        logger.warning(f"network locality lookup failed; treating all servers as non-local: {error}")
-        return set(), set()
+def _server_locality(servers: list[dict]) -> tuple[set[str], set[str]]:
+    """Each server's private mark and loopback fact for one catalog build, from the one owner."""
+    from llm.locality import server_locality
+
+    private: set[str] = set()
+    local: set[str] = set()
+    for server in servers:
+        facts = server_locality(server)
+        if facts.private:
+            private.add(str(server["id"]))
+        if facts.on_this_mac:
+            local.add(str(server["id"]))
+    return private, local
 
 
 def _loaded_model_ids_fn():
@@ -341,8 +336,9 @@ def catalog_base_rows() -> list[dict]:
     from llm import catalog as model_catalog
 
     cloud_active = _cloud_providers_active()
-    server_status = _network_server_status()
-    private_servers, local_servers = _server_locality()
+    servers = _network_servers()
+    server_status = _network_server_status(servers)
+    private_servers, local_servers = _server_locality(servers)
     loaded_ids_fn = _loaded_model_ids_fn()
     rows: list[dict] = []
     for row in model_catalog.get_model_status_catalog_rows():

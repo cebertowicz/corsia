@@ -11,6 +11,8 @@ from connections.vendor_accounts import AccountError
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.product_events import emit_product_event
+from infra.state.ws import notify_models_changed
 
 router = APIRouter(prefix="/api", tags=["provider-policy"], dependencies=[Depends(require_user)])
 
@@ -74,6 +76,13 @@ async def put_cloud_models_off(
     project_id: str, body: CloudModelsOffWrite, user: dict = Depends(require_user),
 ):
     require_person_for_key(user, kind="project", name=project_id, action="write")
-    return await _run(
+    result = await _run(
         set_project_cloud_models_off, project_id, cloud_models_off=body.cloud_models_off,
     )
+    # Held heads and every catalog reader depend on this switch: resume what it released.
+    notify_models_changed()
+    emit_product_event(
+        "project", "cloud_models_off.changed",
+        properties={"project_id": project_id, "cloud_models_off": body.cloud_models_off},
+    )
+    return result

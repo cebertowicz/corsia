@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from ipaddress import ip_address
 from urllib.parse import urlparse
 
@@ -56,6 +57,30 @@ def server_on_this_mac(server: dict, endpoints: list[dict] | None = None) -> boo
         return False
 
 
+@dataclass(frozen=True, slots=True)
+class ServerLocality:
+    """One network server's locality facts, as every consumer reads them."""
+
+    private: bool
+    on_this_mac: bool
+
+
+def server_locality(server: dict, endpoints: list[dict] | None = None) -> ServerLocality:
+    """The one owner of a server's private mark and on-this-Mac fact.
+
+    Catalog rows, send enforcement and the Settings view all read these two facts here,
+    so none can drift from another. The mark is private only when it is literally ``true``.
+    Pass ``endpoints`` the caller already loaded to avoid a read; ``None`` reads them.
+    """
+    from llm.network_discovery import parse_server_metadata
+
+    metadata = parse_server_metadata(str(server.get("id")), server.get("metadata_json"))
+    return ServerLocality(
+        private=bool(metadata and metadata.get("private") is True),
+        on_this_mac=server_on_this_mac(server, endpoints),
+    )
+
+
 def row_is_local(
     row: dict, *, private_servers: set[str] | None = None, local_servers: set[str] | None = None,
 ) -> bool:
@@ -91,7 +116,7 @@ def row_is_local(
 
 
 def project_cloud_models_off(project_id: str | None, *, db) -> bool:
-    """Read the project-local cloud switch; absent rows deliberately mean off."""
+    """Read the project-local cloud switch; an absent row means cloud models are allowed."""
     if not project_id:
         return False
     row = db.execute(
@@ -115,37 +140,55 @@ def set_project_cloud_models_off(project_id: str, *, cloud_models_off: bool, db=
                ON CONFLICT(project_id) DO UPDATE SET cloud_models_off = excluded.cloud_models_off""",
             (project_id, int(cloud_models_off)),
         )
+        _refresh_project_holds(project_id, db=connection)
     return {"project_id": project_id, "cloud_models_off": cloud_models_off}
 
 
+def _refresh_project_holds(project_id: str, *, db) -> None:
+    """Re-project the holds of every project thread that has queued input, as a policy write must.
+
+    The policy is an idempotent boolean set by a person's own session, so the write takes no
+    compare-and-set revision: two writers can only agree on the last value, never lose an update.
+    """
+    from connections.account_holds import refresh_thread_holds
+
+    for row in db.execute(
+        "SELECT t.id FROM threads t WHERE t.project_id = ? AND EXISTS ("
+        " SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.input_order IS NOT NULL"
+        " AND m.delivery_state = 'queued' AND m.active_turn_id IS NULL)",
+        (project_id,),
+    ).fetchall():
+        refresh_thread_holds(str(row["id"]), db=db)
+
+
 def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> str | None:
-    """Return the named locality refusal for a catalog row, if policy requires it."""
+    """Return the named locality refusal for a catalog row, if policy requires it.
+
+    The project policy is read first: with none in force nothing else is read, so a send in
+    an ordinary project adds one primary-key read, never a server lookup.
+    """
+    cloud_off = project_cloud_models_off(project_id, db=db)
+    if not (thread_local_only or cloud_off):
+        return None
     private_servers: set[str] = set()
     local_servers: set[str] = set()
     server_id = _server_id(row)
     if server_id:
         server = db.execute("SELECT * FROM network_servers WHERE id = ?", (server_id,)).fetchone()
         if server:
-            from llm.network_discovery import parse_server_metadata
-
-            server = dict(server)
-            metadata = parse_server_metadata(server_id, server["metadata_json"])
-            if metadata and metadata.get("private") is True:
-                private_servers.add(server_id)
             endpoints = [
                 dict(e) for e in db.execute(
                     "SELECT * FROM network_server_endpoints WHERE server_id = ?", (server_id,),
                 ).fetchall()
             ]
-            if server_on_this_mac(server, endpoints):
+            facts = server_locality(dict(server), endpoints)
+            if facts.private:
+                private_servers.add(server_id)
+            if facts.on_this_mac:
                 local_servers.add(server_id)
     if row_is_local(row, private_servers=private_servers, local_servers=local_servers):
         return None
-    if thread_local_only:
-        return "thread_local_only"
-    if project_cloud_models_off(project_id, db=db):
-        return "project_cloud_off"
-    return None
+    return "thread_local_only" if thread_local_only else "project_cloud_off"
 
 
 def _thread_project(thread_id: str | None, db) -> str | None:
@@ -176,17 +219,3 @@ def thread_locality_refusal(model: str, *, thread_id: str | None, db) -> str | N
         row, thread_local_only=False, project_id=_thread_project(thread_id, db), db=db,
     )
 
-
-# Governance & Scopes owns this wording. Only a person can turn cloud models back on,
-# so the text never tells an agent to do it.
-NO_LOCAL_READY_TEXT = (
-    "No local model is ready now. Stay on your current model and do the work inline,"
-    " or check model_catalog later."
-)
-
-
-def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:
-    """Return the agent-facing recovery text for a ``project_cloud_off`` refusal."""
-    text = f"project_cloud_off: This project has cloud models turned off, so {selector} can't run here. "
-    text += f"Use a ready local model: {', '.join(ready_local)}." if ready_local else NO_LOCAL_READY_TEXT
-    return f"{text} Local workers run one at a time." if spawn else text

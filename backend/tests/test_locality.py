@@ -84,7 +84,7 @@ def test_locality_refusal_reads_private_mark_and_project_policy(isolated_db):
 
 
 def test_project_cloud_off_text_is_governance_wording():
-    from llm.locality import project_cloud_off_text
+    from prompts.cloud_off import project_cloud_off_text
 
     head = "project_cloud_off: This project has cloud models turned off, so codex/gpt-5.6-terra can't run here. "
     assert project_cloud_off_text("codex/gpt-5.6-terra", ["omlx@local/a", "omlx@local/b"]) == (

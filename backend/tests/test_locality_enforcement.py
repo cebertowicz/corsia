@@ -83,17 +83,14 @@ def test_project_accounts_overlays_cloud_rows_only_in_a_cloud_off_project(world)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["codex/test", CLOUD])
-async def test_cloud_off_thread_is_refused_on_a_cloud_row(world, model):
+async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_holds(world, model):
     from infra import send_target
-    from infra.unavailable_model_recovery import resolve_or_hold
 
-    for launch in (
-        lambda: send_target.resolve_target(model, thread_id="actor"),
-        lambda: resolve_or_hold(model, SimpleNamespace(thread_id="actor")),
-    ):
-        with pytest.raises(send_target.TargetUnavailable) as refused:
-            await launch()
-        assert "project_cloud_off" in refused.value.detail
+    target = await send_target.resolve_target(model, thread_id="actor")
+
+    assert (target.available, target.availability_reason) == (False, "project_cloud_off")
+    assert send_target.classify_target_admission(target) == "wait"
+    assert send_target.model_admission(model, db=world, thread_id="actor") == "wait"
 
 
 @pytest.mark.asyncio
@@ -223,3 +220,129 @@ def test_catalog_rows_carry_the_server_fact_as_is_local(world):
     world.commit()
     rows = {r["id"]: r for r in get_model_status_rows()}
     assert rows["omlx@lan/n"]["is_local"] is True
+
+
+def test_both_person_writes_refresh_holds_notify_and_emit(client, world, monkeypatch):
+    world.execute(
+        "INSERT INTO messages(id,thread_id,role,content,created_at,input_order,target_model,delivery_state)"
+        " VALUES ('queued-1','destination','user','x','t',1,'codex/test','queued')"
+    )
+    world.commit()
+    seen = {"notified": [], "events": [], "refreshed": []}
+    monkeypatch.setattr("api.provider_policy.notify_models_changed", lambda: seen["notified"].append("policy"))
+    monkeypatch.setattr("api.network_servers.notify_models_changed", lambda: seen["notified"].append("server"))
+    monkeypatch.setattr("api.provider_policy.emit_product_event", lambda *a, **k: seen["events"].append((a, k)))
+    monkeypatch.setattr("api.network_servers.emit_product_event", lambda *a, **k: seen["events"].append((a, k)))
+    monkeypatch.setattr(
+        "connections.account_holds.refresh_thread_holds",
+        lambda thread_id, **_k: seen["refreshed"].append(thread_id),
+    )
+
+    policy = client.put(f"/api/projects/{CLOUD_ON}/cloud-models-off", json={"cloud_models_off": True}, headers=_h(SESSION))
+    private = client.put("/api/settings/network-servers/loop/private", json={"private": True}, headers=_h(SESSION))
+
+    assert (policy.status_code, private.status_code) == (200, 200)
+    assert seen["notified"] == ["policy", "server"]
+    assert seen["refreshed"] == ["destination"]
+    assert seen["events"] == [
+        (("project", "cloud_models_off.changed"), {"properties": {"project_id": CLOUD_ON, "cloud_models_off": True}}),
+        (("server", "private.changed"), {"properties": {"server_id": "loop", "private": True}}),
+    ]
+
+
+def test_a_rejected_write_notifies_nothing(client, monkeypatch):
+    notified: list = []
+    monkeypatch.setattr("api.provider_policy.notify_models_changed", lambda: notified.append(1))
+    monkeypatch.setattr("api.network_servers.notify_models_changed", lambda: notified.append(1))
+
+    client.put(f"/api/projects/{CLOUD_ON}/cloud-models-off", json={"cloud_models_off": True}, headers=_h(API))
+    client.put("/api/settings/network-servers/loop/private", json={"private": True}, headers=_h(API))
+    client.put("/api/settings/network-servers/nope/private", json={"private": True}, headers=_h(SESSION))
+
+    assert notified == []
+
+
+@pytest.mark.parametrize("stored", ['{"private": true}', '{"private": "false"}', '{"private": 1}', '{"private": "true"}', "{}", "nonsense"])
+def test_every_locality_reader_agrees_on_a_server_whatever_its_stored_mark(world, stored):
+    from api.network_servers import _public_server_view
+    from llm.locality import locality_refusal, server_locality
+    from llm.model_status import _server_locality
+
+    _server(world, "lan", LAN)
+    world.execute("UPDATE network_servers SET metadata_json = ? WHERE id = 'lan'", (stored,))
+    world.commit()
+    server = dict(world.execute("SELECT * FROM network_servers WHERE id = 'lan'").fetchone())
+    endpoints = [dict(e) for e in world.execute("SELECT * FROM network_server_endpoints WHERE server_id = 'lan'")]
+    expected = stored == '{"private": true}'
+
+    facts = server_locality(server, endpoints)
+    private, local = _server_locality([server])
+    view = _public_server_view(dict(server), {})
+    refusal = locality_refusal(
+        {"litellm_model": "omlx@lan/m", "backend": "network", "provider": "omlx", "harness": "native"},
+        thread_local_only=False, project_id=CLOUD_OFF, db=world,
+    )
+
+    assert facts.private is expected and facts.on_this_mac is False
+    assert (("lan" in private), ("lan" in local)) == (expected, False)
+    assert (view["private"], view["on_this_mac"]) == (expected, False)
+    assert (refusal is None) is expected
+
+
+def test_the_public_server_view_reads_nothing_when_the_route_loaded_the_endpoints(world, monkeypatch):
+    from api.network_servers import _public_server_view
+
+    server = dict(world.execute("SELECT * FROM network_servers WHERE id = 'loop'").fetchone())
+    endpoints = [dict(e) for e in world.execute("SELECT * FROM network_server_endpoints WHERE server_id = 'loop'")]
+
+    def forbidden(*_a, **_k):
+        raise AssertionError("the view read the database")
+
+    monkeypatch.setattr("llm.network_endpoints.get_endpoints", forbidden)
+    monkeypatch.setattr("llm.network_discovery.get_db", forbidden, raising=False)
+    view = _public_server_view({**server, "endpoints": endpoints}, {})
+
+    assert (view["private"], view["on_this_mac"]) == (False, True)
+
+
+def test_a_send_in_an_ordinary_project_reads_no_server(world):
+    """Item 5: with no policy in force the refusal returns after one project read."""
+    from llm.locality import locality_refusal
+
+    statements: list[str] = []
+    world.set_trace_callback(statements.append)
+    try:
+        refusal = locality_refusal(
+            {"litellm_model": LOCAL, "backend": "network", "provider": "omlx", "harness": "native"},
+            thread_local_only=False, project_id=CLOUD_ON, db=world,
+        )
+    finally:
+        world.set_trace_callback(None)
+
+    assert refusal is None
+    assert len(statements) == 1 and "project_inference_policies" in statements[0]
+
+
+def test_a_catalog_build_reads_the_servers_once_and_endpoints_only_for_managed_ones(world, monkeypatch):
+    import llm.network_discovery as nd
+    import llm.network_endpoints as ne
+    from llm.model_status import get_model_status_rows
+
+    _server(world, "ext", LOOPBACK, kind="external")
+    reads = {"servers": 0, "endpoints": []}
+    real_servers, real_endpoints = nd.get_servers, ne.get_endpoints
+
+    def servers(*args, **kwargs):
+        reads["servers"] += 1
+        return real_servers(*args, **kwargs)
+
+    def endpoints(server_id):
+        reads["endpoints"].append(server_id)
+        return real_endpoints(server_id)
+
+    monkeypatch.setattr(nd, "get_servers", servers)
+    monkeypatch.setattr(ne, "get_endpoints", endpoints)
+
+    get_model_status_rows()
+
+    assert reads == {"servers": 1, "endpoints": ["loop"]}
