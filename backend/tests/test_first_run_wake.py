@@ -269,8 +269,8 @@ class TestAppPath:
     @pytest.mark.parametrize(("status", "expected_download"), [
         ({"state": "downloading", "model": "qwen", "percent": 50}, {"state": "downloading", "model": "qwen", "percent": 50}),
         ({"state": "ready", "model": "qwen"}, {"state": "ready", "model": "qwen"}),
-        ({"state": "failed", "cause": "DiskSpaceError", "bytes_to_free": 1024}, {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}),
-        ({"state": "not_loaded", "cause": "other_omlx"}, {"state": "not_loaded", "cause": "other_omlx"}),
+        ({"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}, {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}),
+        ({"state": "setup_failed", "cause": "other_omlx"}, {"state": "setup_failed", "cause": "other_omlx"}),
         ({"state": "idle", "stage": None, "result": None}, {"state": "stopped"}),
     ])
     async def test_app_setup_facts_carry_every_source_and_download_state(
@@ -408,7 +408,7 @@ class TestAppPath:
     @pytest.mark.parametrize("failed, expected", [
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
-        ("setup_handoff", ("tool_attempts", "other_omlx", "bound_model")),
+        ("setup_handoff", ("tool_attempts", "other_omlx")),
         ("web_search_ready", ("web_search_ready",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),

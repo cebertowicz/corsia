@@ -6,10 +6,7 @@ from typing import Any
 
 
 _SAFE_CAUSES = frozenset({"connection", "disk_full", "other", "memory", "other_omlx"})
-_LIVE_STATES = frozenset({
-    "ineligible_memory", "pick_failed", "downloading", "stopped", "failed", "starting",
-    "not_loaded", "start_failed", "ready",
-})
+_LIVE_STATES = frozenset({"downloading", "stopped", "failed", "starting", "setup_failed", "start_failed", "ready"})
 
 
 def normalize(status: dict[str, Any]) -> dict[str, Any]:
@@ -34,20 +31,6 @@ def normalize(status: dict[str, Any]) -> dict[str, Any]:
         cause = status.get("cause")
         if cause in _SAFE_CAUSES:
             detail["cause"] = cause
-        elif state in {"pick_failed", "failed", "start_failed", "not_loaded"}:
-            # Local ownership reports an exception class. The wake contract carries
-            # a stable, actionable category rather than that implementation detail.
-            label = str(cause or "").lower()
-            if "disk" in label or "space" in label:
-                detail["cause"] = "disk_full"
-            elif "connect" in label or "network" in label:
-                detail["cause"] = "connection"
-            elif "memory" in label or "ram" in label:
-                detail["cause"] = "memory"
-            elif "foreign" in label or "omlx" in label:
-                detail["cause"] = "other_omlx"
-            else:
-                detail["cause"] = "other"
         bytes_to_free = status.get("bytes_to_free")
         if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
             detail["bytes_to_free"] = bytes_to_free
@@ -55,14 +38,6 @@ def normalize(status: dict[str, Any]) -> dict[str, Any]:
         if isinstance(ref, str) and ref and len(ref) <= 160:
             detail["ref"] = ref
         return detail
-    # Compatibility with the pre-redesign local-flight owner until it exposes the live contract above.
-    if state == "running":
-        return {"state": "starting", "progress": status.get("stage")}
-    if state == "succeeded":
-        # A completed download is not usable until the catalog reports a ready local model.
-        return {"state": "not_loaded"}
-    if state == "failed":
-        return {"state": "failed", "cause": "other"}
     return {"state": "stopped"}
 
 

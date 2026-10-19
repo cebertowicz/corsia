@@ -9,6 +9,7 @@ the first account); it exists only while no account does.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
@@ -36,9 +37,6 @@ logger = logging.getLogger(__name__)
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
 _MINIMUM_MACOS_MAJOR = 15
-
-
-# Request body validation lives in api.setup_requests.
 
 
 def _own_backend_port(request: Request) -> int | None:
@@ -178,7 +176,6 @@ def _setup_status() -> dict:
         "local_eligible": apple_silicon and macos_supported and memory_ok,
         "work_folder": _work_folder_display(config.WORKSPACE),
         "required_username": _required_username(),
-        "existing_omlx": foreign_omlx_process() is not None,
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
         "ai_check_pending": _ai_check_pending(),
@@ -299,8 +296,10 @@ async def local_download(request: Request) -> dict | Response:
         body = LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
-    if refusal := apply_foreign_omlx_choice(
-        consent_existing=body.consent_existing, manage_existing=body.manage_existing,
+    if refusal := await asyncio.to_thread(
+        apply_foreign_omlx_choice,
+        consent_existing=body.consent_existing,
+        manage_existing=body.manage_existing,
     ):
         return JSONResponse(status_code=409, content={"code": refusal})
     from llm.local_setup import begin_local_setup

@@ -15,11 +15,13 @@ async def test_register_managed_server_retires_all_prior_omlx_rows(isolated_db, 
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
     from llm.local_setup_managed import is_corsia_managed_server, reserve_managed_omlx_port
-    from llm.local_setup_runtime import register_managed_server
+    from llm.local_setup_ownership import marker_path
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME, register_managed_server
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    marker_path().write_text("legacy\n", encoding="utf-8")
     legacy_managed = await run_in_db(discovery.upsert_server,
-        provider="omlx", instance_id="127.0.0.1:8000", instance_name="Old local oMLX",
+        provider="omlx", instance_id="127.0.0.1:8000", instance_name=LOCAL_SERVER_NAME,
         host="127.0.0.1", port=8000, status="online", kind="managed",
     )
     foreign_external = await run_in_db(discovery.upsert_server,
@@ -98,6 +100,7 @@ async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
     monkeypatch.setattr(local_model, "backfill_legacy_record", broken)
     monkeypatch.setattr("llm.local_setup_recovery.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
+    monkeypatch.setattr("llm.local_setup_upgrade.done_path", lambda: SimpleNamespace(exists=lambda: True))
     monkeypatch.setattr("llm.local_setup_runtime.retire_unowned_local_omlx_rows", lambda: calls.append("retire"))
     monkeypatch.setattr(local_setup_upgrade, "start_upgrade", lambda: calls.append("upgrade"))
 
@@ -177,22 +180,30 @@ def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, 
     _model_row("lan-model", f"omlx@{lan}/someone/model", "someone/model")
     _model_row("local-model", f"omlx@{local}/someone/local", "someone/local")
 
-    assert retire_unowned_local_omlx_rows() == [local]
+    assert retire_unowned_local_omlx_rows() == []
 
     assert discovery.get_server(lan)["status"] == "online"
     assert catalog.get_model("lan-model")["id"] == "lan-model"
     assert catalog.is_valid_model_choice(f"omlx@{lan}/someone/model") is True
-    assert discovery.get_server(local)["status"] == "removed"
-    assert catalog.is_valid_model_choice(f"omlx@{local}/someone/local") is False
+    assert discovery.get_server(local)["status"] == "online"
+    assert catalog.is_valid_model_choice(f"omlx@{local}/someone/local") is True
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "[::1]", "127.0.0.2"])
-def test_loopback_hosts_retire(host) -> None:
+def test_only_the_marker_gated_legacy_fingerprint_retires(monkeypatch, tmp_path) -> None:
     from llm.local_setup_managed import is_retired_local_omlx
+    from llm.local_setup_ownership import marker_path
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME
 
-    row = {"provider": "omlx", "kind": "managed", "instance_id": f"{host}:8000"}
-    assert is_retired_local_omlx(row, [host])
-    assert is_retired_local_omlx(row, [])
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    row = {
+        "provider": "omlx", "kind": "managed", "source": "manual",
+        "instance_id": "127.0.0.1:8000", "instance_name": LOCAL_SERVER_NAME,
+    }
+    assert not is_retired_local_omlx(row, ["127.0.0.1"])
+    marker_path().write_text("legacy\n", encoding="utf-8")
+    assert is_retired_local_omlx(row, ["127.0.0.1"])
+    assert not is_retired_local_omlx({**row, "instance_name": "Studio"}, ["127.0.0.1"])
+    assert not is_retired_local_omlx({**row, "instance_id": "127.0.0.1:9999"}, ["127.0.0.1"])
 
 
 @pytest.mark.parametrize("row,hosts", [

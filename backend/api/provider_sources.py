@@ -142,8 +142,10 @@ async def setup_local_source(
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start managed setup after an explicit choice about an identified foreign process."""
-    if refusal := apply_foreign_omlx_choice(
-        consent_existing=consent_existing, manage_existing=manage_existing,
+    if refusal := await asyncio.to_thread(
+        apply_foreign_omlx_choice,
+        consent_existing=consent_existing,
+        manage_existing=manage_existing,
     ):
         raise HTTPException(status_code=409, detail={"code": refusal})
     from llm.local_setup import begin_local_setup

@@ -32,7 +32,7 @@ from llm.local_setup_auth import (  # noqa: F401
     secure_local_omlx,
 )
 from llm.local_setup_ownership import ensure_omlx as _ensure_omlx
-from llm.local_setup_disk import require_free_disk
+from llm.local_setup_disk import DiskSpaceError, require_free_disk
 from llm.local_setup_ownership import run_command as _run
 from llm.local_profiles import format_size
 from llm import local_setup_cancel, local_setup_download, local_setup_operation
@@ -91,6 +91,7 @@ class _Flight:
     result: dict | None = None
     # The model this flight downloads, once it is picked or resumed.
     model: LocalModel | None = None
+    downloaded: bool = False
     following: bool = False
     kind: str | None = None
     server_id: str | None = None
@@ -132,6 +133,7 @@ def _claim_operation(kind: str, model: LocalModel | None = None) -> bool:
     _flight.operation_lock = lock
     _flight.kind = kind
     _flight.model = model
+    _flight.downloaded = False
     return True
 
 
@@ -194,9 +196,9 @@ def setup_status() -> dict[str, Any]:
     model = _flight.model
     stage = setup_stage() if _running() else None
     if _running():
-        state = "downloading" if _flight.following else "running"
+        state = "downloading" if model is not None else "starting"
     elif result is None:
-        state = "idle"
+        state = "stopped"
     elif result.get("downloading"):
         state = "downloading"
     else:
@@ -210,10 +212,10 @@ def setup_status() -> dict[str, Any]:
         percent = min(100, int(match.group(1))) if match else None
     return {
         "state": state,
-        "model": model.view() if model else None,
+        "model": model.repository if model else None,
         "percent": percent,
         "eta_seconds": _flight.download_eta_seconds,
-        "download_size": format_size(model.download_size_bytes) if model else None,
+        "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
         "cause": result.get("cause") if result else None,
         "ref": result.get("ref") if result else None,
@@ -253,19 +255,18 @@ def _notify_models_changed() -> None:
 
 
 async def _notify_terminal_setup_download(result: dict) -> None:
-    """Wake first-run chat for terminal setup flights; Settings downloads never wake it."""
-    if _flight.kind != "setup":
+    """Wake first-run chat only when a setup download has reached an outcome."""
+    if _flight.kind != "setup" or result.get("downloading"):
         return
     model = _flight.model
-    if result.get("downloading"):
-        outcome = "not_loaded"
-    elif result.get("ok"):
+    if result.get("ok"):
         outcome = "ready"
+    elif result.get("pre_download"):
+        outcome = "setup_failed"
     else:
-        outcome = "start_failed" if model is None else "failed"
-    flight_id = (local_setup_operation.read() or local_setup_operation.Operation.for_model(
-        model or LocalModel("local-model", 0, 0), "setup",
-    )).task_id or (model.repository if model else "local-model")
+        outcome = "start_failed" if _flight.downloaded else "failed"
+    operation = local_setup_operation.read()
+    flight_id = (operation.task_id if operation else None) or (model.repository if model else "local-model")
     try:
         from onboarding.local_download_wake import notify_terminal_setup_download
 
@@ -299,13 +300,34 @@ async def _run_flight(*, model: LocalModel | None = None,
     except StillDownloading:
         result = {**_stopped_following(_flight.model, events), "next_action": f"Run `{SETUP_COMMAND}` to follow it again."}
     except Exception as exc:
-        log.exception("Local setup failed")
-        result = {**local_setup_error(_failure_message(exc)), "progress": events,
-                  "cause": type(exc).__name__}
-        _emit("failed", error_type=type(exc).__name__)
+        from api.cli_install import new_reference
+
+        cause = _failure_cause(exc)
+        ref = new_reference()
+        log.exception("Local setup failed reference=%s cause=%s", ref, cause)
+        result = {
+            **local_setup_error(_failure_message(exc)), "progress": events,
+            "cause": cause, "ref": ref,
+            "pre_download": _flight.model is None,
+        }
+        if isinstance(exc, DiskSpaceError):
+            result["bytes_to_free"] = exc.bytes_to_free
+        _emit("failed", cause=cause, ref=ref)
     await _notify_terminal_setup_download(result)
     return local_setup_operation.finish(_flight, result)
 
+def _failure_cause(exc: Exception) -> str:
+    """Classify a local-flight failure once, at its producer."""
+    if isinstance(exc, DiskSpaceError):
+        return "disk_full"
+    if isinstance(exc, MemoryError):
+        return "memory"
+    label = f"{type(exc).__name__} {exc}".lower()
+    if "connect" in label or "network" in label or "timeout" in label:
+        return "connection"
+    if "omlx" in label or "foreign" in label or "port" in label:
+        return "other_omlx"
+    return "other"
 
 def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
     """The result when the follow window ended while oMLX keeps downloading (setup and Settings)."""
@@ -317,12 +339,9 @@ def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
         "progress": events,
     }
 
-
 def flight_task() -> asyncio.Task | None:
     """The flight's task for lifespan shutdown to cancel and join, else None."""
     return _flight.task
-
-
 
 async def begin_local_setup(
     *,
@@ -376,8 +395,6 @@ async def begin_local_setup(
     _flight.task.add_done_callback(lambda _task: _notify_models_changed())
     _emit("started")
     return _in_progress_result(notice=notice)
-
-
 
 from llm.local_settings_download import begin as begin_settings_download  # noqa: E402
 from llm.local_setup_new_omlx import _setup_new_omlx  # noqa: E402  (reads this module's names at call time)

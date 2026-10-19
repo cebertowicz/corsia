@@ -331,6 +331,18 @@ async def test_any_unexpected_error_settles_the_job_failed_and_is_logged(monkeyp
     assert "stopped unexpectedly" in caplog.text
 
 
+@pytest.mark.parametrize(("reason", "cause"), [
+    ("no internet connection", "connection"),
+    ("the download site refused the request", "site_refused"),
+    ("the download didn't verify", "download_unverified"),
+    ("the installer stopped", "installer_failed"),
+])
+def test_install_failure_codes_are_independent_of_copy(reason, cause):
+    from api import cli_install
+
+    assert cli_install.install_cause(reason) == cause
+
+
 def test_installer_env_passes_only_the_minimal_variables(monkeypatch):
     from api import cli_install
 

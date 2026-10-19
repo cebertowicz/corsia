@@ -25,13 +25,7 @@ class ToolAttempt(BaseModel):
         return self
 
 
-class BoundModel(BaseModel):
-    """The setup-selected model, expressed without any provider credential or account identifier."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    model: str = Field(min_length=1, max_length=512)
-    source: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9_-]*$")
+# The selected model belongs to the thread binding and is read when the wake renders.
 
 
 class SetupHandoff(BaseModel):
@@ -41,7 +35,6 @@ class SetupHandoff(BaseModel):
 
     tools: dict[str, ToolAttempt]
     other_omlx: Literal["none", "stopped_theirs", "kept_both"]
-    bound_model: BoundModel | None = None
 
     @field_validator("tools")
     @classmethod

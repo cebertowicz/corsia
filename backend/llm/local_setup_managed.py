@@ -97,13 +97,23 @@ def is_retired_local_omlx(server: dict, hosts: list[str]) -> bool:
     """
     if server.get("provider") != "omlx" or server.get("kind") == "external":
         return False
+    # Setup v0.4 auto-registered only this marker-gated fingerprint (origin/dev
+    # local_setup_runtime.register_loopback_server); other manual rows stay routable.
+    if server.get("source") == "manual":
+        from llm.local_setup_ownership import marker_path
+        from llm.local_setup_runtime import LOCAL_SERVER_NAME
+        from llm.local_setup_upgrade import legacy_omlx_port
+
+        port = legacy_omlx_port()
+        return (
+            marker_path().exists()
+            and server.get("instance_id") == f"127.0.0.1:{port}"
+            and server.get("instance_name") == LOCAL_SERVER_NAME
+        )
     # Setup's own row is rewritten in place whenever setup registers it.
     if server.get("instance_id") == MANAGED_INSTANCE_ID:
         return False
-    if not hosts:
-        instance = str(server.get("instance_id") or "")
-        hosts = [instance.rpartition(":")[0]] if ":" in instance else []
-    return bool(hosts) and all(is_loopback_host(host) for host in hosts)
+    return False
 
 
 def is_corsia_managed_server(server: dict, metadata: dict | None = None) -> bool:

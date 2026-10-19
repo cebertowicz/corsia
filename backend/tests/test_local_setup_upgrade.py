@@ -527,7 +527,7 @@ async def test_the_earlier_service_stays_routable_until_its_upgrade_succeeds(
 
 
 @pytest.mark.asyncio
-async def test_a_foreign_loopback_omlx_still_retires_while_the_upgrade_is_pending(upgrade_env, legacy) -> None:
+async def test_a_foreign_loopback_omlx_stays_routable_while_the_upgrade_is_pending(upgrade_env, legacy) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery
     from llm.local_setup_runtime import retire_unowned_local_omlx_rows
@@ -539,17 +539,20 @@ async def test_a_foreign_loopback_omlx_still_retires_while_the_upgrade_is_pendin
         host="127.0.0.1", port=9000, status="online", kind="managed")
 
     assert not done_path().exists()
-    assert await run_in_db(retire_unowned_local_omlx_rows) == [foreign]
+    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert (await run_in_db(network_discovery.get_server, foreign))["status"] == "online"
     assert (await run_in_db(network_discovery.get_server, old))["status"] != "removed"
 
 
 @pytest.mark.asyncio
-async def test_without_corsias_install_marker_every_loopback_omlx_retires(legacy, isolated_db) -> None:
+async def test_without_corsias_install_marker_the_legacy_row_stays(legacy, isolated_db) -> None:
     from infra.db_async import run_in_db
+    from llm import network_discovery
     from llm.local_setup_ownership import marker_path
     from llm.local_setup_runtime import retire_unowned_local_omlx_rows
 
     assert not marker_path().exists()
     old = await _legacy_row_with_binding()
 
-    assert await run_in_db(retire_unowned_local_omlx_rows) == [old]
+    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert (await run_in_db(network_discovery.get_server, old))["status"] == "online"

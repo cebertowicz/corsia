@@ -177,18 +177,17 @@ def test_before_an_account_only_the_local_choice_is_taken(client):
     assert setup_progress.read() is None
 
 
-def test_handoff_can_be_written_before_binding_then_replaced_on_success(client):
+def test_handoff_can_be_written_before_binding_and_never_copies_it(client):
     token = _create_account(client)
 
     assert _put(client, {"handoff": HANDOFF}, token).status_code == 200
     assert setup_progress.read()["handoff"] == HANDOFF
-    completed_handoff = {**HANDOFF, "bound_model": {"model": "claude-code/sonnet", "source": "claude-code"}}
-    assert _put(client, {"completed": True, "handoff": completed_handoff}, token).status_code == 200
+    assert _put(client, {"completed": True, "handoff": HANDOFF}, token).status_code == 200
 
-    assert setup_progress.read()["handoff"] == completed_handoff
-    # A stale tab cannot change either completion or the handoff after the bind succeeded.
+    assert setup_progress.read()["handoff"] == HANDOFF
+    # A stale tab cannot change either completion or the durable handoff after binding.
     assert _put(client, {"handoff": HANDOFF}, token).status_code == 200
-    assert setup_progress.read()["handoff"] == completed_handoff
+    assert setup_progress.read()["handoff"] == HANDOFF
 
 
 @pytest.mark.parametrize("handoff", [

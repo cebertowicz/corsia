@@ -176,12 +176,18 @@
 		const current = get(token); if (!current || finishing) return;
 		finishing = true; sourceError = '';
 		try {
-			const binding = await bindSetupFirstModel(current, tested, async () => {
+			await bindSetupFirstModel(current, tested, async () => {
 				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new Error('handoff');
 			});
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx, bound_model: binding } }, current)) throw new Error('completion');
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new Error('completion');
 			onFinished();
-		} catch { await refreshSources(true); }
+		} catch (error) {
+			const message = error instanceof Error ? error.message : '';
+			await refreshSources(true);
+			sourceError = message === 'handoff' || message === 'completion'
+				? 'CORSIA couldn’t save setup progress. Retry.'
+				: message || 'CORSIA couldn’t finish model setup. Retry.';
+		}
 		finally { finishing = false; }
 	}
 	async function resumeSetup() {

@@ -161,13 +161,13 @@ def test_post_setup_returns_complete_code(client, method, path):
     assert response.json() == {"code": "setup_complete"}
 
 
-def test_status_reports_a_positively_identified_foreign_omlx(client, monkeypatch):
-    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: 4242)
+def test_status_does_not_inspect_foreign_omlx(client, monkeypatch):
+    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: pytest.fail("status must not inspect processes"))
 
     response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
 
     assert response.status_code == 200
-    assert response.json()["existing_omlx"] is True
+    assert "existing_omlx" not in response.json()
 
 
 def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_exists(client, monkeypatch):

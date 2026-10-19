@@ -64,6 +64,7 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
         model = await prepare.ask(server_id, port)
     ls._record_model(model)
     await ls._download(server_id, report, model)
+    ls._flight.downloaded = True
     await ls._configure_model_settings(server_id, model)
     report("Refreshing model catalog")
     from llm.catalog_network_models import discover_network_models

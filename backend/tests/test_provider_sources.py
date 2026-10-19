@@ -823,11 +823,11 @@ class TestRecheck:
         current["pid"] = 4243
         assert client.post("/api/providers/local/setup").status_code == 200
         assert _sources(client)["omlx"]["state"] == "not_installed"
-        # Startup retires the unowned loopback row, and its model with it.
+        # A manually added loopback row remains routable across setup checks.
         from llm.local_setup_runtime import retire_unowned_local_omlx_rows
 
-        assert retire_unowned_local_omlx_rows() == [foreign]
-        assert f"omlx@{foreign}" not in set().union(*local_sources.catalog_membership())
+        assert retire_unowned_local_omlx_rows() == []
+        assert f"omlx@{foreign}" in set().union(*local_sources.catalog_membership())
 
     def test_local_setup_route_explicit_stop_supersedes_remembered_keep_for_the_same_pid(
             self, isolated_db, client, monkeypatch, tmp_path):
@@ -963,7 +963,7 @@ class TestRecheck:
         # Status is derived from the managed local server and flight record.
         not_checked = {"state": "not_checked", "model": None, "message": None}
         idle = client.get("/api/providers/local/setup").json()
-        assert idle["state"] == "idle" and idle["local_model"] == not_checked
+        assert idle["state"] == "stopped" and idle["local_model"] == not_checked
 
         failure = {"ok": False, "message": "oMLX failed"}
         local_setup._flight.result = failure
@@ -987,7 +987,7 @@ class TestRecheck:
             return status
 
         running_status = asyncio.run(running())
-        assert running_status["state"] == "running"
+        assert running_status["state"] == "starting"
 
     def test_local_setup_status_route_requires_a_signed_in_caller(self, isolated_db):
         from api.provider_sources import router

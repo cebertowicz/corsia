@@ -38,7 +38,6 @@ UNAVAILABLE_READS = {
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
     "other_omlx": "setup progress handoff saved before model binding",
-    "bound_model": "setup progress handoff saved before model binding",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
     "user_profile": "preferred-name read from the workspace profile",
@@ -90,6 +89,17 @@ def _your_model(model: str) -> dict[str, Any]:
 
     target = resolve_execution_target(model)
     return {"display_name": target.display_name, "local": target.provider == "omlx"}
+
+
+def _bound_model(model: str) -> dict[str, str] | None:
+    """Project the model this selection is about to bind through its resolver."""
+    from llm.resolution import ModelUnavailableError, resolve_execution_target
+
+    try:
+        target = resolve_execution_target(model)
+    except ModelUnavailableError:
+        return None
+    return {"model": model, "source": target.provider}
 
 
 def _web_search_key() -> bool:
@@ -240,12 +250,12 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
                 "codex": tool_attempts.get("codex"),
             }
         other_omlx = handoff.get("other_omlx")
-        bound_model = handoff.get("bound_model")
     elif isinstance(handoff, dict):
         unavailable = _unavailable("tool_attempts")
-        tool_attempts = other_omlx = bound_model = unavailable
+        tool_attempts = other_omlx = unavailable
     else:
-        tool_attempts = other_omlx = bound_model = None
+        tool_attempts = other_omlx = None
+    bound_model = _bound_model(model)
     return {
         "first_run_path": "app",
         "harness_ready": harness_ready,

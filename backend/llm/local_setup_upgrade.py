@@ -67,6 +67,19 @@ def legacy_model_dir() -> Path:
 _OMLX_DEFAULT_PORT = 8000
 
 
+def legacy_omlx_port() -> int:
+    """Read the prior CORSIA service port without consulting live upgrade state."""
+    from llm.local_setup_ownership import legacy_omlx_settings_file
+
+    try:
+        raw = json.loads(legacy_omlx_settings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    server = raw.get("server") if isinstance(raw, dict) else None
+    port = server.get("port") if isinstance(server, dict) else None
+    return port if isinstance(port, int) and not isinstance(port, bool) else _OMLX_DEFAULT_PORT
+
+
 def pending_legacy_port() -> int | None:
     """The port CORSIA's old service serves on while its upgrade has not finished, else None.
 
@@ -78,13 +91,7 @@ def pending_legacy_port() -> int | None:
 
     if done_path().exists() or not legacy_setup_owns_current_omlx():
         return None
-    try:
-        raw = json.loads(legacy_omlx_settings_file().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raw = {}
-    server = raw.get("server") if isinstance(raw, dict) else None
-    port = server.get("port") if isinstance(server, dict) else None
-    return port if isinstance(port, int) and not isinstance(port, bool) else _OMLX_DEFAULT_PORT
+    return legacy_omlx_port()
 
 
 def recorded_models(legacy_dir: Path) -> list[LocalModel]:

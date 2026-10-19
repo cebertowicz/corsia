@@ -11,7 +11,11 @@ log = logging.getLogger(__name__)
 
 
 class DiskSpaceError(RuntimeError):
-    """The models volume lacks room for the download; the message says how much to free."""
+    """The models volume lacks room for the download; carry the exact deficit."""
+
+    def __init__(self, message: str, *, bytes_to_free: int) -> None:
+        super().__init__(message)
+        self.bytes_to_free = bytes_to_free
 
 
 def _present_bytes(folder: Path) -> int:
@@ -78,4 +82,6 @@ def require_free_disk(download_bytes: int, model_dir: Path | None, repository: s
         short = (needed - free) / 1000**3
         raise DiskSpaceError(
             f"This download needs {needed / 1000**3:.0f} GB of free disk space and this computer has "
-            f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.")
+            f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.",
+            bytes_to_free=max(1, needed - free),
+        )

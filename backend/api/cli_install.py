@@ -57,13 +57,18 @@ class InstallerFailure(RuntimeError):
     """A safe, user-facing reason why an installation job could not finish."""
 
 
+def new_reference() -> str:
+    """Mint the stable public reference used by installer and local-setup failures."""
+    return f"cli-{secrets.token_hex(8)}"
+
+
 @dataclass
 class InstallJob:
     """The current in-memory state for one vendor installation or update job."""
 
     state: str = "running"
     reason: str | None = None
-    ref: str = field(default_factory=lambda: f"cli-{secrets.token_hex(8)}")
+    ref: str = field(default_factory=new_reference)
     path_shadowed_by: str | None = None
     task: asyncio.Task | None = None
     # Cancel: the installer runs in its own process group so the whole tree can be stopped. `lock` orders
@@ -78,12 +83,31 @@ class InstallJob:
 _jobs: dict[str, InstallJob] = {}
 
 
+def install_cause(reason: str | None) -> str | None:
+    """The stable install failure code; UI behavior must not depend on English copy."""
+    if reason is None:
+        return None
+    if reason == NO_INTERNET:
+        return "connection"
+    if reason == DOWNLOAD_REFUSED:
+        return "site_refused"
+    if reason == DOWNLOAD_UNVERIFIED:
+        return "download_unverified"
+    return "installer_failed"
+
+
 def _status(vendor: str) -> dict[str, str | None]:
     """Return the public state shape for one vendor's installation job."""
     job = _jobs.get(vendor)
-    return ({"state": job.state, "reason": job.reason, "ref": job.ref if job.state == "failed" else None,
-             "path_shadowed_by": job.path_shadowed_by}
-            if job else {"state": "idle", "reason": None, "ref": None, "path_shadowed_by": None})
+    if job is None:
+        return {"state": "idle", "reason": None, "ref": None, "path_shadowed_by": None}
+    result = {
+        "state": job.state, "reason": job.reason,
+        "ref": job.ref if job.state == "failed" else None, "path_shadowed_by": job.path_shadowed_by,
+    }
+    if job.state == "failed":
+        result["cause"] = install_cause(job.reason)
+    return result
 
 
 def _installer_request(vendor: str) -> urllib.request.Request:
