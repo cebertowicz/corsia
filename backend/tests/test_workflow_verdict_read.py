@@ -149,9 +149,9 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
         ("m1", True, "c1"), ("m2", False, "c1")]
 
 
-def _definitions(db) -> None:
+def _definitions(db, *, can_decide: bool = True) -> None:
     event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
-    kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": True,
+    kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": can_decide,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
     rows = [("event", "qg.escape", 1, event, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 1, {**kpi, "review": 0.2}, "2026-09-01T00:00:00Z"),
@@ -242,6 +242,14 @@ def test_calibration_script_refuses_when_a_calibrated_workflow_lacks_owner_kpi_d
     node(db, "brief-run", workflow="decision-brief", version="v1")
     db.commit()
     with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE: decision-brief"):
+        calibration_script().main([str(isolated_db)])
+
+
+def test_calibration_script_refuses_when_no_owner_kpi_can_decide(db, isolated_db) -> None:
+    _definitions(db, can_decide=False)
+    node(db, "sdlc-run")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE: sdlc-process"):
         calibration_script().main([str(isolated_db)])
 
 

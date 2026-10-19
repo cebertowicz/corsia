@@ -16,7 +16,7 @@ from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, freeze_plan,
 )
 from core.workflow_verdicts import (
-    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
+    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 from tests.verdict_calibration_helpers import calibration_script
@@ -215,6 +215,14 @@ def test_calibration_splits_use_the_production_first_use_cutoff() -> None:
     calls, _ = calibration_script().splits(source, NOW)
     assert freeze_plan(split, "b").baseline == "a"
     assert any(call != "no_baseline" for found in calls.values() for call, _ in found)
+
+
+def test_calibration_split_judges_the_same_new_side_as_production() -> None:
+    # An unpriced mixed-model run is outside every comparison group, so it cannot make cost unknown.
+    source = history(runs("v1", 1, started=90, ended=80), runs("v1", 1, started=70, ended=60),
+                     runs("v1", 1, count=1, started=55, ended=50, group=(MIXED, "standard", "M"), cost=None))
+    calls, _ = calibration_script().splits(source, NOW)
+    assert [call for call, _ in calls[COST]] == ["no_worse"]
 
 
 def test_calibration_split_refuses_without_a_production_baseline() -> None:

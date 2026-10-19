@@ -238,14 +238,21 @@ def _prefix(plan: FrozenPlan, deciding: Sequence[PlannedMeasure], new: Sequence[
     return None
 
 
+def sides(history: WorkflowHistory, plan: FrozenPlan) -> tuple[list[Run], list[Run]]:
+    """The baseline runs settled by the version's first use, and the version's own ended runs in end order."""
+    assert plan.baseline is not None
+    window = max(m.window_days for m in plan.measures)
+    old = baseline_runs(history, plan.baseline, plan.minimum, window, parse_ts(history.first_use(plan.version)))
+    new = sorted((r for r in _side(history, plan.version) if r.terminal_at), key=lambda r: parse_ts(r.terminal_at or ""))
+    return old, new
+
+
 def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime, replaced_by: str | None = None) -> Verdict:
     """Collecting, Changed again, Not enough data, or the verdict at look 1 or look 2."""
     if plan.baseline is None:
         return Verdict("not_enough_data", "no_baseline", 0, (), {"minimum": plan.minimum, "skipped": list(plan.skipped)})
     window = max(m.window_days for m in plan.measures)
-    baseline_cutoff = parse_ts(history.first_use(plan.version))
-    old = baseline_runs(history, plan.baseline, plan.minimum, window, baseline_cutoff)
-    new = sorted((r for r in _side(history, plan.version) if r.terminal_at), key=lambda r: parse_ts(r.terminal_at or ""))
+    old, new = sides(history, plan)
     call = lambda m, runs, bootstrap=True: measure_call(m, runs, old, minimum=plan.minimum, now=now,  # noqa: E731
                                                         seed=plan.seed + len(m.name), bootstrap=bootstrap)
     overall = [call(m, new, bootstrap=False) for m in plan.measures]

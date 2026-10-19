@@ -6,10 +6,11 @@
 Opens the database with ``mode=ro`` and runs the verdict's own read side (``core.workflow_verdict_read``), pricing
 included, and its own bootstrap. Prints no run, message or node: only
 
-1. **A/A splits.** Each version of ``sdlc-process`` and ``decision-brief`` is split into alternating halves (blocks
-   of 1 to 5 runs in start order, one split per block size) and the later half is judged against the earlier. Per
-   measure: the share of splits that read Keep or Not enough data (any call but Worse), and the 90th percentile of
-   the split differences, which replaces the 25% margin when that share is under 90%.
+1. **A/A splits.** Each version of ``sdlc-process`` and ``decision-brief`` is split once, into the earlier and later
+   halves of its runs in start order, and the later half is judged against the earlier by the production rule, so
+   each version gives one sample. Per measure: the share of splits that read Keep or Not enough data (any call but
+   Worse), and the 90th percentile of the split differences, which replaces the 25% margin when that share is under
+   90%.
 2. **Correction lag.** Days from a run settling to its last attributed correction: p50, p90, p95, max.
 3. **Replay.** Each real version against its baseline: the verdict and reason it would have given.
 
@@ -33,7 +34,9 @@ os.environ.setdefault("CORSIA_ANALYTICS_DISABLE", "1")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from core.workflow_verdict_read import price_snapshot, read_snapshot  # noqa: E402
-from core.workflow_verdict_rules import WorkflowHistory, baseline_runs, compute, decide, freeze_plan  # noqa: E402
+from core.workflow_verdict_rules import (  # noqa: E402
+    WorkflowHistory, assert_evaluator_fields, compute, decide, definitions_in_force, freeze_plan, sides,
+)
 from core.workflow_verdicts import measure_call, parse_ts  # noqa: E402
 
 CALIBRATED = ("sdlc-process", "decision-brief")
@@ -77,9 +80,7 @@ def splits(history: WorkflowHistory, now: datetime) -> tuple[dict, list[tuple[st
             for measure in plan.measures:
                 calls[measure.name].append(("no_baseline", None))
             continue
-        window = max(m.window_days for m in plan.measures)
-        old = baseline_runs(split, plan.baseline, plan.minimum, window, parse_ts(split.first_use("b")))
-        new = [run for run in halves if run.version == "b" and run.terminal_at]
+        old, new = sides(split, plan)
         for measure in plan.measures:
             call = measure_call(measure, new, old, minimum=plan.minimum, now=now, seed=plan.seed + len(measure.name))
             calls[measure.name].append((call.call, call.difference))
@@ -109,7 +110,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("missing calibrated workflow history for calibration")
     missing_definitions = [
         history.ref for history in calibrated
-        if not history.owner or not any(definition.kind == "kpi" for definition in history.definitions)
+        if not history.owner or not assert_evaluator_fields(
+            definitions_in_force(history.definitions, snapshot.now), history.ref, history.version_attr)[0]
     ]
     if missing_definitions:
         raise SystemExit("missing owner KPI definitions for calibration in CORSIA_WORKSPACE: "
