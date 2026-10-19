@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
 import { createSession, lastUserMessage, loginByUrl, openSettings, saveEvidenceScreenshot, userMessages } from './support/corsia';
+import { readMockCallCount, seedMockResponses } from './support/mock';
 
 const viewports = [
 	{ name: '1440', width: 1440, height: 900 },
@@ -111,6 +112,18 @@ for (const viewport of viewports) {
 			await dialog.getByRole('button', { name: 'Back', exact: true }).click();
 			await expect(dialog.getByLabel('What it runs')).toBeFocused();
 			await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+			await seedMockResponses(page.request, [
+				{
+					tool_calls: [{
+						id: `google-post-update-${viewport.name}-${theme}`,
+						name: 'post_update',
+						arguments: JSON.stringify({ text: "Let's connect a Google account for all your projects. Which account should agents use?" }),
+					}],
+					finish_reason: 'tool_calls',
+					match_thread: corsiaThreadId,
+				},
+				{ content: 'I asked which Google account to use.', finish_reason: 'stop', match_thread: corsiaThreadId },
+			]);
 			await dialog.getByLabel('Google (email, calendar and files)').click();
 			await dialog.getByRole('button', { name: 'Continue', exact: true }).click();
 			await expect(dialog).toBeHidden();
@@ -118,7 +131,9 @@ for (const viewport of viewports) {
 			await expect(userMessages(page)).toHaveCount(1);
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeEmpty();
 			await expect.poll(() => messages.filter((frame) => frame.content === 'Connect a Google account for all my projects').length).toBe(1);
-			await capture(page, testInfo, `google-after-continue-${viewport.name}-${theme}`, { fullPage: false });
+			await expect(page.getByText("Let's connect a Google account for all your projects. Which account should agents use?")).toBeVisible();
+			await expect.poll(() => readMockCallCount(page.request), { timeout: 20_000 }).toBe(2);
+			await capture(page, testInfo, `google-reply-${viewport.name}-${theme}`, { fullPage: false });
 		});
 	}
 }
