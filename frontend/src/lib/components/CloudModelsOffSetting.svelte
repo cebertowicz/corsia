@@ -4,7 +4,7 @@
 	import { loadCloudModelsOff, saveCloudModelsOff } from '$lib/api/providerPolicy';
 	import { models } from '$lib/stores/models';
 
-	// The project's own switch: only models on this Mac or a private machine run in the project.
+	// The project's own switch: only models on this computer or a private machine run in the project.
 	let { projectId }: { projectId: string } = $props();
 	let off = $state(false);
 	let loaded = $state(false);
@@ -25,7 +25,7 @@
 		saving = true; error = '';
 		const result = await saveCloudModelsOff(projectId, next);
 		if (result.ok) off = result.value.cloud_models_off;
-		else error = `Could not turn Cloud models off ${next ? 'on' : 'off'}: ${result.error}`;
+		else error = `Couldn't save Cloud models off: ${result.error}`;
 		saving = false;
 	}
 </script>
@@ -33,7 +33,7 @@
 <div class="setting">
 	<div>
 		<span class="label">Cloud models off</span>
-		<p>When on, only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.</p>
+		<p>When on, only models on this computer, or on a machine you've marked private, can run in this project, including every worker its agents start.</p>
 		{#if off}<p>Agents here using a cloud model stop at their next turn until they switch to a local one.</p>{/if}
 	</div>
 	<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Cloud models off" onchange={change} />

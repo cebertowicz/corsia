@@ -37,6 +37,9 @@ const catalogs = {
 	noneReady: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff)],
 	remoteNotPrivate: [cloudRow('opus', 'Opus 5.5'), cloudRow('sonnet', 'Sonnet 5.5'),
 		localRow('qwen', 'Qwen3 8B', 'This Mac'), localRow('llama', 'Llama 3.3 70B', 'Studio mini', { is_local: false })],
+	privateExternalOnly: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff),
+		modelRow({ id: 'external/gemma', selector: 'external@lms/gemma', litellm_model: 'external@lms/gemma', name: 'Gemma 3 27B', display_name: 'Gemma 3 27B',
+			connection: 'external', provider: 'external', backend: 'network', server_name: 'LM Studio', status: 'ready', is_local: true })],
 	localDown: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff),
 		localRow('qwen', 'Qwen3 8B', 'This Mac', { status: 'unavailable', status_reason: 'missing_context_window' })],
 };
@@ -72,11 +75,14 @@ const policy = {
 	})),
 };
 
-type State = { models: unknown[]; servers: unknown[]; cloudOff: boolean; failSave: boolean; failPrivate?: boolean; hold?: Promise<void> | null };
+type State = { models: unknown[]; servers: unknown[]; cloudOff: boolean; failSave: boolean; failPrivate?: boolean; canAddLocal?: boolean; hold?: Promise<void> | null };
 
 async function serve(page: Page, state: State) {
 	await page.route('**/api/models**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/models'
 		? route.fulfill({ json: { models: state.models, active_local_threads: 0 } }) : route.continue());
+	// Only the frames that show "Add a local model" fake this computer's setup answer; the rest read the disposable backend's own.
+	await page.route('**/api/providers/sources**', (route) => state.canAddLocal && route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/providers/sources'
+		? route.fulfill({ json: { sources: [{ source: 'omlx', name: 'oMLX', state: 'needs_setup', eligible: true }] } }) : route.continue());
 	await page.route('**/api/vendor-accounts**', (route) => route.request().method() === 'GET' ? route.fulfill({ json: { accounts: vendorAccounts } }) : route.continue());
 	await page.route('**/api/provider-policy**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/provider-policy'
 		? route.fulfill({ json: policy }) : route.continue());
@@ -176,8 +182,14 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: false, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
 				await region.getByRole('button', { name: 'Cloud models off', exact: true }).click();
-				await expect(region.getByText('Could not turn Cloud models off on: Server unavailable')).toBeVisible();
+				await expect(region.getByText("Couldn't save Cloud models off: Server unavailable")).toBeVisible();
 				await shot('project-save-failed', size, theme);
+
+				Object.assign(state, { models: catalogs.someLocal, cloudOff: true, failSave: true });
+				region = await openProjectProviders(page, await begin(width, height, theme));
+				await region.getByRole('button', { name: 'Cloud models off', exact: true }).click();
+				await expect(region.getByText("Couldn't save Cloud models off: Server unavailable")).toBeVisible();
+				await shot('project-save-failed-off', size, theme);
 				state.failSave = false;
 
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: false });
@@ -217,7 +229,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 					await openEndpoints(page, label);
 					if (act === 'fail') {
 						await page.getByRole('button', { name: 'Private machine', exact: true }).click();
-						await expect(page.getByText('Could not turn Private machine on: Server unavailable')).toBeVisible();
+						await expect(page.getByText("Couldn't save Private machine: Server unavailable")).toBeVisible();
 					}
 					await shot(name, size, theme);
 				}
@@ -229,11 +241,16 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			await openSheetInProject(page, await begin(width, height, theme));
 			await shot(`${prefix}sheet-remote-not-private`, size, theme);
 			if (!BEFORE) {
-				for (const [name, models] of [['sheet-some-local', catalogs.someLocal], ['sheet-no-local', catalogs.noneReady], ['sheet-local-not-ready', catalogs.localDown]] as const) {
-					Object.assign(state, { models, cloudOff: true });
+				for (const [name, models, canAddLocal] of [
+					['sheet-some-local', catalogs.someLocal, false], ['sheet-no-local', catalogs.noneReady, true],
+					['sheet-local-not-ready', catalogs.localDown, false], ['sheet-private-external-only', catalogs.privateExternalOnly, true],
+				] as const) {
+					Object.assign(state, { models, cloudOff: true, canAddLocal });
 					await openSheetInProject(page, await begin(width, height, theme));
 					await shot(name, size, theme);
 				}
+
+				state.canAddLocal = false;
 
 				// A thread already on a cloud model when the project turns Cloud models off.
 				Object.assign(state, { models: catalogs.plain, cloudOff: false });

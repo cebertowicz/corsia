@@ -56,8 +56,9 @@
 	});
 
 	// Starter, setup, and Settings download states show in the Local group while the picker is open.
-	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
-	const hasLocalGroup = $derived(groups.some(isLocalGroup));
+	// The group that hosts this computer's oMLX setup status is keyed on the oMLX row, not on `is_local`: a private machine's group says "Local" but is not this computer.
+	const hostsLocalSetup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
+	const hasLocalSetupGroup = $derived(groups.some(hostsLocalSetup));
 	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: LocalPickerRetry) {
@@ -160,8 +161,7 @@
 			{#if cloudModelsOff && !hasReadyGroup}
 				<div class="model-list-empty">Cloud models are off in this project, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
 			{/if}
-			{#if groups.length === 0 && cloudModelsOff}
-			{:else if groups.length === 0 && !$localStatus}
+			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
@@ -229,7 +229,7 @@
 
 
 							{/if}
-						{#if $localStatus && isLocalGroup(group)}
+						{#if $localStatus && hostsLocalSetup(group)}
 								{#if $localStatus.retry === 'settings'}
 									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
 								{:else}
@@ -288,7 +288,7 @@
 					</section>
 				{/each}
 				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">Cloud models are off in this project.</div>{/if}
-				{#if !hasLocalGroup && ($localStatus || $canAddLocalModel)}
+				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
 						{#if $localStatus}

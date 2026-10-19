@@ -4,7 +4,7 @@ import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 import { token } from '$lib/stores/auth';
 import { models, type Model } from '$lib/stores/models';
 
-const DESCRIPTION = "When on, only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.";
+const DESCRIPTION = "When on, only models on this computer, or on a machine you've marked private, can run in this project, including every worker its agents start.";
 const STOPS = 'Agents here using a cloud model stop at their next turn until they switch to a local one.';
 const NONE_READY = 'No local model is ready, so nothing in this project can run until one is.';
 const local = { id: 'omlx/q', name: 'Qwen', size: '', backend: 'network', speed: '', status: 'ready', is_local: true } as Model;
@@ -73,8 +73,15 @@ describe('CloudModelsOffSetting', () => {
 	it('save failed: names the label, direction and error', async () => {
 		stub(false, 'fail'); await mountSetting();
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain('Could not turn Cloud models off on: Server unavailable'));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save Cloud models off: Server unavailable"));
 		expect(host.querySelector('.msg.err')).not.toBeNull();
 		expect(text()).not.toContain(STOPS);
+	});
+	it('save failed turning it off: the same line, and the switch stays on', async () => {
+		stub(true, 'fail'); await mountSetting();
+		expect(toggle().getAttribute('aria-pressed')).toBe('true');
+		toggle().click(); flushSync();
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save Cloud models off: Server unavailable"));
+		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
 });

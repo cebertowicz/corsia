@@ -15,7 +15,7 @@
 		busy = true; error = '';
 		const result = await setNetworkServerPrivate(server.id, value);
 		if (result.ok) saved = value;
-		else error = `Could not turn Private machine ${value ? 'on' : 'off'}: ${result.message ?? 'Could not save this setting.'}`;
+		else error = `Couldn't save Private machine: ${result.message ?? 'Could not save this setting.'}`;
 		busy = false;
 	}
 </script>
@@ -31,11 +31,11 @@
 			</span>
 		</div>
 	{/each}
-	{#if onThisMac}<p class="note">On this Mac: its models count as local.</p>{/if}
+	{#if onThisMac}<p class="note">On this computer: its models count as local.</p>{/if}
 </div>
 {#if !onThisMac}
 	<div class="private-machine">
-		<div><span>Private machine</span><p>Its models count as local for local-only chats and cloud-off projects. Only turn this on if its models run on that machine, not on a service it forwards to.</p></div>
+		<div><span>Private machine</span><p>When on, its models count as local for local-only chats and cloud-off projects. Only turn this on if its models run on that machine, not on a service it forwards to.</p></div>
 		<Toggle checked={privateMachine} disabled={busy} ariaLabel="Private machine" onchange={savePrivate} />
 	</div>
 	{#if error}<Message variant="err">{error}</Message>{/if}
