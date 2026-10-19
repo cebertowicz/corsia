@@ -71,6 +71,8 @@ export interface ConnectedAccount {
 	state: AccountState;
 	account_kind?: 'personal' | 'work' | null;
 	cause?: string | null;
+	/** Microsoft Application (client) ID only; no credential or key-store reference leaves the server. */
+	client_id?: string | null;
 	reach: AccountReach;
 }
 
@@ -150,13 +152,14 @@ export async function loadConnectedAppsRows(): Promise<{ rows: ConnectedAppsRow[
 	return { rows: [...accounts, ...apps], signInHere: result.sign_in_here ?? false };
 }
 
-/** Starts a sign-in for this account in the browser on this Mac; the answer holds the link to open. */
-export function startAccountSignIn(id: string): Promise<{ url: string; account_id: string }> {
-	return response('/api/google/connect', {
+/** Starts the matching provider's sign-in for this account; the answer holds the link to open. */
+export function startAccountSignIn(account: Pick<ConnectedAccount, 'id' | 'provider'>): Promise<{ url: string; account_id: string }> {
+	const provider = account.provider === 'microsoft' ? 'Microsoft' : 'Google';
+	return response(`/api/${account.provider}/connect`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ account_id: id }),
-	}, "Couldn't start Google sign-in. Try again.");
+		body: JSON.stringify({ account_id: account.id }),
+	}, `Couldn't start ${provider} sign-in. Try again.`);
 }
 
 export function signOutOfAccount(id: string): Promise<AccountSignOutResult> {

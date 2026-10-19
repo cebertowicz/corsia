@@ -61,7 +61,7 @@ describe('the account controls', () => {
 	it('signs an account in again by naming it, and gets the link to open', async () => {
 		const fetchMock = answer({ url: 'https://accounts.example/auth', account_id: 'acc 1' });
 
-		await expect(startAccountSignIn('acc 1')).resolves.toEqual({ url: 'https://accounts.example/auth', account_id: 'acc 1' });
+		await expect(startAccountSignIn(account)).resolves.toEqual({ url: 'https://accounts.example/auth', account_id: 'acc 1' });
 
 		const call = sent(fetchMock);
 		expect(call.path).toBe('/api/google/connect');
@@ -69,9 +69,17 @@ describe('the account controls', () => {
 		expect(call.body).toEqual({ account_id: 'acc 1' });
 	});
 
+	it('routes Microsoft account reauthentication through Microsoft and uses its fixed fallback', async () => {
+		const fetchMock = answer({ url: 'https://login.microsoft.example/auth', account_id: 'microsoft-1' });
+		await expect(startAccountSignIn({ ...account, id: 'microsoft-1', provider: 'microsoft' })).resolves.toEqual({ url: 'https://login.microsoft.example/auth', account_id: 'microsoft-1' });
+		expect(sent(fetchMock)).toMatchObject({ path: '/api/microsoft/connect', body: { account_id: 'microsoft-1' } });
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
+		await expect(startAccountSignIn({ ...account, provider: 'microsoft' })).rejects.toThrow("Couldn't start Microsoft sign-in. Try again.");
+	});
+
 	it('uses the approved Google fallback when an account sign-in cannot start', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
-		await expect(startAccountSignIn('acc 1')).rejects.toThrow("Couldn't start Google sign-in. Try again.");
+		await expect(startAccountSignIn(account)).rejects.toThrow("Couldn't start Google sign-in. Try again.");
 	});
 
 	it('uses the neighbouring generic fallback when an app sign-in cannot start', async () => {

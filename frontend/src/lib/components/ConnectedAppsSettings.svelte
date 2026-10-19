@@ -14,7 +14,6 @@
 	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
-
 	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
 	const providerName = (account: ConnectedAccount) => account.provider === 'microsoft' ? 'Microsoft' : 'Google';
 	const accountName = (account: ConnectedAccount) => `${providerName(account)} — ${account.address}`;
@@ -22,7 +21,6 @@
 	const isAccount = (row: ConnectedAppsRow): row is ConnectedAccount => row.kind === 'account';
 	const accountNeedsSignIn = (account: ConnectedAccount) => account.state === 'needs_sign_in' || account.state === 'signed_out';
 	const isOpenApp = (app: ConnectedApp): boolean => openId === app.id || needsSignInAttention(app);
-
 	let rows = $state<ConnectedAppsRow[]>([]);
 	let loading = $state(true);
 	let offline = $state(false);
@@ -45,10 +43,14 @@
 	let signInAfterApprove = $state<string | null>(null);
 	let closedLocalPrefixes = $state(new Map<string, string>());
 	let linkedAccountId = $state<string | null>(null);
+	let copiedAdminMessageId = $state<string | null>(null);
 	let textContext: CanvasRenderingContext2D | null = null;
-
 	const stateLine = (app: ConnectedApp) => connectedAppStateLine(app, signedOut.has(app.id));
+	const isMicrosoft = (account: ConnectedAccount) => account.provider === 'microsoft';
+	const microsoftCause = (account: ConnectedAccount, cause: string) => isMicrosoft(account) && account.cause === cause;
 	function accountStateLine(account: ConnectedAccount): string {
+		if (microsoftCause(account, 'admin_approval_required')) return 'Needs admin approval';
+		if (microsoftCause(account, 'provider_unavailable')) return 'Sign-in didn’t finish';
 		switch (account.state) {
 			case 'connected': return 'Connected';
 			case 'needs_sign_in': return 'Needs you to sign in';
@@ -56,7 +58,7 @@
 		}
 	}
 	function tone(row: ConnectedAppsRow): 'quiet' | 'failed' | 'attention' {
-		if (isAccount(row)) return row.state === 'connected' || row.state === 'signed_out' ? 'quiet' : 'attention';
+		if (isAccount(row)) return microsoftCause(row, 'provider_unavailable') ? 'failed' : row.state === 'connected' || row.state === 'signed_out' ? 'quiet' : 'attention';
 		if (row.state === 'failed' || (row.sign_in?.status === 'failed' && !row.sign_in.signed_in)) return 'failed';
 		return row.state === 'working' ? 'quiet' : 'attention';
 	}
@@ -79,7 +81,6 @@
 		replaceApp(next);
 		if (next.state === 'needs_sign_in') signInAfterApprove = next.id;
 	}
-
 	async function load(): Promise<void> {
 		loading = rows.length === 0;
 		error = '';
@@ -119,13 +120,28 @@
 		actionId = account.id; errorId = account.id; actionError = '';
 		const page = signInHere ? window.open('', '_blank') : null;
 		try {
-			const started = await startAccountSignIn(account.id);
+			const started = await startAccountSignIn(account);
 			if (page) { page.opener = null; page.location.href = started.url; }
 			else window.location.assign(started.url);
 		} catch (cause) {
 			page?.close();
-			actionError = cause instanceof Error ? cause.message : "Couldn't start Google sign-in. Try again.";
+			actionError = cause instanceof Error ? cause.message : "Couldn't start the sign-in. Try again.";
 		} finally { actionId = null; }
+	}
+	function adminApprovalMessage(account: ConnectedAccount): string {
+		if (!account.client_id) return '';
+		return `Please approve my CORSIA app for my account, ${account.address}. It is my own Microsoft app registration, Application (client) ID ${account.client_id}, and requests delegated Microsoft Graph access to Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access and User.Read.`;
+	}
+	async function copyAdminMessage(account: ConnectedAccount): Promise<void> {
+		const message = adminApprovalMessage(account);
+		if (!message) return;
+		try {
+			await navigator.clipboard.writeText(message);
+			copiedAdminMessageId = account.id;
+		} catch {
+			errorId = account.id;
+			actionError = "Couldn't copy the message. Try again.";
+		}
 	}
 	async function signOut(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
@@ -133,7 +149,7 @@
 			const result: AccountSignOutResult = await signOutOfAccount(account.id);
 			const row = { ...result.row, kind: 'account' as const };
 			replace(row); signedOut = new Set(signedOut).add(account.id);
-			manualStep = needsManualGoogleStep(result.revocation) ? row : null;
+			manualStep = row.provider === 'google' && needsManualGoogleStep(result.revocation) ? row : null;
 		} catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't change this Google account. Try again."; }
 		finally { confirmingOut = null; actionId = null; }
 	}
@@ -142,12 +158,11 @@
 		try {
 			const result = await removeAccount(account.id);
 			rows = rows.filter((row) => row.id !== account.id);
-			removedManualStep = needsManualGoogleStep(result.revocation) ? account : null;
+			removedManualStep = account.provider === 'microsoft' || needsManualGoogleStep(result.revocation) ? account : null;
 		}
 		catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't change this Google account. Try again."; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
-
 	function accountAddress(address: string): AccountAddress | null {
 		const at = address.lastIndexOf('@');
 		if (at <= 0 || at === address.length - 1) return null;
@@ -271,7 +286,6 @@
 </script>
 
 {#snippet appSecondLine(app: ConnectedApp)}{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine({ ...app, kind: 'hosted_app' })}`}</span>{/if}{#if app.folder}<span class="line">From Claude Code · {app.folder} folder</span>{/if}{/snippet}
-
 <section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
 	<div class="heading">
 		<div>
@@ -301,11 +315,12 @@
 								<div class="details">
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
-									{#if row.state === 'needs_sign_in'}<p class="impact">Google signed you out, so agents can’t use this account until you sign in again.</p>{/if}
+									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Try again.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">Google signed you out, so agents can’t use this account until you sign in again.</p>{/if}
 									{#if manualStep?.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
+									{#if copiedAdminMessageId === row.id}<p class="copied" role="status">Message copied</p>{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
-										{#if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="primary" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{/if}
+										{#if microsoftCause(row, 'admin_approval_required')}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'provider_unavailable') ? 'primary' : 'ghost'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Try again' : 'Sign in'}</Button></span>{/if}
 										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedAccountId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
 										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
 										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
@@ -339,12 +354,12 @@
 		{/if}
 	{/if}
 </section>
-{#if removedManualStep}<p class="manual-removal" role="status">CORSIA removed {accountName(removedManualStep)} here, but couldn’t reach Google. To remove it there, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
+{#if removedManualStep}{#if removedManualStep.provider === 'microsoft'}<p class="manual-removal" role="status">Microsoft may still list CORSIA as allowed for {removedManualStep.address}. <a href={removedManualStep.account_kind === 'personal' ? 'https://account.live.com/consent/Manage' : 'https://myapps.microsoft.com'} target="_blank" rel="noopener" onclick={() => removedManualStep = null}>Manage Microsoft permissions</a></p>{:else}<p class="manual-removal" role="status">CORSIA removed {accountName(removedManualStep)} here, but couldn’t reach Google. To remove it there, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}{/if}
 
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
 {#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in conversations already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
-{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description="Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account." confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
+{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.'} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
@@ -362,9 +377,11 @@
 	.line { display: block; }
 	.details { padding: var(--space-1) var(--space-2) var(--space-3); }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
+	.account-action :global(.btn:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
+	.copied { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.manual-removal { margin: var(--space-3) var(--space-2) 0; color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }

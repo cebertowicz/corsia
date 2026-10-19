@@ -330,6 +330,70 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
 	});
 
+	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
+		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111' };
+		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };
+		const expired = { ...admin, id: 'microsoft-expired', cause: 'refresh_token_invalid' };
+		const failed = { ...admin, id: 'microsoft-failed', cause: 'provider_unavailable' };
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		Object.assign(navigator, { clipboard: { writeText } });
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [admin, cancelled, expired, failed] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
+		const open = (id: string) => { (host.querySelector(`[data-connected-account-id="${id}"] button`) as HTMLButtonElement).click(); flushSync(); };
+		open(admin.id);
+		expect(host.textContent).toContain('Needs admin approval');
+		expect(host.textContent).toContain('Send this to your IT admin, then press Sign in.');
+		expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Copy message for IT')?.className).toContain('primary');
+		([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Copy message for IT') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('alex@contoso.example')));
+		await vi.waitFor(() => expect(host.textContent).toContain('Message copied'));
+		expect(writeText.mock.calls[0][0]).toContain('Application (client) ID 11111111-1111-4111-8111-111111111111');
+		expect(writeText.mock.calls[0][0]).not.toContain('You can approve it here');
+		expect(host.textContent).toContain('Message copied');
+		open(cancelled.id);
+		expect(host.textContent).toContain('Sign-in was cancelled. Press Sign in to try again.');
+		open(expired.id);
+		expect(host.textContent).toContain('Microsoft signed you out, so agents can’t use this account until you sign in again.');
+		open(failed.id);
+		expect(host.textContent).toContain('Sign-in didn’t finish');
+		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
+		const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Try again');
+		expect(retry?.className).toContain('primary');
+		expect(host.textContent).toContain('Where it works…');
+		expect(host.textContent).toContain('Remove');
+	});
+
+	it('uses Microsoft removal copy and keeps the correct provider permissions link after removal', async () => {
+		const microsoft = { ...googleAccount, id: 'microsoft-personal', provider: 'microsoft' as const, address: 'alex@outlook.example', account_kind: 'personal' as const };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/microsoft-personal') ? { id: microsoft.id, removed: true, revocation: 'manual_only' } : { servers: [], accounts: [microsoft] } })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@outlook.example"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="microsoft-personal"] button') as HTMLButtonElement).click();
+		flushSync();
+		([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Remove') as HTMLButtonElement).click();
+		flushSync();
+		expect(document.body.textContent).toContain('CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.');
+		([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Microsoft may still list CORSIA as allowed for alex@outlook.example.'));
+		const link = [...host.querySelectorAll<HTMLAnchorElement>('a')].find((anchor) => anchor.textContent === 'Manage Microsoft permissions');
+		expect(link?.href).toBe('https://account.live.com/consent/Manage');
+	});
+
+	it('keeps work-account removals on My Apps', async () => {
+		const microsoft = { ...googleAccount, id: 'microsoft-work-remove', provider: 'microsoft' as const, address: 'alex@contoso.example', account_kind: 'work' as const };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/microsoft-work-remove') ? { id: microsoft.id, removed: true, revocation: 'manual_only' } : { servers: [], accounts: [microsoft] } })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="microsoft-work-remove"] button') as HTMLButtonElement).click();
+		flushSync();
+		([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Remove') as HTMLButtonElement).click();
+		flushSync();
+		([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Manage Microsoft permissions'));
+		expect([...host.querySelectorAll<HTMLAnchorElement>('a')].find((anchor) => anchor.textContent === 'Manage Microsoft permissions')?.href).toBe('https://myapps.microsoft.com/');
+	});
+
 	it('keeps same-prefix Google account titles distinct while preserving their domains', async () => {
 		const accounts = [
 			{ ...googleAccount, id: 'google-work', address: 'shared.prefix.very-long-work-address@example.com' },

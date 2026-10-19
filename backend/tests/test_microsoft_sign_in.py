@@ -9,6 +9,9 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
+from api import microsoft as microsoft_api
 from api.connected_account_rows import list_account_rows
 from connections import account_actions, connected_accounts
 from connections.app_reach import AppReach
@@ -117,6 +120,15 @@ async def _finish(url: str, **query: str) -> tuple[int, bytes]:
     return await _callback(found["redirect_uri"], state=found["state"], **(query or {"code": "authorization-code"}))
 
 
+async def _request(body: object) -> Request:
+    encoded = json.dumps(body).encode()
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": encoded, "more_body": False}
+
+    return Request({"type": "http", "method": "POST", "path": "/api/microsoft/connect", "headers": []}, receive)
+
+
 async def _connect(fake: FakeMicrosoft, *, kind: str = "work", tenant: str | None = TENANT_A) -> str:
     url, account_id = await oauth.start_sign_in(CLIENT_ID, kind, tenant, actor=("system", "test"), reach=EVERYWHERE)
     query = _query(url)
@@ -144,6 +156,38 @@ def _bundle(account_id: str) -> dict[str, object] | None:
         return resolve_credentials(account_id, db=db)
     finally:
         db.close()
+
+
+async def test_connect_route_passes_account_id_to_shared_sign_in(monkeypatch) -> None:
+    started: dict[str, object] = {}
+
+    async def start_sign_in(client_id, kind, tenant_id, **kwargs):
+        started.update(client_id=client_id, kind=kind, tenant_id=tenant_id, **kwargs)
+        return "https://login.microsoft.example/auth", "shared-account"
+
+    monkeypatch.setattr(oauth, "start_sign_in", start_sign_in)
+
+    result = await microsoft_api.connect(
+        await _request({"account_id": "existing-account", "client_id": CLIENT_ID, "kind": "work", "tenant_id": TENANT_A}),
+        {"token_kind": "session", "id": "person"},
+    )
+
+    assert result == {"url": "https://login.microsoft.example/auth", "account_id": "shared-account"}
+    assert started["account_id"] == "existing-account"
+    assert started["client_id"] == CLIENT_ID
+
+
+async def test_connect_route_keeps_safe_not_found_contract(monkeypatch) -> None:
+    async def start_sign_in(*_args, **_kwargs):
+        raise MicrosoftError(ACCOUNT_NOT_FOUND)
+
+    monkeypatch.setattr(oauth, "start_sign_in", start_sign_in)
+
+    with pytest.raises(HTTPException) as raised:
+        await microsoft_api.connect(await _request({"account_id": "missing"}), {"token_kind": "session", "id": "person"})
+
+    assert raised.value.status_code == 404
+    assert raised.value.detail == {"cause": ACCOUNT_NOT_FOUND, "message": "That account isn't connected."}
 
 
 def test_scopes_are_exactly_the_graph_ones_without_openid_or_profile() -> None:
