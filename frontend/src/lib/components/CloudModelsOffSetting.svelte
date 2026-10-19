@@ -42,10 +42,10 @@
 {#if error}<Message variant="err">{error}</Message>{/if}
 
 <style>
-	.setting { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+	.setting { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 	.setting > div { min-width: 0; }
 	.setting :global(.tg) { flex: 0 0 auto; }
-	.label { color: var(--text-primary); font-size: var(--text-subhead); font-weight: 500; }
+	.label { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	p + p { margin-top: var(--space-1); }
 </style>
