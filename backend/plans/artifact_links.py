@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plans import service
+from plans import hierarchy, operator_display_state, service
 from plans.user_ask import ask_attention_state_sql, askable_sql
 
 WRITABLE_ROLES = frozenset({"input", "result", "attention"})
@@ -17,6 +17,25 @@ _ATTENTION_STATE_SQL = f"""CASE
 END"""
 LINK_IDENTITY_COLUMNS = f"""i.integration,i.type,i.external_id,i.title,i.path,i.state,
     {_ATTENTION_STATE_SQL} AS attention_state"""
+
+
+def deferred_attention_artifact_ids(artifact_ids, *, db) -> set[str]:
+    """Plan attention artifacts whose linked node defers their Needs-you state."""
+    identities = list(dict.fromkeys(str(artifact_id) for artifact_id in artifact_ids))
+    deferred: set[str] = set()
+    for start in range(0, len(identities), hierarchy._ID_CHUNK):
+        chunk = identities[start:start + hierarchy._ID_CHUNK]
+        marks = ",".join("?" for _ in chunk)
+        rows = db.execute(
+            f"""SELECT DISTINCT l.artifact_id FROM plan_node_artifact_links l
+                  CROSS JOIN plan_nodes n ON n.id=l.node_id
+                  CROSS JOIN plans p ON p.id=n.plan_id
+                 WHERE l.role='attention' AND l.artifact_id IN ({marks})
+                   AND {operator_display_state.ask_deferred_sql('n.id', plan_state_sql='p.state')}""",
+            chunk,
+        ).fetchall()
+        deferred.update(str(row["artifact_id"]) for row in rows)
+    return deferred
 
 
 def raised_attention_nodes(node_ids, *, db) -> set[str]:

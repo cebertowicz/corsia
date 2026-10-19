@@ -9,15 +9,8 @@ from plans import admission, node_states, operator_stopped, service, wait_causes
 from plans.admission_projection import executor_of
 from plans import operator_node_facts as facts
 from plans.operator_display_state import (
-    NODE_LABEL_KEYS, PLAN_LABEL_KEYS,
-    TERMINAL_DISPLAY,
-    TONE_KEYS,
-    _HUMAN_REVIEWS,
-    ask_deferred,
-    display_from_facts,
-    needs_user_from_facts,
-    plan_paused,
-    retired_display,
+    NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS, ask_deferred,
+    display_from_facts, needs_user_from_facts, node_paused, plan_paused, retired_display,
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
@@ -174,6 +167,7 @@ def _needs_user(node: dict, review: dict | None, execution: dict) -> bool:
             for link in node.get("artifact_links", [])
         ),
         plan_paused=plan_paused(execution),
+        node_paused=node_paused(execution),
     )
 
 
@@ -191,6 +185,7 @@ def _display(node: dict, execution: dict, review: dict | None, *, stopped: str |
             for cause in execution["causes"]
         ),
         plan_paused=plan_paused(execution),
+        node_paused=node_paused(execution),
     )
 
 
@@ -344,13 +339,17 @@ def leaf_bucket_from_facts(
     quiet_block: bool = False,
     unactionable_user_block: bool = False,
     plan_paused: bool = False,
+    node_paused: bool = False,
 ) -> str:
     """Reduce compact lifecycle facts into the canonical distribution bucket."""
     if state in service._ACCEPTED_STATES:
         return "done"
     if state == "failed":
         return state
-    if ask_deferred(condition, review_kind, plan_paused=plan_paused):
+    if (
+        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
+        and condition == "review" and review_kind in _HUMAN_REVIEWS
+    ):
         return "paused"
     if condition == "review":
         return "review_human" if review_kind in _HUMAN_REVIEWS else "review_parent_agent"
@@ -377,6 +376,7 @@ def leaf_bucket(node: dict) -> str:
         quiet_block=is_quiet(node),
         unactionable_user_block=unactionable_user_hold(node),
         plan_paused=plan_paused(node["execution"]),
+        node_paused=node_paused(node["execution"]),
     )
 
 

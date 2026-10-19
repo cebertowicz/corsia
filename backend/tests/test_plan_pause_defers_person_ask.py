@@ -1,21 +1,34 @@
-"""A whole-plan pause defers a raised decision's attention until resume.
+"""A paused plan or a paused item defers its asks' Needs-you attention until resume.
 
-Activity's count, the operator payload and the dock queue share one rule.
-
-The decision stays raised and answerable meanwhile (the person may still answer
-it), and resume restores the count. A raised artifact ask on a plan's node
-defers the same way. Human-review asks are covered by
-``test_plan_chat_list_state`` and ``test_plan_operator_pause_disclosure``.
+Activity's count, the operator payload, the chat list, status and the dock
+queue share one rule (``operator_display_state.ask_deferred`` and its SQL twin).
+The ask stays raised and answerable meanwhile, resume restores it, and an
+unpaused sibling ask keeps counting. A decision node itself refuses a pause.
 """
 
 from __future__ import annotations
 
+import pytest
+
 from api import attention
-from plans import boundary, decision_projection, operator_projection, service
+from plans import (
+    admission,
+    boundary,
+    decision_projection,
+    operator_chat_state,
+    operator_display_state,
+    operator_projection,
+    node_settlement,
+    service,
+    status,
+    user_ask,
+)
+from tests.plan_ask_helpers import document_ask
 from tests.test_plan_decision_answer import (
     _human,
     _mid,
     _raised_decision,
+    _thread_actor,
     db,  # noqa: F401 - shared fixture
 )
 
@@ -29,6 +42,26 @@ def _lifecycle(db, plan_id: str, operation: str) -> None:
     db.commit()
 
 
+def _node_lifecycle(db, plan_id: str, node_id: str, operation: str) -> None:
+    revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (node_id,)).fetchone()[0]
+    boundary.mutate(
+        plan_id, operation,
+        {"node_id": node_id, "expected_revision": revision},
+        actor=_human(), provenance=f"api.plans.{operation}", mutation_id=_mid(), db=db,
+    )
+    db.commit()
+
+
+def _agent_lifecycle(db, plan_id: str, node_id: str, operation: str, **params) -> None:
+    revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (node_id,)).fetchone()[0]
+    boundary.mutate(
+        plan_id, operation,
+        {"node_id": node_id, "expected_revision": revision, **params},
+        actor=_human(), provenance=f"test.{operation}", mutation_id=_mid(), db=db,
+    )
+    db.commit()
+
+
 def _payload_awaiting(db) -> int:
     return operator_projection.read_thread("owner", actor=_human(), db=db)["attention"][
         "awaiting_count"
@@ -37,6 +70,36 @@ def _payload_awaiting(db) -> int:
 
 def _dock(db) -> list:
     return attention._queue_for("user-1", db=db)
+
+
+def test_ask_deferred_sql_matches_projected_pause_facts(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "Check parity", db=db)
+    db.commit()
+
+    def sql(plan_state: str) -> bool:
+        return bool(db.execute(
+            f"SELECT {operator_display_state.ask_deferred_sql('?', plan_state_sql='?')}",
+            (plan_state, node.id),
+        ).fetchone()[0])
+
+    execution = admission.project(node.id, db=db)
+    assert operator_display_state.ask_deferred(
+        plan_paused=False, node_paused=operator_display_state.node_paused(execution),
+    ) == sql("active") == False
+    _node_lifecycle(db, plan.id, node.id, "pause_node")
+    execution = admission.project(node.id, db=db)
+    assert operator_display_state.ask_deferred(
+        plan_paused=False, node_paused=operator_display_state.node_paused(execution),
+    ) == sql("active") == True
+    _node_lifecycle(db, plan.id, node.id, "resume_node")
+    execution = admission.project(node.id, db=db)
+    assert operator_display_state.ask_deferred(
+        plan_paused=False, node_paused=operator_display_state.node_paused(execution),
+    ) == sql("active") == False
+    assert operator_display_state.ask_deferred(plan_paused=True) == sql("paused") == True
 
 
 def test_pause_defers_the_decision_count_and_resume_restores_it(db):
@@ -62,9 +125,122 @@ def test_pause_defers_the_decision_count_and_resume_restores_it(db):
     assert len(_dock(db)) == 1
 
 
-def test_pause_defers_a_raised_artifact_ask_and_resume_restores_it(db):
+def test_decision_node_refuses_pause_and_stays_counted(db):
+    plan, _source, decision = _raised_decision(db)
+    _same_plan, _sibling_source, sibling = _raised_decision(db, title="Keep this decision visible")
+
+    assert decision_projection.awaiting_count([plan.id], db=db) == 2
+    assert _payload_awaiting(db) == 2
+    assert len(_dock(db)) == 2
+    status_before = status.read(db, service._plan_row(db, plan.id), actor=_human())["severity"]
+
+    with pytest.raises(node_settlement.LaneOwnedNodeError, match="decision awaiting the user"):
+        _node_lifecycle(db, plan.id, decision["node_id"], "pause_node")
+
+    assert decision_projection.awaiting_count([plan.id], db=db) == 2
+    assert _payload_awaiting(db) == 2
+    assert [row["detail"]["id"] for row in _dock(db)] == [decision["id"], sibling["id"]]
+    pane = operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]
+    assert all(node["requires_user_action"] for node in pane["nodes"] if node["id"] in {
+        decision["node_id"], sibling["node_id"],
+    })
+    assert operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"][
+        "attention_items"
+    ] == [
+        {"kind": "decision", "title": decision["title"], "node_id": decision["node_id"]},
+        {"kind": "decision", "title": sibling["title"], "node_id": sibling["node_id"]},
+    ]
+    assert status.read(db, service._plan_row(db, plan.id), actor=_human())["severity"] == status_before
+
+
+def test_pause_node_defers_a_user_assigned_step_and_keeps_its_sibling(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    paused = _task(plan.id, "Paused sign-off", assignee="user", db=db)
+    sibling = _task(plan.id, "Visible sign-off", assignee="user", db=db)
+    db.commit()
+
+    def nodes():
+        return operator_projection.read_thread("owner", actor=_human(), db=db)["plans"][0]["nodes"]
+
+    assert all(node["requires_user_action"] for node in nodes())
+    _node_lifecycle(db, plan.id, paused.id, "pause_node")
+    assert not next(node for node in nodes() if node["id"] == paused.id)["requires_user_action"]
+    assert next(node for node in nodes() if node["id"] == sibling.id)["requires_user_action"]
+    assert operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"][
+        "attention_items"
+    ] == [{"kind": "hold", "title": "Visible sign-off", "node_id": sibling.id}]
+    _node_lifecycle(db, plan.id, paused.id, "resume_node")
+    assert all(node["requires_user_action"] for node in nodes())
+
+
+def test_pause_node_defers_a_human_review_and_keeps_its_sibling(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    paused = _task(plan.id, "Paused review", assignee="user", db=db)
+    sibling = _task(plan.id, "Visible review", assignee="user", db=db)
+    db.commit()
+    for node in (paused, sibling):
+        _agent_lifecycle(db, plan.id, node.id, "activate")
+        _agent_lifecycle(db, plan.id, node.id, "request_review", evidence="Ready")
+
+    _node_lifecycle(db, plan.id, paused.id, "pause_node")
+    state = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"]
+    assert state["state"] == "blocked_on_you"
+    assert state["attention_items"] == [{"kind": "review", "title": "Visible review", "node_id": sibling.id}]
+    _node_lifecycle(db, plan.id, paused.id, "resume_node")
+    assert len(operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"][
+        "attention_items"
+    ]) == 2
+
+
+def test_paused_only_human_review_leaves_chat_list_unowed(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    review = _task(plan.id, "Paused review", assignee="user", db=db)
+    db.commit()
+    _agent_lifecycle(db, plan.id, review.id, "activate")
+    _agent_lifecycle(db, plan.id, review.id, "request_review", evidence="Ready")
+    _node_lifecycle(db, plan.id, review.id, "pause_node")
+
+    state = operator_chat_state.read_thread_states(["owner"], actor=_human(), db=db)["states"]["owner"]
+    assert state["state"] == "paused"
+    assert state["attention_items"] == []
+    assert status.read(db, service._plan_row(db, plan.id), actor=_human())["severity"] != "needs_input"
+
+
+def test_pause_node_defers_a_document_ask_and_resume_restores_it(db):
+    from tests.test_plan_decisions import _task
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(plan.id, "Review the document", db=db)
+    artifact_id = document_ask(db, "owner")
+    db.commit()
+    boundary.mutate(
+        plan.id, "block_node",
+        {"node_id": node.id, "owner_kind": "user", "ask_artifact_id": artifact_id,
+         "reason": "Review the document", "reason_key": "document_review",
+         "expected_revision": node.revision},
+        actor=_thread_actor("owner"), provenance="test", mutation_id=_mid(), db=db,
+    )
+    db.commit()
+
+    assert user_ask.ask_attention_state(db, artifact_id) == "raised"
+    assert len(attention._summarize_raised(None, "user-1", db=db)) == 1
+    _node_lifecycle(db, plan.id, node.id, "pause_node")
+    assert user_ask.ask_attention_state(db, artifact_id) == "deferred"
+    assert attention._summarize_raised(None, "user-1", db=db) == []
+    _node_lifecycle(db, plan.id, node.id, "resume_node")
+    assert user_ask.ask_attention_state(db, artifact_id) == "raised"
+    assert len(attention._summarize_raised(None, "user-1", db=db)) == 1
+
+
+def test_pause_node_defers_a_raised_artifact_ask_and_resume_restores_it(db):
     from plans import artifact_links, operator_chat_state
-    from registry import attention, models
+    from registry import attention as registry_attention, models
     from tests.test_plan_decisions import _task
 
     plan = service.ensure_plan("thread", "cousin", db=db)
@@ -76,7 +252,7 @@ def test_pause_defers_a_raised_artifact_ask_and_resume_restores_it(db):
     raised = db.execute(
         "SELECT id FROM artifact_identities WHERE external_id='cousin#1'",
     ).fetchone()["id"]
-    attention.raise_attention(raised, db=db)
+    registry_attention.raise_attention(raised, db=db)
     artifact_links.link(node.id, raised, "attention", actor_id=None, provenance="test", db=db)
     db.commit()
 
@@ -84,8 +260,20 @@ def test_pause_defers_a_raised_artifact_ask_and_resume_restores_it(db):
         states = operator_chat_state.read_thread_states(["cousin"], actor=_human(), db=db)
         return states["states"]["cousin"]["attention_items"]
 
-    assert [item["node_id"] for item in items()] == [node.id]
+    def shown() -> tuple:
+        # An untyped ask is listed by /raised, the dock's generic rows.
+        return (
+            [item["node_id"] for item in items()],
+            len(attention._summarize_raised(None, "user-1", db=db)),
+        )
+
+    assert shown() == ([node.id], 1)
+    _node_lifecycle(db, plan.id, node.id, "pause_node")
+    assert shown() == ([], 0)
+    _node_lifecycle(db, plan.id, node.id, "resume_node")
+    assert shown() == ([node.id], 1)
+    # #983: a whole-plan pause defers an untyped ask too, not only decisions.
     _lifecycle(db, plan.id, "pause")
-    assert items() == []
+    assert shown()[1] == 0
     _lifecycle(db, plan.id, "resume")
-    assert [item["node_id"] for item in items()] == [node.id]
+    assert shown() == ([node.id], 1)

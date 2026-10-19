@@ -57,9 +57,26 @@ def plan_paused(execution: dict) -> bool:
     return any(cause.get("reason_key") == "plan_paused" for cause in execution["causes"])
 
 
-def ask_deferred(condition: str, review_kind: str | None, *, plan_paused: bool) -> bool:
-    """Display and bucket consequence of the rule for a row still in human review."""
-    return plan_paused and condition == "review" and review_kind in _HUMAN_REVIEWS
+def node_paused(execution: dict) -> bool:
+    """Whether this row carries the user-controlled pause from steering facts."""
+    from plans import user_steering
+
+    pause = user_steering.placed_pause(execution["causes"])
+    return pause is not None and user_steering.is_user_pause(pause)
+
+
+def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> bool:
+    """The one rule for suppressing a plan-owned ask's attention until resume."""
+    return plan_paused or node_paused
+
+
+def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
+    """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
+    return f"""({plan_state_sql}='paused' OR EXISTS (
+        SELECT 1 FROM plan_node_holds pause
+         WHERE pause.node_id={node_id_sql} AND pause.cleared_at IS NULL
+           AND pause.kind='paused' AND pause.owner_kind='user'
+    ))"""
 
 
 def needs_user_from_facts(
@@ -70,12 +87,13 @@ def needs_user_from_facts(
     *,
     has_attention: bool,
     plan_paused: bool = False,
+    node_paused: bool = False,
 ) -> bool:
     """Return whether compact node facts expose a concrete user action now.
 
     Every plan-owned ask is deferred under a pause (``plan_defers_asks``).
     """
-    if state in TERMINAL_DISPLAY or plan_paused:
+    if state in TERMINAL_DISPLAY or ask_deferred(plan_paused=plan_paused, node_paused=node_paused):
         return False
     return bool(
         (assignee == "user" and condition == "ready")
@@ -94,6 +112,7 @@ def display_from_facts(
     executor_stopped: bool = False,
     worker_needs_input: bool = False,
     plan_paused: bool = False,
+    node_paused: bool = False,
 ) -> dict[str, str]:
     """Reduce compact lifecycle facts into the canonical four-state display."""
     if state in TERMINAL_DISPLAY:
@@ -102,7 +121,10 @@ def display_from_facts(
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}
-    if ask_deferred(condition, review_kind, plan_paused=plan_paused):
+    if (
+        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
+        and condition == "review" and review_kind in _HUMAN_REVIEWS
+    ):
         return {"label_key": "waiting", "tone_key": "waiting"}
     if condition == "review":
         kind = review_kind or "parent_agent"
