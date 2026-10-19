@@ -1,8 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requestCorsiaMessage } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn() }));
+const { requestCorsiaMessage, requestSettingsSection } = vi.hoisted(() => ({ requestCorsiaMessage: vi.fn(), requestSettingsSection: vi.fn() }));
 vi.mock('$lib/corsiaRequest', () => ({ requestCorsiaMessage }));
+vi.mock('$lib/stores/settingsNavigation', () => ({ requestSettingsSection }));
 
 import ConnectAppFlow from './ConnectAppFlow.svelte';
 import { token } from '$lib/stores/auth';
@@ -25,14 +26,16 @@ afterEach(() => {
 	host.remove();
 	vi.restoreAllMocks();
 	requestCorsiaMessage.mockReset();
+	requestSettingsSection.mockReset();
 	token.set(null);
 });
 
-function render(): { onClose: ReturnType<typeof vi.fn>; onConnected: ReturnType<typeof vi.fn> } {
+function render(): { onClose: ReturnType<typeof vi.fn>; onConnected: ReturnType<typeof vi.fn>; onSignIn: ReturnType<typeof vi.fn> } {
 	const onClose = vi.fn();
 	const onConnected = vi.fn();
-	component = mount(ConnectAppFlow, { target: host, props: { onClose, onConnected } });
-	return { onClose, onConnected };
+	const onSignIn = vi.fn();
+	component = mount(ConnectAppFlow, { target: host, props: { onClose, onConnected, onSignIn } });
+	return { onClose, onConnected, onSignIn };
 }
 
 function press(label: string): void {
@@ -47,6 +50,22 @@ function type(label: string, value: string): void {
 	field.value = value;
 	field.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
+}
+
+async function connectResult(state: string, extra: Record<string, unknown> = {}): Promise<{ created: Record<string, unknown>; onClose: ReturnType<typeof vi.fn>; onSignIn: ReturnType<typeof vi.fn> }> {
+	const created = { id: 'files', name: 'Files', state, revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: true }, ...extra };
+	vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => created })));
+	const { onClose, onSignIn } = render();
+	press('Continue');
+	type('Name', 'Files');
+	type('What it runs', 'npx -y @example/app');
+	press('Continue');
+	press('Connect');
+	const stateLine = state === 'working'
+		? `Connected${typeof extra.tool_count === 'number' && extra.tool_count ? ` · ${extra.tool_count} actions` : ''}`
+		: state === 'needs_token' ? 'Needs a key' : state === 'needs_sign_in' ? 'Needs you to sign in' : state === 'connecting' ? 'Connecting…' : 'Disconnected';
+	await vi.waitFor(() => expect(host.querySelector('h2')?.textContent).toBe(`Files: ${stateLine}`));
+	return { created, onClose, onSignIn };
 }
 
 describe('ConnectAppFlow', () => {
@@ -124,6 +143,45 @@ describe('ConnectAppFlow', () => {
 		expect(host.textContent).toContain('Try again');
 		press('Back');
 		await vi.waitFor(() => expect(host.querySelector('input[aria-label="What it runs"]')).toBe(document.activeElement));
+	});
+
+	it('shows working state as Connected and finishes with Done', async () => {
+		const { onClose } = await connectResult('working', { tool_count: 46 });
+		expect(host.querySelector('h2')?.textContent).toBe('Files: Connected · 46 actions');
+		press('Done');
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('explains the key requirement and takes the person to Keys', async () => {
+		const { onClose } = await connectResult('needs_token');
+		expect(host.textContent).toContain('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.');
+		expect(host.textContent).toContain('Done');
+		press('Set key');
+		expect(requestSettingsSection).toHaveBeenCalledWith('keys');
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('explains sign-in and opens the connected app after closing', async () => {
+		const { created, onClose, onSignIn } = await connectResult('needs_sign_in');
+		expect(host.textContent).toContain("Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.");
+		expect(host.textContent).toContain('Done');
+		press('Sign in');
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(onSignIn).toHaveBeenCalledWith(created);
+	});
+
+	it('names connecting state without claiming the app is Connected', async () => {
+		await connectResult('connecting');
+		expect(host.querySelector('h2')?.textContent).toBe('Files: Connecting…');
+		expect(host.querySelector('h2')?.textContent).not.toContain('Connected');
+		expect(host.textContent).toContain('Done');
+	});
+
+	it('names disconnected state without claiming the app is Connected', async () => {
+		await connectResult('disconnected');
+		expect(host.querySelector('h2')?.textContent).toBe('Files: Disconnected');
+		expect(host.querySelector('h2')?.textContent).not.toContain('Connected');
+		expect(host.textContent).toContain('Done');
 	});
 
 	it('opens CORSIA with the Google request instead of starting OAuth', () => {
