@@ -48,7 +48,11 @@ def server_on_this_mac(server: dict, endpoints: list[dict] | None = None) -> boo
             for e in known
         ]
         return all(base and endpoint_on_this_mac(base) for base in bases)
-    except Exception:
+    except Exception as error:
+        from loguru import logger
+
+        # Fail closed: a server whose endpoints can't be read is not treated as local.
+        logger.warning("server locality could not be read for {}: {}", server.get("id"), error)
         return False
 
 
