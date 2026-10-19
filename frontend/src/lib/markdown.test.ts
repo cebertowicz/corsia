@@ -46,11 +46,25 @@ describe('renderMarkdown — legitimate markup survives sanitization', () => {
 		expect(html.toLowerCase()).not.toContain('onclick');
 	});
 
+	it('marks a text fence for wrapped message treatment while leaving code fences unchanged', () => {
+		const text = renderMarkdown('```text\nA long message for an administrator\n```');
+		const code = renderMarkdown('```js\nconst a = 1;\n```');
+		expect(text).toContain('class="code-block text-code-block"');
+		expect(text).toContain('class="language-text"');
+		expect(code).not.toContain('text-code-block');
+	});
+
 	it('keeps target=_blank and forces rel=noopener on rendered links', () => {
 		const html = renderMarkdown('[site](https://example.com)');
 		expect(html).toContain('href="https://example.com"');
 		expect(html).toContain('target="_blank"');
 		expect(html).toContain('rel="noopener');
+	});
+
+	it('keeps an in-app account link in this tab', () => {
+		const html = renderMarkdown('[account](#connected-apps/google-work)');
+		expect(html).toContain('href="#connected-apps/google-work"');
+		expect(html).not.toContain('target="_blank"');
 	});
 
 	it('forces rel=noopener even on a raw-HTML target=_blank link', () => {

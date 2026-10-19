@@ -18,7 +18,7 @@
 	import { openThread } from '$lib/stores/openThread';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { closeSettingsBack, recordSettingsHomeThread, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, recordSettingsHomeThread, requestConnectedApp, requestSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
@@ -445,7 +445,15 @@
 	}
 
 	onMount(() => {
-		return registerHomeLifecycle({
+		const openConnectedAppFromHash = () => {
+			const match = window.location.hash.match(/^#connected-apps\/([^/]+)$/);
+			if (!match) return;
+			requestConnectedApp(decodeURIComponent(match[1]));
+			openSettings();
+		};
+		openConnectedAppFromHash();
+		window.addEventListener('hashchange', openConnectedAppFromHash);
+		const stop = registerHomeLifecycle({
 			token: () => $token,
 			activeThreadId: () => get(activeThreadId),
 			activeView: () => activeView,
@@ -462,6 +470,7 @@
 			on,
 			connect,
 		});
+		return () => { window.removeEventListener('hashchange', openConnectedAppFromHash); stop(); };
 	});
 </script>
 
