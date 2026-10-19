@@ -77,7 +77,8 @@ def test_remote_access_never_reuses_or_adds_to_a_funnel_port():
     row_1 = next(line for line in states.splitlines() if line.startswith("| 1 |"))
     row_5 = next(line for line in states.splitlines() if line.startswith("| 5 |"))
     row_0a = next(line for line in states.splitlines() if line.startswith("| 0a |"))
-    after_change = remote.split("## After this reference changes", 1)[1]
+    row_1b = next(line for line in states.splitlines() if line.startswith("| 1b |"))
+    internet_check = remote.split("## Internet check, once per install", 1)[1]
 
     # A webhook path mapped by `tailscale funnel --set-path` targets CORSIA's port
     # but is public; neither may count as CORSIA's mapping.
@@ -94,13 +95,15 @@ def test_remote_access_never_reuses_or_adds_to_a_funnel_port():
     # Row 1 routes into 0a and 0a exits to row 5 without looping back to row 1.
     assert "or to row 0a when it answers through a port with Funnel on" in row_1
     assert "Then go to row 5 without checking the address again" in row_0a
-    assert "I didn't set up" not in row_0a
     # Installs the earlier flow already exposed get CORSIA's `/` taken off,
     # leaving the port's other paths, once this reference changes.
     assert "tailscale serve --https=[Funnel port] --set-path=/ off" in remote
     assert "confirm `/` is gone and the port's other paths are unchanged" in row_0a
-    assert "When a System-change notice lists this file and the `Remote access` task is done" in after_change
-    assert "goes to row 0a" in after_change
+    assert "it carries no `Internet check done` note" in internet_check
+    assert "goes to row 0a" in internet_check
+    assert "Whatever the outcome, add the note `Internet check done`" in internet_check
+    # An unreadable configuration closes with its own reason, not "ports in use".
+    assert "`Couldn't read Tailscale settings`" in row_1b
 
 
 def test_settings_keys_is_spelled_by_the_one_constant():
