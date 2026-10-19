@@ -80,6 +80,18 @@ def _validate_title_payload(raw: object) -> str:
     return title
 
 
+def _title_locality_refusal(model: str, thread_id: str | None) -> str | None:
+    """Why the thread's project may not send its history to ``model``, if it may not."""
+    from infra.database import get_db
+    from llm.locality import thread_locality_refusal
+
+    db = get_db()
+    try:
+        return thread_locality_refusal(model, thread_id=thread_id, db=db)
+    finally:
+        db.close()
+
+
 def _resolve_title_target(model: str):
     """Resolve the thread model's exact target and its harness binary."""
     from core.checkpoint_render import checkpoint_binary
@@ -119,6 +131,11 @@ async def _call_title_llm(prompt: str, model: str, *, thread_id: str | None = No
     from llm.isolated_structured import invoke_isolated_structured
 
     try:
+        refusal = await run_in_db(_title_locality_refusal, model, thread_id)
+        if refusal:
+            # Keep the current title; never pick another model for this thread's history.
+            logger.info("Title generation skipped: thread={} model={} reason={}", thread_id, model, refusal)
+            return None
         target, binary = await run_in_db(_resolve_title_target, model)
         raw = await invoke_isolated_structured(
             target,

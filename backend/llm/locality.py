@@ -148,6 +148,35 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
     return None
 
 
+def _thread_project(thread_id: str | None, db) -> str | None:
+    """The thread's project from its canonical scope; a missing thread has none to enforce."""
+    from connections.account_policy import AccountAdmissionError, thread_scope
+
+    if not thread_id:
+        return None
+    try:
+        return thread_scope(thread_id, db=db)["project_id"]
+    except AccountAdmissionError:
+        return None
+
+
+def thread_locality_refusal(model: str, *, thread_id: str | None, db) -> str | None:
+    """Return the refusal for sending a thread's content to ``model`` in its project, if any.
+
+    The one call path for every site that sends a thread's history to a model, so a project with
+    cloud models off is enforced the same way at send time and in background work. A model with
+    no catalog row has nothing to judge here; its own resolution refuses it.
+    """
+    from llm.resolution import catalog_row
+
+    row = catalog_row(model, db=db)
+    if row is None:
+        return None
+    return locality_refusal(
+        row, thread_local_only=False, project_id=_thread_project(thread_id, db), db=db,
+    )
+
+
 # Governance & Scopes owns this wording. Only a person can turn cloud models back on,
 # so the text never tells an agent to do it.
 NO_LOCAL_READY_TEXT = (

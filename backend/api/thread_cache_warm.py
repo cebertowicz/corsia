@@ -34,10 +34,11 @@ def _has_positive_context_evidence(target: ExecutionTarget) -> bool:
 
 def _warm_suppressed(suppression: str) -> dict:
     return {
-        "ok": False,
-        "skipped": True,
+        "ok": False, "skipped": True,
         "reason": suppression,
-        "message": "Warm suppressed while the session has active delivery work",
+        "message": ("Cloud models are off in this project, so this thread was not warmed"
+                    if suppression == "project_cloud_off"
+                    else "Warm suppressed while the session has active delivery work"),
     }
 
 
@@ -55,7 +56,7 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
         sess = get_thread_for_user(thread_id, user_id, db=db)
         if not sess:
             raise HTTPException(404)
-        suppression = warm_suppression_reason(thread_id, db=db)
+        suppression = warm_suppression_reason(thread_id, db=db, model=sess["model"] or model)
         if suppression is not None:
             return _warm_suppressed(suppression)
         bound = sess["model"] or ""

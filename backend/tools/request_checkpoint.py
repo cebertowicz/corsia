@@ -59,6 +59,11 @@ def _refusal_message(reason_key: str, details: dict[str, object]) -> str:
         return "A checkpoint is already in progress for this thread."
     if reason_key in {"target_unavailable", "model_unavailable"}:
         return "This thread's model is unavailable, so a checkpoint cannot run now."
+    if reason_key == "project_cloud_off":
+        return (
+            "Cloud models are off in this project, so a checkpoint cannot run on this "
+            "thread's model. Continue working."
+        )
     if reason_key == "warm_capture_refused":
         return "The provider session cannot be folded right now. Try after your next turn."
     return "Checkpoint is not available right now. Continue working and try after a later boundary."
@@ -113,7 +118,11 @@ class RequestCheckpointTool(Tool):
             CheckpointNotReady,
             prepare_external_checkpoint,
         )
-        from core.checkpoint_runtime import CheckpointTargetLimited, request_checkpoint
+        from core.checkpoint_runtime import (
+            CheckpointCloudOff,
+            CheckpointTargetLimited,
+            request_checkpoint,
+        )
 
         thread_id = kwargs.get("_thread_id")
         if not isinstance(thread_id, str) or not thread_id:
@@ -159,6 +168,9 @@ class RequestCheckpointTool(Tool):
                 "turn's most recent work may not be included. Continue as normal; "
                 "the fold installs on its own."
             )
+        except CheckpointCloudOff as error:
+            _emit(thread_id, "refused", error.reason_key, request_reason)
+            return _refusal_message(error.reason_key, {})
         except CheckpointTargetLimited:
             _emit(thread_id, "refused", "target_limited", request_reason)
             return _refusal_message("target_limited", {})

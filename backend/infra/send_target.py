@@ -71,33 +71,17 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
     """Resolve one target and enforce the project's cloud-model policy."""
     from infra.database import get_db
-    from llm.locality import locality_refusal
+    from llm.locality import thread_locality_refusal
 
     db = get_db()
     try:
         target = model_resolution.resolve_execution_target(model, db=db)
-        row = model_resolution.catalog_row(model, db=db)
-        if row is not None:
-            refusal = locality_refusal(
-                row, thread_local_only=False, project_id=_thread_project(thread_id, db), db=db,
-            )
-            if refusal:
-                raise ModelUnavailableError(model, refusal)
+        refusal = thread_locality_refusal(model, thread_id=thread_id, db=db)
+        if refusal:
+            raise ModelUnavailableError(model, refusal)
         return target
     finally:
         db.close()
-
-
-def _thread_project(thread_id: str | None, db) -> str | None:
-    """The thread's project from its canonical scope; a missing thread has none to enforce."""
-    from connections.account_policy import AccountAdmissionError, thread_scope
-
-    if not thread_id:
-        return None
-    try:
-        return thread_scope(thread_id, db=db)["project_id"]
-    except AccountAdmissionError:
-        return None
 
 
 TargetAdmission = Literal["run", "wait", "fail"]

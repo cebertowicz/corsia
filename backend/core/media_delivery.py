@@ -346,6 +346,11 @@ def tool_result_media_for_model(
     )
     if reference is None:
         return None
+    from core.media_locality import media_locality_refusal_text
+
+    refusal = media_locality_refusal_text(delivery, model)
+    if refusal:
+        return _decline(f"{delivery.content} {refusal}")
     return tool_result_media_for_reference(
         delivery.content, reference, model, image_count=image_count
     )

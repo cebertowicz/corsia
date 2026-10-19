@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
+from loguru import logger
+
 from core.checkpoint_types import (
     CheckpointRecord,
     CheckpointRequest,
@@ -59,6 +61,16 @@ def _resolved_target(db, model: str):
     if not target.available or not target.context_window:
         return None
     return target
+
+
+def _cloud_off(db, thread_id: str, model: str) -> bool:
+    """Whether the thread's project forbids folding on this cloud model; logged once."""
+    from llm.locality import thread_locality_refusal
+
+    refusal = thread_locality_refusal(model, thread_id=thread_id, db=db)
+    if refusal:
+        logger.info("idle checkpoint skipped: thread={} model={} reason={}", thread_id, model, refusal)
+    return bool(refusal)
 
 
 def _warm_refused(cause: str) -> IdleCheckpointSkip:
@@ -123,6 +135,8 @@ def read_idle_context(
             return IdleCheckpointSkip(IdleCheckpointReason.STALE)
         if active_for_thread(due.thread_id, db=connection) is not None:
             return IdleCheckpointSkip(IdleCheckpointReason.TURN_RUNNING)
+        if _cloud_off(connection, due.thread_id, source_model):
+            return IdleCheckpointSkip(IdleCheckpointReason.PROJECT_CLOUD_OFF)
         target = _resolved_target(connection, source_model)
         if target is None:
             return IdleCheckpointSkip(IdleCheckpointReason.TARGET_UNAVAILABLE)

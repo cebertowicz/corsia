@@ -7,7 +7,9 @@ from typing import Any
 from uuid import uuid4
 
 from core.checkpoint_fit import ColdFoldInputTooLarge
-from core.checkpoint_types import CheckpointRequest, CheckpointTrigger, ProviderCheckpointRequest
+from core.checkpoint_types import (
+    CLOUD_OFF_CHECKPOINT_MESSAGE, CheckpointRequest, CheckpointTrigger, ProviderCheckpointRequest,
+)
 from history.types import HistoryBoundary
 from infra.checkpoint_admission import IDLE_MIN_DELTA_TOKENS, admits_idle_checkpoint
 from llm.resolution import ExecutionTarget
@@ -41,6 +43,7 @@ class CheckpointNotReady(RuntimeError):
 _REASON_MESSAGES = {
     "no_sealed_boundary": "checkpoint requires a sealed message boundary",
     "no_new_history": "checkpoint already covers the sealed history",
+    "project_cloud_off": CLOUD_OFF_CHECKPOINT_MESSAGE,
 }
 
 

@@ -58,6 +58,21 @@ class CheckpointTargetLimited(CheckpointNotAdmitted):
         self.connection = held.connection
 
 
+#: What a person is told when a checkpoint is refused because the project has cloud models off.
+CLOUD_OFF_CHECKPOINT_MESSAGE = (
+    "Cloud models are off in this project. Switch this chat to a local model to checkpoint it."
+)
+
+
+class CheckpointCloudOff(CheckpointNotAdmitted):
+    """The fold's own target is a cloud model in a project with cloud models off; no call was made."""
+
+    reason_key = "project_cloud_off"
+
+    def __init__(self) -> None:
+        super().__init__(CLOUD_OFF_CHECKPOINT_MESSAGE)
+
+
 class OptionalCheckpointSkipped(Exception):
     """A preparer declined an optional fold by design; not an admission failure."""
 
@@ -200,6 +215,9 @@ class IdleCheckpointReason(str, Enum):
     # (oMLX): a local fold would compete with foreground local turns, and
     # no local admission path defers it, so it stays excluded (#2283).
     LOCAL_SHARED_MODEL = "local_shared_model"
+    # The project turned cloud models off: the thread's own model is a cloud model, so no
+    # background fold may send its history there.
+    PROJECT_CLOUD_OFF = "project_cloud_off"
     UNRESOLVABLE = "unresolvable"
     MISSING_THREAD = "missing_thread"
     # A marker cleared before it could fire, because real work took the
