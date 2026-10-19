@@ -4,7 +4,7 @@ import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 import { token } from '$lib/stores/auth';
 import { models, type Model } from '$lib/stores/models';
 
-const DESCRIPTION = "Only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.";
+const DESCRIPTION = "When on, only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.";
 const STOPS = 'Agents here using a cloud model stop at their next turn until they switch to a local one.';
 const NONE_READY = 'No local model is ready, so nothing in this project can run until one is.';
 const local = { id: 'omlx/q', name: 'Qwen', size: '', backend: 'network', speed: '', status: 'ready', is_local: true } as Model;

@@ -33,7 +33,7 @@
 <div class="setting">
 	<div>
 		<span class="label">Cloud models off</span>
-		<p>Only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.</p>
+		<p>When on, only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.</p>
 		{#if off}<p>Agents here using a cloud model stop at their next turn until they switch to a local one.</p>{/if}
 	</div>
 	<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Cloud models off" onchange={change} />

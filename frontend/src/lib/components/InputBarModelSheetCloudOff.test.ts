@@ -37,6 +37,18 @@ describe('model sheet in a cloud-off project', () => {
 		expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Open project settings')).toBe(true);
 		expect(text()).not.toContain('Claude Opus');
 	});
+	it('only a not-ready local row: the line and link show and the group is still listed', () => {
+		models.set([cloud('cc/opus', 'Claude Opus'), { ...local, status: 'unavailable', status_reason: 'connection_unavailable' } as Model]); open();
+		expect(text()).toContain('Cloud models are off in this project, and no local model is ready.');
+		expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Open project settings')).toBe(true);
+		expect(host.querySelector('section[aria-label="This Mac"]')).not.toBeNull(); expect(text()).not.toContain('Claude Opus');
+		expect(host.innerHTML.indexOf('no local model is ready')).toBeLessThan(host.innerHTML.indexOf('aria-label="This Mac"'));
+	});
+	it('a ready local row: no empty-state line', () => {
+		models.set([cloud('cc/opus', 'Claude Opus'), local]); open();
+		expect(text()).not.toContain('no local model is ready');
+		expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Open project settings')).toBe(false);
+	});
 	it('not a cloud-off project: unchanged', () => {
 		models.set([{ id: 'ext/gpt', name: 'Claude Opus', size: '', backend: 'network', provider: 'external', server_name: 'Hosted', litellm_model: 'external@h/gpt', speed: '', status: 'ready', is_local: false } as Model, local]); open();
 		expect(text()).toContain('Claude Opus'); expect(text()).not.toContain('Cloud models are off');

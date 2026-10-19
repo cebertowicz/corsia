@@ -37,7 +37,8 @@ const catalogs = {
 	noneReady: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff)],
 	remoteNotPrivate: [cloudRow('opus', 'Opus 5.5'), cloudRow('sonnet', 'Sonnet 5.5'),
 		localRow('qwen', 'Qwen3 8B', 'This Mac'), localRow('llama', 'Llama 3.3 70B', 'Studio mini', { is_local: false })],
-	localDown: [cloudRow('opus', 'Opus 5.5', cloudOff), localRow('qwen', 'Qwen3 8B', 'This Mac', { status: 'available' })],
+	localDown: [cloudRow('opus', 'Opus 5.5', cloudOff), cloudRow('sonnet', 'Sonnet 5.5', cloudOff),
+		localRow('qwen', 'Qwen3 8B', 'This Mac', { status: 'unavailable', status_reason: 'connection_unavailable' })],
 };
 
 const endpoint = (id: string, host: string, kind: 'local' | 'lan') => ({ id, server_id: id, host, kind, last_ok_at: null, last_latency_ms: kind === 'lan' ? 4 : 1 });
@@ -50,6 +51,7 @@ const servers = {
 	remoteOff: server('srv-studio', { instance_name: 'Studio mini', endpoints: [endpoint('e1', '192.168.1.20', 'lan')], active_host: '192.168.1.20', private: false }),
 	remoteOn: server('srv-studio', { instance_name: 'Studio mini', endpoints: [endpoint('e1', '192.168.1.20', 'lan')], active_host: '192.168.1.20', private: true }),
 	thisMac: server('srv-local', { instance_name: 'oMLX', on_this_mac: true, endpoints: [endpoint('e2', '127.0.0.1', 'local')], active_host: '127.0.0.1' }),
+	remoteOffline: server('srv-studio', { instance_name: 'Studio mini', status: 'offline', latency_ms: null, endpoints: [{ ...endpoint('e1', '192.168.1.20', 'lan'), last_latency_ms: null }], active_host: null, private: true }),
 	loopback: server('srv-lms', { provider: 'external', kind: 'external', instance_name: 'LM Studio', port: 1234, dialect: 'openai',
 		endpoints: [endpoint('e3', '127.0.0.1', 'local')], active_host: '127.0.0.1', private: false, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
 };
@@ -70,7 +72,7 @@ const policy = {
 	})),
 };
 
-type State = { models: unknown[]; servers: unknown[]; cloudOff: boolean; failSave: boolean };
+type State = { models: unknown[]; servers: unknown[]; cloudOff: boolean; failSave: boolean; failPrivate?: boolean; hold?: Promise<void> | null };
 
 async function serve(page: Page, state: State) {
 	await page.route('**/api/models**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/models'
@@ -80,11 +82,15 @@ async function serve(page: Page, state: State) {
 		? route.fulfill({ json: policy }) : route.continue());
 	await page.route('**/api/projects/*/cloud-models-off**', async (route) => {
 		if (route.request().method() === 'PUT') {
+			if (state.hold) await state.hold;
 			if (state.failSave) return route.fulfill({ status: 500, json: { detail: 'Server unavailable' } });
 			state.cloudOff = (route.request().postDataJSON() as { cloud_models_off: boolean }).cloud_models_off;
 		}
 		await route.fulfill({ json: { cloud_models_off: state.cloudOff } });
 	});
+	await page.route('**/api/settings/network-servers/*/private', (route) => state.failPrivate
+		? route.fulfill({ status: 500, json: { detail: 'Server unavailable' } })
+		: route.fulfill({ json: { ok: true } }));
 	await page.route('**/api/settings/network-servers**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/settings/network-servers'
 		? route.fulfill({ json: { servers: state.servers } }) : route.continue());
 }
@@ -169,6 +175,16 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				await expect(region.getByText('Could not turn Cloud models off on: Server unavailable')).toBeVisible();
 				await shot('project-save-failed', size, theme);
 				state.failSave = false;
+
+				Object.assign(state, { models: catalogs.someLocal, cloudOff: false });
+				region = await openProjectProviders(page, await begin(width, height, theme));
+				let release = () => {};
+				state.hold = new Promise<void>((resolve) => { release = resolve; });
+				const saving = region.getByRole('button', { name: 'Cloud models off', exact: true });
+				await saving.click();
+				await expect(saving).toBeDisabled();
+				await shot('project-saving', size, theme);
+				release(); state.hold = null;
 			}
 
 			// Endpoints tab.
@@ -187,16 +203,44 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				await shot(`${prefix}${name}`, size, theme);
 			}
 
+			if (!BEFORE) {
+				for (const [name, row, label, act] of [
+					['endpoints-private-save-failed', servers.remoteOff, 'oMLX', 'fail'],
+					['endpoints-remote-offline', servers.remoteOffline, 'oMLX', 'none'],
+				] as const) {
+					Object.assign(state, { servers: [row], failPrivate: act === 'fail' });
+					await begin(width, height, theme);
+					await openEndpoints(page, label);
+					if (act === 'fail') {
+						await page.getByRole('button', { name: 'Private machine', exact: true }).click();
+						await expect(page.getByText('Could not turn Private machine on: Server unavailable')).toBeVisible();
+					}
+					await shot(name, size, theme);
+				}
+				state.failPrivate = false;
+			}
+
 			// Composer model sheet in a cloud-off project.
 			Object.assign(state, { models: catalogs.remoteNotPrivate, cloudOff: false });
 			await openSheetInProject(page, await begin(width, height, theme));
 			await shot(`${prefix}sheet-remote-not-private`, size, theme);
 			if (!BEFORE) {
-				for (const [name, models] of [['sheet-some-local', catalogs.someLocal], ['sheet-no-local', catalogs.noneReady]] as const) {
+				for (const [name, models] of [['sheet-some-local', catalogs.someLocal], ['sheet-no-local', catalogs.noneReady], ['sheet-local-not-ready', catalogs.localDown]] as const) {
 					Object.assign(state, { models, cloudOff: true });
 					await openSheetInProject(page, await begin(width, height, theme));
 					await shot(name, size, theme);
 				}
+
+				// A thread already on a cloud model when the project turns Cloud models off.
+				Object.assign(state, { models: catalogs.plain, cloudOff: false });
+				await openSheetInProject(page, await begin(width, height, theme));
+				await page.locator('.model-sheet').getByRole('button', { name: /Opus 5\.5/ }).first().click();
+				Object.assign(state, { models: catalogs.someLocal, cloudOff: true });
+				await page.reload();
+				await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
+				await page.locator('button.model-chip').click();
+				await expect(page.locator('.model-sheet')).toBeVisible();
+				await shot('sheet-on-cloud-model', size, theme);
 			}
 		}
 

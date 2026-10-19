@@ -58,6 +58,7 @@
 	// Starter, setup, and Settings download states show in the Local group while the picker is open.
 	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
 	const hasLocalGroup = $derived(groups.some(isLocalGroup));
+	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
@@ -156,8 +157,10 @@
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if cloudModelsOff && groups.length === 0}
+			{#if cloudModelsOff && !hasReadyGroup}
 				<div class="model-list-empty">Cloud models are off in this project, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+			{/if}
+			{#if groups.length === 0 && cloudModelsOff}
 			{:else if groups.length === 0 && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
@@ -284,7 +287,7 @@
 						{/if}
 					</section>
 				{/each}
-				{#if cloudModelsOff}<div class="model-list-empty">Cloud models are off in this project.</div>{/if}
+				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">Cloud models are off in this project.</div>{/if}
 				{#if !hasLocalGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
