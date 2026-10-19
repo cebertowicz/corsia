@@ -11,7 +11,7 @@ A move is a same-volume rename when possible; otherwise a copy that is checked
 by file count and size before the source is removed. Every step can run again:
 a finished move is recognised, an interrupted copy is discarded and redone, and
 a failure leaves the source where it was, the records unchanged and the app
-usable. Startup never waits on this: it runs as one background task.
+usable; when no model moved, the old service is started again. Startup never waits on this: it runs as one background task.
 """
 
 from __future__ import annotations
@@ -166,6 +166,22 @@ def _stop_legacy_service() -> bool:
     return jobs is not None and BREW_SERVICE_LABEL not in jobs.values()
 
 
+def _restart_legacy_service() -> None:
+    """Start CORSIA's old service again after a move that moved nothing."""
+    import subprocess
+
+    from llm.local_setup_ownership import OMLX_FORMULA, run_command
+
+    brew = shutil.which("brew")
+    if not brew:
+        log.warning("could not restart CORSIA's earlier oMLX service: Homebrew is missing")
+        return
+    try:
+        run_command([brew, "services", "start", OMLX_FORMULA])
+    except (OSError, subprocess.SubprocessError) as error:
+        log.warning("could not restart CORSIA's earlier oMLX service: %s", error)
+
+
 async def _start_managed(setup: LocalModel | None) -> None:
     """Start the managed server on the moved models and list them in the catalog."""
     from llm import local_setup as ls
@@ -218,6 +234,9 @@ async def upgrade_legacy_omlx() -> list[Moved] | None:
         failed = [item.repository for item in moved if item.outcome == "failed"]
         if any(item.outcome in {"moved", "already"} for item in moved):
             await _start_managed(setup)
+        else:
+            # Nothing reached the managed directory: the old service keeps serving until a later start succeeds.
+            await asyncio.to_thread(_restart_legacy_service)
         if failed:
             log.warning("%d local model(s) stayed in the earlier oMLX folder; the next start tries again", len(failed))
         else:

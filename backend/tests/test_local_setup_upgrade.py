@@ -6,6 +6,7 @@ import errno
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -261,6 +262,12 @@ def upgrade_env(legacy, isolated_db, monkeypatch):
         return True
 
     monkeypatch.setattr(ownership, "retire_legacy_owned_omlx_service", retire)
+
+    def restart() -> None:
+        events.append("restart service")
+        service["running"] = True
+
+    monkeypatch.setattr("llm.local_setup_upgrade._restart_legacy_service", restart)
     monkeypatch.setattr(ownership, "launchd_jobs",
                         lambda: {101: ownership.BREW_SERVICE_LABEL} if service["running"] else {})
     monkeypatch.setattr(ownership, "_omlx_serve_processes",
@@ -356,8 +363,77 @@ async def test_a_failed_move_leaves_the_install_as_it_was_and_retries(upgrade_en
 
     assert [item.outcome for item in moved] == ["failed"]
     assert _tree(legacy / "models" / MODEL.repository) == before
-    assert "start managed" not in upgrade_env
+    assert upgrade_env == ["stop service", "restart service"]
     assert not done_path().exists()
+
+
+@pytest.mark.asyncio
+async def test_when_every_move_fails_the_old_service_runs_again_and_the_next_start_retries(
+        upgrade_env, legacy, monkeypatch) -> None:
+    from llm import local_downloads
+    from llm.local_model import set_up_model
+    from llm.local_setup_upgrade import done_path, upgrade_legacy_omlx
+
+    second = LocalModel("someone/settings-download", 1_000, 32_768)
+    _write_model(legacy / "models" / second.repository, {"model.safetensors": 1_000})
+    monkeypatch.setattr(local_downloads, "all",
+                        lambda: [SimpleNamespace(model=second, status="available")])
+    record = set_up_model()
+    before = {model: _tree(legacy / "models" / model) for model in (MODEL.repository, second.repository)}
+    _cross_volume(monkeypatch)
+    real_copy = shutil.copytree
+
+    def copy_fails(*_args, **_kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", copy_fails)
+
+    moved = await upgrade_legacy_omlx()
+
+    assert [item.outcome for item in moved] == ["failed", "failed"]
+    assert upgrade_env == ["stop service", "restart service"]
+    assert not done_path().exists()
+    assert {model: _tree(legacy / "models" / model) for model in before} == before
+    assert set_up_model() == record
+    assert not (_managed_dir() / MODEL.repository).exists()
+    assert not (_managed_dir() / second.repository).exists()
+
+    # No done marker, so the next start tries again; with room it moves both.
+    monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", real_copy)
+    upgrade_env.clear()
+    moved = await upgrade_legacy_omlx()
+    assert [item.outcome for item in moved] == ["moved", "moved"]
+    assert upgrade_env[:2] == ["stop service", "start managed"]
+    assert done_path().exists()
+
+
+@pytest.mark.asyncio
+async def test_a_partial_move_starts_the_managed_server_and_leaves_the_old_service_stopped(
+        upgrade_env, legacy, monkeypatch) -> None:
+    from llm import local_downloads
+    from llm.local_setup_upgrade import done_path, upgrade_legacy_omlx
+
+    second = LocalModel("someone/settings-download", 1_000, 32_768)
+    _write_model(legacy / "models" / second.repository, {"model.safetensors": 1_000})
+    monkeypatch.setattr(local_downloads, "all",
+                        lambda: [SimpleNamespace(model=second, status="available")])
+    _cross_volume(monkeypatch)
+    real_copy = shutil.copytree
+
+    def copy(source, target, **kwargs):
+        if second.repository in str(source):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_copy(source, target, **kwargs)
+
+    monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", copy)
+
+    moved = await upgrade_legacy_omlx()
+
+    assert [item.outcome for item in moved] == ["moved", "failed"]
+    assert "restart service" not in upgrade_env
+    assert "start managed" in upgrade_env
+    assert not done_path().exists()
+    assert (legacy / "models" / second.repository).is_dir()
 
 
 @pytest.mark.asyncio
