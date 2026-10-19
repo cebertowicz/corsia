@@ -11,7 +11,7 @@ import pytest
 from api.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs
 from core.workflow_verdict_read import price_snapshot, read_snapshot
-from core.workflow_verdict_rules import freeze_plan
+from core.workflow_verdict_rules import compute, freeze_plan
 from core.workflow_verdicts import MIXED, KpiRow
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from model_identity_fixtures import seed_identity_catalog, seed_manifest
@@ -207,10 +207,49 @@ def test_the_frozen_plan_uses_the_definitions_in_force_at_the_versions_first_run
     node(db, "second", version="v2", created="2026-10-12T00:00:00Z", ended="2026-10-14T00:00:00Z")
     _, history = runs_of(read_snapshot(db, now=NOW))
     assert history.owner == "owner"
-    (v1,) = [m for m in freeze_plan(history, "v1", NOW).measures if m.source == "kpi"]
-    (v2,) = [m for m in freeze_plan(history, "v2", NOW).measures if m.source == "kpi"]
+    (v1,) = [m for m in freeze_plan(history, "v1").measures if m.source == "kpi"]
+    (v2,) = [m for m in freeze_plan(history, "v2").measures if m.source == "kpi"]
     assert (v1.definition_version, v1.margin_gap) == (1, pytest.approx(0.1))
     assert (v2.definition_version, v2.margin_gap) == (2, pytest.approx(0.4))
+
+
+def test_bounded_snapshot_keeps_the_versions_true_first_use_and_frozen_plan(db) -> None:
+    early_v1 = (NOW - timedelta(days=360)).isoformat()
+    early_v2 = (NOW - timedelta(days=350)).isoformat()
+    recent_v1 = (NOW - timedelta(days=101)).isoformat()
+    recent_v2 = (NOW - timedelta(days=100)).isoformat()
+    for index in range(20):
+        node_id = f"early-v1-{index}"
+        node(db, node_id, created=early_v1, ended=early_v1)
+        usage(db, f"usage-{node_id}", node_id)
+    node(db, "early-v2", version="v2", created=early_v2, ended=early_v2)
+    usage(db, "usage-early-v2", "early-v2")
+    node(db, "recent-v1", created=recent_v1, ended=recent_v1)
+    usage(db, "usage-recent-v1", "recent-v1")
+    node(db, "recent-v2", version="v2", created=recent_v2, ended=recent_v2)
+    usage(db, "usage-recent-v2", "recent-v2")
+    _, before = runs_of(read_snapshot(db, now=NOW))
+    first = freeze_plan(before, "v2")
+    subject = "workflow:sdlc-process@v2"
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes) VALUES ('planned','planned','measurement.verdict.planned','corsia','instrumented',?,?,?,?)",
+               (early_v2, early_v2, subject, json.dumps({"plan": first.encoded()})))
+    after_snapshot = read_snapshot(db, now=NOW + timedelta(days=20))
+    _, after = runs_of(after_snapshot)
+    assert first.baseline == "v1" and after.first_use("v2") == early_v2
+    assert after_snapshot.plans[subject] == first
+    assert next(item for item in compute(after_snapshot) if item.subject == subject).plan == first
+
+
+def test_reached_verdicts_remain_skipped_after_their_event_ages_past_the_read_window(db) -> None:
+    node(db, "run")
+    subject = "workflow:sdlc-process@v1"
+    old = (NOW - timedelta(days=400)).isoformat()
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes) VALUES ('reached','reached','measurement.verdict.reached','corsia','instrumented',?,?,?,"
+               "'{}')", (old, old, subject))
+    snapshot = read_snapshot(db, now=NOW)
+    assert subject in snapshot.reached and compute(snapshot) == []
 
 
 def test_kpi_rows_come_only_from_an_injected_reader(db) -> None:

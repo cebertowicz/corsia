@@ -72,7 +72,7 @@ def splits(history: WorkflowHistory, now: datetime) -> tuple[dict, list[tuple[st
             split = replace(history, ref=f"{history.ref}#{version}#{block}", runs=tuple(halves))
             if {run.version for run in halves} != {"a", "b"}:
                 continue
-            plan = freeze_plan(split, "b", now)
+            plan = freeze_plan(split, "b", baseline_as_of=now)
             words.append((decide(split, plan, now).word, len(own)))
             if plan.baseline is None:
                 for measure in plan.measures:

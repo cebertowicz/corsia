@@ -4,9 +4,12 @@ The rule tests build runs directly; ``test_workflow_verdict_read.py`` builds the
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -53,7 +56,7 @@ def history(*sides: list[Run], definitions=()) -> WorkflowHistory:
 
 
 def plan_for(source: WorkflowHistory, version: str = "v2", *extra: PlannedMeasure) -> FrozenPlan:
-    plan = freeze_plan(source, version, NOW)
+    plan = freeze_plan(source, version)
     return FrozenPlan(plan.subject, plan.version, plan.baseline, plan.skipped, (*plan.measures, *extra),
                       plan.minimum, plan.refusals, plan.seed)
 
@@ -172,11 +175,22 @@ def test_baseline_is_the_nearest_version_with_the_minimum_in_shared_groups() -> 
     assert plan_for(source).skipped == ("v1",) and verdict(source).inputs["skipped"] == ["v1"]
 
 
-def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
-    source = history(runs("v1", 1, started=30, ended=21), runs("v2", 1, started=20, ended=10))
-    first = freeze_plan(source, "v2", NOW - timedelta(days=19))
-    later = freeze_plan(source, "v2", NOW)
-    assert first == later and first.baseline is None
+# First-use stability across the bounded reader is covered by test_workflow_verdict_read.py.
+
+
+def test_calibration_splits_use_all_history_for_their_baseline() -> None:
+    source = history(runs("v1", 1, count=80, started=90, ended=30))
+    ordered = sorted(source.runs, key=lambda run: (run.started_at, run.run_id))
+    halves = [replace(run, version="a" if index % 2 == 0 else "b") for index, run in enumerate(ordered)]
+    split = replace(source, runs=tuple(halves))
+    path = Path(__file__).resolve().parents[2] / "scripts" / "verdict_calibration.py"
+    spec = importlib.util.spec_from_file_location("verdict_calibration", path)
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    calls, _ = script.splits(source, NOW)
+    assert freeze_plan(split, "b", baseline_as_of=NOW).baseline == "a"
+    assert any(call != "too_few" for found in calls.values() for call, _ in found)
 
 
 def test_baseline_runs_are_the_most_recent_up_to_twice_the_minimum_per_group() -> None:

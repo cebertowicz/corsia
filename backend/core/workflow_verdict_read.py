@@ -26,7 +26,7 @@ from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
-from core.workflow_verdict_rules import BUILTINS, Definition, FrozenPlan, Snapshot, WorkflowHistory
+from core.workflow_verdict_rules import BUILTINS, Definition, FrozenPlan, Snapshot, WorkflowHistory, kpi_window_days
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
 from tools.workflow_owners import thread_workflow_owners
 from tools.workflow_task_fields import judged_version
@@ -168,18 +168,37 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
     return by_workflow, owners
 
 
-def _recorded(db: sqlite3.Connection, since: str) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
-    """Recorded verdict state from the same bounded history as the snapshot nodes."""
+def _recorded(db: sqlite3.Connection) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+    """All recorded plan and reached state; one event per version keeps this read bounded in practice."""
     plans, reached = {}, set()
     for row in db.execute("""
         SELECT subject_key, event_name, attributes FROM outcome_events
-        WHERE event_name IN (?, ?) AND retracted_at IS NULL AND subject_key IS NOT NULL AND ts >= ?
-    """, (PLANNED_EVENT, REACHED_EVENT, since)).fetchall():
+        WHERE event_name IN (?, ?) AND retracted_at IS NULL AND subject_key IS NOT NULL
+    """, (PLANNED_EVENT, REACHED_EVENT)).fetchall():
         if row["event_name"] == REACHED_EVENT:
             reached.add(row["subject_key"])
         else:
             plans[row["subject_key"]] = FrozenPlan.decoded(json.loads(row["attributes"])["plan"])
     return plans, frozenset(reached)
+
+
+def _first_uses(db: sqlite3.Connection, run_ids: Iterable[str]) -> dict[tuple[str, str], str]:
+    """Earliest use of each snapshot version, including runs outside the bounded history window.
+
+    Every workflow-bearing descendant starts after its run root, so the minimum node creation time is the
+    same as the first run root without repeating the root walk over unbounded history.
+    """
+    rows = db.execute("""
+        WITH snapshot_versions AS (
+          SELECT DISTINCT workflow_ref, workflow_version FROM plan_nodes
+          WHERE id IN (SELECT value FROM json_each(:ids))
+        )
+        SELECT node.workflow_ref, node.workflow_version, MIN(node.created_at) AS first_use
+        FROM plan_nodes node JOIN snapshot_versions version
+          ON version.workflow_ref=node.workflow_ref AND version.workflow_version=node.workflow_version
+        GROUP BY node.workflow_ref, node.workflow_version
+    """, {"ids": _ids(run_ids)}).fetchall()
+    return {(row["workflow_ref"], row["workflow_version"]): row["first_use"] for row in rows}
 
 
 def _terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) -> str | None:
@@ -196,7 +215,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
     definitions, owners = _definitions(db)
     follow_up_days = max(chain(
         (measure.window_days for measure in BUILTINS),
-        (int(definition.spec.get("settle_days") or 0) for items in definitions.values() for definition in items
+        (kpi_window_days(definition.spec) for items in definitions.values() for definition in items
          if definition.kind == "kpi"),
     ))
     since = (now - timedelta(days=BASELINE_LOOKBACK_DAYS + follow_up_days)).isoformat()
@@ -211,6 +230,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         facts[run_id].append(CorrectionFact(fact.message_id, fact.message_at, fact.counter, fact.is_correction))
     judged = [node for node in roots if judged_version(node["workflow_version"])]
     judged_ids = {node["id"] for node in judged}
+    first_uses = _first_uses(db, judged_ids)
     models = _model_groups(db, [node["id"] for node in judged])
     times = _terminal_times(db, [node["id"] for node in judged])
     by_workflow: dict[str, list[Run]] = defaultdict(list)
@@ -230,9 +250,12 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         if kpi_reader is not None and runs:
             rows = kpi_reader(db, runs, definitions.get(ref, []))
             runs = [replace(run, kpi_rows=rows.get(run.run_id, {})) for run in runs]
-        histories.append(WorkflowHistory(ref, owners.get(ref), tuple(runs), tuple(definitions.get(ref, ())),
-                                         excluded={k: v for k, v in excluded.get(ref, {}).items()}))
-    plans, reached = _recorded(db, since)
+        histories.append(WorkflowHistory(
+            ref, owners.get(ref), tuple(runs), tuple(definitions.get(ref, ())),
+            excluded={k: v for k, v in excluded.get(ref, {}).items()},
+            first_uses={run.version: first_uses[(ref, run.version)] for run in runs},
+        ))
+    plans, reached = _recorded(db)
     return Snapshot(now.isoformat(), tuple(histories), plans, reached)
 
 

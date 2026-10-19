@@ -48,6 +48,7 @@ class WorkflowHistory:
     definitions: tuple[Definition, ...] = ()
     version_attr: str | None = None  # not persisted by measure_sync yet, so the read side passes None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
+    first_uses: Mapping[str, str] = field(default_factory=dict)
 
     def versions(self) -> list[str]:
         """Judged versions by first use (v1, v2, ...)."""
@@ -57,7 +58,8 @@ class WorkflowHistory:
         return list(first)
 
     def first_use(self, version: str) -> str:
-        return min((run.started_at for run in self.runs if run.version == version), key=parse_ts)
+        return self.first_uses.get(version) or min(
+            (run.started_at for run in self.runs if run.version == version), key=parse_ts)
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,11 @@ def definitions_in_force(definitions: Sequence[Definition], at: str) -> list[Def
     return [item for item in latest.values() if not item.removed]
 
 
+def kpi_window_days(spec: Mapping[str, object]) -> int:
+    """The owner-declared KPI follow-up window in whole days."""
+    return int(spec.get("settle_days") or 0)  # type: ignore[call-overload]
+
+
 def assert_evaluator_fields(definitions: Sequence[Definition], workflow: str, version_attr: str | None = None
                             ) -> tuple[tuple[PlannedMeasure, ...], tuple[tuple[str, str], ...], int]:
     """The deciding KPIs that still pass the sync test, the refused ones with why, and the minimum.
@@ -145,7 +152,7 @@ def assert_evaluator_fields(definitions: Sequence[Definition], workflow: str, ve
             refusals.append((item.name, refusal))
             continue
         gap = abs(float(spec["target"]) - float(spec["review"]))  # type: ignore[arg-type]
-        measures.append(PlannedMeasure(item.name, role, str(spec["better"]), "kpi", int(spec.get("settle_days") or 0),  # type: ignore[call-overload]
+        measures.append(PlannedMeasure(item.name, role, str(spec["better"]), "kpi", kpi_window_days(spec),  # type: ignore[call-overload]
                                        item.version, margin_gap=gap, coverage=bool(spec.get("coverage"))))
         minimum = max(minimum, int(spec.get("min_n") or 0))  # type: ignore[call-overload]
     return tuple(measures), tuple(refusals), minimum
@@ -177,14 +184,15 @@ def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window
     return None, tuple(skipped)
 
 
-def freeze_plan(history: WorkflowHistory, version: str, now: datetime) -> FrozenPlan:
-    """The plan, including its baseline, from the version's first run rather than this pass (design §3.4)."""
+def freeze_plan(history: WorkflowHistory, version: str, *, baseline_as_of: datetime | None = None) -> FrozenPlan:
+    """Freeze a plan at first use, or at ``baseline_as_of`` for retrospective calibration (design §3.4)."""
     subject = f"workflow:{history.ref}@{version}"
     in_force = definitions_in_force(history.definitions, history.first_use(version))
     kpis, refusals, minimum = assert_evaluator_fields(in_force, history.ref, history.version_attr)
     measures = (*BUILTINS, *kpis)
     window = max(measure.window_days for measure in measures)
-    baseline, skipped = choose_baseline(history, version, minimum, window, parse_ts(history.first_use(version)))
+    baseline, skipped = choose_baseline(
+        history, version, minimum, window, baseline_as_of or parse_ts(history.first_use(version)))
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed)
 
@@ -288,7 +296,7 @@ def compute(snapshot: Snapshot) -> list[Evaluation]:
             if subject in snapshot.reached:
                 continue
             existing = snapshot.plans.get(subject)
-            plan = existing or freeze_plan(history, version, now)
+            plan = existing or freeze_plan(history, version)
             replaced_by = order[index + 1] if index + 1 < len(order) else None
             evaluations.append(Evaluation(subject, history.owner, plan, decide(history, plan, now, replaced_by),
                                           existing is None))
