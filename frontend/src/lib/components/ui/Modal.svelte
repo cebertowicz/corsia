@@ -139,7 +139,7 @@
 		padding-left: 32px; padding-right: 32px;
 	}
 	.modal {
-		background: var(--glass-regular-thick);
+		background: var(--bg-elevated);
 		backdrop-filter: var(--glass-blur);
 		-webkit-backdrop-filter: var(--glass-blur);
 		border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
