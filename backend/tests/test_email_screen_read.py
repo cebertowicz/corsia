@@ -15,7 +15,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from connections.connected_accounts import corsia_only_reach, create_google_account, store_google_credentials
+from connections.connected_accounts import store_google_credentials
+from connections.google.accounts import NONE_AVAILABLE
+from google_account_helpers import only_corsia_account
 from connections.google import client as google_client
 from connections.google import email_screen, gmail_read
 from infra.corsia_agent import set_corsia_agent
@@ -111,9 +113,7 @@ def mail(isolated_db, tmp_path, monkeypatch):
         return _REAL_CLIENT(*args, **kwargs)
 
     monkeypatch.setattr(google_client.httpx, "AsyncClient", factory)
-    account = create_google_account(
-        ACCOUNT, reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
-    )
+    account = only_corsia_account(ACCOUNT, created_by=("system", "test"), state="connected")
     store_google_credentials(str(account["id"]), {
         "client_id": "id-0123", "client_secret": "secret-0123", "refresh_token": "refresh-0123",
     })
@@ -287,7 +287,7 @@ async def test_a_cloud_row_with_a_local_looking_name_never_reaches_the_model(iso
     )
     model = FakeModel()
     monkeypatch.setattr(email_screen, "invoke_isolated_structured", model)
-    account = create_google_account(ACCOUNT, reach=corsia_only_reach(), created_by=("system", "test"))
+    account = only_corsia_account(ACCOUNT, created_by=("system", "test"))
     screen = await email_screen.screen_message(str(account["id"]), "m1", {"from": "a@b.example"}, "body")
     assert screen.status == "unavailable" and model.calls == []
     assert _rows()[0]["status"] == "unavailable"
@@ -440,19 +440,15 @@ async def test_search_caps_the_result_count(mail, conductor):
 
 async def test_a_caller_outside_reach_gets_the_exact_refusal_for_every_selector(mail):
     other = make_session(get_db(), prefix="other")
-    for selector in (mail.account, ACCOUNT, ACCOUNT.upper(), None):
+    # An out-of-reach account by id or address answers exactly like a name no account has.
+    for selector in (mail.account, ACCOUNT, ACCOUNT.upper(), "nobody@example.com", None):
         for tool, args in ((EmailSearchTool(), {"query": "x"}), (EmailReadTool(), {"message_id": "m1"})):
-            assert await tool.execute(_thread_id=other, account_id=selector, **args) == (
-                "Error: This Google account is available only in CORSIA. Ask the person who connected "
-                "it to change Where it works."
-            )
+            assert await tool.execute(_thread_id=other, account_id=selector, **args) == f"Error: {NONE_AVAILABLE}"
     assert mail.gmail.requests == []
 
 
 async def test_no_account_named_returns_the_clarification_never_a_default(mail, conductor):
-    second = create_google_account(
-        "work@example.com", reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
-    )
+    second = only_corsia_account("work@example.com", created_by=("system", "test"), state="connected")
     for tool, args in ((EmailSearchTool(), {"query": "x"}), (EmailReadTool(), {"message_id": "m1"})):
         out = await tool.execute(_thread_id=conductor, **args)
         assert out == (

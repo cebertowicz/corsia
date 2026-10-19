@@ -21,7 +21,7 @@ afterEach(() => {
 const account: ConnectedAccount = {
 	kind: 'account', id: 'acc 1', provider: 'google', address: 'person@example.com',
 	capabilities: ['mail', 'calendar', 'files'], state: 'connected',
-	reach: { mode: 'selected', project_ids: [], outside_projects: false },
+	reach: { mode: 'corsia', project_ids: [], outside_projects: false },
 };
 const app = { id: 'app-1', name: 'GitHub', state: 'working', revision: 3, reach: { mode: 'all' as const, project_ids: [], outside_projects: false } };
 
@@ -113,7 +113,7 @@ describe('the account controls', () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const refuse = (detail: string) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ detail }) }));
 		refuse('Only the signed-in person can widen where an account works; open Connected apps.');
-		await expect(saveAccountReach('acc 1', account.reach)).rejects.toThrow('Only the signed-in person can widen where an account works; open Connected apps.');
+		await expect(saveAccountReach('acc 1', { mode: 'all', project_ids: [], outside_projects: false })).rejects.toThrow('Only the signed-in person can widen where an account works; open Connected apps.');
 		refuse('connected_account_gone');
 		await expect(signOutOfAccount('acc 1')).rejects.toThrow("Couldn't change this Google account. Try again.");
 	});

@@ -6,7 +6,7 @@
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
-		type ConnectedAppsRow, needsManualGoogleStep,
+		type ConnectedAppsRow, isOnlyCorsia, needsManualGoogleStep,
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
@@ -51,9 +51,7 @@
 		switch (account.state) {
 			case 'connected': return 'Connected';
 			case 'needs_sign_in': return 'Needs you to sign in';
-			case 'signing_in': return 'Signing in…';
 			case 'signed_out': return 'Signed out';
-			case 'removing': return 'Removing…';
 		}
 	}
 	function tone(row: ConnectedAppsRow): 'quiet' | 'failed' | 'attention' {
@@ -66,11 +64,12 @@
 	}
 	function placeLine(row: ConnectedAppsRow): string {
 		if (row.reach.mode === 'all') return 'All projects';
+		if (isAccount(row) && isOnlyCorsia(row.reach)) return 'Only CORSIA';
 		const names = [
 			...$projects.filter((project) => row.reach.project_ids.includes(project.id)).map((project) => project.name),
 			...(row.reach.outside_projects ? ['Outside projects'] : []),
 		];
-		if (names.length === 0) return isAccount(row) ? 'Only CORSIA' : 'Choose where it works';
+		if (names.length === 0) return 'Choose where it works';
 		return names.length > 2 ? `${names.slice(0, 2).join(', ')}, ${names.length - 2} more` : names.join(', ');
 	}
 	function replace(next: ConnectedAppsRow): void { rows = rows.map((row) => row.id === next.id ? next : row); }

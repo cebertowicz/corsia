@@ -9,8 +9,8 @@ import uuid
 from connections.connected_accounts import (
     GOOGLE_CAPABILITIES,
     GOOGLE_PROVIDER,
+    ONLY_CORSIA,
     credential_key,
-    corsia_only_reach,
 )
 from infra import key_store, key_store_values
 from infra.connected_accounts_schema import CONNECTED_ACCOUNTS_SCHEMA_SQL
@@ -83,7 +83,6 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
     state = status if credentials is not None and status in {"connected", "needs_sign_in"} else "needs_sign_in"
     account_id = str(uuid.uuid4())
     now = utc_now_iso()
-    reach = corsia_only_reach()
     key = credential_key(account_id)
     conn.execute(
         "INSERT INTO connected_accounts("
@@ -92,8 +91,7 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
         "created_at,updated_at"
         ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (account_id, GOOGLE_PROVIDER, None, address.strip(),
-         json.dumps(GOOGLE_CAPABILITIES, separators=(",", ":")), state, reach.mode,
-         int(reach.outside_projects), key,
+         json.dumps(GOOGLE_CAPABILITIES, separators=(",", ":")), state, ONLY_CORSIA, 0, key,
          json.dumps(cursor, separators=(",", ":"), sort_keys=True) if cursor is not None else None,
          "system", "legacy_google_migration", "system", "legacy_google_migration", now, now),
     )

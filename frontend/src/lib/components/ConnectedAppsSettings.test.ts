@@ -8,7 +8,7 @@ import { get } from 'svelte/store';
 import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
-const googleAccount = { id: 'google-work', provider: 'google' as const, address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, reach: { mode: 'selected' as const, project_ids: [], outside_projects: false } };
+const googleAccount = { id: 'google-work', provider: 'google' as const, address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
@@ -410,7 +410,11 @@ describe('WhereItWorks', () => {
 		await settle();
 		(host.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
 		flushSync();
-		expect(host.textContent).toContain('CORSIA and agents in Garden plan will be able to use sam.work@example.com.');
+		// The CORSIA agent works outside projects: without Outside projects the account leaves it.
+		expect(host.textContent).toContain("Google — sam.work@example.com will move from CORSIA to Garden plan, with its sign-in. CORSIA won't be able to use it.");
+		([...host.querySelectorAll('input[type="checkbox"]')].find((input) => (input.parentElement?.textContent ?? '').includes('Outside projects')) as HTMLInputElement).click();
+		flushSync();
+		expect(host.textContent).toContain('CORSIA and agents in Garden plan, Outside projects will be able to use sam.work@example.com.');
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const, reach: { mode: 'selected', project_ids: ['garden'], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
@@ -481,6 +485,11 @@ describe('WhereItWorks', () => {
 		expect(host.textContent).not.toContain(line);
 		unmount(component);
 		component = mount(WhereItWorks, { target: host, props: { app: { ...awaiting, reach: { mode: 'selected', project_ids: [], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(host.textContent).not.toContain(line);
+		unmount(component);
+		// Only CORSIA is its own reach value, never an account with no place chosen.
+		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const, reach: { mode: 'selected', project_ids: [], outside_projects: false } }, onClose: vi.fn(), onSaved: vi.fn() } });
 		await settle();
 		expect(host.textContent).not.toContain(line);
 	});

@@ -3,30 +3,34 @@
 An agent names the account by ``account_id`` or by the address the person
 used. There is never a default: with no name, the call returns a
 clarification listing the accounts this caller can reach. Every error text
-here is fixed and safe to show. An address the caller names that is connected but out of
-reach gets the reach refusal, which says the account exists and who can widen it; an
-address no account has gets "No Google account matches". An out-of-reach account is
-never listed in a clarification.
+here is fixed and safe to show. Only the accounts that reach the caller are
+ever searched, so an out-of-reach account named by id or address gets exactly
+the answer a name that matches nothing gets, and a caller that reaches no
+account gets ``NONE_AVAILABLE``, which claims nothing about where any account works.
+Only when no Google account exists at all does it say to connect one.
 """
 
 from __future__ import annotations
 
 import sqlite3
 
-from connections.connected_accounts import account_reaches_thread, google_accounts
+from connections.connected_accounts import (
+    GOOGLE_PROVIDER, ConnectedAccountError, account_reaches_thread, get_account, google_accounts,
+)
 from connections.google.client import (
     NOT_CONNECTED, SIGN_IN_RECOVERY, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError,
 )
 
-REACH_REFUSAL = (
-    "This Google account is available only in CORSIA. Ask the person who connected it to change "
-    "Where it works."
+NONE_AVAILABLE = (
+    "No Google account is available here. If one should be, ask the person to change Where it works "
+    "on its row in Connected apps."
 )
 CHOOSE = (
     "Pass account_id to say which Google account to use: {choices}. If the person hasn't said "
     "which account, ask them; never pick one for them."
 )
-UNKNOWN = "No Google account matches {selector!r}. Pass account_id as one of: {choices}."
+# Never echoes the name, so the answer is byte-identical whichever unusable name was passed.
+UNKNOWN = "No Google account matches that name. Pass account_id as one of: {choices}."
 SIGNED_OUT = (
     "{address} is signed out. Ask the person to use Sign in on its row in Connected apps, or call "
     "google_connect with this account_id and post its reply verbatim followed by its link as "
@@ -65,16 +69,30 @@ def _usable(account: dict) -> dict:
     raise GoogleError(UNAVAILABLE.format(address=account["address"]))
 
 
+def _visible(account: dict[str, object], thread_id: str | None, db: sqlite3.Connection) -> bool:
+    """The one visibility rule: the person sees every account; an agent, only those that reach its thread."""
+    return thread_id is None or account_reaches_thread(str(account["id"]), thread_id, db=db)
+
+
 def visible_google_accounts(thread_id: str | None, *, db: sqlite3.Connection) -> list[dict[str, object]]:
-    """Every Google account for the person (``thread_id`` None); for an agent, only those that reach its thread."""
-    return [
-        account for account in google_accounts(db=db)
-        if thread_id is None or account_reaches_thread(str(account["id"]), thread_id, db=db)
-    ]
+    """Every Google account this caller may see (``thread_id`` None is the person)."""
+    return [account for account in google_accounts(db=db) if _visible(account, thread_id, db)]
+
+
+def visible_google_account(
+    account_id: str, thread_id: str | None, *, db: sqlite3.Connection,
+) -> dict[str, object] | None:
+    """The Google account ``account_id`` names if this caller may see it (any, for the person);
+    None alike for an unknown id and an out-of-reach one, so no surface can tell them apart."""
+    try:
+        account = get_account(account_id, db=db)
+    except ConnectedAccountError:
+        return None
+    return account if account["provider"] == GOOGLE_PROVIDER and _visible(account, thread_id, db) else None
 
 
 def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
-    """The one connected account ``selector`` names, if ``thread_id`` may use it; else a fixed refusal."""
+    """The one reachable connected account ``selector`` names; else a fixed refusal."""
     if db is None:
         from infra.database import get_db
 
@@ -86,20 +104,17 @@ def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Conne
     accounts = google_accounts(db=db)
     if not accounts:
         raise GoogleError(NOT_CONNECTED)
-    if not isinstance(thread_id, str) or not thread_id:
-        raise GoogleError(REACH_REFUSAL)
-    reachable = [account for account in accounts if account_reaches_thread(str(account["id"]), thread_id, db=db)]
+    caller = thread_id if isinstance(thread_id, str) and thread_id else None
+    reachable = [account for account in accounts if caller is not None and _visible(account, caller, db)]
+    if not reachable:
+        raise GoogleError(NONE_AVAILABLE)
+    listed = _choices(reachable)
     if selector is None or (isinstance(selector, str) and not selector.strip()):
-        raise GoogleError(CHOOSE.format(choices=_choices(reachable)) if reachable else REACH_REFUSAL)
+        raise GoogleError(CHOOSE.format(choices=listed))
     wanted = selector.strip() if isinstance(selector, str) else ""
-    named = [account for account in accounts if account["id"] == wanted] or [
-        account for account in accounts if str(account["address"]).strip().lower() == wanted.lower()
+    named = [account for account in reachable if account["id"] == wanted] or [
+        account for account in reachable if str(account["address"]).strip().lower() == wanted.lower()
     ]
     if len(named) != 1:
-        if not reachable:
-            raise GoogleError(REACH_REFUSAL)
-        listed = _choices(reachable)
-        raise GoogleError(CHOOSE.format(choices=listed) if named else UNKNOWN.format(selector=wanted, choices=listed))
-    if named[0] not in reachable:
-        raise GoogleError(REACH_REFUSAL)
+        raise GoogleError(CHOOSE.format(choices=listed) if named else UNKNOWN.format(choices=listed))
     return _usable(named[0])

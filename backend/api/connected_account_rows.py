@@ -23,7 +23,6 @@ accounts_router = APIRouter()
 
 NOT_FOUND = "That Google account isn't connected."
 NOT_SIGNED_IN = "That Google account is already signed out."
-NOT_YOURS = "This Google account is available only in CORSIA. Ask the person who connected it to change Where it works."
 PERSON_ONLY_CONTROLS = "Only the signed-in person can sign out or remove a Google account; open Connected apps."
 PERSON_ONLY = "Only the signed-in person can widen where an account works; open Connected apps."
 INVALID_REACH = "Where it works needs a valid choice of places."
@@ -52,28 +51,22 @@ def list_account_rows(thread_id: str | None, *, db: sqlite3.Connection) -> list[
 
 
 def _authorize(account_id: str, user: dict, *, person_only: bool = False) -> None:
-    """404 for an unknown or non-Google id; then, for an agent, 403 at once when the control is
-    ``person_only`` (Sign out, Remove), else 403 unless the account reaches its thread (Where it works)."""
-    from connections.connected_accounts import (
-        GOOGLE_PROVIDER, ConnectedAccountError, account_reaches_thread, get_account,
-    )
+    """404 unless the caller may see the account, so an agent gets the same answer for an id outside
+    its reach as for an unknown one; then, for an agent, 403 when the control is ``person_only``
+    (Sign out, Remove)."""
+    from connections.google.accounts import visible_google_account
 
     db = get_db()
     try:
-        try:
-            if get_account(account_id, db=db)["provider"] != GOOGLE_PROVIDER:
-                raise ConnectedAccountError("connected account not found")
-        except ConnectedAccountError:
-            raise refusal(NOT_FOUND, 404) from None
-        if is_person_session(user):
-            return
-        if person_only:
-            raise refusal(PERSON_ONLY_CONTROLS, 403)
-        from api.connected_apps import _agent_thread  # Imported here: that module includes this one's router.
+        thread_id: str | None = None
+        if not is_person_session(user):
+            from api.connected_apps import _agent_thread  # Imported here: that module includes this one's router.
 
-        thread_id, _scope = _agent_thread(user, db)
-        if not account_reaches_thread(account_id, thread_id, db=db):
-            raise refusal(NOT_YOURS, 403)
+            thread_id, _scope = _agent_thread(user, db)
+        if visible_google_account(account_id, thread_id, db=db) is None:
+            raise refusal(NOT_FOUND, 404)
+        if thread_id is not None and person_only:
+            raise refusal(PERSON_ONLY_CONTROLS, 403)
     finally:
         db.close()
 

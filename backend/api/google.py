@@ -30,14 +30,14 @@ log = logging.getLogger(__name__)
 
 MAX_BODY_BYTES = 2048
 CONNECTED_PAGE = "Google is connected. You can close this tab and go back to CORSIA."
+CALLBACK_FAILED = "Google sign-in couldn't finish. Go back to CORSIA and try again."
 
 
 def _callback_message(error: GoogleError) -> str:
-    """Use the error's browser-safe copy, with a safe fallback for future agent-only errors."""
+    """The error's browser copy when it carries one; agent-facing text never reaches the browser."""
     if isinstance(error, oauth.GoogleSignInError) and error.browser_message:
         return error.browser_message
-    message = str(error)
-    return message if "google_" not in message else "Google sign-in couldn't finish. Go back to CORSIA and try again."
+    return CALLBACK_FAILED
 
 
 def _page(message: str, status: int = 200) -> HTMLResponse:
@@ -70,13 +70,13 @@ def _agent_thread_id(user: dict, missing_thread_message: str) -> str:
         db.close()
 
 
-def _reaches(account_id: str, thread_id: str) -> bool:
-    from connections.connected_accounts import account_reaches_thread
+def _visible(account_id: str, thread_id: str) -> bool:
+    from connections.google.accounts import visible_google_account
     from infra.database import get_db
 
     db = get_db()
     try:
-        return account_reaches_thread(account_id, thread_id, db=db)
+        return visible_google_account(account_id, thread_id, db=db) is not None
     finally:
         db.close()
 
@@ -100,8 +100,8 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
             _agent_thread_id, user,
             "Google account sign-in from an agent needs its current thread context; call this through corsia_api from that thread.",
         )
-        if not await run_in_db(_reaches, account_id, thread_id):
-            raise HTTPException(403, "This Google account is not available to your project; ask the person in Connected apps.")
+        if not await run_in_db(_visible, account_id, thread_id):
+            raise HTTPException(400, oauth.UNKNOWN_ACCOUNT)  # Exactly what an unknown id gets below.
     adding_thread_id = None if person or account_id else _body_field(user, "thread_id")
     if account_id is None and not person and adding_thread_id is None:
         raise HTTPException(403, "Only the person or an agent's own thread can add a Google account.")

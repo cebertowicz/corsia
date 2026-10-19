@@ -47,7 +47,15 @@ export type RevocationCause =
 	| 'provider_rejected'
 	| 'provider_unexpected';
 
-export type AccountState = 'connected' | 'needs_sign_in' | 'signing_in' | 'signed_out' | 'removing';
+export type AccountState = 'connected' | 'needs_sign_in' | 'signed_out';
+
+/** An account's reach: an app's, or `mode: 'corsia'` (Only CORSIA), which no save ever writes. */
+export type AccountReach = Omit<AppReach, 'mode'> & { mode: AppReach['mode'] | 'corsia' };
+
+/** The one test for Only CORSIA. */
+export function isOnlyCorsia(reach: AccountReach): boolean {
+	return reach.mode === 'corsia';
+}
 
 /** One signed-in provider account (today Google). Never holds a credential, a key name, a token or provider text. */
 export interface ConnectedAccount {
@@ -59,8 +67,7 @@ export interface ConnectedAccount {
 	/** Stable ids; the screen words them: `mail` is Email, `calendar` Calendar, `files` Files. */
 	capabilities: ('mail' | 'calendar' | 'files')[];
 	state: AccountState;
-	/** Only CORSIA is `mode: 'selected'` with no projects and no outside places. */
-	reach: AppReach;
+	reach: AccountReach;
 }
 
 /** A hosted or local app row, as `/api/mcp/servers` returns it, tagged for the union. */

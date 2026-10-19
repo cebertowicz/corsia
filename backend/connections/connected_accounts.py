@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import sqlite3
 import uuid
@@ -16,13 +17,15 @@ from infra.time import utc_now_iso
 
 GOOGLE_PROVIDER = "google"
 GOOGLE_CAPABILITIES = ("mail", "calendar", "files")
-GOOGLE_STATES = frozenset(("connected", "needs_sign_in", "signing_in", "signed_out", "removing"))
+GOOGLE_STATES = frozenset(("connected", "needs_sign_in", "signed_out"))
+#: Account-only reach mode: the designated CORSIA agent alone. Only the legacy migration writes it.
+ONLY_CORSIA = "corsia"
 AUDIT_ACTIONS = frozenset(("connect", "sign_in", "sign_out", "remove"))
 REVOCATION_CAUSES = frozenset((
-    "revoked", "provider_unreachable", "provider_timeout", "provider_rejected",
-    "provider_unexpected", "not_signed_in",
+    "revoked", "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected", "not_signed_in",
 ))
 Actor = tuple[Literal["person", "agent", "system"], str]
+log = logging.getLogger(__name__)
 
 
 class ConnectedAccountError(ValueError):
@@ -34,19 +37,15 @@ def credential_key(account_id: str) -> str:
     return f"{key_store.CONNECTED_ACCOUNT_PREFIX}{account_id}"
 
 
-def corsia_only_reach() -> AppReach:
-    """Only CORSIA: an empty selection, which Where it works never saves, so it can't be read as Outside projects."""
-    return AppReach(mode="selected", project_ids=frozenset(), outside_projects=False)
-
-
 def _is_corsia_agent_thread(thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Only CORSIA: the designated CORSIA agent while available, never a project conductor; fails closed."""
+    """Only CORSIA: the designated CORSIA agent while available, never a project conductor; fails closed, logged."""
     from infra.corsia_agent import CorsiaAgentSettingError, is_corsia_agent
     from infra.queries import thread_available_sql
 
     try:
         designated = is_corsia_agent(thread_id, db=db)
     except CorsiaAgentSettingError:
+        log.error("Only CORSIA accounts are unavailable: the CORSIA agent designation is unreadable")
         return False
     available = f"SELECT 1 FROM threads WHERE id=? AND {thread_available_sql()}"
     return designated and db.execute(available, (thread_id,)).fetchone() is not None
@@ -74,7 +73,7 @@ def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Conne
     """The one reach check every agent surface asks: can this account serve the caller's full parent chain."""
     try:
         reach = _account_reach(account_id, db=db)
-        if reach == corsia_only_reach():
+        if reach.mode == ONLY_CORSIA:
             return _is_corsia_agent_thread(thread_id, db=db)
         return reach_reaches_thread(reach, thread_id, db=db)
     except (AppReachError, ConnectedAccountError):

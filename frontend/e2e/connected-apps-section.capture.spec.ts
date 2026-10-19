@@ -18,10 +18,10 @@ type Account = {
 	address: string;
 	capabilities: ('mail' | 'calendar' | 'files')[];
 	state: 'connected' | 'needs_sign_in' | 'signed_out';
-	reach: { mode: 'all' | 'selected'; project_ids: string[]; outside_projects: boolean };
+	reach: { mode: 'all' | 'selected' | 'corsia'; project_ids: string[]; outside_projects: boolean };
 };
 
-const onlyCorsia = { mode: 'selected' as const, project_ids: [], outside_projects: false };
+const onlyCorsia = { mode: 'corsia' as const, project_ids: [], outside_projects: false };
 const allProjects = { mode: 'all' as const, project_ids: [], outside_projects: false };
 const healthy: Account = { id: 'google-work', provider: 'google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'], state: 'connected', reach: onlyCorsia };
 const personal: Account = { id: 'google-personal', provider: 'google', address: 'sam@example.com', capabilities: ['mail', 'calendar', 'files'], state: 'connected', reach: allProjects };

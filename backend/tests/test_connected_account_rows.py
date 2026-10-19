@@ -9,14 +9,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import connected_account_rows, connected_apps
-from api.connected_account_rows import NOT_FOUND, NOT_YOURS, PERSON_ONLY, PERSON_ONLY_CONTROLS
+from api.connected_account_rows import NOT_FOUND, PERSON_ONLY, PERSON_ONLY_CONTROLS
 from auth_fixtures import OWNER_USER
 from connections.app_reach import AppReach
 from connections.app_lifecycle import create_app
 from connections.connected_accounts import (
-    GOOGLE_PROVIDER, corsia_only_reach, create_google_account, credential_key, get_account, store_google_credentials,
+    GOOGLE_PROVIDER, create_google_account, credential_key, get_account, store_google_credentials,
 )
 from connections.google import account_actions
+from google_account_helpers import ONLY_CORSIA_REACH, make_only_corsia
 from infra.auth import require_user
 from infra.database import get_db
 
@@ -35,9 +36,12 @@ def _stored_entries(account_id: str) -> int:
 
 
 def _account(address: str, *, reach: AppReach | None = None, signed_in: bool = True) -> str:
+    """A connected account; with no ``reach``, Only CORSIA."""
     account_id = str(create_google_account(
-        address, reach=reach or corsia_only_reach(), created_by=("system", "test"), state="connected",
+        address, reach=reach or ALL, created_by=("system", "test"), state="connected",
     )["id"])
+    if reach is None:
+        make_only_corsia(account_id)
     if signed_in:
         store_google_credentials(account_id, {
             "client_id": SECRETS[0], "client_secret": SECRETS[1], "refresh_token": SECRETS[2],
@@ -94,7 +98,7 @@ def test_two_accounts_are_two_rows_with_their_own_state_and_reach_and_no_secrets
     assert set(rows) == {first, second}
     assert rows[first] == {
         "kind": "account", "id": first, "provider": GOOGLE_PROVIDER, "address": "person@example.com",
-        "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": corsia_only_reach().as_dict(),
+        "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": ONLY_CORSIA_REACH,
     }
     # A row that lost its sign-in says so, with its own reach, whatever its stored state.
     assert rows[second]["state"] == "needs_sign_in" and rows[second]["reach"] == ALL
@@ -198,7 +202,7 @@ def test_a_person_widens_and_the_body_cannot_name_who_acted(api):
     account_id = _account("person@example.com")
 
     refused = client.put(f"/api/mcp/accounts/{account_id}/reach", json={"reach": ALL, "actor": ["person", "x"]})
-    assert refused.status_code == 422 and _rows(client)["person@example.com"]["reach"] == corsia_only_reach().as_dict()
+    assert refused.status_code == 422 and _rows(client)["person@example.com"]["reach"] == ONLY_CORSIA_REACH
 
     saved = client.put(f"/api/mcp/accounts/{account_id}/reach", json={"reach": ALL})
     assert saved.status_code == 200 and saved.json()["row"]["reach"] == ALL
@@ -209,18 +213,32 @@ def test_a_person_widens_and_the_body_cannot_name_who_acted(api):
     assert [tuple(row) for row in db.execute("SELECT actor_kind,actor_id FROM connected_account_audit WHERE action='sign_out'")] == [("person", OWNER_USER)]
 
 
-@pytest.mark.parametrize("reach,status", [
-    ({"mode": "selected", "project_ids": [], "outside_projects": False}, 422),
-    ({"mode": "nope"}, 422),
+@pytest.mark.parametrize("reach,detail", [
+    ({"mode": "selected", "project_ids": [], "outside_projects": False}, connected_account_rows.EMPTY_REACH),
+    # Only CORSIA is never saved: only the legacy migration writes it.
+    (ONLY_CORSIA_REACH, connected_account_rows.INVALID_REACH),
+    ({"mode": "nope"}, connected_account_rows.INVALID_REACH),
 ])
-def test_where_it_works_refuses_a_choice_that_names_no_place_or_is_invalid(api, reach, status):
+def test_where_it_works_refuses_a_choice_that_names_no_place_or_is_invalid(api, reach, detail):
     client, _who, _revoked = api
-    account_id = _account("person@example.com")
+    account_id = _account("person@example.com", reach=AppReach(mode="all", project_ids=frozenset(), outside_projects=False))
 
     response = client.put(f"/api/mcp/accounts/{account_id}/reach", json={"reach": reach})
 
-    assert response.status_code == status
-    assert response.json()["detail"] in {connected_account_rows.EMPTY_REACH, connected_account_rows.INVALID_REACH}
+    assert response.status_code == 422 and response.json()["detail"] == detail
+    assert _rows(client)["person@example.com"]["reach"] == ALL
+
+
+def test_an_agent_narrowing_to_no_place_is_refused_like_any_empty_choice(api):
+    client, who, _revoked = api
+    account_id = _account("a@example.com", reach=AppReach(mode="selected", project_ids=frozenset(("project-a",)), outside_projects=False))
+    who["user"] = AGENT
+
+    response = client.put(
+        f"/api/mcp/accounts/{account_id}/reach", json={"reach": {"mode": "selected", "project_ids": [], "outside_projects": False}},
+    )
+
+    assert response.status_code == 422 and response.json()["detail"] == connected_account_rows.EMPTY_REACH
 
 
 @pytest.mark.parametrize("method,path,body", [
@@ -250,8 +268,11 @@ def test_an_agent_cannot_sign_out_or_remove_any_account_and_nothing_changes(api,
     who["user"] = AGENT
 
     for response in (client.post(f"/api/mcp/accounts/{account_id}/sign-out"), client.delete(f"/api/mcp/accounts/{account_id}")):
-        assert response.status_code == 403 and response.json()["detail"] == PERSON_ONLY_CONTROLS
-        assert response.headers["X-Corsia-Agent-Remedy"] == PERSON_ONLY_CONTROLS
+        # Out of reach, the account answers exactly like an unknown id.
+        expected = (403, PERSON_ONLY_CONTROLS) if reaches_thread else (404, NOT_FOUND)
+        assert (response.status_code, response.json()["detail"]) == expected
+        if reaches_thread:
+            assert response.headers["X-Corsia-Agent-Remedy"] == PERSON_ONLY_CONTROLS
     assert revoked == [] and _stored_entries(account_id) == 1
     assert get_account(account_id, db=get_db()) == before
     db = get_db()
@@ -269,11 +290,22 @@ def test_an_agent_gets_the_404_before_the_person_only_refusal(api):
         assert response.status_code == 404 and response.json()["detail"] == NOT_FOUND
 
 
-def test_an_agent_cannot_change_where_an_account_it_cannot_reach_works(api):
+@pytest.mark.parametrize("method,path,body", [
+    ("post", "/sign-out", None), ("delete", "", None),
+    ("put", "/reach", {"reach": {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}}),
+])
+def test_an_out_of_reach_account_answers_every_row_route_exactly_like_an_unknown_id(api, method, path, body):
     client, who, _revoked = api
-    account_id = _account("person@example.com")  # Only CORSIA: no project reaches it.
+    out_of_reach = _account("person@example.com")  # Only CORSIA: no project reaches it.
+    before = get_account(out_of_reach, db=get_db())
     who["user"] = AGENT
 
-    response = client.put(f"/api/mcp/accounts/{account_id}/reach", json={"reach": {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}})
+    def call(account_id: str):
+        return getattr(client, method)(f"/api/mcp/accounts/{account_id}{path}", **({"json": body} if body else {}))
 
-    assert response.status_code == 403 and response.json()["detail"] == NOT_YOURS
+    hidden, unknown = call(out_of_reach), call("no-such-id")
+
+    assert hidden.status_code == unknown.status_code == 404
+    assert hidden.content == unknown.content
+    assert hidden.headers.get("X-Corsia-Agent-Remedy") == unknown.headers.get("X-Corsia-Agent-Remedy")
+    assert get_account(out_of_reach, db=get_db()) == before

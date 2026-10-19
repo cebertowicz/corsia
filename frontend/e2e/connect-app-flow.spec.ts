@@ -54,7 +54,7 @@ for (const viewport of viewports) {
 					servers: [], sign_in_here: true,
 					accounts: googleAccountReady ? [{
 						id: 'google-work', provider: 'google', address: 'sam.work@example.com', state: 'connected',
-						capabilities: ['mail', 'calendar', 'files'], reach: { mode: 'selected', project_ids: [], outside_projects: false },
+						capabilities: ['mail', 'calendar', 'files'], reach: { mode: 'corsia', project_ids: [], outside_projects: false },
 					}] : [],
 				} });
 			});

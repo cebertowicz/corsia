@@ -6,12 +6,13 @@ import asyncio
 
 import pytest
 
-from connections.connected_accounts import corsia_only_reach, create_google_account, get_account, set_state
+from connections.connected_accounts import get_account, set_state
 from connections.google import client as google_client
 from connections.google import email_screen
 from connections.google import gmail_read
 from events.connectors import gmail_feed as feed
 from events.connectors import gmail_poller as poller
+from google_account_helpers import only_corsia_account
 from infra.database import get_db
 
 ADDRESS = "person@example.com"
@@ -20,10 +21,7 @@ OLD_FLOOR = "2026-10-01T00:00:00+00:00"
 
 
 def _connect(address: str) -> str:
-    account = create_google_account(
-        address, reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
-    )
-    return str(account["id"])
+    return str(only_corsia_account(address, created_by=("system", "test"), state="connected")["id"])
 
 
 @pytest.fixture(autouse=True)

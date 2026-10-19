@@ -5,9 +5,10 @@ The Google client owns credentials, the screen owns its stored result, and
 account's durable Gmail history cursor and its observable state. A first run
 records the mailbox's current history id as a floor, so it never replays old
 mail. Each cycle snapshots the connected accounts and polls each one in its
-own task; before every fetch, screen, event and cursor write it re-reads the
-account and stops if it is gone, signed out or being removed, and the event
-and cursor writes re-check it inside their own transaction.
+own task. Remove cancels that task; otherwise the writes own the guard: the
+screen record, the event and the cursor each re-check the account inside
+their own transaction, and a fetch for a signed-out or removed account gets
+no credential.
 """
 
 from __future__ import annotations
@@ -97,16 +98,6 @@ def cancel_account(account_id: str) -> None:
         task.cancel()
     _accounts.pop(account_id, None)
     _due.pop(account_id, None)
-
-
-def _connected(account_id: str) -> bool:
-    from connections.connected_accounts import is_connected
-
-    db = get_db()
-    try:
-        return is_connected(account_id, db=db)
-    finally:
-        db.close()
 
 
 def _account_states() -> dict[str, str]:
@@ -246,25 +237,19 @@ def disabled_reason() -> str | None:
 async def poll_once(account_id: str) -> None:
     """Deliver one complete Gmail history page for one account, holding its cursor on any failure.
 
-    Returns early, writing nothing more, once the account is no longer connected.
+    Returns early, writing nothing more, once a write finds the account no longer connected.
     """
-    if not await run_in_db(_connected, account_id):
-        return
     cursor, initialized = await _load_cursor(account_id)
     if initialized or cursor is None:
         await run_in_db(email_screen.sweep_expired)
         return
     page = await feed.added_messages(account_id, cursor.history_id)
     for message_id in page.message_ids:
-        if not await run_in_db(_connected, account_id):
-            return
         try:
             metadata = await feed.metadata(account_id, message_id)
             full = await feed.full_message(account_id, message_id)
         except feed.GmailMessageGone:
             continue
-        if not await run_in_db(_connected, account_id):
-            return
         screen = await email_screen.screen_message(account_id, message_id, full.headers, full.body)
         if not await run_in_db(_deliver, account_id, event_payload(account_id, metadata, screen, page.history_id)):
             return

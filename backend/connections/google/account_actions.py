@@ -21,8 +21,7 @@ import httpx
 
 from connections.app_reach import AppReach, AppReachError, normalize_reach
 from connections.connected_accounts import (
-    GOOGLE_PROVIDER, Actor, ConnectedAccountError, _account_reach, _check_actor, corsia_only_reach,
-    get_account, record_audit, resolve_google_credentials, set_audit_cause, set_state,
+    GOOGLE_PROVIDER, Actor, ConnectedAccountError, _account_reach, _check_actor, get_account, record_audit, resolve_google_credentials, set_audit_cause, set_state,
     take_google_refresh_token,
 )
 from connections.google.client import TIMEOUT_SECONDS
@@ -125,13 +124,16 @@ def _widens(before: AppReach, after: AppReach) -> bool:
 def change_google_account_reach(
     account_id: str, reach: object, *, actor: Actor, db: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Save where one account works. Agents may only narrow it; widening needs the person."""
+    """Save where one account works. Agents may only narrow it; widening needs the person.
+
+    The saved reach is always an app reach with at least one place, so a save never writes Only CORSIA.
+    """
     _check_actor(actor)
     try:
-        after = reach if isinstance(reach, AppReach) else normalize_reach(reach)
+        after = normalize_reach(reach.as_dict() if isinstance(reach, AppReach) else reach)
     except AppReachError:
         raise ConnectedAccountError(INVALID_REACH) from None
-    if after == corsia_only_reach():
+    if after.mode == "selected" and not after.project_ids and not after.outside_projects:
         raise ConnectedAccountError(EMPTY_REACH)
     with write_transaction(db, scope="google_reach") as conn:
         _google_row(account_id, conn)

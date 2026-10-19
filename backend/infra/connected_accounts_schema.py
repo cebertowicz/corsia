@@ -32,10 +32,8 @@ CONNECTED_ACCOUNTS_SCHEMA_SQL = f"""
         provider_subject TEXT,
         address TEXT NOT NULL,
         capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
-        state TEXT NOT NULL CHECK(state IN (
-            'connected', 'needs_sign_in', 'signing_in', 'signed_out', 'removing'
-        )),
-        reach_mode TEXT NOT NULL CHECK(reach_mode IN ('all', 'selected')),
+        state TEXT NOT NULL CHECK(state IN ('connected', 'needs_sign_in', 'signed_out')),
+        reach_mode TEXT NOT NULL CHECK(reach_mode IN ('all', 'selected', 'corsia')),
         outside_projects INTEGER NOT NULL DEFAULT 0
             CHECK(outside_projects IN (0, 1)),
         credential_key TEXT NOT NULL UNIQUE,

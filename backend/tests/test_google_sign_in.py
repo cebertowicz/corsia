@@ -548,15 +548,19 @@ async def test_agent_routes_filter_status_and_refuse_an_unreachable_reconnect(go
             hidden = await http.get("/api/google/status")
         with internal_request("steve", other):
             reconnect = await http.post("/api/google/connect", json={"account_id": account_id})
+            unknown = await http.post("/api/google/connect", json={"account_id": "no-such-account"})
     assert [account["account_id"] for account in visible.json()["accounts"]] == [account_id]
     assert hidden.status_code == 200 and hidden.json() == {"accounts": []}
-    assert reconnect.status_code == 403
+    # Out of reach, the account answers exactly like an id no account has.
+    assert reconnect.status_code == unknown.status_code == 400
+    assert reconnect.content == unknown.content and reconnect.json()["detail"] == oauth.UNKNOWN_ACCOUNT
 
 
 def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:
     """Projects A and B, A's conductor, and one account per reach: B only, A only, Only CORSIA, All projects."""
     from connections.app_reach import AppReach
-    from connections.connected_accounts import corsia_only_reach, create_google_account
+    from connections.connected_accounts import create_google_account
+    from google_account_helpers import make_only_corsia
     from infra.conductor import set_project_conductor
 
     db = get_db()
@@ -572,7 +576,7 @@ def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:
         reaches = {
             "b-only@example.com": AppReach(mode="selected", project_ids=frozenset({"b"}), outside_projects=False),
             "a-only@example.com": AppReach(mode="selected", project_ids=frozenset({"a"}), outside_projects=False),
-            "corsia-only@example.com": corsia_only_reach(),
+            "corsia-only@example.com": AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
             "everywhere@example.com": AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
         }
         ids = {
@@ -581,6 +585,8 @@ def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:
             )["id"])
             for address, reach in reaches.items()
         }
+        make_only_corsia(ids["corsia-only@example.com"], db=db)
+        db.commit()
     finally:
         db.close()
     return conductor_a, ids
@@ -610,7 +616,7 @@ async def test_a_project_conductor_sees_and_names_only_the_accounts_that_reach_i
     assert reachable["link"] == f"#connected-apps/{ids['a-only@example.com']}"
 
 
-async def test_only_corsia_reaches_the_corsia_agent_and_no_project_conductor(google, conductor):
+async def test_only_corsia_reaches_the_corsia_agent_and_no_project_conductor(google, conductor, caplog):
     from connections.connected_accounts import account_reaches_thread
     from connections.google.accounts import resolve_for_thread
 
@@ -630,12 +636,57 @@ async def test_only_corsia_reaches_the_corsia_agent_and_no_project_conductor(goo
         assert resolve_for_thread(only_corsia, conductor, db=db)["id"] == only_corsia
         with pytest.raises(google_client.GoogleError):
             resolve_for_thread(only_corsia, conductor_a, db=db)
-        # A corrupt CORSIA designation fails closed rather than falling back to any coordinator.
+        # A corrupt CORSIA designation fails closed rather than falling back to any coordinator, and says so.
         db.execute("UPDATE settings SET value='{' WHERE key='corsia_agent_thread_id'")
         db.commit()
-        assert not account_reaches_thread(only_corsia, conductor, db=db)
+        caplog.clear()
+        with caplog.at_level(logging.ERROR, logger="connections.connected_accounts"):
+            assert not account_reaches_thread(only_corsia, conductor, db=db)
+        assert [record.getMessage() for record in caplog.records if record.levelno == logging.ERROR] == [
+            "Only CORSIA accounts are unavailable: the CORSIA agent designation is unreadable",
+        ]
     finally:
         db.close()
+
+
+def _refusal(selector: object, thread_id: str) -> str:
+    from connections.google.accounts import resolve_for_thread
+
+    db = get_db()
+    try:
+        with pytest.raises(google_client.GoogleError) as refused:
+            resolve_for_thread(selector, thread_id, db=db)
+        return str(refused.value)
+    finally:
+        db.close()
+
+
+async def test_the_mail_and_calendar_resolver_answers_an_out_of_reach_account_like_an_unknown_name(google, conductor):
+    from connections.google.accounts import NONE_AVAILABLE
+
+    conductor_a, ids = _reach_cast(conductor)
+    hidden_id, hidden_address = ids["b-only@example.com"], "b-only@example.com"
+    for hidden, unknown in ((hidden_id, "no-such-account"), (hidden_address, "nobody@example.com")):
+        assert _refusal(hidden, conductor_a) == _refusal(unknown, conductor_a)
+        assert hidden_address not in _refusal(hidden, conductor_a)
+    # A caller that reaches no account, or has no thread, gets one text that names no place.
+    nobody = make_session(get_db(), project_id="b", prefix="nobody")
+    db = get_db()
+    try:
+        db.execute("DELETE FROM connected_account_reach WHERE project_id='b'")
+        db.commit()
+    finally:
+        db.close()
+    from connections.app_reach import AppReach
+    from connections.google.account_actions import change_google_account_reach
+
+    change_google_account_reach(
+        ids["everywhere@example.com"], AppReach(mode="selected", project_ids=frozenset({"a"}), outside_projects=False),
+        actor=("person", "person"),
+    )
+    for selector in (hidden_id, hidden_address, "nobody@example.com", None):
+        assert _refusal(selector, nobody) == _refusal(selector, "") == NONE_AVAILABLE
+    assert "CORSIA" not in NONE_AVAILABLE
 
 
 async def test_person_google_routes_remain_unfiltered(google, conductor, client_file):
@@ -681,6 +732,14 @@ async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
             oauth.WRONG_ACCOUNT.format(signed_in="wrong@example.test", address="right@example.test"),
             browser_message="That's a different Google account. Go back to CORSIA and sign in again as right@example.test.",
         ),
+        *(
+            oauth.GoogleSignInError(reply, browser_message=reply) for reply in (
+                oauth.ALREADY_CONNECTED.format(address="sam@example.test", reach=""),
+                oauth.ALREADY_NEEDS_SIGN_IN.format(address="sam@example.test"),
+                oauth.CONNECTED_NOT_FOR_PROJECT.format(address="sam@example.test", project="Garden plan"),
+                oauth.CONNECTED_NOT_FOR_ALL.format(address="sam@example.test"),
+            )
+        ),
     )
     async with _http() as http:
         for error in errors:
@@ -691,6 +750,21 @@ async def test_callback_uses_browser_copy_without_agent_tool_names(monkeypatch):
             assert response.status_code == 400
             assert error.browser_message in html.unescape(response.text)
             assert "google_" not in response.text
+
+
+async def test_a_callback_error_without_browser_copy_shows_the_one_generic_line(monkeypatch):
+    errors = (
+        google_client.GoogleRequestFailed(), google_client.GoogleSignInRejected(),
+        oauth.GoogleSignInError("Agent text that names google_connect."),
+    )
+    async with _http() as http:
+        for error in errors:
+            async def fail(*_args, _error=error, **_kwargs):
+                raise _error
+            monkeypatch.setattr(oauth, "complete_sign_in", fail)
+            response = await http.get("/api/google/oauth/callback", params={"code": "code", "state": "state"})
+            assert response.status_code == 400
+            assert google_api.CALLBACK_FAILED in html.unescape(response.text) and str(error) not in response.text
 
 
 async def test_routes_need_a_signed_in_caller(google):

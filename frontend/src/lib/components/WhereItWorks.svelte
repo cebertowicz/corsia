@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { approveConnectedApp, saveAccountReach, saveConnectedAppReach, type ConnectedAppsRow } from '$lib/api/connectedApps';
+	import { approveConnectedApp, isOnlyCorsia, saveAccountReach, saveConnectedAppReach, type ConnectedAppsRow } from '$lib/api/connectedApps';
 
 	let { app, approve = false, onClose, onSaved }: { app: ConnectedAppsRow; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedAppsRow) => void } = $props();
 	const appName = $derived(app.kind === 'account' ? `Google — ${app.address}` : app.name);
-	/** An account saved with no place is Only CORSIA; the sheet names that before anything is chosen. */
-	const onlyCorsia = $derived(app.kind === 'account' && app.reach.mode === 'selected' && app.reach.project_ids.length === 0 && !app.reach.outside_projects);
-	let mode = $state<'all' | 'selected'>(app.reach.mode);
+	/** Only CORSIA is its own reach; the sheet names it before anything is chosen, and a save always replaces it. */
+	const onlyCorsia = $derived(isOnlyCorsia(app.reach));
+	let mode = $state<'all' | 'selected'>(app.reach.mode === 'all' ? 'all' : 'selected');
 	let selected = $state(new Set(app.reach.project_ids));
 	let outsideProjects = $state(app.reach.outside_projects);
 	let saving = $state(false);
@@ -31,11 +31,13 @@
 		}
 		const from = originalNames.join(', ');
 		const to = selectedNames.join(', ');
-		if (originalNames.length === 0) {
-			return app.kind === 'account'
+		// The CORSIA agent works outside projects, so it keeps an Only CORSIA account only when Outside projects stays chosen.
+		if (app.kind === 'account' && isOnlyCorsia(app.reach)) {
+			return outsideProjects
 				? `CORSIA and agents in ${to} will be able to use ${app.address}.`
-				: `Agents in ${to} will be able to use ${app.name}.`;
+				: `${appName} will move from CORSIA to ${to}, with its sign-in. CORSIA won't be able to use it.`;
 		}
+		if (originalNames.length === 0) return `Agents in ${to} will be able to use ${appName}.`;
 		return app.kind === 'account'
 			? `${appName} will move from ${from} to ${to}, with its sign-in. Agents in ${from} won't be able to use it.`
 			: `${appName} will move from ${from} to ${to}, with its sign-in and key. Agents in ${from} won't be able to use it.`;

@@ -19,7 +19,9 @@ import pytest
 
 from connections.google import client as google_client
 from connections.google import email_document
+from connections.google.accounts import NONE_AVAILABLE
 from doceditor.document_scope import revision as document_revision
+from google_account_helpers import make_only_corsia
 import infra.config as config
 from infra.database import get_db
 from tests.test_google_sign_in import (  # noqa: F401  (fixtures)
@@ -276,23 +278,14 @@ async def test_update_needs_an_open_draft_of_this_thread(mail):
     assert out == "Error: There is no open draft with that id in this conversation."
 
 
-def _only_corsia(account_id: str) -> None:
-    db = get_db()
-    db.execute("UPDATE connected_accounts SET reach_mode='selected',outside_projects=0 WHERE id=?", (account_id,))
-    db.execute("DELETE FROM connected_account_reach WHERE account_id=?", (account_id,))
-    db.commit()
-
-
 async def test_a_caller_outside_the_accounts_reach_is_refused_with_the_exact_text(mail):
     from tests.registry_helpers import make_session
 
-    _only_corsia(mail.account)
+    make_only_corsia(mail.account)
     other = make_session(get_db(), prefix="other")
-    refused = (
-        "Error: This Google account is available only in CORSIA. Ask the person who connected it to "
-        "change Where it works."
-    )
-    for selector in (mail.account, EMAIL, None):
+    refused = f"Error: {NONE_AVAILABLE}"
+    # The account by id or address answers exactly like a name no account has.
+    for selector in (mail.account, EMAIL, "nobody@example.com", None):
         out = await EmailDraftTool().execute(
             _thread_id=other, account_id=selector, to=["a@example.com"], subject="s", body="b",
         )
@@ -307,7 +300,7 @@ async def test_send_re_checks_reach_and_uses_the_drafts_own_account(mail, approv
     assert json.loads(_row(saved["draft_id"])["target_json"])["account_id"] == mail.account
     monkeypatch.setattr(accounts, "account_reaches_thread", lambda *args, **kwargs: False)
     out = await _send(mail, saved)
-    assert out == f"Error: Not sent: {accounts.REACH_REFUSAL}"
+    assert out == f"Error: Not sent: {accounts.NONE_AVAILABLE}"
     assert mail.sent_requests() == [] and _row(saved["draft_id"])["state"] == "open"
 
 

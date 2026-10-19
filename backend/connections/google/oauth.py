@@ -142,10 +142,6 @@ def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-de
         account = get_account(account_id, db=db)
     except ConnectedAccountError:
         raise GoogleSignInError(UNKNOWN_ACCOUNT) from None
-    if account["state"] == "removing":
-        raise GoogleSignInError(
-            GONE, browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
-        )
     if account["state"] == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is not None:
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
 
@@ -261,11 +257,14 @@ def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> N
 
     for account in google_accounts(db=conn):
         if _same_identity(account, email, provider_subject):
+            # These replies address the person, so the callback page shows them as they are.
             if account["state"] != STATUS_CONNECTED:
-                raise GoogleSignInError(ALREADY_NEEDS_SIGN_IN.format(address=account["address"]))
-            if reply := not_covered_reply(account, pending.adding_thread_id, conn):
-                raise GoogleSignInError(reply)
-            raise GoogleSignInError(ALREADY_CONNECTED.format(address=account["address"], reach=""))
+                reply = ALREADY_NEEDS_SIGN_IN.format(address=account["address"])
+            else:
+                reply = not_covered_reply(account, pending.adding_thread_id, conn) or ALREADY_CONNECTED.format(
+                    address=account["address"], reach="",
+                )
+            raise GoogleSignInError(reply, browser_message=reply)
     fields = {
         "created_by": pending.actor, "signed_in_by": pending.actor, "provider_subject": provider_subject,
         "account_id": pending.account_id, "state": STATUS_CONNECTED,
@@ -299,11 +298,6 @@ def _store(
                     GONE,
                     browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
                 ) from None
-            if account["state"] == "removing":
-                raise GoogleSignInError(
-                    GONE,
-                    browser_message="This Google account was removed from CORSIA. Go back to CORSIA and connect it again.",
-                )
             if not _same_identity(account, email, provider_subject):
                 raise GoogleSignInError(
                     WRONG_ACCOUNT.format(signed_in=email, address=account["address"]),

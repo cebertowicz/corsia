@@ -7,7 +7,8 @@ from contextlib import closing
 
 import pytest
 
-from connections.connected_accounts import corsia_only_reach, google_accounts, resolve_google_credentials
+from connections.connected_accounts import google_accounts, resolve_google_credentials
+from google_account_helpers import ONLY_CORSIA_REACH
 from infra import key_store, key_store_values
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
@@ -71,7 +72,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
-        assert account["reach"] == corsia_only_reach().as_dict()
+        assert account["reach"] == ONLY_CORSIA_REACH
         assert account["cursor"] == CURSOR
         assert resolve_google_credentials(str(account["id"]), db=db) == {
             "client_id": "client-id", "client_secret": "client-secret", "refresh_token": "refresh-token",

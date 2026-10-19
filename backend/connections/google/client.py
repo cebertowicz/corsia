@@ -128,7 +128,7 @@ def _on_account(work, account_id: str, *args: object):  # type: ignore[no-untype
 
 
 def _usable_credentials(account_id: str, *, db) -> dict[str, str] | None:  # type: ignore[no-untyped-def]
-    """The account's bundle only while it is connected: a signed-out or removing row lends nothing."""
+    """The account's bundle only while it is connected: a signed-out or removed account lends nothing."""
     from connections.connected_accounts import is_connected, resolve_google_credentials
 
     return resolve_google_credentials(account_id, db=db) if is_connected(account_id, db=db) else None

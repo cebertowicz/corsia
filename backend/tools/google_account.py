@@ -14,10 +14,9 @@ import json
 import logging
 from typing import Any
 
-from connections.connected_accounts import (
-    ConnectedAccountError, account_reaches_thread, get_account, resolve_google_credentials,
-)
+from connections.connected_accounts import resolve_google_credentials
 from connections.google import oauth
+from connections.google.accounts import visible_google_account
 from connections.google.client import GoogleError, STATUS_CONNECTED
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -56,14 +55,9 @@ def _existing_account_reply(account_id: str, thread_id: str) -> tuple[str, str]:
     """
     db = get_db()
     try:
-        if not account_reaches_thread(account_id, thread_id, db=db):
+        account = visible_google_account(account_id, thread_id, db=db)
+        if account is None:
             raise oauth.GoogleSignInError(oauth.UNKNOWN_ACCOUNT)
-        try:
-            account = get_account(account_id, db=db)
-        except ConnectedAccountError:
-            raise oauth.GoogleSignInError(oauth.UNKNOWN_ACCOUNT) from None
-        if account["state"] == "removing":
-            raise oauth.GoogleSignInError(oauth.GONE)
         if account["state"] == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is not None:
             reply = oauth.not_covered_reply(account, thread_id, db) or oauth.ALREADY_CONNECTED.format(
                 address=account["address"], reach=_reach_phrase(account, db),

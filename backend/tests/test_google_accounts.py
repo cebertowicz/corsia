@@ -11,12 +11,12 @@ import pytest
 
 from connections.app_reach import AppReach
 from connections.connected_accounts import (
-    ConnectedAccountError, corsia_only_reach, credential_key, create_google_account, get_account,
-    resolve_google_credentials,
+    ConnectedAccountError, credential_key, create_google_account, get_account, resolve_google_credentials,
 )
 from connections.google import account_actions
 from connections.google import client as google_client
 from connections.google import oauth
+from google_account_helpers import ONLY_CORSIA_REACH, only_corsia_account
 from infra.database import get_db
 from tests.test_google_sign_in import (  # noqa: F401 -- conductor and client_file are fixtures
     _REAL_CLIENT, FakeGoogle, _accounts, _http, _id_token, _start, client_file, conductor,
@@ -227,31 +227,32 @@ async def test_a_remove_that_cannot_reach_google_still_removes(google, conductor
 
 
 def test_only_the_person_can_widen_where_an_account_works(isolated_db):
-    account_id = str(create_google_account(
-        "person@example.com", reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
-    )["id"])
+    account_id = str(only_corsia_account("person@example.com", created_by=("system", "test"), state="connected")["id"])
     everywhere = AppReach(mode="all", project_ids=frozenset(), outside_projects=False)
     outside = AppReach(mode="selected", project_ids=frozenset(), outside_projects=True)
 
     with pytest.raises(ConnectedAccountError, match=account_actions.PERSON_ONLY):
         account_actions.change_google_account_reach(account_id, everywhere, actor=("agent", "some-thread"))
-    assert _row(account_id)["reach"] == corsia_only_reach().as_dict()
+    assert _row(account_id)["reach"] == ONLY_CORSIA_REACH
 
     account_actions.change_google_account_reach(account_id, everywhere, actor=PERSON)
     assert _row(account_id)["reach"]["mode"] == "all"
     # Narrowing never needs the person.
     account_actions.change_google_account_reach(account_id, outside, actor=("agent", "some-thread"))
     assert _row(account_id)["reach"] == outside.as_dict()
-    # Saving Only CORSIA through Where it works is refused: it needs at least one place.
-    with pytest.raises(ConnectedAccountError, match=account_actions.EMPTY_REACH):
-        account_actions.change_google_account_reach(account_id, corsia_only_reach(), actor=PERSON)
+    # Narrowing to no place is refused, and Only CORSIA is never a value a save can write.
+    nowhere = AppReach(mode="selected", project_ids=frozenset(), outside_projects=False)
+    for actor in (PERSON, ("agent", "some-thread")):
+        with pytest.raises(ConnectedAccountError, match=account_actions.EMPTY_REACH):
+            account_actions.change_google_account_reach(account_id, nowhere, actor=actor)
+        with pytest.raises(ConnectedAccountError, match=account_actions.INVALID_REACH):
+            account_actions.change_google_account_reach(account_id, ONLY_CORSIA_REACH, actor=actor)
+    assert _row(account_id)["reach"] == outside.as_dict()
 
 
 def test_the_remove_audit_survives_with_foreign_keys_on(isolated_db):
     """Remove deletes the account row; its audit and migration records must outlive it."""
-    account_id = str(create_google_account(
-        "person@example.com", reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
-    )["id"])
+    account_id = str(only_corsia_account("person@example.com", created_by=("system", "test"), state="connected")["id"])
     db = get_db()
     try:
         db.execute(
