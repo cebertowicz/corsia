@@ -31,15 +31,16 @@ async function readProc(file: string): Promise<string> {
  * port saw to `network-diagnostics.txt` in the test's output folder. A direct request to the backend that hangs
  * without an access-log line and without an error is either waiting for a connection, written to a socket the
  * backend never read, or read and never answered. The state of the client's socket (SYN-SENT with retransmits,
- * ESTAB with unsent bytes), the listener's accept queue and the drop counters tell which. This runs while the hung
+ * ESTAB with unsent bytes), the listener's accept queue and the drop counters tell which, and the owning process
+ * (`-p`) shows a socket a forked child still holds open after the backend closed it. This runs while the hung
  * request's socket still exists, because the request fixture is torn down after it.
  */
 export async function recordNetworkDiagnostics(testInfo: TestInfo): Promise<void> {
 	if (process.platform !== 'linux') return;
 	if (testInfo.status !== 'timedOut' && testInfo.status !== 'failed') return;
 	const sections = await Promise.all([
-		capture(`ss -tanoi sockets of :${BACKEND_PORT}`, 'ss', [
-			'-tanoi', '(', 'sport', '=', `:${BACKEND_PORT}`, 'or', 'dport', '=', `:${BACKEND_PORT}`, ')',
+		capture(`ss -tanoip sockets of :${BACKEND_PORT}`, 'ss', [
+			'-tanoip', '(', 'sport', '=', `:${BACKEND_PORT}`, 'or', 'dport', '=', `:${BACKEND_PORT}`, ')',
 		]),
 		capture('ss -s', 'ss', ['-s']),
 		capture('nstat -as', 'nstat', ['-as']),

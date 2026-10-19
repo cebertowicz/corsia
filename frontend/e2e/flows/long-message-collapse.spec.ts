@@ -4,6 +4,7 @@ import { expect, type Locator } from '@playwright/test';
 import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
+import { settled } from '../support/reviewFixtures';
 
 const LONG_TEXT = Array.from(
     { length: 26 },
@@ -16,6 +17,9 @@ async function expectCollapsedThenExpand(row: Locator) {
 
     await expect(body).toHaveClass(/collapsed/, { timeout: 10_000 });
     await expect(toggle).toBeVisible();
+    // The rows fade in and the opened thread's panel slides in under the toggle; a press that lands mid-slide
+    // goes down on the button and comes up on the text it moved over, so it is no click on the button.
+    await settled(row.page());
 
     await toggle.click();
     await expect(row.getByRole('button', { name: 'Show less' })).toBeVisible();

@@ -250,7 +250,10 @@ export function captureFailedRequests(page: Page, predicate: (url: string) => bo
 	const failed: string[] = [];
 	page.on('requestfailed', (req) => {
 		const url = req.url();
-		if (predicate(url)) failed.push(url);
+		// A GET the app cancels itself (supersedingRead cancels an in-flight message read when the thread
+		// changes) is not a failure; an aborted mutation, or any other transport error, still is.
+		const cancelledRead = req.method() === 'GET' && req.failure()?.errorText === 'net::ERR_ABORTED';
+		if (predicate(url) && !cancelledRead) failed.push(url);
 	});
 	page.on('response', (resp) => {
 		const url = resp.url();
