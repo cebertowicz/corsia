@@ -44,7 +44,7 @@ def test_arrival_trigger_only_notifies_new_owner_messages(monkeypatch):
     from jobs import corrections_realtime
 
     seen = []
-    monkeypatch.setattr(corrections_realtime, "notify", seen.append)
+    monkeypatch.setattr(corrections_realtime, "notify", lambda source_kind, source_id: seen.append((source_kind, source_id)))
 
     def accepted(message_id, duplicate=False):
         from types import SimpleNamespace
@@ -57,7 +57,7 @@ def test_arrival_trigger_only_notifies_new_owner_messages(monkeypatch):
         accepted("agent"), role="user", content="A correction.", metadata={"sender_kind": "agent"},
     )
 
-    assert seen == ["message"]
+    assert seen == [("message", "message")]
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,7 @@ def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolat
     newer = ClassifierVersion("corrections-classifier", "v2", "correction", 0.5, "modernbert-owner-context-v2-2048")
 
     def candidate(message_id, created_at):
-        return CorrectionCandidate(message_id, "thread", "project", "x", created_at)
+        return CorrectionCandidate("message", message_id, "thread", "project", "x", created_at)
 
     assert _record_fact(candidate("recent", recent), unreadable, _version())
     assert _record_fact(candidate("recent", recent), unreadable, newer)  # re-read by a newer version
@@ -218,7 +218,7 @@ async def test_fact_carries_the_verified_asset_result_without_message_text(isola
     finally:
         db.close()
     assert attributes == {
-        "message_id": "owner-message", "thread_id": "thread", "label": "correction",
+        "source_kind": "message", "source_id": "owner-message", "thread_id": "thread", "label": "correction",
         "asset_id": "corrections-classifier", "asset_version": "v1", "head": "correction",
         "threshold": "0.595681", "input_policy_id": "modernbert-owner-context-v2-2048",
         "truncated": "false", "original_tokens": 9, "failure_reason": "none",
@@ -263,3 +263,73 @@ def test_only_send_thread_input_calls_the_corrections_admission_hook():
                 callers.append((path.relative_to(backend).as_posix(), function.name))
 
     assert callers == [("infra/send_service.py", "send_thread_input")]
+
+
+def _seed_comment_and_answer_sources(db):
+    db.execute(
+        """INSERT INTO artifact_identities
+           (id,integration,type,external_id,state,metadata,created_at,updated_at)
+           VALUES ('doc','local','document','doc','active','{}','t','t')"""
+    )
+    db.execute(
+        """INSERT INTO artifact_registrations
+           (id,artifact_id,parent_thread_id,relationship_state,created_at,updated_at)
+           VALUES ('doc-owner','doc','thread','owner-active','t','t')"""
+    )
+    db.execute(
+        """INSERT INTO doc_comments
+           (id,artifact_id,author,author_kind,body,anchor_text,created_at,updated_at)
+           VALUES ('comment','doc','owner','user','The date is wrong.','2027 launch','2026-10-01T00:02:00Z','t')"""
+    )
+    decision = {
+        "plan_decision": {
+            "state": "answered", "thread_id": "thread", "revision": 7,
+            "answered_at": "2026-10-01T00:03:00Z", "title": "Which date?",
+            "context": "Release copy", "tradeoff": "Accuracy", "options": [],
+            "answer": {"text": "Use 2027, not 2026."},
+        },
+    }
+    db.execute(
+        """INSERT INTO artifact_identities
+           (id,integration,type,external_id,state,metadata,created_at,updated_at)
+           VALUES ('decision-artifact','local','plan-decision','decision','active',?,'t','t')""",
+        (json.dumps(decision),),
+    )
+    db.commit()
+
+
+@pytest.mark.asyncio
+async def test_scan_batches_messages_comments_and_free_text_answers(isolated_db):
+    from jobs.corrections_recording import next_pending_batch
+
+    db = _db()
+    try:
+        _seed(db)
+        _seed_comment_and_answer_sources(db)
+    finally:
+        db.close()
+
+    batch = await next_pending_batch(_version(), 10, None, since="2026-10-01T00:00:00Z")
+
+    assert [(key.source_kind, key.source_id) for key in batch.selected_keys] == [
+        ("plan_decision_answer", "decision"), ("doc_comment", "comment"), ("message", "owner-message"),
+    ]
+    assert [(candidate.source_kind, candidate.source_id) for candidate in batch.candidates] == [
+        ("plan_decision_answer", "decision:7"), ("doc_comment", "comment"), ("message", "owner-message"),
+    ]
+
+
+def test_measurement_figure_excludes_comment_and_decision_facts(isolated_db):
+    from datetime import datetime, timezone
+
+    from core.corrections_recording import CorrectionCandidate
+    from jobs.corrections_activation import weekly_correction_figure
+    from jobs.corrections_recording import _record_fact
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    payload = {"label": "correction", "truncated": False, "original_tokens": 1, "failure_reason": "none"}
+    assert _record_fact(CorrectionCandidate("message", "message", "thread", "project", "Wrong.", timestamp), payload, _version())
+    assert _record_fact(CorrectionCandidate("doc_comment", "comment", "thread", "project", "Wrong.", timestamp), payload, _version())
+    assert _record_fact(CorrectionCandidate("plan_decision_answer", "decision:7", "thread", "project", "Wrong.", timestamp), payload, _version())
+
+    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 1

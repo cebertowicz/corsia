@@ -50,7 +50,8 @@ def complete_backfill(
 def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: int) -> float:
     """Return the bounded-window weekly correction figure for one full version.
 
-    Only ``correction`` facts count; ``unreadable`` and ``not_correction`` never do.
+    Only user-message ``correction`` facts count; comment and decision feedback
+    drives triage but does not change the Measurement figure.
     """
     from core.corrections_recording import CORRECTION_EVENT, LABEL_CORRECTION
     from infra.database import get_db
@@ -62,6 +63,7 @@ def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: i
             f"""SELECT COUNT(*) FROM outcome_events e
                WHERE e.event_name=:event AND e.retracted_at IS NULL AND e.ts >= :since
                  AND {version_filter}
+                 AND json_extract(e.attributes, '$.source_kind')='message'
                  AND json_extract(e.attributes, '$.label')=:label""",
             {**version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION},
         ).fetchone()

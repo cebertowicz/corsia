@@ -56,9 +56,7 @@ from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import (
-    candidate_for_message, record_classification, record_unreadable, unreadable_messages,
-)
+from jobs.corrections_recording import candidate_for_message, candidate_for_source, record_classification, record_unreadable, unreadable_messages
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
 QUEUE_SIZE = 256
@@ -66,16 +64,14 @@ SCAN_BATCH = 20
 ATTEMPTS_PER_KIND = 2
 LOAD_CRASH_BACKOFF_SECONDS = 60.0
 
-
 def _clock() -> float:
     return time.monotonic()
-
 
 class CorrectionsWorker:
     """The one owner of the arrival queue, one child, and both state machines."""
 
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=QUEUE_SIZE)
+        self.queue: asyncio.Queue[tuple[str, str, float]] = asyncio.Queue(maxsize=QUEUE_SIZE)
         self.arrived = asyncio.Event()
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
@@ -232,11 +228,15 @@ class CorrectionsWorker:
             if manifest is None:
                 return outcome
 
-    async def _arrival(self, message_id: str, enqueued_at: float) -> None:
+    async def _arrival(self, source_kind: str, source_id: str, enqueued_at: float) -> None:
         started_at = _clock()
         self.queue_delay_ms = (started_at - enqueued_at) * 1000
         try:
-            candidate = await run_in_db(candidate_for_message, message_id)
+            candidate = await run_in_db(
+                candidate_for_message if source_kind == "message" else candidate_for_source,
+                source_id if source_kind == "message" else source_kind,
+                *(() if source_kind == "message" else (source_id,)),
+            )
             if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
                 self._release_hold()
         except Exception:
@@ -278,7 +278,8 @@ class CorrectionsWorker:
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
                 return await activate_after_backfill(version)
-            before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
+            tail = batch.selected_keys[-1]
+            before = (tail.created_at, getattr(tail, "source_kind", "message"), getattr(tail, "source_id", None) or tail.message_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
@@ -299,13 +300,14 @@ class CorrectionsWorker:
     async def run(self) -> None:
         while True:
             try:
-                message_id, enqueued_at = self.queue.get_nowait()
+                queued = self.queue.get_nowait()
+                source_kind, source_id, enqueued_at = ("message", *queued) if len(queued) == 2 else queued
             except asyncio.QueueEmpty:
                 if self.scan == "idle" or self.held_reason is not None:
                     return
                 await self._scan_pass()
                 continue
-            await self._arrival(message_id, enqueued_at)
+            await self._arrival(source_kind, source_id, enqueued_at)
 
     def _start_task(self, coroutine) -> None:
         if self.task is not None and not self.task.done():
@@ -325,12 +327,14 @@ class CorrectionsWorker:
             self._set("unavailable", f"worker error: {type(error).__name__}")
         self._hold(f"worker error: {type(error).__name__}")
 
-    def notify(self, message_id: str) -> None:
+    def notify(self, source_kind: str, source_id: str | None = None) -> None:
+        if source_id is None:
+            source_kind, source_id = "message", source_kind
         if self.stopping:
             self._owe()
             return
         try:
-            self.queue.put_nowait((message_id, _clock()))
+            self.queue.put_nowait((source_kind, source_id, _clock()))
         except asyncio.QueueFull:
             self._owe()
             self.dropped_arrivals += 1
@@ -358,9 +362,7 @@ class CorrectionsWorker:
             self.child.kill()
         await drop_child(self)
 
-
 WORKER = CorrectionsWorker()
-
 
 async def _startup_worker() -> None:
     try:
@@ -369,18 +371,14 @@ async def _startup_worker() -> None:
         logger.exception("corrections activation notice retry failed; the next startup retries it")
     await WORKER.run()
 
-
-def notify(message_id: str) -> None:
-    WORKER.notify(message_id)
-
+def notify(source_kind: str, source_id: str | None = None) -> None:
+    WORKER.notify(source_kind, source_id)
 
 def startup_scan() -> None:
     WORKER.startup()
 
-
 async def shutdown() -> None:
     await WORKER.shutdown()
-
 
 def state_snapshot(db: Any = None) -> dict[str, object]:
     snapshot = WORKER.snapshot()
@@ -388,12 +386,11 @@ def state_snapshot(db: Any = None) -> dict[str, object]:
         snapshot["unreadable_messages"] = unreadable_messages(db, WORKER.version) if WORKER.version else 0
     return snapshot
 
-
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
     from core.corrections_recording import is_owner_authored_message
 
     try:
         if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
-            notify(accepted.message_id)
+            notify("message", accepted.message_id)
     except Exception:
         logger.exception("corrections classifier admission notification failed")

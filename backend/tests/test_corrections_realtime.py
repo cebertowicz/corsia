@@ -16,7 +16,7 @@ def _candidate(message_id: str = "owner-message"):
     from core.corrections_recording import CorrectionCandidate
 
     return CorrectionCandidate(
-        message_id=message_id, thread_id="thread", project_id="project",
+        source_kind="message", source_id=message_id, thread_id="thread", project_id="project",
         content="That result is wrong.", created_at="2026-10-14T00:00:00Z",
         context=(("Agent", "Earlier answer."),),
     )
@@ -1076,7 +1076,8 @@ async def test_one_worker_processes_arrival_queued_during_startup_scan(worker, m
         worker.queue.put_nowait(("during-startup", 0.0))
         worker._finish_scan()
 
-    async def arrival(message_id, enqueued_at):
+    async def arrival(source_kind, message_id, enqueued_at):
+        assert source_kind == "message"
         processed.append(message_id)
         worker.queue.task_done()
 
@@ -1240,7 +1241,7 @@ def _recorded_message_ids() -> set[str]:
     try:
         return {
             str(row[0]) for row in db.execute(
-                "SELECT json_extract(attributes,'$.message_id') FROM outcome_events"
+                "SELECT json_extract(attributes,'$.source_id') FROM outcome_events"
             ).fetchall()
         }
     finally:
@@ -1270,3 +1271,25 @@ async def test_recorded_newest_messages_do_not_hide_older_pending_ones(isolated_
 
     assert seen_at_activation == [set(ids)]
     assert worker.scan == "idle"
+
+
+@pytest.mark.asyncio
+async def test_typed_source_arrival_uses_the_shared_classifier_queue(worker, monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from jobs import corrections_realtime
+
+    source = replace(_candidate("comment"), source_kind="doc_comment", source_id="comment")
+    seen = []
+    monkeypatch.setattr(
+        corrections_realtime, "candidate_for_source",
+        lambda source_kind, source_id: seen.append((source_kind, source_id)) or source,
+    )
+    monkeypatch.setattr(worker, "_classify", AsyncMock(return_value=SimpleNamespace(kind="recorded")))
+    worker.queue.put_nowait(("doc_comment", "comment", 0.0))
+    worker.queue.get_nowait()
+
+    await worker._arrival("doc_comment", "comment", 0.0)
+
+    assert seen == [("doc_comment", "comment")]

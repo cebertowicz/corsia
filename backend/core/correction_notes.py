@@ -48,7 +48,7 @@ def _local_clock(created_at: str) -> str:
 def note_text(message_id: str, content: str, created_at: str) -> str:
     """The note one correction puts in its target's next turn."""
     return (
-        f"Correction recorded on your work (message {message_id}, sent "
+        f"Correction recorded on your work (feedback {message_id}, sent "
         f'{_local_clock(created_at)}): "{_quote(content)}"\n'
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
@@ -68,11 +68,11 @@ def _has_target(db: sqlite3.Connection, thread_id: str) -> bool:
     return row is not None and thread_is_available(row)
 
 
-def _first_record(db: sqlite3.Connection, message_id: str, event_id: str) -> bool:
-    """No other fact names this message, under any classifier version or label."""
+def _first_record(db: sqlite3.Connection, candidate: CorrectionCandidate, event_id: str) -> bool:
+    """No other fact names this source, under any classifier version or label."""
     return db.execute(
         "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? AND id<>? LIMIT 1",
-        (CORRECTION_EVENT, subject_key(message_id), event_id),
+        (CORRECTION_EVENT, subject_key(candidate.source_kind, candidate.source_id), event_id),
     ).fetchone() is None
 
 
@@ -92,7 +92,7 @@ def _newer_owner_message(db: sqlite3.Connection, candidate: CorrectionCandidate)
               AND (m.created_at > :created OR (m.created_at=:created AND m.id > :message))
             ORDER BY m.created_at,m.id""",
         {**params, "thread": candidate.thread_id, "created": candidate.created_at,
-         "message": candidate.message_id},
+         "message": candidate.source_id},
     )
     return any(
         is_owner_authored_message(role=row[0], content=row[1], metadata=row[2]) for row in rows
@@ -114,26 +114,25 @@ def queue_correction_note(
     """
     if not _has_target(db, candidate.thread_id):
         return None
-    if not _first_record(db, candidate.message_id, event_id):
+    if not _first_record(db, candidate, event_id):
         return None
     if not candidate.arrived and (
         not _is_active(db, version) or _newer_owner_message(db, candidate)
     ):
         return None
-    row = db.execute("SELECT content FROM messages WHERE id=?", (candidate.message_id,)).fetchone()
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note
 
     return append_thread_context_note(
         db,
         thread_id=candidate.thread_id,
         summary=note_text(
-            candidate.message_id, str(row[0] if row else candidate.content), candidate.created_at,
+            candidate.source_id, candidate.content, candidate.created_at,
         ),
         # Agent-only: no chip, so the person's transcript shows nothing for it.
         details={
             "chip": None,
             "kind": NOTE_KIND,
-            "correction_subject": subject_key(candidate.message_id),
+            "correction_subject": subject_key(candidate.source_kind, candidate.source_id),
             REOFFER_UNWRITTEN: True,
         },
     )

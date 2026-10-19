@@ -17,6 +17,9 @@ from loguru import logger
 
 CORRECTION_EVENT = "measurement.correction"
 MESSAGE_SUBJECT_PREFIX = "message:"
+COMMENT_SUBJECT_PREFIX = "doc-comment:"
+DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
+SOURCE_KINDS = ("message", "doc_comment", "plan_decision_answer")
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
 # A healthy, self-tested classifier failed twice on this one input; Measurement never counts it.
@@ -32,7 +35,8 @@ SYSTEM_WRAPPER_PREFIXES = (
 )
 OWNER_MESSAGE_METADATA_KEYS = ("sender_kind", "routed_event", "send_idempotency_key")
 FACT_KEYS = (
-    "message_id",
+    "source_kind",
+    "source_id",
     "thread_id",
     "label",
     "asset_id",
@@ -109,13 +113,19 @@ class CorrectionCandidate:
     ``arrived`` marks a message classified as it arrives, not by a later scan.
     """
 
-    message_id: str
+    source_kind: str
+    source_id: str
     thread_id: str
     project_id: str | None
     content: str
     created_at: str
     context: tuple[tuple[str, str], ...] = ()
     arrived: bool = False
+
+    @property
+    def message_id(self) -> str:
+        """Compatibility identity for message-only callers during source migration."""
+        return self.source_id
 
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
@@ -156,15 +166,22 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
         db.close()
 
 
-def subject_key(message_id: str) -> str:
-    """The ``outcome_events`` subject for one durable message."""
-    return MESSAGE_SUBJECT_PREFIX + message_id
+def subject_key(source_kind: str, source_id: str) -> str:
+    """The non-colliding ``outcome_events`` subject for one correction source."""
+    prefixes = {
+        "message": MESSAGE_SUBJECT_PREFIX,
+        "doc_comment": COMMENT_SUBJECT_PREFIX,
+        "plan_decision_answer": DECISION_SUBJECT_PREFIX,
+    }
+    if source_kind not in prefixes:
+        raise ValueError(f"unknown correction source kind: {source_kind}")
+    return prefixes[source_kind] + source_id
 
 
-def dedupe_key(message_id: str, version: ClassifierVersion) -> str:
-    """Stable idempotency key for one message under one classifier version."""
+def dedupe_key(candidate: CorrectionCandidate, version: ClassifierVersion) -> str:
+    """Stable idempotency key for one source under one classifier version."""
     payload = json.dumps(
-        {"message_id": message_id, **version_attributes(version)},
+        {"subject_key": subject_key(candidate.source_kind, candidate.source_id), **version_attributes(version)},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -246,7 +263,8 @@ def fact_attributes(
     if label not in LABELS or reason not in FAILURE_REASONS or (label == LABEL_UNREADABLE) == (reason == "none"):
         raise ValueError(f"inconsistent correction fact: label {label}, failure {reason}")
     return {
-        "message_id": candidate.message_id,
+        "source_kind": candidate.source_kind,
+        "source_id": candidate.source_id,
         "thread_id": candidate.thread_id,
         "label": label,
         **version_attributes(version),

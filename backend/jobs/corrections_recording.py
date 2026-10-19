@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import json
 from typing import TYPE_CHECKING
 
+from core.corrections_input import owner_text
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
@@ -18,7 +20,12 @@ from core.corrections_recording import (
     version_match_sql,
 )
 from infra.db_async import run_in_db
-from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates, pending_candidate_keys
+from jobs.corrections_scanning import (
+    PendingCandidateKey,
+    hydrate_candidates,
+    pending_candidate_keys,
+    pending_source_candidate_keys,
+)
 
 if TYPE_CHECKING:
     from core.corrections_classifier import Classification
@@ -60,12 +67,12 @@ def _record_fact(
     with write_transaction(None, scope="record_correction_fact") as db:
         result = record_outcome_event(
             db,
-            dedupe_key=dedupe_key(candidate.message_id, version),
+            dedupe_key=dedupe_key(candidate, version),
             event_name=CORRECTION_EVENT,
             source="corsia",
             provenance="agent_recorded",
             ts=candidate.created_at,
-            subject_key=subject_key(candidate.message_id),
+            subject_key=subject_key(candidate.source_kind, candidate.source_id),
             project_id=candidate.project_id,
             agent_thread_id=candidate.thread_id,
             attributes=attributes,
@@ -75,6 +82,66 @@ def _record_fact(
         if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
             queue_correction_note(db, candidate, version, result.event_id)
         return result.inserted
+
+
+def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
+    """Hydrate one newly arrived correction source or return no human candidate."""
+    if source_kind == "message":
+        return candidate_for_message(source_id)
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        if source_kind == "doc_comment":
+            row = db.execute(
+                """SELECT id,artifact_id,anchor_text,body,created_at FROM doc_comments
+                   WHERE id=? AND author_kind='user'""", (source_id,),
+            ).fetchone()
+            from registry.models import get_artifact
+
+            artifact = get_artifact(str(row['artifact_id']), db=db) if row is not None else None
+            if row is None or artifact is None or not artifact.get('parent_thread_id'):
+                return None
+            target = str(artifact['parent_thread_id'])
+            project = db.execute("SELECT project_id FROM threads WHERE id=?", (target,)).fetchone()
+            content = f"Artifact excerpt: {row['anchor_text'] or '(no anchor)'}\nOwner comment: {row['body']}"
+            return CorrectionCandidate("doc_comment", str(row['id']), target, project[0] if project else None, owner_text(content), str(row['created_at']))
+        if source_kind == "plan_decision_answer":
+            from plans.decision_projection import identity_row
+
+            row = identity_row(db, source_id)
+            if row is None:
+                return None
+            try:
+                body = json.loads(row['metadata']).get('plan_decision', {})
+            except (TypeError, ValueError):
+                return None
+            answer = body.get('answer') if isinstance(body, dict) else None
+            text = answer.get('text') if isinstance(answer, dict) else None
+            thread_id, revision, answered_at = (
+                body.get('thread_id'), body.get('revision'), body.get('answered_at'),
+            ) if isinstance(body, dict) else (None, None, None)
+            if (
+                body.get('state') != 'answered' or not isinstance(text, str) or not text.strip()
+                or not isinstance(thread_id, str) or not thread_id or revision is None
+                or not isinstance(answered_at, str) or not answered_at
+            ):
+                return None
+            options = body.get('options') if isinstance(body.get('options'), list) else ()
+            options_text = '; '.join(
+                f"{item.get('id')} — {item.get('label')} — {item.get('detail', '')}"
+                for item in options if isinstance(item, dict)
+            )
+            content = (f"Decision question: {body.get('title', '')}\nContext: {body.get('context', '')}\n"
+                       f"Trade-off: {body.get('tradeoff', '')}\nOptions: {options_text}\nOwner answer: {text}")
+            project = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+            return CorrectionCandidate(
+                "plan_decision_answer", f"{source_id}:{revision}", thread_id,
+                project[0] if project else None, owner_text(content), answered_at,
+            )
+        return None
+    finally:
+        db.close()
 
 
 def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
@@ -89,7 +156,7 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
         ).fetchone()
         if row is None:
             return None
-        key = PendingCandidateKey(int(row[0]), str(row[1]), str(row[2]), row[3], str(row[4]))
+        key = PendingCandidateKey(int(row[0]), "message", str(row[1]), str(row[2]), row[3], str(row[4]))
     finally:
         db.close()
     candidates = hydrate_candidates([key])
@@ -116,9 +183,10 @@ async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierV
 
 
 def unreadable_messages(db, version: ClassifierVersion) -> int:
-    """Count this version's ``unreadable`` messages in the Measurement window, each once.
+    """Count this version's unreadable user messages in the Measurement window, once each.
 
-    The ``(event_name, ts)`` index bounds the read to the window's correction facts.
+    Comment and decision sources are excluded with their correction facts. The
+    ``(event_name, ts)`` index bounds the read to the window's correction facts.
     """
     from jobs.corrections_activation import measurement_window_start
 
@@ -126,7 +194,8 @@ def unreadable_messages(db, version: ClassifierVersion) -> int:
     row = db.execute(
         f"""SELECT COUNT(DISTINCT e.subject_key) FROM outcome_events e
            WHERE e.event_name=:event AND e.ts >= :since AND e.retracted_at IS NULL
-             AND {version_filter} AND json_extract(e.attributes,'$.label')=:label""",
+             AND {version_filter} AND json_extract(e.attributes,'$.source_kind')='message'
+             AND json_extract(e.attributes,'$.label')=:label""",
         {
             **version_params, "event": CORRECTION_EVENT, "label": LABEL_UNREADABLE,
             "since": measurement_window_start().isoformat(),
@@ -144,11 +213,13 @@ class _PendingBatch:
 
 
 async def next_pending_batch(
-    version: ClassifierVersion, batch_size: int, before: tuple[str, str] | None,
+    version: ClassifierVersion, batch_size: int, before: tuple[str, ...] | None,
     *, since: str | None = None,
 ) -> _PendingBatch:
     """Globally select keys before reading the bounded classifier inputs."""
-    keys: list[PendingCandidateKey] = []
+    keys: list[PendingCandidateKey] = await run_in_db(
+        pending_source_candidate_keys, version, batch_size, before, since,
+    )
     for owner_user_id in await run_in_db(owner_user_ids):
         keys.extend(
             await run_in_db(
@@ -156,6 +227,6 @@ async def next_pending_batch(
             )
         )
     selected = sorted(
-        keys, key=lambda key: (key.created_at, key.message_id), reverse=True,
+        keys, key=lambda key: (key.created_at, key.source_kind, key.source_id), reverse=True,
     )[:batch_size]
     return _PendingBatch(selected, await run_in_db(hydrate_candidates, selected))
