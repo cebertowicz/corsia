@@ -178,7 +178,7 @@ def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
     hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
-    drives: list[str] | None = None,
+    drives: list[str] | None = None, idle_drives: list[str] | None = None,
 ) -> AttentionResult:
     """Clear attention through one of the public user/system outcomes.
 
@@ -196,7 +196,7 @@ def clear_attention(
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
         verdict=verdict, note=note, hold_ids=hold_ids, require_hold_ids=require_hold_ids,
-        db=db, drives=drives,
+        db=db, drives=drives, idle_drives=idle_drives,
     )
 
 
@@ -211,7 +211,7 @@ def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
     hold_ids: list[str] | None = None, require_hold_ids: bool = False, db=None,
-    drives: list[str] | None = None,
+    drives: list[str] | None = None, idle_drives: list[str] | None = None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -224,6 +224,7 @@ def _clear_attention(
 
     with write_transaction(db, scope="clear_attention") as _db, \
             plans_public.collect_wake_recipients(_db, drives):
+        message_floor = _db.execute("SELECT COALESCE(MAX(rowid), 0) FROM messages").fetchone()[0]
         row = _identity_row(artifact_id, _db)
         identity = _identity(row)
         record = AR.register_or_resolve(identity, db=_db)
@@ -258,6 +259,21 @@ def _clear_attention(
         plans_public.ask_cleared(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )
+        if answer is not None and answer.correction_note is not None:
+            target, note_key = answer.correction_note
+            already_queued = _db.execute(
+                """SELECT 1 FROM messages WHERE rowid>? AND thread_id=?
+                   AND delivery_state='queued' LIMIT 1""",
+                (message_floor, target),
+            ).fetchone()
+            if already_queued is None:
+                from infra.passive_changes import materialize_pending_digest
+
+                admitted = materialize_pending_digest(
+                    _db, target, message_id=f"correction-wake:{note_key}",
+                )
+                if admitted is not None and not admitted.duplicate and idle_drives is not None:
+                    idle_drives.append(target)
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",

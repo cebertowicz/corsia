@@ -122,12 +122,6 @@ class CorrectionCandidate:
     context: tuple[tuple[str, str], ...] = ()
     arrived: bool = False
 
-    @property
-    def message_id(self) -> str:
-        """Compatibility identity for message-only callers during source migration."""
-        return self.source_id
-
-
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
 ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"
 

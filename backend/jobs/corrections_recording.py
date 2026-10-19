@@ -52,7 +52,7 @@ def _record_fact(
     candidate: CorrectionCandidate,
     classification: dict[str, str | int | bool],
     version: ClassifierVersion,
-) -> bool:
+) -> tuple[bool, str | None]:
     """Write one versioned local-classifier fact in its own transaction.
 
     A new correction queues its triage note in the same transaction.
@@ -79,9 +79,20 @@ def _record_fact(
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
+        note_key = None
         if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
-            queue_correction_note(db, candidate, version, result.event_id)
-        return result.inserted
+            note_key = queue_correction_note(db, candidate, version, result.event_id)
+            if note_key is not None and candidate.source_kind != "message":
+                from infra.passive_changes import materialize_pending_digest
+
+                admitted = materialize_pending_digest(
+                    db,
+                    candidate.thread_id,
+                    message_id=f"correction-wake:{note_key}",
+                )
+                if admitted is None or admitted.duplicate:
+                    note_key = None
+        return result.inserted, candidate.thread_id if note_key is not None else None
 
 
 def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
@@ -163,30 +174,42 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
     return replace(candidates[0], arrived=True) if candidates else None
 
 
+async def _record_and_drive(
+    candidate: CorrectionCandidate,
+    classification: dict[str, str | int | bool],
+    version: ClassifierVersion,
+) -> bool:
+    inserted, wake_target = await run_in_db(_record_fact, candidate, classification, version)
+    if wake_target is not None:
+        from infra.thread_execution import drive_idle_thread
+
+        await drive_idle_thread(wake_target)
+    return inserted
+
+
 async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:
     """Record a scored fact; ``failure_reason`` is ``none``."""
-    classification = {
+    return await _record_and_drive(candidate, {
         "label": result.label,
         "truncated": result.truncated,
         "original_tokens": result.original_tokens,
         "failure_reason": "none",
-    }
-    return await run_in_db(_record_fact, candidate, classification, result.version)
+    }, result.version)
 
 
 async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierVersion, reason: str) -> bool:
     """Record an input a healthy model failed on twice, with that failure's kind."""
-    classification = {
+    return await _record_and_drive(candidate, {
         "label": LABEL_UNREADABLE, "truncated": False, "original_tokens": 0, "failure_reason": reason,
-    }
-    return await run_in_db(_record_fact, candidate, classification, version)
+    }, version)
 
 
 def unreadable_messages(db, version: ClassifierVersion) -> int:
-    """Count this version's unreadable user messages in the Measurement window, once each.
+    """Count served unreadable facts in the Measurement window, once each.
 
-    Comment and decision sources are excluded with their correction facts. The
-    ``(event_name, ts)`` index bounds the read to the window's correction facts.
+    Comment facts count alongside messages, including legacy facts that lack a
+    source-kind attribute. Decision answers stay triage-only. The ``(event_name,
+    ts)`` index bounds the read to the window's correction facts.
     """
     from jobs.corrections_activation import measurement_window_start
 
@@ -194,7 +217,7 @@ def unreadable_messages(db, version: ClassifierVersion) -> int:
     row = db.execute(
         f"""SELECT COUNT(DISTINCT e.subject_key) FROM outcome_events e
            WHERE e.event_name=:event AND e.ts >= :since AND e.retracted_at IS NULL
-             AND {version_filter} AND json_extract(e.attributes,'$.source_kind')='message'
+             AND {version_filter} AND e.subject_key NOT LIKE 'plan-decision-answer:%'
              AND json_extract(e.attributes,'$.label')=:label""",
         {
             **version_params, "event": CORRECTION_EVENT, "label": LABEL_UNREADABLE,

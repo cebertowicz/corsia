@@ -318,7 +318,11 @@ def _roster_content(db: sqlite3.Connection, thread_id: str, roster_change: sqlit
 
 
 def materialize_pending_digest(
-    db: sqlite3.Connection, thread_id: str, *, admit_while_fenced: bool = False,
+    db: sqlite3.Connection,
+    thread_id: str,
+    *,
+    admit_while_fenced: bool = False,
+    message_id: str | None = None,
 ) -> AcceptedInput | None:
     """Pull relevant unseen changes into one passive FIFO input."""
     if thread_id == "ui":  # Reserved user principal, never a runnable thread.
@@ -362,9 +366,7 @@ def materialize_pending_digest(
             role="system",
             content=content,
             intent="queue_after_turn",
-            message_id=(
-                f"context-digest:{thread_id}:{after + 1}:{through}{clock_suffix}"
-            ),
+            message_id=message_id or f"context-digest:{thread_id}:{after + 1}:{through}{clock_suffix}",
             metadata={
                 "type": "context_event",
                 "event_type": "context.digest",

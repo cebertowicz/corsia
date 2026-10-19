@@ -260,11 +260,13 @@ async def post_clear(artifact_id: str, body: ClearBody):
     user = _require_user(body.token)
     await _authorize(artifact_id, user)
     woken: list[str] = []
+    idle_woken: list[str] = []
     try:
         result = await run_in_db(lambda: attention.clear_attention(
             artifact_id, outcome=body.outcome, condition=body.condition,
             reason=body.reason, verdict=body.verdict, note=body.note,
             hold_ids=body.hold_ids, require_hold_ids=True, drives=woken,
+            idle_drives=idle_woken,
         ))
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
@@ -274,6 +276,11 @@ async def post_clear(artifact_id: str, body: ClearBody):
     except attention.AttentionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await public.drive_threads(woken)
+    if idle_woken:
+        from infra.thread_execution import drive_idle_thread
+
+        for thread_id in idle_woken:
+            await drive_idle_thread(thread_id)
     return asdict(result)
 
 

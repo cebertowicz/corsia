@@ -56,7 +56,13 @@ from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import candidate_for_message, candidate_for_source, record_classification, record_unreadable, unreadable_messages
+from jobs.corrections_recording import (
+    candidate_for_message,
+    candidate_for_source,
+    record_classification,
+    record_unreadable,
+    unreadable_messages,
+)
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
 QUEUE_SIZE = 256
@@ -228,23 +234,17 @@ class CorrectionsWorker:
             if manifest is None:
                 return outcome
 
-    async def _arrival(self, source_kind: str, source_id: str, enqueued_at: float) -> None:
-        started_at = _clock()
-        self.queue_delay_ms = (started_at - enqueued_at) * 1000
-        try:
-            candidate = await run_in_db(
-                candidate_for_message if source_kind == "message" else candidate_for_source,
-                source_id if source_kind == "message" else source_kind,
-                *(() if source_kind == "message" else (source_id,)),
-            )
-            if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
-                self._release_hold()
-        except Exception:
-            logger.exception("corrections classifier arrival failed; the scan will read it")
-            self._owe()
-        finally:
-            self.service_time_ms = (_clock() - started_at) * 1000
-            self.queue.task_done()
+    def clock(self) -> float:
+        return _clock()
+
+    async def classify_arrival(self, candidate: CorrectionCandidate) -> ClassificationOutcome:
+        return await self._classify(candidate)
+
+    def release_hold(self) -> None:
+        self._release_hold()
+
+    def owe_scan(self) -> None:
+        self._owe()
 
     async def _scan_pass(self) -> None:
         self.scan = "running"
@@ -279,7 +279,7 @@ class CorrectionsWorker:
             if not batch.selected_keys:
                 return await activate_after_backfill(version)
             tail = batch.selected_keys[-1]
-            before = (tail.created_at, getattr(tail, "source_kind", "message"), getattr(tail, "source_id", None) or tail.message_id)
+            before = (tail.created_at, tail.source_kind, tail.source_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
@@ -297,17 +297,13 @@ class CorrectionsWorker:
                     await asyncio.wait_for(self.arrived.wait(), self.call_seconds)
         return "yielded"
 
+    async def scan_pass(self) -> None:
+        await self._scan_pass()
+
     async def run(self) -> None:
-        while True:
-            try:
-                queued = self.queue.get_nowait()
-                source_kind, source_id, enqueued_at = ("message", *queued) if len(queued) == 2 else queued
-            except asyncio.QueueEmpty:
-                if self.scan == "idle" or self.held_reason is not None:
-                    return
-                await self._scan_pass()
-                continue
-            await self._arrival(source_kind, source_id, enqueued_at)
+        from jobs.corrections_dispatch import run_dispatch
+
+        await run_dispatch(self)
 
     def _start_task(self, coroutine) -> None:
         if self.task is not None and not self.task.done():
