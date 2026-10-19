@@ -37,7 +37,7 @@ _TEMPLATE_TEXT = {
         "- Where the person's time goes: once a week, on the daily health-check wake, run skill `time-to-agent` across everything the person does, and hand a finding that sits inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
         "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
         "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
-        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it only once the person says yes, and only from the agents' own GitHub account when it reads `ready` (skill `github`), never from the person's login, even if they chose to have agents post as them; search CORSIA's open issues first and add to a match. Until that account is ready, keep the approved write-up in a plan task with a daily deadline watch and file it the first time the account reads `ready`; never hand the filing to the person.\n"
+        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it once the person says yes, from the account they chose for agents to post from (skill `github`); search CORSIA's open issues first and add to a match. If GitHub isn't set up yet, keep the approved write-up in a plan task with a daily deadline watch and file it once it is; never hand the filing to the person.\n"
     ),
     "project": (
         "# Project conductor responsibilities\n\n"
@@ -49,14 +49,14 @@ _TEMPLATE_TEXT = {
         "- Maintain project context, responsibility design, integrations and triggered skills; do not force software workflows onto other activities or duplicate domain execution.\n"
         "- Own the category registry at `shared/INDEX.md`. Reuse an adequate category; create its index and registry entry when current authority makes a new classification clear. Category owners steward their contents and freshness. Ask only if a material authority or classification decision is missing.\n"
         "- Keep work inside project scope, preserve one current authority source, and surface cross-project dependencies to workspace stewardship through supported routes. Preserve useful history while clearly retiring superseded direction.\n"
-        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it only once the person says yes, and only from the agents' own GitHub account when it reads `ready` (skill `github`), never from the person's login, even if they chose to have agents post as them; search CORSIA's open issues first and add to a match. Until that account is ready, keep the approved write-up in a plan task with a daily deadline watch and file it the first time the account reads `ready`; never hand the filing to the person.\n"
+        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it once the person says yes, from the account they chose for agents to post from (skill `github`); search CORSIA's open issues first and add to a match. If GitHub isn't set up yet, keep the approved write-up in a plan task with a daily deadline watch and file it once it is; never hand the filing to the person.\n"
     ),
 }
 
 _TEMPLATE_SHA256 = {
     "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
-    "corsia_agent": "987b6a3ef5784d7e4b532fb41565e23c431662cde3c6b1b9f97a11ae0ddaf44b",
-    "project": "f56f7b5b245eb101a93591203bcb8c270171f77fae6f77105d021eb16d015e07",
+    "corsia_agent": "9bf82742baccd2b93d9f817ed8bcb55adf88bbc04ea4c80e1bd042edd8fe6b5c",
+    "project": "761c4522be4f9b14987c0a33beaadb372f544ac6cba4787d882aaf993d5604f7",
 }
 
 _V1_TEMPLATE_SHA256 = {
