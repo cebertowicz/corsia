@@ -306,10 +306,10 @@ class DocCommentUpdateTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent "
-            "thread. You may edit only comments you wrote, and resolve or acknowledge only on a "
-            "document you own or a comment you wrote; otherwise reply with doc_comment_create.")
+        return ("Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent thread. You may edit only "
+                "comments you wrote, and resolve or acknowledge only on a document you own or a comment you wrote; otherwise reply "
+                "with doc_comment_create. Leave a person's comment open for them to resolve, above all one you replied to; resolve it "
+                "yourself only when they asked you to, or when you made exactly the change it asked for and had nothing to say.")
 
     @property
     def parameters(self) -> dict[str, Any]:
