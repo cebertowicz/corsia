@@ -164,8 +164,9 @@ async def test_native_ws_persists_broadcasts_and_starts_browser_turn(
                     if message["id"] == message_id
                 ]
 
+            # Wait for as many states as expected; the asserts below check them.
             async with self._sent:
-                await self._sent.wait_for(lambda: _delivered_states() == expected)
+                await self._sent.wait_for(lambda: len(_delivered_states()) >= len(expected))
 
     ws = _WS()
     peer_ws = _WS()
@@ -233,12 +234,13 @@ async def test_native_ws_persists_broadcasts_and_starts_browser_turn(
                 broadcast_exclude_ws=ws,
             )
             await settled.wait()
-            await asyncio.gather(
+            # Bounded, so a lost frame fails the test instead of hanging the run.
+            await asyncio.wait_for(asyncio.gather(
                 ws.wait_for_delivery_states(result.message_id, ["queued", "delivered"]),
                 peer_ws.wait_for_delivery_states(
                     result.message_id, ["queued", "queued", "delivered"],
                 ),
-            )
+            ), timeout=5)
     finally:
         state._ws_thread_clients.pop("native-ws", None)
 
