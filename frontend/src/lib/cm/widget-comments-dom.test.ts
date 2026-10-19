@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
+import { markdownLivePreview } from './markdown-live';
 import { pendingCommentMark } from './pending-comment-mark';
 import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
 
@@ -113,6 +114,34 @@ describe('selectionIn a diagram', () => {
 		const selection = selectionIn(view, el, range)!;
 		expect(selection).toMatchObject({ from: FENCE_FROM, to: FENCE_TO, inWidget: true });
 		expect(label(selection)).toBe('The whole diagram');
+	});
+});
+
+describe('a selection raised inside a rendered table', () => {
+	it('survives the editor updates that follow it when the editor held focus', () => {
+		vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+		let view!: EditorView;
+		const raised: Array<WidgetSelection | null> = [];
+		// As the document viewer does: raising a widget selection draws its pending mark, an editor update that repaints the cell.
+		const onSelect = (selection: WidgetSelection | null) => {
+			raised.push(selection);
+			view.plugin(pendingCommentMark)!.range = selection && { from: selection.from, to: selection.to };
+			view.dispatch({ effects: setCommentRanges.of([]) });
+		};
+		view = new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect, onFocus: vi.fn() })] }), parent: document.body });
+		view.focus();
+		expect(view.hasFocus, 'setup: the editor holds focus, as after any click in the document').toBe(true);
+		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		expect(table, 'setup: the table rendered').toBeTruthy();
+		const text = table.querySelector('table')!.rows[1].cells[0].firstChild!;
+		document.getSelection()!.setBaseAndExtent(text, 1, text, 4);
+		document.dispatchEvent(new Event('selectionchange'));
+		vi.advanceTimersByTime(50);
+		document.dispatchEvent(new Event('selectionchange'));
+		vi.advanceTimersByTime(50);
+		expect(table.querySelector('.cm-comment-pending')?.textContent, 'the pending mark is drawn under the selection').toBe('lph');
+		expect(document.getSelection()!.toString()).toBe('lph');
+		expect(raised.at(-1)).toMatchObject({ text: 'lph', inWidget: true });
 	});
 });
 

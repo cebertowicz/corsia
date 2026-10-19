@@ -43,13 +43,13 @@ const backendCommand = [
 		: `CORSIA_TEST_MODE=1 CORSIA_WORKSPACE=${shellQuote(workspace)} CORSIA_STATE_DIR=${shellQuote(stateRoot)} ${shellQuote(backendPython)} -m uvicorn ${backendApp} --host 127.0.0.1 --port ${backendPort}`,
 ].filter(Boolean).join(' ');
 
-// The desktop app is a WKWebView, so the document scroll spec can also run in
-// WebKit. Opt-in (CORSIA_E2E_WEBKIT=1, then `--project webkit-desktop`) because
+// The desktop app is a WKWebView, so the document scroll and table-cell
+// selection specs can also run in WebKit. Opt-in (CORSIA_E2E_WEBKIT=1, then `--project webkit-desktop`) because
 // the default CI browser install does not include WebKit.
 const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 	? [{
 		name: 'webkit-desktop',
-		testMatch: /document-comment-scroll\.spec\.ts$/,
+		testMatch: /(document-comment-scroll|doc-table-cell-selection)\.spec\.ts$/,
 		use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
 	}]
 	: [];

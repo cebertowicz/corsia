@@ -4,7 +4,7 @@ import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
-import { addCommentId, commentIdsAt, paintTable, unpaint, type Mark } from './widget-paint';
+import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -236,6 +236,15 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 			const el = range && widgetOf(this.view, range.commonAncestorContainer);
 			const raised = el && range && (!range.collapsed || el.matches(TABLE)) ? selectionIn(this.view, el, range) : null;
+			// While the editor holds focus, every editor update (this selection's own pending mark, a collaborator's edit)
+			// writes the editor's caret over the browser's selection, which then reads as nothing. A selection inside a widget
+			// is not the editor's, so the editor gives up focus and the same range is put back.
+			if (raised && this.view.hasFocus) {
+				const kept = range!.cloneRange();
+				this.view.contentDOM.blur();
+				selection!.removeAllRanges();
+				selection!.addRange(kept);
+			}
 			if (raised) { this.raised = true; hooks.onSelect({ ...raised, top: raised.anchor()?.top ?? raised.top }); }
 			else if (this.raised) { this.raised = false; hooks.onSelect(null); }
 		}
@@ -260,16 +269,18 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 						const signature = JSON.stringify([block.from, src.length, mine]);
 						if (el.dataset.paintSignature === signature) continue;
 						el.dataset.paintSignature = signature;
-						unpaint(el);
-						if (el.matches(DIAGRAM)) {
-							for (const mark of mine) {
-								el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
-								addCommentId(el, mark);
-								el.dataset.commentAria = 'true';
-								el.setAttribute('role', 'img');
-								el.setAttribute('aria-label', 'Commented diagram');
-							}
-						} else paintTable(el, block.from, src, mine);
+						keepingSelection(el, () => {
+							unpaint(el);
+							if (el.matches(DIAGRAM)) {
+								for (const mark of mine) {
+									el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
+									addCommentId(el, mark);
+									el.dataset.commentAria = 'true';
+									el.setAttribute('role', 'img');
+									el.setAttribute('aria-label', 'Commented diagram');
+								}
+							} else paintTable(el, block.from, src, mine);
+						});
 					}
 				},
 			});
