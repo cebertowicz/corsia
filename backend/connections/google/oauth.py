@@ -66,7 +66,7 @@ MISSING_SCOPES = (
     "Gmail and Calendar; Drive, Docs and Sheets are optional."
 )
 ALREADY_CONNECTED = (
-    "{address} is already connected. To change where it works, use Where it works… on its row in "
+    "{address} is already connected{reach}. To change where it works, use Where it works… on its row in "
     "Connected apps."
 )
 ALREADY_NEEDS_SIGN_IN = (
@@ -168,6 +168,7 @@ def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-de
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
 
 
+
 def _begin(
     client_file: object, account_id: str | None, actor: Actor, adding_thread_id: str | None,
     reach: AppReach | None,
@@ -250,7 +251,7 @@ def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> N
     for account in google_accounts(db=conn):
         if _same_identity(account, email, provider_subject):
             text = ALREADY_CONNECTED if account["state"] == STATUS_CONNECTED else ALREADY_NEEDS_SIGN_IN
-            raise GoogleSignInError(text.format(address=account["address"]))
+            raise GoogleSignInError(text.format(address=account["address"], reach=""))
     fields = {
         "created_by": pending.actor, "signed_in_by": pending.actor, "provider_subject": provider_subject,
         "account_id": pending.account_id, "state": STATUS_CONNECTED,

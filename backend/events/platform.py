@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from events import dead_letter
 from events.connectors import get_manifest
@@ -30,6 +30,7 @@ WOKE = "woke"
 DIGESTED = "digested"
 DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
+FILTERED = "filtered"
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class PlatformDelivery:
 
     event_id: str
     thread_id: str | None
-    outcome: str  # woke | digested | dead_lettered | duplicate
+    outcome: str  # woke | digested | dead_lettered | duplicate | filtered
     reason: str | None = None
 
 
@@ -123,6 +124,7 @@ def deliver_platform_event_sync(
     event_type: str | None = None,
     *,
     repair_owner: str | None = None,
+    target_filter: Callable[[Target, sqlite3.Connection], str | None] | None = None,
     db: sqlite3.Connection | None = None,
 ) -> list[PlatformDelivery]:
     """Normalize, resolve and deliver one event in one write transaction."""
@@ -131,7 +133,9 @@ def deliver_platform_event_sync(
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
         deliveries = [
-            _deliver_target(conn, envelope, target, collapse_fact)
+            PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
+            if target_filter is not None and (reason := target_filter(target, conn)) is not None
+            else _deliver_target(conn, envelope, target, collapse_fact)
             for target in targets
         ]
         for delivery in deliveries:

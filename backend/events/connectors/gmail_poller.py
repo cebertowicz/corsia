@@ -26,7 +26,8 @@ from connections.google import client as google_client
 from connections.google import email_screen
 from connections.google.accounts import thread_key
 from events.connectors import gmail_feed as feed
-from events.platform import deliver_platform_event_sync
+from events.platform import DIGESTED, FILTERED, WOKE, PlatformDelivery, deliver_platform_event_sync
+from events.resolve import Target
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
@@ -43,7 +44,10 @@ _STATIC_REASONS = frozenset({"test_mode", "config_off"})
 
 
 def _fresh_status() -> dict[str, Any]:
-    return {"state": "starting", "reason": None, "last_success_at": None, "last_error": None}
+    return {
+        "state": "starting", "reason": None, "last_success_at": None, "last_error": None,
+        "delivery": {"delivered": 0, "excluded": 0, "outcomes": {}},
+    }
 
 
 #: The loop's own state: why it is off, if it is.
@@ -65,7 +69,11 @@ class Cursor:
 def poller_status(account_id: str | None = None) -> dict[str, Any]:
     """A copy of live poller state: the loop's, or one account's (``starting`` until it is polled)."""
     source = _status if account_id is None else _accounts.get(account_id, _fresh_status())
-    return {**source, "last_error": dict(source["last_error"] or {}) or None}
+    delivery = source.get("delivery", {})
+    return {
+        **source, "last_error": dict(source["last_error"] or {}) or None,
+        "delivery": {**delivery, "outcomes": dict(delivery.get("outcomes", {}))},
+    }
 
 
 def _set_state(state: str, reason: str | None = None, account_id: str | None = None) -> None:
@@ -146,14 +154,35 @@ def _save_cursor(cursor: Cursor, db: sqlite3.Connection | None = None) -> bool:
 
 
 def _deliver(account_id: str, payload: dict[str, Any], db: sqlite3.Connection | None = None) -> bool:
-    """Deliver one event only while its account is connected, in the same transaction as the check."""
-    from connections.connected_accounts import is_connected
+    """Deliver one event only to resolved owners inside its account reach."""
+    from connections.connected_accounts import account_reaches_thread, is_connected
+
+    def inside_account_reach(target: Target, connection: sqlite3.Connection) -> str | None:
+        if target.thread is None or account_reaches_thread(account_id, target.thread, db=connection):
+            return None
+        return "account_out_of_reach"
 
     with write_transaction(db, scope="gmail_poll_deliver") as conn:
         if not is_connected(account_id, db=conn):
             return False
-        deliver_platform_event_sync("gmail", payload, db=conn)
+        deliveries = deliver_platform_event_sync(
+            "gmail", payload, target_filter=inside_account_reach, db=conn,
+        )
+        _record_delivery(account_id, deliveries)
         return True
+
+
+def _record_delivery(account_id: str, deliveries: list[PlatformDelivery]) -> None:
+    """Expose Gmail routing outcomes without treating an intentional scope drop as a poll failure."""
+    status = _accounts.setdefault(account_id, _fresh_status())
+    delivery = status["delivery"]
+    outcomes = delivery["outcomes"]
+    for result in deliveries:
+        outcomes[result.outcome] = outcomes.get(result.outcome, 0) + 1
+        if result.outcome == FILTERED:
+            delivery["excluded"] += 1
+        elif result.outcome in {WOKE, DIGESTED}:
+            delivery["delivered"] += 1
 
 
 async def _load_cursor(account_id: str) -> tuple[Cursor | None, bool]:
