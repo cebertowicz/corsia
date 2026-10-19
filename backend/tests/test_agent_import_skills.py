@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import builtins
 import datetime
+import hashlib
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -160,7 +162,7 @@ def test_install_writes_the_skill_data_form_and_nothing_tool_granting(home):
     roots, workspace = home
     results = _install(home, _ids(_offers(home), "adr-writer", "git-tidy"))
     assert [row["outcome"] for row in results] == ["installed", "installed"]
-    assert set(results[0]) == {"item_id", "name", "sha256", "outcome"}
+    assert set(results[0]) == {"item_id", "name", "sha256", "outcome", "history_outcome", "guidance_history"}
     target = workspace / "skills" / "adr-writer"
     meta = yaml.safe_load((target / "SKILL.md").read_text().split("---\n")[1])
     assert meta == {
@@ -181,6 +183,120 @@ def test_install_writes_the_skill_data_form_and_nothing_tool_granting(home):
 
     assert validate_skill_file(target / "SKILL.md").ok
     assert validate_skill_file(workspace / "skills" / "git-tidy" / "SKILL.md").ok
+    history = subprocess.run(
+        ["git", "-C", str(workspace), "log", "-1", "--format=%B"], capture_output=True, check=True, text=True
+    ).stdout
+    assert "Reason: consented skill import from agent_import" in history
+
+
+def test_install_writes_the_description_that_was_shown(home):
+    roots, workspace = home
+    _skill(roots.codex / "skills" / "long-said", "long-said", "word " * 200)
+    shown = _offers(home)["long-said"]["description"]
+
+    assert _install(home, _ids(_offers(home), "long-said"))[0]["outcome"] == "installed"
+    meta = yaml.safe_load((workspace / "skills" / "long-said" / "SKILL.md").read_text().split("---\n")[1])
+    assert meta["description"] == shown
+    assert len(shown) <= 500
+
+
+def test_an_upstream_sidecar_is_dropped_and_only_origin_is_written(home):
+    roots, workspace = home
+    folder = _skill(roots.codex / "skills" / "with-handler", "with-handler", "carries a handler")
+    (folder / "corsia.yaml").write_text("handler:\n  kind: cli\n  command: rm\nworkflow:\n  steps: []\n")
+
+    assert _install(home, _ids(_offers(home), "with-handler"))[0]["outcome"] == "installed"
+    sidecar = yaml.safe_load((workspace / "skills" / "with-handler" / "corsia.yaml").read_text())
+    assert list(sidecar) == ["origin"]
+    assert sidecar["origin"]["sha256"] == hashlib.sha256((folder / "SKILL.md").read_bytes()).hexdigest()
+
+
+def test_a_save_that_stops_partway_leaves_nothing_and_can_be_retried(home, monkeypatch):
+    from infra import skill_install
+
+    def partial(writes, **_kwargs):
+        path, data = next(iter(writes.items()))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        raise OSError("disk full")
+
+    offers = _offers(home)
+    monkeypatch.setattr(skill_install, "save_guidance", partial)
+    assert _install(home, _ids(offers, "rfc-writer"))[0]["outcome"] == "failed"
+    assert not (home[1] / "skills" / "rfc-writer").exists()
+    monkeypatch.undo()
+    assert _offers(home)["rfc-writer"]["state"] == "new"
+
+
+@pytest.mark.parametrize("outcome", ["deferred", "failed", "history-off"])
+def test_a_save_without_history_is_installed_and_passes_its_line_on_unchanged(home, monkeypatch, outcome):
+    from infra import skill_install
+    from infra.guidance_git import SaveResult
+
+    def unrecorded(writes, **_kwargs):
+        for path, data in writes.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return SaveResult(outcome, "history fault", line="Saved, but the commit failed. Report this.")
+
+    monkeypatch.setattr(skill_install, "save_guidance", unrecorded)
+    installed = _install(home, _ids(_offers(home), "rfc-writer"))[0]
+    assert (installed["outcome"], installed["history_outcome"], installed["guidance_history"]) == (
+        "installed", outcome, "Saved, but the commit failed. Report this.")
+    assert (home[1] / "skills" / "rfc-writer" / "SKILL.md").exists()
+
+
+@pytest.mark.parametrize(("outcome", "state"), [("stale", "already_here"), ("refused", "failed")])
+def test_a_save_that_writes_nothing_keeps_its_line(home, monkeypatch, outcome, state):
+    from infra import skill_install
+    from infra.guidance_git import SaveResult
+
+    monkeypatch.setattr(skill_install, "save_guidance", lambda _writes, **_kwargs: SaveResult(outcome, line="why"))
+    result = _install(home, _ids(_offers(home), "rfc-writer"))[0]
+    assert (result["outcome"], result["history_outcome"], result["guidance_history"]) == (state, outcome, "why")
+
+
+def test_a_recorded_install_passes_the_save_line_on(home):
+    result = _install(home, _ids(_offers(home), "rfc-writer"))[0]
+    assert (result["outcome"], result["history_outcome"]) == ("installed", "written")
+    assert result["guidance_history"].startswith("Saved and committed ")
+
+
+def test_a_commit_with_an_unsynced_index_is_shown_and_never_removed(home, monkeypatch):
+    from infra import skill_install
+    from infra.guidance_git import SaveResult
+
+    def landed(writes, **_kwargs):
+        for path, data in writes.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"other bytes")
+        return SaveResult("written", "index-unsynced", sha="a" * 40, line="index sync failed",
+                          unsynced=("skills/rfc-writer/SKILL.md",))
+
+    monkeypatch.setattr(skill_install, "save_guidance", landed)
+    result = _install(home, _ids(_offers(home), "rfc-writer"))[0]
+    assert (result["outcome"], result["history_outcome"], result["guidance_history"]) == (
+        "installed", "written", "index sync failed")
+    assert (home[1] / "skills" / "rfc-writer" / "SKILL.md").exists()
+
+
+def test_an_upstream_sidecar_in_another_case_is_dropped_and_a_case_clash_fails(home):
+    roots, workspace = home
+    folder = _skill(roots.codex / "skills" / "cased", "cased", "carries a cased sidecar")
+    (folder / "Corsia.yaml").write_text("handler:\n  kind: cli\n  command: rm\n")
+    assert _install(home, _ids(_offers(home), "cased"))[0]["outcome"] == "installed"
+    sidecar = yaml.safe_load((workspace / "skills" / "cased" / "corsia.yaml").read_text())
+    assert list(sidecar) == ["origin"]
+
+    from infra.skill_install import install_skill_bundle
+
+    clash = install_skill_bundle(
+        workspace, "clash", (folder / "SKILL.md").read_bytes(), {"notes.md": b"a", "NOTES.md": b"b"},
+        "clashes", {"source": "codex:~/.codex/skills/clash", "sha256": "0", "adopted_at": "now"},
+        author_thread_id="t",
+    )
+    assert clash == {"outcome": "failed"}
+    assert not (workspace / "skills" / "clash").exists()
 
 
 def test_a_rerun_offers_nothing_twice(home):

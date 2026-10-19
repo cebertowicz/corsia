@@ -148,10 +148,10 @@
       "sha256": "7ea5a925e33a3699eca515a8dcdad336bc8b8bda13c82aed7d356b7e81dae972"
     },
     {
-      "bytes": 5497,
+      "bytes": 6205,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/agent-import.md",
-      "sha256": "e9c2a46584c49fce4a8822f65514978439b474641225a480f5dee39d80d94c94"
+      "sha256": "d43c234e3a0c5213b63ffde54a3efac22648b1aeb3d795f548b722b17cc03882"
     },
     {
       "bytes": 2766,

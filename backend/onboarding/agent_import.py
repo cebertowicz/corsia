@@ -27,7 +27,7 @@ CODEX = "codex"
 OPENCLAW = "openclaw"
 HERMES = "hermes"
 TOOLS = (CLAUDE_CODE, CODEX, OPENCLAW, HERMES)
-LABELS = {CLAUDE_CODE: "Claude Code", CODEX: "Codex", OPENCLAW: "OpenClaw", HERMES: "Hermes"}
+LABELS = {CLAUDE_CODE: "Claude Code", CODEX: "Codex", OPENCLAW: "OpenClaw", HERMES: "Hermes Agent"}
 
 FILE_BYTES = 8 * 1024
 TOTAL_BYTES = 40 * 1024
@@ -168,7 +168,10 @@ def _head(path: Path, root: Path, read: MemoryRead) -> bytes | None:
     except FileNotFoundError:
         return None
     except OSError as exc:
-        reason = f"couldn't check: {exc.strerror or type(exc).__name__}"
+        read.skipped.append({
+            "path": display_path(path), "reason": f"couldn't check: {exc.strerror or type(exc).__name__}", "unread": True,
+        })
+        return None
     if reason is not None:
         read.skipped.append({"path": display_path(path), "reason": reason})
         return None
@@ -178,7 +181,7 @@ def _head(path: Path, root: Path, read: MemoryRead) -> bytes | None:
     except OSError as exc:
         read.failed = True
         read.skipped.append({
-            "path": display_path(path), "reason": f"couldn't read: {exc.strerror or type(exc).__name__}",
+            "path": display_path(path), "reason": f"couldn't read: {exc.strerror or type(exc).__name__}", "unread": True,
         })
         return None
     read.opened.append({"path": display_path(path), "bytes": len(data)})

@@ -48,7 +48,7 @@ def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here(
     # With no connections clause nothing is read from settings, so none are excepted.
     assert "with them, their settings, or any key" in context
     assert context.endswith("What I read stays on this computer: I run on a local model.")
-    one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
+    one = setup.agent_import(ImportCard(("Codex", "Hermes Agent"), ("Codex",), "GPT, by OpenAI"))["context"]
     assert "the connected apps that Codex uses," in one
     assert "their other settings" in one
 
@@ -218,6 +218,7 @@ def test_answer_a_allows_one_read_with_a_content_free_receipt(wired):
     assert result["result"] == "read"
     assert "Maya Chen" in result["excerpts"][0]["text"]
     assert [row["name"] for row in result["skills"]] == ["rfc-writer"]
+    assert result["skipped_files"] == []
     consumed = _receipt(wired, tool_module.CONSENT_OPERATION)
     assert set(consumed) == {"consumed", "read_at"}
     read = _receipt(wired, tool_module.READ_OPERATION)
@@ -227,6 +228,45 @@ def test_answer_a_allows_one_read_with_a_content_free_receipt(wired):
     assert "Maya" not in json.dumps(read)
     again = asyncio.run(_execute(consent_decision_id=decision_id))
     assert again.startswith("❌") and "already used" in again
+
+
+def test_read_reports_skipped_display_names_without_their_content(wired, monkeypatch):
+    from onboarding import agent_import
+
+    monkeypatch.setattr(
+        agent_import,
+        "read_memory",
+        lambda *_args, **_kwargs: agent_import.MemoryRead(
+            skipped=[
+                {"path": "~/.claude/CLAUDE.md", "reason": "couldn't read: Permission denied", "unread": True},
+                {"path": "~/.codex/auth.md", "reason": "a protected path"},
+            ],
+            failed=True,
+        ),
+    )
+    result = json.loads(asyncio.run(_execute(consent_decision_id=_consent(wired))))
+
+    assert result["result"] == "read"
+    # A file that could not be opened can be retried; one skipped on purpose cannot.
+    assert result["unread_files"] == ["~/.claude/CLAUDE.md"]
+    assert result["skipped_files"] == ["~/.codex/auth.md"]
+    assert "Permission denied" not in json.dumps(result)
+
+
+def test_import_events_expose_only_counts_and_outcomes(wired, monkeypatch):
+    events = []
+    monkeypatch.setattr(tool_module, "_emit_event", lambda _thread, event, **properties: events.append((event, properties)))
+
+    assert "consent_decision" in json.loads(asyncio.run(_execute()))
+    decision_id = _consent(wired)
+    item_id = json.loads(asyncio.run(_execute(consent_decision_id=decision_id)))["skills"][0]["item_id"]
+    asyncio.run(_execute(consent_decision_id=decision_id, mode="install", item_ids=[item_id]))
+
+    assert events == [
+        ("consent_card", {"tools_count": 2}),
+        ("read", {"excerpts_count": 1, "skills_count": 1, "skipped_count": 0, "unread_count": 0}),
+        ("install", {"outcome": "installed", "count": 1}),
+    ]
 
 
 def test_installs_from_that_read_for_one_hour_only(wired, monkeypatch):
