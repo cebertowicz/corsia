@@ -262,6 +262,18 @@ def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
     assert "`setup_stage` set or `setup_downloading` true is still setting up, not failed: say nothing about it" in app
 
 
+def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    email = app.split("5. **Email and calendar.**", 1)[1].split("6. **GitHub", 1)[0]
+    for branch in ("**Gmail or Google:**", "**Outlook:**", "**Both:** Gmail first", "**Something else:**"):
+        assert branch in email
+    assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email
+    assert "Outlook for Outlook and for both, Other for anything else" in email
+    assert "Never write it in `USER.md`, and never change the `- **Email:**` line" in email
+    # Conditional on delivery: phrased so check_system_closure does not require the skill before it ships.
+    assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email
+
+
 def test_app_path_reads_no_other_app_settings_before_a_yes():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "mcp_sources" not in app
