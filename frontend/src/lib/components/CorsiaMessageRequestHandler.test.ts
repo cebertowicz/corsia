@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import CorsiaMessageRequestHandler from './CorsiaMessageRequestHandler.svelte';
 import { pendingCorsiaMessage, requestCorsiaMessage } from '$lib/corsiaRequest';
+import { toasts } from '$lib/stores/toast';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
@@ -16,10 +17,11 @@ afterEach(() => {
 });
 
 describe('CorsiaMessageRequestHandler', () => {
-	it('warns and clears a request that cannot open its CORSIA conversation', async () => {
+	it('shows an error and clears a request that cannot open its CORSIA conversation', async () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
-		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const toast = vi.spyOn(toasts, 'show');
 		const send = vi.fn();
 		component = mount(CorsiaMessageRequestHandler, {
 			target: host,
@@ -35,6 +37,7 @@ describe('CorsiaMessageRequestHandler', () => {
 		await vi.waitFor(() => expect(get(pendingCorsiaMessage)).toBeNull());
 
 		expect(send).not.toHaveBeenCalled();
-		expect(warning).toHaveBeenCalledWith('CORSIA request was not sent because its conversation could not open');
+		expect(error).toHaveBeenCalledWith('CORSIA request was not sent because its conversation could not open');
+		expect(toast).toHaveBeenCalledWith("Couldn't open CORSIA's chat. Try again.", 'error');
 	});
 });

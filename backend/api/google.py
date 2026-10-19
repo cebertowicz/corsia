@@ -32,6 +32,18 @@ MAX_BODY_BYTES = 2048
 CONNECTED_PAGE = "Google is connected. You can close this tab and go back to CORSIA."
 
 
+def _callback_message(error: GoogleError) -> str:
+    """Translate agent recovery instructions before putting them in a person's browser."""
+    message = str(error)
+    if message.startswith("You signed in as "):
+        return "That's a different Google account from the one you were adding. Go back to CORSIA and try again."
+    if message.startswith("That Google account was removed"):
+        return "This Google account was removed from CORSIA. Go back to CORSIA and connect it again."
+    if message.startswith("Too many Google sign-ins"):
+        return "Too many Google sign-ins are waiting. Finish one or wait ten minutes, then go back to CORSIA and try again."
+    return message
+
+
 def _page(message: str, status: int = 200) -> HTMLResponse:
     return HTMLResponse(
         f"<!doctype html><title>CORSIA</title><p>{html.escape(message)}</p>", status_code=status,
@@ -61,6 +73,18 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
         body = {}
     account_id = _body_field(body, "account_id")
     person = is_person_session(user)
+    if account_id is not None and not person:
+        from api.connected_apps import _agent_thread
+        from api.connected_account_rows import list_account_rows
+        from infra.database import get_db
+
+        db = get_db()
+        try:
+            thread_id, _scope = _agent_thread(user, db)
+            if account_id not in {str(row["id"]) for row in list_account_rows(thread_id, db=db)}:
+                raise HTTPException(403, "This Google account is not available to your project; ask the person in Connected apps.")
+        finally:
+            db.close()
     adding_thread_id = None if person or account_id else _body_field(user, "thread_id")
     if account_id is None and not person and adding_thread_id is None:
         raise HTTPException(403, "Only the person or an agent's own thread can add a Google account.")
@@ -82,7 +106,7 @@ async def callback(request: Request, code: str | None = None, state: str | None 
     try:
         await oauth.complete_sign_in(code, state)
     except GoogleError as exc:
-        return _page(str(exc), 400)
+        return _page(_callback_message(exc), 400)
     except Exception:
         log.exception("Google sign-in callback failed")
         return _page("Google sign-in failed. Go back to CORSIA and try again.", 500)
@@ -90,5 +114,21 @@ async def callback(request: Request, code: str | None = None, state: str | None 
 
 
 @router.get("/status")
-async def status(_user: dict = Depends(require_user)) -> dict[str, Any]:
-    return await run_in_db(oauth.accounts_status)
+async def status(user: dict = Depends(require_user)) -> dict[str, Any]:
+    if is_person_session(user):
+        return await run_in_db(oauth.accounts_status)
+
+    def visible_status() -> dict:
+        from api.connected_apps import _agent_thread
+        from api.connected_account_rows import list_account_rows
+        from infra.database import get_db
+
+        db = get_db()
+        try:
+            thread_id, _scope = _agent_thread(user, db)
+            ids = {str(row["id"]) for row in list_account_rows(thread_id, db=db)}
+        finally:
+            db.close()
+        return oauth.accounts_status(ids)
+
+    return await run_in_db(visible_status)

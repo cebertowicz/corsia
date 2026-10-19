@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -118,6 +119,7 @@ class _Pending:
 
 
 _pending: dict[str, _Pending] = {}
+_pending_lock = threading.Lock()
 
 
 def redirect_uri() -> str:
@@ -194,10 +196,6 @@ def _begin(
     if credentials is None:
         raise GoogleSignInError(NEEDS_CLIENT_FILE)
     client_id, client_secret = credentials
-    for stale in [nonce for nonce, flow in _pending.items() if flow.expired]:
-        _pending.pop(stale, None)
-    if len(_pending) >= PENDING_MAX:
-        raise GoogleSignInError(TOO_MANY)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     pending = _Pending(
@@ -206,7 +204,12 @@ def _begin(
         scopes=SCOPES, verifier=verifier, client_id=client_id, client_secret=client_secret,
         redirect_uri=redirect_uri(), created_at=time.monotonic(),
     )
-    _pending[pending.state] = pending
+    with _pending_lock:
+        for stale in [nonce for nonce, flow in _pending.items() if flow.expired]:
+            _pending.pop(stale, None)
+        if len(_pending) >= PENDING_MAX:
+            raise GoogleSignInError(TOO_MANY)
+        _pending[pending.state] = pending
     return AUTH_URL + "?" + urlencode({
         "client_id": pending.client_id, "redirect_uri": pending.redirect_uri, "response_type": "code",
         "scope": " ".join(pending.scopes), "state": pending.state, "code_challenge": challenge,
@@ -235,10 +238,11 @@ def _take_pending(state: object) -> _Pending:
     """
     if not isinstance(state, str) or not state:
         raise GoogleSignInError(DENIED)
-    match = next(
-        (nonce for nonce in list(_pending) if secrets.compare_digest(state.encode(), nonce.encode())), None,
-    )
-    pending = _pending.pop(match, None) if match is not None else None
+    with _pending_lock:
+        match = next(
+            (nonce for nonce in _pending if secrets.compare_digest(state.encode(), nonce.encode())), None,
+        )
+        pending = _pending.pop(match, None) if match is not None else None
     if pending is None or pending.expired:
         raise GoogleSignInError(DENIED)
     return pending
@@ -363,8 +367,8 @@ async def complete_sign_in(code: object, state: object) -> str:
     return email
 
 
-def accounts_status() -> dict:
-    """Every Google account's sign-in state for ``google_status``: never a token or a secret."""
+def accounts_status(visible_account_ids: set[str] | None = None) -> dict:
+    """Visible Google accounts' sign-in state for ``google_status``: never a token or a secret."""
     # Imported here: the poller module imports this one.
     from connections.connected_accounts import google_accounts, google_scopes, resolve_google_credentials
     from events.connectors.gmail_poller import poller_status
@@ -374,6 +378,8 @@ def accounts_status() -> dict:
         rows = []
         for account in google_accounts(db=db):
             account_id = str(account["id"])
+            if visible_account_ids is not None and account_id not in visible_account_ids:
+                continue
             status = str(account["state"])
             if status == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is None:
                 status = client.STATUS_NEEDS_SIGN_IN

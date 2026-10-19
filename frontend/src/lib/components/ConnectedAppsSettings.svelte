@@ -94,7 +94,7 @@
 			// Keep the last successful rows in component state for an offline retry.
 		} catch {
 			if (rows.length) offline = true;
-			else error = 'Could not load connected apps.';
+			else error = "Couldn't load connected apps.";
 		} finally { loading = false; }
 	}
 	async function refresh(): Promise<void> {
@@ -115,7 +115,7 @@
 				if (next.removed) rows = rows.filter((row) => row.id !== app.id); else replaceApp(next);
 			} else if (action === 'reconnect') replaceApp(await reconnectConnectedApp(app.id));
 			else { await removeConnectedApp(app.id); rows = rows.filter((row) => row.id !== app.id); }
-		} catch (cause) { actionError = cause instanceof Error ? cause.message : 'Could not update this app. Try again.'; }
+		} catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't update this app. Try again."; }
 		finally { actionId = null; }
 	}
 	async function startSignIn(account: ConnectedAccount): Promise<void> {
@@ -127,7 +127,7 @@
 			else window.location.assign(started.url);
 		} catch (cause) {
 			page?.close();
-			actionError = cause instanceof Error ? cause.message : 'Could not start the sign-in. Try again.';
+			actionError = cause instanceof Error ? cause.message : "Couldn't start Google sign-in. Try again.";
 		} finally { actionId = null; }
 	}
 	async function signOut(account: ConnectedAccount): Promise<void> {
@@ -137,7 +137,7 @@
 			const row = { ...result.row, kind: 'account' as const };
 			replace(row); signedOut = new Set(signedOut).add(account.id);
 			manualStep = needsManualGoogleStep(result.revocation) ? row : null;
-		} catch (cause) { actionError = cause instanceof Error ? cause.message : 'Could not change this Google account. Try again.'; }
+		} catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't change this Google account. Try again."; }
 		finally { confirmingOut = null; actionId = null; }
 	}
 	async function remove(account: ConnectedAccount): Promise<void> {
@@ -147,7 +147,7 @@
 			rows = rows.filter((row) => row.id !== account.id);
 			removedManualStep = needsManualGoogleStep(result.revocation) ? account : null;
 		}
-		catch (cause) { actionError = cause instanceof Error ? cause.message : 'Could not change this Google account. Try again.'; }
+		catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't change this Google account. Try again."; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
 

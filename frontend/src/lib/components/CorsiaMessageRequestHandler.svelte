@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { pendingCorsiaMessage, takeCorsiaMessage, type CorsiaMessageRequest } from '$lib/corsiaRequest';
+	import { toasts } from '$lib/stores/toast';
 	import type ChatPanel from './ChatPanel.svelte';
 
 	let { goConductor, chatPanel, active }: {
@@ -13,12 +14,14 @@
 	async function deliver(request: CorsiaMessageRequest): Promise<void> {
 		try {
 			if (!await goConductor() || !active()) {
-				console.warn('CORSIA request was not sent because its conversation could not open');
+				console.error('CORSIA request was not sent because its conversation could not open');
+				toasts.show("Couldn't open CORSIA's chat. Try again.", 'error');
 				return;
 			}
 			await tick();
 			if (!active() || !chatPanel) {
-				console.warn('CORSIA request was not sent because its composer is unavailable');
+				console.error('CORSIA request was not sent because its composer is unavailable');
+				toasts.show("Couldn't open CORSIA's chat. Try again.", 'error');
 				return;
 			}
 			if (!await chatPanel.setAndSend(request.text)) {

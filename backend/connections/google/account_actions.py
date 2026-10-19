@@ -34,6 +34,8 @@ from infra.time import utc_now_iso
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 SIGN_OUT_FROM = frozenset(("connected", "needs_sign_in"))
 NOT_FOUND = "connected account not found"
+NOT_SIGNED_IN = "account is not signed in"
+INVALID_REACH = "invalid app reach"
 EMPTY_REACH = "Where it works needs at least one place"
 PERSON_ONLY = "only the person can widen where an account works"
 MANUAL_STEP_CAUSES = frozenset(("provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected"))
@@ -68,7 +70,7 @@ def _sign_out_locally(account_id: str, actor: Actor, *, db: sqlite3.Connection |
     """Strip the refresh token, mark the row signed out and audit it, in one transaction."""
     with write_transaction(db, scope="google_sign_out") as conn:
         if _google_row(account_id, conn)["state"] not in SIGN_OUT_FROM:
-            raise ConnectedAccountError("account is not signed in")
+            raise ConnectedAccountError(NOT_SIGNED_IN)
         taken = take_google_refresh_token(account_id, db=conn)
         set_state(account_id, "signed_out", db=conn)
         audit_id = record_audit(account_id, "sign_out", actor, db=conn)
@@ -87,7 +89,7 @@ def _remove_locally(account_id: str, actor: Actor, *, db: sqlite3.Connection | N
         try:
             key_store.drop_managed_entry(str(account["credential_key"]), db=conn)
         except key_store.KeyStoreError:
-            pass  # Never held a bundle.
+            raise
         conn.execute("DELETE FROM connected_account_reach WHERE account_id=?", (account_id,))
         conn.execute("DELETE FROM email_screens WHERE account=?", (account_id,))
         conn.execute("DELETE FROM connected_accounts WHERE id=?", (account_id,))
@@ -131,7 +133,7 @@ def change_google_account_reach(
     try:
         after = reach if isinstance(reach, AppReach) else normalize_reach(reach)
     except AppReachError:
-        raise ConnectedAccountError("invalid app reach") from None
+        raise ConnectedAccountError(INVALID_REACH) from None
     if after == corsia_only_reach():
         raise ConnectedAccountError(EMPTY_REACH)
     with write_transaction(db, scope="google_reach") as conn:

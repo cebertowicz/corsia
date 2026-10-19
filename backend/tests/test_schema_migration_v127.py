@@ -83,6 +83,64 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
+def test_migration_rekeys_owned_threads_and_binds_open_google_drafts() -> None:
+    with closing(_dev_126()) as db:
+        _seed_legacy(db)
+        db.execute(
+            "INSERT INTO threads(id,user_id,created_at,updated_at) VALUES (?,?,?,?)",
+            ("owner-thread", "owner", "t", "t"),
+        )
+        db.execute(
+            "INSERT INTO artifact_identities(id,integration,type,external_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+            ("email-artifact", "gmail", "email-thread", "raw-thread", "t", "t"),
+        )
+        db.execute(
+            "INSERT INTO artifact_registrations(id,artifact_id,parent_thread_id,created_at,updated_at) VALUES (?,?,?,?,?)",
+            ("email-owner", "email-artifact", "owner-thread", "t", "t"),
+        )
+        db.execute(
+            "INSERT INTO connection_rules(id,connector,fact,value,destination_thread_id,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("gmail-thread-rule", "gmail", "thread_id", "raw-thread", "owner-thread", "t", "t"),
+        )
+        db.execute(
+            "INSERT INTO connection_rules(id,connector,fact,value,destination_thread_id,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("gmail-label-rule", "gmail", "label", "inbox", "owner-thread", "t", "t"),
+        )
+        for kind in ("email", "invite"):
+            db.execute(
+                "INSERT INTO action_drafts(id,thread_id,kind,path,target_json,recorded_revision,recorded_at,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (f"{kind}-draft", "owner-thread", kind, f"{kind}.md", "{}", "r1", "t", "t"),
+            )
+        db.execute("PRAGMA user_version=126")
+        db.commit()
+
+        migrate_to_current(db, SCHEMA_VERSION)
+
+        account = google_account(db=db)
+        assert account is not None
+        account_id = str(account["id"])
+        assert db.execute(
+            "SELECT external_id FROM artifact_identities WHERE id='email-artifact'",
+        ).fetchone()[0] == f"google:{account_id}:thread:raw-thread"
+        assert db.execute(
+            "SELECT parent_thread_id FROM artifact_registrations WHERE artifact_id='email-artifact'",
+        ).fetchone()[0] == "owner-thread"
+        assert db.execute(
+            "SELECT value FROM connection_rules WHERE id='gmail-thread-rule'",
+        ).fetchone()[0] == f"google:{account_id}:thread:raw-thread"
+        assert db.execute(
+            "SELECT value FROM connection_rules WHERE id='gmail-label-rule'",
+        ).fetchone()[0] == "inbox"
+        assert [row[0] for row in db.execute(
+            "SELECT target_json FROM action_drafts ORDER BY id",
+        )] == [
+            f'{{"account_id":"{account_id}"}}', f'{{"account_id":"{account_id}"}}',
+        ]
+
+
 def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_startup() -> None:
     with closing(_dev_126()) as db:
         _seed_legacy(db)
@@ -232,73 +290,4 @@ def test_fresh_install_has_final_history_tables_and_audit_causes() -> None:
             )
 
 
-LINKED_HISTORY_SQL = """
-    CREATE TABLE connected_account_audit (
-        id INTEGER PRIMARY KEY,
-        created_at TEXT NOT NULL,
-        account_id TEXT NOT NULL REFERENCES connected_accounts(id) ON DELETE CASCADE,
-        actor_kind TEXT NOT NULL CHECK(actor_kind IN ('person', 'agent', 'system')),
-        actor_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
-        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
-            'revoked', 'provider_unreachable', 'provider_timeout',
-            'provider_rejected', 'provider_unexpected', 'manual_only'
-        ))
-    );
-    CREATE INDEX idx_connected_account_audit_account ON connected_account_audit(account_id, id);
-    CREATE TABLE connected_account_migration_journal (
-        migration_key TEXT PRIMARY KEY,
-        completed_at TEXT NOT NULL,
-        account_id TEXT REFERENCES connected_accounts(id)
-    );
-"""
-
-
-def test_transient_train_history_is_repaired_without_losing_rows() -> None:
-    from connections.google import account_actions
-
-    with closing(_dev_126()) as db:
-        _seed_legacy(db)
-        migrate_to_current(db, SCHEMA_VERSION)
-        account = google_account(db=db)
-        assert account is not None
-        account_id = str(account["id"])
-
-        db.execute("DROP TABLE connected_account_audit")
-        db.execute("DROP TABLE connected_account_migration_journal")
-        db.executescript(LINKED_HISTORY_SQL)
-        db.execute(
-            "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
-            "VALUES ('t0', ?, 'system', 'test', 'connect', NULL)", (account_id,),
-        )
-        db.execute(
-            "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "
-            "VALUES ('t1', ?, 'person', 'owner', 'remove', 'manual_only')", (account_id,),
-        )
-        db.execute(
-            "INSERT INTO connected_account_migration_journal(migration_key, completed_at, account_id) VALUES (?,?,?)",
-            ("google-singleton-v1", "t0", account_id),
-        )
-        db.execute("PRAGMA user_version=126")
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-
-        assert (result.migrated, result.from_version, result.to_version) == (True, 126, 127)
-        assert [row[0] for row in db.execute("SELECT revocation_cause FROM connected_account_audit ORDER BY id")] == [
-            None, "not_signed_in",
-        ]
-        assert db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_connected_account_audit_account'",
-        ).fetchone()
-        for table in ("connected_account_audit", "connected_account_migration_journal"):
-            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []
-
-        db.execute("PRAGMA foreign_keys=ON")
-        account_actions._remove_locally(account_id, ("person", "owner"), db=db)
-        assert db.execute(
-            "SELECT COUNT(*) FROM connected_account_audit WHERE account_id=?", (account_id,),
-        ).fetchone()[0] == 3
-        assert db.execute(
-            "SELECT account_id FROM connected_account_migration_journal WHERE migration_key=?", ("google-singleton-v1",),
-        ).fetchone()[0] == account_id
+# The transient train-only history schema never reached a development build; migration 126→127 does not repair it.

@@ -13,11 +13,7 @@ from connections.connected_accounts import (
     corsia_only_reach,
 )
 from infra import key_store, key_store_values
-from infra.connected_accounts_schema import (
-    AUDIT_TABLE_SQL,
-    CONNECTED_ACCOUNTS_SCHEMA_SQL,
-    JOURNAL_TABLE_SQL,
-)
+from infra.connected_accounts_schema import CONNECTED_ACCOUNTS_SCHEMA_SQL
 from infra.settings import get_setting
 from infra.time import utc_now_iso
 
@@ -58,39 +54,6 @@ def _clear_legacy(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM settings WHERE key IN (?,?)", (LEGACY_ACCOUNT_SETTING, LEGACY_CURSOR_SETTING))
 
 
-def _normalize_history_tables(conn: sqlite3.Connection) -> None:
-    """Replace transient train history DDL with the final no-FK, current-cause shape."""
-    tables = (
-        ("connected_account_audit", AUDIT_TABLE_SQL),
-        ("connected_account_migration_journal", JOURNAL_TABLE_SQL),
-    )
-    for table, create in tables:
-        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
-        if row is None:
-            continue
-        sql = str(row[0])
-        has_foreign_keys = bool(conn.execute(f"PRAGMA foreign_key_list({table})").fetchall())
-        has_old_audit_cause = table == "connected_account_audit" and "not_signed_in" not in sql
-        if not has_foreign_keys and not has_old_audit_cause:
-            continue
-
-        columns = [column[1] for column in conn.execute(f"PRAGMA table_info({table})")]
-        copied_columns = ",".join(columns)
-        select_columns = ",".join(
-            "CASE WHEN revocation_cause='manual_only' THEN 'not_signed_in' ELSE revocation_cause END"
-            if column == "revocation_cause" else column
-            for column in columns
-        )
-        old_table = f"{table}_transient_train"
-        conn.execute(f"ALTER TABLE {table} RENAME TO {old_table}")
-        conn.execute(create)
-        conn.execute(f"INSERT INTO {table}({copied_columns}) SELECT {select_columns} FROM {old_table}")
-        conn.execute(f"DROP TABLE {old_table}")
-
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_connected_account_audit_account ON connected_account_audit(account_id, id)"
-    )
-
 
 def migrate_126_to_127(conn: sqlite3.Connection) -> None:
     """Move one usable legacy Google singleton atomically into its account row.
@@ -101,7 +64,6 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
     bundle resolves. A failed bundle write therefore leaves the old path intact.
     """
     conn.executescript(CONNECTED_ACCOUNTS_SCHEMA_SQL)
-    _normalize_history_tables(conn)
     if conn.execute(
         "SELECT 1 FROM connected_account_migration_journal WHERE migration_key=?", (JOURNAL_KEY,),
     ).fetchone() is not None:
@@ -151,6 +113,7 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
         if key_store_values.resolve(conn, [key]).get(key) != encoded:
             raise ValueError("new Google account credentials could not be verified")
     _rekey_screens(conn, address.strip(), account_id)
+    _rekey_legacy_google_data(conn, account_id)
     _clear_legacy(conn)
     _journal(conn, account_id)
 
@@ -164,6 +127,40 @@ def _rekey_screens(conn: sqlite3.Connection, address: str | None, account_id: st
             "UPDATE OR IGNORE email_screens SET account=? WHERE lower(account)=lower(?)", (account_id, address),
         )
     conn.execute("DELETE FROM email_screens WHERE account IS NOT ?", (account_id,))
+
+
+def _rekey_legacy_google_data(conn: sqlite3.Connection, account_id: str) -> None:
+    """Namespace legacy Gmail thread identities and bind still-open Google action drafts."""
+    prefix = f"google:{account_id}:thread:"
+    if _has_table(conn, "artifact_identities"):
+        conn.execute(
+            "UPDATE artifact_identities SET external_id=? || external_id "
+            "WHERE integration='gmail' AND type='email-thread' "
+            "AND external_id NOT LIKE 'google:%:thread:%'",
+            (prefix,),
+        )
+    if _has_table(conn, "connection_rules"):
+        conn.execute(
+            "UPDATE connection_rules SET value=? || value "
+            "WHERE connector='gmail' AND fact='thread_id' AND value NOT LIKE 'google:%:thread:%'",
+            (prefix,),
+        )
+    if not _has_table(conn, "action_drafts"):
+        return
+    for row in conn.execute(
+        "SELECT id,target_json FROM action_drafts WHERE kind IN ('email','invite') AND state='open'",
+    ):
+        try:
+            target = json.loads(row["target_json"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(target, dict) or target.get("account_id"):
+            continue
+        target["account_id"] = account_id
+        conn.execute(
+            "UPDATE action_drafts SET target_json=? WHERE id=?",
+            (json.dumps(target, separators=(",", ":"), sort_keys=True), row["id"]),
+        )
 
 
 def _journal(conn: sqlite3.Connection, account_id: str | None) -> None:

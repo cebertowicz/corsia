@@ -31,7 +31,7 @@ class ConnectedAccountError(ValueError):
 
 def credential_key(account_id: str) -> str:
     """The opaque, per-account key-store name for a Google credential bundle."""
-    return f"connected-account--google--{account_id}"
+    return f"{key_store.CONNECTED_ACCOUNT_PREFIX}{account_id}"
 
 
 def corsia_only_reach() -> AppReach:

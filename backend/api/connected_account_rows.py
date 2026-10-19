@@ -28,7 +28,7 @@ PERSON_ONLY_CONTROLS = "Only the signed-in person can sign out or remove a Googl
 PERSON_ONLY = "Only the signed-in person can widen where an account works; open Connected apps."
 INVALID_REACH = "Where it works needs a valid choice of places."
 EMPTY_REACH = "Where it works needs at least one place."
-CHANGE_FAILED = "Could not change this Google account. Try again."
+CHANGE_FAILED = "Couldn't change this Google account. Try again."
 
 
 def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[str, object]:
@@ -102,8 +102,8 @@ def _error(exc: Exception) -> Exception:
         return refusal(CHANGE_FAILED, 500)
     fixed = {
         account_actions.NOT_FOUND: refusal(NOT_FOUND, 404),
-        "account is not signed in": refusal(NOT_SIGNED_IN, 409),
-        "invalid app reach": refusal(INVALID_REACH),
+        account_actions.NOT_SIGNED_IN: refusal(NOT_SIGNED_IN, 409),
+        account_actions.INVALID_REACH: refusal(INVALID_REACH),
         account_actions.EMPTY_REACH: refusal(EMPTY_REACH),
         account_actions.PERSON_ONLY: refusal(PERSON_ONLY, 403),
     }
