@@ -8,10 +8,12 @@ import { get } from 'svelte/store';
 import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
+const googleAccount = { id: 'google-work', provider: 'google' as const, address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, reach: { mode: 'selected' as const, project_ids: [], outside_projects: false } };
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
 beforeEach(() => {
+	vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ measureText: (text: string) => ({ width: text.length * 8 }) } as CanvasRenderingContext2D);
 	token.set('test-token');
 	projects.set([{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }]);
 	host = document.createElement('div');
@@ -306,6 +308,51 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('h2')).toBeNull();
 		expect(host.querySelector('p')?.textContent).toContain('Connect the apps you already use');
 	});
+
+	it('renders Google accounts before hosted apps with their own state, reach and capabilities', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [{ ...awaiting, state: 'working' }], accounts: [googleAccount, { ...googleAccount, id: 'google-personal', address: 'sam@example.com' }] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull());
+		const names = [...host.querySelectorAll('[aria-label^="Google —"], [data-settings-row] .name')].map((node) => node.getAttribute('aria-label') ?? node.textContent);
+		expect(names).toEqual(['Google — sam.work@example.com', 'Google — sam@example.com', 'GitHub']);
+		expect(host.textContent).toContain('Connected · Only CORSIA');
+		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain('Reaches: Email, Calendar, Files');
+	});
+
+	it('keeps account rows visible with the approved offline message after a failed refresh', async () => {
+		let calls = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).includes('/api/projects')) return { ok: true, json: async () => ({ projects: [] }) };
+			calls += 1;
+			if (calls === 1) return { ok: true, json: async () => ({ servers: [], accounts: [googleAccount] }) };
+			throw new Error('network failed');
+		}));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull());
+		window.dispatchEvent(new Event('focus'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Showing last known items.'));
+		expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull();
+		expect(host.textContent).not.toContain('network failed');
+	});
+
+	it('shows the manual Google Account step only when account sign-out reports a provider failure', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const path = String(input);
+			if (path.includes('/api/projects')) return { ok: true, json: async () => ({ projects: [] }) };
+			if (path.includes('/sign-out')) return { ok: true, json: async () => ({ row: { ...googleAccount, state: 'signed_out' }, revocation: 'provider_timeout' }) };
+			return { ok: true, json: async () => ({ servers: [], accounts: [googleAccount] }) };
+		}));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
+		flushSync();
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Sign out') as HTMLButtonElement).click();
+		flushSync();
+		([...document.body.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Sign out').at(-1) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Google Account'));
+	});
 });
 
 describe('WhereItWorks', () => {
@@ -340,6 +387,20 @@ describe('WhereItWorks', () => {
 		await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
 		const call = fetch.mock.calls.find(([input]) => String(input).includes('/reach'));
 		expect(JSON.parse(String(call?.[1]?.body)).reach).toEqual({ mode: 'all', project_ids: [], outside_projects: false });
+	});
+
+	it('saves an account reach through its account endpoint without an app revision', async () => {
+		const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({ row: googleAccount }) }));
+		vi.stubGlobal('fetch', fetch);
+		const onSaved = vi.fn();
+		component = mount(WhereItWorks, { target: host, props: { app: { ...googleAccount, kind: 'account' as const }, onClose: vi.fn(), onSaved } });
+		await settle();
+		(host.querySelector('input[type="radio"]') as HTMLInputElement).click();
+		flushSync();
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Save')) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
+		const call = fetch.mock.calls.find(([input]) => String(input).includes('/api/mcp/accounts/google-work/reach'));
+		expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reach: { mode: 'all', project_ids: [], outside_projects: false } });
 	});
 
 	it("shows the server's Mac notice on the approve sheet only", async () => {
