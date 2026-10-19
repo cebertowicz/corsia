@@ -70,6 +70,16 @@ def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> boo
     return plan_paused or node_paused
 
 
+def review_deferred(
+    condition: str, review_kind: str | None, *, plan_paused: bool, node_paused: bool,
+) -> bool:
+    """Display and bucket consequence of ``ask_deferred`` for a row in human review."""
+    return (
+        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
+        and condition == "review" and review_kind in _HUMAN_REVIEWS
+    )
+
+
 def node_paused_sql(node_id_sql: str) -> str:
     """SQL twin of ``node_paused``: the node carries an uncleared user pause hold."""
     return f"""EXISTS (
@@ -126,10 +136,7 @@ def display_from_facts(
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}
-    if (
-        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
-        and condition == "review" and review_kind in _HUMAN_REVIEWS
-    ):
+    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
         return {"label_key": "waiting", "tone_key": "waiting"}
     if condition == "review":
         kind = review_kind or "parent_agent"

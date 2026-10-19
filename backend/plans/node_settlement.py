@@ -26,9 +26,10 @@ answer that has not been given, so both are refused too. ``close_node`` is the
 same act as the archive by a different name -- it ends the node outright -- so
 it is refused for the same reason.
 
-The user's own pause and resume are not settlement: a pause is a hold that
-defers the question's attention until resume, the node keeps the state the
-answer settles from, and the answer still lands while it is paused.
+The lane still refuses an agent's pause and resume, but admits the user's: a
+pause is a hold that defers the question's attention until resume, the node
+keeps the state the answer settles from, and the answer still lands while it
+is paused.
 
 This module only classifies and refuses. It writes nothing, so it adds no second
 owner of decision state.
@@ -54,7 +55,8 @@ SETTLING_OPERATIONS = frozenset({
 
 DECISION = "decision"
 
-#: The user's own steering a decision node admits; none of them settles it.
+#: The user's own steering a decision node admits: Won't do withdraws the
+#: decision (``plans.user_steering``); pause and resume only hold it.
 _USER_STEERING = frozenset({"close_node", "pause_node", "resume_node"})
 
 _LANE_SQL = """

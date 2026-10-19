@@ -277,10 +277,10 @@ def _end_user_pause(db, node_id: str, *, actor_id: str, provenance: str) -> None
     contract rule 5); answering it is the person acting on the item, so their
     pause has nothing left to hold. Any other hold still refuses the answer.
     """
-    from plans import holds
+    from plans import holds, user_steering
 
     for hold in holds.active_holds(node_id, db=db):
-        if hold["kind"] == "paused" and hold["owner_kind"] == "user":
+        if user_steering.is_user_pause(hold):
             holds.clear_write(
                 node_id, hold["id"], expected_kind="paused", actor_id=actor_id,
                 provenance=provenance, db=db,

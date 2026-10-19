@@ -156,8 +156,10 @@ QUEUE_ITEMS_CAP = 50
 def _queue_for(user_id: str, *, db=None) -> list[dict]:
     """The one queue, user-global: it names no plan target, by design.
 
-    Annotation filters every plan-owned renderer through the shared deferral
-    predicate, so the dock never shows an ask whose Needs-you state is deferred.
+    A decision is listed only where Activity would count it, so the dock and
+    Activity's awaiting count never disagree about an archived plan or project.
+    Annotation marks an ask whose every live link is paused, so the dock never
+    shows it until resume.
     """
     _db = db or get_db()
     try:

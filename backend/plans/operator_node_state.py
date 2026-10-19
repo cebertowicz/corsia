@@ -9,8 +9,9 @@ from plans import admission, node_states, operator_stopped, service, wait_causes
 from plans.admission_projection import executor_of
 from plans import operator_node_facts as facts
 from plans.operator_display_state import (
-    NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS, ask_deferred,
+    NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
     display_from_facts, needs_user_from_facts, node_paused, plan_paused, retired_display,
+    review_deferred,
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
@@ -346,10 +347,7 @@ def leaf_bucket_from_facts(
         return "done"
     if state == "failed":
         return state
-    if (
-        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
-        and condition == "review" and review_kind in _HUMAN_REVIEWS
-    ):
+    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
         return "paused"
     if condition == "review":
         return "review_human" if review_kind in _HUMAN_REVIEWS else "review_parent_agent"

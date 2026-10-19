@@ -107,6 +107,18 @@ def open_asks_sql(columns: str, *, joins: str = "", by: str = "artifact") -> str
     )
 
 
+def link_open_ask_sql(link: str) -> str:
+    """Whether the outer attention link ``link`` carries an open review request.
+
+    ``open_asks_sql`` correlated to that link's task and artifact; ``link`` must
+    not be ``l``, which names the inner link.
+    """
+    return (
+        f"EXISTS ({open_asks_sql('1', by='all')}"
+        f" AND l.node_id={link}.node_id AND l.artifact_id={link}.artifact_id)"
+    )
+
+
 def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(

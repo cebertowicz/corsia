@@ -339,3 +339,51 @@ def test_pause_node_defers_a_raised_artifact_ask_and_resume_restores_it(db):
     assert shown()[1] == 0
     _lifecycle(db, plan.id, "resume")
     assert shown() == ([node.id], 1)
+
+
+def _raised_pr(db, number: int, *nodes) -> str:
+    from plans import artifact_links
+    from registry import attention as registry_attention, models
+
+    models.register_artifact(
+        integration="github", type="pr", external_id=f"cousin#{number}",
+        parent_thread_id="cousin", title="Merge the release", db=db,
+    )
+    raised = db.execute(
+        "SELECT id FROM artifact_identities WHERE external_id=?", (f"cousin#{number}",),
+    ).fetchone()["id"]
+    registry_attention.raise_attention(raised, db=db)
+    for node in nodes:
+        artifact_links.link(node.id, raised, "attention", actor_id=None, provenance="test", db=db)
+    db.commit()
+    return raised
+
+
+def test_an_artifact_asked_from_two_tasks_stays_raised_until_both_are_paused(db):
+    from tests.test_plan_decisions import _task
+
+    first_plan = service.ensure_plan("thread", "cousin", db=db)
+    first = _task(first_plan.id, "Merge the release", db=db)
+    second_plan = service.ensure_plan("thread", "owner", db=db)
+    second = _task(second_plan.id, "Check the release", db=db)
+    _raised_pr(db, 2, first, second)
+
+    _node_lifecycle(db, first_plan.id, first.id, "pause_node")
+    assert len(attention._summarize_raised(None, "user-1", db=db)) == 1
+    _node_lifecycle(db, second_plan.id, second.id, "pause_node")
+    assert attention._summarize_raised(None, "user-1", db=db) == []
+
+def test_a_settled_link_in_a_paused_plan_never_hides_a_live_ask(db):
+    from tests.test_plan_decisions import _task
+
+    settled_plan = service.ensure_plan("thread", "cousin", db=db)
+    settled = _task(settled_plan.id, "Earlier merge", db=db)
+    live_plan = service.ensure_plan("thread", "owner", db=db)
+    live = _task(live_plan.id, "Merge the release", db=db)
+    _raised_pr(db, 3, settled, live)
+    _node_lifecycle(db, settled_plan.id, settled.id, "close_node")
+
+    _lifecycle(db, settled_plan.id, "pause")
+    assert len(attention._summarize_raised(None, "user-1", db=db)) == 1
+    _node_lifecycle(db, live_plan.id, live.id, "pause_node")
+    assert attention._summarize_raised(None, "user-1", db=db) == []
