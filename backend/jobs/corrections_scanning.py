@@ -116,7 +116,7 @@ def pending_source_candidate_keys(
     ``candidate_for_source`` rechecks the source and builds the bounded input.
     """
     from infra.database import get_db
-    from plans.decision_projection import DECISION_TYPE
+    from plans.public import DECISION_TYPE
     from registry.identity_bridge import OWNER_REGISTRATION_STATES
 
     db = get_db()

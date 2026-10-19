@@ -118,6 +118,23 @@ def raised_asks(db, artifact_id: str) -> list:
     ).fetchall()
 
 
+def answered_ask_round(db, artifact_id: str, at: str):
+    """The review round the person answered that something made at ``at`` fell inside, or None.
+
+    A round runs from its raise to the answer's clearance. A hold the agent
+    withdrew or a task ended is not an answered round.
+    """
+    return db.execute(
+        """SELECT h.id AS hold_id, h.created_at AS raised_at, h.cleared_at AS answered_at
+             FROM plan_node_holds h JOIN plan_node_events e ON e.id=h.clearance_event_id
+            WHERE h.kind='blocked' AND h.owner_kind='user' AND h.owner_id=?
+              AND h.created_at < ? AND ? <= h.cleared_at
+              AND json_extract(e.payload_json, '$.detail.answered_by')='user'
+            ORDER BY h.created_at DESC, h.id DESC LIMIT 1""",
+        (artifact_id, at, at),
+    ).fetchone()
+
+
 def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
     """The open review requests, or one document's, oldest first, as ``open_asks_sql`` defines them.
 

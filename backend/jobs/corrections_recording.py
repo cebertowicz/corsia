@@ -6,6 +6,8 @@ from dataclasses import dataclass, replace
 import json
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from core.corrections_input import owner_text
 from core.corrections_recording import (
     CORRECTION_EVENT,
@@ -55,9 +57,10 @@ def _record_fact(
 ) -> tuple[bool, str | None]:
     """Write one versioned local-classifier fact in its own transaction.
 
-    A new correction queues its triage note in the same transaction.
+    A new correction queues its triage note in the same transaction; a comment's
+    fact also retries the round or batch note that waited for it.
     """
-    from core.correction_notes import queue_correction_note
+    from core.correction_notes import queue_correction_note, queue_late_comment_note
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -79,20 +82,23 @@ def _record_fact(
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
-        note_key = None
-        if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
-            note_key = queue_correction_note(db, candidate, version, result.event_id)
-            if note_key is not None and candidate.source_kind != "message":
-                from infra.passive_changes import materialize_pending_digest
+        note: tuple[str, str] | None = None
+        if result.inserted and result.event_id:
+            if candidate.source_kind == "doc_comment":
+                try:
+                    note = queue_late_comment_note(db, candidate, result.event_id)
+                except Exception:  # A fact is never lost to its note.
+                    logger.exception("late comment correction note failed")
+            elif classification["label"] == LABEL_CORRECTION:
+                note_key = queue_correction_note(db, candidate, version, result.event_id)
+                note = None if note_key is None else (candidate.thread_id, note_key)
+        if note is not None and candidate.source_kind != "message":
+            from infra.passive_changes import materialize_pending_digest
 
-                admitted = materialize_pending_digest(
-                    db,
-                    candidate.thread_id,
-                    wake_id=f"correction-wake:{note_key}",
-                )
-                if admitted is None or admitted.duplicate:
-                    note_key = None
-        return result.inserted, candidate.thread_id if note_key is not None else None
+            admitted = materialize_pending_digest(db, note[0], wake_id=f"correction-wake:{note[1]}")
+            if admitted is None or admitted.duplicate:
+                note = None
+        return result.inserted, note[0] if note is not None else None
 
 
 def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
@@ -121,9 +127,9 @@ def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidat
                 owner_text(content), str(row['created_at']),
             )
         if source_kind == "plan_decision_answer":
-            from plans.decision_projection import identity_row
+            from plans.public import decision_identity_row
 
-            row = identity_row(db, source_id)
+            row = decision_identity_row(db, source_id)
             if row is None:
                 return None
             try:
