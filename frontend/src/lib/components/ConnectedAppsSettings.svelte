@@ -184,13 +184,21 @@
 		const address = accountAddress(account.address);
 		if (!address || width(address.localPrefix, style) <= available) return address?.localPrefix ?? account.address;
 		const ownSegments = localSegments(address.localPrefix);
-		const siblings = rows.filter(isAccount).filter((candidate) => candidate.id !== account.id && candidate.id !== openId && accountAddress(candidate.address)?.domain === address.domain);
+		const siblings = rows.filter(isAccount).filter((candidate) => {
+			const other = accountAddress(candidate.address);
+			return candidate.id !== account.id && candidate.id !== openId && other?.domain === address.domain && localSegments(other.localPrefix)[0] === ownSegments[0];
+		});
 		const distinctIndex = ownSegments.findIndex((segment, index) => siblings.every((candidate) => localSegments(accountAddress(candidate.address)!.localPrefix)[index] !== segment));
 		if (distinctIndex < 0) return clippedPrefix(address.localPrefix, available, style);
+		if (distinctIndex === 0) return clippedPrefix(address.localPrefix, available, style);
 		const distinctive = ownSegments[distinctIndex];
 		const lead = ownSegments[0];
 		const candidate = `${lead}…${distinctive}`;
 		if (width(candidate, style) <= available) return candidate;
+		for (let length = [...lead].length - 1; length > 0; length--) {
+			const shortened = `${[...lead].slice(0, length).join('')}…${distinctive}`;
+			if (width(shortened, style) <= available) return shortened;
+		}
 		return clippedPrefix(address.localPrefix, available, style);
 	}
 	function observeClosedTitle(node: HTMLElement, account: ConnectedAccount) {
@@ -218,7 +226,7 @@
 					domainRange.selectNodeContents(domain);
 					const overflow = domainRange.getBoundingClientRect().right - node.getBoundingClientRect().right;
 					if (overflow <= 0.5) return;
-					const fallback = clippedPrefix(parts.localPrefix, Math.max(0, available - overflow - 1), getComputedStyle(prefix));
+					const fallback = distinctPrefix(current, Math.max(0, available - overflow - 1), getComputedStyle(prefix));
 					if (closedLocalPrefixes.get(current.id) !== fallback) closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, fallback);
 				});
 			});
@@ -298,7 +306,7 @@
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
 									{#if row.state === 'needs_sign_in'}<p class="impact">Google signed you out, so agents can’t use this account until you sign in again.</p>{/if}
 									{#if manualStep?.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
-									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline. Try again when you’re connected.</p>{/if}
+									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
 										{#if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="primary" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{/if}
 										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedAccountId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>

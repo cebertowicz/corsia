@@ -323,6 +323,28 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('.capability-label')?.textContent).toBe('Reaches');
 	});
 
+	it('keeps same-prefix Google account titles distinct while preserving their domains', async () => {
+		const accounts = [
+			{ ...googleAccount, id: 'google-work', address: 'shared.prefix.very-long-work-address@example.com' },
+			{ ...googleAccount, id: 'google-personal', address: 'shared.prefix.very-long-personal-address@example.com' },
+			{ ...googleAccount, id: 'google-alpha', address: 'alexandria.long-project-alpha-address@example.com' },
+			{ ...googleAccount, id: 'google-beta', address: 'alexandria.long-project-beta-address@example.com' },
+		];
+		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('account-closed-name') ? 296 : 0; });
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+			const width = this.classList.contains('account-provider') ? 56 : this.classList.contains('account-local-suffix') ? 64 : this.classList.contains('account-domain') ? 96 : this.classList.contains('account-closed-name') ? 296 : 0;
+			return { width, right: width } as DOMRect;
+		});
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.account-local-prefix')).toHaveLength(4));
+		const prefixes = [...host.querySelectorAll('.account-local-prefix')].map((node) => node.textContent);
+		const titles = [...host.querySelectorAll('.account-closed-name')].map((node) => node.textContent);
+		expect(new Set(prefixes).size).toBe(4);
+		expect(prefixes.join(' ')).toMatch(/alpha.*beta/);
+		expect(titles.every((title) => title?.endsWith('@example.com'))).toBe(true);
+	});
+
 	it('keeps account rows visible with the approved offline message after a failed refresh', async () => {
 		let calls = 0;
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -338,7 +360,7 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull();
 		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
 		flushSync();
-		expect(host.textContent).toContain('Actions are unavailable while offline. Try again when you’re connected.');
+		expect(host.textContent).toContain('Actions are unavailable while offline.');
 		for (const label of ['Where it works…', 'Sign out', 'Remove']) expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === label)?.disabled).toBe(true);
 		expect(host.textContent).not.toContain('network failed');
 	});
