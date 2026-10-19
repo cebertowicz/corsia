@@ -274,6 +274,14 @@ def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_read
     assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email
 
 
+def test_app_path_local_news_covers_exactly_the_outcomes_the_wake_sends():
+    from onboarding.local_download_wake import OUTCOMES
+
+    news = FIRST_RUN_APP.read_text(encoding="utf-8").split("**The local model's news.**", 1)[1].split("## The message", 1)[0]
+    named = set(re.findall(r"`([a-z_]+)`", "".join(line.split(":", 1)[0] for line in news.splitlines() if line.startswith("- `"))))
+    assert named == OUTCOMES
+
+
 def test_app_path_reads_no_other_app_settings_before_a_yes():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "mcp_sources" not in app
