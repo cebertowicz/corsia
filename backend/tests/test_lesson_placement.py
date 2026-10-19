@@ -567,6 +567,54 @@ async def test_a_rule_inferred_from_a_persons_words_is_captured_until_it_is_deri
     assert _state(env, literal) == ("active", None)  # the person's words never expire
 
 
+async def test_a_capture_keeps_correction_subjects_when_revised_and_promoted(env: Env) -> None:
+    def start(turn_id: str, message_id: str) -> None:
+        input_order = int(env.db.execute(
+            "SELECT COALESCE(max(input_order), 0) + 1 FROM messages WHERE thread_id=?", (THREAD,),
+        ).fetchone()[0])
+        env.db.execute(
+            """INSERT INTO active_turns(
+                id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json
+            ) VALUES (?,? ,0,'test/model','running','now','boot','{}')""", (turn_id, THREAD),
+        )
+        env.db.execute(
+            """INSERT INTO messages(
+                id,thread_id,role,content,created_at,input_order,active_turn_id
+            ) VALUES (?,?,'user','Please correct this.','now',?,?)""",
+            (message_id, THREAD, input_order, turn_id),
+        )
+        env.db.commit()
+
+    literal = _entry(env, SAID, "the user said: that answer was wrong")
+    entry = _entry(env, SAID, "always search the history first")
+    start("turn-one", "first")
+
+    _place(env, entry)
+    await _drain(env.worker)
+    [capture_path] = (env.tray / "context" / "captures").glob("*.md")
+    assert lesson_files.read_capture(capture_path.read_text()).originating_subjects == ("message:first",)
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-one'")
+    start("turn-two", "second")
+    _place(env, entry)
+    await _drain(env.worker)
+    assert lesson_files.read_capture(capture_path.read_text()).originating_subjects == (
+        "message:first", "message:second",
+    )
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-two'")
+    start("turn-three", "third")
+    _place(env, entry, _answer(trial={
+        "derivation": "they rejected an answer that skipped the earlier decision",
+        "literal_ref": {"entry_id": literal},
+    }))
+    await _drain(env.worker)
+
+    assert lesson_files.read_trial(_skill(env).read_text()).lesson.originating_subjects == (
+        "message:first", "message:second", "message:third",
+    )
+
+
 async def test_an_expired_trial_is_no_longer_offered_and_the_persons_words_stay(
     env: Env,
 ) -> None:
