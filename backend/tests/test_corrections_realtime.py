@@ -395,8 +395,15 @@ async def test_only_version_with_two_native_load_exits_notifies_once_and_stays_r
         update_failure_notice, "tell_corrections_classifier_load_crash_detached",
         lambda version, *, tasks: notices.append((version, tasks)),
     )
+    recorded = []
+    real_record = worker._record_only_version_load_crash
+    monkeypatch.setattr(  # the worker's own method changes its state; no module function does
+        worker, "_record_only_version_load_crash",
+        lambda version, reason, retry_at: (recorded.append(version), real_record(version, reason, retry_at)),
+    )
 
     assert (await worker._classify(_candidate())).kind == "outage"
+    assert recorded == ["v1"]
     assert (worker.state, worker.reason) == ("unavailable", "load native exit")
     assert worker.failed_versions == {}
     assert worker.snapshot()["retryable"] is True

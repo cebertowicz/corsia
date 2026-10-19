@@ -316,11 +316,13 @@ def test_a_backfill_before_activation_never_notes(agent, main_db):
 
 
 def _activate(main_db, at: str) -> None:
-    from core.corrections_recording import ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING, version_key
+    from core.corrections_recording import ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING, version_attributes, version_key
     from infra.settings import set_setting
 
     key = version_key(_version())
-    set_setting(ACTIVATIONS_SETTING, {key: {"activated_at": at}}, db=main_db)
+    set_setting(
+        ACTIVATIONS_SETTING, {key: {"activated_at": at, "version": version_attributes(_version())}}, db=main_db,
+    )
     set_setting(ACTIVE_VERSION_SETTING, {"key": key}, db=main_db)
     main_db.commit()
 

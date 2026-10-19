@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from core.corrections_input import owner_text
 from core.corrections_recording import (
@@ -23,18 +25,19 @@ from core.corrections_recording import (
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import (
     PendingCandidateKey,
+    PositiveComment,
     ScanCursor,
-    completed_unit_keys,
     hydrate_candidates,
     pending_candidate_keys,
     pending_source_candidate_keys,
+    positive_comment_keys,
 )
 
 if TYPE_CHECKING:
     from core.corrections_classifier import Classification
 
-#: Units ``recover_unit_notes`` reads per page.
-UNIT_PAGE = 20
+#: Comments ``recover_comment_notes`` reads per page.
+COMMENT_PAGE = 20
 
 
 def owner_user_ids() -> list[str]:
@@ -111,19 +114,39 @@ def _active_since() -> str | None:
         db.close()
 
 
-async def recover_unit_notes(window_start: str) -> None:
-    """Write the notes of each unit completed since activation whose positive facts have none yet.
+def _write_recovered(version: ClassifierVersion, keys: list[PositiveComment]) -> None:
+    """Write the notes of the units holding ``keys``' comments that the no-history rule admits."""
+    from core.correction_notes import made_after_activation, write_comment_notes
+    from infra.database import write_transaction
 
-    The scan's recovery for a unit key the worker never took or failed on; it
-    reads no further back than the scan's own ``window_start``.
+    with write_transaction(None, scope="recover_correction_comment_notes") as db:
+        admitted = [key.comment_id for key in keys if made_after_activation(db, key.created_at, version)]
+        write_comment_notes(db, admitted)
+
+
+async def recover_comment_notes(window_start: str) -> None:
+    """Write the note of each unit holding a comment the active version found a correction in.
+
+    The scan's recovery for a unit key the worker never took or failed on. It
+    selects the active version's live ``correction`` facts on comments made
+    after that version became active (``correction_notes.made_after_activation``,
+    the no-history rule a scan fact's note follows) and no earlier than the
+    scan's ``window_start``. It hands those comments to ``write_comment_notes``,
+    whose ``_unit_of`` is the one membership rule. A candidate version's
+    verdicts are never selected, so its backfill cannot note a unit the active
+    version found clean. A noted comment is read again on later passes; its
+    ``note_key`` stops the write.
     """
+    from core.corrections_recording import active_corrections_version
+
+    version = await run_in_db(active_corrections_version)
     activated = await run_in_db(_active_since)
-    if activated is None:
-        return  # No active version: no note is owed.
-    since, after = max(activated, window_start), None
-    while keys := await run_in_db(completed_unit_keys, since, UNIT_PAGE, after):
-        for unit in keys:
-            await run_in_db(write_unit, unit.kind, unit.unit_id)
+    if not isinstance(version, ClassifierVersion) or activated is None:
+        return  # No readable active version: no note is owed.
+    # Cut to the second: a superset of the later instants ``made_after_activation`` admits.
+    since, after = max(activated, window_start)[:19], None
+    while keys := await run_in_db(positive_comment_keys, version, since, COMMENT_PAGE, after):
+        await run_in_db(_write_recovered, version, keys)
         after = keys[-1]
 
 
@@ -222,6 +245,18 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
         db.close()
     candidates = hydrate_candidates([key])
     return replace(candidates[0], arrived=True) if candidates else None
+
+
+def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
+    """Hand the corrections worker an admitted owner message; best effort, never failing the send."""
+    from core.corrections_recording import is_owner_authored_message
+    from jobs.corrections_realtime import notify
+
+    try:
+        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
+            notify("message", accepted.message_id)
+    except Exception:
+        logger.exception("corrections classifier admission notification failed")
 
 
 async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:

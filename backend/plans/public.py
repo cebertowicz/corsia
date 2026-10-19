@@ -94,7 +94,6 @@ from plans.activity_projection import (
 from plans.user_ask import (
     ASKABLE_TYPES,
     ASK_ENDINGS,
-    ANSWERED_ROUNDS_SQL,
     AskRelease,
     ask_attention_state,
     ask_attention_state_sql,

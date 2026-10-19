@@ -15,10 +15,13 @@ makes it once):
 
 - a fact lands (``write_fact_notes``, in the fact's transaction);
 - a unit completes (``write_unit_notes``): the unit key an answer or a
-  delivery enqueues after its own commit, or one the scan recovers.
+  delivery enqueues after its own commit.
 
-A failing note fails that worker step, so it has one failure policy: the
-fact rolls back and the scan retries it; a unit key's scan recovers it.
+A scan pass's recovery covers a unit key the worker never took: it hands
+``write_comment_notes`` each comment the active version found a correction in,
+made after that version became active, so ``_unit_of`` stays the one
+membership rule. A failing note fails that worker step, so it has one failure
+policy: the fact rolls back and the scan retries it; the scan recovers a unit key.
 No note starts a turn. It rides its recipient's next admitted input as a
 passive digest, exactly as a chat note does.
 """
@@ -123,18 +126,26 @@ def _newer_owner_message(db: sqlite3.Connection, candidate: CorrectionCandidate)
     return any(is_owner_authored_message(role=row[0], content=row[1], metadata=row[2]) for row in rows)
 
 
+def made_after_activation(db: sqlite3.Connection, created_at: str, version: ClassifierVersion | None = None) -> bool:
+    """The no-history rule: a source made after the active version (``version``, only if active) became active.
+
+    A scan fact's note and the scan's recovery both apply it.
+    """
+    since = active_since(db, version)
+    try:
+        return since is not None and _instant(created_at) > _instant(since)
+    except ValueError:
+        return False  # An unreadable time is never proof the source is new.
+
+
 def _scan_fact_notes(db: sqlite3.Connection, candidate: CorrectionCandidate, version: ClassifierVersion) -> bool:
     """Whether a scan's fact may note: its source was made after its version became active.
 
     So neither an activation backfill nor the first scan after an upgrade notes
     history. A message must also still be the person's latest word.
     """
-    since = active_since(db, version)
-    try:
-        if since is None or _instant(candidate.created_at) <= _instant(since):
-            return False
-    except ValueError:
-        return False  # An unreadable time is never proof the source is new.
+    if not made_after_activation(db, candidate.created_at, version):
+        return False
     return candidate.source_kind != "message" or not _newer_owner_message(db, candidate)
 
 

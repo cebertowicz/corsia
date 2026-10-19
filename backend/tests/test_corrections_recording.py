@@ -41,7 +41,7 @@ def test_owner_message_filter_excludes_agents_and_system_wrappers():
 
 
 def test_arrival_trigger_only_notifies_new_owner_messages(monkeypatch):
-    from jobs import corrections_realtime
+    from jobs import corrections_realtime, corrections_recording
 
     seen = []
     monkeypatch.setattr(corrections_realtime, "notify", lambda source_kind, source_id: seen.append((source_kind, source_id)))
@@ -51,9 +51,9 @@ def test_arrival_trigger_only_notifies_new_owner_messages(monkeypatch):
 
         return SimpleNamespace(message_id=message_id, duplicate=duplicate)
 
-    corrections_realtime.notify_if_owner(accepted("message"), role="user", content="A correction.", metadata="{}")
-    corrections_realtime.notify_if_owner(accepted("duplicate", True), role="user", content="A correction.", metadata="{}")
-    corrections_realtime.notify_if_owner(
+    corrections_recording.notify_if_owner(accepted("message"), role="user", content="A correction.", metadata="{}")
+    corrections_recording.notify_if_owner(accepted("duplicate", True), role="user", content="A correction.", metadata="{}")
+    corrections_recording.notify_if_owner(
         accepted("agent"), role="user", content="A correction.", metadata={"sender_kind": "agent"},
     )
 

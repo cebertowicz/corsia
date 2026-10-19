@@ -23,7 +23,7 @@ Scan state (``scan``)::
 
     from                         event                                      to
     idle                         ready, startup, or dropped arrival          owed
-    idle                         arrival error, or notify while stopping/no loop owed
+    idle                         arrival error or notify while stopping        owed
     owed                         worker starts a pass                         running
     running                      pass finishes                                idle
     running                      yields to an arrival or must reselect        owed
@@ -33,13 +33,15 @@ Scan state (``scan``)::
 
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
+Only the worker's loop changes either state: ``notify`` off it hands itself to the application
+loop, and with none changes nothing, since startup owes a scan that reads what it carried.
 
 An outage writes no fact and keeps the source pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after
 it reaches the end using its originally selected manifest; a deterministic failure
 ends the pass unactivated, and the next pass re-selects (or the state is failed).
 A review unit's key (``UNIT_KINDS``) only writes the notes it owes; a pass that
-reaches the end first recovers the unit keys the worker never took.
+reaches the end first recovers the notes of units whose key the worker never took.
 """
 
 from __future__ import annotations
@@ -60,9 +62,7 @@ from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
 from jobs.corrections_recording import arrival_candidate, record_classification, record_unreadable, unreadable_facts
-from jobs.corrections_runtime import (
-    ClassificationOutcome, classify, drop_child, hand_to_app_loop, record_only_version_load_crash,
-)
+from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child, hand_to_app_loop
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -178,6 +178,15 @@ class CorrectionsWorker:
             str(version), reason, reader, tasks=self.failure_notice_tasks,
         )
 
+    def _record_only_version_load_crash(self, version: str, reason: str, retry_at: float) -> None:
+        """Back the sole version off until ``retry_at``, telling the person once per version."""
+        if version not in self.load_crash_retry_at:
+            from automation.update_failure_notice import tell_corrections_classifier_load_crash_detached
+
+            tell_corrections_classifier_load_crash_detached(version, tasks=self.failure_notice_tasks)
+        self.load_crash_retry_at[version] = retry_at
+        self._set("unavailable", reason)
+
     async def _after_version_failure(self, failure: ClassificationOutcome) -> AssetManifest | None:
         """Re-select past a deterministic failure; with nothing left, fail naming that version."""
         manifest = await self._select_manifest(after_version_failure=True)
@@ -204,7 +213,7 @@ class CorrectionsWorker:
         )
         if outcome.only_version_load_crash:
             retry_at = now + LOAD_CRASH_BACKOFF_SECONDS
-            record_only_version_load_crash(self, manifest.version, outcome.reason or "load exited", retry_at)
+            self._record_only_version_load_crash(manifest.version, outcome.reason or "load exited", retry_at)
         elif outcome.load_succeeded and manifest.version in self.load_crash_retry_at:
             self.load_crash_retry_at[manifest.version] = 0.0
         return outcome
@@ -258,7 +267,7 @@ class CorrectionsWorker:
     async def _scan(self) -> str:
         """Walk and activate one immutable manifest's measurement window."""
         from jobs.corrections_activation import measurement_window_start
-        from jobs.corrections_recording import next_pending_batch, recover_unit_notes
+        from jobs.corrections_recording import next_pending_batch, recover_comment_notes
 
         manifest = await self._select_manifest()
         if manifest is None:
@@ -269,7 +278,7 @@ class CorrectionsWorker:
         while self.queue.empty():
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
-                await recover_unit_notes(cutoff.isoformat())  # the unit keys the worker never took
+                await recover_comment_notes(cutoff.isoformat())  # the unit keys the worker never took
                 return await activate_after_backfill(version)
             tail = batch.selected_keys[-1]
             before = (tail.created_at, tail.source_kind, tail.source_id)
@@ -320,11 +329,11 @@ class CorrectionsWorker:
         self._hold(f"worker error: {type(error).__name__}")
 
     def notify(self, source_kind: str, source_id: str) -> None:
-        """Take a source or unit key from any thread; off the loop it hops onto the application loop."""
+        """Take a source or unit key on the worker's loop; called off it, hand the call to the application loop."""
+        if hand_to_app_loop(self.notify, source_kind, source_id):
+            return
         if self.stopping:
             self._owe()
-            return
-        if hand_to_app_loop(self, source_kind, source_id):
             return
         try:
             self.queue.put_nowait((source_kind, source_id, _clock()))
@@ -384,13 +393,3 @@ def state_snapshot(db: Any = None) -> dict[str, object]:
     if db is not None:
         snapshot["unreadable_facts"] = unreadable_facts(db, WORKER.version) if WORKER.version else 0
     return snapshot
-
-
-def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
-    from core.corrections_recording import is_owner_authored_message
-
-    try:
-        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
-            notify("message", accepted.message_id)
-    except Exception:
-        logger.exception("corrections classifier admission notification failed")

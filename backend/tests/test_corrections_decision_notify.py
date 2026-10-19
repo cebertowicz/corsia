@@ -2,7 +2,7 @@
 
 The worker's queue, event and task are bound to the application loop, so its
 ``notify`` hands a commit effect from a DB pool thread to ``infra.app_loop``,
-and with no application loop the scan is owed and recovers the answer.
+and with no application loop changes nothing: startup's owed scan reads the answer.
 """
 
 from __future__ import annotations
@@ -62,16 +62,18 @@ async def test_answer_through_run_in_db_notifies_the_worker_on_its_loop(db, monk
     assert len(notified_on) == 2 and notified_on[0] != notified_on[1] == threading.get_ident()
 
 
-def test_answer_with_no_app_loop_owes_the_scan_which_recovers_the_answer(db, monkeypatch):
+def test_answer_with_no_app_loop_changes_no_worker_state_and_startups_scan_reads_it(db, monkeypatch):
     from jobs.corrections_scanning import pending_source_candidate_keys
 
     worker = _isolated_worker(monkeypatch)  # the suite hides the app loop outside integration tests
     _plan, _source, decision = _raised_decision(db)
+    before = worker.snapshot()
 
     _answer(db, decision)
     db.commit()
 
-    assert worker.scan == "owed" and worker.queue.empty()
+    # Off every loop, nothing may touch the worker's state; startup owes the scan that reads the answer.
+    assert worker.snapshot() == before and worker.scan == "idle" and worker.queue.empty()
     monkeypatch.setattr("infra.database.get_db", lambda: _DbProxy(db))
     assert [(key.source_kind, key.source_id) for key in pending_source_candidate_keys(_version(), 10)] == [
         ("plan_decision_answer", decision["id"]),

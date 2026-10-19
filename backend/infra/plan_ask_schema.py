@@ -7,7 +7,8 @@ database creates it from this one definition (migration_126_to_127).
 from __future__ import annotations
 
 #: ``plans.user_ask.ask_rounds``: an artifact's user asks, newest raise first,
-#: read on the answer path; without it that read scans every hold ever placed.
+#: read on the answer path and by the corrections note writers in
+#: ``core.correction_notes``; without it that read scans every hold ever placed.
 ASK_ROUNDS_INDEX_SQL = """
     CREATE INDEX IF NOT EXISTS idx_plan_holds_user_ask_rounds
         ON plan_node_holds(owner_id, created_at, id)

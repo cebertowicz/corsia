@@ -3,14 +3,17 @@
 Regressions for the review of the comments-and-answers corrections change: the
 arrival API takes its source kind, a scan fact notes under the active version,
 a comment's unit is the ask open when it was made, a note queues no input of
-its own, and the scan recovers a unit key the worker never took.
+its own, and the scan recovers a unit key the worker never took with the notes
+arrival writes.
 """
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from doc_feedback_helpers import seed_document
+from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from tests.test_correction_notes import _activate, _version  # noqa: F401
 from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fixture and helpers
     CORRECTION,
@@ -22,9 +25,10 @@ from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fix
     _seed_decision,
     _user_comment,
     _wakes,
+    _worker_takes,
     db,
 )
-from tests.test_review_bar_answer import _ask, _legacy_duplicate_ask
+from tests.test_review_bar_answer import _answer as _clear_with_answer, _ask, _legacy_duplicate_ask
 
 
 def test_notify_requires_the_source_kind():
@@ -174,42 +178,175 @@ def _missed_units(db) -> tuple[str, str, str]:
 @pytest.mark.parametrize("page", [1, 20])
 async def test_the_scan_recovers_each_unit_whose_key_the_worker_never_took(db, monkeypatch, page):
     from jobs import corrections_recording
-    from jobs.corrections_scanning import completed_unit_keys
 
-    monkeypatch.setattr(corrections_recording, "UNIT_PAGE", page)
+    monkeypatch.setattr(corrections_recording, "COMMENT_PAGE", page)
     _activate(db, "2000-01-01T00:00:00+00:00")
-    *expected, round_batch = _missed_units(db)
+    *expected, _round_batch = _missed_units(db)
 
-    def selected() -> set[str]:
-        return {f"{unit.kind}:{unit.unit_id}" for unit in completed_unit_keys("2000-01-01", 50)}
+    await corrections_recording.recover_comment_notes("2000-01-01T00:00:00+00:00")
 
-    assert selected() == {*expected, round_batch}
-
-    await corrections_recording.recover_unit_notes("2000-01-01T00:00:00+00:00")
-
-    assert {details["note_key"] for details, _ in _correction_notes(db)} == set(expected)
-    # A noted unit is never selected again. The round's batch holds only the round's comment, so
-    # it writes no note and stays selected until the window passes it: bounded, a known residual.
-    assert selected() == {round_batch}
-    await corrections_recording.recover_unit_notes("2000-01-01T00:00:00+00:00")
-    assert len(_correction_notes(db)) == 2
+    # The round's comment belongs to its round, so the round's batch writes no note of its own.
+    assert sorted(details["note_key"] for details, _ in _correction_notes(db)) == sorted(expected)
+    await corrections_recording.recover_comment_notes("2000-01-01T00:00:00+00:00")
+    assert len(_correction_notes(db)) == 2  # a repeat pass re-reads the comments; note_key stops the writes
 
 
 @pytest.mark.asyncio
-async def test_recovery_reads_nothing_completed_before_activation(db):
-    from jobs.corrections_recording import recover_unit_notes
+async def test_recovery_reads_nothing_made_before_activation(db):
+    from jobs.corrections_recording import recover_comment_notes
 
     _missed_units(db)
-    await recover_unit_notes("2000-01-01T00:00:00+00:00")  # no active version: no note is owed
+    await recover_comment_notes("2000-01-01T00:00:00+00:00")  # no active version: no note is owed
     assert _correction_notes(db) == []
 
-    _activate(db, "2999-01-01T00:00:00+00:00")  # the units completed before this version became active
-    await recover_unit_notes("2000-01-01T00:00:00+00:00")
+    _activate(db, "2999-01-01T00:00:00+00:00")  # the comments were made before this version became active
+    await recover_comment_notes("2000-01-01T00:00:00+00:00")
     assert _correction_notes(db) == []
 
 
-def test_recovery_finds_a_noted_unit_by_its_note_key_index(db):
-    from jobs.corrections_scanning import completed_unit_keys
+@pytest.mark.asyncio
+async def test_recovery_applies_the_scan_facts_exact_activation_instant(db):
+    from doceditor import feedback_batches
+    from jobs.corrections_recording import recover_comment_notes
+
+    made = {}
+    for name, at in (("before", "2026-10-19T12:00:00.250000+00:00"), ("after", "2026-10-19T12:00:00.750000+00:00")):
+        artifact = seed_document(db, "owner", name=f"{name}.md")
+        comment = _user_comment(db, artifact)
+        db.execute("UPDATE doc_comments SET created_at=? WHERE id=?", (at, comment))
+        db.commit()
+        _record(db, "doc_comment", comment)
+        batch = db.execute("SELECT id FROM doc_feedback_batches WHERE artifact_id=?", (artifact,)).fetchone()[0]
+        assert feedback_batches.close_batch(db, batch, "send")[0]
+        db.commit()
+        made[name] = f"doc-feedback:{batch}"
+    _drop_queued_keys()
+    # Within the same second as both comments: the selector's floor is cut to the second.
+    _activate(db, "2026-10-19T12:00:00.500000+00:00")
+
+    await recover_comment_notes("2000-01-01T00:00:00+00:00")
+
+    assert [details["note_key"] for details, _ in _correction_notes(db)] == [made["after"]]
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_versions_backfill_never_notes_a_unit_the_active_version_found_clean(db):
+    from doceditor import feedback_batches
+    from jobs.corrections_recording import recover_comment_notes
+
+    _activate(db, "2000-01-01T00:00:00+00:00")  # v1 is active
+    artifact = seed_document(db, "owner", name="p.md")
+    comment = _user_comment(db, artifact)
+    _record(db, "doc_comment", comment, payload={**CORRECTION, "label": "not_correction"})
+    batch = db.execute("SELECT id FROM doc_feedback_batches WHERE artifact_id=?", (artifact,)).fetchone()[0]
+    assert feedback_batches.close_batch(db, batch, "send")[0]
+    db.commit()
+    _drop_queued_keys()
+    # v2 fills its measurement window and disagrees; it is not active.
+    assert _record(db, "doc_comment", comment, arrived=False, version=_version("v2")) is True
+
+    await recover_comment_notes("2000-01-01T00:00:00+00:00")
+
+    assert _correction_notes(db) == []
+
+
+@pytest.mark.asyncio
+async def test_a_round_answered_with_no_app_loop_is_noted_by_startups_recovery(db, monkeypatch):
+    from infra.db_async import run_in_db
+    from jobs import corrections_realtime as realtime
+    from jobs.corrections_recording import recover_comment_notes
+
+    worker = realtime.CorrectionsWorker()
+    monkeypatch.setattr(worker, "_start_task", lambda coroutine: coroutine.close())
+    monkeypatch.setattr(realtime, "notify", worker.notify)  # the real hand-off, not the suite's queue
+    _activate(db, "2000-01-01T00:00:00+00:00")
+    artifact = seed_document(db, "owner", name="p.md")
+    hold = _ask(db, artifact)
+    _record(db, "doc_comment", _user_comment(db, artifact))
+    before = worker.snapshot()
+
+    # On a DB pool thread with no application loop: the round's key reaches no queue.
+    await run_in_db(_clear_with_answer, db, artifact, "changes_requested")
+
+    assert worker.snapshot() == before and worker.queue.empty() and _correction_notes(db) == []
+    await recover_comment_notes("2000-01-01T00:00:00+00:00")  # what startup's owed scan runs
+    (details, _summary), = _correction_notes(db)
+    assert details["note_key"].startswith("review-round:"), (details, hold)
+
+
+def _note_rows(db) -> list[tuple[str, str, list[str], str]]:
+    """Every correction note as ``(recipient, note_key, subjects, summary)``, in a stable order."""
+    rows = db.execute(
+        "SELECT object_id,details_json,summary FROM context_change_journal WHERE object_kind='thread_context'"
+    ).fetchall()
+    notes = [(str(row[0]), json.loads(row[1]), str(row[2])) for row in rows]
+    return sorted(
+        (recipient, details["note_key"], details["correction_subjects"], summary)
+        for recipient, details, summary in notes if details.get("kind") == "correction_note"
+    )
+
+
+def _overlapping_asks(db, _monkeypatch) -> None:
+    artifact = seed_document(db, "owner", name="overlap.md")
+    _ask(db, artifact, title="First")
+    first = _user_comment(db, artifact)
+    _legacy_duplicate_ask(db, artifact, title="Second")
+    second = _user_comment(db, artifact)
+    for comment in (first, second):
+        _record(db, "doc_comment", comment)
+    _clear_with_answer(db, artifact, "changes_requested")
+
+
+def _round_older_than_the_rounds_read(db, monkeypatch) -> None:
+    import plans.user_ask as user_ask
+
+    monkeypatch.setattr(user_ask, "ASK_ROUNDS_LIMIT", 1)  # the first round is read as its batch
+    artifact = seed_document(db, "owner", name="older.md")
+    for title in ("First", "Second"):
+        _ask(db, artifact, title=title)
+        _record(db, "doc_comment", _user_comment(db, artifact))
+        _clear_with_answer(db, artifact, "changes_requested")
+
+
+def _reply_to_an_agent_comment(db, _monkeypatch) -> None:
+    from doceditor import feedback_batches
+
+    seed_thread(db, "reviewer")
+    artifact = seed_document(db, "owner", name="reply.md")
+    agent_row, _ = add_comment(db, artifact, author_kind="agent", author_id="reviewer")
+    db.commit()
+    reply, _ = add_comment(
+        db, artifact, author_kind="user", author="Steve", author_id=None, parent_id=str(agent_row["id"]),
+    )
+    db.commit()
+    _record(db, "doc_comment", str(reply["id"]))
+    for batch in batches(db, state="open"):  # the reply joined a batch to each of them
+        assert feedback_batches.close_batch(db, batch["id"], "send")[0]
+    db.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scenario", [_overlapping_asks, _round_older_than_the_rounds_read, _reply_to_an_agent_comment],
+)
+async def test_recovery_writes_exactly_the_notes_arrival_writes(db, monkeypatch, scenario):
+    from jobs.corrections_recording import recover_comment_notes
+
+    _activate(db, "2000-01-01T00:00:00+00:00")
+    scenario(db, monkeypatch)
+    _worker_takes(db)  # arrival: the facts' notes, then every unit key the commits handed the worker
+    arrived = _note_rows(db)
+    assert arrived
+
+    db.execute("DELETE FROM context_change_journal WHERE json_extract(details_json,'$.kind')='correction_note'")
+    db.commit()
+    await recover_comment_notes("2000-01-01T00:00:00+00:00")
+
+    assert _note_rows(db) == arrived
+
+
+def test_recovery_reads_positive_comment_facts_by_time(db):
+    from jobs.corrections_scanning import positive_comment_keys
 
     import infra.database as database
 
@@ -221,7 +358,7 @@ def test_recovery_finds_a_noted_unit_by_its_note_key_index(db):
             self._connection = connection
 
         def execute(self, sql, params=()):
-            if "WITH rounds AS" in sql:
+            if "FROM outcome_events e" in sql:
                 plan.extend(row[3] for row in self._connection.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall())
             return self._connection.execute(sql, params)
 
@@ -230,8 +367,8 @@ def test_recovery_finds_a_noted_unit_by_its_note_key_index(db):
 
     database.get_db = lambda: Explaining(real_get_db())
     try:
-        completed_unit_keys("2000-01-01", 5)
+        positive_comment_keys(_version(), "2000-01-01", 5)
     finally:
         database.get_db = real_get_db
 
-    assert any("idx_context_changes_note_key" in step for step in plan), plan
+    assert any("idx_outcome_events_name_ts" in step and "ts>" in step for step in plan), plan
