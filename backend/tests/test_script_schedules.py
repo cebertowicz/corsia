@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -201,6 +202,30 @@ async def test_in_bounds_reading_is_a_passive_note_not_a_wake(tmp_path, monkeypa
         "WHERE object_kind='thread_context'"
     ).fetchall()
     assert len(notes) == 1 and "cost = 3.5 usd" in notes[0][0]
+
+
+@pytest.mark.asyncio
+async def test_run_without_settled_measures_keeps_the_prior_measure_summary(tmp_path, monkeypatch):
+    db = _db()
+    schedule = _register(db, tmp_path)
+    db.execute("UPDATE automation_schedules SET last_measures='measures: 2 recorded, 0 refused (measure_status)'")
+    _use_run(monkeypatch, _run())
+
+    await _settle_all(db, T0)
+
+    assert schedules.get(schedule.id, db=db).last_measures == "measures: 2 recorded, 0 refused (measure_status)"
+
+
+@pytest.mark.asyncio
+async def test_run_whose_measure_lines_were_all_refused_replaces_the_prior_summary(tmp_path, monkeypatch):
+    db = _db()
+    schedule = _register(db, tmp_path)
+    db.execute("UPDATE automation_schedules SET last_measures='measures: 2 recorded, 0 refused (measure_status)'")
+    _use_run(monkeypatch, _run(json.dumps({"measure": {"attributes": {}}}) + "\n"))  # malformed: refused
+
+    await _settle_all(db, T0)
+
+    assert schedules.get(schedule.id, db=db).last_measures == "measures: 0 recorded, 1 refused (measure_status)"
 
 
 @pytest.mark.asyncio

@@ -213,6 +213,9 @@ KNOWN_INDIRECT: dict[str, str] = {
     "api/measurement_model_cost.py::materialize_chain": (
         "table is CHAIN_TABLE, the measurement task-chain temp table"
     ),
+    "api/measurement_model_cost.py::clear_chain": (
+        "table is CHAIN_TABLE, the measurement task-chain temp table"
+    ),
     "api/measurement_chain_costs.py::chain_costs": (
         "table is materialize_chain's return value, CHAIN_TABLE"
     ),
