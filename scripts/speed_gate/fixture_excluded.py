@@ -49,7 +49,7 @@ EXCLUDED: dict[str, str] = {
         "connected_apps", "connection_rules", "doc_feedback_edit_items", "durable_write_intents",
         "email_screens", "key_store_entries", "key_write_attempts", "lesson_placement_checks",
         "limit_observations", "managed_process_retirements", "measure_definitions", "measure_namespaces",
-        "plan_ask_deferrals",
+        "measure_workflows", "plan_ask_deferrals",
         "plan_markdown_import_issues", "plan_markdown_imports",
         "plan_status_dirty", "provider_availability", "reviewer_gate_approval",
         "vendor_account_billing_facts", "vendor_account_billing_revisions")},
