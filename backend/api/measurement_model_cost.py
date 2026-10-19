@@ -80,6 +80,11 @@ def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | No
     return CHAIN_TABLE
 
 
+def clear_chain(db) -> None:
+    """Empty the table :func:`materialize_chain` filled; the pooled connection outlives the caller."""
+    db.execute(f"DELETE FROM {CHAIN_TABLE}")
+
+
 def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None) -> tuple[str, str, dict[str, Any]]:
     """The CTE prefix, the chain rows to select from and the binds: the walk itself, unless a table already holds it."""
     if chain_rows is not None:

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
-from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
+from api.measurement_model_cost import clear_chain, materialize_chain, query_model_costs, query_recording_gaps
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
@@ -267,7 +267,7 @@ def price_snapshot(db: sqlite3.Connection, snapshot: Snapshot) -> Snapshot:
                     dollars[row["task_id"]] += float(row["dollars"])
             unknown |= query_recording_gaps(db, params, task_ids=tasks, chain_rows=chain)
         finally:
-            db.execute(f"DELETE FROM {chain}")  # the pooled connection outlives the job
+            clear_chain(db)
 
     def cost(run: Run) -> float | None:
         ids = {node["id"] for node in trees.get(run.run_id, ())}
