@@ -8,7 +8,7 @@ export type LocalPick = {
 };
 
 export const LOW_MEMORY_LOCAL_MODEL_SENTENCE = 'Local models need at least 24 GB of memory, and this computer has less.';
-export const LOW_MEMORY_LOCAL_MODEL_MESSAGE = `${LOW_MEMORY_LOCAL_MODEL_SENTENCE} Connect a subscription or an API provider.`;
+export const LOW_MEMORY_LOCAL_MODEL_MESSAGE = `${LOW_MEMORY_LOCAL_MODEL_SENTENCE} Connect a subscription or an API provider. Smaller local models may come in a future update.`;
 
 const PICK = '/api/setup/local-model';
 const FAILED: LocalPick = { state: 'failed', model: null, message: null };
