@@ -239,8 +239,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # Every failing test keeps its trace (playwright.config.ts retain-on-failure); a failure that does not reproduce
-      # locally is rooted in these, not guessed at.
+      # Every failing test keeps its trace (playwright.config.ts retain-on-failure) and, on Linux, the socket and TCP
+      # counter state its backend port had when it failed (support/networkDiagnostics.ts); a failure that does not
+      # reproduce locally is rooted in these, not guessed at.
       - name: Upload failing-test traces
         if: failure()
         continue-on-error: true
@@ -250,6 +251,7 @@ jobs:
           path: |
             frontend/test-results/**/trace.zip
             frontend/test-results/**/error-context.md
+            frontend/test-results/**/network-diagnostics.txt
           if-no-files-found: ignore
           retention-days: 7
 

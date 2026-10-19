@@ -1,5 +1,6 @@
 import { test as base } from '@playwright/test';
 import { TEST_TOKEN } from './corsia';
+import { recordNetworkDiagnostics } from './networkDiagnostics';
 
 async function threadIds(request: import('@playwright/test').APIRequestContext): Promise<string[]> {
 	const response = await request.get('/api/threads', { params: { token: TEST_TOKEN } });
@@ -13,7 +14,16 @@ async function threadIds(request: import('@playwright/test').APIRequestContext):
  * fresh conversation out of the mounted rows. After each test this deletes the conversations that test created.
  * Conversations that exist before a test starts (a `beforeAll`, an earlier test of a serial file) are kept.
  */
-export const test = base.extend<{ deleteCreatedThreads: void }>({
+export const test = base.extend<{ deleteCreatedThreads: void; networkDiagnostics: void }>({
+	// Declared after `request`, so it tears down before the request context disposes a hung request's socket.
+	networkDiagnostics: [
+		async ({ request }, use, testInfo) => {
+			void request;
+			await use();
+			await recordNetworkDiagnostics(testInfo);
+		},
+		{ auto: true },
+	],
 	deleteCreatedThreads: [
 		async ({ request }, use) => {
 			const before = new Set(await threadIds(request));
