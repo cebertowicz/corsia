@@ -619,10 +619,15 @@ test.describe('@flow:doc-margin-marker', () => {
 		const nearId = now[nearIndex].ids[0];
 		await buttons.nth(nearIndex).focus();
 		expect(await active(), `the marker holding qmna (${keysOf(opened, now[nearIndex])}) has focus before the regroup`).toBe(now[nearIndex].ids.join(','));
+		// Each step regroups against the grouping the step before settled on: spread to 90px, a fine pointer's markers go
+		// back to the natural grouping (one thread per line), so comparing with the first grouping would never see a change.
+		const grouping = async () => (await markers(page)).map((marker) => marker.ids.length).join(',');
+		let before = all.map((marker) => marker.ids.length).join(',');
 		for (const lineHeight of ['10px', '90px']) {
 			await page.addStyleTag({ content: `.cm-line { line-height: ${lineHeight} !important; }` });
-			await expect.poll(async () => (await markers(page)).map((marker) => marker.ids.length).join(','), { message: `markers regroup at ${lineHeight}` }).not.toBe(all.map((marker) => marker.ids.length).join(','));
+			await expect.poll(grouping, { message: `markers regroup at ${lineHeight}` }).not.toBe(before);
 			await settle(page);
+			before = await grouping();
 			const holder = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.commentIds ?? '');
 			expect(holder.split(','), `after ${lineHeight} lines focus is on the marker holding the thread it was on (${opened.byId[nearId]}; focus is on ${keysOf(opened, { ids: holder.split(',') })}; markers ${(await markers(page)).map((marker) => keysOf(opened, marker).join('+')).join(' | ')})`).toContain(nearId);
 			const labels = (await markers(page)).flatMap((marker) => marker.ids);
