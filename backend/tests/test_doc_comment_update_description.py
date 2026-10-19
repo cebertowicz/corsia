@@ -1,15 +1,13 @@
-"""The doc_comment_update description carries the same resolve rule as the
-feedback-node framing: a person's comment stays open for them to resolve."""
+"""Both places an agent learns who resolves a person's comment carry the one rule:
+the feedback-node framing and the doc_comment_update description."""
 
 from __future__ import annotations
 
 
-def test_description_leaves_a_persons_comment_open():
+def test_both_surfaces_carry_the_whole_resolve_rule():
+    from doceditor.comment_state_updates import PERSON_COMMENT_RESOLVE_RULE
     from plans.feedback_nodes import USER_FRAMING
     from tools.documents import DocCommentUpdateTool
 
-    description = DocCommentUpdateTool().description
-    rule = "Leave a person's comment open for them to resolve, above all one you replied to"
-    assert rule in description
-    assert "resolve it yourself only when they asked you to" in description
-    assert "resolve it yourself only when they asked you to" in USER_FRAMING
+    assert PERSON_COMMENT_RESOLVE_RULE in DocCommentUpdateTool().description
+    assert PERSON_COMMENT_RESOLVE_RULE in USER_FRAMING

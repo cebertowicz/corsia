@@ -10,6 +10,13 @@ from doceditor.note_names import actor_name, document_name
 from infra.passive_changes import append_thread_context_note
 from registry import models as registry_models
 
+# Who resolves a person's comment, told to agents by the feedback-node framing and doc_comment_update.
+PERSON_COMMENT_RESOLVE_RULE = (
+    "Leave the user's comment open for them to resolve, above all one you replied to; resolve it "
+    "yourself only when they asked you to, or when you made exactly the change it asked for "
+    "and had nothing to say."
+)
+
 
 def _transitions(before: dict[str, Any], patch: dict[str, Any], *, by_user: bool) -> list[str]:
     verbs = []
