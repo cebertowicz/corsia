@@ -72,6 +72,7 @@ def _client() -> TestClient:
 
 @pytest.mark.parametrize(("error", "reason"), [
     (urllib.error.URLError("offline"), "no internet connection"),
+    (urllib.error.HTTPError("https:" "//example.test", 403, "forbidden", Message(), None), "this computer couldn't download the installer"),
     (urllib.error.HTTPError("https:" "//example.test", 503, "down", Message(), None), "the download service didn't answer"),
 ])
 def test_download_connection_failures_have_safe_reasons(monkeypatch, error, reason):
@@ -83,6 +84,22 @@ def test_download_connection_failures_have_safe_reasons(monkeypatch, error, reas
     monkeypatch.setattr(cli_install.urllib.request, "urlopen", fail)
     with pytest.raises(cli_install.InstallerFailure, match=reason):
         cli_install._download_script("codex")
+
+
+def test_download_request_identifies_corsia_with_its_app_version(monkeypatch):
+    from api import cli_install
+
+    observed = {}
+
+    def fetch(request, **_kwargs):
+        observed["user_agent"] = request.get_header("User-agent")
+        return _Response(b"#!/bin/sh\n")
+
+    monkeypatch.setattr(cli_install.app_version, "_read_frontend_build_info", lambda: {"app": {"version": "0.4.1-dev.246"}})
+    monkeypatch.setattr(cli_install.urllib.request, "urlopen", fetch)
+    script = cli_install._download_script("codex")
+    assert observed["user_agent"] == "CORSIA/0.4.1-dev.246"
+    script.unlink()
 
 
 def test_download_rejects_non_script_response(monkeypatch):

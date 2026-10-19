@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
+from api import version as app_version
 from api.provider_sources import recheck_sources_once
 from cli_location import login_shell_binary, package_manager_for, path_shadowed_binary, service_binary, service_path
 from connections.vendor_accounts import VENDORS
@@ -45,6 +46,7 @@ _SECRET_VALUE = re.compile(
 
 NO_INTERNET = "no internet connection"
 DOWNLOAD_UNAVAILABLE = "the download service didn't answer"
+DOWNLOAD_REFUSED = "this computer couldn't download the installer"
 DOWNLOAD_UNVERIFIED = "the download didn't verify"
 TIMED_OUT = "it took too long"
 INSTALLER_STOPPED = "the installer stopped"
@@ -81,16 +83,25 @@ def _status(vendor: str) -> dict[str, str | None]:
             if job else {"state": "idle", "reason": None, "path_shadowed_by": None})
 
 
+def _installer_request(vendor: str) -> urllib.request.Request:
+    """Build the official installer request with CORSIA's running app version."""
+    version = app_version._app_version(app_version._read_frontend_build_info()) or "unknown"
+    return urllib.request.Request(
+        INSTALL_URLS[vendor], headers={"Accept": "text/plain", "User-Agent": f"CORSIA/{version}"}
+    )
+
+
 def _download_script(vendor: str) -> Path:
     """Download and minimally verify an official shell installer into a temp file."""
-    request = urllib.request.Request(INSTALL_URLS[vendor], headers={"Accept": "text/plain"})
+    request = _installer_request(vendor)
     try:
         with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
             script = response.read(_MAX_SCRIPT_BYTES + 1)
     except TimeoutError as exc:
         raise InstallerFailure(TIMED_OUT) from exc
     except urllib.error.HTTPError as exc:
-        raise InstallerFailure(DOWNLOAD_UNAVAILABLE) from exc
+        reason = DOWNLOAD_REFUSED if 400 <= exc.code < 500 else DOWNLOAD_UNAVAILABLE
+        raise InstallerFailure(reason) from exc
     except (urllib.error.URLError, OSError) as exc:
         raise InstallerFailure(NO_INTERNET) from exc
     if len(script) > _MAX_SCRIPT_BYTES or not script.startswith(b"#!"):
