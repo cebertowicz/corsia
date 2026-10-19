@@ -64,6 +64,7 @@ class CaptureFile:
     id: str
     hash: str
     source_refs: tuple[dict[str, str], ...]
+    originating_subjects: tuple[str, ...]
 
 
 def _one_line(value: object) -> str:
@@ -178,12 +179,14 @@ def raw_sha256(data: bytes) -> str:
 def render_capture(
     *, capture_id: str, capture_hash: str, owner: str, reason: str, name: str | None,
     description: str | None, text: str, trial: Trial, source_refs: list[dict[str, Any]],
+    originating_subjects: tuple[str, ...] = (),
 ) -> str:
     """A captured hypothesis: kept and reviewed, never offered as guidance."""
     capture: dict[str, Any] = {
         "id": capture_id, "hash": capture_hash, "state": "captured", "reason": reason,
         "kind": trial.kind, "owner": owner, "review_after": trial.review_after,
         "source_refs": _refs(source_refs),
+        "originating_subjects": list(originating_subjects),
     }
     if trial.derivation:
         capture["derivation"] = trial.derivation
@@ -216,9 +219,12 @@ def read_capture(text: str) -> CaptureFile | None:
     if not isinstance(capture, dict) or not capture.get("id") or not capture.get("hash"):
         return None
     refs = capture.get("source_refs")
+    subjects = capture.get("originating_subjects")
     return CaptureFile(
         id=str(capture["id"]), hash=str(capture["hash"]),
         source_refs=tuple(_refs(refs if isinstance(refs, list) else [])),
+        originating_subjects=tuple(subject for subject in subjects if isinstance(subject, str))
+        if isinstance(subjects, list) else (),
     )
 
 

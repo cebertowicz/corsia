@@ -120,7 +120,11 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
-    identity, text = _render(thread_id, capture_id, entry, decision, destination.path)
+    capture = None
+    if place.tray is not None:
+        path = lesson_files.capture_path(place.tray, capture_id)
+        capture = lesson_files.read_capture(path.read_text(encoding="utf-8")) if path.exists() else None
+    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture)
     offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
     line = _index_line(decision, destination.path)
     from core.lesson_index import fits_budget
@@ -217,8 +221,8 @@ def _on_trial(row: sqlite3.Row) -> bool:
 
 
 def _render(
-    thread_id: str, capture_id: str, entry: dict[str, Any],
-    decision: Decision, path: Path,
+    thread_id: str, capture_id: str, entry: dict[str, Any], decision: Decision, path: Path,
+    capture: lesson_files.CaptureFile | None,
 ) -> tuple[str, str]:
     """The trial's identity and its file text, against what the path holds now.
 
@@ -232,7 +236,10 @@ def _render(
     assert trial is not None
     from core.lesson_corrections import merge_subjects
 
-    identity, origin, earlier, subjects = capture_id, None, (), decision.originating_subjects
+    identity, origin, earlier = capture_id, None, ()
+    subjects = merge_subjects(
+        capture.originating_subjects if capture is not None else (), decision.originating_subjects,
+    )
     if path.exists():
         current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
         if current is None or current.lesson.owner != thread_id:
