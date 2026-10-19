@@ -148,6 +148,8 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 
 ### Install
 
+CORSIA runs on Macs with Apple silicon (M1 or later) and macOS 15 or later.
+
 Open Terminal and run:
 
 ```bash
