@@ -88,11 +88,11 @@ async function serve(page: Page, state: State) {
 		}
 		await route.fulfill({ json: { cloud_models_off: state.cloudOff } });
 	});
+	await page.route('**/api/settings/network-servers**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/settings/network-servers'
+		? route.fulfill({ json: { servers: state.servers } }) : route.continue());
 	await page.route('**/api/settings/network-servers/*/private**', (route) => state.failPrivate
 		? route.fulfill({ status: 500, json: { detail: 'Server unavailable' } })
 		: route.fulfill({ json: { ok: true } }));
-	await page.route('**/api/settings/network-servers**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/settings/network-servers'
-		? route.fulfill({ json: { servers: state.servers } }) : route.continue());
 }
 
 async function createProject(page: Page, name: string) {
