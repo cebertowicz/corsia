@@ -9,6 +9,7 @@ import sqlite3
 import uuid
 from typing import Literal
 
+from connections.agent_add_reach import AddingScopeError, reach_for_adding_thread as _agent_add_reach
 from connections.app_lifecycle_support import _assert_selected_projects_exist
 from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
 from infra import key_store
@@ -121,18 +122,11 @@ def is_connected(account_id: str, *, db: sqlite3.Connection) -> bool:
 
 
 def reach_for_adding_thread(thread_id: str, *, db: sqlite3.Connection) -> AppReach:
-    """Derive a new account's reach from its server-known adding scope."""
-    from connections.account_policy import missing_project_reason, thread_scope
-
-    scope = thread_scope(thread_id, db=db)
-    if missing_project_reason(scope, db=db):
-        raise ConnectedAccountError("adding scope is unavailable")
-    project_id = scope["project_id"]
-    return AppReach(
-        mode="all" if project_id is None else "selected",
-        project_ids=frozenset() if project_id is None else frozenset((str(project_id),)),
-        outside_projects=False,
-    )
+    """Derive a new app or account's reach from its server-known adding scope."""
+    try:
+        return _agent_add_reach(thread_id, db=db)
+    except AddingScopeError:
+        raise ConnectedAccountError("adding scope is unavailable") from None
 
 
 def create_google_account_for_thread(

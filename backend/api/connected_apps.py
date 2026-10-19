@@ -60,19 +60,7 @@ def _reaching_thread(user: dict, app_id: str) -> str:
     return thread_id
 
 
-def _agent_reach(thread_id: str, scope: dict, *, db) -> dict[str, object]:
-    """Limit ordinary agents to their place; CORSIA proposes workspace apps for all projects."""
-    from infra.corsia_agent import is_corsia_agent
-
-    if is_corsia_agent(thread_id, db=db):
-        return {"mode": "all", "project_ids": [], "outside_projects": False}
-    project_id = scope["project_id"]
-    return {
-        "mode": "selected",
-        "project_ids": [project_id] if project_id is not None else [],
-        "outside_projects": project_id is None,
-    }
-
+# The shared agent-add reach rule lives with connected accounts so apps and accounts stay equivalent.
 
 def _expected_revision(body: dict[str, Any]) -> int:
     revision = body.get("expected_revision")
@@ -215,7 +203,7 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
             from connections.app_lifecycle import create_pending_app
             from infra.corsia_agent import is_corsia_agent
 
-            thread_id, scope = _agent_thread(user, _db())
+            thread_id, _scope = _agent_thread(user, _db())
             if asked_by_thread_id is not None:
                 if not is_corsia_agent(thread_id, db=_db()):
                     raise _refusal("Only the workspace CORSIA agent can name an asking agent.", 403)
@@ -223,8 +211,10 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
                     thread_scope(asked_by_thread_id, db=_db())
                 except AccountAdmissionError:
                     raise _refusal("The asking agent thread no longer exists; use its current thread id.") from None
+            from connections.connected_accounts import reach_for_adding_thread
+
             return create_pending_app(
-                name, config, _agent_reach(thread_id, scope, db=_db()), actor_thread_id=thread_id,
+                name, config, reach_for_adding_thread(thread_id, db=_db()).as_dict(), actor_thread_id=thread_id,
                 asked_by_thread_id=asked_by_thread_id, audit_actor=_audit_actor(user), db=_db(),
             )
     try:

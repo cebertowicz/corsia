@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from connections.app_lifecycle import create_app, create_pending_app
+from connections.connected_accounts import create_google_account_for_thread
 from connections.app_reach import get_app, key_entry_names
 from infra.database import initialize_schema
 
@@ -24,7 +25,7 @@ def connected_apps_client(monkeypatch):
             "INSERT INTO projects(id,name,created_at,updated_at) VALUES (?,?,?,?)",
             (project_id, project_id, "t", "t"),
         )
-    for thread_id, project_id in (("thread-a", "project-a"), ("thread-b", "project-b"), ("workspace", None)):
+    for thread_id, project_id in (("thread-a", "project-a"), ("thread-b", "project-b"), ("workspace", None), ("outside", None)):
         db.execute(
             "INSERT INTO threads(id,user_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?)",
             (thread_id, "user", project_id, "t", "t"),
@@ -195,6 +196,21 @@ def test_agent_create_uses_server_thread_scope_and_refuses_reach(connected_apps_
     }
 
 
+def test_person_can_create_an_all_projects_app_with_the_frontend_body(connected_apps_client) -> None:
+    client, _db, actor = connected_apps_client
+    actor.clear()
+    actor.update({"id": "user", "token_kind": "session"})
+    body = {
+        "name": "Files", "config": {"command": "npx -y @example/app"}, "key_refs": [],
+        "reach": {"mode": "all", "project_ids": [], "outside_projects": False},
+    }
+
+    created = client.post("/api/mcp/servers", json=body)
+
+    assert created.status_code == 201
+    assert created.json()["reach"] == body["reach"]
+
+
 @pytest.mark.parametrize("body,remedy", [
     ({"name": "GitHub", "config": {}}, "needs the command"),
     ({"name": "GitHub", "config": {"name": "GitHub"}}, "needs the command"),
@@ -256,6 +272,32 @@ def test_workspace_corsia_proposes_an_app_for_all_projects(connected_apps_client
 
     assert created.status_code == 201
     assert created.json()["reach"] == {"mode": "all", "project_ids": [], "outside_projects": False}
+
+
+@pytest.mark.parametrize(
+    ("thread_id", "expected"),
+    [
+        ("workspace", {"mode": "all", "project_ids": [], "outside_projects": False}),
+        ("thread-a", {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}),
+        ("outside", {"mode": "selected", "project_ids": [], "outside_projects": True}),
+    ],
+)
+def test_agent_added_apps_and_accounts_have_the_same_reach(connected_apps_client, thread_id, expected) -> None:
+    client, db, actor = connected_apps_client
+    db.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
+        ('{"session_id":"workspace"}',),
+    )
+    db.commit()
+    actor["thread_id"] = thread_id
+
+    app = client.post("/api/mcp/servers", json={"name": f"{thread_id} app", "config": {"command": "app"}, "key_refs": []})
+    account = create_google_account_for_thread(
+        f"{thread_id}@example.test", actor_thread_id=thread_id, created_by=("agent", thread_id), db=db,
+    )
+
+    assert app.status_code == 201
+    assert app.json()["reach"] == account["reach"] == expected
 
 
 def test_workspace_agent_asked_by_provenance_is_server_resolved(connected_apps_client) -> None:

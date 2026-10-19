@@ -28,7 +28,6 @@ describe('CorsiaMessageRequestHandler', () => {
 			props: {
 				goConductor: vi.fn(async () => false),
 				chatPanel: { setAndSend: send } as never,
-				active: () => true,
 			},
 		});
 		flushSync();
@@ -52,7 +51,6 @@ describe('CorsiaMessageRequestHandler', () => {
 			props: {
 				goConductor: vi.fn(async () => true),
 				chatPanel: { setAndSend: send } as never,
-				active: () => true,
 			},
 		});
 		flushSync();
@@ -82,5 +80,27 @@ describe('CorsiaMessageRequestHandler', () => {
 
 		expect(toast).not.toHaveBeenCalled();
 		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it.each(['goConductor', 'setAndSend'] as const)('clears the request and shows the not-sent toast when %s rejects', async (rejecting) => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		const toast = vi.spyOn(toasts, 'show');
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+		const send = vi.fn(async () => rejecting === 'setAndSend' ? Promise.reject(new Error('send failed')) : 'sent');
+		component = mount(CorsiaMessageRequestHandler, {
+			target: host,
+			props: {
+				goConductor: vi.fn(async () => rejecting === 'goConductor' ? Promise.reject(new Error('open failed')) : true),
+				chatPanel: { setAndSend: send } as never,
+			},
+		});
+		flushSync();
+
+		requestCorsiaMessage('Connect a Google account for all my projects');
+		await vi.waitFor(() => expect(get(pendingCorsiaMessage)).toBeNull());
+
+		expect(toast).toHaveBeenCalledWith("Couldn't send that to CORSIA. Try again.", 'error');
+		expect(error).toHaveBeenCalledWith('CORSIA request was not sent because delivery failed', expect.any(Error));
 	});
 });

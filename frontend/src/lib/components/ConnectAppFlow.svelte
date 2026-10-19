@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { loadProjects, projects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { ConnectAppError, connectedAppStateLine, createConnectedApp, needsTokenBody, type ConnectedApp } from '$lib/api/connectedApps';
+	import { ALL_PROJECTS_REACH, ConnectAppError, connectedAppStateLine, createConnectedApp, needsTokenBody, type ConnectedApp } from '$lib/api/connectedApps';
 	import { SIGN_IN_LEDE } from '$lib/appSignIn';
 	import { requestCorsiaMessage } from '$lib/corsiaRequest';
 	import { requestAppKey } from '$lib/stores/settingsNavigation';
@@ -33,7 +33,7 @@
 		...(outsideProjects ? ['Outside projects'] : []),
 	]);
 	const reach = $derived(mode === 'all'
-		? { mode: 'all' as const, project_ids: [], outside_projects: true }
+		? ALL_PROJECTS_REACH
 		: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects });
 	const reachLine = $derived(mode === 'all'
 		? `Agents in ${allNames.join(', ')} and any new project will be able to use it.`

@@ -30,7 +30,7 @@ from infra.db_async import run_in_db
 from infra.internal_principal import internal_request
 from tests.registry_helpers import make_session
 from tools.corsia_api import CorsiaApiTool
-from tools.google_account import GoogleConnectTool, GoogleStatusTool
+from tools.google_account import GoogleConnectTool, GoogleStatusTool, _account_reply
 
 REFRESH = "1//canaryREFRESHtoken0123456789abcdef"
 SECRET = "canary-client-secret-0123456789"
@@ -120,6 +120,16 @@ def _http(*, client=("127.0.0.1", 50000)) -> httpx.AsyncClient:
 async def _start(google: FakeGoogle, conductor: str, client_file: str | None, **kwargs) -> tuple[str, str]:
     out = await GoogleConnectTool().execute(_thread_id=conductor, client_file=client_file, **kwargs)
     url = json.loads(out)["url"]
+    query = parse_qs(urlparse(url).query)
+    google.challenge = query["code_challenge"][0]
+    return url, query["state"][0]
+
+
+async def _start_for_thread(google: FakeGoogle, thread_id: str, client_file: str | None) -> tuple[str, str]:
+    """Start the same OAuth flow for a real project or outside-project agent."""
+    url, _ = await oauth.start_sign_in(
+        client_file, actor=("agent", thread_id), adding_thread_id=thread_id,
+    )
     query = parse_qs(urlparse(url).query)
     google.challenge = query["code_challenge"][0]
     return url, query["state"][0]
@@ -332,16 +342,17 @@ async def test_existing_connected_account_returns_the_b_g1_reply_for_each_reach(
     from connections.google.account_actions import change_google_account_reach
 
     await run_in_db(change_google_account_reach, account_id, reach, actor=("person", "person"))
+    caller = conductor
     if reach["mode"] == "selected":
         db = get_db()
         try:
-            db.execute("UPDATE threads SET project_id='garden' WHERE id=?", (conductor,))
+            caller = make_session(db, project_id="garden", prefix="garden-agent")
             db.commit()
         finally:
             db.close()
-    result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))
+    reply, link = await _account_reply(account_id, caller)
 
-    assert result == {
+    assert {"reply": reply, "link": link} == {
         "reply": f"{EMAIL} is already connected{reach_phrase}. To change where it works, use Where it works… on its row in Connected apps.",
         "link": f"#connected-apps/{account_id}",
     }
@@ -370,11 +381,11 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
 
     db = get_db()
     try:
-        db.execute("UPDATE threads SET project_id='launch' WHERE id=?", (conductor,))
+        launch_agent = make_session(db, project_id="launch", prefix="launch-agent")
         db.commit()
     finally:
         db.close()
-    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == workspace_reply
+    assert (await _account_reply(account_id, launch_agent))[0] == workspace_reply
 
     await run_in_db(
         change_google_account_reach,
@@ -384,9 +395,11 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
     )
     # By id, an account outside this conversation's reach is indistinguishable from an unknown one;
     # signing in as its address again still names what the conversation lacks.
-    refusal = f"Error: {oauth.UNKNOWN_ACCOUNT}"
-    assert await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id) == refusal
-    _, state = await _start(google, conductor, None)
+    refusal = oauth.UNKNOWN_ACCOUNT
+    with pytest.raises(oauth.GoogleSignInError) as refused:
+        await _account_reply(account_id, launch_agent)
+    assert str(refused.value) == refusal
+    _, state = await _start_for_thread(google, launch_agent, None)
     async with _http() as http:
         duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
     assert duplicate.status_code == 400 and (
@@ -395,15 +408,23 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
 
     db = get_db()
     try:
-        db.execute("UPDATE threads SET project_id=NULL WHERE id=?", (conductor,))
+        outside_agent = make_session(db, prefix="outside-agent")
         db.commit()
     finally:
         db.close()
     all_projects_reply = (
         f"{EMAIL} is connected, but not for all your projects. To make it work for all of them, use Where it works… on its row in Connected apps."
     )
-    assert await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id) == refusal
+    with pytest.raises(oauth.GoogleSignInError) as refused:
+        await _account_reply(account_id, outside_agent)
+    assert str(refused.value) == refusal
 
+    _, state = await _start_for_thread(google, outside_agent, None)
+    async with _http() as http:
+        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert duplicate.status_code == 400 and oauth.ALREADY_CONNECTED.format(address=EMAIL, reach="") in duplicate.text
+
+    # CORSIA is the workspace case even if a test fixture later changes its row.
     _, state = await _start(google, conductor, None)
     async with _http() as http:
         duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
@@ -411,12 +432,12 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
 
     db = get_db()
     try:
-        db.execute("UPDATE threads SET project_id='garden' WHERE id=?", (conductor,))
+        garden_agent = make_session(db, project_id="garden", prefix="garden-agent")
         db.execute("UPDATE connected_accounts SET state='needs_sign_in' WHERE id=?", (account_id,))
         db.commit()
     finally:
         db.close()
-    assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == needs_sign_in_reply
+    assert (await _account_reply(account_id, garden_agent))[0] == needs_sign_in_reply
 
 
 async def test_person_readding_connected_account_gets_already_connected_reply(google, conductor, client_file):
@@ -554,6 +575,14 @@ async def test_agent_routes_filter_status_and_refuse_an_unreachable_reconnect(go
     # Out of reach, the account answers exactly like an id no account has.
     assert reconnect.status_code == unknown.status_code == 400
     assert reconnect.content == unknown.content and reconnect.json()["detail"] == oauth.UNKNOWN_ACCOUNT
+
+    async with _http() as http:
+        with internal_request("steve", "missing-agent-thread"):
+            refused_add = await http.post("/api/google/connect")
+            refused_reconnect = await http.post("/api/google/connect", json={"account_id": account_id})
+    assert refused_add.status_code == refused_reconnect.status_code == 403
+    assert "no longer exists" in refused_add.json()["detail"]
+    assert "no longer exists" in refused_reconnect.json()["detail"]
 
 
 def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:

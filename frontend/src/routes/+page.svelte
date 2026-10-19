@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
@@ -40,11 +40,13 @@
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { getTurnState, resetTurnState, restoreTurnState } from '$lib/ws/turnState';
 	import { cancelThreadTypewriters } from '$lib/ws/typewriter';
+
 	let activeView = $state<View>(measurementViewRequested() ? 'measurement' : 'activity');
 	let sidebarOpen = $state(false);
 	let conductorLookup = $state<CoordinationLookup>({ kind: 'unknown' });
 	const conductorThreadId = $derived(conductorLookup.kind === 'target' ? conductorLookup.target.thread_id : null);
 	const conductorKnownAbsent = $derived(conductorLookup.kind === 'absent');
+
 	let lastEmittedView: View = 'activity';
 	$effect(() => {
 		const next = activeView;
@@ -52,6 +54,7 @@
 		emitProductEvent('ui', 'tab_switched', { from: lastEmittedView, to: next });
 		lastEmittedView = next;
 	});
+
 	$effect(() => { recordSettingsHomeThread(activeView, get(activeThreadId)); }); // every route out of Settings clears the thread it opened over
 	let lastSettingsOpenRequest = 0;
 	$effect(() => {
@@ -68,8 +71,6 @@
 	let systemStatus = $state<{ memory?: any; cpu?: any; llama_server?: any }>({});
 	let deleteConfirmId = $state<string | null>(null);
 	let chatPanelRef = $state<ChatPanel | undefined>(undefined);
-	let pageActive = true;
-	onDestroy(() => { pageActive = false; });
 	// Each deliberate selection advances this route-local intent. A first-run
 	// opener holds one generation and must yield as soon as the user chooses.
 	let selectionIntent = 0;
@@ -114,11 +115,11 @@
 		resetSurface('activity');
 	}
 
-	async function goConductor(): Promise<boolean> {
+	async function goConductor(isActive: () => boolean = () => true): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
 		conductorLookup = await fetchScopeTarget($token, $uiScope);
-		if (!pageActive) return false;
+		if (!isActive()) return false;
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
 			if ('reasoning_effort' in target) reasoningEffort.set(target.reasoning_effort ?? null);
@@ -131,7 +132,6 @@
 		toasts.show(`Couldn't load ${$uiScope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
-
 
 	$effect(() => {
 		const [t, scope, authenticated] = [$token, $uiScope, $isAuthenticated];
@@ -472,8 +472,8 @@
 </svelte:head>
 
 <svelte:window onkeydown={handleKeydown} />
-<CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} active={() => pageActive} />
 
+<CorsiaMessageRequestHandler {goConductor} chatPanel={chatPanelRef} />
 <HomePageView
 	isAuthenticated={$isAuthenticated} {activeView} bind:sidebarOpen bind:chatPanelRef
 	{conductorThreadId} {conductorKnownAbsent} {systemStatus} {isDraggingOver} {paneConfig}

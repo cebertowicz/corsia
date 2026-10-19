@@ -63,7 +63,9 @@ def migrate_128_to_129(conn: sqlite3.Connection) -> None:
     before commit only the legacy entries resolve; after commit only the account
     bundle resolves. A failed bundle write therefore leaves the old path intact.
     """
-    conn.executescript(CONNECTED_ACCOUNTS_SCHEMA_SQL)
+    for statement in CONNECTED_ACCOUNTS_SCHEMA_SQL.split(";"):
+        if statement.strip():
+            conn.execute(statement)
     if conn.execute(
         "SELECT 1 FROM connected_account_migration_journal WHERE migration_key=?", (JOURNAL_KEY,),
     ).fetchone() is not None:

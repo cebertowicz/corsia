@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { Button, Modal } from '$lib/components/ui';
-	import { approveConnectedApp, isOnlyCorsia, saveAccountReach, saveConnectedAppReach, type ConnectedAppsRow } from '$lib/api/connectedApps';
+	import { ALL_PROJECTS_REACH, approveConnectedApp, isOnlyCorsia, saveAccountReach, saveConnectedAppReach, type ConnectedAppsRow } from '$lib/api/connectedApps';
 
 	let { app, approve = false, onClose, onSaved }: { app: ConnectedAppsRow; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedAppsRow) => void } = $props();
 	const appName = $derived(app.kind === 'account' ? `Google — ${app.address}` : app.name);
@@ -67,7 +67,7 @@
 		error = '';
 		try {
 			const reach = mode === 'all'
-				? { mode: 'all' as const, project_ids: [], outside_projects: false }
+				? ALL_PROJECTS_REACH
 				: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects };
 			if (approve && app.kind !== 'account') onSaved(await approveConnectedApp(app, reach));
 			else if (app.kind === 'account') onSaved({ ...(await saveAccountReach(app.id, reach)).row, kind: 'account' });

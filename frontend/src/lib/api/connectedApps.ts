@@ -38,6 +38,8 @@ export interface ConnectedApp {
 
 export type AppReach = ConnectedApp['reach'];
 
+export const ALL_PROJECTS_REACH: AppReach = { mode: 'all', project_ids: [], outside_projects: false };
+
 /** Why a Google account's sign-in is gone or was just revoked. Only the last four show the manual Google Account step. */
 export type RevocationCause =
 	| 'revoked'

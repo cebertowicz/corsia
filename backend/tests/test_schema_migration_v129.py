@@ -192,7 +192,32 @@ def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(mon
         assert get_setting("google_account", db=db) == {"email": ACCOUNT, "status": "connected"}
         assert get_setting("gmail_poll_cursor", db=db) == CURSOR
         assert set(key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db)) == set(key_store.GOOGLE_ENTRIES)
-        assert db.execute("SELECT COUNT(*) FROM connected_accounts").fetchone()[0] == 0
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='connected_accounts'",
+        ).fetchone() is None
+
+
+def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(monkeypatch) -> None:
+    with closing(_dev_128()) as db:
+        _seed_legacy(db)
+        db.execute("DROP INDEX idx_doc_comments_user_created")
+        db.execute("PRAGMA user_version=126")
+        db.commit()
+
+        monkeypatch.setattr(key_store_values, "put", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")))
+        with pytest.raises(MigrationError):
+            migrate_to_current(db, SCHEMA_VERSION)
+
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 126
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_doc_comments_user_created'",
+        ).fetchone() is None
+        assert db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='connected_accounts'",
+        ).fetchone() is None
+
+        monkeypatch.undo()
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 129
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:

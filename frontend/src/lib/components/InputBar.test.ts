@@ -661,6 +661,43 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(component.getDrafts().get('thread-1')).toMatchObject({ content: 'Keep this draft', attachments: [attachment] });
 	});
 
+	it('waits for a new thread before restoring the draft around an automatic send', async () => {
+		activeThreadId.set('thread-before-automatic-send');
+		let resolveThread!: () => void;
+		const onAutoCreateThread = vi.fn(() => new Promise<void>(resolve => {
+			resolveThread = () => {
+				activeThreadId.set('thread-created-for-automatic-send');
+				resolve();
+			};
+		}));
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn(), onAutoCreateThread } });
+		flushSync();
+		await component.setText('Keep this draft');
+		const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+		Object.defineProperty(fileInput, 'files', {
+			configurable: true,
+			value: [new File(['notes'], attachment.filename, { type: attachment.mime_type })],
+		});
+		fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await vi.waitFor(() => expect(host.querySelector('.attachment-chip')).not.toBeNull());
+		activeThreadId.set(null);
+		flushSync();
+
+		const automaticSend = component.setAndSend('Connect a Google account for all my projects', true);
+		await vi.waitFor(() => expect(onAutoCreateThread).toHaveBeenCalledOnce());
+		resolveThread();
+		await automaticSend;
+
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-created-for-automatic-send', 'Connect a Google account for all my projects', 'network/model', [], undefined,
+		);
+		expect(component.getInputText()).toBe('Keep this draft');
+		expect(host.querySelector('.attachment-chip')).not.toBeNull();
+		expect(component.getDrafts().get('thread-before-automatic-send')).toMatchObject({
+			content: 'Keep this draft', attachments: [attachment],
+		});
+	});
+
 	describe('an automatic send that fails keeps the draft and reports how it failed', () => {
 		async function mountWithDraft() {
 			activeThreadId.set('thread-1');
@@ -716,6 +753,15 @@ describe('InputBar model readiness at the action seam', () => {
 			expect(get(toasts).slice(before)).toEqual([
 				expect.objectContaining({ message: 'Connection lost before CORSIA could accept this message.', type: 'error' }),
 			]);
+			expectDraftKept();
+		});
+
+		it('restores the draft and attachment when sending rejects', async () => {
+			await mountWithDraft();
+			wsMocks.sendMessage.mockImplementationOnce(() => { throw new Error('send failed'); });
+
+			await expect(component!.setAndSend('Connect a Google account for all my projects', true)).rejects.toThrow('send failed');
+
 			expectDraftKept();
 		});
 	});

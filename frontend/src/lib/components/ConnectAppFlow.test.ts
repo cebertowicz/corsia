@@ -126,7 +126,15 @@ describe('ConnectAppFlow', () => {
 		press('Continue');
 		press('Connect');
 		await vi.waitFor(() => expect(onConnected).toHaveBeenCalledWith(created));
-		expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers'), expect.objectContaining({ method: 'POST' }));
+		expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers'), expect.objectContaining({
+			method: 'POST',
+			body: JSON.stringify({
+				name: 'Files',
+				config: { command: 'npx -y @example/app' },
+				reach: { mode: 'all', project_ids: [], outside_projects: false },
+				key_refs: [],
+			}),
+		}));
 		expect(host.textContent).toContain('Files: Connected · 46 actions');
 	});
 
