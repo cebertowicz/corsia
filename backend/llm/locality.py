@@ -142,3 +142,18 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
     if project_cloud_models_off(project_id, db=db):
         return "project_cloud_off"
     return None
+
+
+# Governance & Scopes owns this wording. Only a person can turn cloud models back on,
+# so the text never tells an agent to do it.
+NO_LOCAL_READY_TEXT = (
+    "No local model is ready now. Stay on your current model and do the work inline,"
+    " or check model_catalog later."
+)
+
+
+def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:
+    """Return the agent-facing recovery text for a ``project_cloud_off`` refusal."""
+    text = f"project_cloud_off: This project has cloud models turned off, so {selector} can't run here. "
+    text += f"Use a ready local model: {', '.join(ready_local)}." if ready_local else NO_LOCAL_READY_TEXT
+    return f"{text} Local workers run one at a time." if spawn else text

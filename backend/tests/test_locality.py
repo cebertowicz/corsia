@@ -83,6 +83,19 @@ def test_locality_refusal_reads_private_mark_and_project_policy(isolated_db):
     assert locality_refusal({"backend": "api"}, thread_local_only=False, project_id=None, db=db) is None
 
 
+def test_project_cloud_off_text_is_governance_wording():
+    from llm.locality import project_cloud_off_text
+
+    head = "project_cloud_off: This project has cloud models turned off, so codex/gpt-5.6-terra can't run here. "
+    assert project_cloud_off_text("codex/gpt-5.6-terra", ["omlx@local/a", "omlx@local/b"]) == (
+        head + "Use a ready local model: omlx@local/a, omlx@local/b."
+    )
+    assert project_cloud_off_text("codex/gpt-5.6-terra", [], spawn=True) == (
+        head + "No local model is ready now. Stay on your current model and do the work inline,"
+        " or check model_catalog later. Local workers run one at a time."
+    )
+
+
 def test_email_screen_keeps_external_loopback_behavior():
     from connections.google.email_screen import local_endpoint_refusal
 
