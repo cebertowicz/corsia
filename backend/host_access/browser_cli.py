@@ -10,7 +10,8 @@ from pathlib import Path
 import re
 import shutil
 import stat
-from typing import Literal, Sequence
+import tempfile
+from typing import IO, Literal, Sequence
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
@@ -228,38 +229,9 @@ def _diagnostic(exc: Exception, phase: str) -> str:
     return diagnostic
 
 
-async def _pump(stream: asyncio.StreamReader | None, sink: bytearray) -> None:
-    while stream is not None and (chunk := await stream.read(65536)):
-        sink += chunk
-
-
-async def _communicate(process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
-    """Return at client exit plus a bounded drain, never at pipe EOF.
-
-    The client starts the browser daemon, so a descendant can keep the client's
-    pipe write ends open long after the client exited; waiting for EOF
-    (``Process.communicate``) then hangs until the caller's timeout.
-    """
-    out, err = bytearray(), bytearray()
-    pumps = [asyncio.ensure_future(_pump(process.stdout, out)),
-             asyncio.ensure_future(_pump(process.stderr, err))]
-    try:
-        # Process.wait() also waits for the pipes to close, so watch the exit status itself.
-        while process.returncode is None:
-            await asyncio.sleep(0.05)
-        await asyncio.wait(pumps, timeout=_DRAIN_AFTER_EXIT)
-    finally:
-        for pump in pumps:
-            pump.cancel()
-        if process.returncode is not None:
-            # Release pipes a descendant still holds so the transports can close.
-            transport = getattr(process, "_transport", None)
-            if transport is not None:
-                transport.close()
-    return bytes(out), bytes(err)
-
-
-_DRAIN_AFTER_EXIT = 1.5
+def _read_output(stream: IO[bytes]) -> str:
+    stream.seek(0)
+    return stream.read().decode("utf-8", errors="replace").strip()
 
 
 async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> CommandResult:
@@ -269,18 +241,28 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
     env.pop("AGENT_BROWSER_DASHBOARD", None)
     env.pop("AGENT_BROWSER_SESSION", None)
     env["AGENT_BROWSER_SOCKET_DIR"] = str(socket_dir)
+    # The client starts a browser daemon that outlives it, and a descendant can keep the client's stdout and stderr
+    # open after the client exits. Pipes would then never reach end-of-file, so the client writes to files and
+    # settles on its own exit; what a descendant writes later goes to a file nobody waits on.
+    output, errors = tempfile.TemporaryFile(), tempfile.TemporaryFile()
+
+    def release_output(_: object = None) -> None:
+        output.close()
+        errors.close()
+
     spawn = _retain(asyncio.create_task(asyncio.create_subprocess_exec(
-        *tuple(argv), stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, env=env,
+        *tuple(argv), stdout=output, stderr=errors, env=env,
     )))
     try:
         process = await asyncio.wait_for(asyncio.shield(spawn), timeout)
         if (current := asyncio.current_task()) is not None and current.cancelling():
             raise asyncio.CancelledError
     except asyncio.TimeoutError:
+        spawn.add_done_callback(release_output)
         pending = _retain(asyncio.create_task(_settle_late_spawn(spawn)))
         return CommandResult(-1, "", "", True, "unknown", pending)
     except asyncio.CancelledError:
+        spawn.add_done_callback(release_output)
         pending = _retain(asyncio.create_task(_settle_late_spawn(spawn)))
         result = CommandResult(-1, "", "", completion="unknown", settlement=pending)
         try:
@@ -289,11 +271,13 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
             pass  # The retained settlement still owns the client.
         raise CommandCancelled(result.settled()) from None
     except Exception as exc:
+        release_output()
         return CommandResult(1, "", _diagnostic(exc, "spawn"), completion="unknown")
     try:
-        stdout, stderr = await asyncio.wait_for(_communicate(process), timeout)
+        await asyncio.wait_for(process.wait(), timeout)
         if (current := asyncio.current_task()) is not None and current.cancelling():
             raise asyncio.CancelledError
+        stdout, stderr = _read_output(output), _read_output(errors)
     except (asyncio.CancelledError, Exception) as exc:
         stopped = await asyncio.shield(_stop_client(process))
         diagnostic = "" if isinstance(exc, (asyncio.TimeoutError, asyncio.CancelledError)) else _diagnostic(exc, "communicate")
@@ -302,8 +286,9 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
         if isinstance(exc, asyncio.CancelledError):
             raise CommandCancelled(result) from None
         return result
-    return CommandResult(int(process.returncode or 0), stdout.decode("utf-8", errors="replace").strip(),
-                         stderr.decode("utf-8", errors="replace").strip())
+    finally:
+        release_output()
+    return CommandResult(int(process.returncode or 0), stdout, stderr)
 
 
 def check_local_mode(args: Sequence[str]) -> None:

@@ -40,22 +40,26 @@ async def test_missing_client_preserves_healthy_bound_session(synthetic_browser,
     assert runtime.record == before
 
 
-async def test_actual_client_communicate_failure_keeps_safe_diagnostic(
+async def test_actual_client_wait_failure_keeps_safe_diagnostic(
     monkeypatch, tmp_path, caplog,
 ):
     original = asyncio.create_subprocess_exec
     clients = []
 
-    async def recording_spawn(*args, **kwargs):
+    async def broken_spawn(*args, **kwargs):
         process = await original(*args, **kwargs)
         clients.append(process)
+
+        real_wait = process.wait
+
+        async def broken_wait():
+            monkeypatch.setattr(process, 'wait', real_wait)
+            raise OSError('private path /secret and session value')
+
+        monkeypatch.setattr(process, 'wait', broken_wait)
         return process
 
-    async def broken_communicate(process):
-        raise OSError('private path /secret and session value')
-
-    monkeypatch.setattr(asyncio, 'create_subprocess_exec', recording_spawn)
-    monkeypatch.setattr(cli, '_communicate', broken_communicate)
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', broken_spawn)
     result = await cli.invoke(
         (sys.executable, '-c', 'import time; time.sleep(20)'),
         socket_dir=tmp_path, timeout=3,
