@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
-	import { settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { requestAppKey, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
@@ -327,8 +327,14 @@
 						</div>
 					{:else}
 						<div class="item">
-							<SettingsRow name={row.name} subTone={tone(row)} chevron expanded={isOpenApp(row)} onOpen={() => openId = openId === row.id ? null : row.id}>{#snippet sub()}{@render appSecondLine(row)}{/snippet}</SettingsRow>
-							{#if isOpenApp(row)}<div class="details">{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}<AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} autoStart={signInAfterApprove === row.id} onAutoStarted={() => signInAfterApprove = null} /><div class="actions">{#if row.state === 'expired'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'decline')}>Dismiss</Button>{:else}<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'reconnect')}>Reconnect</Button>{#if row.sign_in?.signed_in && confirmingAppOut !== row.id}<Button variant="ghost" size="sm" onclick={() => confirmingAppOut = row.id}>Sign out</Button>{/if}<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'remove')}>Remove</Button></span>{/if}</div></div>{/if}
+							<SettingsRow name={row.name} subTone={tone(row)} chevron expanded={isOpenApp(row)} stackActions onOpen={() => openId = openId === row.id ? null : row.id}>
+								{#snippet sub()}{@render appSecondLine(row)}{/snippet}
+								{#snippet actions()}
+									{#if !isOpenApp(row) && row.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Set key</Button>
+									{:else if !isOpenApp(row) && row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}
+								{/snippet}
+							</SettingsRow>
+							{#if isOpenApp(row)}<div class="details">{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}<AppSignInPanel app={row} {signInHere} confirmOut={confirmingAppOut === row.id} onConfirmOut={(on) => confirmingAppOut = on ? row.id : null} onChange={(patch) => replaceApp({ ...row, ...patch })} onRefresh={refresh} onSignedOut={() => signedOut = new Set(signedOut).add(row.id)} autoStart={signInAfterApprove === row.id} onAutoStarted={() => signInAfterApprove = null} />{#if row.state === 'needs_token'}<p class="key-detail">{row.name} needs a key before agents can use it: a code {row.name} gives you so other apps can use your account ({row.name} may call it a token or an API key). Create one in your {row.name} settings. Then press Set key next to {row.name}. That opens the Keys page: paste the key there and press Set.</p>{:else if row.state === 'token_rejected'}<p class="key-detail">{row.name} didn't accept its key. Create a new one in your {row.name} settings, then press Replace key.</p>{/if}<div class="actions">{#if row.state === 'expired'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'decline')}>Dismiss</Button>{:else}{#if row.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Set key</Button>{:else if row.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(row)}>Replace key</Button>{/if}<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button>{#if row.state !== 'needs_token' && row.state !== 'token_rejected'}<Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'reconnect')}>Reconnect</Button>{/if}{#if row.sign_in?.signed_in && confirmingAppOut !== row.id}<Button variant="ghost" size="sm" onclick={() => confirmingAppOut = row.id}>Sign out</Button>{/if}<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => runApp(row, 'remove')}>Remove</Button></span>{/if}</div></div>{/if}
 						</div>
 					{/if}
 				{/each}
@@ -360,6 +366,7 @@
 	.details { padding: var(--space-1) var(--space-2) var(--space-3); }
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
+	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.manual-removal { margin: var(--space-3) var(--space-2) 0; color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }

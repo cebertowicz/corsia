@@ -30,6 +30,8 @@ export interface SettingsNavigation {
 	anchor: string | null;
 	/** A connected-account row to disclose and focus after a chat link opens Connected apps. */
 	connectedAppId: string | null;
+	/** A key card opened from Connected apps; it supplies the scoped header return and every referenced key's app-qualified label. */
+	connectedAppKey: { app: string; entry: string; refs: { entry: string; name: string }[] } | null;
 }
 
 /*
@@ -52,7 +54,7 @@ export interface SettingsNavigation {
  */
 const initial = (): SettingsNavigation => ({
 	section: 'providers', project: null, fromProject: null, drill: null,
-	openRequest: 0, homeThread: null, anchor: null, connectedAppId: null,
+	openRequest: 0, homeThread: null, anchor: null, connectedAppId: null, connectedAppKey: null,
 });
 const state = writable<SettingsNavigation>(initial());
 export const settingsNavigation: Readable<SettingsNavigation> = { subscribe: state.subscribe };
@@ -66,7 +68,7 @@ export const providerCardRequest = writable<string | null>(null);
 
 export function requestSettingsSection(section: SettingsSection, anchor: string | null = null) {
 	change((s) => ({
-		section, anchor, connectedAppId: null, fromProject: null,
+		section, anchor, connectedAppId: null, connectedAppKey: null, fromProject: null,
 		project: section === 'projects' ? s.project : null,
 		openRequest: s.openRequest + 1,
 	}));
@@ -101,6 +103,27 @@ export function openWorkspaceSettings(anchor: string | null = null) {
 	requestSettingsSection('providers', anchor);
 }
 
+/** Open the exact existing key card needed by a Connected apps recovery action. */
+export function requestConnectedAppKey(app: string, entry: string, refs: { entry: string; name: string }[]) {
+	change((s) => ({
+		section: 'keys', anchor: `key-${entry}`, fromProject: null, project: null,
+		connectedAppKey: { app, entry, refs }, openRequest: s.openRequest + 1,
+	}));
+}
+
+/** Set or replace an app's key: its first unset (else first) declared key's card, or the Keys section when it declares none. */
+export function requestAppKey(app: { name: string; key_refs?: { entry: string; name: string; set: boolean }[] }) {
+	const refs = app.key_refs ?? [];
+	const ref = refs.find((candidate) => !candidate.set) ?? refs[0];
+	if (ref) requestConnectedAppKey(app.name, ref.entry, refs);
+	else requestSettingsSection('keys');
+}
+
+/** Return from a focused app key card to the list that opened it. */
+export function returnToConnectedApps() {
+	change(() => ({ section: 'connected-apps', anchor: null, connectedAppKey: null }));
+}
+
 /** A project's gear: Settings at Projects, on that project's page. */
 export function openProjectSettings(projectId: string, anchor: string | null = null) {
 	change((s) => ({
@@ -120,7 +143,7 @@ export function returnToProjectPage() {
 
 /** A tap on the section list. */
 export function selectSettingsSection(section: SettingsSection) {
-	change(() => ({ section, project: null, fromProject: null, anchor: null }));
+	change(() => ({ section, project: null, fromProject: null, anchor: null, connectedAppKey: null }));
 }
 
 /** A row in the Projects list opens that project's page. */
