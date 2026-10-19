@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { projects, loadProjects } from '$lib/stores/projects';
-	import { settingsAnchor } from '$lib/stores/settingsNavigation';
+	import { requestAppKey, settingsAnchor } from '$lib/stores/settingsNavigation';
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsList, reconnectConnectedApp, removeConnectedApp,
 		type ConnectedApp,
@@ -131,21 +131,29 @@
 				</div>
 				{:else}
 				<div class="item">
-					<SettingsRow name={app.name} subTone={tone(app)} chevron expanded={isOpen(app)} onOpen={() => openId = openId === app.id ? null : app.id}>
+					<SettingsRow name={app.name} subTone={tone(app)} chevron expanded={isOpen(app)} stackActions onOpen={() => openId = openId === app.id ? null : app.id}>
 						{#snippet sub()}{@render secondLine(app)}{/snippet}
+						{#snippet actions()}
+							{#if !isOpen(app) && app.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Set key</Button>
+							{:else if !isOpen(app) && app.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Replace key</Button>{/if}
+						{/snippet}
 					</SettingsRow>
 					{#if isOpen(app)}
 						<div class="details">
 							{#if errorId === app.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 							<AppSignInPanel {app} {signInHere} confirmOut={confirmingOut === app.id} onConfirmOut={(on) => confirmingOut = on ? app.id : null} onChange={(patch) => replace({ ...app, ...patch })} onRefresh={refresh}
 								onSignedOut={() => signedOut = new Set(signedOut).add(app.id)} autoStart={signInAfterApprove === app.id} onAutoStarted={() => signInAfterApprove = null} />
+							{#if app.state === 'needs_token'}<p class="key-detail">{app.name} needs a key before agents can use it: a code {app.name} gives you so other apps can use your account ({app.name} may call it a token or an API key). Create one in your {app.name} settings. Then press Set key next to {app.name}. That opens the Keys page: paste the key there and press Set.</p>
+							{:else if app.state === 'token_rejected'}<p class="key-detail">{app.name} didn't accept its key. Create a new one in your {app.name} settings, then press Replace key.</p>{/if}
 							<div class="actions">
 								{#if app.state === 'expired'}
 									<!-- A request that ran out can't be placed, reconnected or approved; Dismiss runs Decline's cleanup (copy sheet). -->
 									<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'decline')}>Dismiss</Button>
 								{:else}
+									{#if app.state === 'needs_token'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Set key</Button>
+									{:else if app.state === 'token_rejected'}<Button variant="ghost" size="sm" onclick={() => requestAppKey(app)}>Replace key</Button>{/if}
 									<Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereApp = app; }}>Where it works…</Button>
-									<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>
+									{#if app.state !== 'needs_token' && app.state !== 'token_rejected'}<Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'reconnect')}>Reconnect</Button>{/if}
 									{#if app.sign_in?.signed_in && confirmingOut !== app.id}<Button variant="ghost" size="sm" onclick={() => confirmingOut = app.id}>Sign out</Button>{/if}
 									<span class="danger-text"><Button variant="ghost" size="sm" loading={actionId === app.id} onclick={() => run(app, 'remove')}>Remove</Button></span>
 								{/if}
@@ -179,6 +187,7 @@
 	.actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-left: calc(-1 * var(--button-pad-x-sm)); }
 	/* Remove is a text action in the danger tone. */
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
+	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); padding: 0 var(--space-2); font-size: var(--text-footnote); }
 	/* The header action wraps beneath the explanation on narrow screens. */
 </style>

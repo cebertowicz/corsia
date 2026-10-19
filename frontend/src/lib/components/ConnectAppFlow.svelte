@@ -5,7 +5,7 @@
 	import { ConnectAppError, connectedAppStateLine, createConnectedApp, needsTokenBody, type ConnectedApp } from '$lib/api/connectedApps';
 	import { SIGN_IN_LEDE } from '$lib/appSignIn';
 	import { requestCorsiaMessage } from '$lib/corsiaRequest';
-	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
+	import { requestAppKey } from '$lib/stores/settingsNavigation';
 
 	let { onClose, onConnected, onSignIn }: { onClose: () => void; onConnected: (app: ConnectedApp) => void; onSignIn: (app: ConnectedApp) => void } = $props();
 	type AppKind = 'local' | 'web' | 'google';
@@ -140,6 +140,11 @@
 			submitting = false;
 		}
 	}
+
+	function openResultKey(): void {
+		if (result) requestAppKey(result);
+		onClose();
+	}
 </script>
 
 <Modal title="Connect an app" size="sm" {onClose}>
@@ -201,7 +206,7 @@
 			{:else if step === 'where'}
 				<Button onclick={backToSetup}>Back</Button><Button variant="primary" onclick={connect} disabled={!hasSelection} loading={submitting}>{error ? 'Try again' : 'Connect'}</Button>
 			{:else if result?.state === 'needs_token'}
-				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={() => { requestSettingsSection('keys'); onClose(); }}>Set key</Button>
+				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={openResultKey}>Set key</Button>
 			{:else if result?.state === 'needs_sign_in'}
 				<Button onclick={onClose}>Done</Button><Button variant="primary" onclick={() => { onClose(); onSignIn(result); }}>Sign in</Button>
 			{:else}

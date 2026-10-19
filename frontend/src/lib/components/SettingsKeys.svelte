@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { Button, Field, Message } from '$lib/components/ui';
 	import {
 		checkKey,
@@ -16,7 +16,9 @@
 		type ProviderKeyRow,
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
-	import { requestProviderCard, requestServerCard } from '$lib/stores/settingsNavigation';
+	import { requestProviderCard, requestServerCard, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { loadConnectedAppsList } from '$lib/api/connectedApps';
+	import { ms } from '$lib/popoverMotion';
 
 	type Action = 'set' | 'clear' | 'remove';
 
@@ -32,6 +34,10 @@
 	let formError = $state('');
 	let checking = $state<string | null>(null);
 	let checkResults = $state<Record<string, { ok: boolean; text: string }>>({});
+	let reconnectStatus = $state('');
+	let arrivedFor: string | null = null;
+	let arrivalEntry = $state<string | null>(null);
+	const connectedAppKey = $derived($settingsNavigation.connectedAppKey);
 
 	const FAILURE_REASONS: Record<string, string> = {
 		network: "couldn't reach the search service",
@@ -53,6 +59,38 @@
 	}
 
 	onMount(load);
+
+	/** The target action pulses for two hero-plus tokens (1.2s with the current token), then retains keyboard focus in its normal state. */
+	$effect(() => {
+		const target = connectedAppKey;
+		if (!target) {
+			arrivedFor = null;
+			arrivalEntry = null;
+			return;
+		}
+		if (!entries.some((entry) => entry.name === target.entry) || arrivedFor === target.entry || open?.name === target.entry) return;
+		let cancelled = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		arrivedFor = target.entry;
+		arrivalEntry = target.entry;
+		void tick().then(() => {
+			if (cancelled) return;
+			const card = document.querySelector<HTMLElement>(`[data-key-entry="${target.entry}"]`);
+			const action = card?.querySelector<HTMLButtonElement>('.card-actions .btn.primary');
+			if (!action) return;
+			action.focus({ preventScroll: true });
+			timer = setTimeout(() => {
+				if (arrivalEntry === target.entry) arrivalEntry = null;
+			}, ms('--dur-hero-plus') * 2);
+		});
+		return () => { cancelled = true; if (timer) clearTimeout(timer); if (arrivalEntry === target.entry) arrivalEntry = null; };
+	});
+
+	function cardLabel(entry: KeyEntry): string {
+		const ref = connectedAppKey?.refs.find((candidate) => candidate.entry === entry.name);
+		if (!connectedAppKey || !ref) return entry.label;
+		return connectedAppKey.refs.length > 1 ? `${connectedAppKey.app} key: ${ref.name}` : `${connectedAppKey.app} key`;
+	}
 
 	function status(entry: KeyEntry): string {
 		if (!entry.is_set) return 'Not set';
@@ -99,6 +137,13 @@
 			else await removeKey(name, typed);
 			open = null;
 			delete checkResults[name];
+			if (action === 'set' && connectedAppKey?.entry === name) {
+				reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
+				await tick();
+				const app = (await loadConnectedAppsList()).servers.find((candidate) => candidate.name === connectedAppKey.app);
+				if (app?.state === 'working') reconnectStatus = `${connectedAppKey.app} is connected.`;
+				else if (app?.state === 'token_rejected') reconnectStatus = `${connectedAppKey.app} didn't accept this key. Create a new one in your ${connectedAppKey.app} settings, then press Replace.`;
+			}
 			await load();
 		} catch (error) {
 			formError = error instanceof KeyWriteError ? error.message : KEYS_NOT_SAVED;
@@ -175,8 +220,8 @@
 {/snippet}
 
 {#each entries as entry (entry.name)}
-	<div class="settings-card" data-key-entry={entry.name}>
-		<h3>{entry.label}</h3>
+	<div class="settings-card" data-key-entry={entry.name} data-settings-anchor={`key-${entry.name}`} use:settingsAnchor={`key-${entry.name}`}>
+		<h3>{cardLabel(entry)}</h3>
 		{#if entry.description}
 			<p class="card-desc">{entry.description}</p>
 		{/if}
@@ -192,6 +237,7 @@
 		{#if entry.ignored_env_var}
 			<p class="row-note" data-ignored-env>{ignoredEnvironmentNote(entry.ignored_env_var)}</p>
 		{/if}
+		{#if connectedAppKey?.entry === entry.name && reconnectStatus}<p class="reconnect-status" role="status">{reconnectStatus}</p>{/if}
 
 		{#if open?.name === entry.name}
 			{@render keyForm()}
@@ -199,7 +245,7 @@
 			{#if checkResults[entry.name]}
 				<Message variant={checkResults[entry.name].ok ? 'ok' : 'err'}>{checkResults[entry.name].text}</Message>
 			{/if}
-			<div class="card-actions">
+			<div class="card-actions" class:arrival={arrivalEntry === entry.name}>
 				<Button variant="primary" onclick={() => openForm(entry.name, 'set')}>
 					{entry.is_set ? 'Replace' : 'Set'}
 				</Button>
@@ -271,10 +317,18 @@
 	.settings-card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 20px 24px; margin-bottom: 16px; }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 8px; line-height: 1.5; }
+	.reconnect-status { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: var(--space-2) 0 0; }
 	.key-meta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--text-footnote); color: var(--text-secondary); }
 	.key-status { color: var(--text-primary); }
 	.key-form { margin-top: 12px; }
 	.card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+	.card-actions.arrival :global(.btn.primary) { animation: key-action-arrival calc(var(--dur-hero-plus) * 2) var(--ease-entrance); }
+	@keyframes key-action-arrival {
+		0% { opacity: 0.72; transform: scale(0.96); }
+		20% { opacity: 1; transform: scale(1.04); }
+		45%, 100% { opacity: 1; transform: scale(1); }
+	}
+	@media (prefers-reduced-motion: reduce) { .card-actions.arrival :global(.btn.primary) { animation: none; } }
 
 	.provider-keys { padding: 8px 24px; }
 	.provider-row { padding: 10px 0; }

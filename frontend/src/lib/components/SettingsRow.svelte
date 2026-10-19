@@ -54,9 +54,6 @@
 		{#if sub}<span class="sub" class:multi={typeof sub !== 'string'} class:failed={subTone === 'failed'} class:attention={subTone === 'attention'}>{#if typeof sub === 'string'}{sub}{:else}{@render sub()}{/if}</span>{/if}
 	</span>
 	{#if trailing}<span class="trailing">{trailing}</span>{/if}
-	{#if chevron}
-		<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-	{/if}
 {/snippet}
 
 <div class="settings-row" class:stack={stackActions} data-settings-row={name} {...menu.rowHandlers(name)}>
@@ -67,6 +64,9 @@
 		<div class="face" tabindex={menuItems.length ? 0 : undefined}>{@render content()}</div>
 	{/if}
 	{#if actions}<span class="actions">{@render actions()}</span>{/if}
+	{#if chevron}
+		<svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+	{/if}
 </div>
 {#if menu.open}
 	<Menu ariaLabel={`Actions for ${name}`} items={menuItems} x={menu.open.x} y={menu.open.y} onSelect={select} onClose={menu.close} />
@@ -108,7 +108,7 @@
 	.sub.attention { color: var(--amber-text); }
 	.trailing { flex-shrink: 0; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 	.chev { flex-shrink: 0; color: var(--text-tertiary); transition: transform var(--dur-tight); }
-	.face[aria-expanded='true'] .chev { transform: rotate(90deg); }
+	.settings-row:has(.face[aria-expanded='true']) .chev { transform: rotate(90deg); }
 	@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
 	/* Preserve the ghost button's symmetric hit area while its fill reaches the row edge. */
 	/* The actions drop below the copy only when the row is too narrow for both, so the second line is never cut to make room. */

@@ -5,6 +5,15 @@ import { signInStateLine } from '$lib/appSignIn';
 
 export type AppState = 'awaiting_approval' | 'connecting' | 'working' | 'needs_token' | 'token_rejected' | 'needs_sign_in' | 'disconnected' | 'failed' | 'expired';
 
+export interface AppKeyRef {
+	/** Display-only declared reference; it never contains a key value. */
+	name: string;
+	kind: 'env' | 'header';
+	/** Managed key-store entry name, for navigation to the existing Keys card. */
+	entry: string;
+	set: boolean;
+}
+
 export interface ConnectedApp {
 	id: string;
 	name: string;
@@ -23,6 +32,8 @@ export interface ConnectedApp {
 	removed?: boolean;
 	/** Present for an app at a web address. Never holds a token or the sign-in link. */
 	sign_in?: SignInView;
+	/** Declared key metadata only; values never leave the key store. */
+	key_refs?: AppKeyRef[];
 }
 
 export type AppReach = ConnectedApp['reach'];

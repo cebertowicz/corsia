@@ -84,6 +84,24 @@ def test_agent_list_hides_unreached_configuration(connected_apps_client) -> None
     assert refused.status_code == 403
 
 
+def test_key_store_entry_names_reach_the_persons_list_and_never_an_agents(connected_apps_client) -> None:
+    client, db, actor = connected_apps_client
+    app = create_app(
+        "A", {"command": "a", "key_refs": [{"kind": "env", "name": "A_TOKEN"}]},
+        {"mode": "all", "project_ids": [], "outside_projects": False}, db=db,
+    )
+    (entry,) = key_entry_names(app["id"], get_app(app["id"], db=db)["config"])
+
+    agent_ref = client.get("/api/mcp/servers").json()["servers"][0]["key_refs"]
+    assert agent_ref == [{"kind": "env", "name": "A_TOKEN", "set": False}]
+    assert entry not in str(client.get("/api/mcp/servers").json()["servers"])
+
+    actor.clear()
+    actor.update({"id": "user", "token_kind": "session"})
+    person_ref = client.get("/api/mcp/servers").json()["servers"][0]["key_refs"]
+    assert person_ref == [{"kind": "env", "name": "A_TOKEN", "entry": entry, "set": False}]
+
+
 def test_agent_state_guidance_uses_the_persons_connected_apps_words():
     from api.connected_apps import _agent_next_step
 

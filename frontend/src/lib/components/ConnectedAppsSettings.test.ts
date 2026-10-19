@@ -4,6 +4,8 @@ import ConnectedAppsSettings from './ConnectedAppsSettings.svelte';
 import WhereItWorks from './WhereItWorks.svelte';
 import { token } from '$lib/stores/auth';
 import { projects } from '$lib/stores/projects';
+import { get } from 'svelte/store';
+import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 let host: HTMLElement;
@@ -364,5 +366,49 @@ describe('WhereItWorks', () => {
 		const save = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('Save')) as HTMLButtonElement;
 		expect(save.disabled).toBe(true);
 		expect(host.textContent).toContain('Select at least one project, or remove GitHub.');
+	});
+});
+
+describe('ConnectedAppsSettings key actions', () => {
+	const reach = { mode: 'all', project_ids: [], outside_projects: false };
+	const refs = [{ kind: 'env', name: 'API_KEY', entry: 'mcp-stripe-api-key-123', set: false }];
+
+	async function mountRows(servers: Record<string, unknown>[]): Promise<void> {
+		resetSettingsNavigation();
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-settings-row]')).not.toBeNull());
+	}
+	const button = (label: string) => [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
+	const open = () => { (host.querySelector('.item button.open') as HTMLButtonElement).click(); flushSync(); };
+
+	it('opens the declared key card from the closed and the open row', async () => {
+		await mountRows([{ id: 'stripe', name: 'Stripe', state: 'needs_token', revision: 1, reach, key_refs: refs }]);
+		button('Set key').click();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: 'key-mcp-stripe-api-key-123', connectedAppKey: { app: 'Stripe', entry: 'mcp-stripe-api-key-123' } });
+		resetSettingsNavigation();
+		open();
+		expect(button('Reconnect')).toBeUndefined();
+		button('Set key').click();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', connectedAppKey: { app: 'Stripe' } });
+	});
+
+	it('falls back to the Keys section from a closed and an open row that declares no key', async () => {
+		await mountRows([{ id: 'files', name: 'Files', state: 'needs_token', revision: 1, reach, key_refs: [] }]);
+		button('Set key').click();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null, connectedAppKey: null });
+		resetSettingsNavigation();
+		open();
+		button('Set key').click();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', anchor: null, connectedAppKey: null });
+	});
+
+	it('offers Replace key and no Reconnect on a rejected key', async () => {
+		await mountRows([{ id: 'sentry', name: 'Sentry', state: 'token_rejected', revision: 1, reach }]);
+		expect(button('Replace key')).toBeDefined();
+		open();
+		expect(button('Reconnect')).toBeUndefined();
+		button('Replace key').click();
+		expect(get(settingsNavigation)).toMatchObject({ section: 'keys', connectedAppKey: null });
 	});
 });
