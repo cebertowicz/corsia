@@ -158,6 +158,7 @@
 		const suffixStart = Math.max(local.lastIndexOf('.'), local.lastIndexOf('_'), local.lastIndexOf('-'), local.lastIndexOf('+'));
 		return { localPrefix: suffixStart > 0 ? local.slice(0, suffixStart) : local, localSuffix: suffixStart > 0 ? local.slice(suffixStart) : '', domain: address.slice(at + 1) };
 	}
+	function localSegments(prefix: string): string[] { return prefix.split(/[._+\-]+/).filter(Boolean); }
 	function width(text: string, style: CSSStyleDeclaration): number {
 		if (!textContext && typeof document !== 'undefined') textContext = document.createElement('canvas').getContext('2d');
 		if (!textContext) return text.length * 8;
@@ -181,28 +182,16 @@
 	}
 	function distinctPrefix(account: ConnectedAccount, available: number, style: CSSStyleDeclaration): string {
 		const address = accountAddress(account.address);
-		if (!address) return account.address;
-		const initial = clippedPrefix(address.localPrefix, available, style);
-		const colliding = rows.filter(isAccount).filter((candidate) => {
-			const other = accountAddress(candidate.address);
-			return candidate.id !== account.id && candidate.id !== openId && other?.domain === address.domain
-				&& displayKey(clippedPrefix(other.localPrefix, available, style), other.localSuffix, other.domain) === displayKey(initial, address.localSuffix, address.domain);
-		});
-		if (!colliding.length) return initial;
-		const own = [...address.localPrefix];
-		let distinctAt = own.findIndex((character, index) => colliding.every((candidate) => {
-			const other = accountAddress(candidate.address)!;
-			return [...other.localPrefix][index] !== character;
-		}));
-		if (distinctAt < 0) return initial;
-		// A dot next to an ellipsis reads as a run of periods. Keep the first later non-dot character too.
-		if (own[distinctAt] === '.') {
-			const later = own.findIndex((character, index) => index > distinctAt && character !== '.');
-			if (later >= 0) distinctAt = later;
-		}
-		let kept = 0;
-		while (kept <= distinctAt && width(`${own.slice(0, kept + 1).join('').replace(/[._+\-]+$/, '')}…${own[distinctAt]}`, style) <= available) kept += 1;
-		return `${own.slice(0, kept).join('').replace(/[._+\-]+$/, '')}…${own[distinctAt]}`;
+		if (!address || width(address.localPrefix, style) <= available) return address?.localPrefix ?? account.address;
+		const ownSegments = localSegments(address.localPrefix);
+		const siblings = rows.filter(isAccount).filter((candidate) => candidate.id !== account.id && candidate.id !== openId && accountAddress(candidate.address)?.domain === address.domain);
+		const distinctIndex = ownSegments.findIndex((segment, index) => siblings.every((candidate) => localSegments(accountAddress(candidate.address)!.localPrefix)[index] !== segment));
+		if (distinctIndex < 0) return clippedPrefix(address.localPrefix, available, style);
+		const distinctive = ownSegments[distinctIndex];
+		const lead = ownSegments[0];
+		const candidate = `${lead}…${distinctive}`;
+		if (width(candidate, style) <= available) return candidate;
+		return clippedPrefix(address.localPrefix, available, style);
 	}
 	function observeClosedTitle(node: HTMLElement, account: ConnectedAccount) {
 		let current = account;
@@ -217,8 +206,9 @@
 				const suffix = node.querySelector<HTMLElement>('.account-local-suffix');
 				const domain = node.querySelector<HTMLElement>('.account-domain');
 				if (!parts || !prefix || !provider || !suffix || !domain) return;
-				const gap = Number.parseFloat(getComputedStyle(node).columnGap) || 0;
-				const available = Math.max(0, node.clientWidth - provider.getBoundingClientRect().width - suffix.getBoundingClientRect().width - domain.getBoundingClientRect().width - gap * 3);
+				const providerStyle = getComputedStyle(provider);
+				const providerGap = Number.parseFloat(providerStyle.marginInlineEnd) || 0;
+				const available = Math.max(0, node.clientWidth - provider.getBoundingClientRect().width - providerGap - suffix.getBoundingClientRect().width - domain.getBoundingClientRect().width);
 				const next = distinctPrefix(current, available, getComputedStyle(prefix));
 				if (closedLocalPrefixes.get(current.id) !== next) closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, next);
 			});
@@ -235,7 +225,7 @@
 		const parts = accountAddress(account.address);
 		if (!parts) return '';
 		const prefix = shownPrefix(account);
-		return prefix.includes('…') && /^[._+\-]/.test(parts.localSuffix) ? parts.localSuffix.slice(1) : parts.localSuffix;
+		return prefix.endsWith('…') && /^[._+\-]/.test(parts.localSuffix) ? parts.localSuffix.slice(1) : parts.localSuffix;
 	}
 	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
 
@@ -263,11 +253,12 @@
 
 <section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
 	<div class="heading">
+		<h2 class="page-title">Connected apps</h2>
+		<Button variant="primary" onclick={() => connectAppOpen = true}>Connect an app</Button>
 		<div>
 			<p class="lede">Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>
 			{#if anyFirstSignIn(rows.filter((row): row is ConnectedApp => !isAccount(row)))}<p class="lede">{SIGN_IN_LEDE}</p>{/if}
 		</div>
-		<Button variant="primary" onclick={() => connectAppOpen = true}>Connect an app</Button>
 	</div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
@@ -282,21 +273,22 @@
 				{#each rows as row (row.id)}
 					{#if isAccount(row)}
 						<div class="item account-item" data-connected-account-id={row.id} data-settings-anchor={accountAnchor(row.id)} use:settingsAnchor={accountAnchor(row.id)}>
-							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">Google — </span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
-							<SettingsRow name={accountTitle} ariaLabel={accountName(row)} subTone={tone(row)} chevron expanded={openId === row.id} onOpen={() => openId = openId === row.id ? null : row.id}>
+							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">Google —</span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
+							<SettingsRow name={accountTitle} ariaLabel={accountName(row)} subTone={tone(row)} wrapName={openId === row.id} chevron expanded={openId === row.id} onOpen={() => openId = openId === row.id ? null : row.id}>
 								{#snippet sub()}{accountStateLine(row)}<span class="place">{` · ${placeLine(row)}`}</span>{/snippet}
 							</SettingsRow>
 							{#if openId === row.id}
 								<div class="details">
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
-									<p class="capabilities">Reaches — {capabilityLabels(row)}</p>
+									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
 									{#if row.state === 'needs_sign_in'}<p class="impact">Google signed you out, so agents can’t use this account until you sign in again.</p>{/if}
 									{#if manualStep?.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
+									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline. Try again when you’re connected.</p>{/if}
 									<div class="actions account-actions">
-										{#if accountNeedsSignIn(row)}<span class="account-action"><Button variant="primary" size="sm" loading={actionId === row.id} onclick={() => startSignIn(row)}>Sign in</Button></span>{/if}
-										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id} data-chat-link-focus={linkedAccountId === row.id || undefined}><Button variant="ghost" size="sm" onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
-										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
-										<span class="danger-text account-action"><Button variant="ghost" size="sm" loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
+										{#if accountNeedsSignIn(row)}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => startSignIn(row)}>Sign in</Button></span>{/if}
+										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id} data-chat-link-focus={linkedAccountId === row.id || undefined}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
+										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
+										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
 								</div>
 							{/if}
@@ -330,14 +322,17 @@
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
-	.heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
-	@media (min-width: 48.0625rem) { .heading > div { flex: 1; min-width: 0; } }
+	.heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-3) var(--space-4); }
+	.heading .page-title { grid-column: 1; margin: 0; padding: 0 var(--space-2); font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	.heading > :global(.btn) { grid-column: 2; }
+	.heading > div { grid-column: 1 / -1; min-width: 0; }
 	.lede, .state, .offline { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
 	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
 	.state, .offline { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
 	.state { margin-top: var(--space-5); display: grid; gap: var(--space-3); justify-items: start; }
 	.state p { margin: 0; }
 	.offline { display: flex; align-items: center; gap: var(--space-1); }
+	.offline-action-note { margin: 0 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.rows { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-4); }
 	.place, .line { color: var(--text-tertiary); }
 	.line { display: block; }
@@ -346,10 +341,13 @@
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.manual-removal { margin: var(--space-3) var(--space-2) 0; color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
-	.impact, .capabilities { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
+	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
+	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
+	.capability-label { color: var(--text-tertiary); }
 	.account-closed-name, .account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); }
-	.account-closed-name { display: flex; column-gap: 0; overflow: hidden; white-space: nowrap; }
+	.account-closed-name { display: flex; overflow: hidden; white-space: nowrap; }
 	.account-provider, .account-local-prefix, .account-local-suffix, .account-domain { flex: 0 0 auto; }
+	.account-provider { margin-inline-end: var(--space-1); }
 	.account-local-prefix { overflow: hidden; text-overflow: clip; }
 	.account-open-name { overflow-wrap: anywhere; }
 	.account-action { position: relative; display: inline-flex; }

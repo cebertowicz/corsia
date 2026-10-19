@@ -299,11 +299,12 @@ describe('ConnectedAppsSettings', () => {
 		expect([...host.querySelectorAll('.item .details .actions .btn.ghost')].map((b) => b.textContent?.trim())).toEqual(['Where it works…', 'Reconnect', 'Remove']);
 	});
 
-	it('does not draw its own heading; the page title belongs to Settings', async () => {
+	it('keeps Connect an app on the Connected apps title line', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet.'));
-		expect(host.querySelector('h2')).toBeNull();
+		expect(host.querySelector('h2')?.textContent).toBe('Connected apps');
+		expect(host.querySelector('.heading .btn')?.textContent?.trim()).toBe('Connect an app');
 		expect(host.querySelector('p')?.textContent).toContain('Connect the apps you already use');
 	});
 
@@ -316,7 +317,8 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.textContent).toContain('Connected · Only CORSIA');
 		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
 		flushSync();
-		expect(host.textContent).toContain('Reaches — Email, Calendar, Files');
+		expect(host.textContent).toContain('ReachesEmail, Calendar, Files');
+		expect(host.querySelector('.capability-label')?.textContent).toBe('Reaches');
 	});
 
 	it('keeps account rows visible with the approved offline message after a failed refresh', async () => {
@@ -332,6 +334,10 @@ describe('ConnectedAppsSettings', () => {
 		window.dispatchEvent(new Event('focus'));
 		await vi.waitFor(() => expect(host.textContent).toContain('Showing last known items.'));
 		expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull();
+		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain('Actions are unavailable while offline. Try again when you’re connected.');
+		for (const label of ['Where it works…', 'Sign out', 'Remove']) expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === label)?.disabled).toBe(true);
 		expect(host.textContent).not.toContain('network failed');
 	});
 

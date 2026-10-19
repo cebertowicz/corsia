@@ -27,6 +27,8 @@ function accountsFor(state: AccountState): Account[] {
 	if (state === 'long') return [
 		{ ...healthy, address: 'shared.prefix.very-long-work-address@example.com' },
 		{ ...personal, address: 'shared.prefix.very-long-personal-address@example.com' },
+		{ ...healthy, id: 'google-alpha', address: 'alexandria.long-project-alpha-address@example.com' },
+		{ ...personal, id: 'google-beta', address: 'alexandria.long-project-beta-address@example.com' },
 	];
 	return [healthy, personal];
 }
@@ -44,18 +46,27 @@ async function openConnectedApps(page: Page) {
 	await expect(page.getByRole('heading', { name: 'Connected apps' })).toBeVisible();
 }
 
-async function expectPaintedLongNamesToStaySeparate(page: Page) {
+async function expectPaintedClosedTitles(page: Page) {
 	const measurements = await page.locator('[data-connected-account-id]').evaluateAll((rows) => rows.map((row) => {
+		const provider = row.querySelector('.account-provider');
 		const prefix = row.querySelector('.account-local-prefix');
 		const suffix = row.querySelector('.account-local-suffix');
-		if (!prefix || !suffix) return null;
-		const range = document.createRange();
-		range.selectNodeContents(prefix);
-		return { prefix: prefix.textContent, paintedRight: range.getBoundingClientRect().right, nextLeft: suffix.getBoundingClientRect().left };
+		if (!provider || !prefix || !suffix) return null;
+		const providerRange = document.createRange();
+		providerRange.selectNodeContents(provider);
+		const prefixRange = document.createRange();
+		prefixRange.selectNodeContents(prefix);
+		return { prefix: prefix.textContent, providerRight: providerRange.getBoundingClientRect().right, prefixLeft: prefixRange.getBoundingClientRect().left, prefixRight: prefixRange.getBoundingClientRect().right, suffixLeft: suffix.getBoundingClientRect().left };
 	}));
-	expect(measurements).toHaveLength(2);
-	expect(measurements.every((measurement) => measurement && measurement.prefix?.includes('…') && measurement.paintedRight <= measurement.nextLeft + 0.5)).toBe(true);
-	expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(2);
+	expect(measurements.every((measurement) => measurement && measurement.prefixLeft > measurement.providerRight && measurement.prefixRight <= measurement.suffixLeft + 0.5)).toBe(true);
+	return measurements;
+}
+
+async function expectPaintedLongNamesToStaySeparate(page: Page) {
+	const measurements = await expectPaintedClosedTitles(page);
+	expect(measurements).toHaveLength(4);
+	expect(measurements.every((measurement) => measurement?.prefix?.includes('…') && !/[._+\-][^._+\-]?…/.test(measurement.prefix ?? ''))).toBe(true);
+	expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(4);
 }
 
 test.describe('Google account rows capture', () => {
@@ -91,13 +102,15 @@ test.describe('Google account rows capture', () => {
 			await openConnectedApps(page);
 			const viewport = page.viewportSize()!.width;
 			const width = viewport > 768 ? '1440' : '393';
-			await expect(page.getByRole('button', { name: 'Google — sam.work@example.com' })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Google — sam.work@example.com', exact: true })).toBeVisible();
 			await expect(page.getByText('Connected · Only CORSIA')).toBeVisible();
+			await expectPaintedClosedTitles(page);
 			await capture(page, testInfo, `01-migrated-two-accounts-${width}-${theme}`);
 
-			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
-			await expect(page.getByText('Reaches — Email, Calendar, Files')).toBeVisible();
+			await page.getByRole('button', { name: 'Google — sam.work@example.com', exact: true }).click();
+			await expect(page.locator('.capabilities')).toHaveText('ReachesEmail, Calendar, Files');
 			await expect(page.getByRole('button', { name: 'Where it works…' })).toBeVisible();
+			await page.mouse.move(0, 0);
 			await capture(page, testInfo, `02-open-actions-${width}-${theme}`);
 
 			await page.getByRole('button', { name: 'Where it works…' }).click();
@@ -118,9 +131,14 @@ test.describe('Google account rows capture', () => {
 			await page.reload();
 			await openConnectedApps(page);
 			await expect(page.getByText('Needs you to sign in · Only CORSIA')).toBeVisible();
-			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
-			await expect(page.locator('[data-connected-account-id="google-work"]').getByRole('button', { name: 'Sign in' })).toBeVisible();
+			await page.getByRole('button', { name: 'Google — sam.work@example.com', exact: true }).click();
+			const signInAction = page.locator('[data-connected-account-id="google-work"]').getByRole('button', { name: 'Sign in' });
+			await expect(signInAction).toBeVisible();
 			await capture(page, testInfo, `11-needs-sign-in-${width}-${theme}`);
+			await page.evaluate(() => { window.location.hash = 'connected-apps/google-work'; });
+			await expect(signInAction).toBeFocused();
+			await capture(page, testInfo, `23-needs-sign-in-chat-link-focus-${width}-${theme}`);
+			await page.evaluate(() => { history.replaceState(null, '', window.location.pathname); });
 
 			state = 'signed-out';
 			await page.reload();
@@ -131,16 +149,19 @@ test.describe('Google account rows capture', () => {
 			state = 'long';
 			await page.reload();
 			await openConnectedApps(page);
-			await expect(page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com' })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com', exact: true })).toBeVisible();
 			if (viewport <= 768) await expectPaintedLongNamesToStaySeparate(page);
 			await capture(page, testInfo, `24-same-prefix-long-closed-${width}-${theme}`);
-			await page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com' }).click();
+			await page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com', exact: true }).click();
+			const openLongName = page.locator('[data-connected-account-id="google-work"] .name[data-wrap-name="true"]');
+			await expect(openLongName).toHaveText('Google — shared.prefix.very-long-work-address@example.com');
+			await expect.poll(() => openLongName.evaluate((node) => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight)).toBe(true);
 			await capture(page, testInfo, `17-long-open-${width}-${theme}`);
 
 			state = 'typical';
 			await page.reload();
 			await openConnectedApps(page);
-			await page.getByRole('button', { name: 'Google — sam.work@example.com' }).click();
+			await page.getByRole('button', { name: 'Google — sam.work@example.com', exact: true }).click();
 			await page.getByRole('button', { name: 'Remove' }).click();
 			const removeDialog = page.locator('.modal').filter({ hasText: 'Remove Google — sam.work@example.com?' });
 			await expect(removeDialog).toBeVisible();
@@ -156,6 +177,11 @@ test.describe('Google account rows capture', () => {
 			failNextList = true;
 			await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 			await expect(page.getByText('Showing last known items.')).toBeVisible();
+			await expect(page.getByText('Actions are unavailable while offline. Try again when you’re connected.')).toBeVisible();
+			const offlineAccount = page.locator('[data-connected-account-id="google-work"]');
+			await expect(offlineAccount.getByRole('button', { name: 'Where it works…' })).toBeDisabled();
+			await expect(offlineAccount.getByRole('button', { name: 'Sign out' })).toBeDisabled();
+			await expect(offlineAccount.getByRole('button', { name: 'Remove' })).toBeDisabled();
 			await capture(page, testInfo, `offline-${width}-${theme}`);
 		});
 	}
