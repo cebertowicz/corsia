@@ -7,7 +7,7 @@ from contextlib import closing
 
 import pytest
 
-from connections.connected_accounts import corsia_only_reach, google_account, resolve_google_credentials
+from connections.connected_accounts import corsia_only_reach, google_accounts, resolve_google_credentials
 from infra import key_store, key_store_values
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
@@ -25,6 +25,13 @@ def _fresh() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     initialize_schema(db)
     return db
+
+
+def google_account(*, db):  # type: ignore[no-untyped-def]
+    """The single account a legacy migration may create, or None."""
+    accounts = google_accounts(db=db)
+    assert len(accounts) <= 1
+    return accounts[0] if accounts else None
 
 
 def _seed_legacy(db: sqlite3.Connection) -> None:
@@ -114,3 +121,37 @@ def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(mon
         assert get_setting("gmail_poll_cursor", db=db) == CURSOR
         assert set(key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db)) == set(key_store.GOOGLE_ENTRIES)
         assert db.execute("SELECT COUNT(*) FROM connected_accounts").fetchone()[0] == 0
+
+
+def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:
+    db.execute(
+        "INSERT INTO email_screens(account,message_id,status,screened_at) VALUES (?,?,'unavailable','t')",
+        (account, message_id),
+    )
+
+
+def test_stored_screens_are_rekeyed_to_the_new_account_and_strays_dropped() -> None:
+    with closing(_fresh()) as db:
+        _seed_legacy(db)
+        _screen(db, ACCOUNT.upper(), "m1")  # Address case differs from the setting's.
+        _screen(db, "someone-else@example.test", "m2")
+        db.execute("PRAGMA user_version=125")
+        db.commit()
+
+        migrate_to_current(db, SCHEMA_VERSION)
+
+        account = google_account(db=db)
+        assert account is not None
+        rows = db.execute("SELECT account, message_id FROM email_screens ORDER BY message_id").fetchall()
+        assert [tuple(row) for row in rows] == [(account["id"], "m1")]
+
+
+def test_screens_without_a_legacy_account_are_dropped() -> None:
+    with closing(_fresh()) as db:
+        _screen(db, ACCOUNT, "m1")
+        db.execute("PRAGMA user_version=125")
+        db.commit()
+
+        migrate_to_current(db, SCHEMA_VERSION)
+
+        assert db.execute("SELECT COUNT(*) FROM email_screens").fetchone()[0] == 0

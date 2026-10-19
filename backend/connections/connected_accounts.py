@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import uuid
 from typing import Literal
@@ -34,8 +35,19 @@ def credential_key(account_id: str) -> str:
 
 
 def corsia_only_reach() -> AppReach:
-    """Today's designated CORSIA scope in the shared hosted-app reach model."""
-    return AppReach(mode="selected", project_ids=frozenset(), outside_projects=True)
+    """Only CORSIA: an empty selection, which Where it works never saves, so it can't be read as Outside projects."""
+    return AppReach(mode="selected", project_ids=frozenset(), outside_projects=False)
+
+
+def _designated_thread(thread_id: str, *, db: sqlite3.Connection) -> bool:
+    """Today's designated CORSIA thread: an available thread that coordinates a scope."""
+    from infra.conductor import get_coordination_scopes
+    from infra.queries import thread_available_sql
+
+    available = db.execute(
+        f"SELECT 1 FROM threads WHERE id=? AND {thread_available_sql()}", (thread_id,),
+    ).fetchone()
+    return available is not None and bool(get_coordination_scopes(thread_id, db=db))
 
 
 def _account_reach(account_id: str, *, db: sqlite3.Connection) -> AppReach:
@@ -59,7 +71,10 @@ def _account_reach(account_id: str, *, db: sqlite3.Connection) -> AppReach:
 def account_reaches_thread(account_id: str, thread_id: str, *, db: sqlite3.Connection) -> bool:
     """Whether an account can serve the caller's full parent chain, failing closed."""
     try:
-        return reach_reaches_thread(_account_reach(account_id, db=db), thread_id, db=db)
+        reach = _account_reach(account_id, db=db)
+        if reach == corsia_only_reach():
+            return _designated_thread(thread_id, db=db)
+        return reach_reaches_thread(reach, thread_id, db=db)
     except (AppReachError, ConnectedAccountError):
         return False
 
@@ -89,13 +104,19 @@ def get_account(account_id: str, *, db: sqlite3.Connection) -> dict[str, object]
     }
 
 
-def google_account(*, db: sqlite3.Connection) -> dict[str, object] | None:
-    """The temporary single-account compatibility accessor for PR A consumers."""
-    row = db.execute(
-        "SELECT id FROM connected_accounts WHERE provider=? ORDER BY created_at,id LIMIT 1",
-        (GOOGLE_PROVIDER,),
-    ).fetchone()
-    return get_account(row["id"], db=db) if row is not None else None
+def google_accounts(*, db: sqlite3.Connection) -> list[dict[str, object]]:
+    """Every Google account, oldest first; never credential material."""
+    rows = db.execute(
+        "SELECT id FROM connected_accounts WHERE provider=? ORDER BY created_at,id", (GOOGLE_PROVIDER,),
+    ).fetchall()
+    return [get_account(row["id"], db=db) for row in rows]
+
+
+def is_connected(account_id: str, *, db: sqlite3.Connection) -> bool:
+    """Whether the account still exists and is connected: the gate before any write for it."""
+    return db.execute(
+        "SELECT 1 FROM connected_accounts WHERE id=? AND state='connected'", (account_id,),
+    ).fetchone() is not None
 
 
 def reach_for_adding_thread(thread_id: str, *, db: sqlite3.Connection) -> AppReach:
@@ -115,22 +136,36 @@ def reach_for_adding_thread(thread_id: str, *, db: sqlite3.Connection) -> AppRea
 
 def create_google_account_for_thread(
     address: str, *, actor_thread_id: str, created_by: Actor, db: sqlite3.Connection | None = None,
+    **fields: object,
 ) -> dict[str, object]:
-    """Create an account at the caller's scope; no request can widen its reach."""
-    if db is None:
-        from infra.database import get_db
+    """Create an account at the caller's scope; no request can widen its reach.
 
-        connection = get_db()
-        try:
-            return create_google_account(
-                address, reach=reach_for_adding_thread(actor_thread_id, db=connection),
-                created_by=created_by, db=connection,
-            )
-        finally:
-            connection.close()
-    return create_google_account(
-        address, reach=reach_for_adding_thread(actor_thread_id, db=db), created_by=created_by, db=db,
-    )
+    ``fields`` are :func:`create_google_account`'s other keywords, never ``reach``.
+    """
+    if "reach" in fields:
+        raise ConnectedAccountError("reach comes from the adding scope")
+    return _on_db(db, lambda conn: create_google_account(
+        address, reach=reach_for_adding_thread(actor_thread_id, db=conn), created_by=created_by, db=conn,
+        **fields,  # type: ignore[arg-type]
+    ))
+
+
+def _on_db(db: sqlite3.Connection | None, read):  # type: ignore[no-untyped-def]
+    """Run ``read`` on the caller's connection, or on a new one this frame closes."""
+    if db is not None:
+        return read(db)
+    from infra.database import get_db
+
+    connection = get_db()
+    try:
+        return read(connection)
+    finally:
+        connection.close()
+
+
+def _check_actor(actor: object) -> None:
+    if not isinstance(actor, tuple) or len(actor) != 2 or actor[0] not in {"person", "agent", "system"} or not actor[1]:
+        raise ConnectedAccountError("invalid account actor")
 
 
 def create_google_account(
@@ -154,13 +189,9 @@ def create_google_account(
         raise ConnectedAccountError("invalid connected account")
     if provider_subject is not None and (not isinstance(provider_subject, str) or not provider_subject):
         raise ConnectedAccountError("invalid provider subject")
-    if not isinstance(created_by, tuple) or len(created_by) != 2 or created_by[0] not in {"person", "agent", "system"} or not created_by[1]:
-        raise ConnectedAccountError("invalid account actor")
-    if signed_in_by is not None and (
-        not isinstance(signed_in_by, tuple) or len(signed_in_by) != 2
-        or signed_in_by[0] not in {"person", "agent", "system"} or not signed_in_by[1]
-    ):
-        raise ConnectedAccountError("invalid account actor")
+    _check_actor(created_by)
+    if signed_in_by is not None:
+        _check_actor(signed_in_by)
     normalized = reach if isinstance(reach, AppReach) else normalize_reach(reach)
     identity = account_id or str(uuid.uuid4())
     if not isinstance(identity, str) or not identity:
@@ -184,15 +215,7 @@ def create_google_account(
             "INSERT INTO connected_account_reach(account_id,project_id) VALUES (?,?)",
             ((identity, project_id) for project_id in normalized.project_ids),
         )
-    if db is not None:
-        return get_account(identity, db=db)
-    from infra.database import get_db
-
-    connection = get_db()
-    try:
-        return get_account(identity, db=connection)
-    finally:
-        connection.close()
+    return _on_db(db, lambda conn: get_account(identity, db=conn))
 
 
 def backfill_google_subject(
@@ -202,82 +225,96 @@ def backfill_google_subject(
     if not isinstance(provider_subject, str) or not provider_subject:
         raise ConnectedAccountError("invalid provider subject")
     with write_transaction(db, scope="connected_account_subject") as conn:
-        row = conn.execute(
-            "SELECT provider_subject FROM connected_accounts WHERE id=? AND provider=?",
-            (account_id, GOOGLE_PROVIDER),
-        ).fetchone()
-        if row is None:
+        if conn.execute(
+            "SELECT 1 FROM connected_accounts WHERE id=? AND provider=?", (account_id, GOOGLE_PROVIDER),
+        ).fetchone() is None:
             raise ConnectedAccountError("connected account not found")
-        if row["provider_subject"] is None:
-            conn.execute(
-                "UPDATE connected_accounts SET provider_subject=?,updated_at=? WHERE id=?",
-                (provider_subject, utc_now_iso(), account_id),
-            )
+        conn.execute(
+            "UPDATE connected_accounts SET provider_subject=?,updated_at=? WHERE id=? AND provider_subject IS NULL",
+            (provider_subject, utc_now_iso(), account_id),
+        )
 
 
-def store_google_credentials(
-    account_id: str, credentials: dict[str, object], *, db: sqlite3.Connection | None = None,
-) -> None:
-    """Store one complete Google credential bundle against an existing account."""
-    required = {"client_id", "client_secret", "refresh_token"}
-    keys = set(credentials)
-    if (
-        not required <= keys or keys - (required | {"scopes"})
-        or any(not isinstance(credentials[key], str) or not credentials[key] for key in required)
-        or ("scopes" in credentials and (
-            not isinstance(credentials["scopes"], list)
-            or any(not isinstance(scope, str) for scope in credentials["scopes"])
-        ))
-    ):
-        raise ConnectedAccountError("invalid Google credentials")
-    with write_transaction(db, scope="connected_account_credentials") as conn:
-        account = conn.execute(
-            "SELECT credential_key FROM connected_accounts WHERE id=? AND provider=?", (account_id, GOOGLE_PROVIDER),
-        ).fetchone()
-        if account is None:
-            raise ConnectedAccountError("connected account not found")
-        key_store.set_managed_value(account["credential_key"], json.dumps(credentials, separators=(",", ":")), db=conn)
+_BUNDLE_REQUIRED = frozenset(("client_id", "client_secret", "refresh_token"))
+_CLIENT_FIELDS = frozenset(("client_id", "client_secret"))
 
 
-def resolve_google_credentials(account_id: str, *, db: sqlite3.Connection) -> dict[str, str] | None:
-    """Return one account's complete Google bundle or None, never another account's."""
+def _valid_bundle(bundle: object, required: frozenset[str] = _BUNDLE_REQUIRED) -> bool:
+    """A stored bundle: the required strings, and optionally the granted scope list."""
+    if not isinstance(bundle, dict) or not required <= set(bundle) or set(bundle) - (_BUNDLE_REQUIRED | {"scopes"}):
+        return False
+    if any(not isinstance(bundle[key], str) or not bundle[key] for key in set(bundle) & _BUNDLE_REQUIRED):
+        return False
+    scopes = bundle.get("scopes", [])
+    return isinstance(scopes, list) and all(isinstance(scope, str) for scope in scopes)
+
+
+def _stored_bundle(account_id: str, *, db: sqlite3.Connection) -> dict | None:
     row = db.execute(
         "SELECT credential_key FROM connected_accounts WHERE id=? AND provider=?", (account_id, GOOGLE_PROVIDER),
     ).fetchone()
     if row is None:
         return None
     stored = key_store.resolve_names([row["credential_key"]], db=db).get(row["credential_key"])
-    if stored is None:
-        return None
     try:
-        bundle = json.loads(stored)
+        bundle = json.loads(stored) if stored else None
     except (TypeError, ValueError):
         return None
-    required = {"client_id", "client_secret", "refresh_token"}
-    if (
-        not isinstance(bundle, dict) or not required <= set(bundle)
-        or set(bundle) - (required | {"scopes"})
-        or any(not isinstance(bundle[key], str) or not bundle[key] for key in required)
-        or ("scopes" in bundle and (
-            not isinstance(bundle["scopes"], list)
-            or any(not isinstance(scope, str) for scope in bundle["scopes"])
-        ))
-    ):
+    return bundle if isinstance(bundle, dict) else None
+
+
+def _write_bundle(account_id: str, bundle: dict[str, object], *, db: sqlite3.Connection | None) -> None:
+    with write_transaction(db, scope="connected_account_credentials") as conn:
+        account = conn.execute(
+            "SELECT credential_key FROM connected_accounts WHERE id=? AND provider=?", (account_id, GOOGLE_PROVIDER),
+        ).fetchone()
+        if account is None:
+            raise ConnectedAccountError("connected account not found")
+        key_store.set_managed_value(account["credential_key"], json.dumps(bundle, separators=(",", ":")), db=conn)
+
+
+def store_google_credentials(
+    account_id: str, credentials: dict[str, object], *, db: sqlite3.Connection | None = None,
+) -> None:
+    """Store one complete Google credential bundle against an existing account."""
+    if not _valid_bundle(credentials):
+        raise ConnectedAccountError("invalid Google credentials")
+    _write_bundle(account_id, credentials, db=db)
+
+
+def resolve_google_credentials(account_id: str, *, db: sqlite3.Connection) -> dict[str, str] | None:
+    """Return one account's complete Google bundle or None, never another account's."""
+    bundle = _stored_bundle(account_id, db=db)
+    if bundle is None or not _valid_bundle(bundle):
         return None
-    return {key: bundle[key] for key in required}
+    return {key: bundle[key] for key in _BUNDLE_REQUIRED}
+
+
+def google_client_material(account_id: str, *, db: sqlite3.Connection) -> tuple[str, str] | None:
+    """The account's saved OAuth client, kept after Sign out so signing in again needs no file."""
+    bundle = _stored_bundle(account_id, db=db)
+    if bundle is None or not _valid_bundle(bundle, _CLIENT_FIELDS):
+        return None
+    return bundle["client_id"], bundle["client_secret"]
+
+
+def take_google_refresh_token(account_id: str, *, db: sqlite3.Connection | None = None) -> dict[str, str] | None:
+    """Remove one bundle's refresh token, returning what it held for the revoke only.
+
+    The client stays so the row can sign in again; the row resolves no usable credential.
+    """
+    with write_transaction(db, scope="connected_account_take_token") as conn:
+        bundle = _stored_bundle(account_id, db=conn)
+        if bundle is None or not _valid_bundle(bundle):
+            return None
+        _write_bundle(account_id, {key: bundle[key] for key in _CLIENT_FIELDS}, db=conn)
+        return {key: bundle[key] for key in _BUNDLE_REQUIRED}
 
 
 def google_scopes(account_id: str, *, db: sqlite3.Connection) -> list[str]:
     """Return one account's saved granted OAuth scopes without exposing credentials."""
-    row = db.execute("SELECT credential_key FROM connected_accounts WHERE id=?", (account_id,)).fetchone()
-    if row is None:
-        return []
-    stored = key_store.resolve_names([row["credential_key"]], db=db).get(row["credential_key"])
-    try:
-        bundle = json.loads(stored) if stored else {}
-    except (TypeError, ValueError):
-        return []
-    scopes = bundle.get("scopes") if isinstance(bundle, dict) else None
+    bundle = _stored_bundle(account_id, db=db)
+    scopes = bundle.get("scopes") if bundle is not None and _valid_bundle(bundle) else None
     return sorted(scope for scope in scopes if isinstance(scope, str)) if isinstance(scopes, list) else []
 
 
@@ -290,6 +327,34 @@ def set_state(account_id: str, state: str, *, db: sqlite3.Connection | None = No
             "UPDATE connected_accounts SET state=?,updated_at=? WHERE id=?", (state, utc_now_iso(), account_id),
         ).rowcount != 1:
             raise ConnectedAccountError("connected account not found")
+
+
+def mark_signed_in(
+    account_id: str, *, address: str, provider_subject: str | None, actor: Actor,
+    db: sqlite3.Connection | None = None,
+) -> None:
+    """Record a completed sign-in on its own row: connected, by whom, as which address."""
+    with write_transaction(db, scope="connected_account_signed_in") as conn:
+        if conn.execute(
+            "UPDATE connected_accounts SET state='connected',address=?,signed_in_by_kind=?,signed_in_by_id=?,"
+            "provider_subject=COALESCE(provider_subject,?),updated_at=? WHERE id=?",
+            (address.strip(), actor[0], actor[1], provider_subject, utc_now_iso(), account_id),
+        ).rowcount != 1:
+            raise ConnectedAccountError("connected account not found")
+
+
+def mark_needs_sign_in(account_id: str, refresh_token: str | None = None, *, db: sqlite3.Connection | None = None) -> bool:
+    """Mark only this connected account ``needs_sign_in``; given the refused refresh token,
+    only while the row still holds it, so a refusal racing a new sign-in never undoes it."""
+    with write_transaction(db, scope="connected_account_needs_sign_in") as conn:
+        if refresh_token is not None:
+            current = resolve_google_credentials(account_id, db=conn)
+            if current is None or not secrets.compare_digest(current["refresh_token"], refresh_token):
+                return False
+        return conn.execute(
+            "UPDATE connected_accounts SET state='needs_sign_in',updated_at=? WHERE id=? AND state='connected'",
+            (utc_now_iso(), account_id),
+        ).rowcount == 1
 
 
 def set_cursor(account_id: str, cursor: dict[str, object] | None, *, db: sqlite3.Connection | None = None) -> None:
@@ -305,8 +370,8 @@ def set_cursor(account_id: str, cursor: dict[str, object] | None, *, db: sqlite3
 def record_audit(
     account_id: str, action: str, actor: Actor, *, revocation_cause: str | None = None,
     db: sqlite3.Connection | None = None,
-) -> None:
-    """Record a fixed account lifecycle action without provider response text."""
+) -> int:
+    """Record a fixed account lifecycle action without provider response text; returns its id."""
     if action not in AUDIT_ACTIONS or actor[0] not in {"person", "agent", "system"} or not actor[1]:
         raise ConnectedAccountError("invalid account audit")
     if revocation_cause is not None and revocation_cause not in REVOCATION_CAUSES:
@@ -314,8 +379,20 @@ def record_audit(
     with write_transaction(db, scope="connected_account_audit") as conn:
         if conn.execute("SELECT 1 FROM connected_accounts WHERE id=?", (account_id,)).fetchone() is None:
             raise ConnectedAccountError("connected account not found")
-        conn.execute(
+        inserted = conn.execute(
             "INSERT INTO connected_account_audit(created_at,account_id,actor_kind,actor_id,action,revocation_cause) "
             "VALUES (?,?,?,?,?,?)",
             (utc_now_iso(), account_id, actor[0], actor[1], action, revocation_cause),
+        )
+        return int(inserted.lastrowid or 0)
+
+
+def set_audit_cause(audit_id: int, revocation_cause: str, *, db: sqlite3.Connection | None = None) -> None:
+    """Fill in the fixed revocation outcome once the provider call after the audit settles."""
+    if revocation_cause not in REVOCATION_CAUSES:
+        raise ConnectedAccountError("invalid account audit")
+    with write_transaction(db, scope="connected_account_audit_cause") as conn:
+        conn.execute(
+            "UPDATE connected_account_audit SET revocation_cause=? WHERE id=? AND revocation_cause IS NULL",
+            (revocation_cause, audit_id),
         )

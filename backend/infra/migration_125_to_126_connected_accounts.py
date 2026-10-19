@@ -70,12 +70,9 @@ def migrate_125_to_126(conn: sqlite3.Connection) -> None:
 
     legacy = _legacy_setting(conn, LEGACY_ACCOUNT_SETTING)
     cursor = _legacy_setting(conn, LEGACY_CURSOR_SETTING)
-    if not isinstance(legacy, dict):
-        _clear_legacy(conn)
-        _journal(conn, None)
-        return
-    address = legacy.get("email")
-    if not isinstance(address, str) or not address.strip():
+    address = legacy.get("email") if isinstance(legacy, dict) else None
+    if not isinstance(legacy, dict) or not isinstance(address, str) or not address.strip():
+        _rekey_screens(conn, None, None)
         _clear_legacy(conn)
         _journal(conn, None)
         return
@@ -114,8 +111,20 @@ def migrate_125_to_126(conn: sqlite3.Connection) -> None:
         )
         if key_store_values.resolve(conn, [key]).get(key) != encoded:
             raise ValueError("new Google account credentials could not be verified")
+    _rekey_screens(conn, address.strip(), account_id)
     _clear_legacy(conn)
     _journal(conn, account_id)
+
+
+def _rekey_screens(conn: sqlite3.Connection, address: str | None, account_id: str | None) -> None:
+    """Key stored screens by the new account id instead of the address; drop any no account owns."""
+    if not _has_table(conn, "email_screens"):
+        return
+    if address is not None and account_id is not None:
+        conn.execute(
+            "UPDATE OR IGNORE email_screens SET account=? WHERE lower(account)=lower(?)", (account_id, address),
+        )
+    conn.execute("DELETE FROM email_screens WHERE account IS NOT ?", (account_id,))
 
 
 def _journal(conn: sqlite3.Connection, account_id: str | None) -> None:

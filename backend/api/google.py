@@ -1,7 +1,8 @@
-"""The platform-held Google sign-in routes.
+"""The platform-held Google sign-in routes, one account per sign-in.
 
 ``connect`` and ``status`` answer any signed-in caller and never carry a
-token. The callback is Google's redirect into the person's own browser: it has
+token. An account the person adds here works in all their projects; one an
+agent's token adds works only where that agent works. The callback is Google's redirect into the person's own browser: it has
 no session to check, so it is loopback-only and trusts nothing but the
 single-use state it issued (``connections.google.oauth``).
 """
@@ -16,9 +17,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from api.connected_app_access import audit_actor
+from connections.app_reach import AppReach
 from connections.google import oauth
 from connections.google.client import GoogleError
-from infra.auth import require_user
+from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 
@@ -36,20 +39,40 @@ def _page(message: str, status: int = 200) -> HTMLResponse:
     )
 
 
+ALL_PROJECTS = AppReach(mode="all", project_ids=frozenset(), outside_projects=False)
+
+
+def _body_field(body: object, key: str) -> str | None:
+    value = body.get(key) if isinstance(body, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 @router.post("/connect")
-async def connect(request: Request, _user: dict = Depends(require_user)) -> dict[str, Any]:
-    """Start a sign-in; returns the URL for the person to open. Accepts ``{"client_file": path}``."""
+async def connect(request: Request, user: dict = Depends(require_user)) -> dict[str, Any]:
+    """Start one sign-in; returns the URL for the person to open and the account it is for.
+
+    Accepts ``{"client_file": path, "account_id": id}``: with ``account_id`` it signs that
+    account in again, otherwise it adds one.
+    """
     try:
         raw = await request.body()
         body = json.loads(raw) if raw and len(raw) <= MAX_BODY_BYTES else {}
-        client_file = body.get("client_file") if isinstance(body, dict) else None
     except ValueError:
-        client_file = None
+        body = {}
+    account_id = _body_field(body, "account_id")
+    person = is_person_session(user)
+    adding_thread_id = None if person or account_id else _body_field(user, "thread_id")
+    if account_id is None and not person and adding_thread_id is None:
+        raise HTTPException(403, "Only the person or an agent's own thread can add a Google account.")
     try:
-        url = await oauth.start_sign_in(client_file)
+        url, signing_in = await oauth.start_sign_in(
+            _body_field(body, "client_file"), actor=audit_actor(user), account_id=account_id,  # type: ignore[arg-type]
+            adding_thread_id=adding_thread_id,
+            reach=ALL_PROJECTS if person and account_id is None else None,
+        )
     except GoogleError as exc:
         raise HTTPException(400, str(exc)) from None
-    return {"url": url}
+    return {"url": url, "account_id": signing_in}
 
 
 @router.get("/oauth/callback")
@@ -68,4 +91,4 @@ async def callback(request: Request, code: str | None = None, state: str | None 
 
 @router.get("/status")
 async def status(_user: dict = Depends(require_user)) -> dict[str, Any]:
-    return await run_in_db(oauth.account_status)
+    return await run_in_db(oauth.accounts_status)

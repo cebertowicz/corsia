@@ -23,7 +23,7 @@ def _disable_analytics(monkeypatch):
 
 
 def _mail(message_id="m1", thread_id="t1", **screen):
-    return {"from": "a@example.com", "to": "me@example.com", "label": "INBOX",
+    return {"account_id": "acct-1", "from": "a@example.com", "to": "me@example.com", "label": "INBOX",
             "thread_id": thread_id, "message_id": message_id,
             "subject": "Hello", **screen}
 
