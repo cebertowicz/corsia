@@ -33,8 +33,6 @@ Scan state (``scan``)::
 
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
-Only the worker's loop changes either state: ``notify`` off it hands itself to the application
-loop, and with none changes nothing, since startup owes a scan that records what it carried.
 
 An outage writes no fact and keeps the source pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after
@@ -59,7 +57,7 @@ from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
 from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts
-from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child, hand_to_app_loop
+from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -328,9 +326,7 @@ class CorrectionsWorker:
         self._hold(f"worker error: {type(error).__name__}")
 
     def notify(self, source_kind: str, source_id: str) -> None:
-        """Take a source on the worker's loop; called off it, hand the call to the application loop."""
-        if hand_to_app_loop(self.notify, source_kind, source_id):
-            return
+        """Take one committed source on the worker's loop; a full queue or a stopping worker owes the scan."""
         if self.stopping:
             self._owe()
             return

@@ -9,18 +9,13 @@ fact on a comment or decision answer writes no note.
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import replace
 
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from infra.database import get_db
-from infra.schema import SCHEMA_SQL
-from plans import decisions
 from tests.test_correction_notes import THREAD, _notes, _version, agent  # noqa: F401 - shared fixture
-from tests.test_plan_decision_answer import _human, _raised_decision
-from tests.test_plan_decisions import _mid, _seed
 
 CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
 NOT_CORRECTION = {**CORRECTION, "label": "not_correction"}
@@ -265,33 +260,6 @@ def test_missing_archived_or_ui_target_keeps_fact_without_note(db, source, targe
 
     assert outcome is True and len(_facts(db)) == 1
     assert _correction_notes(db) == []
-
-
-@pytest.mark.parametrize(
-    ("answer", "enqueued"),
-    [({"option_id": "A"}, False), ({"option_id": "other", "other_text": "Neither."}, True)],
-)
-def test_decision_answer_is_enqueued_only_when_it_carries_text(monkeypatch, answer, enqueued):
-    seen = []
-    monkeypatch.setattr(
-        "jobs.corrections_realtime.notify", lambda kind, source: seen.append((kind, source)),
-    )
-    connection = sqlite3.connect(":memory:", check_same_thread=False)
-    connection.row_factory = sqlite3.Row
-    connection.executescript(SCHEMA_SQL)
-    _seed(connection)
-    connection.commit()
-    try:
-        _plan, _source, decision = _raised_decision(connection)
-        decisions.answer(
-            decision["id"], expected_revision=decision["revision"], mutation_id=_mid(),
-            actor=_human(), provenance="p", db=connection, **answer,
-        )
-        connection.commit()
-    finally:
-        connection.close()
-
-    assert seen == ([("plan_decision_answer", decision["id"])] if enqueued else [])
 
 
 @pytest.mark.asyncio

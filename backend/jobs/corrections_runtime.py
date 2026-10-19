@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -45,31 +44,6 @@ async def drop_child(worker: CorrectionsWorker) -> bool:
     if worker.child is child:
         worker.child = None
         worker.child_manifest = None
-    return True
-
-
-def hand_to_app_loop(notify: Callable[[str, str], None], source_kind: str, source_id: str) -> bool:
-    """Off the event loop (a DB pool thread's commit effect), hand ``notify`` to the application loop.
-
-    Returns False on a running loop, where the caller enqueues itself. With no
-    application loop it changes nothing: startup owes a scan, which records the
-    source's fact (a scan fact on a comment or decision answer writes no note).
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        return False
-    import infra.app_loop as app_loop
-
-    async def _on_loop() -> None:
-        notify(source_kind, source_id)
-
-    try:
-        app_loop.submit(_on_loop())
-    except app_loop.AppLoopUnavailable:
-        logger.info("corrections classifier: no application loop for {} {}; startup's scan reads it", source_kind, source_id)
     return True
 
 

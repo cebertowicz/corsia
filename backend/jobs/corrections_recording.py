@@ -132,6 +132,20 @@ def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object)
         logger.exception("corrections classifier admission notification failed")
 
 
+def notify_decision_answer(decision_id: str, other_text: object) -> None:
+    """Hand the worker a committed decision answer that carries free text; best effort, never failing the answer.
+
+    An Other answer and a pick-any note both arrive as ``other_text``.
+    """
+    from jobs.corrections_realtime import notify
+
+    try:
+        if isinstance(other_text, str) and other_text.strip():
+            notify("plan_decision_answer", decision_id)
+    except Exception:
+        logger.exception("corrections classifier decision-answer notification failed")
+
+
 async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:
     """Record a scored fact; ``failure_reason`` is ``none``."""
     classification = {

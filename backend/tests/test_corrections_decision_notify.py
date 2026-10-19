@@ -1,81 +1,111 @@
-"""A decision answer commits on a DB thread; its arrival reaches the corrections worker on the app loop.
+"""The decision-answer route hands a free-text answer to the corrections worker once it committed.
 
-The worker's queue, event and task are bound to the application loop, so its
-``notify`` hands a commit effect from a DB pool thread to ``infra.app_loop``,
-and with no application loop changes nothing: startup's owed scan reads the answer,
-recording its fact without a note.
+``answer_plan_decision`` notifies on the application loop after the answer's
+delivery succeeded, and only when the request carries free text: an Other
+answer or a pick-any note, both sent as ``other_text``. ``plans`` itself
+imports nothing from ``jobs``.
 """
 
 from __future__ import annotations
 
-import asyncio
-import threading
+import json
+from dataclasses import replace
 
 import pytest
 
-from plans import decisions
+from plans import service
 from tests.test_correction_notes import _version
-from tests.test_plan_decision_answer import _human, _raised_decision
-from tests.test_plan_decisions import _DbProxy, _mid, db  # noqa: F401 - shared fixture
+from tests.test_plan_decision_answer import _client, _raised_decision
+from tests.test_plan_decision_pick_any import _draft_any, _raise
+from tests.test_plan_decisions import _DbProxy, _task, db  # noqa: F401 - shared fixture
 
-OTHER = {"option_id": "other", "other_text": "Neither."}
+CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
 
 
-def _answer(db, decision):
-    return decisions.answer(
-        decision["id"], expected_revision=decision["revision"], mutation_id=_mid(),
-        actor=_human(), provenance="p", db=db, **OTHER,
+@pytest.fixture
+def seen(monkeypatch):
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr("jobs.corrections_realtime.notify", lambda kind, source: calls.append((kind, source)))
+    return calls
+
+
+def _post(client, decision, **answer):
+    return client.post(
+        f"/api/plans/decisions/{decision['id']}/answer",
+        json={"expected_revision": decision["revision"], "mutation_id": answer.pop("mutation_id", "m-1"), **answer},
     )
 
 
-def _isolated_worker(monkeypatch):
-    from jobs import corrections_realtime as realtime
-
-    worker = realtime.CorrectionsWorker()
-    monkeypatch.setattr(realtime, "WORKER", worker)
-    monkeypatch.setattr(worker, "_start_task", lambda coroutine: coroutine.close())
-    return worker
-
-
-@pytest.mark.asyncio
-async def test_answer_through_run_in_db_notifies_the_worker_on_its_loop(db, monkeypatch):
-    import infra.app_loop as app_loop
-    from infra.db_async import run_in_db
-
-    worker = _isolated_worker(monkeypatch)
-    notified_on = []
-    real_notify = worker.notify
-    monkeypatch.setattr(
-        worker, "notify", lambda *args: (notified_on.append(threading.get_ident()), real_notify(*args)),
-    )
-    app_loop.capture(asyncio.get_running_loop())  # what ``lifespan`` captures
+@pytest.mark.parametrize(
+    ("answer", "notified"),
+    [({"option_id": "A"}, False), ({"option_id": "other", "other_text": "Neither."}, True)],
+)
+def test_the_route_notifies_only_an_answer_that_carries_text(db, monkeypatch, seen, answer, notified):
     _plan, _source, decision = _raised_decision(db)
 
-    try:
-        await run_in_db(lambda: _answer(db, decision))
-        for _ in range(5):
-            await asyncio.sleep(0)
-    finally:
-        app_loop.clear()
+    assert _post(_client(db, monkeypatch), decision, **answer).status_code == 200
 
-    assert worker.queue.get_nowait()[:2] == ("plan_decision_answer", decision["id"])
-    # Called on the DB pool's thread, it hopped once and enqueued on the loop's.
-    assert len(notified_on) == 2 and notified_on[0] != notified_on[1] == threading.get_ident()
+    assert seen == ([("plan_decision_answer", decision["id"])] if notified else [])
 
 
-def test_answer_with_no_app_loop_changes_no_worker_state_and_startups_scan_reads_it(db, monkeypatch):
-    from jobs.corrections_scanning import pending_source_candidate_keys
+def test_a_pick_any_note_is_notified_like_an_other_answer(db, monkeypatch, seen):
+    from plans import decisions
 
-    worker = _isolated_worker(monkeypatch)  # the suite hides the app loop outside integration tests
+    plan = service.ensure_plan("thread", "owner", db=db)
+    source = _task(plan.id, "Pick tools", db=db)
+    db.commit()
+    decision = _raise(db, decisions, _draft_any(db, decisions, plan, source))
+
+    response = _post(_client(db, monkeypatch), decision, option_ids=["A"], other_text="Not web search.")
+
+    assert response.status_code == 200
+    assert seen == [("plan_decision_answer", decision["id"])]
+
+
+def test_a_refused_answer_notifies_nothing(db, monkeypatch, seen):
     _plan, _source, decision = _raised_decision(db)
-    before = worker.snapshot()
 
-    _answer(db, decision)
+    stale = {**decision, "revision": decision["revision"] + 99}
+    response = _post(_client(db, monkeypatch), stale, option_id="other", other_text="Neither.")
+
+    assert response.status_code == 409 and seen == []
+
+
+def test_a_failing_notify_never_fails_the_committed_answer(db, monkeypatch):
+    def broken(*_args):
+        raise RuntimeError("worker gone")
+
+    monkeypatch.setattr("jobs.corrections_realtime.notify", broken)
+    _plan, _source, decision = _raised_decision(db)
+
+    response = _post(_client(db, monkeypatch), decision, option_id="other", other_text="Neither.")
+
+    assert response.status_code == 200 and response.json()["decision"]["state"] == "answered"
+
+
+def test_a_replayed_answer_notifies_again_and_writes_no_second_note(db, monkeypatch, seen):
+    """A replay re-sends the same subject; the fact's unique ``dedupe_key`` stops a second fact and note."""
+    from jobs.corrections_recording import _record_fact, candidate_for_source
+
+    monkeypatch.setattr("infra.passive_changes.clock_event", lambda *_args: None)
+    monkeypatch.setattr("infra.database.get_db", lambda: _DbProxy(db))
+    _plan, _source, decision = _raised_decision(db)
+    client = _client(db, monkeypatch)
+    for _ in range(2):
+        assert _post(client, decision, option_id="other", other_text="Neither.", mutation_id="replay").status_code == 200
     db.commit()
 
-    # Off every loop, nothing may touch the worker's state; startup owes the scan that reads the answer.
-    assert worker.snapshot() == before and worker.scan == "idle" and worker.queue.empty()
-    monkeypatch.setattr("infra.database.get_db", lambda: _DbProxy(db))
-    assert [(key.source_kind, key.source_id) for key in pending_source_candidate_keys(_version(), 10)] == [
-        ("plan_decision_answer", decision["id"]),
+    recorded = [
+        _record_fact(replace(candidate_for_source(kind, source), arrived=True), CORRECTION, _version())
+        for kind, source in seen
+    ]
+
+    assert len(seen) == 2 and recorded == [True, False]
+    notes = [
+        json.loads(row[0]) for row in db.execute(
+            "SELECT details_json FROM context_change_journal WHERE object_kind='thread_context'"
+        )
+    ]
+    assert [note["correction_subject"] for note in notes if note.get("kind") == "correction_note"] == [
+        f"plan-decision-answer:{decision['id']}:{decision['revision'] + 1}",
     ]
