@@ -277,10 +277,6 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
         )
         db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
         review_woken = review_requests.settle_for_batch(db, batch)
-        from infra.write_effects import after_commit
-        from jobs.corrections_realtime import notify
-
-        after_commit(db, lambda: notify("doc-feedback", batch_id))  # the worker writes its correction notes
     return True, delivered.woken_threads + review_woken
 
 

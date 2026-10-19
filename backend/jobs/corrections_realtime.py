@@ -34,14 +34,12 @@ Scan state (``scan``)::
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
 Only the worker's loop changes either state: ``notify`` off it hands itself to the application
-loop, and with none changes nothing, since startup owes a scan that reads what it carried.
+loop, and with none changes nothing, since startup owes a scan that records what it carried.
 
 An outage writes no fact and keeps the source pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after
 it reaches the end using its originally selected manifest; a deterministic failure
 ends the pass unactivated, and the next pass re-selects (or the state is failed).
-A review unit's key (``UNIT_KINDS``) only writes the notes it owes; a pass that
-reaches the end first recovers the notes of units whose key the worker never took.
 """
 
 from __future__ import annotations
@@ -49,7 +47,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from datetime import timezone
 from typing import Any
 
 from loguru import logger
@@ -61,7 +58,7 @@ from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_assets import AssetSelectionError, asset_root, installed as _installed, select_manifest
-from jobs.corrections_recording import arrival_candidate, record_classification, record_unreadable, unreadable_facts
+from jobs.corrections_recording import candidate_for_source, record_classification, record_unreadable, unreadable_facts
 from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child, hand_to_app_loop
 
 QUEUE_SIZE = 256
@@ -240,7 +237,7 @@ class CorrectionsWorker:
         started_at = _clock()
         self.queue_delay_ms = (started_at - enqueued_at) * 1000
         try:
-            candidate = await run_in_db(arrival_candidate, source_kind, source_id)
+            candidate = await run_in_db(candidate_for_source, source_kind, source_id)
             if candidate is not None and (await self._classify(candidate)).kind in {"recorded", "unreadable"}:
                 self._release_hold()
         except Exception:
@@ -267,8 +264,10 @@ class CorrectionsWorker:
 
     async def _scan(self) -> str:
         """Walk and activate one immutable manifest's measurement window."""
+        from datetime import timezone
+
         from jobs.corrections_activation import measurement_window_start
-        from jobs.corrections_recording import next_pending_batch, recover_comment_notes
+        from jobs.corrections_recording import next_pending_batch
 
         manifest = await self._select_manifest()
         if manifest is None:
@@ -279,7 +278,6 @@ class CorrectionsWorker:
         while self.queue.empty():
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
-                await recover_comment_notes(cutoff.isoformat())  # the unit keys the worker never took
                 return await activate_after_backfill(version)
             tail = batch.selected_keys[-1]
             before = (tail.created_at, tail.source_kind, tail.source_id)
@@ -330,7 +328,7 @@ class CorrectionsWorker:
         self._hold(f"worker error: {type(error).__name__}")
 
     def notify(self, source_kind: str, source_id: str) -> None:
-        """Take a source or unit key on the worker's loop; called off it, hand the call to the application loop."""
+        """Take a source on the worker's loop; called off it, hand the call to the application loop."""
         if hand_to_app_loop(self.notify, source_kind, source_id):
             return
         if self.stopping:

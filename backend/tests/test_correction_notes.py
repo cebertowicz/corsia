@@ -16,8 +16,8 @@ THREAD = "main-1"
 CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
 NOT_CORRECTION = {**CORRECTION, "label": "not_correction"}
 NOTE_DETAILS = {
-    "chip": None, "kind": "correction_note", "note_key": "message:c1",
-    "correction_subjects": ["message:c1"], "reoffer_unwritten": True,
+    "chip": None, "kind": "correction_note", "correction_subject": "message:c1",
+    "reoffer_unwritten": True,
 }
 
 
@@ -150,7 +150,9 @@ def test_the_note_text_quotes_the_person_and_names_when_they_sent_it(monkeypatch
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
         "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
         "The triage is working state, not part of your reply. "
-        "If you already fixed and triaged it when the message arrived, do nothing more."
+        "If you already fixed and triaged it when the message arrived, do nothing more.\n"
+        "If several correction notes reach you together, triage them as one: look for one general cause "
+        "and re-check the whole artifact or decision, not each comment separately."
     )
 
 
@@ -315,42 +317,22 @@ def test_a_backfill_before_activation_never_notes(agent, main_db):
     assert _journal(main_db) == []
 
 
-def _activate(main_db, at: str) -> None:
-    from core.corrections_recording import ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING, version_attributes, version_key
-    from infra.settings import set_setting
-
-    key = version_key(_version())
-    set_setting(
-        ACTIVATIONS_SETTING, {key: {"activated_at": at, "version": version_attributes(_version())}}, db=main_db,
-    )
-    set_setting(ACTIVE_VERSION_SETTING, {"key": key}, db=main_db)
-    main_db.commit()
-
-
 def test_a_scan_catch_up_notes_only_the_latest_owner_message(agent, main_db):
+    from core.corrections_recording import ACTIVE_VERSION_SETTING, version_key
+    from infra.settings import set_setting
     from jobs.corrections_recording import _record_fact
 
     agent.say("c1", "Wrong file.", at="2026-10-16T20:00:00Z")
     agent.deliver()
     agent.say("c2", "And the date is wrong.", at="2026-10-16T20:01:00Z")
-    _activate(main_db, "2026-10-16T19:00:00+00:00")
+    set_setting(ACTIVE_VERSION_SETTING, {"key": version_key(_version())}, db=main_db)
+    main_db.commit()
 
     # Behind a newer owner message: no note. The latest one: one catch-up note.
     assert _record_fact(_scanned("c1"), CORRECTION, _version())
     assert _journal(main_db) == []
     assert _record_fact(_scanned("c2"), CORRECTION, _version())
-    assert [entry["correction_subjects"] for entry in _journal(main_db)] == [["message:c2"]]
-
-
-def test_the_first_scan_after_an_upgrade_notes_no_message_made_before_activation(agent, main_db):
-    from jobs.corrections_recording import _record_fact
-
-    # The person's latest word, but sent before the version became active: history, not news.
-    agent.say("c1", "Wrong file.", at="2026-10-16T20:00:00Z")
-    _activate(main_db, "2026-10-16T20:00:00+00:00")
-
-    assert _record_fact(_scanned("c1"), CORRECTION, _version())
-    assert _journal(main_db) == []
+    assert [entry["correction_subject"] for entry in _journal(main_db)] == ["message:c2"]
 
 
 def test_a_lesson_placed_in_the_turn_the_note_arrived_is_stamped_with_it(agent, main_db):

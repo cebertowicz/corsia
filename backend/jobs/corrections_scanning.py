@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import NamedTuple
 
-from core.corrections_input import CONTEXT_HEAD_CHARS, CONTEXT_ROWS, CONTEXT_TAIL_CHARS, owner_text, shape_context
+from core.corrections_input import (
+    CONTEXT_HEAD_CHARS, CONTEXT_ROWS, CONTEXT_TAIL_CHARS, agent_context, owner_text, shape_context,
+)
 from core.corrections_recording import (
     COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
     DECISION_SUBJECT_PREFIX,
-    LABEL_CORRECTION,
     MESSAGE_SUBJECT_PREFIX,
     ClassifierVersion,
     CorrectionCandidate,
@@ -188,84 +189,106 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
 
     db = get_db()
     try:
-        candidates: list[CorrectionCandidate] = []
-        for key in keys:
-            if key.source_kind != "message":
-                from jobs.corrections_recording import source_candidate
-
-                candidate = source_candidate(key.source_kind, key.source_id)
-                if candidate is not None:
-                    candidates.append(candidate)
-                continue
-            message = db.execute(
-                "SELECT role,content,metadata FROM messages WHERE rowid=?", (key.rowid,)
-            ).fetchone()
-            if not message or not is_owner_authored_message(
-                role=message[0], content=message[1], metadata=message[2],
-            ):
-                continue
-            preceding = db.execute(
-                """SELECT role,substr(content,1,:head),substr(content,-:tail),metadata FROM messages
-                   WHERE thread_id=:thread AND role IN ('user','assistant')
-                     AND (created_at < :created OR (created_at=:created AND id < :message))
-                   ORDER BY created_at DESC,id DESC LIMIT :rows""",
-                {
-                    "head": CONTEXT_HEAD_CHARS, "tail": CONTEXT_TAIL_CHARS, "rows": CONTEXT_ROWS,
-                    "thread": key.thread_id, "created": key.created_at, "message": key.source_id,
-                },
-            ).fetchall()
-            candidates.append(CorrectionCandidate(
-                source_kind=key.source_kind, source_id=key.source_id,
-                thread_id=str(key.thread_id), project_id=key.project_id,
-                content=owner_text(message[1]), created_at=key.created_at,
-                context=shape_context(preceding),
-            ))
-        return candidates
+        candidates = (
+            _message_candidate(db, key) if key.source_kind == "message" else source_candidate(db, key.source_kind, key.source_id)
+            for key in keys
+        )
+        return [candidate for candidate in candidates if candidate is not None]
     finally:
         db.close()
 
 
-class PositiveComment(NamedTuple):
-    """A comment the active version found a correction in; the last one read is the next page's cursor."""
+def _message_candidate(db, key: PendingCandidateKey) -> CorrectionCandidate | None:
+    message = db.execute(
+        "SELECT role,content,metadata FROM messages WHERE rowid=?", (key.rowid,)
+    ).fetchone()
+    if not message or not is_owner_authored_message(
+        role=message[0], content=message[1], metadata=message[2],
+    ):
+        return None
+    preceding = db.execute(
+        """SELECT role,substr(content,1,:head),substr(content,-:tail),metadata FROM messages
+           WHERE thread_id=:thread AND role IN ('user','assistant')
+             AND (created_at < :created OR (created_at=:created AND id < :message))
+           ORDER BY created_at DESC,id DESC LIMIT :rows""",
+        {
+            "head": CONTEXT_HEAD_CHARS, "tail": CONTEXT_TAIL_CHARS, "rows": CONTEXT_ROWS,
+            "thread": key.thread_id, "created": key.created_at, "message": key.source_id,
+        },
+    ).fetchall()
+    return CorrectionCandidate(
+        source_kind=key.source_kind, source_id=key.source_id,
+        thread_id=str(key.thread_id), project_id=key.project_id,
+        content=owner_text(message[1]), created_at=key.created_at,
+        context=shape_context(preceding),
+    )
 
-    created_at: str
-    subject_key: str
-    comment_id: str
 
+def source_candidate(db, source_kind: str, source_id: str) -> CorrectionCandidate | None:
+    """Read one comment or decision answer as classifier input; None when it is no candidate.
 
-def positive_comment_keys(
-    version: ClassifierVersion, since: str, limit: int, after: PositiveComment | None = None,
-) -> list[PositiveComment]:
-    """Comments with a live ``correction`` fact by ``version``, made at or after ``since``, oldest first.
-
-    Recovery's selector, read strictly after ``after``. It reads facts by time on
-    ``idx_outcome_events_name_ts``: a comment fact's ``ts`` is the comment's
-    ``created_at``. It states no review-unit membership: which unit a comment
-    belongs to, and whether that unit owes a note, is
-    ``correction_notes.write_comment_notes``'s call.
+    The owner segment is the person's words alone. What the agent put to them
+    (the commented excerpt, or the decision's question and options) is one
+    ``Agent`` context row before it, the shape the classifier was trained on.
     """
-    from infra.database import get_db
+    if source_kind == "doc_comment":
+        return _comment_candidate(db, source_id)
+    if source_kind == "plan_decision_answer":
+        return _decision_candidate(db, source_id)
+    raise ValueError(f"unknown correction source kind: {source_kind}")
 
-    version_filter, version_params = version_match_sql("e", version)
-    db = get_db()
+
+def _project_of(db, thread_id: str) -> str | None:
+    row = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
+    return row[0] if row else None
+
+
+def _comment_candidate(db, comment_id: str) -> CorrectionCandidate | None:
+    from core.correction_targets import comment_target_sql
+    from registry.models import get_artifact
+
+    row = db.execute(
+        f"""SELECT c.id,c.artifact_id,c.anchor_text,c.body,c.created_at,{comment_target_sql('c')} AS target
+            FROM doc_comments c WHERE c.id=? AND c.author_kind='user'""", (comment_id,),
+    ).fetchone()
+    if row is None or not row["target"]:
+        return None  # No agent was or will be handed it: the scan never selects it either.
+    target, body = str(row["target"]), str(row["body"])
+    artifact = get_artifact(str(row["artifact_id"]), db=db) or {}
+    return CorrectionCandidate(
+        "doc_comment", str(row["id"]), target, _project_of(db, target), owner_text(body), str(row["created_at"]),
+        context=agent_context(row["anchor_text"] or ""),
+        quote=body, about=str(artifact.get("title") or artifact.get("path") or row["artifact_id"]),
+    )
+
+
+def _decision_candidate(db, decision_id: str) -> CorrectionCandidate | None:
+    from plans.public import answer_note, decision_identity_row
+
+    row = decision_identity_row(db, decision_id)
     try:
-        rows = db.execute(
-            f"""SELECT e.ts, e.subject_key, substr(e.subject_key, length(:prefix) + 1)
-                  FROM outcome_events e INDEXED BY idx_outcome_events_name_ts
-                 WHERE e.event_name=:event AND e.ts >= :from_ts
-                   AND (:after_ts IS NULL OR (e.ts, e.subject_key) > (:after_ts, :after_subject))
-                   AND substr(e.subject_key, 1, length(:prefix))=:prefix AND e.retracted_at IS NULL
-                   AND json_extract(e.attributes,'$.label')=:label AND {version_filter}
-                 ORDER BY e.ts, e.subject_key LIMIT :limit""",
-            {
-                **version_params, "event": CORRECTION_EVENT, "label": LABEL_CORRECTION,
-                "prefix": COMMENT_SUBJECT_PREFIX, "limit": limit,
-                # A page's range starts at its cursor, so paging reads each fact once.
-                "from_ts": max(since, after.created_at) if after else since,
-                "after_ts": after.created_at if after else None,
-                "after_subject": after.subject_key if after else None,
-            },
-        ).fetchall()
-        return [PositiveComment(str(row[0]), str(row[1]), str(row[2])) for row in rows]
-    finally:
-        db.close()
+        body = json.loads(row["metadata"]).get("plan_decision") if row is not None else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not isinstance(body, dict) or body.get("state") != "answered":
+        return None
+    text = answer_note(body.get("answer"))  # Plans' own test of whether an answer carries the person's words.
+    thread_id, revision, answered_at = body.get("thread_id"), body.get("revision"), body.get("answered_at")
+    if not text or not thread_id or not isinstance(thread_id, str) or revision is None or not answered_at:
+        return None
+    return CorrectionCandidate(
+        "plan_decision_answer", f"{decision_id}:{revision}", thread_id, _project_of(db, thread_id),
+        owner_text(text), str(answered_at), context=agent_context(_question(body)),
+        quote=text, about=str(body.get("title") or decision_id),
+    )
+
+
+def _question(body: dict) -> str:
+    """The decision as the agent put it to the person: title, context, trade-off, then each option."""
+    listed = body.get("options")
+    options = [option for option in listed if isinstance(option, dict)] if isinstance(listed, list) else []
+    lines = [str(body.get(field) or "") for field in ("title", "context", "tradeoff")]
+    for option in options:
+        said = ": ".join(str(part) for part in (option.get("label"), option.get("detail")) if part)
+        lines.append(f"- {said}" if said else "")
+    return "\n".join(line for line in lines if line)

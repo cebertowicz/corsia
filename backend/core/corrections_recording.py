@@ -19,9 +19,11 @@ CORRECTION_EVENT = "measurement.correction"
 MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
-SOURCE_KINDS = ("message", "doc_comment", "plan_decision_answer")
-# The review units a comment is noted with (``core.correction_notes``); the worker takes their keys as it takes sources.
-UNIT_KINDS = ("review-round", "doc-feedback")
+SUBJECT_PREFIXES = {
+    "message": MESSAGE_SUBJECT_PREFIX,
+    "doc_comment": COMMENT_SUBJECT_PREFIX,
+    "plan_decision_answer": DECISION_SUBJECT_PREFIX,
+}
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
 # A healthy, self-tested classifier failed twice on this one input; Measurement never counts it.
@@ -113,8 +115,9 @@ class CorrectionCandidate:
     """One persisted owner source (message, comment or decision answer) eligible to be checked.
 
     ``arrived`` marks a source classified as it arrives, not by a later scan.
-    ``quote`` is the person's own words a triage note quotes when ``content``
-    wraps them in classifier context; ``source_ref`` is the source the note names.
+    For a comment or a decision answer, ``quote`` is the person's words as
+    written (``content`` is their masked classifier input) and ``about`` is the
+    artifact or decision its triage note names.
     """
 
     source_kind: str
@@ -126,7 +129,8 @@ class CorrectionCandidate:
     context: tuple[tuple[str, str], ...] = ()
     arrived: bool = False
     quote: str | None = None
-    source_ref: str | None = None
+    about: str | None = None
+
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
 ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"
@@ -146,18 +150,9 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
     logged and returned as ``CorruptActivation`` so no caller mistakes it for absence.
     """
     from infra.database import get_db
-
-    db = get_db()
-    try:
-        return read_active_version(db)
-    finally:
-        db.close()
-
-
-def read_active_version(db) -> ClassifierVersion | CorruptActivation | None:
-    """``active_corrections_version`` on the caller's connection, so a writer reads it in its own transaction."""
     from infra.settings import get_setting
 
+    db = get_db()
     try:
         active = get_setting(ACTIVE_VERSION_SETTING, db=db)
         if active is None:
@@ -171,31 +166,15 @@ def read_active_version(db) -> ClassifierVersion | CorruptActivation | None:
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         logger.error("corrections activation record is unreadable: {}", type(error).__name__)
         return CorruptActivation(type(error).__name__)
-
-
-def active_since(db, version: ClassifierVersion | None = None) -> str | None:
-    """When the active version (or ``version``, only if it is the active one) became active, else None."""
-    from infra.settings import get_setting
-
-    active = get_setting(ACTIVE_VERSION_SETTING, db=db)
-    key = active.get("key") if isinstance(active, dict) else None
-    if key is None or (version is not None and key != version_key(version)):
-        return None
-    activation = (get_setting(ACTIVATIONS_SETTING, db=db) or {}).get(key)
-    since = activation.get("activated_at") if isinstance(activation, dict) else None
-    return since if isinstance(since, str) and since else None
+    finally:
+        db.close()
 
 
 def subject_key(source_kind: str, source_id: str) -> str:
     """The non-colliding ``outcome_events`` subject for one correction source."""
-    prefixes = {
-        "message": MESSAGE_SUBJECT_PREFIX,
-        "doc_comment": COMMENT_SUBJECT_PREFIX,
-        "plan_decision_answer": DECISION_SUBJECT_PREFIX,
-    }
-    if source_kind not in prefixes:
+    if source_kind not in SUBJECT_PREFIXES:
         raise ValueError(f"unknown correction source kind: {source_kind}")
-    return prefixes[source_kind] + source_id
+    return SUBJECT_PREFIXES[source_kind] + source_id
 
 
 def dedupe_key(candidate: CorrectionCandidate, version: ClassifierVersion) -> str:

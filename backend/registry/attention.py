@@ -258,13 +258,6 @@ def _clear_attention(
         plans_public.ask_cleared(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )
-        if answer is not None:
-            from infra.write_effects import after_commit
-            from jobs.corrections_realtime import notify
-
-            # The rounds the answer ended: the corrections worker writes their notes once this commits.
-            for hold_id in answer.hold_ids:
-                after_commit(_db, lambda hold_id=hold_id: notify("review-round", hold_id))
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",

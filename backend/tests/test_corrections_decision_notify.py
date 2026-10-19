@@ -2,7 +2,8 @@
 
 The worker's queue, event and task are bound to the application loop, so its
 ``notify`` hands a commit effect from a DB pool thread to ``infra.app_loop``,
-and with no application loop changes nothing: startup's owed scan reads the answer.
+and with no application loop changes nothing: startup's owed scan reads the answer,
+recording its fact without a note.
 """
 
 from __future__ import annotations

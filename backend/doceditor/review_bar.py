@@ -46,7 +46,6 @@ class ReviewAnswer:
     note: str | None = None
     counts: dict = field(default_factory=dict)
     feedback_task: str | None = None
-    hold_ids: tuple[str, ...] = ()
 
     def payload(self) -> dict:
         return {
@@ -201,7 +200,4 @@ def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer
         db, author_kind="user", author_id=USER_AUTHOR_ID,
         artifact_id=artifact_id, reason="send",
     )
-    return ReviewAnswer(
-        verdict, note, counts, _feedback_task(db, artifact_id, since),
-        tuple(str(ask["hold_id"]) for ask in asks),
-    )
+    return ReviewAnswer(verdict, note, counts, _feedback_task(db, artifact_id, since))

@@ -833,7 +833,7 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", locked)
     processed = []
-    monkeypatch.setattr(corrections_recording, "candidate_for_source", lambda _kind, message_id: processed.append(message_id))
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: processed.append(message_id))
 
     worker.scan = "owed"
     worker.queue.put_nowait(("message", "arrival", 0.0))
@@ -852,7 +852,7 @@ async def test_a_failing_arrival_owes_the_scan_and_the_next_arrival_still_runs(w
             raise RuntimeError("database is locked")
         return None
 
-    monkeypatch.setattr(corrections_recording, "candidate_for_source", candidate)
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", candidate)
     monkeypatch.setattr(worker, "_scan_pass", AsyncMock(side_effect=lambda: worker._finish_scan()))
     worker.queue.put_nowait(("message", "first", 0.0))
     worker.queue.put_nowait(("message", "second", 0.0))
@@ -878,7 +878,7 @@ async def test_worker_task_that_dies_keeps_the_scan_owed_and_notify_restarts_it(
     assert (worker.scan, worker.held_reason) == ("owed", "worker error: RuntimeError")
 
     seen = []
-    monkeypatch.setattr(corrections_recording, "candidate_for_source", lambda _kind, message_id: seen.append(message_id))
+    monkeypatch.setattr(corrections_realtime, "candidate_for_source", lambda _kind, message_id: seen.append(message_id))
     corrections_realtime.notify("message", "after-crash")
     await worker.task
 

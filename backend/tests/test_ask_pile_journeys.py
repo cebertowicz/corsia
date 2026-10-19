@@ -223,7 +223,7 @@ def test_answering_an_ended_ask_is_not_offered_and_reports_that_it_ended(db):
     assert _in_pile(db, "proposal.md") == set()
     assert review_bar.round_state(db, artifact_id)["ask_raised"] is False
     with pytest.raises(review_bar.AnswerRefused) as refused:
-        attention.clear_attention(artifact_id, outcome="answer", verdict="approved", drives=[], db=db)
+        attention.clear_attention(artifact_id, outcome="answer", verdict="approved", db=db)
     assert refused.value.code == "ask_stale"
     assert "replaced" not in str(refused.value)
     assert "ended" in str(refused.value)
@@ -668,7 +668,7 @@ def test_ask_place_withdraw_and_pile_answer_each_nudge_the_person(db, monkeypatc
 
     _plan_op(db, plan.id, "block_node", ask)
     scheduled.clear()
-    attention.clear_attention(artifact_id, outcome="answer", verdict="approved", drives=[], db=db)
+    attention.clear_attention(artifact_id, outcome="answer", verdict="approved", db=db)
     assert [set(ids) for ids in scheduled] == [{plan.id}]
     assert nudged_users(notifications.prepare_after_commit(scheduled[0], db=db)) == {
         "user": {plan.id},

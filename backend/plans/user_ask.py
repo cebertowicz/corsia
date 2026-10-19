@@ -118,49 +118,6 @@ def raised_asks(db, artifact_id: str) -> list:
     ).fetchall()
 
 
-#: The newest asks ``ask_rounds`` reads per artifact: a bound on the answer path
-#: and on the corrections note writers in ``core.correction_notes``.
-ASK_ROUNDS_LIMIT = 50
-
-
-def ask_rounds(db, artifact_id: str) -> list:
-    """The newest ``ASK_ROUNDS_LIMIT`` review rounds the person was asked on this artifact, newest raise first.
-
-    A round runs from its raise to its clearance (``cleared_at`` is None while it
-    is open). ``answered`` is whether the person's answer ended it; a hold the
-    agent withdrew or a task ended is not answered. One indexed range
-    (``idx_plan_holds_user_ask_rounds``) reads at most the limit.
-    """
-    return db.execute(
-        """SELECT h.id AS hold_id, h.created_at AS raised_at, h.cleared_at,
-                  COALESCE(json_extract(e.payload_json, '$.detail.answered_by')='user', 0) AS answered
-             FROM plan_node_holds h LEFT JOIN plan_node_events e ON e.id=h.clearance_event_id
-            WHERE h.kind='blocked' AND h.owner_kind='user' AND h.owner_id=?
-            ORDER BY h.created_at DESC, h.id DESC LIMIT ?""",
-        (artifact_id, ASK_ROUNDS_LIMIT),
-    ).fetchall()
-
-
-def asked_artifact(db, hold_id: str) -> str | None:
-    """The artifact a user ask (one review round of ``ask_rounds``) was raised on, or None."""
-    row = db.execute(
-        "SELECT owner_id FROM plan_node_holds WHERE id=? AND kind='blocked' AND owner_kind='user'", (hold_id,),
-    ).fetchone()
-    return str(row[0]) if row is not None else None
-
-
-def round_at(rounds: list, at: str):
-    """The round of ``ask_rounds`` open when something was made at ``at``, or None.
-
-    That is the newest raised before ``at`` and not cleared before it, so when
-    several asks clear together each moment still belongs to exactly one round.
-    """
-    return next(
-        (r for r in rounds if r["raised_at"] < at and (r["cleared_at"] is None or at <= r["cleared_at"])),
-        None,
-    )
-
-
 def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
     """The open review requests, or one document's, oldest first, as ``open_asks_sql`` defines them.
 

@@ -1,4 +1,4 @@
-"""Served correction counts include comment facts and legacy facts, and exclude decision answers."""
+"""Served correction counts: the weekly figure reads chat messages, unreadable counts add comments."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 
 from doc_feedback_helpers import seed_document
-from tests.test_correction_notes import _version  # noqa: F401
+from tests.test_correction_notes import _version
 from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fixture and helpers
     CORRECTION,
     UNREADABLE,
@@ -18,9 +18,9 @@ from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fix
 )
 
 
-def test_measurement_excludes_decision_answers_from_correction_rates(db):
+def test_weekly_figure_counts_chat_messages_and_unreadable_counts_comments_not_answers(db):
     from jobs.corrections_activation import weekly_correction_figure
-    from jobs.corrections_recording import unreadable_facts
+    from jobs.corrections_recording import _record_fact, candidate_for_message, unreadable_facts
 
     now = datetime.now(timezone.utc).isoformat()
     comment = _user_comment(db, seed_document(db, "owner", name="p.md"))
@@ -30,17 +30,16 @@ def test_measurement_excludes_decision_answers_from_correction_rates(db):
         (now,),
     )
     db.commit()
-    from jobs.corrections_recording import _record_fact, candidate_for_message
 
     assert _record_fact(candidate_for_message("m"), CORRECTION, _version())
     _record(db, "doc_comment", comment)
     _record(db, "plan_decision_answer", "dec")
+    _record(db, "doc_comment", comment, payload=UNREADABLE, version=_version("v2"))
     _record(db, "plan_decision_answer", "dec", payload=UNREADABLE, version=_version("v2"))
 
-    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 2
-    # Like for like across versions: the chat message alone.
-    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1, messages_only=True) == 1
-    assert unreadable_facts(db, _version("v2")) == 0
+    # Like for like across versions: the chat message alone, never the comment or the answer.
+    assert weekly_correction_figure(_version(), since="2000-01-01T00:00:00Z", weeks=1) == 1
+    assert unreadable_facts(db, _version("v2")) == 1  # the comment; the decision answer stays triage-only
     assert any(subject == "plan-decision-answer:dec:7" for subject, _ in _facts(db))  # triage still sees it
 
 

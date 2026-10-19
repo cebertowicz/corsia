@@ -7,32 +7,46 @@ read that one rule.
 
 from __future__ import annotations
 
+import json
+
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from tests.test_correction_notes import _version  # noqa: F401
+from doceditor import feedback_batches
+from tests.test_correction_notes import _version
 from tests.test_corrections_comments_answers import (  # noqa: F401 - shared fixture and helpers
-    CORRECTION,
-    _correction_notes,
-    _deliver_batch,
     _record,
     _user_comment,
-    _worker_takes,
     db,
 )
 
 
 def _candidate_thread(source_id: str) -> str | None:
-    from jobs.corrections_recording import source_candidate
+    from jobs.corrections_recording import candidate_for_source
 
-    candidate = source_candidate("doc_comment", source_id)
+    candidate = candidate_for_source("doc_comment", source_id)
     return candidate.thread_id if candidate is not None else None
 
 
-def _deliver_all(db) -> None:
-    from doceditor import feedback_batches
+def _deliver_batch(db):
+    batch = batches(db)[0]
+    assert feedback_batches.close_batch(db, batch["id"], "send")[0]
+    db.commit()
+    return batch
 
+
+def _deliver_all(db) -> None:
     for batch in batches(db, state="open"):
         assert feedback_batches.close_batch(db, batch["id"], "send")[0]
-    _worker_takes(db)
+    db.commit()
+
+
+def _noted(db) -> list[tuple[str, str]]:
+    """Each correction note as ``(recipient thread, subject)``, oldest first."""
+    return [
+        (row[0], json.loads(row[1])["correction_subject"]) for row in db.execute(
+            "SELECT object_id,details_json FROM context_change_journal "
+            "WHERE object_kind='thread_context' AND details_json LIKE '%correction_note%' ORDER BY seq"
+        )
+    ]
 
 
 def test_a_reply_to_an_agent_comment_targets_the_owner_not_the_comment_author(db):
@@ -56,13 +70,8 @@ def test_a_reply_to_an_agent_comment_targets_the_owner_not_the_comment_author(db
 
     assert _candidate_thread(str(reply["id"])) == "owner"
     for comment in (earlier, str(reply["id"])):
-        _record(db, "doc_comment", comment)
-    _deliver_all(db)
-    assert {details["note_key"].split(":")[0] for details, _ in _correction_notes(db)} == {"doc-feedback"}
-    owner_notes = db.execute(
-        "SELECT COUNT(*) FROM context_change_journal WHERE object_id='owner' AND details_json LIKE '%correction_note%'"
-    ).fetchone()[0]
-    assert owner_notes == 1 and len(_correction_notes(db)) == 1
+        assert _record(db, "doc_comment", comment) is True
+    assert _noted(db) == [("owner", f"doc-comment:{earlier}"), ("owner", f"doc-comment:{reply['id']}")]
 
 
 def test_a_comment_handed_out_before_the_owner_changed_stays_with_its_recipient(db):
@@ -75,8 +84,8 @@ def test_a_comment_handed_out_before_the_owner_changed_stays_with_its_recipient(
 
     assert _candidate_thread(comment) == "owner"  # the agent that got the feedback, not the new owner
     assert _record(db, "doc_comment", comment) is True
-    (details, _summary), = _correction_notes(db)
-    assert details["note_key"] == f"doc-feedback:{batch['id']}"
+    assert batch["recipient_id"] == "owner"
+    assert _noted(db) == [("owner", f"doc-comment:{comment}")]
 
 
 def test_a_comment_in_no_batch_targets_the_current_owner_and_with_none_has_no_target(db):

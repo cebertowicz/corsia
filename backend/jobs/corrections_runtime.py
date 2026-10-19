@@ -52,8 +52,8 @@ def hand_to_app_loop(notify: Callable[[str, str], None], source_kind: str, sourc
     """Off the event loop (a DB pool thread's commit effect), hand ``notify`` to the application loop.
 
     Returns False on a running loop, where the caller enqueues itself. With no
-    application loop it changes nothing: startup owes a scan, whose recovery
-    reads the source or unit.
+    application loop it changes nothing: startup owes a scan, which records the
+    source's fact (a scan fact on a comment or decision answer writes no note).
     """
     try:
         asyncio.get_running_loop()
