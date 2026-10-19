@@ -53,6 +53,13 @@ class _Untouched:
         raise AssertionError(f"reached .{name} after the catalog row was removed")
 
 
+class _ThreadOnly(_Untouched):
+    """A batch whose only readable field is the thread it was claimed for."""
+
+    def __init__(self, thread_id: str):
+        self.thread_id = thread_id
+
+
 @pytest.fixture
 def removed(accounts):
     """Bind each vendor thread, freeze a Turn on its account, then delete the model rows."""
@@ -632,8 +639,10 @@ async def test_fresh_launch_refuses_as_our_own_missing_catalog_row(removed, prov
 
     db, thread, model = removed.db, THREADS[provider], MODELS[provider]
     before = _bindings(db)
-    # Send admission and the drain driver share one resolver; neither reaches the batch.
-    for launch in (lambda: send_target.resolve_target(model), lambda: resolve_or_hold(model, _Untouched())):
+    # Send admission and the drain driver share one resolver; neither reaches the
+    # batch beyond the thread identity its project policy is read from.
+    batch = _ThreadOnly(thread)
+    for launch in (lambda: send_target.resolve_target(model), lambda: resolve_or_hold(model, batch)):
         with pytest.raises(send_target.TargetUnavailable) as refused:
             await launch()
         assert refused.value.side is DeliveryFailureSide.OURS

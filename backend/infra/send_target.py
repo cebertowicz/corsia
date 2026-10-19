@@ -78,18 +78,26 @@ def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionT
         target = model_resolution.resolve_execution_target(model, db=db)
         row = model_resolution.catalog_row(model, db=db)
         if row is not None:
-            scope = db.execute(
-                "SELECT project_id FROM threads WHERE id = ?", (thread_id,),
-            ).fetchone() if thread_id else None
-            project_id = scope["project_id"] if scope else None
             refusal = locality_refusal(
-                row, thread_local_only=False, project_id=project_id, db=db,
+                row, thread_local_only=False, project_id=_thread_project(thread_id, db), db=db,
             )
             if refusal:
                 raise ModelUnavailableError(model, refusal)
         return target
     finally:
         db.close()
+
+
+def _thread_project(thread_id: str | None, db) -> str | None:
+    """The thread's project from its canonical scope; a missing thread has none to enforce."""
+    from connections.account_policy import AccountAdmissionError, thread_scope
+
+    if not thread_id:
+        return None
+    try:
+        return thread_scope(thread_id, db=db)["project_id"]
+    except AccountAdmissionError:
+        return None
 
 
 TargetAdmission = Literal["run", "wait", "fail"]
