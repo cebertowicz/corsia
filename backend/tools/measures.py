@@ -1,10 +1,12 @@
 """Agent-facing tools for declared measure definitions and their intake status."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
+from infra import config
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.measure_registry import sync
@@ -26,11 +28,7 @@ async def _sync(kwargs: dict[str, Any]) -> str:
     if not isinstance(path, str):
         return "Error: path is required"
     try:
-        target = Path(path).resolve()
-        from infra.config import WORKSPACE
-        if not target.is_relative_to(WORKSPACE.resolve()) or target.name != "measures.yaml":
-            raise ValueError("path must be a measures.yaml file inside the workspace")
-        text = target.read_text(encoding="utf-8")
+        target, text = await asyncio.to_thread(_read_declaration, path)
 
         def load() -> dict[str, Any]:
             return sync(get_db(), owner_thread_id=thread_id, path=str(target), text=text)
@@ -38,6 +36,14 @@ async def _sync(kwargs: dict[str, Any]) -> str:
         return json.dumps(await run_in_db(load), sort_keys=True)
     except (OSError, ValueError) as exc:
         return f"Error: {exc}"
+
+
+def _read_declaration(path: str) -> tuple[Path, str]:
+    """Resolve ``path`` against the workspace and read it, refusing anything but a workspace measures.yaml."""
+    target = (config.WORKSPACE / path).resolve()
+    if not target.is_relative_to(config.WORKSPACE.resolve()) or target.name != "measures.yaml":
+        raise ValueError("path must be a measures.yaml file inside the workspace")
+    return target, target.read_text(encoding="utf-8")
 
 
 class MeasureSyncTool(Tool):

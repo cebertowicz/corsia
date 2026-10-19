@@ -2,30 +2,36 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from infra.measure_registry import REFUSAL_LIMIT, REGISTRY
 
-_WINDOWS = {"today": "date('now')", "last_7_days": "date('now','-6 days')"}
+_WINDOW_DAYS = {"today": 0, "last_7_days": 6}
+# Both reads are index ranges: observed_ts text starts with the UTC day, so a day string bounds it.
+ROWS_SQL = (
+    "SELECT event_name, count(*) FROM outcome_events "
+    "WHERE agent_thread_id=? AND observed_ts >= ? GROUP BY event_name"
+)
+COUNTERS_SQL = (
+    "SELECT event_name, counter, sum(n) FROM outcome_event_counters "
+    "WHERE agent_thread_id=? AND day >= ? GROUP BY event_name, counter"
+)
 
 
 def status(db: sqlite3.Connection, agent_thread_id: str) -> dict[str, Any]:
     """Per event, today and over 7 days: rows recorded and each counter, plus the last refusals."""
     events: dict[str, dict[str, Any]] = {}
-    for window, since in _WINDOWS.items():
-        for name, rows in db.execute(
-            f"SELECT event_name, count(*) FROM outcome_events WHERE agent_thread_id=? AND substr(observed_ts,1,10) >= {since} GROUP BY event_name",
-            (agent_thread_id,),
-        ):
+    today = datetime.now(timezone.utc).date()
+    for window, back in _WINDOW_DAYS.items():
+        since = (today - timedelta(days=back)).isoformat()
+        for name, rows in db.execute(ROWS_SQL, (agent_thread_id, since)):
             events.setdefault(name, {})[window] = {"rows": rows, "counters": {}}
-        for name, counter, total in db.execute(
-            f"SELECT event_name, counter, sum(n) FROM outcome_event_counters WHERE agent_thread_id=? AND day >= {since} GROUP BY event_name, counter",
-            (agent_thread_id,),
-        ):
+        for name, counter, total in db.execute(COUNTERS_SQL, (agent_thread_id, since)):
             slot = events.setdefault(name, {}).setdefault(window, {"rows": 0, "counters": {}})
             slot["counters"][counter] = total
     for per_event in events.values():
-        for window in _WINDOWS:
+        for window in _WINDOW_DAYS:
             per_event.setdefault(window, {"rows": 0, "counters": {}})
     files = db.execute(
         "SELECT file_path, file_sha256, max(synced_at) FROM measure_definitions WHERE owner_thread_id=? GROUP BY file_path, file_sha256 ORDER BY max(synced_at) DESC",

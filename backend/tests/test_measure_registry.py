@@ -1,16 +1,21 @@
 """measure_sync: declaration validation, workflow ownership and the can_decide sync test."""
 from __future__ import annotations
 
+import ast
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 from infra.measure_registry import REGISTRY, sync
+from infra.measure_validation import STAMPED_ATTRIBUTES
+from infra.outcome_event_attributes import AttributeSpec
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 
 FIXTURES = Path(__file__).parent / "fixtures" / "measures"
 OWNER = "agent-qg"
+NOW_TS = "2026-01-01T12:00:00+00:00"
 
 MEASURES = """
 schema: corsia.measures/1
@@ -43,6 +48,11 @@ namespace: qa
 {kpis}
 """
 GOOD_KPI = "  rate:\n    {body}\n"
+
+
+def own(agent: str) -> str:
+    """The one path an agent-level measures.yaml may sync from."""
+    return f"/ws/.threads/{agent}/measures.yaml"
 
 
 def db() -> sqlite3.Connection:
@@ -85,19 +95,19 @@ def deciding(extra: str = "", *, name: str = "rate") -> str:
 
 def test_sync_then_unchanged_resync_and_changed_version() -> None:
     connection = db()
-    first = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    first = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert [item["status"] for item in first["items"]] == ["added", "added"]
-    again = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    again = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert [item["status"] for item in again["items"]] == ["unchanged", "unchanged"]
-    changed = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES.replace("min_n: 20", "min_n: 30"))
+    changed = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES.replace("min_n: 20", "min_n: 30"))
     assert [item["status"] for item in changed["items"]] == ["unchanged", "changed v1→v2"]
 
 
 def test_namespace_belongs_to_first_syncing_agent() -> None:
     connection = db()
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     with pytest.raises(ValueError, match=r'Namespace "mail" belongs to another agent \(thread agent-a\); you own no namespace yet'):
-        sync(connection, owner_thread_id="agent-b", path="/tmp/measures.yaml", text=MEASURES)
+        sync(connection, owner_thread_id="agent-b", path=own("agent-b"), text=MEASURES)
 
 
 def test_workflow_without_skill_owner_is_refused(tmp_path: Path) -> None:
@@ -201,26 +211,26 @@ def test_a_name_left_out_of_the_resynced_file_is_removed_and_no_longer_admitted(
 
     wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
     connection = db()
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=wider)
+    sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
     assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m1"}).refusal is None
-    left_out = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    left_out = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert {item["name"]: item["status"] for item in left_out["items"]} == {"mail.triaged": "unchanged", "replied_share": "unchanged", "mail.sorted": "removed"}
     refused = admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m2"})
     assert refused.refusal and "is not declared in your measures.yaml" in refused.refusal
     assert connection.execute("SELECT count(*) FROM outcome_events WHERE event_name='mail.sorted'").fetchone()[0] == 1  # old rows stay readable
     assert [version for (version,) in connection.execute("SELECT version FROM measure_definitions WHERE name='mail.sorted' ORDER BY version")] == [1, 2]
-    again = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    again = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     assert [item["status"] for item in again["items"]] == ["unchanged", "unchanged"]  # a retired name is reported once
-    back = sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=wider)
+    back = sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
     assert {item["name"]: item["status"] for item in back["items"]}["mail.sorted"] == "added"
     assert admit(connection, owner_thread_id="agent-a", event_name="mail.sorted", attributes={"message_ref": "m3"}).refusal is None
 
 
-def test_a_name_synced_from_another_file_is_not_removed_by_this_one() -> None:
+def test_a_name_synced_from_another_file_is_not_removed_by_this_one(tmp_path: Path) -> None:
     connection = db()
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
-    other = MEASURES.replace("mail.triaged", "mail.other").replace("replied_share", "other_share")
-    result = sync(connection, owner_thread_id="agent-a", path="/tmp/other/measures.yaml", text=other)
+    sync(connection, owner_thread_id=OWNER, path=own(OWNER), text=MEASURES)
+    other = MEASURES.replace("# agent-level declaration: no workflow", "workflow: llm-pr-review").replace("mail.triaged", "mail.other").replace("replied_share", "other_share")
+    result = sync(connection, owner_thread_id=OWNER, path=skill_file(tmp_path, other), text=other)
     assert all(item["status"] == "added" for item in result["items"])
     assert "mail.triaged" in REGISTRY.events and "mail.other" in REGISTRY.events
 
@@ -228,10 +238,44 @@ def test_a_name_synced_from_another_file_is_not_removed_by_this_one() -> None:
 def test_the_removal_row_keeps_the_prior_spec_with_removed_set_and_rebuild_skips_it() -> None:
     wider = MEASURES.replace("kpis:", "  mail.sorted:\n    attributes: {message_ref: id}\n    dedupe: [message_ref]\nkpis:")
     connection = db()
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=wider)
+    sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=wider)
     before = connection.execute("SELECT spec_json FROM measure_definitions WHERE name='mail.sorted' AND version=1").fetchone()[0]
-    sync(connection, owner_thread_id="agent-a", path="/tmp/measures.yaml", text=MEASURES)
+    sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
     versions = connection.execute("SELECT version, spec_json, removed FROM measure_definitions WHERE name='mail.sorted' ORDER BY version").fetchall()
     assert versions == [(1, before, 0), (2, before, 1)]
     REGISTRY.rebuild(connection)
     assert "mail.sorted" not in REGISTRY.events and "mail.triaged" in REGISTRY.events
+
+
+@pytest.mark.parametrize("name", STAMPED_ATTRIBUTES)
+def test_one_stamped_set_governs_the_file_the_registry_and_admission(name: str) -> None:
+    from infra.measure_admission import admit
+
+    declaring = MEASURES.replace("message_ref: id", f"message_ref: id\n      {name}: id")
+    with pytest.raises(ValueError, match=f"attribute {name} is reserved; the server stamps it"):
+        sync(db(), owner_thread_id="agent-a", path=own("agent-a"), text=declaring)
+    connection = db()
+    sync(connection, owner_thread_id="agent-a", path=own("agent-a"), text=MEASURES)
+    assert all(name in event.specs for event in REGISTRY.events.values())  # the registry gives every event a spec for it
+    admitted = admit(connection, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied", name: "forged"}, run_id="r")
+    assert any(f'attribute "{name}" is stamped by the server' in note for note in admitted.notes)  # admission removes the emitter's value
+    assert json.loads(connection.execute("SELECT attributes FROM outcome_events").fetchone()[0]).get(name) != "forged"
+
+
+def test_kept_attributes_do_not_depend_on_whether_the_registry_is_loaded() -> None:
+    from infra import outcome_event_attributes
+    from infra.outcome_event_attributes import filter_attributes
+    from infra.outcome_events import record_outcome_event
+
+    tree = ast.parse(Path(outcome_event_attributes.__file__).read_text())
+    assert "infra.measure_registry" not in {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    specs = {"message_ref": AttributeSpec("id")}
+    connection = db()
+    for loaded in (False, True):
+        REGISTRY.reset()
+        if loaded:
+            REGISTRY.rebuild(connection)
+        assert filter_attributes("mail.triaged", {"message_ref": "m1", "x": "y"}, specs) == ({"message_ref": "m1"}, ["x"])
+        assert filter_attributes("mail.triaged", {"message_ref": "m1"}) == ({}, ["message_ref"])  # no specs given: built-in allowlist only
+    record_outcome_event(connection, dedupe_key="k", event_name="mail.triaged", source="agent", provenance="agent_recorded", ts=NOW_TS, attributes={"message_ref": "m1"}, declared_specs=specs)
+    assert connection.execute("SELECT attributes FROM outcome_events").fetchone()[0] == '{"message_ref":"m1"}'

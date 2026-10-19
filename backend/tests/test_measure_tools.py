@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -26,8 +27,7 @@ NOW = "2026-01-01T12:00:00+00:00"
 @pytest.fixture
 def agent(isolated_db):
     """A thread in a project, its own workflow skill folder inside the workspace, and a clean registry."""
-    REGISTRY.events, REGISTRY.workflows, REGISTRY.namespaces, REGISTRY.loaded = {}, {}, {}, False
-    REGISTRY.refusals.clear()
+    REGISTRY.reset()
     with database.write_transaction(None, scope="measure_tool_seed") as db:
         db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project-tool','Tool','t','t')")
         db.execute("INSERT INTO threads (id,user_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?)", (AGENT, "fixture-user", "project-tool", NOW, NOW))
@@ -75,6 +75,31 @@ async def test_measure_sync_refuses_a_path_outside_the_workspace_through_the_too
     outside = tmp_path / "measures.yaml"
     outside.write_text(FIXTURE.read_text())
     assert await MeasureSyncTool().execute(_thread_id=AGENT, path=str(outside)) == "Error: path must be a measures.yaml file inside the workspace"
+
+
+@pytest.mark.asyncio
+async def test_a_relative_path_resolves_against_the_workspace_not_the_process_directory(agent, tmp_path: Path, monkeypatch) -> None:
+    measures, _ = agent
+    monkeypatch.chdir(tmp_path)  # a different directory with no measures.yaml of its own
+    relative = measures.relative_to(WORKSPACE)
+    assert ok(await MeasureSyncTool().execute(_thread_id=AGENT, path=str(relative)))["namespace"] == "qa"
+
+
+@pytest.mark.asyncio
+async def test_the_file_is_resolved_and_read_off_the_event_loop(agent, monkeypatch) -> None:
+    measures, _ = agent
+    import tools.measures as module
+
+    loop_thread, seen = threading.get_ident(), []
+    real = module._read_declaration
+
+    def recording_read(path):
+        seen.append(threading.get_ident())
+        return real(path)
+
+    monkeypatch.setattr(module, "_read_declaration", recording_read)
+    ok(await MeasureSyncTool().execute(_thread_id=AGENT, path=str(measures)))
+    assert seen and loop_thread not in seen
 
 
 @pytest.mark.asyncio

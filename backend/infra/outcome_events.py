@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from host_access.credential_sanitizer import contains_credential
-from infra.outcome_event_attributes import filter_attributes
+from infra.outcome_event_attributes import AttributeSpec, filter_attributes
 from infra.outcome_event_input import OutcomeInputRefusal
 
 TOMBSTONE = '{"retracted":true}'
@@ -63,7 +63,7 @@ def count_outcome_event(
         raise ValueError("outcome event counters only grow; n must be positive")
     db.execute(
         "INSERT INTO outcome_event_counters (counter,event_name,agent_thread_id,day,n) VALUES (?,?,?,?,?) "
-        "ON CONFLICT(counter,event_name,agent_thread_id,day) DO UPDATE SET n=n+excluded.n",
+        "ON CONFLICT(agent_thread_id,day,event_name,counter) DO UPDATE SET n=n+excluded.n",
         (counter, event_name, agent_thread_id, day or _now()[:10], n),
     )
 
@@ -82,12 +82,14 @@ def record_outcome_event(
     attribution: str | None = None,
     corroborated_by: str | None = None,
     attributes: dict[str, Any] | None = None,
+    declared_specs: dict[str, AttributeSpec] | None = None,
 ) -> RecordResult:
     """Insert one event keyed on ``dedupe_key``; the first write wins.
 
     A later write with the same key is ignored and counted
     (``duplicate_ignored``). Attributes are filtered through the event's
-    allowlist; dropped keys are counted (``attribute_dropped``) and returned.
+    allowlist (or ``declared_specs``, a declared measure event's own); dropped keys are
+    counted (``attribute_dropped``) and returned.
     ``ts`` is stored as UTC ISO text (a naive value is taken as UTC). Raises
     ``OutcomeInputRefusal`` (a ``ValueError``) only at the credential-identity and
     kept-attribute budget guards; an unparseable ``ts`` raises ordinary ``ValueError``.
@@ -97,7 +99,7 @@ def record_outcome_event(
     for field in (dedupe_key, subject_key, project_id, agent_thread_id, corroborated_by):
         if field and contains_credential(field):
             raise OutcomeInputRefusal("outcome event identity fields must not carry credentials")
-    kept, dropped = filter_attributes(event_name, attributes)
+    kept, dropped = filter_attributes(event_name, attributes, declared_specs)
     event_id = str(uuid.uuid4())
     cursor = db.execute(
         f"INSERT INTO outcome_events ({_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL) "

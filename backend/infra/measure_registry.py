@@ -4,8 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import threading
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,15 +14,18 @@ from typing import Any
 import yaml
 
 from infra.database import write_transaction
-from infra.measure_validation import Lines, load, validate
+from infra.measure_validation import STAMPED_ATTRIBUTES, Lines, load, validate
 from infra.outcome_event_attributes import AttributeSpec
 
 REFUSAL_LIMIT = 20
-# Reserved attributes the server stamps on every declared event; a file cannot declare them.
-_STAMPED = {name: AttributeSpec("id") for name in ("run_id", "workflow_ref", "workflow_version")}
 _INSERT = (
     "INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) "
     "VALUES (?,?,?,?,?,?,?,?,?)"
+)
+_LATEST = (
+    "SELECT d.kind,d.name,d.version,d.spec_json,d.removed,d.file_path FROM measure_definitions d "
+    "WHERE d.owner_thread_id=? AND d.version=(SELECT max(version) FROM measure_definitions "
+    "WHERE owner_thread_id=d.owner_thread_id AND kind=d.kind AND name=d.name)"
 )
 _NO_OWNER = (
     "measure_sync: workflow {workflow} has no owner, so its measures.yaml can't be synced. "
@@ -39,32 +43,59 @@ class DeclaredEvent:
     keep_days: int
 
 
+@dataclass(frozen=True)
+class RegistryState:
+    """One complete read of the declarations; the registry swaps whole states, never edits one."""
+
+    events: dict[str, DeclaredEvent] = field(default_factory=dict)
+    namespaces: dict[str, str] = field(default_factory=dict)
+    workflows: dict[str, str] = field(default_factory=dict)
+
+
 class MeasureRegistry:
-    """The declared-event registry; it swaps after a committed sync and loads lazily after boot."""
+    """The declared-event registry; a committed sync swaps it, and the first use after boot loads it."""
 
     def __init__(self) -> None:
-        self.events: dict[str, DeclaredEvent] = {}
-        self.namespaces: dict[str, str] = {}
-        self.workflows: dict[str, str] = {}
+        self._lock = threading.Lock()
+        self._state: RegistryState | None = None
         self.refusals: dict[str, deque[str]] = {}
-        self.loaded = False
+
+    @property
+    def loaded(self) -> bool:
+        return self._state is not None
+
+    @property
+    def events(self) -> dict[str, DeclaredEvent]:
+        return (self._state or RegistryState()).events
+
+    @property
+    def namespaces(self) -> dict[str, str]:
+        return (self._state or RegistryState()).namespaces
+
+    @property
+    def workflows(self) -> dict[str, str]:
+        return (self._state or RegistryState()).workflows
+
+    def ensure_loaded(self, db: sqlite3.Connection) -> RegistryState:
+        """The current state, loading it first when nothing has; callers that read twice keep the one state."""
+        state = self._state
+        if state is not None:
+            return state
+        with self._lock:
+            if self._state is None:
+                self._state = _read_state(db)
+            return self._state
 
     def rebuild(self, db: sqlite3.Connection) -> None:
-        self.events, self.workflows = {}, {}
-        self.namespaces = dict(db.execute("SELECT namespace, owner_thread_id FROM measure_namespaces"))
-        rows = db.execute(
-            "SELECT owner_thread_id,name,spec_json FROM measure_definitions "
-            "WHERE kind='event' AND removed=0 AND (owner_thread_id,name,version) IN "
-            "(SELECT owner_thread_id,name,max(version) FROM measure_definitions "
-            "WHERE kind='event' GROUP BY owner_thread_id,name)"
-        )
-        for owner, name, raw in rows:
-            spec = json.loads(raw)
-            specs = {**_attribute_specs(spec["attributes"]), **_STAMPED}
-            self.events[name] = DeclaredEvent(owner, specs, tuple(spec["dedupe"]), spec["attributes"], int(spec.get("keep_days", 400)))
-            if spec.get("_workflow"):
-                self.workflows[spec["_workflow"]] = owner
-        self.loaded = True
+        """Read the declarations off to the side, then swap them in whole; readers never take the lock."""
+        with self._lock:
+            self._state = _read_state(db)
+
+    def reset(self) -> None:
+        """Forget the loaded state and refusal notes (tests, between disposable databases)."""
+        with self._lock:
+            self._state = None
+        self.refusals.clear()
 
     def note(self, owner: str, text: str) -> None:
         """Keep the agent's last refusal texts in memory only; a restart loses them."""
@@ -72,6 +103,26 @@ class MeasureRegistry:
 
 
 REGISTRY = MeasureRegistry()
+_STAMPED_SPECS = {name: AttributeSpec("id") for name in STAMPED_ATTRIBUTES}
+
+
+def _read_state(db: sqlite3.Connection) -> RegistryState:
+    events: dict[str, DeclaredEvent] = {}
+    rows = db.execute(
+        "SELECT owner_thread_id,name,spec_json FROM measure_definitions "
+        "WHERE kind='event' AND removed=0 AND (owner_thread_id,name,version) IN "
+        "(SELECT owner_thread_id,name,max(version) FROM measure_definitions "
+        "WHERE kind='event' GROUP BY owner_thread_id,name)"
+    )
+    for owner, name, raw in rows:
+        spec = json.loads(raw)
+        specs = {**_attribute_specs(spec["attributes"]), **_STAMPED_SPECS}
+        events[name] = DeclaredEvent(owner, specs, tuple(spec["dedupe"]), spec["attributes"], int(spec.get("keep_days", 400)))
+    return RegistryState(
+        events=events,
+        namespaces=dict(db.execute("SELECT namespace, owner_thread_id FROM measure_namespaces")),
+        workflows=dict(db.execute("SELECT workflow, owner_thread_id FROM measure_workflows")),
+    )
 
 
 def _attribute_specs(raw: dict[str, Any]) -> dict[str, AttributeSpec]:
@@ -81,22 +132,40 @@ def _attribute_specs(raw: dict[str, Any]) -> dict[str, AttributeSpec]:
     return result
 
 
-def declared_attribute_specs(event_name: str) -> dict[str, AttributeSpec] | None:
-    entry = REGISTRY.events.get(event_name)
-    return entry.specs if entry else None
-
-
-def _workflow_owner(path: str, workflow: str) -> str:
-    """Read the workflow owner from the declaration's sibling SKILL.md."""
-    skill = Path(path).parent / "SKILL.md"
+def _skill_frontmatter(path: str) -> dict[str, Any]:
+    """The frontmatter of the SKILL.md beside a declaration file; empty when there is none."""
     try:
-        text = skill.read_text(encoding="utf-8")
-        owner = yaml.safe_load(text.split("---", 2)[1])["corsia"]["workflow"]["owner"]
-    except (IndexError, KeyError, OSError, TypeError, yaml.YAMLError):
-        owner = None
+        meta = yaml.safe_load((Path(path).parent / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1])
+    except (IndexError, OSError, yaml.YAMLError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _check_workflow_file(path: str, workflow: str, agent: str) -> None:
+    """A workflow file syncs only when its sibling SKILL.md is named for it and names the caller as owner."""
+    meta = _skill_frontmatter(path)
+    corsia = meta.get("corsia")
+    declared = corsia.get("workflow") if isinstance(corsia, dict) else None
+    owner = declared.get("owner") if isinstance(declared, dict) else None
     if not isinstance(owner, str) or not owner:
         raise ValueError(_NO_OWNER.format(workflow=workflow))
-    return owner
+    if owner != agent:
+        raise ValueError(f"measure_sync: workflow {workflow} is owned by another agent; only its owner can sync it.")
+    if meta.get("name") != workflow:
+        raise ValueError(
+            f"measure_sync: workflow {workflow} must be the name of the skill it sits in (this SKILL.md is named {meta.get('name')}). "
+            "Change workflow: to the skill's name."
+        )
+
+
+def _check_agent_file(path: str, agent: str) -> None:
+    """An agent-level file syncs only from the caller's own .threads folder."""
+    folder = Path(path).parent
+    if Path(path).name != "measures.yaml" or folder.name != agent or folder.parent.name != ".threads":
+        raise ValueError(
+            f"measure_sync: an agent-level measures.yaml syncs only from .threads/{agent}/measures.yaml, not {path}. "
+            "Move it there, or add workflow: <skill name> if it belongs to a skill you own."
+        )
 
 
 def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent: str) -> str:
@@ -106,14 +175,28 @@ def namespace_refusal(db: sqlite3.Connection, namespace: str, holder: str, agent
     return f'Namespace "{namespace}" belongs to another agent (thread {holder}); {mine}'
 
 
-def _no_longer_declared(connection: sqlite3.Connection, owner: str, path: str, kept: set[tuple[str, str]]) -> list[tuple[str, str, int, str]]:
-    """Names this owner last synced from ``path`` that the new file leaves out: next version and last spec."""
-    latest = connection.execute(
-        "SELECT d.kind,d.name,d.version,d.spec_json FROM measure_definitions d JOIN "
-        "(SELECT kind,name,max(version) AS version FROM measure_definitions WHERE owner_thread_id=? GROUP BY kind,name) m "
-        "USING (kind,name,version) WHERE d.owner_thread_id=? AND d.file_path=? AND d.removed=0 ORDER BY d.kind,d.name", (owner, owner, path),
-    )
-    return [(kind, name, version + 1, spec_json) for kind, name, version, spec_json in latest if (kind, name) not in kept]
+def _plan(
+    latest: dict[tuple[str, str], tuple[int, str, bool, str]], owner: str, path: str, items: list[tuple[str, str, dict[str, Any]]],
+    sha: str, now: str,
+) -> tuple[list[tuple[Any, ...]], list[dict[str, str]]]:
+    """The rows to insert and every item's status, from one read of the owner's latest versions."""
+    inserts: list[tuple[Any, ...]] = []
+    changes: list[dict[str, str]] = []
+    for kind, name, spec in items:
+        normalized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
+        row = latest.get((kind, name))
+        if row and row[1] == normalized and not row[2]:
+            changes.append({"name": name, "status": "unchanged"})
+            continue
+        version = 1 if row is None else row[0] + 1
+        inserts.append((owner, kind, name, version, normalized, path, sha, now, 0))
+        changes.append({"name": name, "status": "added" if row is None or row[2] else f"changed v{row[0]}→v{version}"})
+    declared = {(kind, name) for kind, name, _ in items}
+    for (kind, name), (version, last_spec, removed, file) in sorted(latest.items()):
+        if file == path and not removed and (kind, name) not in declared:
+            inserts.append((owner, kind, name, version + 1, last_spec, path, sha, now, 1))  # keeps the last real spec
+            changes.append({"name": name, "status": "removed"})
+    return inserts, changes
 
 
 def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) -> dict[str, Any]:
@@ -127,30 +210,24 @@ def sync(db: sqlite3.Connection, *, owner_thread_id: str, path: str, text: str) 
     lines = Lines(text)
     namespace, items = validate(data, lines)
     workflow = data.get("workflow")
-    if workflow and _workflow_owner(path, workflow) != owner_thread_id:
-        raise ValueError(f"measure_sync: workflow {workflow} is owned by another agent; only its owner can sync it.")
     if workflow:
-        items = [(kind, name, {**spec, "_workflow": workflow} if kind == "event" else spec) for kind, name, spec in items]
+        _check_workflow_file(path, workflow, owner_thread_id)
+    else:
+        _check_agent_file(path, owner_thread_id)
     sha = hashlib.sha256(text.encode()).hexdigest()
     now = datetime.now(timezone.utc).isoformat()
-    changes: list[dict[str, str]] = []
+    latest = {(kind, name): (version, spec, bool(removed), file) for kind, name, version, spec, removed, file in db.execute(_LATEST, (owner_thread_id,))}
+    inserts, changes = _plan(latest, owner_thread_id, path, items, sha, now)
     with write_transaction(db, scope="measure_sync") as connection:
-        existing = connection.execute("SELECT owner_thread_id FROM measure_namespaces WHERE namespace=?", (namespace,)).fetchone()
-        if existing and existing[0] != owner_thread_id:
-            raise ValueError(namespace_refusal(connection, namespace, existing[0], owner_thread_id))
+        holder = connection.execute("SELECT owner_thread_id FROM measure_namespaces WHERE namespace=?", (namespace,)).fetchone()
+        if holder and holder[0] != owner_thread_id:
+            raise ValueError(namespace_refusal(connection, namespace, holder[0], owner_thread_id))
+        if workflow:
+            connection.execute("INSERT OR IGNORE INTO measure_workflows(workflow,owner_thread_id) VALUES (?,?)", (workflow, owner_thread_id))
+            claimed = connection.execute("SELECT owner_thread_id FROM measure_workflows WHERE workflow=?", (workflow,)).fetchone()[0]
+            if claimed != owner_thread_id:
+                raise ValueError(f"measure_sync: workflow {workflow} is already owned by another agent (thread {claimed}); use a skill name of your own.")
         connection.execute("INSERT OR IGNORE INTO measure_namespaces(namespace,owner_thread_id) VALUES (?,?)", (namespace, owner_thread_id))
-        for kind, name, spec in items:
-            normalized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
-            row = connection.execute("SELECT version,spec_json,removed FROM measure_definitions WHERE owner_thread_id=? AND kind=? AND name=? ORDER BY version DESC LIMIT 1", (owner_thread_id, kind, name)).fetchone()
-            if row and row[1] == normalized and not row[2]:
-                changes.append({"name": name, "status": "unchanged"})
-                continue
-            version = 1 if row is None else row[0] + 1
-            connection.execute(_INSERT, (owner_thread_id, kind, name, version, normalized, path, sha, now, 0))
-            fresh = row is None or bool(row[2])
-            changes.append({"name": name, "status": "added" if fresh else f"changed v{version - 1}→v{version}"})
-        for kind, name, version, last_spec in _no_longer_declared(connection, owner_thread_id, path, {(kind, name) for kind, name, _ in items}):
-            connection.execute(_INSERT, (owner_thread_id, kind, name, version, last_spec, path, sha, now, 1))  # keeps the last real spec
-            changes.append({"name": name, "status": "removed"})
+        connection.executemany(_INSERT, inserts)
     REGISTRY.rebuild(db)
     return {"namespace": namespace, "items": changes}

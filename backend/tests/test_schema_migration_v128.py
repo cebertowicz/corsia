@@ -27,6 +27,16 @@ def _columns(db: sqlite3.Connection, table: str) -> list[tuple[str, str]]:
     return [(row[1], row[2]) for row in db.execute(f"PRAGMA table_info({table})")]
 
 
+def _key(db: sqlite3.Connection) -> list[str]:
+    """The counters' primary key columns in key order."""
+    return [row[1] for row in sorted(db.execute("PRAGMA table_info(outcome_event_counters)"), key=lambda row: row[5]) if row[5]]
+
+
+def _index_sql(db: sqlite3.Connection) -> str | None:
+    row = db.execute("SELECT sql FROM sqlite_master WHERE name='idx_outcome_events_agent_observed'").fetchone()
+    return " ".join(row[0].split()) if row else None
+
+
 def _fresh() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
@@ -43,6 +53,8 @@ def _wound_back_to_v126(*, registry_present: bool = False) -> sqlite3.Connection
     if not registry_present:
         db.execute("DROP TABLE measure_definitions")
         db.execute("DROP TABLE measure_namespaces")
+        db.execute("DROP TABLE measure_workflows")
+    db.execute("DROP INDEX idx_outcome_events_agent_observed")
     db.execute("PRAGMA user_version=126")
     db.commit()
     return db
@@ -56,8 +68,10 @@ def test_the_step_is_registered_at_126() -> None:
 def test_the_step_matches_a_fresh_schema_and_keeps_old_totals_before_per_day() -> None:
     with closing(_fresh()) as fresh, closing(_wound_back_to_v126()) as db:
         migrate_126_to_127(db)
-        for table in ("outcome_event_counters", "measure_definitions", "measure_namespaces"):
+        for table in ("outcome_event_counters", "measure_definitions", "measure_namespaces", "measure_workflows"):
             assert _columns(db, table) == _columns(fresh, table)
+        assert _key(db) == _key(fresh) == ["agent_thread_id", "day", "event_name", "counter"]
+        assert _index_sql(db) == _index_sql(fresh) and _index_sql(db) is not None
         assert db.execute("SELECT counter,event_name,agent_thread_id,day,n FROM outcome_event_counters ORDER BY counter").fetchall() == [
             ("attribute_dropped", "github.pr.opened", "", "0000-00-00", 3),
             ("duplicate_ignored", "github.pr.opened", "", "0000-00-00", 7),
@@ -75,7 +89,7 @@ def test_the_step_runs_after_the_startup_schema_pass_and_again() -> None:
 def test_the_counter_check_admits_the_five_new_counters() -> None:
     with closing(_wound_back_to_v126()) as db:
         migrate_126_to_127(db)
-        for counter in ("name_undeclared", "namespace_not_owned", "identity_mismatch", "rate_limited", "record_refused", "unversioned"):
+        for counter in ("name_undeclared", "namespace_not_owned", "rate_limited", "record_refused", "unversioned"):
             db.execute("INSERT INTO outcome_event_counters(counter,event_name,agent_thread_id,day) VALUES (?,?,?,?)", (counter, "mail.triaged", "a", "2026-01-01"))
 
 

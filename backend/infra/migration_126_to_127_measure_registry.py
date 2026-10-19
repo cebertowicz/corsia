@@ -1,5 +1,8 @@
 """Schema 126 -> 127: declared measure definitions and per-agent, per-day intake counters.
 
+The counters are keyed agent, day, event, counter so one agent's recent window is a single
+index range; ``idx_outcome_events_agent_observed`` serves the same read over its rows.
+
 The DDL is copied rather than imported from ``infra.outcome_events_schema`` so this step
 keeps producing the shape it was written for. The registry tables are created only when
 the startup schema pass has not already made them, and the counter table is rebuilt only
@@ -16,13 +19,13 @@ _COUNTERS_127_DDL = """
     CREATE TABLE outcome_event_counters (
         counter TEXT NOT NULL CHECK (counter IN (
             'duplicate_ignored', 'attribute_dropped', 'mapping_failed',
-            'name_undeclared', 'namespace_not_owned', 'identity_mismatch',
+            'name_undeclared', 'namespace_not_owned',
             'rate_limited', 'record_refused', 'unversioned')),
         event_name TEXT NOT NULL,
         agent_thread_id TEXT NOT NULL DEFAULT '',
         day TEXT NOT NULL DEFAULT '0000-00-00',
         n INTEGER NOT NULL DEFAULT 0 CHECK (n >= 0),
-        PRIMARY KEY (counter, event_name, agent_thread_id, day)
+        PRIMARY KEY (agent_thread_id, day, event_name, counter)
     )
 """
 
@@ -47,13 +50,30 @@ _REGISTRY_127_DDL = (
         owner_thread_id TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS measure_workflows (
+        workflow TEXT PRIMARY KEY,
+        owner_thread_id TEXT NOT NULL
+    )
+    """,
 )
+
+_AGENT_OBSERVED_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_outcome_events_agent_observed
+        ON outcome_events(agent_thread_id, observed_ts, event_name)
+        WHERE agent_thread_id IS NOT NULL
+"""
 
 
 def migrate_126_to_127(conn: sqlite3.Connection) -> None:
-    """Create the registry and widen counters without losing existing totals."""
+    """Create the registry and index, and widen counters without losing existing totals."""
     for statement in _REGISTRY_127_DDL:
         conn.execute(statement)
+    # Migration 77 creates outcome_events; the index is made only where that table exists.
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='outcome_events'"
+    ).fetchone():
+        conn.execute(_AGENT_OBSERVED_INDEX_DDL)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(outcome_event_counters)")}
     if "agent_thread_id" in columns:
         return

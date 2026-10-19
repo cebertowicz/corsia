@@ -11,7 +11,9 @@ from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 _RESERVED = {"corsia", "github", "measurement", "test", "script", "agent", "otel"}
-_RESERVED_ATTRIBUTES = {"run_id", "workflow_ref", "workflow_version"}
+# The one definition of what the server stamps on every declared event: a file can't declare these,
+# the registry adds them to each event's specs, and admission removes them from an emitter's attributes.
+STAMPED_ATTRIBUTES = ("run_id", "workflow_ref", "workflow_version")
 _KINDS = {"id", "login", "count", "num"}
 
 Item = tuple[str, str, dict[str, Any]]
@@ -118,7 +120,7 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
     for key, kind in attrs.items():
         valid = isinstance(kind, str) and kind in _KINDS
         valid = valid or (isinstance(kind, dict) and set(kind) == {"enum"} and isinstance(kind["enum"], list) and 0 < len(kind["enum"]) <= 20 and all(isinstance(x, str) for x in kind["enum"]))
-        if key in _RESERVED_ATTRIBUTES:
+        if key in STAMPED_ATTRIBUTES:
             raise fail(lines, path + ("attributes", key), f"attribute {key} is reserved; the server stamps it. Remove it from attributes.")
         if not valid:
             raise fail(lines, path + ("attributes", key), f'attribute kind "{kind}" is not allowed; use id, login, count, num or enum.')

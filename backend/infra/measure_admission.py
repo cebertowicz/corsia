@@ -1,4 +1,4 @@
-"""The one admission path for declared measure events: script lines and OTLP records both land here."""
+"""The one admission path for declared measure events; a script run's lines land here."""
 from __future__ import annotations
 
 import sqlite3
@@ -8,11 +8,10 @@ from typing import Any
 
 from host_access.credential_sanitizer import contains_credential
 from infra.measure_registry import REGISTRY, DeclaredEvent, namespace_refusal
-from infra.outcome_event_attributes import AttributeSpec
+from infra.measure_validation import STAMPED_ATTRIBUTES
 from infra.outcome_event_input import OutcomeInputRefusal
 from infra.outcome_events import RecordResult, count_outcome_event, record_outcome_event
 
-_STAMPED = ("run_id", "workflow_ref", "workflow_version")
 _KIND_RULES = {
     "id": "1 to 200 characters from letters, digits and _ . : # / @ + -, and not a credential",
     "login": "1 to 200 characters from letters, digits and _ . : # / @ + -, and not a credential",
@@ -28,61 +27,41 @@ class Admission:
     notes: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class Claims:
-    """The ``corsia.*`` values an outside emitter stated. The server checks them and never trusts them."""
-
-    agent_thread_id: str | None = None
-    project_id: str | None = None
-    run_id: str | None = None
-    workflow_ref: str | None = None
-    workflow_version: str | None = None
-    subject: str | None = None
-
-
 def admit(
     db: sqlite3.Connection, *, owner_thread_id: str, event_name: str, attributes: dict[str, Any],
-    source: str = "agent", provenance: str = "agent_recorded", project_id: str | None = None,
-    run_id: str | None = None, workflow: str | None = None, claims: Claims | None = None,
-    ts: str | None = None,
+    project_id: str | None = None, run_id: str | None = None, workflow: str | None = None, ts: str | None = None,
 ) -> Admission:
-    """Admit one record for the stamped agent, or count and explain its refusal.
+    """Admit one script-run record for the stamped agent, or count and explain its refusal.
 
-    ``run_id`` and ``workflow`` are the runner's own stamps (script path). ``claims`` are an
-    emitter's ``corsia.*`` values (OTLP path), checked against the agent's identity first.
+    ``run_id`` and ``workflow`` are the runner's own stamps; the agent can't set them.
     """
-    if not REGISTRY.loaded:
-        REGISTRY.rebuild(db)
+    state = REGISTRY.ensure_loaded(db)
     refuse = _Refuser(db, owner_thread_id, event_name)
-    entry = REGISTRY.events.get(event_name)
+    entry = state.events.get(event_name)
     if entry is None:
-        names = sorted(name for name, declared in REGISTRY.events.items() if declared.owner == owner_thread_id)
+        names = sorted(name for name, declared in state.events.items() if declared.owner == owner_thread_id)
         return refuse("name_undeclared", f'"{event_name}" is not declared in your measures.yaml (declared: {", ".join(names) or "none"}); the record was dropped. Declare it and run measure_sync.')
     if entry.owner != owner_thread_id:
         return refuse("namespace_not_owned", f"{namespace_refusal(db, event_name.split('.', 1)[0], entry.owner, owner_thread_id)} The record was dropped.")
-    mismatch, stamps = _identity(db, owner_thread_id, project_id, claims or Claims())
-    if mismatch:
-        return refuse("identity_mismatch", mismatch)
+    stamps: dict[str, str] = {}
     if run_id:
         stamps["run_id"] = run_id
-    unversioned = bool(workflow) and REGISTRY.workflows.get(workflow) != owner_thread_id
+    unversioned = bool(workflow) and state.workflows.get(workflow) != owner_thread_id
     if workflow and not unversioned:
         stamps["workflow_ref"] = workflow
-    stripped = [key for key in attributes if key in _STAMPED]
-    subject = (claims.subject if claims else None) or attributes.get("corsia.subject")
-    merged = {**{k: v for k, v in attributes.items() if isinstance(k, str) and not k.startswith("corsia.") and k not in _STAMPED}, **stamps}
+    stripped = [key for key in attributes if key in STAMPED_ATTRIBUTES]
+    merged = {**{k: v for k, v in attributes.items() if k not in STAMPED_ATTRIBUTES}, **stamps}
     late = _time_problem(event_name, ts, entry)
     if late:
         return refuse("record_refused", late)
     key, problem = _dedupe_key(event_name, entry, merged)
     if problem:
         return refuse("record_refused", problem)
-    subject_key = subject if isinstance(subject, str) and AttributeSpec("id").accepts(subject) else None
     try:
         result = record_outcome_event(
-            db, dedupe_key=key, event_name=event_name, source=source, provenance=provenance,
-            ts=ts or datetime.now(timezone.utc).isoformat(), subject_key=subject_key,
-            project_id=project_id, agent_thread_id=owner_thread_id, attribution="caller", attributes=merged,
+            db, dedupe_key=key, event_name=event_name, source="agent", provenance="agent_recorded",
+            ts=ts or datetime.now(timezone.utc).isoformat(), project_id=project_id,
+            agent_thread_id=owner_thread_id, attribution="caller", attributes=merged, declared_specs=entry.specs,
         )
     except OutcomeInputRefusal as exc:
         text = f"{event_name}: attributes exceed 4096 bytes after filtering; the record was dropped. Send fewer or shorter attributes." if "exceed" in str(exc) else f"{event_name}: {exc}; the record was dropped."
@@ -106,17 +85,16 @@ def refuse_line(db: sqlite3.Connection, owner: str, text: str, *, event_name: st
 
 def workflow_is_owned(db: sqlite3.Connection, owner: str, workflow: str) -> bool:
     """True when ``workflow`` is one of the agent's own synced workflows."""
-    if not REGISTRY.loaded:
-        REGISTRY.rebuild(db)
-    return REGISTRY.workflows.get(workflow) == owner
+    return REGISTRY.ensure_loaded(db).workflows.get(workflow) == owner
 
 
 def workflow_refusal(db: sqlite3.Connection, owner: str, workflow: str) -> str | None:
     """The text refusing a schedule's ``workflow`` that is unknown or not the agent's, naming the ones it owns."""
-    if workflow_is_owned(db, owner, workflow):
+    workflows = REGISTRY.ensure_loaded(db).workflows
+    if workflows.get(workflow) == owner:
         return None
-    mine = ", ".join(sorted(ref for ref, holder in REGISTRY.workflows.items() if holder == owner)) or "none"
-    why = "is owned by another agent" if workflow in REGISTRY.workflows else "is not declared by any synced measures.yaml"
+    mine = ", ".join(sorted(ref for ref, holder in workflows.items() if holder == owner)) or "none"
+    why = "is owned by another agent" if workflow in workflows else "is not declared by any synced measures.yaml"
     return f'workflow "{workflow}" {why}; the schedule was not registered. Use a workflow you own (yours: {mine}), or leave workflow out.'
 
 
@@ -130,44 +108,6 @@ class _Refuser:
         count_outcome_event(self.db, counter, self.event_name, agent_thread_id=self.owner)
         REGISTRY.note(self.owner, text)
         return Admission(None, text)
-
-
-def _identity(db: sqlite3.Connection, owner: str, project_id: str | None, claims: Claims) -> tuple[str | None, dict[str, str]]:
-    """Check an emitter's claimed identity; return a refusal, or the stamps the server takes from them."""
-    if claims.agent_thread_id and claims.agent_thread_id != owner:
-        return (f"corsia.agent_thread_id says {claims.agent_thread_id}, but your key belongs to {owner}; the record was dropped. Remove corsia.agent_thread_id, or use the key minted for {claims.agent_thread_id}.", {})
-    if claims.project_id and project_id and claims.project_id != project_id:
-        return (f"corsia.project_id says {claims.project_id}, but your key belongs to project {project_id}; the record was dropped. Remove corsia.project_id, or use the key minted for {claims.project_id}.", {})
-    stamps: dict[str, str] = {}
-    node = _plan_node(db, claims.run_id) if claims.run_id else None
-    if node and not _owns_plan(db, owner, node[2], node[3]):
-        return (f"corsia.run_id names plan node {claims.run_id} on another agent's plan; the record was dropped. Use a node from your own plan or a worker you spawned, or leave run_id out.", {})
-    if claims.run_id:
-        stamps["run_id"] = claims.run_id
-    if node:
-        stamps.update({key: value for key, value in (("workflow_ref", node[0]), ("workflow_version", node[1])) if value})
-    elif claims.workflow_ref:
-        if REGISTRY.workflows.get(claims.workflow_ref) != owner:
-            return (f'corsia.workflow.ref "{claims.workflow_ref}" is owned by another agent; the record was dropped. Use a workflow you own (yours: {", ".join(sorted(w for w, o in REGISTRY.workflows.items() if o == owner)) or "none"}), or leave the ref out.', {})
-        stamps["workflow_ref"] = claims.workflow_ref
-        if claims.workflow_version:
-            stamps["workflow_version"] = claims.workflow_version
-    return None, stamps
-
-
-def _plan_node(db: sqlite3.Connection, node_id: str) -> tuple[str | None, str | None, str, str] | None:
-    row = db.execute(
-        "SELECT n.workflow_ref, n.workflow_version, p.owner_kind, p.owner_id FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE n.id = ?",
-        (node_id,),
-    ).fetchone()
-    return None if row is None else (row[0], row[1], row[2], row[3])
-
-
-def _owns_plan(db: sqlite3.Connection, agent: str, owner_kind: str, owner_id: str) -> bool:
-    """A plan counts as the agent's own, or as a temporary worker's it spawned."""
-    if owner_kind != "thread":
-        return False
-    return owner_id == agent or db.execute("SELECT 1 FROM threads WHERE id = ? AND spawned_by = ?", (owner_id, agent)).fetchone() is not None
 
 
 def _time_problem(event_name: str, ts: str | None, entry: DeclaredEvent) -> str | None:
@@ -208,7 +148,7 @@ def _shown(value: Any) -> str:
 
 def _drop_text(event_name: str, entry: DeclaredEvent, key: str, value: Any) -> str:
     """The §5 text for one attribute the filter dropped."""
-    if key in _STAMPED:
+    if key in STAMPED_ATTRIBUTES:
         return f'{event_name}: attribute "{key}" is stamped by the server; the attribute was dropped. Remove it from the record.'
     declared = entry.declared.get(key)
     if declared is None:
