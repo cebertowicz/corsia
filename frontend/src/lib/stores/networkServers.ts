@@ -21,7 +21,6 @@ export interface ExternalDiscoveryResult {
 }
 
 export interface NetworkServerMetadata {
-	private?: boolean;
 	base_url?: string;
 	discovery?: ExternalDiscoveryResult;
 	// Ids the user declared because the endpoint does not list its models.
@@ -62,6 +61,8 @@ export interface NetworkServer {
 	last_seen_at?: string | null;
 	discovered_at?: string | null;
 	metadata?: NetworkServerMetadata;
+	/** The person marked this machine as theirs, so its models count as local. */
+	private?: boolean;
 	has_key?: boolean;
 	masked_key?: string;
 	/** How the endpoint is billed; null when unset. */
@@ -174,6 +175,28 @@ export async function setNetworkServerEnabled(
 		});
 		if (res.ok) {
 			await loadNetworkServers();
+			return { ok: true };
+		}
+		const data = await res.json().catch(() => ({}));
+		return { ok: false, message: typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}` };
+	} catch (e) {
+		return { ok: false, message: String(e) };
+	}
+}
+
+/** Mark a network server's machine as the person's own (private), or clear the mark. */
+export async function setNetworkServerPrivate(
+	serverId: string,
+	isPrivate: boolean,
+): Promise<{ ok: boolean; message?: string }> {
+	try {
+		const res = await fetch(`${BASE}/api/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ private: isPrivate }),
+		});
+		if (res.ok) {
+			networkServers.update(servers => servers.map(row => row.id === serverId ? { ...row, private: isPrivate } : row));
 			return { ok: true };
 		}
 		const data = await res.json().catch(() => ({}));

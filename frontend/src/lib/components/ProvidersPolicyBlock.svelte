@@ -3,10 +3,9 @@
 	import Button from './ui/Button.svelte';
 	import IconButton from './ui/IconButton.svelte';
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
-	import { loadCloudModelsOff, loadProviderPolicy, saveCloudModelsOff, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
+	import { loadProviderPolicy, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { models } from '$lib/stores/models';
-	import Message from './ui/Message.svelte';
+	import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
@@ -15,30 +14,16 @@
 	let accountsError = $state('');
 	let loading = $state(true);
 	let busy = $state(false);
-	let cloudModelsOff = $state(false);
-	let cloudModelsError = $state('');
-	const hasReadyLocalModel = $derived($models.some((model) => model.is_local && model.status === 'ready'));
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
 
 	$effect(() => { void load(); });
 	async function load() {
 		loading = true; error = ''; accountsError = '';
-		const [result, accounts, cloudPolicy] = await Promise.all([loadProviderPolicy(projectId), loadVendorAccounts(), projectId ? loadCloudModelsOff(projectId) : Promise.resolve(null)]);
+		const [result, accounts] = await Promise.all([loadProviderPolicy(projectId), loadVendorAccounts()]);
 		if (result.ok && Array.isArray(result.value?.providers)) policy = result.value;
 		else error = result.ok ? 'Could not load providers.' : result.error;
 		if (!accounts.ok) accountsError = accounts.error ?? 'Could not load accounts.';
-		if (cloudPolicy && cloudPolicy.ok) cloudModelsOff = cloudPolicy.value.cloud_models_off;
-		else if (cloudPolicy) cloudModelsError = cloudPolicy.error;
 		loading = false;
-	}
-	async function toggleCloudModelsOff(value: boolean) {
-		if (!projectId || busy) return;
-		busy = true; cloudModelsError = '';
-		try {
-			const result = await saveCloudModelsOff(projectId, value);
-			if (result.ok) cloudModelsOff = result.value.cloud_models_off;
-			else cloudModelsError = `Could not turn Cloud models off ${value ? 'on' : 'off'}: ${result.error}`;
-		} finally { busy = false; }
 	}
 	async function toggleScope(useWorkspace: boolean) {
 		if (!projectId || !policy || busy) return;
@@ -95,14 +80,7 @@
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
-		{#if projectId}
-			<div class="scope-setting">
-				<div><span class="scope-label">Cloud models off</span><p>Only models on this Mac, or on a machine you've marked private, can run in this project, including every worker its agents start.</p>{#if cloudModelsOff}<p>Agents here using a cloud model stop at their next turn until they switch to a local one.</p>{/if}</div>
-				<Toggle checked={cloudModelsOff} disabled={busy} ariaLabel="Cloud models off" onchange={toggleCloudModelsOff} />
-			</div>
-			{#if cloudModelsOff && !hasReadyLocalModel}<Message variant="warn">No local model is ready, so nothing in this project can run until one is.</Message>{/if}
-			{#if cloudModelsError}<Message variant="err">{cloudModelsError}</Message>{/if}
-		{/if}
+		{#if projectId}<CloudModelsOffSetting {projectId} />{/if}
 		{#if projectId}
 			<div class="scope-setting">
 				<div>

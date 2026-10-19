@@ -157,7 +157,7 @@
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
 			{#if cloudModelsOff && groups.length === 0}
-				<div class="model-list-empty">Cloud models are off in this project, and no local model is ready. <button type="button" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+				<div class="model-list-empty">Cloud models are off in this project, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
 			{:else if groups.length === 0 && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
