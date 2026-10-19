@@ -47,6 +47,10 @@ class LocalModel:
     context_window: int
     #: A name the profile gives the model; without one the name comes from the repository id.
     name: str | None = field(default=None, compare=False)
+    #: oMLX recommender facts, retained for Settings display without changing model identity.
+    level: float | None = field(default=None, compare=False)
+    fp16: bool | None = field(default=None, compare=False)
+    relative_speed: float | None = field(default=None, compare=False)
 
     @property
     def model(self) -> str:
@@ -66,14 +70,24 @@ class LocalModel:
         """Whether this is an ``-mtp`` build, which oMLX runs with its MTP head on."""
         return self.model.lower().endswith("-mtp")
 
+    @property
+    def quantization_bits(self) -> float | None:
+        """The recommender's structured quantization precision for display."""
+        return 16.0 if self.fp16 else self.level
+
     def view(self) -> dict:
         """The model as setup surfaces show it."""
-        return {
-            "name": self.display_name, "repository": self.repository,
+        result = {
+            "name": self.display_name, "repository": self.repository, "model": self.model,
             "download_size_bytes": self.download_size_bytes,
             "download_size_gb": round(self.download_size_bytes / 1000**3, 1),
             "context_window": self.context_window,
         }
+        if self.quantization_bits is not None:
+            result["quantization_bits"] = self.quantization_bits
+        if self.relative_speed is not None:
+            result["relative_speed"] = self.relative_speed
+        return result
 
 
 def memory_allows_local(ram_bytes: int) -> bool:
@@ -107,7 +121,15 @@ def from_recommendation(raw: object) -> LocalModel | None:
             or not isinstance(context, int) or context < MIN_CONTEXT):
         return None
     name = raw.get("display_name")
-    return LocalModel(repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None)
+    level = raw.get("level")
+    fp16 = raw.get("fp16")
+    relative_speed = raw.get("relative_speed")
+    return LocalModel(
+        repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None,
+        float(level) if isinstance(level, (int, float)) and not isinstance(level, bool) else None,
+        fp16 if isinstance(fp16, bool) else None,
+        float(relative_speed) if isinstance(relative_speed, (int, float)) and not isinstance(relative_speed, bool) else None,
+    )
 
 
 def to_record(model: LocalModel) -> dict:
@@ -116,24 +138,21 @@ def to_record(model: LocalModel) -> dict:
               "max_context": model.context_window}
     if model.name:
         record["display_name"] = model.name
+    if model.level is not None:
+        record["level"] = model.level
+    if model.fp16 is not None:
+        record["fp16"] = model.fp16
+    if model.relative_speed is not None:
+        record["relative_speed"] = model.relative_speed
     return record
-
-
-def pick(payload: object) -> LocalModel | None:
-    """The first row of the recommender's ``best`` section that reaches 32K, else None."""
-    sections = payload.get("sections") if isinstance(payload, dict) else None
-    rows = sections.get("best") if isinstance(sections, dict) else None
-    if not isinstance(rows, list):
-        return None
-    return next((model for row in rows if (model := from_recommendation(row)) is not None), None)
 
 
 class PickUnavailable(RuntimeError):
     """The recommender could not answer: oMLX not up yet, Hugging Face unreachable, or no recommender."""
 
 
-async def ask_recommender(server_id: str) -> LocalModel | None:
-    """Ask the managed oMLX once; None when nothing fits, ``PickUnavailable`` when it can't answer.
+async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
+    """Return every usable named recommender section from one oMLX request.
 
     oMLX answers 503 before its downloader is up, 504 on a Hub timeout and 502 on
     any other failure; its own Hub reads wait up to 30 seconds, so this waits a
@@ -146,16 +165,30 @@ async def ask_recommender(server_id: str) -> LocalModel | None:
     try:
         response = await admin_request({"server_id": server_id}, "GET", "/hf/recommendations", timeout=45.0)
     except (OmlxAdminError, httpx.HTTPError) as exc:
-        raise PickUnavailable(f"oMLX could not be reached ({type(exc).__name__}).") from exc
+        log.exception("oMLX recommender request failed")
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Check that oMLX is running, then try again.") from exc
     if response.status_code != 200:
-        raise PickUnavailable(f"oMLX could not check model recommendations (HTTP {response.status_code}).")
+        log.warning("oMLX recommender returned status %s", response.status_code)
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Check that oMLX is running, then try again.")
     try:
         payload = response.json()
     except ValueError as exc:
-        raise PickUnavailable("oMLX returned unreadable model recommendations.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("sections"), dict):
-        raise PickUnavailable("oMLX returned unreadable model recommendations.")
-    return pick(payload)
+        log.warning("oMLX recommender returned unreadable data")
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Try again.") from exc
+    sections = payload.get("sections") if isinstance(payload, dict) else None
+    if not isinstance(sections, dict):
+        log.warning("oMLX recommender returned an invalid payload")
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Try again.")
+    return {
+        name: [model for row in rows if (model := from_recommendation(row)) is not None]
+        for name, rows in sections.items() if isinstance(name, str) and isinstance(rows, list)
+    }
+
+
+async def ask_recommender(server_id: str) -> LocalModel | None:
+    """Pick setup's model from the shared Settings recommender reader."""
+    sections = await ask_recommendations(server_id)
+    return next((model for model in sections.get("best", [])), None)
 
 
 def _record_path() -> Path:

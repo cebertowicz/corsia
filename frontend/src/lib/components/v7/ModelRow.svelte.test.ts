@@ -1,5 +1,5 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ModelRow from './ModelRow.svelte';
 
 describe('ModelRow warning line', () => {
@@ -50,5 +50,33 @@ describe('ModelRow switch label', () => {
 		const toggleLabels = ['Hide from picker', 'Show in picker'];
 		expect(label({ toggleOn: true, toggleLabels })).toBe('Hide from picker');
 		expect(label({ toggleOn: false, toggleLabels })).toBe('Show in picker');
+	});
+
+	it('offers Delete download from the row menu without removing the load control', () => {
+		const onDeleteDownload = vi.fn();
+		const component = mount(ModelRow, { target: document.body, props: { name: 'Qwen', toggleOn: false, onDeleteDownload } });
+		flushSync();
+		const row = document.querySelector<HTMLElement>('.mr')!;
+		row.focus();
+		row.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ContextMenu' }));
+		flushSync();
+		expect(document.body.textContent).toContain('Delete download');
+		expect(document.querySelector<HTMLButtonElement>('button.tg')?.getAttribute('aria-label')).toBe('Load');
+		[...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Delete download')!.click();
+		expect(onDeleteDownload).toHaveBeenCalledOnce();
+		unmount(component);
+	});
+
+	it('shows no control at all on a download in flight, only the loading puck elsewhere', () => {
+		const loading = mount(ModelRow, { target: document.body, props: { name: 'Qwen', state: 'loading', progress: 40 } });
+		flushSync();
+		expect(document.querySelector('.puck')).not.toBeNull();
+		unmount(loading);
+		const download = mount(ModelRow, { target: document.body, props: { name: 'Qwen', state: 'loading', progress: 40, puck: false } });
+		flushSync();
+		expect(document.querySelector('.puck')).toBeNull();
+		expect(document.querySelector('button.tg')).toBeNull();
+		expect(document.querySelector('.mr-toggle-wrap')).not.toBeNull();
+		unmount(download);
 	});
 });

@@ -160,7 +160,7 @@
 					onToggleExpand={() => toggleExpand(key)}
 				>
 					{#snippet body()}
-						<ProviderModelsBody provider={p} isLocal={group.key === 'this-mac'} />
+						<ProviderModelsBody provider={p} isLocal={group.key === 'this-mac'} onAddProvider={() => showAdd = true} />
 					{/snippet}
 				</ProviderRow>
 			{/each}

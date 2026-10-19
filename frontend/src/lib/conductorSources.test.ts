@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	anyReady,
+	cancelLocalDownload,
+	deleteLocalModelDownload,
+	fetchLocalModelRecommendations,
 	fetchSources,
 	recheckSources,
 	setupLocalSource,
+	startLocalModelDownload,
 	type ModelSource,
 	type SourceAccount,
 } from './conductorSources';
@@ -44,17 +48,33 @@ describe('anyReady', () => {
 describe('source routes', () => {
 	afterEach(() => vi.unstubAllGlobals());
 
-	it('reads, rechecks and sets up with the caller token', async () => {
+	it('owns source and local-model routes with the caller token', async () => {
 		const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => ({
-			ok: true, json: async () => String(input).endsWith('/local/setup') ? { ok: true } : { sources: [{ source: 'omlx' }] },
+			ok: true,
+			json: async () => String(input).endsWith('/local/recommendations')
+				? { state: 'ready', sections: { best: [] } }
+				: String(input).endsWith('/local/setup') ? { ok: true } : { sources: [{ source: 'omlx' }] },
 		}));
 		vi.stubGlobal('fetch', fetchMock);
 		expect(await fetchSources('tok')).toEqual([{ source: 'omlx' }]);
 		expect(await recheckSources('tok')).toEqual([{ source: 'omlx' }]);
 		expect(await setupLocalSource('tok')).toEqual({ ok: true });
+		expect(await fetchLocalModelRecommendations('tok')).toEqual({ state: 'ready', sections: { best: [] } });
+		await startLocalModelDownload('tok', 'org/model');
+		await cancelLocalDownload('tok');
+		await deleteLocalModelDownload('tok', 'org/model');
 		expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? 'GET'])).toEqual([
-			['/api/providers/sources', 'GET'], ['/api/providers/sources/recheck', 'POST'], ['/api/providers/local/setup', 'POST'],
+			['/api/providers/sources', 'GET'],
+			['/api/providers/sources/recheck', 'POST'],
+			['/api/providers/local/setup', 'POST'],
+			['/api/providers/local/recommendations', 'GET'],
+			['/api/providers/local/downloads', 'POST'],
+			['/api/providers/local/cancel', 'POST'],
+			['/api/providers/local/downloads/org%2Fmodel', 'DELETE'],
 		]);
+		for (const [, init] of fetchMock.mock.calls.slice(3)) {
+			expect(init).toMatchObject({ headers: { Authorization: 'Bearer tok' } });
+		}
 	});
 
 	it('returns a structured consent requirement so callers can recover', async () => {

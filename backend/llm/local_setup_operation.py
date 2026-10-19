@@ -7,13 +7,14 @@ advisory lock makes a second backend wait rather than issue another download.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import fcntl
 import json
 import logging
 import os
 from pathlib import Path
-from typing import IO
+from typing import Any, IO
 
 from llm.local_model import LocalModel, from_recommendation, to_record
 
@@ -32,14 +33,23 @@ class Operation:
     kind: str
     task_id: str | None = None
     name: str | None = None
+    level: float | None = None
+    fp16: bool | None = None
+    relative_speed: float | None = None
 
     @classmethod
     def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None) -> Operation:
-        return cls(model.repository, model.download_size_bytes, model.context_window, kind, task_id, model.name)
+        return cls(
+            model.repository, model.download_size_bytes, model.context_window, kind, task_id,
+            model.name, model.level, model.fp16, model.relative_speed,
+        )
 
     @property
     def model(self) -> LocalModel:
-        return LocalModel(self.repository, self.download_size_bytes, self.context_window, self.name)
+        return LocalModel(
+            self.repository, self.download_size_bytes, self.context_window, self.name,
+            self.level, self.fp16, self.relative_speed,
+        )
 
 
 def _state_root() -> Path:
@@ -118,6 +128,16 @@ def try_lock() -> IO[str] | None:
     return handle
 
 
+async def wait_for_lock(flight: Any) -> None:
+    """Wait for the durable local-operation lock and retain it on ``flight``."""
+    while flight.operation_lock is None:
+        handle = try_lock()
+        if handle is not None:
+            flight.operation_lock = handle
+            return
+        await asyncio.sleep(0.25)
+
+
 def unlock(handle: IO[str] | None) -> None:
     if handle is None:
         return
@@ -125,3 +145,18 @@ def unlock(handle: IO[str] | None) -> None:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     finally:
         handle.close()
+
+
+def finish(flight: Any, result: dict) -> dict:
+    """Record a flight's terminal result on ``flight`` and release the operation (setup and Settings)."""
+    flight.result = result
+    flight.stage = None
+    flight.following = False
+    if not result.get("downloading"):
+        # A finished task needs no follow, and a terminal oMLX error cannot be
+        # followed: removing its task id lets an explicit retry create one new
+        # task instead of replaying it. A still-downloading task keeps its id.
+        clear()
+    unlock(flight.operation_lock)
+    flight.operation_lock = None
+    return result
