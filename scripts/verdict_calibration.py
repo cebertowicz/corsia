@@ -13,7 +13,8 @@ included, and its own bootstrap. Prints no run, message or node: only
 2. **Correction lag.** Days from a run settling to its last attributed correction: p50, p90, p95, max.
 3. **Replay.** Each real version against its baseline: the verdict and reason it would have given.
 
-Run it with throwaway ``CORSIA_WORKSPACE`` and ``CORSIA_STATE_DIR``; unset ones default to a fresh temporary folder.
+Run it with ``CORSIA_WORKSPACE`` pointed at the real workspace whose owner workflows and KPI definitions are being calibrated;
+``CORSIA_STATE_DIR`` may be throwaway and defaults to a fresh temporary folder.
 """
 from __future__ import annotations
 
@@ -27,8 +28,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-for _name in ("CORSIA_WORKSPACE", "CORSIA_STATE_DIR"):
-    os.environ.setdefault(_name, tempfile.mkdtemp(prefix="verdict-calibration-"))
+os.environ.setdefault("CORSIA_STATE_DIR", tempfile.mkdtemp(prefix="verdict-calibration-"))
 os.environ.setdefault("CORSIA_ANALYTICS_DISABLE", "1")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
@@ -105,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     snapshot = price_snapshot(db, read_snapshot(db, now=now))
     histories = list(snapshot.workflows)
+    calibrated = [history for history in histories if history.ref in CALIBRATED]
+    if not calibrated:
+        raise SystemExit("missing calibrated workflow history for calibration")
+    if not any(history.owner and any(definition.kind == "kpi" for definition in history.definitions)
+               for history in calibrated):
+        raise SystemExit("missing owner KPI definitions for calibration in CORSIA_WORKSPACE")
 
     print("A/A splits: share reading Keep or Not enough data, and p90 |difference|")
     print(f"{'workflow':<16} {'measure':<26} {'splits':>6} {'called':>6} {'keep/ned':>8} {'p90 diff':>9}")

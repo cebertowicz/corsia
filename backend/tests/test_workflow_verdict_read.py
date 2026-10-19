@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -95,6 +95,17 @@ def runs_of(snapshot, workflow: str = "sdlc-process"):
     return {run.run_id: run for run in history.runs}, history
 
 
+def calibration_script():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "verdict_calibration.py"
+    spec = importlib.util.spec_from_file_location("verdict_calibration", path)
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
+
+
 def test_a_run_is_the_outermost_node_carrying_its_workflow_and_only_judged_versions_count(db) -> None:
     node(db, "run")
     node(db, "same", parent="run")
@@ -117,6 +128,33 @@ def test_settled_means_terminal_and_past_the_window_and_failed_runs_are_not_outc
     assert runs["done"].outcome and runs["done"].settled(3, NOW) and runs["failed"].settled(3, NOW)
     assert not runs["recent"].settled(3, NOW) and runs["recent"].settled(0, NOW)
     assert runs["open"].terminal_at is None and not runs["open"].settled(0, NOW)
+
+
+def test_read_snapshot_excludes_nodes_outside_its_bounded_history(db) -> None:
+    node(db, "old", created="2025-10-04T00:00:00Z", ended="2025-10-05T00:00:00Z")
+    node(db, "current")
+    runs, _ = runs_of(read_snapshot(db, now=NOW))
+    assert set(runs) == {"current"}
+
+
+def test_read_snapshot_does_not_treat_a_window_edge_child_as_a_run_root(db) -> None:
+    root_created = (NOW - timedelta(days=400)).isoformat()
+    node(db, "old-root", created=root_created, ended=root_created)
+    node(db, "recent-child", parent="old-root")
+    snapshot = read_snapshot(db, now=NOW)
+    assert snapshot.workflows == ()
+
+
+def test_read_snapshot_uses_the_longest_owner_declared_follow_up_window(db) -> None:
+    _definitions(db, settle_days=30)
+    created = (NOW - timedelta(days=370)).isoformat()
+    ended = (NOW - timedelta(days=369)).isoformat()
+    node(db, "within-owner-window", created=created, ended=ended)
+    edge_created = (NOW - timedelta(days=390)).isoformat()
+    edge_ended = (NOW - timedelta(days=389)).isoformat()
+    node(db, "at-owner-window-edge", created=edge_created, ended=edge_ended)
+    runs, _ = runs_of(read_snapshot(db, now=NOW))
+    assert set(runs) == {"within-owner-window", "at-owner-window-edge"}
 
 
 def test_the_group_is_the_runs_own_model_difficulty_and_size_band(db) -> None:
@@ -148,10 +186,12 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
         ("m1", True, "c1"), ("m2", False, "c1")]
 
 
-def _definitions(db) -> None:
+def _definitions(db, *, settle_days: int | None = None) -> None:
     event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
     kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": True,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
+    if settle_days is not None:
+        kpi["settle_days"] = settle_days
     rows = [("event", "qg.escape", 1, event, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 1, {**kpi, "review": 0.2}, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 2, {**kpi, "review": 0.5}, "2026-10-10T00:00:00Z")]
@@ -207,14 +247,8 @@ def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -
 
 
 def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only(db, isolated_db, capsys) -> None:
-    import importlib.util
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[2] / "scripts" / "verdict_calibration.py"
-    spec = importlib.util.spec_from_file_location("verdict_calibration", path)
-    assert spec and spec.loader
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+    script = calibration_script()
+    _definitions(db)
     for index in range(66):
         version, day = ("v1", 1 + index % 9) if index < 44 else ("v2", 10 + index % 5)
         node(db, f"r{index}", version=version, created=f"2026-10-{day:02d}T00:00:00Z",
@@ -228,6 +262,13 @@ def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only
     assert "A/A splits" in out and "corrections_per_outcome" in out and "(whole verdict)" in out
     assert "n=5 p50=1.00" in out and "v1 -> v2" in out and "no_baseline" in out
     assert not any(f"r{index}" in out.split() or f"m{index}" in out for index in range(66))
+
+
+def test_calibration_script_refuses_when_workspace_has_no_owner_kpi_definitions(db, isolated_db) -> None:
+    node(db, "run")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE"):
+        calibration_script().main([str(isolated_db)])
 
 
 def test_read_snapshot_never_writes_so_it_runs_on_the_query_only_lane(db) -> None:

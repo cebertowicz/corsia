@@ -178,13 +178,13 @@ def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window
 
 
 def freeze_plan(history: WorkflowHistory, version: str, now: datetime) -> FrozenPlan:
-    """The plan, from the definitions in force at the version's first run, not at this pass."""
+    """The plan, including its baseline, from the version's first run rather than this pass (design §3.4)."""
     subject = f"workflow:{history.ref}@{version}"
     in_force = definitions_in_force(history.definitions, history.first_use(version))
     kpis, refusals, minimum = assert_evaluator_fields(in_force, history.ref, history.version_attr)
     measures = (*BUILTINS, *kpis)
     window = max(measure.window_days for measure in measures)
-    baseline, skipped = choose_baseline(history, version, minimum, window, now)
+    baseline, skipped = choose_baseline(history, version, minimum, window, parse_ts(history.first_use(version)))
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed)
 

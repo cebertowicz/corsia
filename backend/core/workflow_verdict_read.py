@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
+from itertools import chain
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -25,13 +26,15 @@ from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
-from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
+from core.workflow_verdict_rules import BUILTINS, Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
 from tools.workflow_owners import thread_workflow_owners
 from tools.workflow_task_fields import judged_version
 
 MODEL_SHARE = 0.8  # design §3.3: the run's own fresh tokens on one identity
 PLANNED_EVENT, REACHED_EVENT = "measurement.verdict.planned", "measurement.verdict.reached"
+# A baseline version older than a year is not compared; scale budget, not from the design.
+BASELINE_LOOKBACK_DAYS = 365
 _BANDS = {"XS": "XS-S", "S": "XS-S", "M": "M", "L": "L+", "XL": "L+", "XXL": "L+"}
 # The KPI formula engine (KPI slice 2) supplies these rows; with no reader every deciding KPI is Not comparable.
 KpiReader = Callable[[sqlite3.Connection, Sequence[Run], Sequence[Definition]],
@@ -85,12 +88,38 @@ def _terminal_times(db: sqlite3.Connection, node_ids: Sequence[str]) -> dict[tup
     return {(row["node_id"], row["state"]): row["at"] for row in rows}
 
 
-def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None) -> list[dict[str, Any]]:
-    where = "" if plan_ids is None else "WHERE plan_id IN (SELECT value FROM json_each(:plans))"
+def _nodes(db: sqlite3.Connection, plan_ids: Iterable[str] | None = None, *, since: str | None = None
+           ) -> list[dict[str, Any]]:
+    """Nodes in the requested plans or, for a snapshot, the bounded baseline and follow-up history."""
+    clauses, params = [], {}
+    if plan_ids is not None:
+        clauses.append("plan_id IN (SELECT value FROM json_each(:plans))")
+        params["plans"] = _ids(plan_ids)
+    if since is not None:
+        clauses.append("created_at >= :since")
+        params["since"] = since
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     return [dict(row) for row in db.execute(f"""
         SELECT id, plan_id, parent_id, kind, state, assignee, workflow_ref, workflow_version, difficulty, size,
           created_at, updated_at FROM plan_nodes {where}
-    """, {} if plan_ids is None else {"plans": _ids(plan_ids)}).fetchall()]
+    """, params).fetchall()]
+
+
+def _missing_ancestors(db: sqlite3.Connection, nodes: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The ancestors omitted by a bounded node read, stopping when the chain reaches an already loaded node."""
+    ids = _ids(str(node["id"]) for node in nodes)
+    return [dict(row) for row in db.execute("""
+        WITH RECURSIVE ancestors(id) AS (
+          SELECT parent_id FROM plan_nodes
+          WHERE id IN (SELECT value FROM json_each(:ids)) AND parent_id IS NOT NULL
+          UNION
+          SELECT parent.parent_id FROM plan_nodes parent JOIN ancestors child ON parent.id=child.id
+          WHERE parent.parent_id IS NOT NULL AND parent.id NOT IN (SELECT value FROM json_each(:ids))
+        )
+        SELECT id, plan_id, parent_id, kind, state, assignee, workflow_ref, workflow_version, difficulty, size,
+          created_at, updated_at FROM plan_nodes
+        WHERE id IN ancestors AND id NOT IN (SELECT value FROM json_each(:ids))
+    """, {"ids": ids}).fetchall()]
 
 
 def run_roots(nodes: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -139,12 +168,13 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
     return by_workflow, owners
 
 
-def _recorded(db: sqlite3.Connection) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+def _recorded(db: sqlite3.Connection, since: str) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+    """Recorded verdict state from the same bounded history as the snapshot nodes."""
     plans, reached = {}, set()
     for row in db.execute("""
         SELECT subject_key, event_name, attributes FROM outcome_events
-        WHERE event_name IN (?, ?) AND retracted_at IS NULL AND subject_key IS NOT NULL
-    """, (PLANNED_EVENT, REACHED_EVENT)).fetchall():
+        WHERE event_name IN (?, ?) AND retracted_at IS NULL AND subject_key IS NOT NULL AND ts >= ?
+    """, (PLANNED_EVENT, REACHED_EVENT, since)).fetchall():
         if row["event_name"] == REACHED_EVENT:
             reached.add(row["subject_key"])
         else:
@@ -161,24 +191,32 @@ def _terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) 
 
 def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
                   kpi_reader: KpiReader | None = None) -> Snapshot:
-    """Every judged workflow run with its group, settlement and attributed corrections; costs come later."""
+    """Every judged workflow run from bounded baseline/follow-up history, with costs added later."""
     now = now or datetime.now(timezone.utc)
-    nodes = _nodes(db)
+    definitions, owners = _definitions(db)
+    follow_up_days = max(chain(
+        (measure.window_days for measure in BUILTINS),
+        (int(definition.spec.get("settle_days") or 0) for items in definitions.values() for definition in items
+         if definition.kind == "kpi"),
+    ))
+    since = (now - timedelta(days=BASELINE_LOOKBACK_DAYS + follow_up_days)).isoformat()
+    nodes = _nodes(db, since=since)
+    nodes += _missing_ancestors(db, nodes)
     parents = {node["id"]: node["parent_id"] for node in nodes}
-    roots = run_roots(nodes)
+    roots = [node for node in run_roots(nodes) if node["created_at"] >= since]
     facts: dict[str, list[CorrectionFact]] = defaultdict(list)
     root_ids = [node["id"] for node in roots]
-    for fact in attributed_facts(db):
+    for fact in attributed_facts(db, since=since):
         run_id = workflow_run_of(fact.node_id, parents, root_ids)
         facts[run_id].append(CorrectionFact(fact.message_id, fact.message_at, fact.counter, fact.is_correction))
     judged = [node for node in roots if judged_version(node["workflow_version"])]
+    judged_ids = {node["id"] for node in judged}
     models = _model_groups(db, [node["id"] for node in judged])
     times = _terminal_times(db, [node["id"] for node in judged])
-    definitions, owners = _definitions(db)
     by_workflow: dict[str, list[Run]] = defaultdict(list)
     excluded: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for node in roots:
-        if node not in judged:
+        if node["id"] not in judged_ids:
             reason = "local_edit" if node["workflow_version"] else "unversioned"
             excluded[node["workflow_ref"]][reason] += 1
             continue
@@ -194,7 +232,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
             runs = [replace(run, kpi_rows=rows.get(run.run_id, {})) for run in runs]
         histories.append(WorkflowHistory(ref, owners.get(ref), tuple(runs), tuple(definitions.get(ref, ())),
                                          excluded={k: v for k, v in excluded.get(ref, {}).items()}))
-    plans, reached = _recorded(db)
+    plans, reached = _recorded(db, since)
     return Snapshot(now.isoformat(), tuple(histories), plans, reached)
 
 

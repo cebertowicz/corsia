@@ -116,7 +116,8 @@ def test_unconfirmed_numerator_rows_give_not_enough_data_with_k() -> None:
     new = [Run(r.run_id, r.version, r.group, r.started_at, r.terminal_at, r.state, (), 1.0,
                {KPI.name: (KpiRow("num", "self_reported", 1.0, r.terminal_at or "", True),
                            KpiRow("den", "observed", 1.0, r.terminal_at or ""))}) for r in runs("v2", 0, kpi=rows)]
-    result = verdict(history(runs("v1", 0, kpi=[("num", "observed", 0.0), ("den", "observed", 1.0)]), new), KPI)
+    result = verdict(history(runs("v1", 0, started=40, ended=30,
+                                  kpi=[("num", "observed", 0.0), ("den", "observed", 1.0)]), new), KPI)
     assert (result.word, result.reason, result.inputs) == ("not_enough_data", "kpi_unconfirmed", {"kpi": "escapes", "k": 20})
 
 
@@ -169,6 +170,13 @@ def test_baseline_is_the_nearest_version_with_the_minimum_in_shared_groups() -> 
                      runs("v2", 1, started=20, ended=10))
     assert choose_baseline(source, "v2", 20, 3, NOW) == ("v0", ("v1",))
     assert plan_for(source).skipped == ("v1",) and verdict(source).inputs["skipped"] == ["v1"]
+
+
+def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
+    source = history(runs("v1", 1, started=30, ended=21), runs("v2", 1, started=20, ended=10))
+    first = freeze_plan(source, "v2", NOW - timedelta(days=19))
+    later = freeze_plan(source, "v2", NOW)
+    assert first == later and first.baseline is None
 
 
 def test_baseline_runs_are_the_most_recent_up_to_twice_the_minimum_per_group() -> None:
