@@ -41,7 +41,7 @@ When `setup.setup_decisions` holds the import decision (title `Bring over what y
    - **Gmail or Google:** follow skill `google-setup` from its step 2.
    - **Outlook:** when your skills list includes `microsoft-setup`, follow it from its step 1. Otherwise post `I can't connect Outlook or other email yet. I've noted yours, and I'll offer it here as soon as I can.`
    - **Both:** Gmail first, as above. Once it is connected or they say "not now" to it, go on as for Outlook.
-   - **Something else:** post `I can't connect Outlook or other email yet. I've noted yours, and I'll offer it here as soon as I can.`
+   - **Something else:** post `I can't connect that email, but I've noted which one you use.`
 
    On "not now" to the question: `Ask me any time to connect your email.` This is CORSIA's own platform sign-in; it creates no agent.
 6. **GitHub for your agents,** skipped when `github_ready`. Lead with why: `When something you need doesn't exist yet, like a connection to a tool or a fix to CORSIA itself, your agents can build it. They keep that work on GitHub, so they need an account there.` Then raise the GitHub decision from `setup.setup_decisions` unchanged (its `source_node_id` is its task if your plan has one, else your current plan task) and handle the answer the way Task 5 of `references/first-run.md` does (its A and B paths, sign-in and captcha rules), with nothing to start or mark done.
