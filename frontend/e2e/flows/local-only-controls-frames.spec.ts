@@ -142,7 +142,11 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 		const state: State = { models: catalogs.plain, servers: [servers.remoteOff], cloudOff: false, failSave: false };
 		await serve(page, state);
 		let stamp = 0;
-		const shot = async (name: string, size: string, theme: string) => page.screenshot({ path: join(OUT!, `${name}-${size}-${theme}.png`), animations: 'disabled', scale: 'css' });
+		const shot = async (name: string, size: string, theme: string) => {
+			// A frame counts only with the exact committed head in its dev header: wait for the real hash, no placeholder, no dirty mark.
+			await expect(page.locator('.version-overlay')).toHaveText(/^\s*b [0-9a-f]{7}\s*·\s*f [0-9a-f]{7}\s*·/, { timeout: 15_000 });
+			await page.screenshot({ path: join(OUT!, `${name}-${size}-${theme}.png`), animations: 'disabled', scale: 'css' });
+		};
 		const begin = async (width: number, height: number, theme: 'light' | 'dark') => {
 			await page.setViewportSize({ width, height });
 			await page.emulateMedia({ colorScheme: theme });
