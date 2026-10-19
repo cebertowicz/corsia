@@ -251,6 +251,30 @@ def _same_identity(account: dict, email: str, provider_subject: str | None) -> b
     return str(account["address"]).strip().lower() == email.strip().lower()
 
 
+def not_covered_reply(account: dict, adding_thread_id: str | None, db) -> str | None:  # type: ignore[no-untyped-def]
+    """Explain when an existing account cannot serve the adding conversation's scope."""
+    if adding_thread_id is None:
+        return None
+    from connections.connected_accounts import ConnectedAccountError, reach_for_adding_thread
+
+    try:
+        requested = reach_for_adding_thread(adding_thread_id, db=db)
+    except ConnectedAccountError:
+        return None
+    reach = account["reach"]
+    if not isinstance(reach, dict):
+        return None
+    if requested.mode == "all":
+        return CONNECTED_NOT_FOR_ALL.format(address=account["address"]) if reach.get("mode") != "all" else None
+    project_id = next(iter(requested.project_ids), None)
+    if project_id is None or reach.get("mode") == "all" or project_id in reach.get("project_ids", []):
+        return None
+    project = db.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
+    if project is None:
+        return None
+    return CONNECTED_NOT_FOR_PROJECT.format(address=account["address"], project=project["name"])
+
+
 def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> None:  # type: ignore[no-untyped-def]
     from connections.connected_accounts import (
         create_google_account, create_google_account_for_thread, google_accounts,
@@ -258,30 +282,10 @@ def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> N
 
     for account in google_accounts(db=conn):
         if _same_identity(account, email, provider_subject):
-            if account["state"] != STATUS_CONNECTED or pending.adding_thread_id is None:
+            if account["state"] != STATUS_CONNECTED:
                 raise GoogleSignInError(ALREADY_NEEDS_SIGN_IN.format(address=account["address"]))
-            from connections.connected_accounts import reach_for_adding_thread
-
-            try:
-                requested = reach_for_adding_thread(pending.adding_thread_id, db=conn)
-            except ConnectedAccountError:
-                requested = None
-            reach = account["reach"]
-            if not isinstance(reach, dict):
-                raise GoogleSignInError(ALREADY_CONNECTED.format(address=account["address"], reach=""))
-            if requested is not None and requested.mode == "all" and reach.get("mode") != "all":
-                raise GoogleSignInError(CONNECTED_NOT_FOR_ALL.format(address=account["address"]))
-            if requested is not None and requested.mode == "selected" and (
-                reach.get("mode") != "all"
-                and next(iter(requested.project_ids)) not in reach.get("project_ids", [])
-            ):
-                project = conn.execute(
-                    "SELECT name FROM projects WHERE id=?", (next(iter(requested.project_ids)),),
-                ).fetchone()
-                if project is not None:
-                    raise GoogleSignInError(CONNECTED_NOT_FOR_PROJECT.format(
-                        address=account["address"], project=project["name"],
-                    ))
+            if reply := not_covered_reply(account, pending.adding_thread_id, conn):
+                raise GoogleSignInError(reply)
             raise GoogleSignInError(ALREADY_CONNECTED.format(address=account["address"], reach=""))
     fields = {
         "created_by": pending.actor, "signed_in_by": pending.actor, "provider_subject": provider_subject,

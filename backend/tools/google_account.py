@@ -12,9 +12,7 @@ import json
 import logging
 from typing import Any
 
-from connections.connected_accounts import (
-    ConnectedAccountError, get_account, reach_for_adding_thread, resolve_google_credentials,
-)
+from connections.connected_accounts import ConnectedAccountError, get_account, resolve_google_credentials
 from connections.google import oauth
 from connections.google.client import GoogleError, STATUS_CONNECTED
 from infra.database import get_db
@@ -45,27 +43,6 @@ def _reach_phrase(account: dict[str, object], db) -> str:  # type: ignore[no-unt
     return f" for {project['name']}" if project is not None else ""
 
 
-def _requested_scope_reply(account: dict[str, object], thread_id: str, db) -> str | None:  # type: ignore[no-untyped-def]
-    """A fixed B-G1 reply when this conversation cannot add the account at its own scope."""
-    try:
-        requested = reach_for_adding_thread(thread_id, db=db)
-    except ConnectedAccountError:
-        return None
-    reach = account["reach"]
-    if not isinstance(reach, dict):
-        return None
-    if requested.mode == "all":
-        if reach.get("mode") != "all":
-            return oauth.CONNECTED_NOT_FOR_ALL.format(address=account["address"])
-        return None
-    project_id = next(iter(requested.project_ids))
-    if reach.get("mode") == "all" or project_id in reach.get("project_ids", []):
-        return None
-    project = db.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
-    if project is None:
-        return None
-    return oauth.CONNECTED_NOT_FOR_PROJECT.format(address=account["address"], project=project["name"])
-
 
 def _existing_account_reply(account_id: str, thread_id: str) -> tuple[str, str]:
     """Build the row-directed B-G1 tool result without starting another OAuth flow."""
@@ -78,7 +55,7 @@ def _existing_account_reply(account_id: str, thread_id: str) -> tuple[str, str]:
         if account["state"] == "removing":
             raise oauth.GoogleSignInError(oauth.GONE)
         if account["state"] == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is not None:
-            reply = _requested_scope_reply(account, thread_id, db) or oauth.ALREADY_CONNECTED.format(
+            reply = oauth.not_covered_reply(account, thread_id, db) or oauth.ALREADY_CONNECTED.format(
                 address=account["address"], reach=_reach_phrase(account, db),
             )
         else:

@@ -408,6 +408,22 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
     assert json.loads(await GoogleConnectTool().execute(_thread_id=conductor, account_id=account_id))["reply"] == needs_sign_in_reply
 
 
+async def test_person_readding_connected_account_gets_already_connected_reply(google, conductor, client_file):
+    """A person adding through Connected apps must not be sent through a needless re-sign-in."""
+    await _connect(google, conductor, client_file)
+
+    async with _http() as http:
+        started = await http.post("/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
+        assert started.status_code == 200
+        query = parse_qs(urlparse(started.json()["url"]).query)
+        google.challenge = query["code_challenge"][0]
+        duplicate = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": query["state"][0]})
+
+    assert duplicate.status_code == 400
+    assert f"{EMAIL} is already connected." in duplicate.text
+    assert "sign in again" not in duplicate.text
+
+
 async def test_existing_needs_sign_in_account_returns_its_row_link_without_a_second_row(google, conductor, client_file):
     account_id = await _connect(google, conductor, client_file)
     google.refresh_status = 400
