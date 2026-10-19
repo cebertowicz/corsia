@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { RunsOn } from './stores/modelTurn';
 
 import {
 	bestSetupModel,
@@ -19,19 +20,28 @@ function model(overrides: Partial<SetupModel> = {}): SetupModel {
 	} as SetupModel;
 }
 
+function account(overrides: Partial<RunsOn> = {}): RunsOn {
+	return {
+		account_id: 'setup-account', selected: true, status: 'ready',
+		status_reason: null, resets_at: null,
+		usage: { state: 'allowed', usable: true, windows: [] },
+		...overrides,
+	};
+}
+
 describe('setup first model', () => {
 	it('requires a ready selected account for Claude Code and Codex', () => {
 		const sourceOnly = model({
 			connection: 'claude-code',
-			runs_on: [{ selected: false, status: 'ready' }],
+			runs_on: [account({ selected: false })],
 		});
 		const selectedUnavailable = model({
 			connection: 'codex',
-			runs_on: [{ selected: true, status: 'usage_limited' }],
+			runs_on: [account({ status: 'unavailable', status_reason: 'usage_limited' })],
 		});
 		const selectedReady = model({
 			connection: 'claude-code',
-			runs_on: [{ selected: true, status: 'ready' }],
+			runs_on: [account()],
 		});
 
 		expect(setupModelWorks(sourceOnly)).toBe(false);
@@ -42,11 +52,11 @@ describe('setup first model', () => {
 	it('uses Claude Code’s catalog default before Codex, API, and local rows', () => {
 		const claude = model({
 			id: 'claude-default', connection: 'claude-code', is_default: true,
-			runs_on: [{ selected: true, status: 'ready' }],
+			runs_on: [account()],
 		});
 		const codex = model({
 			id: 'codex-default', connection: 'codex', is_default: true,
-			runs_on: [{ selected: true, status: 'ready' }],
+			runs_on: [account()],
 		});
 		const api = model({ id: 'api-default', provider: 'openai', is_default: true });
 		const local = model({ id: 'local', connection: 'omlx' });
@@ -58,11 +68,11 @@ describe('setup first model', () => {
 	it('uses the first ready Claude row when its vendor reports no default', () => {
 		const first = model({
 			id: 'first-claude', connection: 'claude-code',
-			runs_on: [{ selected: true, status: 'ready' }],
+			runs_on: [account()],
 		});
 		const second = model({
 			id: 'second-claude', connection: 'claude-code',
-			runs_on: [{ selected: true, status: 'ready' }],
+			runs_on: [account()],
 		});
 
 		expect(bestSetupModel([first, second])).toBe(first);
