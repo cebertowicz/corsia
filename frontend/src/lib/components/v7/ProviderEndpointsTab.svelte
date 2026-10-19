@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { setNetworkServerPrivate, type NetworkServer } from '$lib/stores/networkServers';
 	import Toggle from '../ui/Toggle.svelte';
-	import Message from '../ui/Message.svelte';
 
 	let { server }: { server: NetworkServer } = $props();
 	// What the person just saved, until the server list reloads with the same value.
@@ -10,12 +9,13 @@
 	let busy = $state(false);
 	let error = $state('');
 	const onThisMac = $derived(server.on_this_mac === true);
+	const canMarkPrivate = $derived(!onThisMac || server.kind === 'external');
 	async function savePrivate(value: boolean) {
 		if (busy) return;
 		busy = true; error = '';
 		const result = await setNetworkServerPrivate(server.id, value);
 		if (result.ok) saved = value;
-		else error = `Couldn't save Private machine: ${result.message ?? 'Could not save this setting.'}`;
+		else error = `Couldn't save this change. ${result.message ?? "The change wasn't saved."} Try again.`;
 		busy = false;
 	}
 </script>
@@ -26,19 +26,21 @@
 		<div class="row">
 			<span class="l"><code>{ep.host}:{server.port}</code></span>
 			<span class="v">
-				<span class="ep-kind {ep.kind}">{ep.kind}</span>
+				{#if onThisMac}<span class="this-computer">This computer</span>{:else}<span class="ep-kind {ep.kind}">{ep.kind}</span>{/if}
 				{#if ep.last_latency_ms != null}<span class="lat">{ep.last_latency_ms}ms</span>{/if}
 			</span>
 		</div>
 	{/each}
-	{#if onThisMac}<p class="note">On this computer: its models count as local.</p>{/if}
 </div>
-{#if !onThisMac}
+{#if canMarkPrivate}
 	<div class="private-machine">
-		<div><span>Private machine</span><p>When on, its models count as local for local-only chats and cloud-off projects. Only turn this on if its models run on that machine, not on a service it forwards to.</p></div>
+		<div>
+			<span>Private machine</span>
+			<p>Its models count as local, so local-only chats and projects can use them. Turn this on only if the models run on that machine, not on a service it forwards to.</p>
+			{#if error}<p class="status error" role="alert">{error}</p>{/if}
+		</div>
 		<Toggle checked={privateMachine} disabled={busy} ariaLabel="Private machine" onchange={savePrivate} />
 	</div>
-	{#if error}<Message variant="err">{error}</Message>{/if}
 {/if}
 <p class="hint">Endpoints are auto-discovered (mDNS or probe). The active host is the one currently serving requests.</p>
 
@@ -69,11 +71,12 @@
 		display: inline-flex; align-items: center; gap: 8px;
 	}
 	.row code { font-family: 'SF Mono', monospace; font-size: var(--text-footnote); color: var(--text-secondary); }
-	.note { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.this-computer { color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-regular); }
 	.private-machine { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; }
 	.private-machine > div { min-width: 0; }
 	.private-machine span { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 	.private-machine p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.private-machine .status { margin-top: var(--space-1); color: var(--red-text); }
 	.private-machine :global(.tg) { flex: 0 0 auto; }
 	.hint {
 		font-size: var(--text-subhead); color: var(--text-tertiary);

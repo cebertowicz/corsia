@@ -4,9 +4,9 @@ import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 import { token } from '$lib/stores/auth';
 import { models, type Model } from '$lib/stores/models';
 
-const DESCRIPTION = "When on, only models on this computer, or on a machine you've marked private, can run in this project, including every worker its agents start.";
-const STOPS = 'Agents here using a cloud model stop at their next turn until they switch to a local one.';
-const NONE_READY = 'No local model is ready, so nothing in this project can run until one is.';
+const DESCRIPTION = "Chats and agents in this project use only models on this computer or on a machine you've marked private. A chat on a cloud model waits until you switch it to a local one.";
+const NONE_READY_OFF = 'No local model is ready yet.';
+const NONE_READY_ON = 'No local model is ready, so nothing in this project can run.';
 const local = { id: 'omlx/q', name: 'Qwen', size: '', backend: 'network', speed: '', status: 'ready', is_local: true } as Model;
 const cloud = { id: 'cc/opus', name: 'Opus', size: '', backend: 'claude-code', speed: '', status: 'unavailable', status_reason: 'project_cloud_off', is_local: false } as Model;
 
@@ -30,7 +30,7 @@ async function mountSetting() {
 	flushSync();
 	await vi.waitFor(() => expect((host.querySelector('button[role="switch"], input, button') as HTMLButtonElement | null)?.disabled).toBeFalsy());
 }
-const toggle = () => host.querySelector('[aria-label="Cloud models off"]') as HTMLElement;
+const toggle = () => host.querySelector('[aria-label="Local models only"]') as HTMLElement;
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
 
 beforeEach(() => {
@@ -40,22 +40,28 @@ beforeEach(() => {
 afterEach(() => { if (component) unmount(component); component = null; host.remove(); token.set(null); vi.unstubAllGlobals(); });
 
 describe('CloudModelsOffSetting', () => {
-	it('off: label and description only', async () => {
+	it('off with a local model ready: label and fixed description only', async () => {
 		stub(false); await mountSetting();
-		expect(text()).toContain('Cloud models off');
+		expect(text()).toContain('Local models only');
 		expect(text()).toContain(DESCRIPTION);
-		expect(text()).not.toContain(STOPS);
+		expect(text()).not.toContain(NONE_READY_OFF);
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});
-	it('on with a local model ready: adds the stop line, no warning', async () => {
+	it('off with no local model ready: quiet setup line', async () => {
+		models.set([cloud]); stub(false); await mountSetting();
+		await vi.waitFor(() => expect(text()).toContain(NONE_READY_OFF));
+		expect(text()).toContain('Set up a local model');
+		expect(host.querySelector('.status.warning')).toBeNull();
+	});
+	it('on with a local model ready: keeps the same fixed description', async () => {
 		stub(true); await mountSetting();
-		await vi.waitFor(() => expect(text()).toContain(STOPS));
-		expect(text()).not.toContain(NONE_READY);
+		expect(text()).toContain(DESCRIPTION);
+		expect(text()).not.toContain(NONE_READY_ON);
 	});
 	it('on with no local model ready: amber line', async () => {
 		models.set([cloud]); stub(true); await mountSetting();
-		await vi.waitFor(() => expect(text()).toContain(NONE_READY));
-		expect(host.querySelector('.msg.warn')).not.toBeNull();
+		await vi.waitFor(() => expect(text()).toContain(NONE_READY_ON));
+		expect(host.querySelector('.status.warning')).not.toBeNull();
 	});
 	it('turning it on saves and disables the switch until the save returns', async () => {
 		let release!: () => void;
@@ -67,21 +73,21 @@ describe('CloudModelsOffSetting', () => {
 		toggle().click(); flushSync();
 		await vi.waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(true));
 		release();
-		await vi.waitFor(() => expect(text()).toContain(STOPS));
+		await vi.waitFor(() => expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true'));
 		expect((toggle() as HTMLButtonElement).disabled).toBe(false);
 	});
-	it('save failed: names the label, direction and error', async () => {
+	it('save failed: uses the shared retry wording and keeps the saved switch state', async () => {
 		stub(false, 'fail'); await mountSetting();
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save Cloud models off: Server unavailable"));
-		expect(host.querySelector('.msg.err')).not.toBeNull();
-		expect(text()).not.toContain(STOPS);
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
+		expect(host.querySelector('.status.error')).not.toBeNull();
+		expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
 	});
 	it('save failed turning it off: the same line, and the switch stays on', async () => {
 		stub(true, 'fail'); await mountSetting();
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save Cloud models off: Server unavailable"));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
 });

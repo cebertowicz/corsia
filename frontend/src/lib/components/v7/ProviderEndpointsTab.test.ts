@@ -4,8 +4,8 @@ import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 import { token } from '$lib/stores/auth';
 import type { NetworkServer } from '$lib/stores/networkServers';
 
-const DESCRIPTION = 'When on, its models count as local for local-only chats and cloud-off projects. Only turn this on if its models run on that machine, not on a service it forwards to.';
-const THIS_MAC = 'On this computer: its models count as local.';
+const DESCRIPTION = 'Its models count as local, so local-only chats and projects can use them. Turn this on only if the models run on that machine, not on a service it forwards to.';
+const THIS_COMPUTER = 'This computer';
 const endpoint = (host: string, kind: 'local' | 'lan') => ({ id: `e-${host}`, server_id: 's1', host, kind, last_ok_at: null, last_latency_ms: null });
 const server = (over: Partial<NetworkServer>): NetworkServer => ({
 	id: 's1', provider: 'omlx', instance_id: 'i1', instance_name: 'Studio', kind: 'managed', port: 8000, status: 'online', source: 'auto',
@@ -34,19 +34,20 @@ describe('ProviderEndpointsTab private machine', () => {
 	it('another machine, off: switch and description', () => {
 		render(server({}));
 		expect(text()).toContain('Private machine'); expect(text()).toContain(DESCRIPTION);
-		expect(toggle()).not.toBeNull(); expect(text()).not.toContain(THIS_MAC);
+		expect(toggle()).not.toBeNull(); expect(text()).not.toContain(THIS_COMPUTER);
 	});
 	it('on: the saved mark shows as a set switch', () => {
 		render(server({ private: true }));
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('true'); expect(text()).toContain(DESCRIPTION);
 	});
-	it('managed oMLX on this computer: the line, no switch', () => {
+	it('managed oMLX on this computer: the caption, no switch', () => {
 		render(server({ endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: true }));
-		expect(text()).toContain(THIS_MAC); expect(toggle()).toBeNull(); expect(text()).not.toContain('Private machine');
+		expect(text()).toContain(THIS_COMPUTER); expect(toggle()).toBeNull(); expect(text()).not.toContain('Private machine');
+		expect(host.querySelector('.ep-kind.local')).toBeNull();
 	});
-	it('External on loopback: the switch, address alone does not count', () => {
-		render(server({ provider: 'external', kind: 'external', endpoints: [endpoint('127.0.0.1', 'local')] }));
-		expect(toggle()).not.toBeNull(); expect(text()).not.toContain(THIS_MAC);
+	it('External on loopback: the backend caption and the switch', () => {
+		render(server({ provider: 'external', kind: 'external', endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: true }));
+		expect(toggle()).not.toBeNull(); expect(text()).toContain(THIS_COMPUTER); expect(host.querySelector('.ep-kind.local')).toBeNull();
 	});
 	it('offline server: the switch still works', async () => {
 		render(server({ status: 'offline' }));
@@ -54,16 +55,17 @@ describe('ProviderEndpointsTab private machine', () => {
 		await vi.waitFor(() => expect(bodies).toEqual([{ private: true }]));
 		await vi.waitFor(() => expect(toggle()?.getAttribute('aria-pressed')).toBe('true'));
 	});
-	it('save failed: names the label and the error, and the switch stays off', async () => {
+	it('save failed: uses the shared retry wording and the switch stays off', async () => {
 		render(server({}), 'fail');
 		toggle()!.click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save Private machine: Server unavailable"));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
+		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
 	});
 	it('save failed turning it off: the same line, and the switch stays on', async () => {
 		render(server({ private: true }), 'fail');
 		toggle()!.click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save Private machine: Server unavailable"));
+		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Server unavailable Try again."));
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
 	});
 });

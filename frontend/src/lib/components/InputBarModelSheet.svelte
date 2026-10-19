@@ -159,7 +159,7 @@
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
 			{#if cloudModelsOff && !hasReadyGroup}
-				<div class="model-list-empty">Cloud models are off in this project, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+				<div class="model-list-empty">This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
 			{/if}
 			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
 				<div class="model-list-empty">No available models</div>
@@ -287,7 +287,7 @@
 						{/if}
 					</section>
 				{/each}
-				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">Cloud models are off in this project.</div>{/if}
+				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
 				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />

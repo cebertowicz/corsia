@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Toggle from './ui/Toggle.svelte';
-	import Message from './ui/Message.svelte';
 	import { loadCloudModelsOff, saveCloudModelsOff } from '$lib/api/providerPolicy';
 	import { models } from '$lib/stores/models';
+	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 
 	// The project's own switch: only models on this computer or a private machine run in the project.
 	let { projectId }: { projectId: string } = $props();
@@ -25,21 +25,22 @@
 		saving = true; error = '';
 		const result = await saveCloudModelsOff(projectId, next);
 		if (result.ok) off = result.value.cloud_models_off;
-		else error = `Couldn't save Cloud models off: ${result.error}`;
+		else error = `Couldn't save this change. ${result.error} Try again.`;
 		saving = false;
 	}
 </script>
 
 <div class="setting">
 	<div>
-		<span class="label">Cloud models off</span>
-		<p>When on, only models on this computer, or on a machine you've marked private, can run in this project, including every worker its agents start.</p>
-		{#if off}<p>Agents here using a cloud model stop at their next turn until they switch to a local one.</p>{/if}
+		<span class="label">Local models only</span>
+		<p>Chats and agents in this project use only models on this computer or on a machine you've marked private. A chat on a cloud model waits until you switch it to a local one.</p>
+		{#if !hasReadyLocalModel}
+			<p class="status" class:warning={off}>{off ? 'No local model is ready, so nothing in this project can run.' : 'No local model is ready yet.'} <button type="button" onclick={() => requestSettingsSection('providers')}>Set up a local model</button></p>
+		{/if}
+		{#if error}<p class="status error" role="alert">{error}</p>{/if}
 	</div>
-	<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Cloud models off" onchange={change} />
+	<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Local models only" onchange={change} />
 </div>
-{#if off && !hasReadyLocalModel}<Message variant="warn">No local model is ready, so nothing in this project can run until one is.</Message>{/if}
-{#if error}<Message variant="err">{error}</Message>{/if}
 
 <style>
 	.setting { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
@@ -48,4 +49,8 @@
 	.label { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 	p { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	p + p { margin-top: var(--space-1); }
+	.status { color: var(--text-secondary); }
+	.status.warning { color: var(--amber-text); }
+	.status.error { color: var(--red-text); }
+	.status button { appearance: none; border: 0; padding: 0; background: transparent; color: var(--accent-text); cursor: pointer; font: inherit; font-size: inherit; text-decoration: underline; }
 </style>

@@ -6,7 +6,7 @@ import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 
 /**
- * Review frames for the local-only controls (Cloud models off, Private machine, the cloud-off model sheet).
+ * Review frames for the local-only controls (Local models only, Private machine, the cloud-off model sheet).
  * Every frame is the real app with the server answers faked by route interception; nothing signs in beyond the
  * disposable test token. Enabled only with LOCAL_ONLY_FRAMES_OUT (the output folder); LOCAL_ONLY_FRAMES_MODE=before
  * renders just the project page and Endpoints tab, for a checkout that does not have the change.
@@ -56,7 +56,7 @@ const servers = {
 	thisMac: server('srv-local', { instance_name: 'oMLX', on_this_mac: true, endpoints: [endpoint('e2', '127.0.0.1', 'local')], active_host: '127.0.0.1' }),
 	remoteOffline: server('srv-studio', { instance_name: 'Studio mini', status: 'offline', latency_ms: null, endpoints: [{ ...endpoint('e1', '192.168.1.20', 'lan'), last_latency_ms: null }], active_host: null, private: true }),
 	loopback: server('srv-lms', { provider: 'external', kind: 'external', instance_name: 'LM Studio', port: 1234, dialect: 'openai',
-		endpoints: [endpoint('e3', '127.0.0.1', 'local')], active_host: '127.0.0.1', private: false, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
+		endpoints: [endpoint('e3', '127.0.0.1', 'local')], active_host: '127.0.0.1', on_this_mac: true, private: false, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
 };
 
 const vendorAccounts = [['personal', 'claude-code', 'Personal Max'], ['pro', 'codex', 'Pro']].map(([id, provider, name]) => ({
@@ -166,29 +166,34 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			// Project page.
 			Object.assign(state, { models: catalogs.plain, cloudOff: false, failSave: false });
 			let region = await openProjectProviders(page, await begin(width, height, theme));
-			if (!BEFORE) await expect(region.getByText('Cloud models off').first()).toBeVisible();
+			if (!BEFORE) await expect(region.getByText('Local models only').first()).toBeVisible();
 			await shot(`${prefix}project-page`, size, theme);
 			if (!BEFORE) {
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
-				await expect(region.getByText('Agents here using a cloud model stop at their next turn')).toBeVisible();
+				await expect(region.getByText("Chats and agents in this project use only models on this computer or on a machine you've marked private. A chat on a cloud model waits until you switch it to a local one.")).toBeVisible();
 				await shot('project-on-local-ready', size, theme);
 
 				Object.assign(state, { models: catalogs.noneReady, cloudOff: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
-				await expect(region.getByText('No local model is ready, so nothing in this project can run until one is.')).toBeVisible();
+				await expect(region.getByText('No local model is ready, so nothing in this project can run.')).toBeVisible();
 				await shot('project-on-none-ready', size, theme);
+
+				Object.assign(state, { models: catalogs.noneReady, cloudOff: false });
+				region = await openProjectProviders(page, await begin(width, height, theme));
+				await expect(region.getByText('No local model is ready yet.')).toBeVisible();
+				await shot('project-off-none-ready', size, theme);
 
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: false, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
-				await region.getByRole('button', { name: 'Cloud models off', exact: true }).click();
-				await expect(region.getByText("Couldn't save Cloud models off: Server unavailable")).toBeVisible();
+				await region.getByRole('button', { name: 'Local models only', exact: true }).click();
+				await expect(region.getByText("Couldn't save this change. Server unavailable Try again.")).toBeVisible();
 				await shot('project-save-failed', size, theme);
 
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: true, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
-				await region.getByRole('button', { name: 'Cloud models off', exact: true }).click();
-				await expect(region.getByText("Couldn't save Cloud models off: Server unavailable")).toBeVisible();
+				await region.getByRole('button', { name: 'Local models only', exact: true }).click();
+				await expect(region.getByText("Couldn't save this change. Server unavailable Try again.")).toBeVisible();
 				await shot('project-save-failed-off', size, theme);
 				state.failSave = false;
 
@@ -196,7 +201,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				region = await openProjectProviders(page, await begin(width, height, theme));
 				let release = () => {};
 				state.hold = new Promise<void>((resolve) => { release = resolve; });
-				const saving = region.getByRole('button', { name: 'Cloud models off', exact: true });
+				const saving = region.getByRole('button', { name: 'Local models only', exact: true });
 				await saving.click();
 				await expect(saving).toBeDisabled();
 				await shot('project-saving', size, theme);
@@ -229,7 +234,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 					await openEndpoints(page, label);
 					if (act === 'fail') {
 						await page.getByRole('button', { name: 'Private machine', exact: true }).click();
-						await expect(page.getByText("Couldn't save Private machine: Server unavailable")).toBeVisible();
+						await expect(page.getByText("Couldn't save this change. Server unavailable Try again.")).toBeVisible();
 					}
 					await shot(name, size, theme);
 				}
@@ -253,7 +258,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 
 				state.canAddLocal = false;
 
-				// A thread already on a cloud model when the project turns Cloud models off.
+				// A thread already on a cloud model when the project turns Local models only.
 				Object.assign(state, { models: catalogs.plain, cloudOff: false });
 				await openSheetInProject(page, await begin(width, height, theme));
 				await page.locator('.model-sheet').getByRole('button', { name: /Opus 5\.5/ }).first().click();

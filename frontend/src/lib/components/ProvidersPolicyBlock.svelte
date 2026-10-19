@@ -75,7 +75,10 @@
 </script>
 
 <section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
-	{#if projectId}<CloudModelsOffSetting {projectId} />{/if}
+	{#if projectId}
+		<h2>Models</h2>
+		<CloudModelsOffSetting {projectId} />
+	{/if}
 	<h2>Accounts and rollover</h2>
 	{#if loading}<p role="status">Loading providers…</p>
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>

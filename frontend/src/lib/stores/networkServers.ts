@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { token } from './auth';
-import { plainResponseError, SERVER_UNREACHABLE } from '$lib/plainError';
+import { plainResponseError } from '$lib/plainError';
 
 export type EndpointKind = 'local' | 'lan' | 'tailscale' | 'public';
 
@@ -62,7 +62,7 @@ export interface NetworkServer {
 	last_seen_at?: string | null;
 	discovered_at?: string | null;
 	metadata?: NetworkServerMetadata;
-	/** The backend's fact: a non-External server on loopback, so its models are local without a mark. */
+	/** The backend's fact that the endpoint is on this computer; it supplies the address caption only. */
 	on_this_mac?: boolean;
 	/** The person marked this machine as theirs, so its models count as local. */
 	private?: boolean;
@@ -202,9 +202,9 @@ export async function setNetworkServerPrivate(
 			networkServers.update(servers => servers.map(row => row.id === serverId ? { ...row, private: isPrivate } : row));
 			return { ok: true };
 		}
-		return { ok: false, message: await plainResponseError(res, 'The server did not accept the change. Try again.') };
+		return { ok: false, message: await plainResponseError(res, "The change wasn't saved.") };
 	} catch {
-		return { ok: false, message: SERVER_UNREACHABLE };
+		return { ok: false, message: "Couldn't reach CORSIA. Check your connection." };
 	}
 }
 
