@@ -15,7 +15,9 @@ AUDIT_TABLE_SQL = """
         action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
         revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
             'revoked', 'provider_unreachable', 'provider_timeout',
-            'provider_rejected', 'provider_unexpected', 'not_signed_in'
+            'provider_rejected', 'provider_unexpected', 'not_signed_in',
+            'manual_only', 'app_registration_not_allowed', 'admin_approval_required',
+            'consent_cancelled', 'refresh_token_invalid', 'provider_unavailable', 'input_refusal'
         ))
     )"""
 
@@ -24,6 +26,11 @@ CONNECTED_ACCOUNTS_SCHEMA_SQL = f"""
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
         provider_subject TEXT,
+        account_kind TEXT CHECK(account_kind IS NULL OR account_kind IN ('personal', 'work')),
+        state_cause TEXT CHECK(state_cause IS NULL OR state_cause IN (
+            'app_registration_not_allowed', 'admin_approval_required', 'consent_cancelled',
+            'refresh_token_invalid', 'provider_unavailable', 'manual_only', 'input_refusal'
+        )),
         address TEXT NOT NULL,
         capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
         state TEXT NOT NULL CHECK(state IN ('connected', 'needs_sign_in', 'signed_out')),

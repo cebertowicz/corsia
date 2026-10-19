@@ -16,7 +16,8 @@
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
 
 	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
-	const accountName = (account: ConnectedAccount) => `Google — ${account.address}`;
+	const providerName = (account: ConnectedAccount) => account.provider === 'microsoft' ? 'Microsoft' : 'Google';
+	const accountName = (account: ConnectedAccount) => `${providerName(account)} — ${account.address}`;
 	const accountAnchor = (id: string) => `connected-account-${id}`;
 	const isAccount = (row: ConnectedAppsRow): row is ConnectedAccount => row.kind === 'account';
 	const accountNeedsSignIn = (account: ConnectedAccount) => account.state === 'needs_sign_in' || account.state === 'signed_out';
@@ -292,7 +293,7 @@
 				{#each rows as row (row.id)}
 					{#if isAccount(row)}
 						<div class="item account-item" data-connected-account-id={row.id} data-settings-anchor={accountAnchor(row.id)} use:settingsAnchor={accountAnchor(row.id)}>
-							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">Google —</span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
+							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">{providerName(row)} —</span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
 							<SettingsRow name={accountTitle} ariaLabel={accountName(row)} subTone={tone(row)} wrapName={openId === row.id} chevron expanded={openId === row.id} onOpen={() => openId = openId === row.id ? null : row.id}>
 								{#snippet sub()}{accountStateLine(row)}<span class="place">{` · ${placeLine(row)}`}</span>{/snippet}
 							</SettingsRow>
