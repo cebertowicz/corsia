@@ -183,7 +183,7 @@
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
-	.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+	.heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 	/* The ledes and the empty, loading and error states are one body size, inset to the edge the page title and rows use. */
 	.lede, .state { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
 	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
@@ -199,5 +199,5 @@
 	/* Remove is a text action in the danger tone. */
 	.danger-text :global(.btn.ghost), .danger-text :global(.btn.ghost:hover:not(:disabled)) { color: var(--red-text); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); padding: 0 var(--space-2); font-size: var(--text-footnote); }
-	@media (max-width: 768px) { .heading { align-items: stretch; flex-direction: column; } .heading :global(.btn) { align-self: flex-start; } }
+	/* The header action wraps beneath the explanation on narrow screens. */
 </style>
