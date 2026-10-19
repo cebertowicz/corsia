@@ -210,7 +210,17 @@
 				const providerGap = Number.parseFloat(providerStyle.marginInlineEnd) || 0;
 				const available = Math.max(0, node.clientWidth - provider.getBoundingClientRect().width - providerGap - suffix.getBoundingClientRect().width - domain.getBoundingClientRect().width);
 				const next = distinctPrefix(current, available, getComputedStyle(prefix));
-				if (closedLocalPrefixes.get(current.id) !== next) closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, next);
+				if (closedLocalPrefixes.get(current.id) === next) return;
+				closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, next);
+				requestAnimationFrame(() => {
+					const domainRange = document.createRange();
+					if (typeof domainRange.getBoundingClientRect !== 'function') return;
+					domainRange.selectNodeContents(domain);
+					const overflow = domainRange.getBoundingClientRect().right - node.getBoundingClientRect().right;
+					if (overflow <= 0.5) return;
+					const fallback = clippedPrefix(parts.localPrefix, Math.max(0, available - overflow - 1), getComputedStyle(prefix));
+					if (closedLocalPrefixes.get(current.id) !== fallback) closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, fallback);
+				});
 			});
 		};
 		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
@@ -229,18 +239,24 @@
 	}
 	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
 
+	function clearLinkedFocus(): void { linkedAccountId = null; }
+
 	$effect(() => {
 		const accountId = $settingsNavigation.connectedAppId;
 		if (loading || !accountId || !rows.some((row) => row.id === accountId)) return;
 		openId = accountId;
-		linkedAccountId = accountId;
+		clearLinkedFocus();
 		requestAnimationFrame(() => {
 			const row = document.querySelector<HTMLElement>(`[data-connected-account-id="${CSS.escape(accountId)}"]`);
 			const account = rows.find((candidate): candidate is ConnectedAccount => candidate.id === accountId && isAccount(candidate));
 			const label = account && accountNeedsSignIn(account) ? 'Sign in' : 'Where it works…';
-			[...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) => button.textContent?.trim() === label)?.focus();
+			const target = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) => button.textContent?.trim() === label);
+			if (!target || target.disabled) return;
+			target.focus();
+			if (document.activeElement === target) linkedAccountId = accountId;
 		});
 	});
+	$effect(() => { if (offline) clearLinkedFocus(); });
 	onMount(() => {
 		void loadProjects(); void load();
 		const afterSignIn = () => { void refresh(); };
@@ -253,12 +269,11 @@
 
 <section class="connected-apps" data-settings-anchor="connected-apps" use:settingsAnchor={'connected-apps'} id="connected-apps">
 	<div class="heading">
-		<h2 class="page-title">Connected apps</h2>
-		<Button variant="primary" onclick={() => connectAppOpen = true}>Connect an app</Button>
 		<div>
 			<p class="lede">Connect the apps you already use, like GitHub or Notion, so your agents can work in them. Each app works in the projects you choose for it.</p>
 			{#if anyFirstSignIn(rows.filter((row): row is ConnectedApp => !isAccount(row)))}<p class="lede">{SIGN_IN_LEDE}</p>{/if}
 		</div>
+		<Button variant="primary" onclick={() => connectAppOpen = true}>Connect an app</Button>
 	</div>
 	{#if loading}
 		<p class="state" role="status">Loading connected apps…</p>
@@ -285,8 +300,8 @@
 									{#if manualStep?.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline. Try again when you’re connected.</p>{/if}
 									<div class="actions account-actions">
-										{#if accountNeedsSignIn(row)}<span class="account-action"><Button variant="primary" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => startSignIn(row)}>Sign in</Button></span>{/if}
-										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id} data-chat-link-focus={linkedAccountId === row.id || undefined}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
+										{#if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="primary" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{/if}
+										<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedAccountId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
 										{#if row.state === 'connected'}<span class="account-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
 										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
@@ -322,10 +337,8 @@
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
-	.heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-3) var(--space-4); }
-	.heading .page-title { grid-column: 1; margin: 0; padding: 0 var(--space-2); font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
-	.heading > :global(.btn) { grid-column: 2; }
-	.heading > div { grid-column: 1 / -1; min-width: 0; }
+	.heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+	@media (min-width: 48.0625rem) { .heading > div { flex: 1; min-width: 0; } }
 	.lede, .state, .offline { margin: 0 0 var(--space-2); padding: 0 var(--space-2); }
 	.lede { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.45; }
 	.state, .offline { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }

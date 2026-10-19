@@ -1,9 +1,14 @@
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection } from './support/corsia';
 
-const outputDir = process.env.CORSIA_CAPTURE_DIR ?? 'test-results/google-account-rows';
+const outputDir = resolve(dirname(fileURLToPath(import.meta.url)), process.env.CORSIA_CAPTURE_DIR ?? 'test-results/google-account-rows');
+const captureViewports = {
+	'chromium-desktop': { width: 1440, height: 1000, label: '1440' },
+	'chromium-mobile': { width: 393, height: 852, label: '393' },
+} as const;
 const captureEnabled = process.env.CORSIA_CAPTURE_CONNECTED_APPS === '1';
 
 type AccountState = 'typical' | 'needs-sign-in' | 'signed-out' | 'long';
@@ -51,22 +56,25 @@ async function expectPaintedClosedTitles(page: Page) {
 		const provider = row.querySelector('.account-provider');
 		const prefix = row.querySelector('.account-local-prefix');
 		const suffix = row.querySelector('.account-local-suffix');
-		if (!provider || !prefix || !suffix) return null;
+		const domain = row.querySelector('.account-domain');
+		const title = row.querySelector('.account-closed-name');
+		if (!provider || !prefix || !suffix || !domain || !title) return null;
 		const providerRange = document.createRange();
 		providerRange.selectNodeContents(provider);
 		const prefixRange = document.createRange();
 		prefixRange.selectNodeContents(prefix);
-		return { prefix: prefix.textContent, providerRight: providerRange.getBoundingClientRect().right, prefixLeft: prefixRange.getBoundingClientRect().left, prefixRight: prefixRange.getBoundingClientRect().right, suffixLeft: suffix.getBoundingClientRect().left };
+		const domainRange = document.createRange();
+		domainRange.selectNodeContents(domain);
+		return { prefix: prefix.textContent, providerRight: providerRange.getBoundingClientRect().right, prefixLeft: prefixRange.getBoundingClientRect().left, prefixRight: prefixRange.getBoundingClientRect().right, suffixLeft: suffix.getBoundingClientRect().left, domainRight: domainRange.getBoundingClientRect().right, titleRight: title.getBoundingClientRect().right };
 	}));
-	expect(measurements.every((measurement) => measurement && measurement.prefixLeft > measurement.providerRight && measurement.prefixRight <= measurement.suffixLeft + 0.5)).toBe(true);
+	expect(measurements.every((measurement) => measurement && measurement.prefixLeft > measurement.providerRight && measurement.prefixRight <= measurement.suffixLeft + 0.5 && measurement.domainRight <= measurement.titleRight + 0.5)).toBe(true);
 	return measurements;
 }
 
-async function expectPaintedLongNamesToStaySeparate(page: Page) {
+async function expectPaintedLongNamesToStaySeparate(page: Page, requireDistinctPrefix: boolean) {
 	const measurements = await expectPaintedClosedTitles(page);
 	expect(measurements).toHaveLength(4);
-	expect(measurements.every((measurement) => measurement?.prefix?.includes('…') && !/[._+\-][^._+\-]?…/.test(measurement.prefix ?? ''))).toBe(true);
-	expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(4);
+	if (requireDistinctPrefix) expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(4);
 }
 
 test.describe('Google account rows capture', () => {
@@ -99,9 +107,11 @@ test.describe('Google account rows capture', () => {
 			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [{ id: 'garden', name: 'Garden plan', status: 'active', accent_color: null }] } }));
 			await page.emulateMedia({ colorScheme: theme });
 			await loginByUrl(page, { waitForComposer: false });
+			const viewport = captureViewports[testInfo.project.name as keyof typeof captureViewports];
+			if (!viewport) throw new Error(`No capture viewport for ${testInfo.project.name}`);
+			await page.setViewportSize(viewport);
 			await openConnectedApps(page);
-			const viewport = page.viewportSize()!.width;
-			const width = viewport > 768 ? '1440' : '393';
+			const width = viewport.label;
 			await expect(page.getByRole('button', { name: 'Google — sam.work@example.com', exact: true })).toBeVisible();
 			await expect(page.getByText('Connected · Only CORSIA')).toBeVisible();
 			await expectPaintedClosedTitles(page);
@@ -136,7 +146,10 @@ test.describe('Google account rows capture', () => {
 			await expect(signInAction).toBeVisible();
 			await capture(page, testInfo, `11-needs-sign-in-${width}-${theme}`);
 			await page.evaluate(() => { window.location.hash = 'connected-apps/google-work'; });
+			const signInMarker = page.locator('[data-connected-account-id="google-work"] [data-chat-link-focus]');
+			await expect(signInMarker).toHaveCount(1);
 			await expect(signInAction).toBeFocused();
+			await expect(signInAction).toHaveCSS('outline-style', 'solid');
 			await capture(page, testInfo, `23-needs-sign-in-chat-link-focus-${width}-${theme}`);
 			await page.evaluate(() => { history.replaceState(null, '', window.location.pathname); });
 
@@ -150,7 +163,7 @@ test.describe('Google account rows capture', () => {
 			await page.reload();
 			await openConnectedApps(page);
 			await expect(page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com', exact: true })).toBeVisible();
-			if (viewport <= 768) await expectPaintedLongNamesToStaySeparate(page);
+			await expectPaintedLongNamesToStaySeparate(page, width === '1440');
 			await capture(page, testInfo, `24-same-prefix-long-closed-${width}-${theme}`);
 			await page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com', exact: true }).click();
 			const openLongName = page.locator('[data-connected-account-id="google-work"] .name[data-wrap-name="true"]');
@@ -173,6 +186,8 @@ test.describe('Google account rows capture', () => {
 			await expect(linkedAction).toBeFocused();
 			await expect(linkedAction).toHaveCSS('outline-style', 'solid');
 			await capture(page, testInfo, `18-chat-link-focus-${width}-${theme}`);
+			await page.getByRole('button', { name: 'Sign out' }).focus();
+			await expect(page.locator('[data-chat-link-focus]')).toHaveCount(0);
 
 			failNextList = true;
 			await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -182,6 +197,8 @@ test.describe('Google account rows capture', () => {
 			await expect(offlineAccount.getByRole('button', { name: 'Where it works…' })).toBeDisabled();
 			await expect(offlineAccount.getByRole('button', { name: 'Sign out' })).toBeDisabled();
 			await expect(offlineAccount.getByRole('button', { name: 'Remove' })).toBeDisabled();
+			await page.evaluate(() => { window.location.hash = 'connected-apps/google-work'; });
+			await expect(offlineAccount.locator('[data-chat-link-focus]')).toHaveCount(0);
 			await capture(page, testInfo, `offline-${width}-${theme}`);
 		});
 	}

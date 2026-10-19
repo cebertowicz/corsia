@@ -299,11 +299,11 @@ describe('ConnectedAppsSettings', () => {
 		expect([...host.querySelectorAll('.item .details .actions .btn.ghost')].map((b) => b.textContent?.trim())).toEqual(['Where it works…', 'Reconnect', 'Remove']);
 	});
 
-	it('keeps Connect an app on the Connected apps title line', async () => {
+	it('keeps the Connect an app action with its introductory copy', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('No connected apps yet.'));
-		expect(host.querySelector('h2')?.textContent).toBe('Connected apps');
+		expect(host.querySelector('h2')).toBeNull();
 		expect(host.querySelector('.heading .btn')?.textContent?.trim()).toBe('Connect an app');
 		expect(host.querySelector('p')?.textContent).toContain('Connect the apps you already use');
 	});
