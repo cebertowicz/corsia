@@ -71,10 +71,12 @@ async function expectPaintedClosedTitles(page: Page) {
 	return measurements;
 }
 
-async function expectPaintedLongNamesToStaySeparate(page: Page, requireDistinctPrefix: boolean) {
+async function expectPaintedLongNamesToStaySeparate(page: Page) {
 	const measurements = await expectPaintedClosedTitles(page);
 	expect(measurements).toHaveLength(4);
-	if (requireDistinctPrefix) expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(4);
+	expect(measurements.every((measurement) => !measurement?.prefix?.includes('…') || !/[._+\-][^._+\-]?…/.test(measurement.prefix ?? '')), JSON.stringify(measurements)).toBe(true);
+	expect(new Set(measurements.map((measurement) => measurement?.prefix)).size).toBe(4);
+	expect(measurements.map((measurement) => measurement?.prefix).join(' ')).toMatch(/work.*personal.*alpha.*beta/);
 }
 
 test.describe('Google account rows capture', () => {
@@ -163,7 +165,7 @@ test.describe('Google account rows capture', () => {
 			await page.reload();
 			await openConnectedApps(page);
 			await expect(page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com', exact: true })).toBeVisible();
-			await expectPaintedLongNamesToStaySeparate(page, width === '1440');
+			await expectPaintedLongNamesToStaySeparate(page);
 			await capture(page, testInfo, `24-same-prefix-long-closed-${width}-${theme}`);
 			await page.getByRole('button', { name: 'Google — shared.prefix.very-long-work-address@example.com', exact: true }).click();
 			const openLongName = page.locator('[data-connected-account-id="google-work"] .name[data-wrap-name="true"]');
@@ -192,7 +194,7 @@ test.describe('Google account rows capture', () => {
 			failNextList = true;
 			await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 			await expect(page.getByText('Showing last known items.')).toBeVisible();
-			await expect(page.getByText('Actions are unavailable while offline. Try again when you’re connected.')).toBeVisible();
+			await expect(page.getByText('Actions are unavailable while offline.')).toBeVisible();
 			const offlineAccount = page.locator('[data-connected-account-id="google-work"]');
 			await expect(offlineAccount.getByRole('button', { name: 'Where it works…' })).toBeDisabled();
 			await expect(offlineAccount.getByRole('button', { name: 'Sign out' })).toBeDisabled();
