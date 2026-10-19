@@ -24,6 +24,47 @@ export interface ConnectedApp {
 	sign_in?: SignInView;
 }
 
+export type AppReach = ConnectedApp['reach'];
+
+/** Why a Google account's sign-in is gone or was just revoked. Only the last four show the manual Google Account step. */
+export type RevocationCause =
+	| 'revoked'
+	| 'not_signed_in'
+	| 'provider_unreachable'
+	| 'provider_timeout'
+	| 'provider_rejected'
+	| 'provider_unexpected';
+
+export type AccountState = 'connected' | 'needs_sign_in' | 'signing_in' | 'signed_out' | 'removing';
+
+/** One signed-in provider account (today Google). Never holds a credential, a key name, a token or provider text. */
+export interface ConnectedAccount {
+	kind: 'account';
+	id: string;
+	provider: 'google';
+	/** Display only: the address can change at Google. */
+	address: string;
+	/** Stable ids; the screen words them: `mail` is Email, `calendar` Calendar, `files` Files. */
+	capabilities: ('mail' | 'calendar' | 'files')[];
+	state: AccountState;
+	/** Only CORSIA is `mode: 'selected'` with no projects and no outside places. */
+	reach: AppReach;
+}
+
+/** A hosted or local app row, as `/api/mcp/servers` returns it, tagged for the union. */
+export type HostedAppRow = ConnectedApp & { kind: 'hosted_app' };
+export type ConnectedAppsRow = HostedAppRow | ConnectedAccount;
+
+/** What the screen shows after Sign out or Remove. Only `MANUAL_STEP_CAUSES` show the manual Google Account step. */
+export const MANUAL_STEP_CAUSES: readonly RevocationCause[] = ['provider_unreachable', 'provider_timeout', 'provider_rejected', 'provider_unexpected'];
+
+export function needsManualGoogleStep(cause: RevocationCause): boolean {
+	return MANUAL_STEP_CAUSES.includes(cause);
+}
+
+export interface AccountSignOutResult { row: ConnectedAccount; revocation: RevocationCause }
+export interface AccountRemoveResult { id: string; removed: true; revocation: RevocationCause }
+
 export interface SignInView {
 	status: 'idle' | 'pending' | 'failed';
 	signed_in: boolean;
@@ -41,9 +82,11 @@ function url(path: string): string {
 	return `${path}?token=${encodeURIComponent(auth ?? '')}`;
 }
 
-async function response<T>(path: string, init?: RequestInit): Promise<T> {
+const ACCOUNT_FAILED = 'Could not change this Google account. Try again.';
+
+async function response<T>(path: string, init?: RequestInit, fallback = 'Could not update this app. Try again.'): Promise<T> {
 	const result = await fetch(url(path), init);
-	if (!result.ok) throw new Error(await plainResponseError(result, 'Could not update this app. Try again.'));
+	if (!result.ok) throw new Error(await plainResponseError(result, fallback));
 	return result.json() as Promise<T>;
 }
 
@@ -54,6 +97,39 @@ export async function loadConnectedAppsList(): Promise<{ servers: ConnectedApp[]
 
 export async function loadConnectedApps(): Promise<ConnectedApp[]> {
 	return (await loadConnectedAppsList()).servers;
+}
+
+/** The one list the Connected apps screen renders: Google accounts first, then apps. */
+export async function loadConnectedAppsRows(): Promise<{ rows: ConnectedAppsRow[]; signInHere: boolean }> {
+	const result = await response<{ servers: ConnectedApp[]; accounts?: ConnectedAccount[]; sign_in_here?: boolean }>('/api/mcp/servers');
+	const accounts = (result.accounts ?? []).map((account): ConnectedAccount => ({ ...account, kind: 'account' }));
+	const apps = result.servers.map((app): HostedAppRow => ({ ...app, kind: 'hosted_app' }));
+	return { rows: [...accounts, ...apps], signInHere: result.sign_in_here ?? false };
+}
+
+/** Starts a sign-in for this account in the browser on this Mac; the answer holds the link to open. */
+export function startAccountSignIn(id: string): Promise<{ url: string; account_id: string }> {
+	return response('/api/google/connect', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ account_id: id }),
+	}, 'Could not start the sign-in. Try again.');
+}
+
+export function signOutOfAccount(id: string): Promise<AccountSignOutResult> {
+	return response(`/api/mcp/accounts/${encodeURIComponent(id)}/sign-out`, { method: 'POST' }, ACCOUNT_FAILED);
+}
+
+export function removeAccount(id: string): Promise<AccountRemoveResult> {
+	return response(`/api/mcp/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }, ACCOUNT_FAILED);
+}
+
+export function saveAccountReach(id: string, reach: AppReach): Promise<{ row: ConnectedAccount }> {
+	return response(`/api/mcp/accounts/${encodeURIComponent(id)}/reach`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ reach }),
+	}, ACCOUNT_FAILED);
 }
 
 /** Starting failed in a way the screen names (a fixed class), not with the server's text. */

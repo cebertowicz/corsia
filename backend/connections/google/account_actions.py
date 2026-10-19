@@ -5,7 +5,12 @@ never returns credential material. Sign out and Remove delete the local
 sign-in first and commit the audit record, then revoke at Google with the
 removed refresh token; the audit then gets one fixed cause, never Google's
 response text. A failed revoke still leaves the local change in place, and the
-returned cause tells the person's surface to show the manual Google Account step.
+returned cause tells the person's surface what to show.
+
+The cause is one of ``REVOCATION_CAUSES``. Only ``MANUAL_STEP_CAUSES`` (the
+provider could not be asked, or refused) show the manual Google Account step;
+``revoked`` shows nothing more, and ``not_signed_in`` means no sign-in was held
+because Sign out already revoked it, so there is nothing for the person to do.
 """
 
 from __future__ import annotations
@@ -31,12 +36,13 @@ SIGN_OUT_FROM = frozenset(("connected", "needs_sign_in"))
 NOT_FOUND = "connected account not found"
 EMPTY_REACH = "Where it works needs at least one place"
 PERSON_ONLY = "only the person can widen where an account works"
+MANUAL_STEP_CAUSES = frozenset(("provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected"))
 
 
 async def _revoke(refresh_token: str | None) -> str:
     """Revoke one refresh token at Google; return the fixed audit cause."""
     if not refresh_token:
-        return "manual_only"
+        return "not_signed_in"
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.post(REVOKE_URL, data={"token": refresh_token})

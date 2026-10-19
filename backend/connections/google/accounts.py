@@ -3,7 +3,10 @@
 An agent names the account by ``account_id`` or by the address the person
 used. There is never a default: with no name, the call returns a
 clarification listing the accounts this caller can reach. Every error text
-here is fixed and safe to show; none confirms an account the caller can't reach.
+here is fixed and safe to show. An address the caller names that is connected but out of
+reach gets the reach refusal, which says the account exists and who can widen it; an
+address no account has gets "No Google account matches". An out-of-reach account is
+never listed in a clarification.
 """
 
 from __future__ import annotations

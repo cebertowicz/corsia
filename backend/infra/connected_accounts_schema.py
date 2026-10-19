@@ -15,7 +15,7 @@ AUDIT_TABLE_SQL = """
         action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
         revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
             'revoked', 'provider_unreachable', 'provider_timeout',
-            'provider_rejected', 'provider_unexpected', 'manual_only'
+            'provider_rejected', 'provider_unexpected', 'not_signed_in'
         ))
     )"""
 JOURNAL_TABLE_SQL = """

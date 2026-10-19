@@ -30,6 +30,8 @@ def migrate_126_to_127(conn: sqlite3.Connection) -> None:
         columns = ",".join(row[1] for row in conn.execute(f"PRAGMA table_info({table})"))
         conn.execute(f"ALTER TABLE {table} RENAME TO {table}_with_fk")
         conn.execute(create)
+        if table == "connected_account_audit":  # The rebuilt check lists the cause's current name.
+            conn.execute(f"UPDATE {table}_with_fk SET revocation_cause='not_signed_in' WHERE revocation_cause='manual_only'")
         conn.execute(f"INSERT INTO {table}({columns}) SELECT {columns} FROM {table}_with_fk")
         conn.execute(f"DROP TABLE {table}_with_fk")
     conn.execute(

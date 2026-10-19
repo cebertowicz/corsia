@@ -20,7 +20,7 @@ GOOGLE_STATES = frozenset(("connected", "needs_sign_in", "signing_in", "signed_o
 AUDIT_ACTIONS = frozenset(("connect", "sign_in", "sign_out", "remove"))
 REVOCATION_CAUSES = frozenset((
     "revoked", "provider_unreachable", "provider_timeout", "provider_rejected",
-    "provider_unexpected", "manual_only",
+    "provider_unexpected", "not_signed_in",
 ))
 Actor = tuple[Literal["person", "agent", "system"], str]
 

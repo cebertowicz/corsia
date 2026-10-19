@@ -51,9 +51,9 @@ def _foreign_keys(db: sqlite3.Connection, table: str) -> list:
 
 
 def test_v126_registers_the_history_step() -> None:
-    assert SCHEMA_VERSION == 127
+    assert SCHEMA_VERSION == 128
     assert MIGRATIONS[126] is migrate_126_to_127
-    assert 127 not in MIGRATIONS
+    assert 128 not in MIGRATIONS
 
 
 def test_a_126_database_keeps_its_remove_audit_after_migrating(isolated_db) -> None:
@@ -66,7 +66,7 @@ def test_a_126_database_keeps_its_remove_audit_after_migrating(isolated_db) -> N
         assert all(_foreign_keys(db, table) for table in HISTORY)
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 126, 127)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 126, 128)
         assert not any(_foreign_keys(db, table) for table in HISTORY)
         assert db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_connected_account_audit_account'"
@@ -95,5 +95,26 @@ def test_the_step_leaves_history_without_foreign_keys_alone(isolated_db) -> None
         migrate_126_to_127(db)
         after = [db.execute(f"SELECT sql FROM sqlite_master WHERE name='{table}'").fetchone()[0] for table in HISTORY]
         assert after == before
+    finally:
+        db.close()
+
+
+def test_a_126_audit_row_with_the_old_cause_keeps_its_row_under_the_new_name(isolated_db) -> None:
+    account_id = str(create_google_account(
+        "person@example.com", reach=corsia_only_reach(), created_by=("system", "test"), state="connected",
+    )["id"])
+    db = get_db()
+    try:
+        _schema_126_with_linked_history(db, account_id)
+        db.execute(
+            "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause)"
+            " VALUES ('t1', ?, 'person', 'steve', 'remove', 'manual_only')", (account_id,),
+        )
+        db.commit()
+
+        migrate_to_current(db, SCHEMA_VERSION)
+
+        causes = [row[0] for row in db.execute("SELECT revocation_cause FROM connected_account_audit ORDER BY id")]
+        assert causes == [None, "not_signed_in"]
     finally:
         db.close()
