@@ -521,6 +521,12 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
     assert sent == ([] if refused else ["delivered"])
 
 
+def test_post_update_needs_no_local_only_confirmation_flag() -> None:
+    from tools.post_update import PostUpdateTool
+
+    assert "no_sensitive_content" not in PostUpdateTool().parameters["properties"]
+
+
 def test_person_chat_on_a_cloud_model_still_needs_confirmation(monkeypatch) -> None:
     from infra import local_only
 
