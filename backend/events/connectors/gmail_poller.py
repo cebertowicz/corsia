@@ -301,7 +301,7 @@ async def run_cycle() -> int | None:
         if known not in states:
             cancel_account(known)
         elif known not in connected:
-            _due.pop(known, None)
+            cancel_account(known)
     if not connected:
         _set_state("disabled", "not_connected")
         return RECHECK_S

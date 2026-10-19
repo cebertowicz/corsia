@@ -17,7 +17,7 @@
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
 	import { requestProviderCard, requestServerCard, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
-	import { loadConnectedAppsList } from '$lib/api/connectedApps';
+	import { connectedAppStateLine, loadConnectedAppsList } from '$lib/api/connectedApps';
 	import { ms } from '$lib/popoverMotion';
 
 	type Action = 'set' | 'clear' | 'remove';
@@ -38,6 +38,8 @@
 	let arrivedFor: string | null = null;
 	let arrivalEntry = $state<string | null>(null);
 	const connectedAppKey = $derived($settingsNavigation.connectedAppKey);
+	const RECONNECT_TIMEOUT_MS = 30_000;
+	const RECONNECT_RETRY_MS = 1_000;
 
 	const FAILURE_REASONS: Record<string, string> = {
 		network: "couldn't reach the search service",
@@ -113,6 +115,33 @@
 		formError = '';
 	}
 
+	async function reconnectAfterKeySave(appName: string) {
+		const deadline = Date.now() + RECONNECT_TIMEOUT_MS;
+		try {
+			while (true) {
+				const app = (await loadConnectedAppsList()).servers.find((candidate) => candidate.name === appName);
+				if (!app) break;
+				if (app.state === 'working') {
+					reconnectStatus = `${appName} is connected.`;
+					return;
+				}
+				if (app.state === 'token_rejected') {
+					reconnectStatus = `${appName} didn't accept this key. Create a new one in your ${appName} settings, then press Replace.`;
+					return;
+				}
+				if (app.state !== 'connecting' && app.state !== 'awaiting_approval') {
+					reconnectStatus = connectedAppStateLine(app);
+					return;
+				}
+				if (Date.now() >= deadline) break;
+				await new Promise<void>((resolve) => setTimeout(resolve, RECONNECT_RETRY_MS));
+			}
+		} catch {
+			// The key already saved; do not turn a reconnect lookup failure into a failed save.
+		}
+		reconnectStatus = 'Saved.';
+	}
+
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		if (!open || busy) return;
@@ -135,19 +164,21 @@
 			if (action === 'set') await saveKeyValue(name, value, typed);
 			else if (action === 'clear') await clearKeyValue(name, typed);
 			else await removeKey(name, typed);
-			open = null;
-			delete checkResults[name];
+		} catch (error) {
+			formError = error instanceof KeyWriteError ? error.message : KEYS_NOT_SAVED;
+			busy = false;
+			return;
+		}
+		open = null;
+		delete checkResults[name];
+		try {
 			if (action === 'set' && connectedAppKey?.entry === name) {
 				reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
 				await tick();
-				const app = (await loadConnectedAppsList()).servers.find((candidate) => candidate.name === connectedAppKey.app);
-				if (app?.state === 'working') reconnectStatus = `${connectedAppKey.app} is connected.`;
-				else if (app?.state === 'token_rejected') reconnectStatus = `${connectedAppKey.app} didn't accept this key. Create a new one in your ${connectedAppKey.app} settings, then press Replace.`;
+				await reconnectAfterKeySave(connectedAppKey.app);
 			}
-			await load();
-		} catch (error) {
-			formError = error instanceof KeyWriteError ? error.message : KEYS_NOT_SAVED;
 		} finally {
+			await load();
 			busy = false;
 		}
 	}

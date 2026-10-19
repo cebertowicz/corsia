@@ -31,6 +31,7 @@ let serverKeys: Record<string, unknown>[];
 let writeAnswer: { status: number; body: unknown };
 let checkAnswer: unknown;
 let fetchMock: ReturnType<typeof vi.fn>;
+let connectedAppsAnswers: ({ servers: unknown[] } | Error)[];
 
 function json(status: number, body: unknown) {
 	return { ok: status < 400, status, json: async () => body } as Response;
@@ -47,8 +48,14 @@ beforeEach(() => {
 	resetSettingsNavigation();
 	writeAnswer = { status: 200, body: { key: webSearch } };
 	checkAnswer = { outcome: 'works', reason: null };
+	connectedAppsAnswers = [];
 	fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 		if (url === '/api/keys') return json(200, { keys: entries, provider_keys: providerKeys, server_keys: serverKeys });
+		if (String(url).startsWith('/api/mcp/servers')) {
+			const answer = connectedAppsAnswers.shift() ?? { servers: [] };
+			if (answer instanceof Error) throw answer;
+			return json(200, answer);
+		}
 		if (url.endsWith('/check')) return json(200, checkAnswer);
 		return json(writeAnswer.status, writeAnswer.body);
 	});
@@ -235,6 +242,37 @@ describe('Settings › Keys', () => {
 		await mountKeys();
 		button('web-search', 'Check').click();
 		await vi.waitFor(() => expect(host.textContent).toContain(text));
+	});
+
+	describe('saved connected-app keys', () => {
+		async function saveLinkedKey() {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+			entries = [{ ...maps, name: 'linear-key', label: 'Linear key' }];
+			requestConnectedAppKey('Linear', 'linear-key', [{ entry: 'linear-key', name: 'API key' }]);
+			await mountKeys('linear-key');
+			button('linear-key', 'Set').click();
+			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
+			const form = host.querySelector('form')!;
+			const fields = form.querySelectorAll<HTMLInputElement>('input');
+			type(fields[0], VALUE);
+			type(fields[1], PASSWORD);
+			form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		}
+
+		const connecting = { servers: [{ name: 'Linear', state: 'connecting' }] };
+		it.each([
+			[[new Error('offline')], 'Saved.'],
+			[[connecting, { servers: [{ name: 'Linear', state: 'working' }] }], 'Linear is connected.'],
+			[[...Array.from({ length: 31 }, () => connecting)], 'Saved.'],
+			[[{ servers: [{ name: 'Linear', state: 'failed', failure_class: 'timed_out' }] }], "Couldn't connect: no response"],
+		])('keeps key-save status accurate after reconnect lookup: %s', async (answers, expected) => {
+			vi.useFakeTimers();
+			connectedAppsAnswers = [...answers];
+			await saveLinkedKey();
+			await vi.runAllTimersAsync();
+			await vi.waitFor(() => expect(host.textContent).toContain(expected));
+			vi.useRealTimers();
+		});
 	});
 
 	describe('provider keys', () => {

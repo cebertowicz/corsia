@@ -19,7 +19,6 @@ from infra.time import utc_now_iso
 
 LEGACY_ACCOUNT_SETTING = "google_account"
 LEGACY_CURSOR_SETTING = "gmail_poll_cursor"
-JOURNAL_KEY = "google-singleton-v1"
 
 
 def _has_table(conn: sqlite3.Connection, name: str) -> bool:
@@ -58,18 +57,13 @@ def _clear_legacy(conn: sqlite3.Connection) -> None:
 def migrate_128_to_129(conn: sqlite3.Connection) -> None:
     """Move one usable legacy Google singleton atomically into its account row.
 
-    The surrounding migration runner owns the transaction and journaled schema
-    version. This step writes its own completion marker in that same transaction:
+    The surrounding migration runner owns the transaction and schema version:
     before commit only the legacy entries resolve; after commit only the account
     bundle resolves. A failed bundle write therefore leaves the old path intact.
     """
     for statement in CONNECTED_ACCOUNTS_SCHEMA_SQL.split(";"):
         if statement.strip():
             conn.execute(statement)
-    if conn.execute(
-        "SELECT 1 FROM connected_account_migration_journal WHERE migration_key=?", (JOURNAL_KEY,),
-    ).fetchone() is not None:
-        return
 
     legacy = _legacy_setting(conn, LEGACY_ACCOUNT_SETTING)
     cursor = _legacy_setting(conn, LEGACY_CURSOR_SETTING)
@@ -77,7 +71,6 @@ def migrate_128_to_129(conn: sqlite3.Connection) -> None:
     if not isinstance(legacy, dict) or not isinstance(address, str) or not address.strip():
         _rekey_screens(conn, None, None)
         _clear_legacy(conn)
-        _journal(conn, None)
         return
 
     credentials = _legacy_credentials(conn)
@@ -115,7 +108,6 @@ def migrate_128_to_129(conn: sqlite3.Connection) -> None:
     _rekey_screens(conn, address.strip(), account_id)
     _rekey_legacy_google_data(conn, account_id)
     _clear_legacy(conn)
-    _journal(conn, account_id)
 
 
 def _rekey_screens(conn: sqlite3.Connection, address: str | None, account_id: str | None) -> None:
@@ -161,10 +153,3 @@ def _rekey_legacy_google_data(conn: sqlite3.Connection, account_id: str) -> None
             "UPDATE action_drafts SET target_json=? WHERE id=?",
             (json.dumps(target, separators=(",", ":"), sort_keys=True), row["id"]),
         )
-
-
-def _journal(conn: sqlite3.Connection, account_id: str | None) -> None:
-    conn.execute(
-        "INSERT INTO connected_account_migration_journal(migration_key,completed_at,account_id) VALUES (?,?,?)",
-        (JOURNAL_KEY, utc_now_iso(), account_id),
-    )

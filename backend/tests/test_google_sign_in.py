@@ -678,6 +678,31 @@ async def test_only_corsia_reaches_the_corsia_agent_and_no_project_conductor(goo
         db.close()
 
 
+async def test_resolver_uses_the_only_reachable_account_and_asks_when_two_reach(google, conductor):
+    from connections.app_reach import AppReach
+    from connections.google.account_actions import change_google_account_reach
+    from connections.google.accounts import CHOOSE, resolve_for_thread
+
+    _conductor_a, ids = _reach_cast(conductor)
+    db = get_db()
+    try:
+        with pytest.raises(google_client.GoogleError, match=CHOOSE.split(":")[0]):
+            resolve_for_thread(None, conductor, db=db)
+    finally:
+        db.close()
+
+    change_google_account_reach(
+        ids["everywhere@example.com"],
+        AppReach(mode="selected", project_ids=frozenset({"a"}), outside_projects=False),
+        actor=("person", "steve"),
+    )
+    db = get_db()
+    try:
+        assert resolve_for_thread(None, conductor, db=db)["id"] == ids["corsia-only@example.com"]
+    finally:
+        db.close()
+
+
 def _refusal(selector: object, thread_id: str) -> str:
     from connections.google.accounts import resolve_for_thread
 

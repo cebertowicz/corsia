@@ -10,7 +10,7 @@
 	import { sidebarCollapsed } from '$lib/stores/ui';
 	import { isMobile } from '$lib/stores/viewport';
 	import { checkSecurityAlert } from '$lib/stores/connection';
-	import { uiScope, exitScope } from '$lib/stores/uiScope';
+	import { uiScope, exitScope, type UiScope } from '$lib/stores/uiScope';
 	import { enterProjectScope, enterThreadScope } from '$lib/stores/projects';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneCollapsed } from '$lib/stores/paneCollapsed';
@@ -115,10 +115,10 @@
 		resetSurface('activity');
 	}
 
-	async function goConductor(isActive: () => boolean = () => true): Promise<boolean> {
+	async function goConductor(isActive: () => boolean = () => true, scope: UiScope | null = $uiScope): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
-		conductorLookup = await fetchScopeTarget($token, $uiScope);
+		conductorLookup = await fetchScopeTarget($token, scope);
 		if (!isActive()) return false;
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
@@ -129,7 +129,7 @@
 		// A user with no conductor has nothing to land on, so the chat surface stays.
 		if (conductorLookup.kind === 'absent') { resetSurface('chat'); return true; }
 		// Unresolved lookup: keep the surface, leave the rail retryable.
-		toasts.show(`Couldn't load ${$uiScope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
+		toasts.show(`Couldn't load ${scope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
 

@@ -33,7 +33,7 @@ def _dev_128() -> sqlite3.Connection:
     db = _fresh()
     db.execute("DROP TABLE connected_account_reach")
     db.execute("DROP TABLE connected_account_audit")
-    db.execute("DROP TABLE connected_account_migration_journal")
+
     db.execute("DROP TABLE connected_accounts")
     db.execute("PRAGMA user_version=128")
     db.commit()
@@ -80,7 +80,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] == account["id"]
+
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
@@ -162,7 +162,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
-def test_addressless_legacy_data_is_retired_and_journaled_without_an_account() -> None:
+def test_addressless_legacy_data_is_retired_without_an_account() -> None:
     with closing(_dev_128()) as db:
         _seed_legacy(db)
         set_setting("google_account", {"status": "connected"}, db=db)
@@ -175,7 +175,7 @@ def test_addressless_legacy_data_is_retired_and_journaled_without_an_account() -
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert db.execute("SELECT account_id FROM connected_account_migration_journal").fetchone()["account_id"] is None
+
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
@@ -268,7 +268,7 @@ def test_dev_128_upgrades_to_the_complete_connected_accounts_schema() -> None:
             "connected_account_audit": {
                 "id", "created_at", "account_id", "actor_kind", "actor_id", "action", "revocation_cause",
             },
-            "connected_account_migration_journal": {"migration_key", "completed_at", "account_id"},
+
         }
         for table, columns in expected_columns.items():
             actual = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -276,7 +276,7 @@ def test_dev_128_upgrades_to_the_complete_connected_accounts_schema() -> None:
 
 
 def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
-    """Remove deletes the account row; its audit and migration records must outlive it."""
+    """Remove deletes the account row; its audit record must outlive it."""
     from connections.google import account_actions
 
     with closing(_dev_128()) as db:
@@ -293,17 +293,12 @@ def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
         assert db.execute(
             "SELECT action FROM connected_account_audit WHERE account_id=? ORDER BY id", (account_id,),
         ).fetchall()[-1][0] == "remove"
-        assert db.execute(
-            "SELECT account_id FROM connected_account_migration_journal WHERE migration_key=?", ("google-singleton-v1",),
-        ).fetchone()[0] == account_id
-        for table in ("connected_account_audit", "connected_account_migration_journal"):
-            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []
+        assert db.execute("PRAGMA foreign_key_list(connected_account_audit)").fetchall() == []
 
 
 def test_fresh_install_has_final_history_tables_and_audit_causes() -> None:
     with closing(_fresh()) as db:
-        for table in ("connected_account_audit", "connected_account_migration_journal"):
-            assert db.execute(f"PRAGMA foreign_key_list({table})").fetchall() == []
+        assert db.execute("PRAGMA foreign_key_list(connected_account_audit)").fetchall() == []
         row = ("t", "account", "person", "owner", "remove")
         db.execute(
             "INSERT INTO connected_account_audit(created_at, account_id, actor_kind, actor_id, action, revocation_cause) "

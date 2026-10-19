@@ -5,7 +5,7 @@
 	import type ChatPanel from './ChatPanel.svelte';
 
 	let { goConductor, chatPanel }: {
-		goConductor: (isActive: () => boolean) => Promise<boolean>;
+		goConductor: (isActive: () => boolean, workspaceScope: null) => Promise<boolean>;
 		chatPanel: ChatPanel | undefined;
 	} = $props();
 	let inFlight = $state<string | null>(null);
@@ -14,7 +14,7 @@
 
 	async function deliver(request: CorsiaMessageRequest): Promise<void> {
 		try {
-			if (!await goConductor(() => active) || !active) {
+			if (!await goConductor(() => active, null) || !active) {
 				console.error('CORSIA request was not sent because its conversation could not open');
 				toasts.show("Couldn't open CORSIA's chat. Try again.", 'error');
 				return;

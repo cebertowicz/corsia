@@ -251,6 +251,16 @@ async def test_no_connected_account_is_off_and_test_mode_is_off(monkeypatch, acc
     assert poller.poller_status()["reason"] == "test_mode"
 
 
+async def test_signed_out_account_is_forgotten_from_poller_status(monkeypatch, account):
+    monkeypatch.setattr(feed, "profile_history_id", lambda _a: _answer("history"))
+    await poller.run_cycle()
+    assert poller.poller_status(account)["state"] == "enabled"
+
+    set_state(account, "needs_sign_in")
+    assert await poller.run_cycle() == poller.RECHECK_S
+    assert poller.poller_status(account)["state"] != "enabled"
+
+
 def test_manifest_keeps_payload_facts_flat_and_hides_subject_when_unavailable(account):
     payload = poller.event_payload(account, _message(), email_screen.Screen("unavailable"), "history")
     from events.envelope import normalize

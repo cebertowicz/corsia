@@ -46,7 +46,7 @@ EXCLUDED: dict[str, str] = {
     "users": _small(1),
     **{table: NOT_IN_CENSUS for table in (
         "action_drafts", "artifact_relocation_intents", "connected_account_audit",
-        "connected_account_migration_journal", "connected_account_reach", "connected_accounts",
+        "connected_account_reach", "connected_accounts",
         "connected_app_audit", "connected_app_reach", "connected_apps", "connection_rules",
         "doc_feedback_edit_items", "durable_write_intents",
         "email_screens", "key_store_entries", "key_write_attempts", "lesson_placement_checks",

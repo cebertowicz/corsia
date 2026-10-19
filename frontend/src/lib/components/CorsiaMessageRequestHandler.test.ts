@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import CorsiaMessageRequestHandler from './CorsiaMessageRequestHandler.svelte';
 import { pendingCorsiaMessage, requestCorsiaMessage } from '$lib/corsiaRequest';
 import { toasts } from '$lib/stores/toast';
+import { uiScope } from '$lib/stores/uiScope';
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 
 afterEach(() => {
 	pendingCorsiaMessage.set(null);
+	uiScope.set(null);
 	if (component) unmount(component);
 	component = null;
 	host?.remove();
@@ -59,6 +61,25 @@ describe('CorsiaMessageRequestHandler', () => {
 		expect(send).toHaveBeenCalledWith('Connect a Google account for all my projects', true);
 		return { warn, toast };
 	}
+
+	it('opens and sends to workspace CORSIA while a project scope is active', async () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		uiScope.set({ id: 'project-1', name: 'Project', color: '#000' });
+		const openWorkspaceCorsia = vi.fn(async () => true);
+		const send = vi.fn(async () => 'sent');
+		component = mount(CorsiaMessageRequestHandler, {
+			target: host,
+			props: { goConductor: openWorkspaceCorsia, chatPanel: { setAndSend: send } as never },
+		});
+		flushSync();
+
+		requestCorsiaMessage('Connect a Google account for all my projects');
+		await vi.waitFor(() => expect(get(pendingCorsiaMessage)).toBeNull());
+
+		expect(openWorkspaceCorsia).toHaveBeenCalledWith(expect.any(Function), null);
+		expect(send).toHaveBeenCalledWith('Connect a Google account for all my projects', true);
+	});
 
 	it('says once that the request was not sent when the composer refused it silently', async () => {
 		const { warn, toast } = await deliverWith('not_sent');

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-# History tables keep the account id without a foreign key: Remove deletes the
-# account row, and its audit and migration records must outlive it even when
-# SQLite foreign keys are on.
+# Audit history keeps the account id without a foreign key: Remove deletes the
+# account row, and its audit record must outlive it even when SQLite foreign
+# keys are on.
 AUDIT_TABLE_SQL = """
     CREATE TABLE IF NOT EXISTS connected_account_audit (
         id INTEGER PRIMARY KEY,
@@ -17,12 +17,6 @@ AUDIT_TABLE_SQL = """
             'revoked', 'provider_unreachable', 'provider_timeout',
             'provider_rejected', 'provider_unexpected', 'not_signed_in'
         ))
-    )"""
-JOURNAL_TABLE_SQL = """
-    CREATE TABLE IF NOT EXISTS connected_account_migration_journal (
-        migration_key TEXT PRIMARY KEY,
-        completed_at TEXT NOT NULL,
-        account_id TEXT
     )"""
 
 CONNECTED_ACCOUNTS_SCHEMA_SQL = f"""
@@ -59,5 +53,4 @@ CONNECTED_ACCOUNTS_SCHEMA_SQL = f"""
 {AUDIT_TABLE_SQL};
     CREATE INDEX IF NOT EXISTS idx_connected_account_audit_account
         ON connected_account_audit(account_id, id);
-{JOURNAL_TABLE_SQL};
 """

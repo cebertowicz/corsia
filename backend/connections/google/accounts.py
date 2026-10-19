@@ -1,8 +1,8 @@
 """Which Google account one call uses, checked against the caller's reach on every call.
 
 An agent names the account by ``account_id`` or by the address the person
-used. There is never a default: with no name, the call returns a
-clarification listing the accounts this caller can reach. Every error text
+used. With no name, a caller with one reachable account uses it; otherwise the
+call returns a clarification listing the accounts this caller can reach. Every error text
 here is fixed and safe to show. Only the accounts that reach the caller are
 ever searched, so an out-of-reach account named by id or address gets exactly
 the answer a name that matches nothing gets, and a caller that reaches no
@@ -110,6 +110,8 @@ def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Conne
         raise GoogleError(NONE_AVAILABLE)
     listed = _choices(reachable)
     if selector is None or (isinstance(selector, str) and not selector.strip()):
+        if len(reachable) == 1:
+            return _usable(reachable[0])
         raise GoogleError(CHOOSE.format(choices=listed))
     wanted = selector.strip() if isinstance(selector, str) else ""
     named = [account for account in reachable if account["id"] == wanted] or [
