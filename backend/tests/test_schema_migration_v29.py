@@ -25,7 +25,7 @@ def _legacy_database(tmp_path):
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 130
+    assert SCHEMA_VERSION == 131
 
 
 def test_fresh_schema_creates_the_measurement_table():

@@ -190,15 +190,3 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
     if row_is_local(row, private_servers=private_servers, local_servers=local_servers):
         return None
     return "thread_local_only" if thread_local_only else "project_cloud_off"
-
-
-def thread_project(thread_id: str | None, db) -> str | None:
-    """The thread's project from its canonical scope; a missing thread has none to enforce."""
-    from connections.account_policy import AccountAdmissionError, thread_scope
-
-    if not thread_id:
-        return None
-    try:
-        return thread_scope(thread_id, db=db)["project_id"]
-    except AccountAdmissionError:
-        return None

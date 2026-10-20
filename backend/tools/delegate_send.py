@@ -10,6 +10,7 @@ from functools import partial
 import logging
 from typing import Any
 
+from infra.local_only import send_confirmation_error
 from infra.send_service import SendRejected
 from infra.send_types import InboxQueuedInput
 import tools.delegation as delegation
@@ -74,6 +75,10 @@ class DelegateSendTool(Tool):
                         "scope id when supplied; it does not authorize cross-scope sends."
                     ),
                 },
+                "no_sensitive_content": {
+                    "type": "boolean",
+                    "description": "Confirm this cloud-bound send contains no sensitive content.",
+                },
             },
             ["thread_id", "message"],
         )
@@ -103,6 +108,14 @@ class DelegateSendTool(Tool):
         )
         if scope_error:
             return scope_error
+        confirmation_error = await delegation.run_in_db(
+            send_confirmation_error,
+            current,
+            target,
+            kwargs.get("no_sensitive_content"),
+        )
+        if confirmation_error:
+            return confirmation_error
         intent = delegation._clean(kwargs.get("intent")) or "progress"
         if intent not in ("progress", "completion"):
             return "Error: intent must be 'progress' or 'completion'"
