@@ -39,9 +39,3 @@ export function resolveParticipant(id: string, usr: Participant, kind?: Particip
 	if (id === 'agent') return AGENTS.jarvis;
 	return agentFor(id);
 }
-
-export function agentTag(p: Participant): string {
-	if (p.provider === 'claude-code') return p.name === 'Claude Code' ? '' : 'via Claude Code';
-	if (p.provider === 'codex') return p.name === 'Codex' ? '' : 'via Codex';
-	return p.model ?? '';
-}
