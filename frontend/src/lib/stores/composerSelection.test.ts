@@ -2,11 +2,14 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { composerSelectionFor } from './composerSelection';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth } from './models';
 import { activeModelId } from './modelsState';
 import { subagentMeta } from './subagents';
 import { activeThreadId, reasoningEffort, threads } from './threads';
 
 beforeEach(() => {
+	_resetThreadModelTruthForTests();
+	acceptThreadModelTruth('worker', 'model/worker', '2026-10-20T10:00:00.000000');
 	activeThreadId.set('open');
 	activeModelId.set('model/open');
 	reasoningEffort.set('high');
@@ -15,7 +18,7 @@ beforeEach(() => {
 		{ id: 'other', model: 'model/other', reasoning_effort: 'low' } as never,
 	]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running', model: 'model/worker',
+		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running', model: 'provider-report-at-start',
 		thread: { reasoning_effort: 'none', project_id: 'project-1' },
 	}]]));
 });
@@ -26,6 +29,7 @@ afterEach(() => {
 	reasoningEffort.set(null);
 	threads.set([]);
 	subagentMeta.set(new Map());
+	_resetThreadModelTruthForTests();
 });
 
 describe('composerSelectionFor', () => {
@@ -46,7 +50,7 @@ describe('composerSelectionFor', () => {
 			.toMatchObject({ threadId: null, isOpen: true, modelId: 'model/open', effort: 'high', thread: undefined });
 	});
 
-	it("reads a worker from its own row, never the open thread's selection", () => {
+	it("reads a worker's model from the thread truth and its effort from its row, never the open thread's", () => {
 		const selection = get(composerSelectionFor)('worker');
 
 		expect(selection).toMatchObject({ threadId: 'worker', isOpen: false, modelId: 'model/worker', effort: 'none' });

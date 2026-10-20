@@ -1,6 +1,6 @@
 import { threads } from '../stores/threads';
-import { acceptThreadModelTruth } from '../stores/models';
-import { patchSubagentThread } from '../stores/subagents';
+import { acceptThreadModelTruth, seedThreadModelTruth } from '../stores/models';
+import { patchSubagentThread, registerSubagent, setSubagentInit } from '../stores/subagents';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
 import { threadFrameFields, threadSwitchFields } from './threadFrameFields';
 
@@ -51,4 +51,15 @@ export function handleSessionUpdated(data: any) {
 		}
 		return updated;
 	});
+}
+
+/**
+ * A worker's `subagent_meta` frame: its row, and the model it is selected on, which is held where
+ * every thread's is and seeded first so readers of the row see it.
+ */
+export function handleSubagentMeta(data: any) {
+	if (!data.thread_id) return;
+	if (data.model) seedThreadModelTruth(data.thread_id, data.model);
+	registerSubagent(data.parent_thread_id, data.thread_id, data.name || 'subagent', data.provider || 'cc', data.live ? 'running' : 'idle');
+	if (data.model) setSubagentInit(data.thread_id, { model: data.model });
 }

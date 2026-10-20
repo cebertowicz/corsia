@@ -3,7 +3,6 @@ import { activeModelId, getModelDispatchId, models, workspaceModels } from './mo
 import { plainErrorText } from '../plainError';
 import { activeThreadId, threads } from './threads';
 import { setContextUsage } from './contextUsageByThread';
-import { setSubagentInit } from './subagents';
 import {
 	applyPendingThreadModelSwitch,
 	type PendingThreadModelSaveResult,
@@ -203,7 +202,6 @@ export function acceptThreadModelTruth(
 		if (order < 0 || (order === 0 && current.model !== model)) return false;
 	}
 	threadModelTruth.set(threadId, { model, updatedAt });
-	setSubagentInit(threadId, { model });
 	threads.update((rows) => {
 		const updated = rows.map((thread) => (
 			thread.id === threadId
@@ -222,6 +220,15 @@ export function acceptThreadModelTruth(
 		if (activeModelBefore !== model) setContextUsage(threadId, null);
 	}
 	return true;
+}
+
+/**
+ * Record the model a read reports for a thread the list does not hold (a worker's `subagent_meta`),
+ * which carries no server time: it never replaces a model already held, and any accepted truth outranks it.
+ */
+export function seedThreadModelTruth(threadId: string, model: string): void {
+	if (!threadId || !model || threadModelTruth.has(threadId)) return;
+	threadModelTruth.set(threadId, { model, updatedAt: '1970-01-01T00:00:00' });
 }
 
 /** The accepted model of a thread, including one the thread list does not hold. */

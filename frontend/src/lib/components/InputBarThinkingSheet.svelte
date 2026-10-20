@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { reasoningEffort, saveReasoningEffort } from '$lib/stores/threads';
+	import { reasoningEffort } from '$lib/stores/threads';
+	import { saveReasoningEffort } from '$lib/stores/threadEffort';
 	import { composerSelectionFor } from '$lib/stores/composerSelection';
-	import { patchSubagentThread } from '$lib/stores/subagents';
+	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 	import type { ReasoningConfig } from '$lib/stores/models';
 	import { reasoningSegments, resolveReasoningEffort } from './inputBarReasoning';
@@ -34,15 +35,16 @@
 	function setEffort(level: string | null) {
 		const sid = sel.threadId;
 		const t = $token;
-		// Only the open thread's effort lives in the store; a worker's is on its row (the list holds the rest).
-		if (sel.isOpen) reasoningEffort.set(level);
-		else if (sid) patchSubagentThread(sid, { reasoning_effort: level });
 		emitProductEvent('ui', 'thinking_toggled', {
 			thread_id: sid,
 			effort: level,
 			reasoning_shape: reasoningConfig?.type ?? null,
 		});
-		if (sid && t) saveReasoningEffort(sid, level, t);
+		if (sid && t) {
+			void saveReasoningEffort(sid, level, t).then((saved) => {
+				if (!saved) toasts.show("Couldn't save the thinking level.", 'error');
+			});
+		} else if (sel.isOpen) reasoningEffort.set(level);
 	}
 
 	function isSegActive(value: string | null) {

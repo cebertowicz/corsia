@@ -1,5 +1,6 @@
 import { derived, type Readable } from 'svelte/store';
 import { activeModelId } from './modelsState';
+import { threadModelFor } from './models';
 import { subagentMeta } from './subagents';
 import { activeThreadId, reasoningEffort, threads, type Thread } from './threads';
 
@@ -33,7 +34,7 @@ export const composerSelectionFor: Readable<(threadId?: string | null) => Compos
 			const id = threadId ?? $activeThreadId;
 			const worker = $subagentMeta.get(id ?? '');
 			const thread: ComposerThreadRow | undefined = $threads.find((row) => row.id === id)
-				?? (worker ? { ...worker.thread, model: worker.model } : undefined);
+				?? (worker ? { ...worker.thread, model: threadModelFor(worker.childThreadId) } : undefined);
 			if (id === null || id === $activeThreadId) {
 				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort };
 			}

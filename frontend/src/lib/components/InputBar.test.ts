@@ -34,7 +34,7 @@ import InputBar from './InputBar.svelte';
 import { QUEUE_ARM_MS as ARM_MS } from './InputBarActionRow.svelte';
 import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
-import { activeModelId, models } from '$lib/stores/models';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, models } from '$lib/stores/models';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
 import { subagentMeta } from '$lib/stores/subagents';
 import { toasts } from '$lib/stores/toast';
@@ -281,9 +281,11 @@ describe('InputBar send and queue preparation', () => {
 		models.update(rows => [...rows, {
 			id: 'network/worker', name: 'Worker Model', size: '', backend: 'network', speed: '', status: 'ready',
 		}]);
+		_resetThreadModelTruthForTests();
+		acceptThreadModelTruth('subagent-thread', 'network/worker', '2026-10-20T10:00:00.000000');
 		subagentMeta.set(new Map([['subagent-thread', {
 			childThreadId: 'subagent-thread', parentThreadId: 'active-thread', name: 'Worker',
-			provider: 'cc', status: 'running', model: 'network/worker',
+			provider: 'cc', status: 'running', model: 'provider-report-at-start',
 		} as never]]));
 		component = mount(InputBar, {
 			target: host,

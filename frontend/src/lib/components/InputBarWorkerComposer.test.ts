@@ -7,7 +7,7 @@ import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
 import { _resetCheckpointsForTests } from '$lib/stores/checkpoints';
 import { clearAllContextUsage } from '$lib/stores/contextUsageByThread';
-import { _resetThreadModelTruthForTests, activeModelId, finishThreadModelSwitch, models } from '$lib/stores/models';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, finishThreadModelSwitch, models, threadModelFor } from '$lib/stores/models';
 import { subagentMeta } from '$lib/stores/subagents';
 import { activeThreadId, reasoningEffort, threads } from '$lib/stores/threads';
 
@@ -63,6 +63,7 @@ beforeEach(() => {
 	connectionState.set('connected');
 	finishThreadModelSwitch('worker');
 	_resetThreadModelTruthForTests();
+	acceptThreadModelTruth('worker', WORKER_MODEL, '2026-10-20T09:59:00.000000');
 	_resetCheckpointsForTests();
 	clearAllContextUsage();
 	activeThreadId.set('parent');
@@ -70,7 +71,7 @@ beforeEach(() => {
 	reasoningEffort.set('medium');
 	threads.set([{ id: 'parent', model: PARENT_MODEL, reasoning_effort: 'medium' } as never]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running', model: WORKER_MODEL,
+		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running', model: 'provider-report-at-start',
 		thread: { reasoning_effort: 'none' },
 	}]]));
 	models.set([model(PARENT_MODEL, 'Parent-9B'), model(WORKER_MODEL, 'Worker-9B'), model(NEXT_MODEL, 'Next-9B')]);
@@ -112,9 +113,7 @@ describe('worker composer reads and changes its own thread', () => {
 	});
 
 	it('asks to select a model while the worker has none, not the open thread\'s', () => {
-		subagentMeta.set(new Map([['worker', {
-			childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running',
-		}]]));
+		_resetThreadModelTruthForTests();
 		mountControls({});
 
 		expect(host.querySelector('button.model-chip .model-chip-name')?.textContent?.trim()).toBe('Select Model');
@@ -134,7 +133,7 @@ describe('worker composer reads and changes its own thread', () => {
 		expect(url).not.toContain('/api/threads/parent');
 		expect(init.method).toBe('PATCH');
 		expect(init.body).toBe(JSON.stringify({ model: NEXT_MODEL }));
-		await vi.waitFor(() => expect(get(subagentMeta).get('worker')?.model).toBe(NEXT_MODEL));
+		await vi.waitFor(() => expect(threadModelFor('worker')).toBe(NEXT_MODEL));
 		expect(get(activeModelId)).toBe(PARENT_MODEL);
 	});
 

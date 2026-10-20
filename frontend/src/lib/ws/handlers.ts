@@ -29,7 +29,7 @@ import {
 } from './handlersTurns';
 import { recoverInput } from './turnState';
 import { handleCheckpointChanged } from './checkpointInvalidation';
-import { handleSessionUpdated } from './handlersSession';
+import { handleSessionUpdated, handleSubagentMeta } from './handlersSession';
 import { FORWARDED_TYPES } from './forwardedTypes';
 
 function reconcileCorrelatedMessage(
@@ -137,10 +137,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 
 		case 'subagent_meta':
-			if (data.thread_id) {
-				registerSubagent(data.parent_thread_id, data.thread_id, data.name || 'subagent', data.provider || 'cc', data.live ? 'running' : 'idle');
-				if (data.model) setSubagentInit(data.thread_id, { model: data.model });
-			}
+			handleSubagentMeta(data);
 			break;
 
 		case 'subagent_closed':
