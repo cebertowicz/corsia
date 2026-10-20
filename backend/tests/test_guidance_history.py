@@ -245,6 +245,41 @@ async def test_write_file_commits_the_saved_bytes_as_the_saver(history_scope):
     assert "Reason: unrecorded" in _body(workspace)
 
 
+def test_save_guidance_delete_requires_the_expected_prior_hash(history_scope):
+    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("before\n")
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        author="Tester <t@agents.corsia.local>", reason="Remove obsolete guidance",
+        deletes={path: digest("before\n")}, atomic=True,
+    )
+
+    assert result.outcome == "written"
+    assert not path.exists()
+    assert path.relative_to(workspace).as_posix() not in _git(["ls-tree", "-r", "--name-only", "HEAD"], cwd=workspace)
+
+
+def test_save_guidance_delete_refuses_a_changed_destination(history_scope):
+    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "demo.md"
+    path.parent.mkdir()
+    path.write_text("newer\n")
+    result = save_guidance(
+        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        author="Tester <t@agents.corsia.local>", reason="Remove obsolete guidance",
+        deletes={path: digest("before\n")}, atomic=True,
+    )
+
+    assert result.outcome == "stale"
+    assert path.read_text() == "newer\n"
+
+
 @pytest.mark.asyncio
 async def test_edit_and_multi_edit_commit_on_a_recorded_base(history_scope):
     from tools.filesystem_edit import EditFileTool, MultiEditTool

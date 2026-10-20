@@ -9,9 +9,11 @@ specific to the file.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -22,6 +24,35 @@ FORMAT_KEY = "corsia-format"
 # Lessons and captures keep the top-level frontmatter block until they get their own
 # context type; a sidecar never carries them.
 BLOCK_ONLY_KEYS = ("lesson", "capture")
+
+
+def installed_digest_part(relative: str, data: bytes) -> bytes | None:
+    """Return the canonical digest input for one installed skill file.
+
+    ``origin`` is local adoption metadata rather than skill content, so a sidecar
+    with only that mapping does not contribute to the folder digest.
+    """
+    if relative != SIDECAR_FILE:
+        return data
+    parsed, errors = parse_sidecar(data.decode("utf-8"))
+    if errors or parsed is None:
+        raise ValueError(f"invalid {SIDECAR_FILE} for installed digest")
+    payload = {key: value for key, value in parsed.items() if key != "origin"}
+    if not payload:
+        return None
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def installed_digest(files: Mapping[str, bytes]) -> str:
+    """Digest an installed skill folder while excluding mutable origin metadata."""
+    digest = hashlib.sha256()
+    for relative in sorted(files):
+        part = installed_digest_part(relative, files[relative])
+        if part is not None:
+            digest.update(relative.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
+    return digest.hexdigest()
 
 
 def pointer_errors(metadata_field: Any) -> tuple[bool, list[str]]:
