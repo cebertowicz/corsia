@@ -8,10 +8,7 @@ from main import app
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    from infra import state
-
-    monkeypatch.setattr(state, "_thread_driver_failure", None)
+def client() -> TestClient:
     return TestClient(app)
 
 
