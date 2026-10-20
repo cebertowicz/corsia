@@ -1,8 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apcaLc, contrastRatio, inkOn, parseColor, parseCssColour } from './contrast';
-import { ACCENT_ROLE_TOKENS, ACCENT_SWATCHES, ACCENT_TEXT_SURFACES, accentRoles, FILL_INK_MIN_LC } from './projectColors';
+import { apcaLc, contrastRatio, inkOn, over, parseColor, parseCssColour, type Rgb } from './contrast';
+import {
+	ACCENT_ROLE_TOKENS,
+	ACCENT_SWATCHES,
+	ACCENT_TEXT_SURFACES,
+	accentRoles,
+	FILL_INK_MIN_LC,
+	SELECTION_MIN_CONTRAST,
+	SELECTION_TEXT,
+	SELECTION_TEXT_MIN_CONTRAST,
+} from './projectColors';
 
 /** Every hue at the lightnesses a project colour realistically takes, plus the offered swatches. */
 const SPREAD = [
@@ -87,6 +96,55 @@ describe('accentRoles', () => {
 	});
 });
 
+/** The selection a role paints over the document page, as the browser renders it: the colour's share over the page, in 8-bit channels. */
+function selectionOver(colour: string, theme: 'light' | 'dark') {
+	const { selection } = accentRoles(colour, theme)!;
+	const match = /^color-mix\(in srgb, (.+) (\d+)%, transparent\)$/.exec(selection);
+	expect(match, `${colour} ${theme} selection ${selection}`).not.toBeNull();
+	const page = parseColor(ACCENT_TEXT_SURFACES[theme][0])!;
+	const mixed = over(parseColor(match![1])!, page, Number(match![2]) / 100).map(Math.round) as Rgb;
+	return { share: Number(match![2]), page, mixed, selection: contrastRatio(mixed, page), text: contrastRatio(SELECTION_TEXT[theme], mixed) };
+}
+
+describe('the accent selection role', () => {
+	it.each(['#007faa', ...ACCENT_SWATCHES])('reads against the document page and keeps its text readable for %s, in both themes', (colour) => {
+		for (const theme of THEMES) {
+			const { selection, text } = selectionOver(colour, theme);
+			expect(selection, `${colour} ${theme} selection against the page`).toBeGreaterThanOrEqual(SELECTION_MIN_CONTRAST);
+			expect(text, `${colour} ${theme} text over the selection`).toBeGreaterThanOrEqual(SELECTION_TEXT_MIN_CONTRAST);
+		}
+	});
+
+	it('starts from 35% in light and 45% in dark and rises only for an accent that does not read there', () => {
+		expect(selectionOver('#007faa', 'light').share).toBe(35);
+		expect(selectionOver('#007faa', 'dark').share).toBe(45);
+		// #ca8a04 composites to about 1.42:1 over white at 35%: the share rises until it reaches the floor.
+		expect(selectionOver('#ca8a04', 'light').share).toBeGreaterThan(35);
+		expect(selectionOver('#ca8a04', 'dark').share).toBe(45);
+	});
+
+	it('keeps the text readable across the hue spread, and where the page cannot be reached takes the strongest selection that does', () => {
+		for (const colour of SPREAD) {
+			for (const theme of THEMES) {
+				const { share, selection, text } = selectionOver(colour, theme);
+				expect(text, `${colour} ${theme} text over the selection`).toBeGreaterThanOrEqual(SELECTION_TEXT_MIN_CONTRAST);
+				if (selection >= SELECTION_MIN_CONTRAST) continue;
+				// The floor is out of reach: one more percent of the accent would cost the text its floor (or there is no more to add).
+				if (share === 100) continue;
+				const page = parseColor(ACCENT_TEXT_SURFACES[theme][0])!;
+				const more = over(parseColor(colour)!, page, (share + 1) / 100).map(Math.round) as Rgb;
+				expect(contrastRatio(SELECTION_TEXT[theme], more), `${colour} ${theme} at ${share + 1}%`).toBeLessThan(SELECTION_TEXT_MIN_CONTRAST);
+			}
+		}
+	});
+
+	it('is a share of the accent itself, so it follows the colour a project is painted', () => {
+		expect(accentRoles('#2563eb', 'dark')!.selection).toMatch(/^color-mix\(in srgb, #2563eb \d+%, transparent\)$/);
+		// An alpha is dropped like every role: the mix is of the opaque hex.
+		expect(accentRoles('#2563eb80', 'light')!.selection).toMatch(/^color-mix\(in srgb, #2563eb \d+%, transparent\)$/);
+	});
+});
+
 describe('every colour form the project API accepts', () => {
 	// Each form `_ACCENT_COLOR_RE` (backend/api/project_types.py) admits, with the channels and alpha it denotes.
 	const FORMS: [string, string, [number, number, number], number][] = [
@@ -164,5 +222,12 @@ describe('ACCENT_TEXT_SURFACES', () => {
 	] as const)('equals the %s theme surface tokens in app-tokens.css', (theme, selector) => {
 		const text = block(selector, theme);
 		expect(ACCENT_TEXT_SURFACES[theme]).toEqual(['--bg-primary', '--bg-tertiary', '--bg-hover', '--bg-active'].map((token) => value(text, token)));
+	});
+
+	it.each([
+		['dark', ':root'],
+		['light', '[data-theme="light"]'],
+	] as const)('puts the %s selection text on the page text token of app-tokens.css', (theme, selector) => {
+		expect(SELECTION_TEXT[theme]).toEqual(parseColor(value(block(selector, theme), '--text-primary')));
 	});
 });

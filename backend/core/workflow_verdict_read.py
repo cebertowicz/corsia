@@ -172,7 +172,9 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
     root_ids = [node["id"] for node in roots]
     for fact in attributed_facts(db):
         run_id = workflow_run_of(fact.node_id, parents, root_ids)
-        facts[run_id].append(CorrectionFact(fact.message_id, fact.message_at, fact.counter, fact.is_correction))
+        facts[run_id].append(CorrectionFact(
+            fact.source_kind, fact.source_id, fact.source_at or "", fact.counter, fact.is_correction,
+        ))
     judged = [node for node in roots if judged_version(node["workflow_version"])]
     judged_ids = {node["id"] for node in judged}
     models = _model_groups(db, [node["id"] for node in judged])
@@ -187,7 +189,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         group = (models.get(node["id"], MIXED), node["difficulty"] or "unrated", size_band(node["size"]))
         by_workflow[node["workflow_ref"]].append(Run(
             node["id"], node["workflow_version"], group, node["created_at"], _terminal_at(node, times), node["state"],
-            tuple(sorted(facts.get(node["id"], ()), key=lambda f: (parse_ts(f.message_at), f.message_id)))))
+            tuple(sorted(facts.get(node["id"], ()), key=lambda f: (parse_ts(f.source_at), f.source_id)))))
     histories = []
     for ref in sorted(set(by_workflow) | set(excluded)):
         runs = by_workflow.get(ref, [])

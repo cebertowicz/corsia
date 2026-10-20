@@ -502,11 +502,19 @@ _CASES = {
     # --- plans/node_creation.py ---
     ("node_creation.py", '"size requires schema version 91"'): _size_before_migration,
     # --- plans/size_fields.py ---
+    ("size_fields.py", "TASK_SIZE_REQUIRED"): _operation(
+        "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD"},
+        default_task_size=False,
+    ),
     (
         "size_fields.py",
         'f"size must be one of: {\', \'.join(SIZE_CLASSES)}. {SIZE_MEANING} {SIZE_SCALE_DESCRIPTION}."',
     ): _operation(
         "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "large"},
+    ),
+    # --- plans/mutations.py ---
+    ("mutations.py", "TASK_SIZE_REQUIRED"): _operation(
+        "edit", {"node_id": NODE, "expected_revision": REV, "size": None},
     ),
     # --- plans/user_ask.py ---
     ("user_ask.py", "DECISION_HOLDS"): _user_block_on_open_decision,

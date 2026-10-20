@@ -90,13 +90,19 @@ def _mutate(db, plan_id, operation, params, mutation_id):
     )
 
 
-def _operation(operation: str, params: dict, *, mutation_id: str | None = None):
+def _operation(
+    operation: str, params: dict, *, mutation_id: str | None = None, default_task_size: bool = True,
+):
     """Build a case that sends one body through the real mutation boundary."""
 
     def build(db, scene):
+        body = _resolved(db, scene, params)
+        if default_task_size and operation in {
+            "add", "insert", "split", "add_follow_up", "accept_with_follow_up",
+        }:
+            body.setdefault("size", "unknown")
         return partial(
-            _mutate, db, scene.plan_id, operation,
-            _resolved(db, scene, params),
+            _mutate, db, scene.plan_id, operation, body,
             _mid() if mutation_id is None else mutation_id,
         )
 

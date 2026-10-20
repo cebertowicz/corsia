@@ -25,6 +25,7 @@ def dispatch(
         created = followups.add_follow_up(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
+            size=fields.require_task_size(params.get("size")),
             **fields.expected(params), **common,
         )
         return service.get_node(params["node_id"], db=db), created

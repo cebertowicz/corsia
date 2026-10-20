@@ -12,7 +12,8 @@ from llm.resolution import ExecutionTarget
 
 CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent"]
 ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
-CheckpointUsageCallback: TypeAlias = Callable[[str, str, dict[str, Any]], Awaitable[None]]
+# (call key, model the vendor reported for the call or None, measured usage)
+CheckpointUsageCallback: TypeAlias = Callable[[str, str | None, dict[str, Any]], Awaitable[None]]
 
 # Exact diagnostic distinguishes degraded completion from user Stop/failure.
 CHECKPOINT_CONTEXT_TRUNCATED = "checkpoint_context_truncated"

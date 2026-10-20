@@ -368,22 +368,24 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
     return _node_from_row(connection, _node_row(connection, node_id))
 
 def add_follow_up(node_id: str, *, title: str, acceptance_criteria: str,
-                  actor_id: str | None = None, provenance: str = "plan_service", db=None) -> PlanNode:
+                  size: str | None = None, actor_id: str | None = None,
+                  provenance: str = "plan_service", db=None) -> PlanNode:
     """Expose the extracted bounded follow-up writer."""
     from plans.followups import add_follow_up as add
 
-    return add(node_id, title=title, acceptance_criteria=acceptance_criteria,
+    return add(node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
                actor_id=actor_id, provenance=provenance, db=db)
 
 def accept_with_follow_up(node_id: str, *, title: str, acceptance_criteria: str,
-                          actor_id: str | None = None, provenance: str = "plan_service",
+                          size: str | None = None, actor_id: str | None = None,
+                          provenance: str = "plan_service",
                           verification_result: str | None = None, verified_by: str | None = None,
                           expected_revision: int | None = None, db=None) -> tuple[PlanNode, PlanNode]:
     """Expose atomic acceptance with an extracted bounded follow-up writer."""
     from plans.followups import accept_with_follow_up as accept
 
     return accept(
-        node_id, title=title, acceptance_criteria=acceptance_criteria,
+        node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
         actor_id=actor_id, provenance=provenance,
         verification_result=verification_result, verified_by=verified_by,
         expected_revision=expected_revision, db=db,

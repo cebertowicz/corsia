@@ -5,6 +5,7 @@ import SettingsView from './SettingsView.svelte';
 import { token } from '$lib/stores/auth';
 import { SETTINGS_SECTIONS, closeSettingsProject, openProjectSettings, requestConnectedAppKey, requestSettingsSection, resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { get } from 'svelte/store';
+import { projects } from '$lib/stores/projects';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -29,6 +30,7 @@ afterEach(() => {
 	Element.prototype.scrollIntoView = scrollIntoView;
 	token.set(null);
 	resetSettingsNavigation();
+	projects.set([]);
 });
 
 describe('SettingsView navigation', () => {
@@ -85,6 +87,15 @@ describe('SettingsView navigation', () => {
 		expect(host.querySelector('.settings-content')?.classList.contains('mobile-section')).toBe(true);
 		expect(get(settingsNavigation).drill?.backLabel).toBe('Projects');
 		closeSettingsProject();
+	});
+
+	it('uses the project name in the app header at desktop width', () => {
+		projects.set([{ id: 'p-garden', name: 'Garden plan', status: 'active', accent_color: null }]);
+		openProjectSettings('p-garden');
+		component = mount(SettingsView, { target: host, props: { systemStatus: {} } });
+		flushSync();
+
+		expect(get(settingsNavigation).drill).toMatchObject({ title: 'Garden plan', backLabel: 'Projects' });
 	});
 
 	it('uses the Settings header to return from a Connected apps key card', () => {

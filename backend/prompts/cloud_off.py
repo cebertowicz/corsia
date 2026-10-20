@@ -36,13 +36,6 @@ HOLD_ACTION = _hold_action("thread")
 WORKER_HOLD_ACTION = _hold_action("worker")
 
 
-def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:
-    """Return the agent-facing recovery text for a ``project_cloud_off`` refusal."""
-    text = f"project_cloud_off: This project uses local models only, so {selector} can't run here. "
-    text += f"{_USE_READY_LOCAL}: {', '.join(ready_local)}." if ready_local else NO_LOCAL_READY_TEXT
-    return f"{text} Local workers run one at a time." if spawn else text
-
-
 def thread_local_only_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:
     """Return the agent-facing recovery text for a ``thread_local_only`` refusal."""
     text = f"local_only_requires_local_model: {_held_clause(selector, 'thread_local_only')}. "

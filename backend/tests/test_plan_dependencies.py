@@ -97,7 +97,7 @@ def test_add_creates_its_dependency_in_the_same_mutation(db):
     prerequisite = _task(db, plan.id, "Prerequisite")
 
     created = mutate(plan.id, "add", {
-        "title": "Dependent", "acceptance_criteria": "Dependent DOD",
+        "title": "Dependent", "acceptance_criteria": "Dependent DOD", "size": "unknown",
         "depends_on_node_id": prerequisite.id,
     }, actor=OWNER, provenance="test", mutation_id=_mid(), db=db).result["node"]
 

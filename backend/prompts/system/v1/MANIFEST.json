@@ -7,10 +7,10 @@
       "sha256": "5d1db196d8a8ddf55fbdd4d7d4db0e008d5fe51fd80d2dafe0133a4a8f7574c7"
     },
     {
-      "bytes": 6058,
+      "bytes": 6252,
       "kind": "context",
       "path": "context/20-CONTEXT-WORK-STATE.md",
-      "sha256": "c060283fe1bcfc602f3988ca0fc6cb0b3d931c2f58bca3a1f3874a9ce5c9c0b9"
+      "sha256": "09030a542fbb02606f80f8550a6bb085523cc6e0f88ff3a28dbd2091fc906bdb"
     },
     {
       "bytes": 3410,
@@ -19,10 +19,10 @@
       "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
     },
     {
-      "bytes": 2887,
+      "bytes": 3059,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "d6e21536597fb270103afc455a1c1aedb7af5219226f94d4beb7af996985aac8"
+      "sha256": "3a5f8f31889f9deea2b8bb4ccdf2209ea228d5f0ed46fe97a58380aaad8afced"
     },
     {
       "bytes": 862,
@@ -43,11 +43,11 @@
       "sha256": "e1e3eb13deff650b55ae30558962fcf57eef9ad2d227241c00751c2b9c0d26a0"
     },
     {
-      "bytes": 3293,
+      "bytes": 3204,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "c68db4057f658336adfb28baa35ce479478ad3df46ede999876370f045e0075c"
+      "sha256": "cfc5fc6853862c49b97b632e52e16064d9965d14b764ff1a731ac88c5099e7cc"
     },
     {
       "bytes": 424,
@@ -124,22 +124,22 @@
       "sha256": "f4fd70fb0d41390fb0e9ea358060bd1bb04195c89aae6094f0ace85cae3019c7"
     },
     {
-      "bytes": 4719,
+      "bytes": 5283,
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
-      "sha256": "23827a97c54bd33200a196356b1f39259ba4c640bb173694ebda1585fa15fa55"
+      "sha256": "36704c8482561c6ae8e4859b192de203d44b1b885ab79ecb87e3666ab6abda00"
     },
     {
-      "bytes": 2264,
+      "bytes": 3370,
       "kind": "skill",
       "path": "skills/apply-feedback/SKILL.md",
-      "sha256": "32b406e16637e0321581223fa5515973b0993173dbfa205a2b79251d21c55d51"
+      "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
     },
     {
-      "bytes": 19066,
+      "bytes": 18740,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
-      "sha256": "a591e0fedb58da816ecde32c6da76cca89d7e0a24d819808b9683da39f2100c7"
+      "sha256": "d33af852f69473e7f2e885a7bbc1c05ed8b506ed65a7d3ab000081f1022e2f86"
     },
     {
       "bytes": 3700,
@@ -220,16 +220,22 @@
       "sha256": "8c11d102b6b8ca00a143efb88c67eba152d1f68754b980a2bccee34b1f16bb43"
     },
     {
+      "bytes": 3564,
+      "kind": "skill",
+      "path": "skills/connect-tools/SKILL.md",
+      "sha256": "62b46585ca89e453847622b0c2a48af1fe379fefe30e9c6f4ea34c4852524d5b"
+    },
+    {
       "bytes": 4409,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
       "sha256": "81b5202ca8ca0907f005691d5fb08805313d29b9ae2f3de9fd8e31df2ff15df2"
     },
     {
-      "bytes": 9929,
+      "bytes": 10005,
       "kind": "skill",
       "path": "skills/coordination-api/SKILL.md",
-      "sha256": "0a2c0c880cce8d89aa42583185257093e9a341338a4d77f312e31f0ec0f325ee"
+      "sha256": "9b20693c953f26ffdb7a9dd492ea8d023514317b24988d98f370cf0eee395c8d"
     },
     {
       "bytes": 4120,
@@ -310,16 +316,22 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 9312,
+      "bytes": 7902,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "a5f9797cae4e3ac75a8aa21fe13afa3e8ab6a7a50e9b1992158d072a7e6e29e3"
+      "sha256": "1424e0d49881475bf8951e0a472426b9bd511640d3756bc52c6917ac6869e81b"
     },
     {
-      "bytes": 10803,
+      "bytes": 10187,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "aef2916f192c3810c26dc9c4f49c1dde2f597f4d1cf18bd70cbfbb60257b7d23"
+      "sha256": "33fdb76347b39afc19a8b55c1d80e700bd863d1c6355a53b7bb1e8ff13301164"
+    },
+    {
+      "bytes": 3276,
+      "kind": "skill",
+      "path": "skills/workflow-design/SKILL.md",
+      "sha256": "c52ed0deea4ea3339d5e0610c3ca29d0ba4e94f3181efe87e8d95206f44ad199"
     }
   ],
   "version": "v1"

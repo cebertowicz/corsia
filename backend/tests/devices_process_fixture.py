@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import threading
 
 import psutil
 import uvicorn
@@ -22,9 +23,21 @@ def main() -> None:
     state = Path(os.environ["CORSIA_STATE_DIR"]).resolve()
     assert workspace != state and workspace.is_dir() and state.is_dir()
 
+    import app_lifecycle
     from infra import config, devices_listener
     import main as backend
     from core.devices_runtime import runtime
+
+    cloud_discovery_done = asyncio.Event()
+    original_cloud_discovery = app_lifecycle._startup_cloud_discovery
+
+    async def track_cloud_discovery():
+        try:
+            await original_cloud_discovery()
+        finally:
+            cloud_discovery_done.set()
+
+    app_lifecycle._startup_cloud_discovery = track_cloud_discovery
 
     assert config.WORKSPACE.resolve() == workspace
     assert config.STATE_ROOT.resolve() == state
@@ -62,6 +75,9 @@ def main() -> None:
             "fds": psutil.Process().num_fds(),
             "tasks": len([task for task in asyncio.all_tasks() if not task.done()]),
             "threads": psutil.Process().num_threads(),
+            "thread_ids": sorted(thread.id for thread in psutil.Process().threads()),
+            "thread_names": sorted(thread.name for thread in threading.enumerate()),
+            "startup_cloud_discovery_pending": not cloud_discovery_done.is_set(),
         }
 
     @app.put("/__i9/devices/{enabled}")

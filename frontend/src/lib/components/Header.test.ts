@@ -244,6 +244,16 @@ describe('Header title on the Measurement page', () => {
 	});
 });
 
+describe('Header title overflow', () => {
+	it('lets a long scope title shrink and ellipsize before it displaces fixed controls', () => {
+		const start = headerSource.indexOf('.h-scope {');
+		const rule = headerSource.slice(start, headerSource.indexOf('}', start));
+		expect(rule).toContain('min-width: 0;');
+		expect(rule).toContain('max-width: 24rem;');
+		expect(rule).toContain('text-overflow: ellipsis;');
+	});
+});
+
 describe('Header glass layers', () => {
 	const rule = (css: string, selector: string) => {
 		const start = css.indexOf(`${selector} {`);

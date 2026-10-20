@@ -134,6 +134,108 @@ describe('ProvidersPolicyBlock', () => {
 		expect(host.textContent).toContain('Reload providers');
 	});
 
+	const projectPolicy = {
+		scope: 'project', use_workspace: false, override_revision: 1, providers: [
+			{ provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'personal', label: 'Personal', enabled: true }] },
+			{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: true }, rollover: false, order: null, disabled: [], revision: 1, units: [] },
+		],
+	};
+	function stubProjectCloudOff(initial: boolean, save: 'ok' | 'fail' = 'ok', policy: object = projectPolicy) {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) {
+				if (init?.method === 'PUT') return save === 'ok'
+					? { ok: true, json: async () => ({ cloud_models_off: true }) }
+					: { ok: false, status: 500, json: async () => ({ detail: 'Save denied' }) };
+				return { ok: true, json: async () => ({ cloud_models_off: initial }) };
+			}
+			return { ok: true, json: async () => policy };
+		}));
+	}
+
+	it('names exactly the account providers the policy lists in the Local models only line', async () => {
+		stubProjectCloudOff(true, 'ok', { ...projectPolicy, providers: [projectPolicy.providers[1]] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Codex isn't used while Local models only is on."));
+		expect(host.textContent).not.toContain('Claude Code');
+	});
+
+	it('hides project account controls behind one quiet line only when saved Local models only is on', async () => {
+		stubProjectCloudOff(true);
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
+		expect(host.textContent).not.toContain('Use workspace settings');
+		expect(host.querySelector('[aria-label="Personal"]')).toBeNull();
+	});
+
+	it('shows project accounts as today when saved Local models only is off', async () => {
+		stubProjectCloudOff(false);
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		expect(host.textContent).toContain('Use workspace settings');
+	});
+
+	it('swaps account controls only after saving Local models only succeeds', async () => {
+		stubProjectCloudOff(false);
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+
+		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
+	});
+
+	it('keeps account controls visible when saving Local models only fails', async () => {
+		stubProjectCloudOff(false, 'fail');
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+
+		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t save this change.'));
+		expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull();
+	});
+
+	it('keeps account controls visible when loading Local models only fails', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const path = input.toString();
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: false, status: 500, json: async () => ({ detail: 'Read denied' }) };
+			return { ok: true, json: async () => projectPolicy };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		// The setting's value is unknown, so its switch is hidden rather than shown as off.
+		expect(host.querySelector('[aria-label="Local models only"]')).toBeNull();
+		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting. Try again');
+	});
+
+	it('keeps the existing loading line until Local models only has loaded', async () => {
+		let resolveCloud!: (value: unknown) => void;
+		vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+			const path = input.toString();
+			if (path.startsWith('/api/vendor-accounts')) return Promise.resolve({ ok: true, json: async () => ({ accounts: [] }) });
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return new Promise((resolve) => { resolveCloud = resolve; });
+			return Promise.resolve({ ok: true, json: async () => projectPolicy });
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain('Loading providers…'));
+		expect(host.querySelector('[aria-label="Personal"]')).toBeNull();
+		resolveCloud({ ok: true, json: async () => ({ cloud_models_off: false }) });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+	});
+
 	function account(id: string, windows: object[] = []) {
 		return { id, provider: 'codex', name: id, is_default: false, state: 'signed_in', revision: 1, identity: {},
 			label: { name: id, email: null, text: id, custom: null },
