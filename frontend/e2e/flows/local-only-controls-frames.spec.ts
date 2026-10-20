@@ -152,8 +152,7 @@ async function openSheetInProject(page: Page, name: string) {
 	await expect(page.locator('.model-sheet')).toBeVisible();
 }
 
-async function openHeldCloudOffChat(page: Page, state: State) {
-	const projectName = 'Customer research';
+async function openHeldCloudOffChat(page: Page, state: State, projectName: string) {
 	const chatName = 'Interview summary';
 	const projectResponse = await page.request.post(`/api/projects?token=${encodeURIComponent(TEST_TOKEN)}`, {
 		data: { name: projectName, description: '', accent_color: '#007faa' },
@@ -191,10 +190,13 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 		const state: State = { models: catalogs.plain, servers: [servers.remoteOff], cloudOff: false, failSave: false };
 		await serve(page, state);
 		let stamp = 0;
-		const projectNames = [
+		const projectThemes = [
 			'Market research', 'Product planning', 'Design review', 'Launch preparation',
 			'Support themes', 'Sales notes', 'Interview notes', 'Competitive analysis',
 		] as const;
+		const projectMonths = testInfo.project.name === 'chromium-desktop'
+			? ['January', 'February', 'March', 'April', 'May', 'June'] as const
+			: ['July', 'August', 'September', 'October', 'November', 'December'] as const;
 		const shot = async (name: string, size: string, theme: string) => {
 			// A frame counts only with the exact committed head in its dev header: wait for the real hash, no placeholder, no dirty mark.
 			await expect(page.locator('.version-overlay')).toHaveText(/^\s*b [0-9a-f]{7}\s*·\s*f [0-9a-f]{7}\s*·/, { timeout: 15_000 });
@@ -205,7 +207,8 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			await page.emulateMedia({ colorScheme: theme });
 			await loginByUrl(page, { waitForComposer: false });
 			stamp += 1;
-			return projectNames[(stamp - 1) % projectNames.length];
+			const index = stamp - 1;
+			return `${projectThemes[index % projectThemes.length]} — ${projectMonths[Math.floor(index / projectThemes.length)]}`;
 		};
 
 		for (const [size, width, height, theme] of REFERENCE_ONLY ? [] : surfaces(testInfo.project.name)) {
@@ -257,7 +260,8 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 
 			if (!BEFORE) {
 				await begin(width, height, theme);
-				await openHeldCloudOffChat(page, state);
+				const heldProjectName = `Customer research — ${projectMonths[Math.floor((stamp - 1) / projectThemes.length)]}`;
+				await openHeldCloudOffChat(page, state, heldProjectName);
 				await shot('chat-held-cloud-off', size, theme);
 			}
 
