@@ -28,7 +28,7 @@ async def _server() -> dict[str, Any]:
     if server is None:
         raise HTTPException(409, "Local models aren't set up. Select Set up to continue.")
     if server.get("status") != "online":
-        raise HTTPException(409, "CORSIA's local model server isn't running. Select Set up to start it.")
+        raise HTTPException(409, "CORSIA's local model server isn't running. Open its settings and select Start daemon.")
     return server
 
 

@@ -75,8 +75,11 @@ async def test_server_selects_corsias_own_omlx_over_a_persons_own(monkeypatch) -
 async def test_offline_managed_omlx_is_not_selected(monkeypatch) -> None:
     _omlx_rows(monkeypatch, [{"id": "corsia-omlx", "status": "offline"}], {"corsia-omlx"})
 
-    with pytest.raises(HTTPException, match="local model server isn't running"):
+    with pytest.raises(HTTPException) as raised:
         await provider_local_models._server()
+
+    # Set up is hidden beside CORSIA's own offline row, so the fix named is the row's own Start.
+    assert raised.value.detail == "CORSIA's local model server isn't running. Open its settings and select Start daemon."
 
 
 @pytest.mark.parametrize("status", ["online", "offline"])
