@@ -98,6 +98,32 @@ def test_model_refusal_delegates_project_cloud_off_wording_to_locality(monkeypat
     )
 
 
+def test_refusals_never_carry_a_secret(monkeypatch) -> None:
+    from infra import local_only
+
+    db = _db()
+    secret = "sk-local-only-sentinel"
+    monkeypatch.setattr(local_only, "_catalog_row", lambda model, **_kwargs: {
+        "litellm_model": model, "is_local": False, "api_key": secret,
+        "api_base": f"https://user:{secret}@cloud.example/v1",
+    })
+    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ["omlx@local/a"])
+
+    model_refusal = local_only.local_only_model_refusal(
+        "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db, spawn=True,
+    )
+    send_refusal = local_only.send_confirmation_refusal(
+        {"local_only": 1},
+        {"id": "r", "title": "Reviewer", "model": "codex/gpt-6.1-sol"},
+        no_sensitive_content=None,
+        db=db,
+    )
+
+    assert model_refusal and send_refusal
+    assert secret not in model_refusal
+    assert secret not in send_refusal
+
+
 def test_scope_to_thread_resolves_a_local_only_thread_through_the_canonical_resolver(
     monkeypatch,
 ) -> None:
