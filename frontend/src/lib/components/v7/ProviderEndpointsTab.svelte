@@ -9,8 +9,7 @@
 	const privateMachine = $derived(saved ?? server.private ?? false);
 	let busy = $state(false);
 	let error = $state('');
-	const onThisMac = $derived(server.on_this_mac === true);
-	const canMarkPrivate = $derived(!onThisMac || server.kind === 'external');
+	const canMarkPrivate = $derived(server.on_this_mac !== true);
 	async function savePrivate(value: boolean) {
 		if (busy) return;
 		busy = true; error = '';
@@ -27,7 +26,7 @@
 		<div class="row">
 			<span class="l"><code>{ep.host}:{server.port}</code></span>
 			<span class="v">
-				{#if onThisMac}<span class="this-computer">This computer</span>{:else}<span class="ep-kind {ep.kind}">{ep.kind}</span>{/if}
+				{#if ep.kind === 'local'}<span class="this-computer">This computer</span>{:else}<span class="ep-kind {ep.kind}">{ep.kind}</span>{/if}
 				{#if ep.last_latency_ms != null}<span class="lat">{ep.last_latency_ms}ms</span>{/if}
 			</span>
 		</div>

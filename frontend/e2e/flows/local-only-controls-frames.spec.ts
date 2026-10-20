@@ -56,7 +56,9 @@ const servers = {
 	thisMac: server('srv-local', { instance_name: 'oMLX', on_this_mac: true, endpoints: [endpoint('e2', '127.0.0.1', 'local')], active_host: '127.0.0.1' }),
 	remoteOffline: server('srv-studio', { instance_name: 'Studio mini', status: 'offline', latency_ms: null, endpoints: [{ ...endpoint('e1', '192.168.1.20', 'lan'), last_latency_ms: null }], active_host: null, private: true }),
 	loopback: server('srv-lms', { provider: 'external', kind: 'external', instance_name: 'LM Studio', port: 1234, dialect: 'openai',
-		endpoints: [endpoint('e3', '127.0.0.1', 'local')], active_host: '127.0.0.1', on_this_mac: true, private: false, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
+		endpoints: [endpoint('e3', '127.0.0.1', 'local')], active_host: '127.0.0.1', on_this_mac: false, private: false, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
+	loopbackPrivate: server('srv-lms-private', { provider: 'external', kind: 'external', instance_name: 'LM Studio', port: 1234, dialect: 'openai',
+		endpoints: [endpoint('e4', '127.0.0.1', 'local')], active_host: '127.0.0.1', on_this_mac: false, private: true, metadata: { base_url: 'http://127.0.0.1:1234/v1' } }),
 };
 
 const vendorAccounts = [['personal', 'claude-code', 'Personal Max'], ['pro', 'codex', 'Pro']].map(([id, provider, name]) => ({
@@ -78,6 +80,9 @@ const policy = {
 type State = { models: unknown[]; servers: unknown[]; cloudOff: boolean; failSave: boolean; failPrivate?: boolean; canAddLocal?: boolean; hold?: Promise<void> | null };
 
 async function serve(page: Page, state: State) {
+	await page.route('**/api/system/host-resources?**', (route) => route.fulfill({ json: {
+		device_name: 'Studio', total_gb: 64, free_gb: 34, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 8, safe_reserve_gb: 8, by_provider: {},
+	} }));
 	await page.route('**/api/models**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/models'
 		? route.fulfill({ json: { models: state.models, active_local_threads: 0 } }) : route.continue());
 	// Only the frames that show "Add a local model" fake this computer's setup answer; the rest read the disposable backend's own.
@@ -93,6 +98,12 @@ async function serve(page: Page, state: State) {
 			state.cloudOff = (route.request().postDataJSON() as { cloud_models_off: boolean }).cloud_models_off;
 		}
 		await route.fulfill({ json: { cloud_models_off: state.cloudOff } });
+	});
+	await page.route('**/api/projects?**', async (route) => {
+		if (route.request().method() !== 'POST') return route.continue();
+		const response = await route.fetch();
+		const body = await response.json() as { project: Record<string, unknown> };
+		await route.fulfill({ response, json: { project: { ...body.project, accent_color: '#007faa' } } });
 	});
 	await page.route('**/api/settings/network-servers**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/settings/network-servers'
 		? route.fulfill({ json: { servers: state.servers } }) : route.continue());
@@ -215,6 +226,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 					['endpoints-remote-on', servers.remoteOn, 'oMLX', null],
 					['endpoints-this-mac', servers.thisMac, 'oMLX', null],
 					['endpoints-external-loopback', servers.loopback, 'OpenAI-compatible API', null],
+					['endpoints-external-loopback-private', servers.loopbackPrivate, 'OpenAI-compatible API', null],
 				] as [string, unknown, string, null][]),
 			];
 			for (const [name, row, label] of endpoints) {

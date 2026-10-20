@@ -45,8 +45,8 @@ describe('ProviderEndpointsTab private machine', () => {
 		expect(text()).toContain(THIS_COMPUTER); expect(toggle()).toBeNull(); expect(text()).not.toContain('Private machine');
 		expect(host.querySelector('.ep-kind.local')).toBeNull();
 	});
-	it('External on loopback: the backend caption and the switch', () => {
-		render(server({ provider: 'external', kind: 'external', endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: true }));
+	it('External on loopback: the address caption and the switch', () => {
+		render(server({ provider: 'external', kind: 'external', endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: false }));
 		expect(toggle()).not.toBeNull(); expect(text()).toContain(THIS_COMPUTER); expect(host.querySelector('.ep-kind.local')).toBeNull();
 	});
 	it('offline server: the switch still works', async () => {
