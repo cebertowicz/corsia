@@ -149,6 +149,8 @@ def _cached_access_token(credentials: dict[str, Any] | None) -> str | None:
         return None
     token = credentials.get("access_token")
     expires_at = credentials.get("access_token_expires_at")
+    if not isinstance(expires_at, (str, int, float)):
+        return None
     try:
         usable_until = float(expires_at)
     except (TypeError, ValueError):

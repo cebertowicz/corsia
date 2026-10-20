@@ -235,11 +235,12 @@ async def test_identity_comes_from_graph_me_with_the_access_token(microsoft, iso
     assert (row["provider_subject"], row["address"], row["account_kind"]) == (f"{TENANT_A}:object-a", "same@example.test", "work")
     assert microsoft.graph_auth == [f"Bearer {ACCESS}"]
     bundle = _bundle(account_id)
+    assert bundle is not None
     assert {key: bundle[key] for key in ("access_token", "refresh_token", "client_id", "tenant_id", "scopes")} == {
         "access_token": ACCESS, "refresh_token": REFRESH, "client_id": CLIENT_ID, "tenant_id": TENANT_A,
         "scopes": list(oauth.SCOPES),
     }
-    assert float(bundle["access_token_expires_at"]) > 0
+    assert float(str(bundle["access_token_expires_at"])) > 0
 
 
 async def test_graph_falls_back_to_the_user_principal_name(microsoft, isolated_db) -> None:
