@@ -26,6 +26,8 @@ export interface DocComment {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
+	/** An orphaned comment whose quote no longer appears in the document text. */
+	detached?: boolean;
 	acked?: boolean;
 	review?: boolean;
 	replacement?: string | null;

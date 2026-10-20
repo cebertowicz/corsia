@@ -167,6 +167,8 @@ test('@slice1 @surface:live-document a disconnected 393px placement reload is de
 		const page = await context.newPage();
 		await openLiveDocument(page, document);
 		await deleteRenderedLine(page, quote);
+		// Place again is offered only for a comment whose text is back, in its old context, so type the quote back where the caret stayed.
+		await page.keyboard.insertText(`\n${quote}`);
 		await page.locator('.comment-status').click();
 		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
 		await expect(comments).toBeVisible();
@@ -177,6 +179,51 @@ test('@slice1 @surface:live-document a disconnected 393px placement reload is de
 		const describedBy = await reload.getAttribute('aria-describedby');
 		expect(describedBy).toBeTruthy();
 		await expect(page.locator(`#${describedBy}`)).toHaveText(/Disconnected/);
+	} finally {
+		await context.close();
+	}
+});
+
+
+test('@slice1 @surface:live-document Place again follows the quote on screen, and detached cards stay without it', async ({ browser, request }, testInfo) => {
+	test.skip(testInfo.project.name !== 'chromium-desktop', 'The shared 1440 layout carries the footer screenshots.');
+	test.setTimeout(120_000);
+	const stamp = `placement-${Date.now()}`;
+	const quote = `placement quote ${stamp}`;
+	const document = await seedLiveDocument(request, `placement-recovery-${stamp}`, `# Placement recovery ${stamp}\n\n${quote}\n`);
+	await createComment(request, document, quote, `Probe ${stamp}`);
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	try {
+		const page = await context.newPage();
+		await openLiveDocument(page, document);
+		await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
+
+		// The text is gone: the drawer shows the Text changed card without Place again.
+		await deleteRenderedLine(page, quote);
+		await page.locator('.comment-status').click();
+		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
+		await expect(comments).toBeVisible();
+		await expect(comments.getByText(/^Text changed:/)).toHaveCount(1);
+		await expect(comments.locator('[data-drawer-placement]')).toHaveCount(0);
+		await expect(comments.getByRole('button', { name: 'Reload comment placements', exact: true })).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath('place-again-text-gone-1440.png'), animations: 'disabled' });
+
+		// The text comes back: the footer offers Place again.
+		await comments.getByRole('button', { name: 'Close comments', exact: true }).click();
+		await expect(comments).toHaveCount(0);
+		await page.locator('.cm-content').click();
+		await page.keyboard.press('ControlOrMeta+End');
+		await page.keyboard.insertText(`${quote}\n`);
+		await page.locator('.comment-status').click();
+		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
+		await expect(reload).toBeVisible();
+		await expect(comments.locator('[data-drawer-placement]').getByRole('status')).toHaveText("1 comment couldn't be placed");
+		await page.screenshot({ path: testInfo.outputPath('place-again-text-back-1440.png'), animations: 'disabled' });
+		await reload.click();
+		await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
+		await expect(comments.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
+		await expect(reload).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath('place-again-placed-1440.png'), animations: 'disabled' });
 	} finally {
 		await context.close();
 	}

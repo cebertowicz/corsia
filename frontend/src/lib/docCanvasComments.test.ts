@@ -157,10 +157,24 @@ describe('inline suggestions in the highlight ranges', () => {
 
 describe('comment surface status', () => {
 	it('counts orphaned cards and reports the placement reload state', () => {
-		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0, placementReloading: false, placementReloadError: false });
+		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0, replaceableCount: 0, placementReloading: false, placementReloadError: false });
 		expect(commentSurfaceStatus([
 			comment('a', 0, 'x', { orphaned: true }), comment('b', 0, 'x', { placementReloading: true }), comment('c', 0, 'x', { placementReloadError: true }),
-		])).toEqual({ commentCount: 3, orphanedCount: 1, placementReloading: true, placementReloadError: true });
+		])).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1, placementReloading: true, placementReloadError: true });
+	});
+
+	it('offers Place again only for orphaned comments whose quote remains in the text', () => {
+		const deleted = commentsInDocumentOrder([comment('deleted', 0, 'quote')], 'other');
+		const restored = commentsInDocumentOrder([comment('restored', 8, 'quote')], 'restored quote', { restored: 'Refused' });
+		const elsewhere = commentsInDocumentOrder([comment('elsewhere', 20, 'quote')], 'quote elsewhere');
+		const refused = commentsInDocumentOrder([comment('refused', 8, 'quote')], 'refused quote', { refused: 'Refused' });
+
+		expect(deleted[0].detached).toBe(true);
+		expect(commentSurfaceStatus(deleted)).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
+		for (const rows of [restored, elsewhere, refused]) {
+			expect(rows[0].detached).toBe(false);
+			expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 1, replaceableCount: 1 });
+		}
 	});
 
 	it('counts only open threads for the header pill', () => {

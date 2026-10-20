@@ -378,7 +378,7 @@
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		feedback={feedbackStatus?.feedback()}
-		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, orphanedCount: commentStatus.orphanedCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
+		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, unplacedCount: commentStatus.orphanedCount, replaceableCount: commentStatus.replaceableCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
