@@ -50,9 +50,9 @@ describe('Header Local only badge', () => {
 	});
 
 	it.each([
-		['its own', { local_only: 1 }],
-		['inherited', { local_only: 1, local_only_inherited_from_thread_id: 'parent' }],
-		['the project, by the thread payload', { local_only_effective: true }],
+		['its own', { local_only: 1, local_only_effective: true, local_only_cause: 'own' }],
+		['inherited', { local_only: 1, local_only_effective: true, local_only_cause: 'inherited', local_only_inherited_from_thread_id: 'parent' }],
+		['the project, by the thread payload', { local_only_effective: true, local_only_cause: 'project' }],
 	])('shows the badge when Local only is %s', (_cause, fields) => {
 		withLocalOnly(fields);
 		render();
@@ -67,7 +67,7 @@ describe('Header Local only badge', () => {
 	});
 
 	it('asks for the model sheet with the Local only row focused when tapped', () => {
-		withLocalOnly({ local_only: 1 });
+		withLocalOnly({ local_only: 1, local_only_effective: true, local_only_cause: 'own' });
 		render();
 		const open = vi.fn();
 		const stop = onModelSheetRequest(open);
@@ -77,7 +77,7 @@ describe('Header Local only badge', () => {
 	});
 
 	it('shows no badge outside the chat view', () => {
-		withLocalOnly({ local_only: 1 });
+		withLocalOnly({ local_only: 1, local_only_effective: true, local_only_cause: 'own' });
 		render('activity');
 		expect(badge()).toBeNull();
 	});
