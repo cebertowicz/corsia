@@ -1,6 +1,6 @@
-"""The person's 409 for a Local only refusal, rendered from its typed fields.
+"""The 409 for a Local only refusal, rendered from its typed fields per audience.
 
-Governance & Scopes owns this wording; the agent text is in ``prompts.cloud_off``.
+Governance & Scopes owns the person's wording; the agent text is in ``prompts.cloud_off``.
 """
 
 from __future__ import annotations
@@ -19,3 +19,8 @@ def locality_refused_response(exc: LocalityRefused, *, turning_on: bool = False)
     else:
         message = "This chat is Local only, so choose a local model and try again."
     return JSONResponse(status_code=409, content={"code": exc.code, "message": message})
+
+
+def agent_locality_refused_response(exc: LocalityRefused) -> JSONResponse:
+    """The agent routes' 409: the same recovery text the agent's tools return."""
+    return JSONResponse(status_code=409, content={"code": exc.code, "message": str(exc)})

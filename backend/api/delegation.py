@@ -7,7 +7,7 @@ from infra.time import utc_now_iso
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from api.locality_refusal import locality_refused_response
+from api.locality_refusal import agent_locality_refused_response
 from infra.auth import authenticate, owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -229,7 +229,7 @@ async def create_thread(token: str, body: dict):
             emit_spawn_chip=bool(spawned_by), account_id=body.get("account_id"),
         )
     except LocalityRefused as exc:
-        return locality_refused_response(exc)
+        return agent_locality_refused_response(exc)
     except SpawnVisibilityRejected as exc:
         raise HTTPException(403, str(exc)) from exc
     thread_id = thread_row["id"]

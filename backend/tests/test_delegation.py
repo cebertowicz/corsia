@@ -230,10 +230,11 @@ class TestCreateThread:
         )
 
         assert response.status_code == 409
-        assert response.json() == {
-            "code": "local_only_requires_local_model",
-            "message": "This chat is Local only, so choose a local model and try again.",
-        }
+        body = response.json()
+        # The agent route gives the tools' recovery text, naming the ready local models.
+        assert body["code"] == "local_only_requires_local_model"
+        assert body["message"].startswith("local_only_requires_local_model: claude-code/sonnet")
+        assert "omlx@local/qwen" in body["message"]
         assert deleg_db.execute("SELECT COUNT(*) FROM threads WHERE title = 'Escape'").fetchone()[0] == 0
 
     def test_create_refuses_a_caller_thread_the_user_does_not_own(self, client, deleg_db):
