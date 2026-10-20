@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from events import dead_letter
-from events.connectors import get_manifest
+from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, resolve_targets
@@ -33,9 +33,8 @@ DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
 
-_DIGEST_SUMMARY_LIMIT = 400
-_DIGEST_VALUE_LIMIT = 120
-_DIGEST_BOOKKEEPING_FACTS = frozenset({"event_id", "message_id", "path"})
+_NOTE_LINE_LIMIT = 400
+_NOTE_VALUE_LIMIT = 120
 
 
 @dataclass(frozen=True)
@@ -90,29 +89,31 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-def _digest_summary(envelope: EventEnvelope, details: dict[str, Any]) -> str:
-    """The note line: the event plus its facts, in the connector's order.
+def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
+    """The agent's note line: the event plus the type's declared line facts.
 
-    Each value is clipped so one long fact cannot hide the rest; the full
-    facts stay in the note's details.
+    Only declared facts show, so outside text such as an email subject never
+    reaches the line. Each value is clipped so one long fact cannot hide the
+    rest; the full facts stay in the note's details.
     """
     facts = []
-    for key, value in details.items():
-        if key in _DIGEST_BOOKKEEPING_FACTS:
+    for key in line_facts:
+        value = envelope.facts.get(key)
+        if value is None:
             continue
         rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         )
-        facts.append(f"{key}={_clip(rendered, _DIGEST_VALUE_LIMIT)}")
-    summary = _summary(envelope)
+        facts.append(f"{key}={_clip(rendered, _NOTE_VALUE_LIMIT)}")
+    line = _summary(envelope)
     if facts:
-        summary = f"{summary}: {', '.join(facts)}"
-    return _clip(summary, _DIGEST_SUMMARY_LIMIT)
+        line = f"{line}: {', '.join(facts)}"
+    return _clip(line, _NOTE_LINE_LIMIT)
 
 
 def _deliver_target(
     db: sqlite3.Connection, envelope: EventEnvelope, target: Target,
-    collapse_fact: str | None,
+    decl: EventTypeDecl,
 ) -> PlatformDelivery:
     event_id = envelope.event_id
     disposition = target.disposition
@@ -140,10 +141,11 @@ def _deliver_target(
         return PlatformDelivery(event_id, thread, WOKE)
     if _digest_seen(db, thread, event_id):
         return PlatformDelivery(event_id, thread, DUPLICATE)
-    details = _digest_details(envelope, collapse_fact)
+    # The person's chip keeps the plain event line; the facts are the agent's.
+    details = {**_digest_details(envelope, decl.collapse_fact), "chip": _summary(envelope)}
     append_thread_context_note(
         db, thread_id=thread,
-        summary=_digest_summary(envelope, details), details=details,
+        summary=_note_line(envelope, decl.digest_line_facts), details=details,
     )
     return PlatformDelivery(event_id, thread, DIGESTED)
 
@@ -159,13 +161,13 @@ def deliver_platform_event_sync(
 ) -> list[PlatformDelivery]:
     """Normalize, resolve and deliver one event in one write transaction."""
     envelope = normalize(connector, raw_payload, event_type)
-    collapse_fact = get_manifest(connector).decl(envelope.type).collapse_fact
+    decl = get_manifest(connector).decl(envelope.type)
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if target_filter is not None and (reason := target_filter(target, conn)) is not None
-            else _deliver_target(conn, envelope, target, collapse_fact)
+            else _deliver_target(conn, envelope, target, decl)
             for target in targets
         ]
         for delivery in deliveries:
