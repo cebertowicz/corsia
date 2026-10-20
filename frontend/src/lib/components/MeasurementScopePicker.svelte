@@ -13,6 +13,7 @@
 	 * chip answers "what is filtered out if I remove this".
 	 */
 	import { tick } from 'svelte';
+	import Popover from './ui/Popover.svelte';
 
 	export type PickerProject = { id: string; name: string };
 	export type PickerAgent = { id: string; name: string; projectId: string | null; projectName: string | null };
@@ -39,6 +40,7 @@
 	let activeIndex = $state(0);
 	let input = $state<HTMLInputElement | undefined>(undefined);
 	let listbox = $state<HTMLElement | undefined>(undefined);
+	let trigger = $state<HTMLButtonElement | undefined>(undefined);
 
 	const LISTBOX_ID = 'measurement-scope-options';
 
@@ -133,6 +135,7 @@
 <div class="scope-picker">
 	<button
 		class="picker-trigger"
+		bind:this={trigger}
 		aria-haspopup="listbox"
 		aria-expanded={open}
 		aria-label="Measurement scope: {selectedLabel}"
@@ -144,57 +147,61 @@
 
 	{#if open}
 		<button class="picker-backdrop" tabindex="-1" aria-label="Close scope picker" onclick={hide}></button>
-		<div class="picker-panel">
-			<input
-				bind:this={input}
-				bind:value={search}
-				class="picker-search"
-				type="search"
-				role="combobox"
-				aria-expanded="true"
-				aria-controls={LISTBOX_ID}
-				aria-activedescendant={activeOption?.id}
-				aria-autocomplete="list"
-				aria-label="Search projects and agents"
-				placeholder="Search projects and agents"
-				oninput={() => (activeIndex = 0)}
-				onkeydown={onKeydown}
-			/>
-			<div class="picker-list" bind:this={listbox} id={LISTBOX_ID} role="listbox" aria-label="Measurement scopes">
-				{#each groups.all as option (option.id)}
-					{@const active = option.id === activeOption?.id}
-					<button id={option.id} class="picker-option" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>
-						<span class="option-label">{option.label}</span>
-					</button>
-				{/each}
-				{#each groups.projects as group (group.project.id)}
-					{@const projectChoice = projectOption(group.project)}
-					{@const projectActive = projectChoice.id === activeOption?.id}
-					<div class="picker-group" role="group" aria-label={group.project.name}>
-						<button id={projectChoice.id} class="picker-option is-project" class:active={projectActive} role="option" aria-selected={projectActive} data-active={projectActive} tabindex="-1" onclick={() => choose(projectChoice)}>
-							<span class="option-label">{projectChoice.label}</span>
-							<span class="option-detail">All agents in this project</span>
-						</button>
-						{#each group.ownAgents as row (row.id)}
-							{@const option = agentOption(row)}
+		<Popover anchor={trigger} open onClose={hide} placement="bottom-end" width="min(420px, calc(100vw - 32px))">
+			{#snippet children()}
+				<div class="picker-panel">
+					<input
+						bind:this={input}
+						bind:value={search}
+						class="picker-search"
+						type="search"
+						role="combobox"
+						aria-expanded="true"
+						aria-controls={LISTBOX_ID}
+						aria-activedescendant={activeOption?.id}
+						aria-autocomplete="list"
+						aria-label="Search projects and agents"
+						placeholder="Search projects and agents"
+						oninput={() => (activeIndex = 0)}
+						onkeydown={onKeydown}
+					/>
+					<div class="picker-list" bind:this={listbox} id={LISTBOX_ID} role="listbox" aria-label="Measurement scopes">
+						{#each groups.all as option (option.id)}
 							{@const active = option.id === activeOption?.id}
-							<button id={option.id} class="picker-option is-nested" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>
+							<button id={option.id} class="picker-option" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>
+								<span class="option-label">{option.label}</span>
+							</button>
+						{/each}
+						{#each groups.projects as group (group.project.id)}
+							{@const projectChoice = projectOption(group.project)}
+							{@const projectActive = projectChoice.id === activeOption?.id}
+							<div class="picker-group" role="group" aria-label={group.project.name}>
+								<button id={projectChoice.id} class="picker-option is-project" class:active={projectActive} role="option" aria-selected={projectActive} data-active={projectActive} tabindex="-1" onclick={() => choose(projectChoice)}>
+									<span class="option-label">{projectChoice.label}</span>
+									<span class="option-detail">All agents in this project</span>
+								</button>
+								{#each group.ownAgents as row (row.id)}
+									{@const option = agentOption(row)}
+									{@const active = option.id === activeOption?.id}
+									<button id={option.id} class="picker-option is-nested" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>
+										<span class="option-label">{option.label}</span>
+										<span class="option-detail">{option.detail}</span>
+									</button>
+								{/each}
+							</div>
+						{/each}
+						{#each groups.orphans as option (option.id)}
+							{@const active = option.id === activeOption?.id}
+							<button id={option.id} class="picker-option" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>
 								<span class="option-label">{option.label}</span>
 								<span class="option-detail">{option.detail}</span>
 							</button>
 						{/each}
+						{#if !options.length}<p class="picker-empty">No project or agent matches that search.</p>{/if}
 					</div>
-				{/each}
-				{#each groups.orphans as option (option.id)}
-					{@const active = option.id === activeOption?.id}
-					<button id={option.id} class="picker-option" class:active role="option" aria-selected={active} data-active={active} tabindex="-1" onclick={() => choose(option)}>
-						<span class="option-label">{option.label}</span>
-						<span class="option-detail">{option.detail}</span>
-					</button>
-				{/each}
-				{#if !options.length}<p class="picker-empty">No project or agent matches that search.</p>{/if}
-			</div>
-		</div>
+				</div>
+			{/snippet}
+		</Popover>
 	{/if}
 </div>
 
@@ -208,10 +215,10 @@
 	.picker-trigger:hover { background: var(--bg-hover); }
 	.picker-label { overflow-wrap: anywhere; text-align: left; }
 	.picker-backdrop { position: fixed; inset: 0; z-index: 39; border: none; background: transparent; padding: 0; cursor: default; }
+	:global(.popover:has(.picker-panel)) { max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; box-shadow: none; }
 	.picker-panel {
-		position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
 		display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;
-		width: min(420px, calc(100vw - 32px)); padding: 8px;
+		width: 100%; padding: 8px;
 		background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius);
 		box-shadow: var(--shadow-chip, 0 8px 32px rgba(0, 0, 0, .32));
 	}
@@ -242,15 +249,5 @@
 	/* The browser's own placeholder grey measured 4.41:1 in light and 3.99:1 in dark against the
 	   field, so the sheet names the token instead of leaving the hint colour to the user agent. */
 	.picker-search::placeholder { color: var(--text-secondary); opacity: 1; }
-	@media (max-width: 768px) {
-		/* The panel is wider than the trigger here, so right-anchoring it pushes its
-		   left edge outside the viewport. Anchor it to the trigger's left instead. */
-		.picker-panel { left: 0; right: auto; }
-	}
-	@media (max-width: 393px) {
-		/* At this breakpoint controls fill the page column, so the panel does too. */
-		.scope-picker { display: flex; width: 100%; }
-		.picker-trigger { justify-content: space-between; width: 100%; max-width: none; }
-		.picker-panel { left: 0; right: 0; width: auto; max-width: none; }
-	}
+	/* The shared Popover positions this panel from its trigger and clamps it to the viewport. */
 </style>

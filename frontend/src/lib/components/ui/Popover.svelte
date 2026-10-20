@@ -13,7 +13,7 @@
 		open: boolean;
 		onClose: () => void;
 		restoreFocus?: () => void;
-		placement?: 'right' | 'bottom';
+		placement?: 'right' | 'bottom' | 'bottom-end';
 		/** Make the content a column bounded by the popover, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
 		/** A CSS width for a card that should span the column of text it covers, instead of the default card width. */
@@ -64,8 +64,8 @@
 		const avoided = avoidRect?.();
 		let left = rect.left;
 		let top = rect.bottom + gap;
-		if (placement === 'bottom') {
-			if (left + width > area.right - gap) left = rect.right - width;
+		if (placement === 'bottom' || placement === 'bottom-end') {
+			if (placement === 'bottom-end' || left + width > area.right - gap) left = rect.right - width;
 			// Below the anchor when it fits; otherwise above it, never clamped up over the anchor.
 			if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) top = rect.top - height - gap;
 		} else if (rect.right + gap + width <= area.right - gap) {
@@ -122,6 +122,6 @@
 {/if}
 
 <style>
-	.popover { position: fixed; z-index: 45; width: min(380px, calc(100vw - 24px)); max-height: min(70vh, 620px); overflow: auto; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-elevated); box-shadow: var(--glass-elevation-2); }
+	.popover { position: fixed; z-index: 45; box-sizing: border-box; width: min(380px, calc(100vw - 24px)); max-height: min(70vh, 620px); overflow: auto; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-elevated); box-shadow: var(--glass-elevation-2); }
 	.popover.fill { display: flex; flex-direction: column; overflow: hidden; }
 </style>
