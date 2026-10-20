@@ -82,6 +82,19 @@
 		(node) => !userActionBusy && !!onUserAction && node.user_actions.length > 0,
 	);
 
+	function instructionsDocument(node: OperatorNode): OperatorArtifactLink | undefined {
+		return node.assignee === 'user'
+			? node.artifacts.find((artifact) => artifact.role === 'input' && artifact.type === 'document')
+			: undefined;
+	}
+
+	function openPersonStep(node: OperatorNode): boolean {
+		const document = instructionsDocument(node);
+		if (!document) return false;
+		onOpenArtifact(document, node.title);
+		return true;
+	}
+
 	// Which tasks are quietly scheduled depends on the clock, so the tree re-arranges on its minute tick.
 	const now = $derived($minuteClock);
 
@@ -204,7 +217,10 @@
 				aria-controls={rowControls.detailsId(node.id)}
 				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
 				title="{detailsExpanded(node.id) ? 'Hide' : 'Show'} details"
-				onclick={() => reveal.byRequest(() => toggleDetails(node.id))}
+				onclick={() => {
+					if (openPersonStep(node)) return;
+					reveal.byRequest(() => toggleDetails(node.id));
+				}}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}

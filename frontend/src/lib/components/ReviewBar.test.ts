@@ -7,9 +7,12 @@ import ReviewBarHarness from '$lib/__tests__/fixtures/ReviewBarHarness.svelte';
 import { DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarState.svelte';
 import { ReviewRefusal, type ReviewBarRead } from '$lib/api/reviewBar';
 import { submittedAnswers } from '$lib/stores/cardAnswers';
+import { token } from '$lib/stores/auth';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
+const planApi = vi.hoisted(() => ({ mutateUserTask: vi.fn() }));
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
+vi.mock('$lib/api/plans', async (importOriginal) => ({ ...(await importOriginal<object>()), ...planApi }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 
 const counts = (comments = 0, suggestions = 0, edits = 0) => ({ comments, suggestions, edits });
@@ -35,6 +38,8 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	api.fetchReviewBar.mockReset();
 	api.answerReview.mockReset();
+	planApi.mutateUserTask.mockReset();
+	token.set(null);
 	submittedAnswers.set({});
 });
 afterEach(() => {
@@ -80,6 +85,42 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalled());
 		await tick();
 		expect(host.querySelector('.review-bar')).toBeNull();
+	});
+
+	it('shows Done and Won’t do for a person-step document, never review actions', async () => {
+		api.fetchReviewBar.mockResolvedValue({
+			...read(0), ask_raised: false,
+			person_step: {
+				node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3,
+				plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent',
+			},
+		});
+		await render();
+		expect(host.textContent).toContain('Setup agent needs you to do this: Set up the workspace');
+		expect(button('Done')).toBeTruthy();
+		expect(button('Won’t do')).toBeTruthy();
+		expect(button('Approve')).toBeUndefined();
+		expect(button('Request changes')).toBeUndefined();
+	});
+
+	it('settles the person step through its existing Done action without waiting on comments', async () => {
+		token.set('user-token');
+		planApi.mutateUserTask.mockResolvedValue({ status: 'success' });
+		api.fetchReviewBar.mockResolvedValue({
+			...read(0), ask_raised: false,
+			person_step: {
+				node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3,
+				plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent',
+			},
+		});
+		const onAnswered = vi.fn();
+		await render(true, onAnswered);
+		button('Done')!.click();
+		await vi.waitFor(() => expect(planApi.mutateUserTask).toHaveBeenCalledWith(
+			'user-token', 'plan-1', 'mark_done', 'step-1', 3, 'mark_done:step-1:3',
+		));
+		await vi.waitFor(() => expect(host.textContent).toContain('You marked this done'));
+		expect(onAnswered).toHaveBeenCalledOnce();
 	});
 
 	it('R1: a failed send restores the bar with the retry message and no receipt', async () => {

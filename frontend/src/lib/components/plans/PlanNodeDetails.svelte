@@ -58,6 +58,9 @@
 	const initiative = $derived(initiativeLine(node));
 	// One total on a lineage of two or more tasks: the older line gives way to it.
 	const followUps = $derived(initiative ? null : withFollowUps(node));
+	const instructionsDocument = $derived(
+		node.assignee === 'user' && node.artifacts.some((artifact) => artifact.role === 'input' && artifact.type === 'document'),
+	);
 </script>
 
 {#snippet statusLine()}
@@ -88,7 +91,7 @@
 		<p class="next"><span class="prefix">Next:</span> {next}</p>
 	{/if}
 
-	{#if node.assignee === 'user' && node.description}
+	{#if node.assignee === 'user' && node.description && !instructionsDocument}
 		<div class="person-instructions md-content">{@html renderMarkdown(node.description)}</div>
 	{/if}
 	{#if node.assignee === 'user' && node.waiting_on.length}

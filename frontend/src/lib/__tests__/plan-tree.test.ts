@@ -114,6 +114,28 @@ describe('PlanTree — same renderer contract', () => {
 		expect(rowTitled('Review brief')!.querySelector('.node-details')).toBeNull();
 	});
 
+	it('opens a person step instructions document from its row instead of details', async () => {
+		const instructions: OperatorArtifactLink = {
+			id: 'instructions-1', role: 'input', integration: 'workspace', type: 'document',
+			external_id: 'how-to.md', title: 'How to set up', path: '/how-to.md', state: 'active', attention_state: null,
+		};
+		const onOpenArtifact = vi.fn();
+		component = mount(PlanTree, {
+			target: host,
+			props: withFolds({
+				nodes: [node({ id: 'person-step', title: 'Set up workspace', assignee: 'user', artifacts: [instructions] })],
+				onOpenArtifact,
+			}),
+		});
+		flushSync();
+
+		(rowTitled('Set up workspace')!.querySelector('.row-body') as HTMLButtonElement).click();
+		await settle();
+
+		expect(onOpenArtifact).toHaveBeenCalledWith(instructions, 'Set up workspace');
+		expect(rowTitled('Set up workspace')!.querySelector('.node-details')).toBeNull();
+	});
+
 	it('still offers Open on a paused ask that left Needs you', () => {
 		const artifact: OperatorArtifactLink = {
 			id: 'ask-1', role: 'attention', integration: 'workspace', type: 'document',

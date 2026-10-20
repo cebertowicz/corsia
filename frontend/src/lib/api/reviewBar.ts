@@ -1,12 +1,20 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
-
 export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requested';
 
 export interface FeedbackCounts { comments: number; suggestions: number; edits: number }
 
 /** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */
+export interface PersonStepInstruction {
+	node_id: string;
+	node_title: string;
+	node_revision: number;
+	plan_id: string;
+	owner_thread_id: string;
+	owner_name: string;
+}
+
 export interface ReviewBarRead {
 	ask_raised: boolean;
 	/** The Plans-owned holds this answer closes; each one identifies one review round. */
@@ -19,6 +27,7 @@ export interface ReviewBarRead {
 	other_request_count: number;
 	round_feedback_count: number;
 	round_feedback_counts: FeedbackCounts;
+	person_step?: PersonStepInstruction;
 }
 
 export interface ReviewAnswer { verdict: ReviewVerdict; note: string | null; feedback_counts: FeedbackCounts }

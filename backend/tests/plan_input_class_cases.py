@@ -498,6 +498,39 @@ def _missing_authority_quote(db, scene):
     }, _mid())
 
 
+def _person_step(extra: dict):
+    return _operation("add", {
+        "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready",
+        "assignee": "user", "description": "Run setup. Already tried: the supported route.",
+        **extra,
+    })
+
+
+def _foreign_instructions_document(db, scene):
+    from registry import models
+
+    artifact = models.register_artifact(
+        integration="local", type="document", external_id="/shared/foreign-instructions.md",
+        parent_thread_id="child", title="Foreign instructions", path="/shared/foreign-instructions.md",
+        db=db,
+    )
+    db.commit()
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready", "size": "unknown",
+        "assignee": "user", "description": "Run setup. Already tried: the supported route.",
+        "instructions_artifact_id": artifact["id"],
+    }, _mid())
+
+
+def _wrong_type_instructions_document(db, scene):
+    artifact = _artifact(db, external_id="instructions-pr", owner="root")
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready", "size": "unknown",
+        "assignee": "user", "description": "Run setup. Already tried: the supported route.",
+        "instructions_artifact_id": artifact,
+    }, _mid())
+
+
 _CASES = {
     # --- plans/service.py ---
     ("service.py", 'f"{field} is required"'): _operation(
@@ -539,6 +572,19 @@ _CASES = {
     # --- plans/boundary_fields.py ---
     ("boundary_fields.py", '"task creation requires size and intent"'): _missing_task_size_and_intent,
     ("boundary_fields.py", '"task creation requires intent"'): _missing_task_intent,
+    ("boundary_fields.py", "PERSON_STEP_DESCRIPTION_LIMIT_REFUSAL"):
+        _person_step({"description": "x" * 380 + " Already tried: route"}),
+    # --- plans/user_step_instructions.py ---
+    ("user_step_instructions.py", '"instructions_artifact_id is only valid for an assignee: user task"'):
+        _operation("add", {"title": "T", "acceptance_criteria": "DOD", "instructions_artifact_id": "doc"}),
+    ("user_step_instructions.py", '"instructions_artifact_id must name a registered document"'):
+        _person_step({"instructions_artifact_id": ""}),
+    ("user_step_instructions.py", 'f"instructions_artifact_id {artifact_id!r} names no registered document"'):
+        _person_step({"instructions_artifact_id": "missing"}),
+    ("user_step_instructions.py", 'f"instructions_artifact_id must name a registered document, not {identity[\'type\']!r}"'):
+        _wrong_type_instructions_document,
+    ("user_step_instructions.py", '"instructions_artifact_id must name a document this thread owns"'):
+        _foreign_instructions_document,
     # --- plans/node_creation.py ---
     ("node_creation.py", '"size requires schema version 91"'): _size_before_migration,
     # --- plans/size_fields.py ---

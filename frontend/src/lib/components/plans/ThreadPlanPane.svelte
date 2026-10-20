@@ -127,6 +127,13 @@
 			focusNotice = 'That item is no longer in this plan';
 			return;
 		}
+		const instructions = node.assignee === 'user'
+			? node.artifacts.find((artifact) => artifact.role === 'input' && artifact.type === 'document')
+			: undefined;
+		if (instructions) {
+			openAsk(instructions, node.title);
+			return;
+		}
 		const forThread = threadId;
 		drillRootId = null;
 		await tick();
