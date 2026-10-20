@@ -272,6 +272,8 @@ def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     assert titles.index("Web search.") < titles.index("Where your work lives.")
     assert titles.index("Email and calendar.") < titles.index("Where your work lives.")
     assert "skill `connect-tools`" in steps
+    work_step = steps.split("6. **Where your work lives.**", 1)[1].split("7. **", 1)[0]
+    assert not re.search(r"\bsteps? \d", work_step)
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
     assert "follow skill `google-setup`" in steps
     assert "no setup task list" in app
