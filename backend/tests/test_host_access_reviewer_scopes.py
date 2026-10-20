@@ -365,3 +365,52 @@ def test_withdrawn_non_harness_model_is_rejected(accounts):
     assert rejected.json()["detail"] == (
         "That model isn't in the catalog. Choose another model."
     )
+
+
+# --- locality policy: a project that turned its cloud models off ----------------
+
+CLOUD_OFF, ORDINARY = PROJECTS
+
+
+def _one_project_cloud_off(accounts):
+    """Both projects can fund the reviewer; only ``CLOUD_OFF`` turns cloud models off."""
+    from llm.locality import set_project_cloud_models_off
+
+    db, legacy, second, _third = accounts
+    _discover(db, legacy)
+    _discover(db, second)
+    _projects_use(db, second)
+    set_project_cloud_models_off(CLOUD_OFF, cloud_models_off=True, db=db)
+
+
+def test_a_cloud_off_project_blocks_a_cloud_reviewer_by_policy(accounts):
+    """The project's own locality policy blocks the scope, not the model everywhere."""
+    from api.system_reviewer import reviewer_scope_blocks
+
+    _one_project_cloud_off(accounts)
+
+    blocks, total = reviewer_scope_blocks(MODEL)
+
+    assert total == len(PROJECTS) + 1
+    assert [(block.scope, block.reason) for block in blocks] == [
+        (CLOUD_OFF, "project_cloud_off")
+    ]
+
+
+def test_a_cloud_off_project_says_it_uses_local_models_only(accounts):
+    from prompts.cloud_off import HOLD_PHRASE
+
+    _one_project_cloud_off(accounts)
+
+    with _client() as client:
+        saved = _save(client)
+        status = _status(client)
+
+    assert saved.status_code == 200
+    assert status["host_access_reviewer_status"] == "ready"
+    message = status["host_access_reviewer_message"]
+    assert message == (
+        f"{_name()} can't review requests from {CLOUD_OFF} right now ({HOLD_PHRASE}). "
+        "Those requests fail. Choose another model or turn on fallback."
+    )
+    assert ORDINARY not in message and WORKSPACE not in message

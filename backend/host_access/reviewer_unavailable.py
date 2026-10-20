@@ -12,8 +12,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from host_access.errors import ReviewerOutage, ReviewerUnavailableError
+from prompts.cloud_off import HOLD_PHRASE, THREAD_HOLD_PHRASE
 
 SETTINGS_PLACE = "Settings > System > Host Access Review"
+
+#: The two locality refusals, each in the words its own policy text already uses.
+#: Only the person can lift either one, so a locality outage is never a wait.
+LOCALITY_CAUSES = {"project_cloud_off": HOLD_PHRASE, "thread_local_only": THREAD_HOLD_PHRASE}
 
 # One notice for many refusals needs a system-notice path that dedupes and
 # clears itself; none exists without new machinery, so the agent is asked to
@@ -56,6 +61,9 @@ def _moment_text(moment: datetime) -> str:
 
 def outage_cause(outage: ReviewerOutage) -> str:
     """Plain words for why one reviewer cannot run, with its reset time when known."""
+    phrase = LOCALITY_CAUSES.get(outage.reason)
+    if phrase:
+        return f"it's a cloud model and {phrase}"
     if outage.reason == "usage_limited":
         moment = _local(outage.resets_at)
         return f"usage limit until {_moment_text(moment)}" if moment else "usage limit"
@@ -89,10 +97,20 @@ def _unavailable_head(exc: ReviewerUnavailableError | None) -> str:
     )
 
 
+def _locality_fix(exc: ReviewerUnavailableError) -> str | None:
+    """The one fix a locality refusal has: the person's setting, and no waiting for it."""
+    if exc.outage.reason not in LOCALITY_CAUSES:
+        return None
+    fix = f"Tell the person once to choose a local reviewer model in {SETTINGS_PLACE}"
+    return f"{fix} or turn on reviewer fallback." if not exc.fallback_enabled else f"{fix}."
+
+
 def application_guidance(
     exc: ReviewerUnavailableError | None, *, subject: str = "application",
 ) -> str:
     """Tell an agent its review did not happen, why, and what to do instead."""
+    if exc is not None and (fix := _locality_fix(exc)):
+        return f"{_unavailable_head(exc)} Your {subject} was not reviewed. {fix}"
     moment = _resume_moment(exc)
     wait = (
         f"until {moment}, or until the reviewer is back"

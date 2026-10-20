@@ -1,9 +1,9 @@
 """Host-access reviewer selection: which catalog models can review for which scopes.
 
 A review runs for the requesting thread's project (or the workspace when it has
-none), so a model's readiness is the reviewer's own account resolution applied
-to each scope. This module reads that decision and keeps no readiness rule of
-its own.
+none), so a model's readiness is the reviewer's own account resolution and that
+project's locality policy applied to each scope. This module reads those
+decisions and keeps no readiness rule of its own.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from infra.settings import (
     get_host_access_reviewer_model,
 )
 from llm import catalog as model_catalog
+from prompts.cloud_off import HOLD_PHRASE
 
 HARNESSES = ("claude-code", "codex")
 WORKSPACE_SCOPE = "agents outside a project"
@@ -36,6 +37,7 @@ _REASON_WORDS = {
     "account_model_not_discovered": "the account doesn't offer this model",
     "discovered_model_unavailable": "the account doesn't offer this model",
     "model_not_in_catalog": "not in the catalog",
+    "project_cloud_off": HOLD_PHRASE,
 }
 
 
@@ -73,16 +75,35 @@ def _scope_block(target, project_id: str | None, scope: str, db) -> ScopeBlock |
     return None
 
 
+def _locality_block(row: dict | None, project_id: str | None, scope: str, db) -> ScopeBlock | None:
+    """The scope's block when its own locality policy forbids this reviewer model.
+
+    A project that turned cloud models off cannot send a lease application and
+    purpose to a cloud reviewer at all, so Settings says so the same way it
+    says an account cannot review there.
+    """
+    if row is None:
+        return None
+    from llm.locality import locality_refusal
+
+    refusal = locality_refusal(row, thread_local_only=False, project_id=project_id, db=db)
+    return ScopeBlock(scope, refusal) if refusal else None
+
+
 def reviewer_scope_blocks(model_id: str) -> tuple[list[ScopeBlock], int]:
     """The scopes whose reviews would fail on ``model_id``, and how many scopes exist.
 
     The scopes are the workspace plus every project that isn't archived (an
     archived one receives no requests). A model-level problem blocks all of
     them; for a harness model each scope then asks the reviewer's own account
-    resolution.
+    resolution, and every project scope first asks its own locality policy.
     """
     from infra.database import get_db
-    from llm.resolution import ModelUnavailableError, resolve_execution_target
+    from llm.resolution import (
+        ModelUnavailableError,
+        catalog_row,
+        resolve_execution_target,
+    )
 
     db = get_db()
     try:
@@ -100,10 +121,20 @@ def reviewer_scope_blocks(model_id: str) -> tuple[list[ScopeBlock], int]:
         if not target.available:
             reason = target.availability_reason or "model_unavailable"
             return [ScopeBlock(name, reason) for _, name in scopes], len(scopes)
-        if target.harness not in HARNESSES:
-            return [], len(scopes)
-        blocks = [_scope_block(target, project, name, db) for project, name in scopes]
-        return [block for block in blocks if block is not None], len(scopes)
+        row = catalog_row(str(target.catalog_id), db=db)
+        blocks = []
+        for project, name in scopes:
+            # Locality is the person's own setting and its fix differs from an
+            # account's, so it is the scope's block whenever it applies, and a
+            # scope never reports both.
+            block = _locality_block(row, project, name, db) or (
+                _scope_block(target, project, name, db)
+                if target.harness in HARNESSES
+                else None
+            )
+            if block is not None:
+                blocks.append(block)
+        return blocks, len(scopes)
     finally:
         db.close()
 
