@@ -251,7 +251,7 @@
 	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
 	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
 	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
-	.h-local-slot { display: inline-flex; flex: 0 0 auto; min-width: 86px; }
+	.h-local-slot { display: inline-flex; flex: 0 0 auto; min-width: var(--header-badge-slot); }
 	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
 	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-local-only:active { transform: scale(.96); }
@@ -337,7 +337,7 @@
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }
 		/* At 393 the badge is its icon alone in a 44px hit area; the label stays for screen readers. */
-		.h-local-slot { flex-basis: var(--touch-target); }
+		.h-local-slot { min-width: var(--touch-target); }
 		.h-local-only { width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
 		.h-local-only:hover { background: transparent; color: var(--text-secondary); }
 		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }

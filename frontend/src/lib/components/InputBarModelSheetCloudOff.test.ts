@@ -34,6 +34,8 @@ afterEach(() => { if (component) unmount(component); component = null; host.remo
 const open = () => { component = mount(InputBarModelSheet, { target: host }); flushSync(); };
 
 describe('model sheet in a cloud-off project', () => {
+	// The thread payload names the project as the cause, as the server sends it for a chat in a cloud-off project.
+	beforeEach(() => threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000', local_only: 0, local_only_effective: true, local_only_from_project: true, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null } as never]));
 	it('some local models ready: only local rows, then the quiet line', () => {
 		models.set([cloud('cc/opus', 'Claude Opus'), local]); open();
 		expect(text()).toContain('Qwen'); expect(text()).not.toContain('Claude Opus');
@@ -76,7 +78,13 @@ describe('model sheet in a cloud-off project', () => {
 		expect(text()).not.toContain('no local model is ready');
 		expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Open project settings')).toBe(false);
 	});
+	it('a new chat with no thread yet: the scope catalog names the project', () => {
+		activeThreadId.set(null);
+		models.set([cloud('cc/opus', 'Claude Opus'), local]); open();
+		expect(text()).toContain('This project uses local models only.');
+	});
 	it('not a cloud-off project: unchanged', () => {
+		threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([{ id: 'ext/gpt', name: 'Claude Opus', size: '', backend: 'network', provider: 'external', server_name: 'Hosted', litellm_model: 'external@h/gpt', speed: '', status: 'ready', is_local: false } as Model, local]); open();
 		expect(text()).toContain('Claude Opus'); expect(text()).not.toContain('This project uses local models only.');
 	});

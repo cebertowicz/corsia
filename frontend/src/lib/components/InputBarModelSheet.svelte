@@ -27,8 +27,9 @@
 	// The project switch and a thread's Local only hide cloud rows through this one filter (the causes in LOCALITY_REFUSALS).
 	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
 	const cloudModelsOff = $derived($models.some(localityOff));
-	const threadPolicy = $derived(threadLocalOnly($threads.find((thread) => thread.id === $activeThreadId)));
-	const projectCloudOff = $derived(threadPolicy.cause === 'project');
+	const threadPolicy = $derived(threadLocalOnly(activeThread));
+	// A new chat has no thread payload yet, so its scope's catalog is the only source for the project switch.
+	const projectCloudOff = $derived(activeThread ? threadPolicy.cause === 'project' : $models.some((model) => model.status_reason === 'project_cloud_off'));
 	const inheritedLocalOnly = $derived(threadPolicy.cause === 'inherited');
 	const openProjectPolicy = () => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy');
 	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
@@ -48,9 +49,7 @@
 		group.state === 'ready'
 			? open ? group.rows : []
 			: open ? group.blocked : group.blocked.filter((model) => modelMatchesId(model, $activeModelId));
-	const activeThread = $derived(
-		$threads.find((thread) => thread.id === $activeThreadId),
-	);
+	const activeThread = $derived($threads.find((thread) => thread.id === $activeThreadId));
 	const pendingModelId = $derived(activeThread?.pending_model ?? null);
 	const pendingStatus = $derived(activeThread?.switch_status ?? null);
 

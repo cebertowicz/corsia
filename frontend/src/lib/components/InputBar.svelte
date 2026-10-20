@@ -52,22 +52,17 @@
 	let inputAreaEl = $state<HTMLDivElement | undefined>(undefined);
 	let isMultiLine = $state(false);
 
-		const isTouchDevice = typeof window !== 'undefined' &&
-			('ontouchstart' in window || navigator.maxTouchPoints > 0);
+		const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
 		let sheetView = $state<SheetView>(null);
 		let focusLocalOnly = $state(false);
-		function toggleSheet(view: Exclude<SheetView, null>) {
-			sheetView = sheetView === view ? null : view;
-		}
+		function toggleSheet(view: Exclude<SheetView, null>) { sheetView = sheetView === view ? null : view; }
 		function closeSheet() { sheetView = null; }
 
 		// The top composer owns the sheet state and focus request for every bound control.
 		$effect(() => threadId === undefined ? onModelSheetRequest((request) => {
 			focusLocalOnly = request.focusLocalOnly;
-			if (sheetView === 'model') return;
-			void loadModels({ refreshUsage: true });
-			sheetView = 'model';
+			if (sheetView !== 'model') { void loadModels({ refreshUsage: true }); sheetView = 'model'; }
 		}) : undefined);
 
 		const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
