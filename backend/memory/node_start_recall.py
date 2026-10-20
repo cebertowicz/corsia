@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
+import re
 import sqlite3
 from time import perf_counter
 
@@ -160,8 +161,30 @@ def _start_cutoff(db, node_id: str | None) -> str | None:
     return str(row["updated_at"]) if row and row["updated_at"] else None
 
 
-def _fts_terms(terms: TaskTerms) -> str:
-    return " OR ".join(f'"{term}"*' for term in terms.terms)
+def _fts_floor(terms: TaskTerms) -> str:
+    """An FTS query for messages holding a title term and ``floor`` distinct terms.
+
+    Each prefix term matches every token ``match()`` counts for it, so the floor drops no hit.
+    """
+    quoted = {term: f'"{term}"*' for term in terms.terms}
+    title = " OR ".join(quoted[term] for term in terms.terms if term in terms.title_terms)
+    return f"({title}) AND ({_at_least(floor(len(terms.terms)), list(quoted.values()))})"
+
+
+def _at_least(count: int, terms: list[str]) -> str:
+    """An FTS expression true when at least ``count`` of ``terms`` match."""
+    if count == 1:
+        return " OR ".join(terms)
+    return " OR ".join(
+        f"({term} AND ({_at_least(count - 1, terms[index + 1:])}))"
+        for index, term in enumerate(terms[:len(terms) - count + 1])
+    )
+
+
+def _positional(clause: str, params: dict[str, str]) -> tuple[str, list[str]]:
+    """Bind a named-placeholder clause by name so it can sit among ``?`` markers."""
+    names = re.findall(r":(\w+)", clause)
+    return re.sub(r":\w+", "?", clause), [params[name] for name in names]
 
 
 def _shared_terms(column: str, terms: TaskTerms) -> tuple[str, list[str]]:
@@ -185,10 +208,9 @@ def _source_scope(alias: str, timestamp: str, caller: sqlite3.Row, cloud_off: se
 
 
 def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
-    owner_filter, owner_params = owner_message_sql_predicate("m")
+    owner_filter, owner_params = _positional(*owner_message_sql_predicate("m"))
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
-    # Messages rank by bm25 over the FTS index; a LIKE floor here would scan every
-    # FTS match before the limit and cost far more than the ranking it replaces.
+    # The FTS query applies the floor before the limit; bm25 only orders eligible messages.
     rows = db.execute(
         f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title
             FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
@@ -200,7 +222,7 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off,
                 WHERE c.thread_id=? AND c.status='installed' AND c.history_epoch=ct.history_epoch
               ), 0))
             ORDER BY bm25(messages_fts),m.created_at DESC LIMIT ?""",
-        [f"role:user AND ({_fts_terms(terms)})", *owner_params.values(), user_id, *source_params,
+        [f"role:user AND ({_fts_floor(terms)})", *owner_params, user_id, *source_params,
          caller_thread_id, caller_thread_id, SOURCE_CANDIDATES],
     ).fetchall()
     hits = []

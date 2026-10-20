@@ -437,6 +437,24 @@ def test_cloud_off_messages_cannot_fill_the_candidate_window(db):
     assert any("deliverable-message" not in line and "Export ledger as CSV format" in line for line in _related(db))
 
 
+def test_one_rare_term_messages_do_not_outrank_a_match_out_of_the_window(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    # Common terms score near zero in bm25, so a rare term repeated outranks the match.
+    common = [(f"common-{index}", "Export account notes.") for index in range(10 * SOURCE_CANDIDATES)]
+    rare = [(f"rare-{index}", "Ledger ledger ledger.") for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user',?,'{}','2026-02-01T12:00:00+00:00',?,'delivered')",
+        [(message_id, body, seq) for seq, (message_id, body) in enumerate([*common, *rare], start=2)],
+    )
+    _message(db, "match", "past", "Export the account ledger.")
+
+    lines = _related(db)
+
+    assert len(lines) == 2 and "Export the account ledger" in lines[1]
+
+
 def test_limits_to_three_lines_and_one_rule(db):
     from checkpoint_retrieval_fixtures import _install_checkpoint
 

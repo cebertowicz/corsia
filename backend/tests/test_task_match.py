@@ -13,11 +13,11 @@ def test_terms_put_title_first_and_drop_boilerplate():
     assert "2283" in terms.terms and len(terms.terms) <= MAX_TERMS
 
 
-def test_node_text_has_no_description_and_uses_person_words():
-    text = NodeText("Export format", words="Use CSV columns for date and account.")
+def test_person_words_add_terms_after_the_title():
+    terms = task_terms(NodeText("Export format", words="Use CSV columns for date and account."))
 
-    assert not hasattr(text, "description")
-    assert "export" in task_terms(text).terms
+    assert terms.terms[:2] == ("export", "format")
+    assert "csv" in terms.terms and "csv" not in terms.title_terms
 
 
 def test_long_multi_topic_message_scores_its_matching_sentence_run_only():

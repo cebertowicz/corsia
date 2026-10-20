@@ -41,7 +41,7 @@ def _quote(content: str) -> str:
 
 
 def local_clock(created_at: str) -> str:
-    """When the correction was sent, in local time like the digest clock."""
+    """An ISO timestamp in local time like the digest clock; unparseable input unchanged."""
     try:
         sent = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
     except ValueError:
