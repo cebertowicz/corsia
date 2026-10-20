@@ -12,6 +12,7 @@ from connections.claude_unlisted import base_identity
 from host_access.failure_reasons import ReviewTerminal, classify_failure
 from infra.db_async import run_in_db
 from infra.llm_usage import record_llm_usage
+from infra.provider_usage import from_codex, unmeasured_ledger_row
 from infra.product_events import emit_product_event
 from llm.isolated_structured import IsolatedStructuredTelemetry
 
@@ -46,17 +47,15 @@ def _recorded_usage(telemetry: IsolatedStructuredTelemetry) -> dict[str, int | f
     usage = {name: getattr(telemetry, name) for name in _USAGE_FIELDS}
     if telemetry.harness != "codex":
         return usage
-    prompt, cached = telemetry.prompt_tokens, telemetry.cache_read_tokens
-    usage["cache_creation_tokens"] = 0
-    usage["prompt_tokens"] = (
-        prompt - cached
-        if prompt is not None and cached is not None and prompt >= cached
-        else None
-    )
-    buckets = (usage["prompt_tokens"], usage["completion_tokens"],
-               usage["cache_creation_tokens"], usage["cache_read_tokens"])
-    usage["total_tokens"] = sum(buckets) if all(bucket is not None for bucket in buckets) else None
-    return usage
+    codex_usage = from_codex({
+        "inputTokens": telemetry.prompt_tokens,
+        "cachedInputTokens": telemetry.cache_read_tokens,
+        "outputTokens": telemetry.completion_tokens,
+    })
+    return {
+        **(codex_usage.ledger_row() if codex_usage is not None else unmeasured_ledger_row()),
+        "cost_usd": telemetry.cost_usd,
+    }
 
 
 @dataclass(slots=True)

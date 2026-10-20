@@ -43,13 +43,13 @@ async def _stop_process(process) -> None:
 class _ToolBoundary:
     """One fork's in-flight tool owner; no queue, retry, or foreground Turn."""
 
-    def __init__(self, process, context, cancel_event, *, on_usage=None, model="") -> None:
+    def __init__(self, process, context, cancel_event, *, on_usage=None) -> None:
         self.process, self.context, self.cancel_event = process, context, cancel_event
         self.changed = asyncio.Event()
         self.lock = asyncio.Lock()
         self.closed = self.truncated = False
         self.failure: str | None = None
-        self.on_usage, self.model = on_usage, model
+        self.on_usage = on_usage
         self.calls: dict[str, dict] = {}
         self.claimed_tool_calls: set[str] = set()
 
@@ -72,7 +72,7 @@ class _ToolBoundary:
             measured = from_anthropic(raw)
             row = measured.ledger_row() if measured is not None else unmeasured_ledger_row()
             reported = message.get("model")
-            model = reported if isinstance(reported, str) and reported.strip() else self.model
+            model = reported if isinstance(reported, str) and reported.strip() else (self.context.model or "")
             if self.calls.get(key) != row:
                 await self.on_usage(str(key), model, row)
                 self.calls[key] = row
@@ -206,8 +206,7 @@ async def communicate_checkpoint(
 ) -> CCCheckpointOutput:
     """Capture buffered narrative on cutoff; explicit Stop still cancels the call."""
     context = CCCheckpointContext(request.target, 0)
-    boundary = _ToolBoundary(process, context, cancel_event,
-                             on_usage=request.on_usage, model=request.target.catalog_id)
+    boundary = _ToolBoundary(process, context, cancel_event, on_usage=request.on_usage)
     if on_tool_executor is not None:
         try:
             await on_tool_executor(boundary.execute)

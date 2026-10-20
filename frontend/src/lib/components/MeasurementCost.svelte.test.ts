@@ -42,6 +42,20 @@ describe('MeasurementCost', () => {
 		expect(content).not.toContain('Not priced:');
 		expect(content).not.toContain('Not API-priced:');
 	});
+	it('appends up to three API-ordered Models labels for each unpriced reason', () => {
+		const markup = render({ data: data({ excluded: [{
+			kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 18,
+			models: [
+				{ model: 'claude-code/opus', label: 'Opus 5.5', records: 12 },
+				{ model: 'codex/gpt-5.6-terra', label: 'GPT-5.6 Terra', records: 3 },
+				{ model: 'claude-code/sonnet', label: 'Sonnet 5.5', records: 2 },
+				{ model: 'external@provider/model', label: 'External model', records: 1 },
+			],
+		}] }) });
+		const content = text(markup);
+		expect(content).toContain('usage records whose token counting format is not proven — Opus 5.5 (12), GPT-5.6 Terra (3), Sonnet 5.5 (2), +1 more');
+		expect(content).not.toContain('External model (1)');
+	});
 	const showActual = (actual: Partial<CostData['actual']> & { workspace_subscription?: WorkspaceSubscriptionContext } = {}) => {
 		const markup = render({ data: data({ actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: workspace(), ...actual } }) });
 		(markup.querySelectorAll('button')[1] as HTMLButtonElement).click(); flushSync();

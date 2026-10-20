@@ -375,6 +375,8 @@ RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of new checkpoint an
         (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "checkpoint", 5, "ok"),
         (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),
         (RECEIPT_ID, "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),
+        ("direct-id", "external@provider/model", "checkpoint", 0, "ok"),  # zero-cache native checkpoint remains admitted
+        ("direct-id", "claude-sonnet-4-5", "host_access_action_review", 0, "ok"),  # bare Claude identity has no receipt contract
         ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # old direct writer: format proves nothing
         ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "contract_unproven"),
         ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 0, "contract_unproven"),

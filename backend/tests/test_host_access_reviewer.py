@@ -351,8 +351,24 @@ def test_codex_review_usage_is_disjoint_with_explicit_zero_cache_creation() -> N
     assert usage == {
         "prompt_tokens": 60, "completion_tokens": 20,
         "cache_creation_tokens": 0, "cache_read_tokens": 40,
-        "total_tokens": 120, "cost_usd": None,
+        "effective_input_tokens": 100, "total_tokens": 120, "cost_usd": None,
     }
+
+
+def test_codex_review_usage_delegates_an_inconsistent_cache_to_the_canonical_owner() -> None:
+    from host_access.review_telemetry import _recorded_usage
+    from infra.provider_usage import from_codex
+
+    telemetry = _telemetry(
+        _target("codex"), prompt_tokens=40, completion_tokens=20,
+        cache_creation_tokens=None, cache_read_tokens=100, total_tokens=60,
+        usage_available=True,
+    )
+    expected = from_codex({
+        "inputTokens": 40, "cachedInputTokens": 100, "outputTokens": 20,
+    })
+    assert expected is not None
+    assert _recorded_usage(telemetry) == {**expected.ledger_row(), "cost_usd": None}
 
 
 @pytest.mark.asyncio

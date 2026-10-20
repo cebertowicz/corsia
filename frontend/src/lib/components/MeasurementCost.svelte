@@ -41,6 +41,10 @@
 	/** The sentence is true only when the first served period falls after the window's own first day: the lead-in before the window is read for the averages, so a series that opens on the window's first day may have begun earlier. */
 	const startsAt = $derived(served.length && costState.data?.period && served[0].period > costState.data.period.range.from ? day.format(new Date(`${served[0].period}T00:00:00Z`)) : null);
 	const group = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+	const excludedModels = (models: NonNullable<CostState['data']>['excluded'][number]['models']) => {
+		const named = models.slice(0, 3).map((model) => `${model.label} (${group(model.records)})`);
+		return models.length > 3 ? [...named, `+${models.length - 3} more`].join(', ') : named.join(', ');
+	};
 	const usd0 = (value: number | null) => (value === null ? '–' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value));
 </script>
 
@@ -85,7 +89,7 @@
 			{:else}
 				<p class="sentence">No usage records could be priced in this range.</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.</p>
+			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excluded.text} — {excludedModels(excluded.models)}{/if}{/each}</p>
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}
