@@ -40,14 +40,6 @@ async def _account(kwargs: dict[str, Any]) -> str:
     return str(account["id"])
 
 
-def _search_screen(screen: email_screen.Screen | None) -> dict[str, Any]:
-    if screen is None or screen.status != email_screen.STATUS_SCREENED:
-        return {"state": "unscreened"}
-    if screen.injection:
-        return {"state": "flagged", "rule": screen.rule}
-    return {"state": "clean", "kind": screen.kind, "needs_person": screen.needs_person}
-
-
 class EmailSearchTool(Tool):
     self_describing_errors = True
 
@@ -100,7 +92,7 @@ class EmailSearchTool(Tool):
             }
             if screen is not None and screen.clean:
                 entry["subject"] = message.headers.get("subject", "")
-            entry["screen"] = _search_screen(screen)
+            entry["screen"] = email_screen.search_screen(screen)
             results.append(entry)
         return json.dumps({"messages": results})
 
@@ -158,6 +150,6 @@ class EmailReadTool(Tool):
             "from": message.headers.get("from", ""), "to": message.headers.get("to", ""),
             "cc": message.headers.get("cc", ""), "date": message.headers.get("date", ""),
             "subject": message.headers.get("subject", ""),
-            "screen": _search_screen(screen),
+            "screen": email_screen.search_screen(screen),
             "body": f"<untrusted-email>\n{body}\n</untrusted-email>",
         })
