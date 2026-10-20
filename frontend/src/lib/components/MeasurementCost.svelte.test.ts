@@ -23,7 +23,7 @@ const data = (overrides: Partial<CostData> = {}): CostData => ({
 	period: { grain: 'weeks', timezone: 'America/Los_Angeles', current: '2026-10-05', range: { from: '2026-07-13', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } },
 	averagePeriods: 4, series: [first, second], latest: pooled(second), previous: pooled(first),
 	coverage: { priced_records: 160, usage_records: 200 }, not_api_priced_records: 7,
-	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40 }],
+	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40, models: [] }],
 	actual: { subscription_records: 12, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: workspace() }, ...overrides,
 });
 const state = (overrides: Partial<CostState> = {}): CostState => ({ loading: false, error: null, scopeKey: 'project:none', grain: 'days', data: data(), ...overrides });

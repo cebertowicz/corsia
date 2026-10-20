@@ -46,6 +46,18 @@ def test_receipt_and_ledger_commit_once_without_foreground_turn(checkpoint_db):
     assert payload["calls"][0]["total_tokens"] == 450
 
 
+def test_repeated_call_pins_its_first_model_identity(checkpoint_db):
+    from infra.checkpoint_usage import freeze_binding, record_call
+
+    db = checkpoint_db
+    freeze_binding("cp-1", _binding(), db=db)
+    record_call("cp-1", "call-1", "claude-code/claude-sonnet-5-5", _usage(), now_iso="t2", db=db)
+    # A later partial/replayed observation has no vendor identity. It reuses
+    # the first receipt's model rather than becoming an accounting defect.
+    assert not record_call("cp-1", "call-1", "claude-code/sonnet", _usage(), now_iso="t3", db=db)
+    assert db.execute("SELECT model FROM llm_usage").fetchone()[0] == "claude-code/claude-sonnet-5-5"
+
+
 def test_changed_measurement_conflicts_instead_of_double_charging(checkpoint_db):
     from infra.checkpoint_usage import freeze_binding, record_call
 

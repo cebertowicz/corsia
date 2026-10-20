@@ -71,8 +71,10 @@ class _ToolBoundary:
         if key and self.on_usage is not None:
             measured = from_anthropic(raw)
             row = measured.ledger_row() if measured is not None else unmeasured_ledger_row()
+            reported = message.get("model")
+            model = reported if isinstance(reported, str) and reported.strip() else self.model
             if self.calls.get(key) != row:
-                await self.on_usage(str(key), self.model, row)
+                await self.on_usage(str(key), model, row)
                 self.calls[key] = row
 
     async def _ready(self, call_id: str) -> None:

@@ -334,6 +334,40 @@ async def test_usage_row_carries_only_the_target_account_id(
 
     assert recorded[0][1]["vendor_account_id"] == account_id
     assert recorded[0][1]["source"] == f"host_access_{kind}_review"
+    assert len(recorded[0][1]["usage_id"]) == 24
+    assert set(recorded[0][1]["usage_id"]) <= set("0123456789abcdef")
+    expected = "claude-code/claude-fable-5" if harness == "claude-code" else target.catalog_id
+    assert recorded[0][0][1] == expected
+
+
+def test_codex_review_usage_is_disjoint_with_explicit_zero_cache_creation() -> None:
+    from host_access.review_telemetry import _recorded_usage
+
+    usage = _recorded_usage(_telemetry(
+        _target("codex"), prompt_tokens=100, completion_tokens=20,
+        cache_creation_tokens=None, cache_read_tokens=40, total_tokens=120,
+        usage_available=True,
+    ))
+    assert usage == {
+        "prompt_tokens": 60, "completion_tokens": 20,
+        "cache_creation_tokens": 0, "cache_read_tokens": 40,
+        "total_tokens": 120, "cost_usd": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_usage_recording_failure_does_not_block_review_telemetry(monkeypatch) -> None:
+    from host_access import review_telemetry
+
+    telemetry = review_telemetry.ReviewTelemetry("action", "root-1", account_id="account-7")
+    telemetry.record(_telemetry(_target("claude-code"), prompt_tokens=5, usage_available=True))
+
+    async def unavailable(*_args, **_kwargs):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(review_telemetry, "run_in_db", unavailable)
+    await telemetry.record_usage()
+    assert telemetry.unrecorded == []
 
 
 @pytest.mark.asyncio
@@ -673,15 +707,19 @@ async def test_provider_usage_is_recorded_before_strict_schema_failure(
         )
 
     assert len(recorded) == 2
-    assert recorded[0] == recorded[1]
-    recorded.pop()
-    args, kwargs = recorded.pop()
-    assert args[:2] == ("root-1", target.catalog_id)
-    assert kwargs == {
+    first_args, first_kwargs = recorded[0]
+    args, kwargs = recorded[1]
+    assert first_args == args
+    assert first_kwargs | {"usage_id": None} == kwargs | {"usage_id": None}
+    assert first_kwargs["usage_id"] != kwargs["usage_id"]
+    assert all(len(row[1]["usage_id"]) == 24 for row in recorded)
+    assert args[:2] == ("root-1", "claude-code/claude-fable-5")
+    assert kwargs | {"usage_id": None} == {
         "source": "host_access_application_review",
         "ttft_ms": None,
         "harness": "claude-code",
         "vendor_account_id": None,
+        "usage_id": None,
     }
     assert args[2] == {
         "prompt_tokens": 113,
@@ -691,6 +729,8 @@ async def test_provider_usage_is_recorded_before_strict_schema_failure(
         "total_tokens": None,
         "cost_usd": None,
     }
+    recorded.pop()
+    recorded.pop()
     event_args, event_kwargs = events.pop()
     assert event_args == ("host_access_review", "completed")
     assert event_kwargs["thread_id"] == "root-1"

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
+from uuid import uuid4
 
 from loguru import logger
 
+from connections.claude_unlisted import base_identity
 from host_access.failure_reasons import ReviewTerminal, classify_failure
 from infra.db_async import run_in_db
 from infra.llm_usage import record_llm_usage
@@ -32,6 +34,31 @@ _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens",
                  "cache_read_tokens", "total_tokens", "cost_usd")
 
 
+def _recorded_model(telemetry: IsolatedStructuredTelemetry) -> str:
+    """Persist a concrete Claude Code identity whenever the reviewer reports one."""
+    if telemetry.harness == "claude-code" and telemetry.reported_model:
+        return f"claude-code/{base_identity(telemetry.reported_model)}"
+    return telemetry.catalog_id
+
+
+def _recorded_usage(telemetry: IsolatedStructuredTelemetry) -> dict[str, int | float | None]:
+    """Normalize reviewer tokens into the disjoint ledger contract."""
+    usage = {name: getattr(telemetry, name) for name in _USAGE_FIELDS}
+    if telemetry.harness != "codex":
+        return usage
+    prompt, cached = telemetry.prompt_tokens, telemetry.cache_read_tokens
+    usage["cache_creation_tokens"] = 0
+    usage["prompt_tokens"] = (
+        prompt - cached
+        if prompt is not None and cached is not None and prompt >= cached
+        else None
+    )
+    buckets = (usage["prompt_tokens"], usage["completion_tokens"],
+               usage["cache_creation_tokens"], usage["cache_read_tokens"])
+    usage["total_tokens"] = sum(buckets) if all(bucket is not None for bucket in buckets) else None
+    return usage
+
+
 @dataclass(slots=True)
 class ReviewTelemetry:
     review_kind: ReviewKind
@@ -51,13 +78,14 @@ class ReviewTelemetry:
     async def record_usage(self) -> None:
         while self.unrecorded:
             telemetry = self.unrecorded.pop(0)
-            usage = {name: getattr(telemetry, name) for name in _USAGE_FIELDS}
             try:
                 await run_in_db(
-                    record_llm_usage, self.thread_id, telemetry.catalog_id, usage,
+                    record_llm_usage, self.thread_id, _recorded_model(telemetry),
+                    _recorded_usage(telemetry),
                     source=f"host_access_{self.review_kind}_review",
                     ttft_ms=None, harness=telemetry.harness,
                     vendor_account_id=self.account_id,
+                    usage_id=uuid4().hex[:24],
                 )
             except Exception as exc:
                 logger.warning("host-access review usage telemetry failed for {}: {}",

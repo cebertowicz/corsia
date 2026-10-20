@@ -42,9 +42,12 @@ _BUCKETS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens", "cach
 # OpenAI's public Standard boundary is based on an individual call's input,
 # not its output or a period's aggregate. A row within the short bound is safe
 # even if it combines usage records; above it, opaque Codex receipts cannot prove tier.
+_RECEIPT_SHAPED = "length(u.id)=24 AND u.id NOT GLOB '*[^0-9a-f]*'"
 INPUT_TIER_SQL = (
     f"CASE WHEN u.prompt_tokens+u.cache_creation_tokens+u.cache_read_tokens>{OPENAI_LONG_CONTEXT_INPUT_TOKENS} "
-    "THEN 'above_short_bound' ELSE 'short_bound' END"
+    f"THEN CASE WHEN COALESCE(u.source,'')='checkpoint' AND COALESCE(u.model,'') LIKE 'codex/%' "
+    f"AND {_RECEIPT_SHAPED} THEN 'proven_above_short_bound' ELSE 'above_short_bound' END "
+    "ELSE 'short_bound' END"
 )
 # Providers with a published idle-hours vector bill by the call's own time, so
 # the hour is read per row, in UTC, before aggregation, against the window of
@@ -70,8 +73,9 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # disjoint contract (#1056) may be thread-cumulative or cache-inclusive,
 # which neither a zero cache nor a matching total disproves. A Codex row is
 # priced only when its id is a 24-hex receipt id: ``_receipt_id`` (turn usage,
-# #1626, 2026-09-11) and the checkpoint writer (#1764, 2026-09-15) are the
-# only writers of that shape, both later than the contract. The checkpoint Codex
+# #1626, 2026-09-11), the checkpoint writer (#1764, 2026-09-15), and the
+# host-access reviewer are the only writers of that shape, all later than the
+# contract. The checkpoint Codex
 # path is per-call and disjoint: ``subagents.codex_app_server_notifications.record_usage``
 # emits ``CumulativeTurnVolume.observe`` deltas as ``TokenUsage.ledger_row()``, and
 # ``core.checkpoint_codex_result.CodexCheckpointCapture.publish_calls`` writes each
@@ -88,13 +92,20 @@ _TOTAL_AGREES = (
 # Evaluated as an explicit 0/1 so a NULL source or model can never reach
 # ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'.
 _CONTRACT_PROVEN = (
-    f"(CASE WHEN COALESCE(u.source,'')='{CLAUDE_CODE_SOURCE}' AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
-    f"WHEN COALESCE(u.source,'') IN ('{CODEX_SOURCE}','checkpoint') AND COALESCE(u.model,'') LIKE 'codex/%' "
-    f"AND length(u.id)=24 AND u.id NOT GLOB '*[^0-9a-f]*' THEN 1 "
+    f"(CASE WHEN COALESCE(u.source,'')='{CLAUDE_CODE_SOURCE}' "
+    "AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
+    "WHEN COALESCE(u.source,'') IN ('checkpoint','host_access_action_review',"
+    "'host_access_application_review') AND COALESCE(u.model,'') LIKE 'claude-code/%' "
+    f"AND {_RECEIPT_SHAPED} THEN 1 "
+    f"WHEN COALESCE(u.source,'') IN ('{CODEX_SOURCE}','checkpoint',"
+    "'host_access_action_review','host_access_application_review') "
+    f"AND COALESCE(u.model,'') LIKE 'codex/%' AND {_RECEIPT_SHAPED} THEN 1 "
     f"WHEN COALESCE(u.source,'')='conversation' AND COALESCE(u.model,'') LIKE 'external@%' "
     f"AND u.created_at>='2026-09-17' THEN 1 "
     f"WHEN u.cache_creation_tokens=0 AND u.cache_read_tokens=0 "
-    f"AND COALESCE(u.source,'')<>'{CODEX_SOURCE}' AND COALESCE(u.model,'') NOT LIKE 'codex/%' THEN 1 "
+    "AND COALESCE(u.source,'') NOT IN ('checkpoint','host_access_action_review',"
+    f"'host_access_application_review','{CODEX_SOURCE}') "
+    "AND COALESCE(u.model,'') NOT LIKE 'codex/%' THEN 1 "
     f"ELSE 0 END)=1"
 )
 ADMISSION_SQL = (
@@ -195,7 +206,8 @@ def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     resolve = IdentityResolver(db)
     shapes = [dict(row) for row in rows]
     for shape in shapes:
-        shape["model"] = resolve(shape).key
+        identity = resolve(shape)
+        shape["model"], shape["model_label"] = identity.key, identity.label
     return shapes
 
 
@@ -246,7 +258,10 @@ def classify_usage_rows(rows: list[dict[str, Any]], listings: Mapping[str, str])
             reason = "context_tier_unproven"
         idle_hours = bool(row.get("idle_hours"))
         buckets = tuple(int(row[bucket]) for bucket in _BUCKETS)
-        dollars = None if reason else api_equivalent(model, *buckets, idle_hours=idle_hours, listing=listing)
+        dollars = None if reason else api_equivalent(
+            model, *buckets, long_context=row["input_tier"] != "short_bound",
+            idle_hours=idle_hours, listing=listing,
+        )
         if dollars is None and reason is None:
             reason = ("cache_rate_unpublished" if has_unpublished_cache_rate(
                 model, buckets[2], buckets[3], idle_hours=idle_hours, listing=listing) else "no_list_price")
@@ -322,6 +337,27 @@ def _pooled(series: list[dict[str, Any]], window: Window, grain: Grain) -> dict[
     }
 
 
+def _excluded_models(classified: list[dict[str, Any]], grain: Grain) -> dict[str, list[dict[str, Any]]]:
+    """Name each latest-window exclusion by the resolved identity it retained."""
+    grouped: dict[str, dict[tuple[str, str], int]] = {}
+    for row in classified:
+        kind = str(row["outcome"])
+        if kind not in _EXCLUDED_TEXT or str(row["period"]) not in grain.latest.periods:
+            continue
+        models = grouped.setdefault(kind, {})
+        identity = (str(row["model"]), str(row["model_label"]))
+        models[identity] = models.get(identity, 0) + int(row["records"])
+    return {
+        kind: [
+            {"model": model, "label": label, "records": records}
+            for (model, label), records in sorted(
+                models.items(), key=lambda item: (-item[1], item[0][0]),
+            )
+        ]
+        for kind, models in grouped.items()
+    }
+
+
 def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build Cost from Measurement's already prepared scope and outcome periods.
 
@@ -341,6 +377,7 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
     for row in classified:
         if str(row["period"]) in grain.latest.periods:
             records[row["outcome"]] += int(row["records"])
+    excluded_models = _excluded_models(classified, grain)
     return {
         "definition_version": 1,
         "series": series,
@@ -348,6 +385,9 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
         "previous": _pooled(every, grain.previous, grain) if every else None,
         "coverage": {"priced_records": records["priced"], "usage_records": sum(records.values())},
         "not_api_priced_records": records["not_api_priced"],
-        "excluded": [{"kind": kind, "text": text, "records": records[kind]} for kind, text in _EXCLUDED_TEXT.items() if records[kind]],
+        "excluded": [
+            {"kind": kind, "text": text, "records": records[kind], "models": excluded_models[kind]}
+            for kind, text in _EXCLUDED_TEXT.items() if records[kind]
+        ],
         "actual": build_actual(db, params),
     }

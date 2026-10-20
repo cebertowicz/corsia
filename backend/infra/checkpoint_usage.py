@@ -55,14 +55,19 @@ def record_call(checkpoint_id, call_key, model, measured, *, now_iso, db=None):
         row, usage = _read(connection, checkpoint_id)
         if "binding" not in usage:
             raise UsageReceiptConflictError("checkpoint attribution was not frozen")
+        receipts = usage.setdefault("receipts", {})
+        previous = receipts.get(identity)
+        # Model is receipt truth: a resumed call may later expose its vendor
+        # identity, but rewriting the first observation would conflict with its
+        # projected ledger row. Keep pre-deploy rows truthful rather than infer.
+        if previous is not None:
+            model = str(previous["model"])
         payload = _receipt_payload(
             thread_id=row["thread_id"], turn_id=None, usage_key=call_key,
             model=model, measured=measured, ttft_ms=None, binding=usage["binding"],
             source="checkpoint", now_iso=now_iso,
             vendor_account_id=usage.get("vendor_account_id"),
         )
-        receipts = usage.setdefault("receipts", {})
-        previous = receipts.get(identity)
         if previous is not None and not _same_receipt_truth(previous, payload):
             raise UsageReceiptConflictError("checkpoint call changed its measurement")
         projected = connection.execute("SELECT * FROM llm_usage WHERE id=?", (identity,)).fetchone()

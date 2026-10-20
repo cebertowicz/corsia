@@ -166,6 +166,9 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
             (model, CODEX, 272_000, 1_000_000, 0, 0, 1_272_000, None, "000000000000000000000001"),
             # This exact terminal receipt is an opaque aggregate above the short bound.
             (model, CODEX, 272_001, 0, 0, 0, 272_001, None, terminal_id, turn_id),
+            # A receipt-shaped checkpoint row is one disjoint call, so its own
+            # input proves the long tier instead of inheriting turn ambiguity.
+            (model, "checkpoint", 272_001, 0, 0, 0, 272_001, None, RECEIPT_ID),
             # Together these exceed 272K, but each original row proves short.
             (model, CODEX, 200_000, 0, 0, 0, 200_000, None, "000000000000000000000003"),
             (model, CODEX, 200_000, 0, 0, 0, 200_000, None, "000000000000000000000004"),
@@ -177,9 +180,10 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
         db.close()
     period = result["latest"]
     assert result["definition_version"] == 1
-    assert period["dollars"] == pytest.approx(10.544 + 0.8)
-    assert (period["priced_records"], period["usage_records"]) == (3, 5)
-    assert result["coverage"] == {"priced_records": 3, "usage_records": 5}
+    expected = 10.544 + 0.8 + api_equivalent(model, 272_001, 0, 0, 0, long_context=True)
+    assert period["dollars"] == pytest.approx(expected)
+    assert (period["priced_records"], period["usage_records"]) == (4, 6)
+    assert result["coverage"] == {"priced_records": 4, "usage_records": 6}
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "context_tier_unproven": 1, "cache_rate_unpublished": 1}
 
@@ -213,6 +217,10 @@ def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db
     assert result["not_api_priced_records"] == 2
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "contract_unproven": 3, "tokens_unreported": 1, "tokens_inconsistent": 1, "no_list_price": 1}
+    no_list_price = next(item for item in result["excluded"] if item["kind"] == "no_list_price")
+    assert no_list_price["models"] == [{
+        "model": "claude-code/opus", "label": "opus (version not recorded)", "records": 1,
+    }]
     assert period["per_outcome"] == pytest.approx(period["dollars"] / 2)
 
 
@@ -337,7 +345,25 @@ def test_a_record_is_classified_by_its_resolved_model_identity_not_its_raw_selec
     assert result["excluded"] == []
 
 
-RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and checkpoint receipts
+def test_checkpoint_and_turn_resolve_and_price_the_same_concrete_claude_identity(isolated_db):
+    from api.cost_identity import IdentityResolver
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        resolve = IdentityResolver(db)
+        checkpoint = resolve({"model": "claude-code/claude-sonnet-5-5"})
+        turn = resolve({
+            "model": "claude-code/sonnet", "manifest_harness": "claude-code",
+            "manifest_model": "claude-sonnet-5-5", "manifest_source": "catalog",
+        })
+    finally:
+        db.close()
+    assert checkpoint.key == turn.key == "claude-code/claude-sonnet-5-5"
+    assert price_identity(checkpoint.key) == "claude-sonnet-5-5"
+
+
+RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of new checkpoint and review rows
 
 
 @pytest.mark.parametrize(
@@ -346,8 +372,12 @@ RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and ch
         (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract turn writer, proven by id shape
         (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 0, "ok"),
         (RECEIPT_ID, "codex/gpt-6.1-sol", "checkpoint", 5, "ok"),             # post-contract checkpoint writer
-        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "checkpoint", 5, "contract_unproven"),
-        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # direct uuid4()[:12] write: era unknown
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "checkpoint", 5, "ok"),
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),
+        (RECEIPT_ID, "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),
+        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # old direct writer: format proves nothing
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "contract_unproven"),
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 0, "contract_unproven"),
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # not a lowercase hex digest
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", "checkpoint", 0, "contract_unproven"),
         ("0123456789abcdef0123456", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),   # wrong length
