@@ -26,6 +26,7 @@ def _no_browser_guard_state():
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
     browser_control._screencasts.clear()
+    browser_control._capture_sizes.clear()
     browser_control._agent_seen.clear()
     yield
     browser_control._panes.clear()
@@ -34,6 +35,7 @@ def _no_browser_guard_state():
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
     browser_control._screencasts.clear()
+    browser_control._capture_sizes.clear()
     browser_control._agent_seen.clear()
 
 
@@ -528,8 +530,8 @@ class RecordedScreencast:
     async def run(self):
         await self.ended.wait()
 
-    def capture_at(self, width, height):
-        self.log.append(("capture_at", self.endpoint, width, height))
+    def capture_at(self, width, height, *, phone=False):
+        self.log.append(("capture_at", self.endpoint, width, height, phone))
 
     def hold(self):
         self.log.append(("hold", self.endpoint))
@@ -553,8 +555,39 @@ async def test_match_pane_sizes_every_screencast_on_the_thread_before_the_viewpo
     await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"))
     # The page is shared, so every pane on its thread captures at the new device size, starting with
     # the restart that the viewport command triggers.
-    assert log == [("capture_at", "pane-1", 1360, 2060), ("capture_at", "pane-2", 1360, 2060),
+    assert log == [("capture_at", "pane-1", 1360, 2060, False), ("capture_at", "pane-2", 1360, 2060, False),
                    ("set", "viewport"), ("set", "media")]
+
+
+@pytest.mark.asyncio
+async def test_match_pane_marks_a_phone_screencast_for_compact_quality(monkeypatch):
+    log = []
+
+    class Owner:
+        async def run(self, _thread_id, _args, **_kwargs):
+            return "ok"
+
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
+    browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(393, 852, 2.0, "dark"))
+    assert log == [("capture_at", "pane-1", 786, 1704, True)]
+
+
+@pytest.mark.asyncio
+async def test_a_phone_appearance_that_beats_endpoint_resolution_sizes_the_later_screencast(monkeypatch):
+    class Owner:
+        async def run(self, *_args, **_kwargs):
+            return "ok"
+
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(393, 732, 2, "dark"))
+    log = []
+    cast = RecordedScreencast("later", log)
+    browser_control.screencast_started("thread-1", "pane", cast)
+    assert log == [("capture_at", "later", 786, 1464, True)]
+    browser_control.pane_connected("thread-1", "pane", lambda _message: None)
+    browser_control.pane_disconnected("thread-1", "pane")
+    assert browser_control._capture_sizes == {}
 
 
 @pytest.mark.asyncio

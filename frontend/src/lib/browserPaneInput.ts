@@ -11,15 +11,31 @@ export function wheelPixels(event: WheelDelta, pageHeight: number): { deltaX: nu
 	const unit = event.deltaMode === 1 ? WHEEL_LINE_PIXELS : event.deltaMode === 2 ? pageHeight : 1;
 	return { deltaX: event.deltaX * unit, deltaY: event.deltaY * unit };
 }
+// Chrome's CDP modifier bits preserve shortcuts that the person performs in the shared page.
+export function keyModifiers(event: KeyboardEvent) {
+	return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+}
+
+// Chrome types only keys that carry text; Enter must carry a return to submit a form.
+export function keyText(event: KeyboardEvent) {
+	if (event.type !== 'keydown' || event.metaKey || event.ctrlKey) return '';
+	return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
+}
+
 type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number };
 
 /** Mouse positions replace each other; touch wheel deltas preserve every drag movement. */
 export class BrowserPaneInput {
 	private pressed: number | null = null;
 	private touch: { start: PointerPosition; last: PointerPosition; point: PanePoint; dragging: boolean } | null = null;
-	private moves = new AnimationFrameCoalescer<PanePoint>(point => this.mouse('mouseMoved', point));
+	private continuous = new AnimationFrameCoalescer<MouseInput>(message => {
+		if (message.eventType === 'mouseWheel') this.send(message);
+		else this.mouse('mouseMoved', message);
+	}, (previous, next) => previous.eventType === 'mouseWheel' || next.eventType === 'mouseWheel' ? {
+		...next, eventType: 'mouseWheel', deltaX: (previous.deltaX ?? 0) + (next.deltaX ?? 0), deltaY: (previous.deltaY ?? 0) + (next.deltaY ?? 0)
+	} : next);
 
-	constructor(private send: (message: MouseInput) => void) {}
+	constructor(private send: (message: MouseInput) => void, private readonly onScroll: (delta: PanePoint) => void = () => {}) {}
 
 	private mouse(eventType: string, point: PanePoint): void {
 		this.send({ type: 'input_mouse', eventType, ...point, button: eventType === 'mouseMoved' && this.pressed === null ? 'none' : 'left', clickCount: eventType === 'mouseMoved' ? 0 : 1 });
@@ -27,7 +43,7 @@ export class BrowserPaneInput {
 
 	press(event: PointerPosition, point: PanePoint): void {
 		if (this.pressed !== null || this.touch) return;
-		this.moves.cancel();
+		this.flush();
 		if (event.pointerType === 'touch') {
 			this.touch = { start: event, last: event, point, dragging: false };
 			return;
@@ -39,7 +55,7 @@ export class BrowserPaneInput {
 
 	move(event: PointerPosition, point: PanePoint, scale: number): void {
 		if (event.pointerType !== 'touch') {
-			this.moves.push(point);
+			this.continuous.push({ type: 'input_mouse', eventType: 'mouseMoved', ...point });
 			return;
 		}
 		const touch = this.touch;
@@ -48,12 +64,17 @@ export class BrowserPaneInput {
 		if (!touch.dragging) return;
 		const deltaX = (touch.last.clientX - event.clientX) / scale;
 		const deltaY = (touch.last.clientY - event.clientY) / scale;
-		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY });
+		this.wheel(point, { deltaX, deltaY });
 		touch.last = event;
 	}
 
+	wheel(point: PanePoint, delta: { deltaX: number; deltaY: number }): void {
+		this.onScroll({ x: delta.deltaX, y: delta.deltaY });
+		this.continuous.push({ type: 'input_mouse', eventType: 'mouseWheel', ...point, ...delta });
+	}
+
 	release(event: PointerPosition, point: PanePoint, cancelled = false): void {
-		this.moves.cancel();
+		this.flush();
 		const touch = this.touch;
 		if (event.pointerType === 'touch') {
 			if (!touch || event.pointerId !== touch.start.pointerId) return;
@@ -71,9 +92,13 @@ export class BrowserPaneInput {
 
 
 	reset(): void {
-		this.moves.cancel();
+		this.continuous.cancel();
 		this.pressed = null;
 		this.touch = null;
+	}
+
+	flush(): void {
+		this.continuous.flush();
 	}
 
 	dispose(): void {
