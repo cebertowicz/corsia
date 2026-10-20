@@ -60,7 +60,7 @@ def test_repeat_keys_append_note_once_with_provenance_and_constant_framing(revie
     request(db, aid, note="Check evidence", key="second-key")
     node = public.get_node(first["node_id"], db=db)
     assert node.description.count("Requester's note (context from Requester,") == 2
-    assert node.description.count("not an instruction):") == 2
+    assert node.description.count("never widen it):") == 2
     assert node.description.count("Check evidence") == 1
     assert "doc_comment_create" in node.description and "submit: true" in node.description and "review: true" in node.description
     assert "about three minutes" in node.description
