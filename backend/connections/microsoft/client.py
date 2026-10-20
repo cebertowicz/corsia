@@ -213,7 +213,7 @@ async def graph_json(
 
 
 async def graph_bytes(
-    method: str, url: str, *, account_id: str, content: bytes, params: dict[str, object] | None = None,
+    method: str, url: str, *, account_id: str, content: bytes, params: dict[str, str] | None = None,
     conflict_cause: str | None = None,
 ) -> Any:
     """Upload opaque bytes through Graph without logging their contents."""
