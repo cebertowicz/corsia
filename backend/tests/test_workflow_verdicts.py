@@ -301,6 +301,14 @@ def test_calibration_share_counts_only_splits_a_measure_could_measure() -> None:
     assert script.aa_share([("no_baseline", None)]) == (0, None)
 
 
+def test_calibration_lists_a_deciding_kpi_no_split_held_as_not_calibrated() -> None:
+    # Only a replay plan held the KPI, so no split called it: it must not read as calibrated.
+    script = calibration_script()
+    calls = {CORRECTIONS: [("no_worse", 0.1)], COST: [("no_baseline", None)]}
+    expected = sorted(f"sdlc-process/{name}" for name in (COST, "escapes"))
+    assert script.uncalibrated("sdlc-process", calls, {"escapes"}) == expected
+
+
 def test_baseline_runs_are_the_most_recent_up_to_twice_the_minimum_per_group() -> None:
     older, recent = runs("v1", 1, count=10, started=70, ended=50), runs("v1", 1, count=45, started=60, ended=30)
     kept = baseline_runs(history(older, recent), "v1", 20, 3, NOW)
