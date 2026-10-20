@@ -191,7 +191,7 @@ test.describe('@surface:local-only local-only header frames', () => {
 					await expect(page.locator('.h-local-only')).toHaveCount(0);
 				} else if (name === 'save-failure') {
 					await page.getByRole('button', { name: 'Local only', exact: true }).click();
-					await expect(page.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
+					await expect(page.getByText("Couldn’t save this change. Check your connection and try again.")).toBeVisible();
 					await expect(page.locator('.h-local-only')).toHaveCount(0);
 				}
 				await screenshot(page, `${BEFORE ? 'before-' : ''}${name}`, size, theme);

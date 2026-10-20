@@ -134,7 +134,7 @@ describe('Local only switch writes', () => {
 		mountRow();
 		toggle().click(); await settle();
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
-		expect(text()).toContain("Couldn't save this change. Check your connection and try again.");
+		expect(text()).toContain("Couldn’t save this change. Check your connection and try again.");
 		expect(host.querySelector('[role="alert"]')).not.toBeNull();
 		expect(get(models).find((m) => m.id === 'cc/opus')?.status_reason).toBeUndefined();
 		expect(loadModels).not.toHaveBeenCalled();

@@ -52,13 +52,13 @@ describe('saveThreadLocalOnly', () => {
 	it('leaves the store alone and returns the save-failure line when the server cannot be reached', async () => {
 		threads.set([makeThread()]);
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
-		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: "Couldn't save this change. Check your connection and try again." });
+		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: "Couldn’t save this change. Check your connection and try again." });
 		expect(get(threads)[0].local_only).toBeUndefined();
 	});
 	it('names the server\'s reason on a refusal', async () => {
 		threads.set([makeThread()]);
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ code: 'local_only_set_by_parent', message: 'Turn Local only off in the chat that started this one.' }) })));
-		expect(await saveThreadLocalOnly('t1', false, 'tok')).toEqual({ ok: false, error: "Couldn't save this change. Turn Local only off in the chat that started this one. Try again." });
+		expect(await saveThreadLocalOnly('t1', false, 'tok')).toEqual({ ok: false, error: "Couldn’t save this change. Turn Local only off in the chat that started this one." });
 		expect(get(threads)[0].local_only).toBeUndefined();
 	});
 });
