@@ -146,21 +146,21 @@
 	async function signOut(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
 		try {
-			const result: AccountSignOutResult = await signOutOfAccount(account.id);
+			const result: AccountSignOutResult = await signOutOfAccount(account);
 			const row = { ...result.row, kind: 'account' as const };
 			replace(row); signedOut = new Set(signedOut).add(account.id);
 			manualStep = row.provider === 'google' && needsManualGoogleStep(result.revocation) ? row : null;
-		} catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't change this Google account. Try again."; }
+		} catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${providerName(account)} account. Try again.`; }
 		finally { confirmingOut = null; actionId = null; }
 	}
 	async function remove(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
 		try {
-			const result = await removeAccount(account.id);
+			const result = await removeAccount(account);
 			rows = rows.filter((row) => row.id !== account.id);
 			removedManualStep = account.provider === 'microsoft' || needsManualGoogleStep(result.revocation) ? account : null;
 		}
-		catch (cause) { actionError = cause instanceof Error ? cause.message : "Couldn't change this Google account. Try again."; }
+		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${providerName(account)} account. Try again.`; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
 	function accountAddress(address: string): AccountAddress | null {

@@ -90,7 +90,7 @@ describe('the account controls', () => {
 	it('signs one account out and returns its updated row and the revocation cause', async () => {
 		const fetchMock = answer({ row: { ...account, state: 'signed_out' }, revocation: 'revoked' });
 
-		const result = await signOutOfAccount('acc 1');
+		const result = await signOutOfAccount(account);
 
 		expect(result.row.state).toBe('signed_out');
 		expect(result.revocation).toBe('revoked');
@@ -100,7 +100,7 @@ describe('the account controls', () => {
 	it('removes one account and returns the cause', async () => {
 		const fetchMock = answer({ id: 'acc 1', removed: true, revocation: 'not_signed_in' });
 
-		await expect(removeAccount('acc 1')).resolves.toEqual({ id: 'acc 1', removed: true, revocation: 'not_signed_in' });
+		await expect(removeAccount(account)).resolves.toEqual({ id: 'acc 1', removed: true, revocation: 'not_signed_in' });
 
 		expect(sent(fetchMock)).toMatchObject({ path: '/api/mcp/accounts/acc%201', init: { method: 'DELETE' } });
 	});
@@ -109,7 +109,7 @@ describe('the account controls', () => {
 		const reach = { mode: 'selected' as const, project_ids: ['p1'], outside_projects: false };
 		const fetchMock = answer({ row: { ...account, reach } });
 
-		await expect(saveAccountReach('acc 1', reach)).resolves.toEqual({ row: { ...account, reach } });
+		await expect(saveAccountReach(account, reach)).resolves.toEqual({ row: { ...account, reach } });
 
 		const call = sent(fetchMock);
 		expect(call.path).toBe('/api/mcp/accounts/acc%201/reach');
@@ -121,9 +121,10 @@ describe('the account controls', () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const refuse = (detail: string) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ detail }) }));
 		refuse('Only the signed-in person can widen where an account works; open Connected apps.');
-		await expect(saveAccountReach('acc 1', { mode: 'all', project_ids: [], outside_projects: false })).rejects.toThrow('Only the signed-in person can widen where an account works; open Connected apps.');
+		await expect(saveAccountReach(account, { mode: 'all', project_ids: [], outside_projects: false })).rejects.toThrow('Only the signed-in person can widen where an account works; open Connected apps.');
 		refuse('connected_account_gone');
-		await expect(signOutOfAccount('acc 1')).rejects.toThrow("Couldn't change this Google account. Try again.");
+		await expect(signOutOfAccount(account)).rejects.toThrow("Couldn't change this Google account. Try again.");
+		await expect(removeAccount({ ...account, provider: 'microsoft' })).rejects.toThrow("Couldn't change this Microsoft account. Try again.");
 	});
 });
 

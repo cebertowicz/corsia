@@ -210,6 +210,8 @@ def test_every_failure_is_a_fixed_code_with_a_real_message() -> None:
     error = MicrosoftError(ADMIN_APPROVAL_REQUIRED)
     assert (error.cause, error.state_cause) == (ADMIN_APPROVAL_REQUIRED, ADMIN_APPROVAL_REQUIRED)
     assert error.message == "Your organization needs to approve CORSIA before it can connect this account."
+    assert MicrosoftError(PROVIDER_UNAVAILABLE).browser_message == "Microsoft had a problem with sign-in. Go back to CORSIA and try again."
+    assert error.browser_message == "Your organization needs to approve CORSIA before it can connect this account. Go back to CORSIA."
     assert MicrosoftError(INPUT_REFUSAL).state_cause is None and MicrosoftError(INTERNAL).state_cause is None
 
 

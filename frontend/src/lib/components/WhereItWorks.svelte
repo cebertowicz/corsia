@@ -70,7 +70,7 @@
 				? ALL_PROJECTS_REACH
 				: { mode: 'selected' as const, project_ids: [...selected], outside_projects: outsideProjects };
 			if (approve && app.kind !== 'account') onSaved(await approveConnectedApp(app, reach));
-			else if (app.kind === 'account') onSaved({ ...(await saveAccountReach(app.id, reach)).row, kind: 'account' });
+			else if (app.kind === 'account') onSaved({ ...(await saveAccountReach(app, reach)).row, kind: 'account' });
 			else onSaved(await saveConnectedAppReach(app, reach));
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Could not update this app. Try again.';

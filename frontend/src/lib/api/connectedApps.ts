@@ -128,7 +128,7 @@ function url(path: string): string {
 	return `${path}?token=${encodeURIComponent(auth ?? '')}`;
 }
 
-const ACCOUNT_FAILED = "Couldn't change this Google account. Try again.";
+const accountFailure = (provider: ConnectedAccount['provider']): string => `Couldn't change this ${provider === 'microsoft' ? 'Microsoft' : 'Google'} account. Try again.`;
 
 async function response<T>(path: string, init?: RequestInit, fallback = 'Could not update this app. Try again.'): Promise<T> {
 	const result = await fetch(url(path), init);
@@ -163,20 +163,20 @@ export function startAccountSignIn(account: Pick<ConnectedAccount, 'id' | 'provi
 	}, `Couldn't start ${provider} sign-in. Try again.`);
 }
 
-export function signOutOfAccount(id: string): Promise<AccountSignOutResult> {
-	return response(`/api/mcp/accounts/${encodeURIComponent(id)}/sign-out`, { method: 'POST' }, ACCOUNT_FAILED);
+export function signOutOfAccount(account: Pick<ConnectedAccount, 'id' | 'provider'>): Promise<AccountSignOutResult> {
+	return response(`/api/mcp/accounts/${encodeURIComponent(account.id)}/sign-out`, { method: 'POST' }, accountFailure(account.provider));
 }
 
-export function removeAccount(id: string): Promise<AccountRemoveResult> {
-	return response(`/api/mcp/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }, ACCOUNT_FAILED);
+export function removeAccount(account: Pick<ConnectedAccount, 'id' | 'provider'>): Promise<AccountRemoveResult> {
+	return response(`/api/mcp/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' }, accountFailure(account.provider));
 }
 
-export function saveAccountReach(id: string, reach: AppReach): Promise<{ row: ConnectedAccount }> {
-	return response(`/api/mcp/accounts/${encodeURIComponent(id)}/reach`, {
+export function saveAccountReach(account: Pick<ConnectedAccount, 'id' | 'provider'>, reach: AppReach): Promise<{ row: ConnectedAccount }> {
+	return response(`/api/mcp/accounts/${encodeURIComponent(account.id)}/reach`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ reach }),
-	}, ACCOUNT_FAILED);
+	}, accountFailure(account.provider));
 }
 
 /** Starting failed in a way the screen names (a fixed class), not with the server's text. */
