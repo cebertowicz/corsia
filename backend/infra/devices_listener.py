@@ -373,6 +373,9 @@ def sign_identity_proof(nonce: bytes, authority: str, state_root: Path = STATE_R
     """Sign one caller nonce and dialed authority with the stable host key."""
     key_path, _ = ensure_host_key(state_root)
     key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
+        # The desktop app checks proofs as P-256 ECDSA only; any other saved key cannot prove this host.
+        raise ValueError("the host key is not a P-256 key")
     payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii")
     return key.sign(payload, ec.ECDSA(hashes.SHA256()))
 
