@@ -16,6 +16,7 @@ from prompts.cloud_off import thread_local_only_text
 
 LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
 LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
+_ANCESTOR_DEPTH = 64
 
 #: The thread and every thread under it through the family links.
 _FAMILY_SQL = (
@@ -93,57 +94,58 @@ def inherited_local_only(ids: tuple[str | None, ...], *, db: sqlite3.Connection)
     return bool(row[0])
 
 
-def local_only_ancestor(thread: sqlite3.Row, *, db: sqlite3.Connection) -> bool:
-    """Whether any family ancestor of ``thread`` is still Local only."""
-    row = db.execute(
-        "WITH RECURSIVE ancestors(id) AS (SELECT ? UNION SELECT ? UNION "
-        "SELECT parent.id FROM threads AS parent JOIN threads AS thread "
-        "ON parent.id=thread.spawned_by OR parent.id=thread.parent_thread_id "
-        "JOIN ancestors ON thread.id=ancestors.id) "
-        "SELECT 1 FROM threads WHERE local_only=1 AND id IN (SELECT id FROM ancestors) LIMIT 1",
-        (thread["spawned_by"], thread["parent_thread_id"]),
-    ).fetchone()
-    return row is not None
+def local_only_sources(
+    thread_ids: list[str], *, db: sqlite3.Connection,
+) -> dict[str, tuple[str, str | None]]:
+    """The nearest Local-only ancestor (id, title) holding each thread's setting.
+
+    The one answer to "is this setting locked to a parent?" for the thread list
+    and the turn-off refusal. Turning Local only on writes it down the family, so
+    only a thread that is itself Local only and has a parent link can have one:
+    the walk starts from those, keeps the same user's threads, never names the
+    thread itself, and stops after ``_ANCESTOR_DEPTH`` links.
+    """
+    if not thread_ids:
+        return {}
+    placeholders = ",".join("?" for _ in thread_ids)
+    ancestors = db.execute(
+        "WITH RECURSIVE ancestors(root_id, user_id, id, depth) AS ("
+        "SELECT child.id, child.user_id, parent.id, 1 FROM threads AS child "
+        "JOIN threads AS parent ON parent.id IN (child.spawned_by, child.parent_thread_id) "
+        f"WHERE child.id IN ({placeholders}) AND child.local_only=1 "
+        "UNION "
+        "SELECT ancestors.root_id, ancestors.user_id, parent.id, ancestors.depth + 1 FROM ancestors "
+        "JOIN threads AS child ON child.id=ancestors.id "
+        "JOIN threads AS parent ON parent.id IN (child.spawned_by, child.parent_thread_id) "
+        f"WHERE ancestors.depth < {_ANCESTOR_DEPTH}"
+        "), ranked AS ("
+        "SELECT ancestors.root_id, ancestor.id, ancestor.title, "
+        "ROW_NUMBER() OVER (PARTITION BY ancestors.root_id ORDER BY ancestors.depth ASC) AS rank "
+        # CROSS JOIN keeps the walk's rows driving, so each ancestor is one primary-key read.
+        "FROM ancestors CROSS JOIN threads AS ancestor ON ancestor.id=ancestors.id "
+        "WHERE ancestor.local_only=1 AND ancestor.user_id=ancestors.user_id "
+        "AND ancestor.id<>ancestors.root_id"
+        ") SELECT root_id, id, title FROM ranked WHERE rank=1",
+        thread_ids,
+    ).fetchall()
+    return {row["root_id"]: (row["id"], row["title"]) for row in ancestors}
 
 
 def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -> None:
     """Add effective Local-only fields to thread payload rows in one batch."""
     if not rows:
         return
-    thread_ids = [str(row["id"]) for row in rows]
-    placeholders = ",".join("?" for _ in thread_ids)
-    ancestors = db.execute(
-        "WITH RECURSIVE roots(id, user_id) AS ("
-        f"SELECT id, user_id FROM threads WHERE id IN ({placeholders})"
-        "), ancestors(root_id, id, depth) AS ("
-        "SELECT roots.id, parent.id, 1 FROM roots JOIN threads AS child ON child.id=roots.id "
-        "JOIN threads AS parent ON parent.id=child.spawned_by OR parent.id=child.parent_thread_id "
-        "UNION "
-        "SELECT ancestors.root_id, parent.id, ancestors.depth + 1 FROM ancestors "
-        "JOIN threads AS child ON child.id=ancestors.id "
-        "JOIN threads AS parent ON parent.id=child.spawned_by OR parent.id=child.parent_thread_id "
-        "WHERE ancestors.depth < 64"
-        "), ranked AS ("
-        "SELECT ancestors.root_id, ancestor.id, ancestor.title, ancestors.depth, "
-        "ROW_NUMBER() OVER (PARTITION BY ancestors.root_id ORDER BY ancestors.depth ASC) AS rank "
-        "FROM ancestors JOIN roots ON roots.id=ancestors.root_id "
-        "JOIN threads AS ancestor ON ancestor.id=ancestors.id "
-        "WHERE ancestor.local_only=1 AND ancestor.user_id=roots.user_id AND ancestor.id<>roots.id"
-        ") SELECT root_id, id, title FROM ranked WHERE rank=1",
-        thread_ids,
-    ).fetchall()
-    inherited = {row["root_id"]: (row["id"], row["title"]) for row in ancestors}
+    # The column says whether the thread is Local only; the source says whether
+    # a parent holds it there, by the same walk that refuses turning it off.
+    inherited = local_only_sources([str(row["id"]) for row in rows], db=db)
 
     from llm.locality import cloud_off_project_ids
 
     cloud_off_projects = cloud_off_project_ids(db=db)
     for row in rows:
-        own_setting = bool(row.get("local_only"))
-        # A worker copies its parent's column at spawn, so the ancestor, not the
-        # column, says whether the setting is locked to a parent.
         source = inherited.get(row["id"])
         row["local_only_effective"] = bool(
-            own_setting or source or row.get("project_id") in cloud_off_projects
+            row.get("local_only") or row.get("project_id") in cloud_off_projects
         )
         row["local_only_inherited_from_thread_id"] = source[0] if source else None
         row["local_only_inherited_from_title"] = source[1] if source else None

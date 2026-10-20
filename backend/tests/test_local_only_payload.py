@@ -65,23 +65,27 @@ def test_copied_column_still_names_the_local_only_parent() -> None:
     assert _fields(_single(db, "child")) == (True, "parent", "Parent")
 
 
-def test_own_setting_after_parent_turned_off_is_unlocked() -> None:
-    from infra.local_only import local_only_ancestor
+def _held_by_route(db, thread_id: str) -> bool:
+    """Whether turning Local only off is refused as set by a parent."""
+    from infra.local_only import local_only_sources
 
+    return thread_id in local_only_sources([thread_id], db=db)
+
+
+def test_own_setting_after_parent_turned_off_is_unlocked() -> None:
     db = _db()
     _thread(db, "parent", title="Parent", local_only=0)
     _thread(db, "child", local_only=1, spawned_by="parent")
 
     assert _fields(_single(db, "child")) == (True, None, None)
-    child = db.execute("SELECT * FROM threads WHERE id = 'child'").fetchone()
-    assert local_only_ancestor(child, db=db) is False
+    assert _held_by_route(db, "child") is False
 
 
 def test_nearest_local_only_ancestor_is_named() -> None:
     db = _db()
     _thread(db, "root", title="Root", local_only=1)
     _thread(db, "parent", title="Nearest", local_only=1, spawned_by="root")
-    _thread(db, "child", spawned_by="parent")
+    _thread(db, "child", local_only=1, spawned_by="parent")
 
     assert _fields(_single(db, "child")) == (True, "parent", "Nearest")
 
@@ -105,9 +109,10 @@ def test_no_local_only_source_is_not_effective() -> None:
 def test_other_users_local_only_ancestor_is_ignored() -> None:
     db = _db()
     _thread(db, "foreign-parent", user_id="other", local_only=1)
-    _thread(db, "child", spawned_by="foreign-parent")
+    _thread(db, "child", local_only=1, spawned_by="foreign-parent")
 
-    assert _fields(_single(db, "child")) == (False, None, None)
+    assert _fields(_single(db, "child")) == (True, None, None)
+    assert _held_by_route(db, "child") is False
 
 
 def test_list_read_includes_local_only_payload_fields(monkeypatch) -> None:
@@ -116,7 +121,7 @@ def test_list_read_includes_local_only_payload_fields(monkeypatch) -> None:
 
     db = _db()
     _thread(db, "parent", title="Parent", local_only=1)
-    _thread(db, "child", parent_thread_id="parent")
+    _thread(db, "child", local_only=1, parent_thread_id="parent")
 
     async def read_inline(fn):
         return fn()
@@ -132,13 +137,8 @@ def test_list_read_includes_local_only_payload_fields(monkeypatch) -> None:
         True, "parent", "Parent",
     )
 
-    single_db = _db()
-    _thread(single_db, "parent", title="Parent", local_only=1)
-    _thread(single_db, "child", spawned_by="parent")
-    assert _fields(_single(single_db, "child")) == (True, "parent", "Parent")
 
-
-def test_cyclic_family_links_are_bounded_in_the_list_read(monkeypatch) -> None:
+def test_cyclic_family_links_are_bounded_and_agree_with_the_route(monkeypatch) -> None:
     from api import threads
     from connections import harness_refresh
 
@@ -155,6 +155,10 @@ def test_cyclic_family_links_are_bounded_in_the_list_read(monkeypatch) -> None:
     monkeypatch.setattr(threads, "run_read", read_inline)
     monkeypatch.setattr(harness_refresh, "schedule_refresh_for_selections", lambda _models: None)
 
+    # The list read closes its connection, so ask the route's question first.
+    held_by_route = {thread_id: _held_by_route(db, thread_id) for thread_id in ("a", "b")}
     listed = {row["id"]: row for row in asyncio.run(threads.list_threads("token"))["threads"]}
-    assert _fields(listed["a"]) == (True, "b", "B")
+    assert _fields(listed["a"]) == (False, None, None)
     assert _fields(listed["b"]) == (True, None, None)
+    for thread_id, held in held_by_route.items():
+        assert (listed[thread_id]["local_only_inherited_from_thread_id"] is not None) is held
