@@ -25,7 +25,7 @@
     "backend/connections/harness_models.py": 599,
     "backend/core/step_handler.py": 428,
     "backend/core/thread_lifecycle.py": 498,
-    "backend/e2e_mock.py": 409,
+    "backend/e2e_mock.py": 410,
     "backend/host_access/processes.py": 1426,
     "backend/host_access/redaction.py": 968,
     "backend/host_access/supervisor.py": 1728,

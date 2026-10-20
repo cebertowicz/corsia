@@ -178,8 +178,9 @@ async def _skip_harness_discovery() -> list:
 
 @contextmanager
 def mock_engine():
-    """Patch completion and model availability."""
+    """Patch completion and model availability within the E2E lifespan."""
     from llm import model_status
+
     production_active_providers = model_status._cloud_providers_active
     with (
         patch("llm.base.acompletion", new=_mock_acompletion),
