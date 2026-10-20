@@ -45,6 +45,8 @@ const EXCLUDED_ROUTES: Record<string, string> = {
 	'/_design/artifacts': 'internal design showcase for the artifact pane, not a reader surface',
 	'/_design/context-chip-probe': 'internal probe for the context chip, not a reader surface',
 	'/_design/focus-outcomes': 'internal design showcase for Focus outcomes, not a reader surface',
+	'/_design/remote-connect': 'internal review frames for remote connect, not a reader surface',
+	'/_design/setup-motion': 'internal motion evidence for setup, not a reader surface',
 };
 
 // ---- Discovery from source ------------------------------------------------
