@@ -442,7 +442,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await shot(page, 'long-name-expanded', info);
 });
 
-journey('keeps an orphan-heavy review ask compact without losing recovery', [
+journey('keeps an orphan-heavy review ask compact and offers no Place again once every quote is gone', [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
 	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
