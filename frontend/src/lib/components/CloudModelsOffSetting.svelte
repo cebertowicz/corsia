@@ -11,18 +11,20 @@
 	let loaded = $state(false);
 	let saving = $state(false);
 	let error = $state('');
+	let loadFailed = $state(false);
 	const hasReadyLocalModel = $derived($models.some((model) => model.is_local && model.status === 'ready'));
 
 	$effect(() => { void load(projectId); });
 	async function load(id: string) {
-		loaded = false; error = '';
+		loaded = false; error = ''; loadFailed = false;
 		const result = await loadCloudModelsOff(id);
 		if (result.ok) {
 			off = result.value.cloud_models_off === true;
 			onCloudModelsOffState?.(off);
 		} else {
-			error = result.error;
-			// If this read fails, leave account controls available as their safe existing state.
+			loadFailed = true;
+			error = result.reached === false ? "Couldn't load this setting. Check your connection." : "Couldn't load this setting.";
+			// The setting is unknown, so its switch stays hidden; account controls show as they would without it.
 			onCloudModelsOffState?.(false);
 		}
 		loaded = true;
@@ -44,11 +46,11 @@
 		<span class="label">Local models only</span>
 		<p>Chats and agents in this project use only models on this computer or on a trusted device. A chat on a cloud model waits until you switch it to a local one.</p>
 		{#if !hasReadyLocalModel}
-			<p class="status" class:warning={off}>{off ? 'No local model is ready, so nothing in this project can run.' : 'No local model is ready yet.'} <button type="button" onclick={() => requestSettingsSection('providers')}>Set up a local model</button></p>
+			<p class="status" class:warning={off}>{off ? 'No local model is ready, so nothing in this project can run.' : 'No local model is ready.'} <button type="button" onclick={() => requestSettingsSection('providers')}>Set up a local model</button></p>
 		{/if}
-		{#if error}<p class="status error" role="alert">{error}</p>{/if}
+		{#if error}<p class="status error" role="alert">{error} {#if loadFailed}<button type="button" onclick={() => load(projectId)}>Try again</button>{/if}</p>{/if}
 	</div>
-	<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Local models only" onchange={change} />
+	{#if !loadFailed}<Toggle checked={off} disabled={saving || !loaded} ariaLabel="Local models only" onchange={change} />{/if}
 </div>
 
 <style>

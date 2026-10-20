@@ -57,7 +57,7 @@ export const THREAD_LOCAL_ONLY = 'thread_local_only';
 
 export const WAITING_FOR_THREAD_LOCAL_MODEL = {
 	label: SWITCH_TO_LOCAL_MODEL,
-	title: 'This chat is set to local models only. Your message is saved and will send as soon as you switch this chat to a local model.',
+	title: 'Local only is on for this chat. Your message is saved and will send as soon as you switch this chat to a local model.',
 } as const;
 
 /** The same hold, written while the thread has no model at all. */

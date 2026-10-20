@@ -21,15 +21,15 @@ export type ProviderPolicy = {
 export type ProjectCloudModelsPolicy = { cloud_models_off: boolean };
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string; conflict?: boolean; detail?: unknown; reached?: boolean };
 
-async function request<T>(path: string, init?: RequestInit, refused = 'Could not save subscriptions.', unreachable = SERVER_UNREACHABLE): Promise<Result<T>> {
+async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> {
 	const auth = get(token);
 	if (!auth) return { ok: false, error: 'Sign in to manage subscriptions.', reached: true };
 	try {
 		const response = await fetch(path, { ...init, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
 		const data = await response.json().catch(() => null);
-		if (!response.ok) return { ok: false, conflict: response.status === 409, error: plainErrorText(data?.detail, refused), detail: data?.detail, reached: true };
+		if (!response.ok) return { ok: false, conflict: response.status === 409, error: plainErrorText(data?.detail, 'Could not save subscriptions.'), detail: data?.detail, reached: true };
 		return { ok: true, value: data as T };
-	} catch { return { ok: false, error: unreachable, reached: false }; }
+	} catch { return { ok: false, error: SERVER_UNREACHABLE, reached: false }; }
 }
 
 export function loadProviderPolicy(projectId?: string) {

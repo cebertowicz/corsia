@@ -65,7 +65,7 @@ describe('deliveryPresentation', () => {
 		};
 		expect(deliveryPresentation(held)).toEqual({
 			label: 'Switch to a local model to send',
-			title: 'This chat is set to local models only. Your message is saved and will send as soon as you switch this chat to a local model.',
+			title: 'Local only is on for this chat. Your message is saved and will send as soon as you switch this chat to a local model.',
 			pending: true,
 			failed: false,
 		});

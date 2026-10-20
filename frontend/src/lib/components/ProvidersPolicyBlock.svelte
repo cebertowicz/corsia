@@ -17,6 +17,11 @@
 	// `null` stays loading until the project's persisted Local models only setting settles.
 	let cloudModelsOff = $state<boolean | null>(null);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
+	const PROVIDER_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+	// Every account provider the policy lists, so a new one is named without a copy change.
+	const cloudOffLine = $derived(accountProviders.length
+		? `${new Intl.ListFormat('en', { type: 'conjunction' }).format(accountProviders.map(providerName))} ${accountProviders.length === 1 ? "isn't" : "aren't"} used while Local models only is on.`
+		: '');
 
 	$effect(() => { void load(); });
 	async function load() {
@@ -49,7 +54,7 @@
 		}
 	}
 	function providerName(provider: ProviderEntry) {
-		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';
+		return PROVIDER_NAMES[provider.provider_key] ?? provider.provider_key;
 	}
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);
@@ -82,9 +87,9 @@
 		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} />
 	{/if}
 	<h2>Accounts and rollover</h2>
-	{#if projectId && cloudModelsOff === true}
-		<p>Claude Code and Codex aren't used while Local models only is on.</p>
-	{:else if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
+	{#if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
+	{:else if projectId && cloudModelsOff === true && policy}
+		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}

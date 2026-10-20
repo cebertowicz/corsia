@@ -5,7 +5,7 @@ import { token } from '$lib/stores/auth';
 import { models, type Model } from '$lib/stores/models';
 
 const DESCRIPTION = 'Chats and agents in this project use only models on this computer or on a trusted device. A chat on a cloud model waits until you switch it to a local one.';
-const NONE_READY_OFF = 'No local model is ready yet.';
+const NONE_READY_OFF = 'No local model is ready.';
 const NONE_READY_ON = 'No local model is ready, so nothing in this project can run.';
 const local = { id: 'omlx/q', name: 'Qwen', size: '', backend: 'network', speed: '', status: 'ready', is_local: true } as Model;
 const cloud = { id: 'cc/opus', name: 'Opus', size: '', backend: 'claude-code', speed: '', status: 'unavailable', status_reason: 'project_cloud_off', is_local: false } as Model;
@@ -82,6 +82,26 @@ describe('CloudModelsOffSetting', () => {
 		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
+	});
+	it('load failed: says the setting did not load, hides the switch, and Try again reloads it', async () => {
+		let reads = 0;
+		vi.stubGlobal('fetch', vi.fn(async () => (++reads === 1
+			? { ok: false, status: 500, json: async () => ({}) }
+			: { ok: true, json: async () => ({ cloud_models_off: true }) })));
+		component = mount(CloudModelsOffSetting, { target: host, props: { projectId: 'p1' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain("Couldn't load this setting."));
+		expect(text()).not.toContain('subscriptions');
+		expect(toggle()).toBeNull();
+		(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Try again') as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(toggle()?.getAttribute('aria-pressed')).toBe('true'));
+		expect(host.querySelector('[role="alert"]')).toBeNull();
+	});
+	it('load unreachable: names the connection', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+		component = mount(CloudModelsOffSetting, { target: host, props: { projectId: 'p1' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain("Couldn't load this setting. Check your connection."));
 	});
 	it('save failed turning it off: the same line, and the switch stays on', async () => {
 		stub(true, 'fail'); await mountSetting();

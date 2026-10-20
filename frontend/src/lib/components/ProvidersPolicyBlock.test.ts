@@ -137,9 +137,10 @@ describe('ProvidersPolicyBlock', () => {
 	const projectPolicy = {
 		scope: 'project', use_workspace: false, override_revision: 1, providers: [
 			{ provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'personal', label: 'Personal', enabled: true }] },
+			{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: true }, rollover: false, order: null, disabled: [], revision: 1, units: [] },
 		],
 	};
-	function stubProjectCloudOff(initial: boolean, save: 'ok' | 'fail' = 'ok') {
+	function stubProjectCloudOff(initial: boolean, save: 'ok' | 'fail' = 'ok', policy: object = projectPolicy) {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const path = input.toString();
 			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
@@ -149,9 +150,18 @@ describe('ProvidersPolicyBlock', () => {
 					: { ok: false, status: 500, json: async () => ({ detail: 'Save denied' }) };
 				return { ok: true, json: async () => ({ cloud_models_off: initial }) };
 			}
-			return { ok: true, json: async () => projectPolicy };
+			return { ok: true, json: async () => policy };
 		}));
 	}
+
+	it('names exactly the account providers the policy lists in the Local models only line', async () => {
+		stubProjectCloudOff(true, 'ok', { ...projectPolicy, providers: [projectPolicy.providers[1]] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Codex isn't used while Local models only is on."));
+		expect(host.textContent).not.toContain('Claude Code');
+	});
 
 	it('hides project account controls behind one quiet line only when saved Local models only is on', async () => {
 		stubProjectCloudOff(true);
@@ -204,6 +214,9 @@ describe('ProvidersPolicyBlock', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		// The setting's value is unknown, so its switch is hidden rather than shown as off.
+		expect(host.querySelector('[aria-label="Local models only"]')).toBeNull();
+		expect(host.querySelector('[role="alert"]')?.textContent).toContain("Couldn't load this setting. Try again");
 	});
 
 	it('keeps the existing loading line until Local models only has loaded', async () => {
