@@ -126,9 +126,9 @@ def changed_paths(
     current: dict[str, bytes] | None, name: str, skill_md: bytes, description: str, bundle: dict[str, bytes],
 ) -> list[str]:
     """Name visible files whose installed bytes change, arrive, or disappear in an update."""
-    from infra.skill_install import _skill_text
+    from infra.skill_install import installed_skill_text
 
-    installed_skill = _skill_text(name, skill_md, description)
+    installed_skill = installed_skill_text(name, skill_md, description)
     new_files = {"SKILL.md": installed_skill.encode("utf-8") if installed_skill is not None else skill_md, **bundle}
     dropped = (set(current or {}) - set(new_files)) - {"corsia.yaml"}
     changed = {

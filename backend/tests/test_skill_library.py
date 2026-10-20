@@ -185,11 +185,11 @@ def test_discard_token_is_bound_to_the_exact_local_files(tmp_path):
 
 
 def test_update_results_name_files_dropped_upstream():
-    from infra.skill_install import _skill_text
+    from infra.skill_install import installed_skill_text
     from tools import skill_library
 
     upstream = b"---\nname: pdf\ndescription: PDF work.\n---\nUse it.\n"
-    installed = _skill_text("pdf", upstream, "PDF work.")
+    installed = installed_skill_text("pdf", upstream, "PDF work.")
     assert installed is not None
     changed = skill_library._changed_paths(
         {"SKILL.md": installed.encode(), "corsia.yaml": b"local", "removed.md": b"old"},
@@ -200,11 +200,11 @@ def test_update_results_name_files_dropped_upstream():
 
 
 def test_update_results_omit_unchanged_installed_files():
-    from infra.skill_install import _skill_text
+    from infra.skill_install import installed_skill_text
     from tools import skill_library
 
     upstream = b"---\nname: pdf\ndescription: PDF work.\n---\nUse it.\n"
-    installed = _skill_text("pdf", upstream, "PDF work.")
+    installed = installed_skill_text("pdf", upstream, "PDF work.")
     assert installed is not None
 
     changed = skill_library._changed_paths(

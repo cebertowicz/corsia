@@ -53,7 +53,7 @@ def produce_once() -> int:
     items = {item["name"]: item for item in index.skills}
     delivered = 0
     for row in _installed_rows():
-        payload = _notice_payload(row, items, getattr(index, "generations", {}))
+        payload = _notice_payload(row, items, index.generations)
         if payload is None:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
@@ -62,7 +62,7 @@ def produce_once() -> int:
 
 
 def _notice_payload(
-    row: dict[str, Any], items: dict[str, dict[str, Any]], index_generations: dict[str, int] | None = None,
+    row: dict[str, Any], items: dict[str, dict[str, Any]], index_generations: dict[str, int],
 ) -> dict[str, Any] | None:
     path = row.get("path")
     external_id = row.get("external_id")
@@ -80,7 +80,7 @@ def _notice_payload(
         "installed_version": origin.get("version"),
         "library_version": item["version"],
         "item_manifest": item_manifest(item),
-        "library_index_generation": (index_generations or {}).get(name, 0),
+        "library_index_generation": index_generations.get(name, 0),
         "installed_at": origin.get("adopted_at"),
         "changed_files": changed_files,
         "edited": edited,

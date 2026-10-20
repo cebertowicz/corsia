@@ -18,6 +18,7 @@ def _payload(event_type: str, **overrides):
         "installed_version": "1.0.0",
         "library_version": "1.1.0",
         "item_manifest": "manifest-1",
+        "library_index_generation": 1,
         "installed_at": "2026-10-19T00:00:00+00:00",
         "changed_files": ["SKILL.md", "corsia.yaml"],
         "edited": False,

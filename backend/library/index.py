@@ -62,12 +62,9 @@ def load_index() -> LibraryIndex:
     prior_items = {} if cached is None else {item["name"]: item for item in cached[0]}
     prior_generations = {} if cached is None else cached[2]
     generations = {
-        item["name"]: prior_generations.get(item["name"], 0) + int(prior_items.get(item["name"]) != item)
+        item["name"]: max(1, prior_generations.get(item["name"], 0) + int(prior_items.get(item["name"]) != item))
         for item in payload
     }
-    for name, generation in list(generations.items()):
-        if generation == 0:
-            generations[name] = 1
     refreshed = cached is None or payload != cached[0]
     _write_cache(payload, now, generations)
     return LibraryIndex(payload, "just now", refreshed=refreshed, generations=generations)

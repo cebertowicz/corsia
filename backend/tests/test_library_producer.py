@@ -72,7 +72,7 @@ def test_producer_handles_1000_copies_under_five_seconds_on_an_indexed_query(iso
             parent_thread_id=owner, path=str(folder / "SKILL.md"),
         )
         items.append({**_item(), "name": name})
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=tuple(items), index_age="just now"))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=tuple(items), index_age="just now", generations={}))
     monkeypatch.setattr("events.platform.deliver_platform_event_sync", lambda *_args: [])
 
     started = time.perf_counter()
@@ -103,7 +103,7 @@ def test_producer_reads_installed_artifacts_and_delivers_each_change_once(isolat
         integration="library", type="installed-skill", external_id=f"{owner}/pdf",
         parent_thread_id=owner, path=str(skill / "SKILL.md"),
     )
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now"))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", generations={}))
 
     first = producer.produce_once()
     repeat = producer.produce_once()
@@ -128,7 +128,7 @@ def test_producer_notices_a_version_change_at_the_same_source(isolated_db, tmp_p
     (skill / "corsia.yaml").write_text(yaml.safe_dump(sidecar))
     row = {"external_id": f"{owner}/pdf", "path": str(skill / "SKILL.md")}
 
-    payload = producer._notice_payload(row, {"pdf": current})
+    payload = producer._notice_payload(row, {"pdf": current}, {})
 
     assert payload is not None
     assert payload["event_type"] == "library.item_changed"
@@ -175,7 +175,7 @@ def test_producer_withdrawal_wakes_the_registered_owner_once(isolated_db, tmp_pa
         integration="library", type="installed-skill", external_id=f"{owner}/pdf",
         parent_thread_id=owner, path=str(skill / "SKILL.md"),
     )
-    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(_item(withdrawn=True),), index_age="just now"))
+    monkeypatch.setattr("library.load_index", lambda: SimpleNamespace(skills=(_item(withdrawn=True),), index_age="just now", generations={}))
 
     producer.produce_once()
     producer.produce_once()
