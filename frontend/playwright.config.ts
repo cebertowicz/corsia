@@ -49,7 +49,7 @@ const backendCommand = [
 const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
 	? [{
 		name: 'webkit-desktop',
-		testMatch: /(document-comment-scroll|doc-table-cell-selection)\.spec\.ts$/,
+		testMatch: /(document-comment-scroll|doc-table-cell-selection|doc-prose-selection-highlight)\.spec\.ts$/,
 		use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
 	}]
 	: [];

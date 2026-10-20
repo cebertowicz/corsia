@@ -209,6 +209,7 @@ def _creation_values(
         connection, plan_id, kind=kind, assignee=assignee,
         watchdog_budget_seconds=watchdog_budget_seconds, parent_id=parent_id, follow_up_of=follow_up_of,
     )
+    from core.size_rating import UNKNOWN
     from plans.workflow_fields import creation_values
     from plans.size_fields import validate_size
 
@@ -216,6 +217,9 @@ def _creation_values(
         workflow_ref=workflow_ref, workflow_version=workflow_version,
         workflow_step=workflow_step, difficulty=difficulty,
     )
+    size = validate_size(size)
+    if kind == "task" and size is None:
+        size = UNKNOWN
     order_key = _open_order_slot(connection, plan_id, parent_id, order_key)
     resolved_commitment = _commitment(connection, plan_id, node_id, parent_id, commitment_id)
     now = service._now()
@@ -224,7 +228,7 @@ def _creation_values(
         service._validate_dod(acceptance_criteria, checkpoint_exception), int(checkpoint_exception),
         assignee, spawn_kind, watchdog_budget_seconds, follow_up_of, 1, resolved_commitment, now, now,
     )
-    return base_values, workflow_ref, workflow_version, workflow_step, difficulty, validate_size(size), resolved_commitment
+    return base_values, workflow_ref, workflow_version, workflow_step, difficulty, size, resolved_commitment
 
 
 def create_node(

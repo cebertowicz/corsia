@@ -146,7 +146,8 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         return mutations.split_node(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
-            description=params.get("description"), **fields.expected(params), **common,
+            description=params.get("description"), size=fields.require_task_size(params.get("size")),
+            **fields.expected(params), **common,
         )
     if operation == "reorder":
         return _reorder(params, common)
@@ -287,6 +288,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     _node, follow_up = service.accept_with_follow_up(
         node_id, title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
+        size=fields.require_task_size(params.get("size")),
         verification_result="passed", verified_by=actor.audit_id,
         **expected, **common,
     )

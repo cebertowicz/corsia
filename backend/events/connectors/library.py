@@ -28,11 +28,16 @@ _FACTS = (
     "installed_version",
     "library_version",
     "item_manifest",
+    "library_index_generation",
     "installed_at",
     "changed_files",
     "edited",
     "withdrawn_reason",
 )
+# What a digest note line shows. Names, versions and file paths come from the
+# reviewed index; the free-text withdrawn_reason stays out of the line.
+_CHANGED_LINE_FACTS = ("name", "installed_version", "library_version", "edited", "changed_files")
+_WITHDRAWN_LINE_FACTS = ("name", "installed_version", "edited")
 
 
 def _classify(raw: dict[str, Any]) -> str:
@@ -67,21 +72,23 @@ MANIFEST = register(ConnectorManifest(
     event_types={
         ITEM_CHANGED_EVENT: EventTypeDecl(
             ITEM_CHANGED_EVENT,
-            ("external_id", "item_manifest", "installed_at"),
+            ("external_id", "item_manifest", "library_index_generation", "installed_at"),
             _FILTERABLE,
             artifact_type=INSTALLED_SKILL_TYPE,
             artifact_integration=LIBRARY_INTEGRATION,
             event_class="informational",
             collapse_fact="item_key",
+            digest_line_facts=_CHANGED_LINE_FACTS,
         ),
         ITEM_WITHDRAWN_EVENT: EventTypeDecl(
             ITEM_WITHDRAWN_EVENT,
-            ("external_id", "item_manifest", "installed_at"),
+            ("external_id", "item_manifest", "library_index_generation", "installed_at"),
             _FILTERABLE,
             artifact_type=INSTALLED_SKILL_TYPE,
             artifact_integration=LIBRARY_INTEGRATION,
             event_class="actionable",
             collapse_fact="item_key",
+            digest_line_facts=_WITHDRAWN_LINE_FACTS,
         ),
     },
     classify=_classify,

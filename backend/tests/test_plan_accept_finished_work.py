@@ -29,10 +29,15 @@ def _active(db, plan_id: str, title: str = "Ship it"):
 
 
 def _accept(db, plan_id: str, node, operation: str = "accept", **extra):
-    return mutate(plan_id, operation, {
+    params = {
         "node_id": node.id, "expected_revision": _row(db, node.id)["revision"],
         "verification_result": "passed", **extra,
-    }, actor=OWNER, provenance="test", mutation_id=_mid(), db=db)
+    }
+    if operation == "accept_with_follow_up":
+        params.setdefault("size", "unknown")
+    return mutate(
+        plan_id, operation, params, actor=OWNER, provenance="test", mutation_id=_mid(), db=db,
+    )
 
 
 def _mark_done(db, plan_id: str, node, **extra):

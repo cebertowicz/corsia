@@ -81,7 +81,7 @@ def _current_thread_context(thread_id: str) -> dict[str, Any] | None:
     try:
         row = db.execute(
             "SELECT id, user_id, profile, project_id, title, agent_enabled, agent_status, "
-            "lifecycle_state, archived_reason, spawned_by FROM threads WHERE id = ?",
+            "lifecycle_state, archived_reason, spawned_by, local_only FROM threads WHERE id = ?",
             (thread_id,),
         ).fetchone()
         return dict(row) if row else None

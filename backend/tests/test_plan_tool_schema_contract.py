@@ -9,7 +9,7 @@ _MUTATION_REQUIRED = {
     "add": {"title", "acceptance_criteria"},
     "insert": {"title", "acceptance_criteria"},
     "edit": {"node_id", "expected_revision"},
-    "split": {"node_id", "title", "acceptance_criteria", "expected_revision"},
+    "split": {"node_id", "title", "acceptance_criteria", "size", "expected_revision"},
     "reorder": {"node_id", "order_key", "expected_revision"},
     "activate": {"node_id", "expected_revision"},
     "start": {"node_id", "expected_revision"},
@@ -30,7 +30,7 @@ _MUTATION_REQUIRED = {
     },
     "accept": {"node_id", "expected_revision"},
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "expected_revision",
+        "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     # expected_event, or a reason that schedules the task instead.
     "arm_watch": {"node_id", "condition", "expected_revision"},
@@ -38,7 +38,7 @@ _MUTATION_REQUIRED = {
     "add_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
     "remove_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
     "add_follow_up": {
-        "node_id", "title", "acceptance_criteria", "expected_revision",
+        "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     "add_correction": {
         "node_id", "title", "acceptance_criteria", "affected_nodes",
@@ -184,6 +184,7 @@ def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(ope
     params = {
         "node_id": "node-1",
         "kind": "task",
+        "size": "S",
         "title": "Do work",
         "description": "Bounded work",
         "acceptance_criteria": "Evidence is recorded",
@@ -240,7 +241,7 @@ _CLOSING_FIELDS = {
         "next_node_id",
     },
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "verification_result",
+        "node_id", "title", "acceptance_criteria", "size", "verification_result",
         "evidence", "expected_revision", "next_node_id",
     },
     # Bulk archive is the one closing body with no single node to describe, so

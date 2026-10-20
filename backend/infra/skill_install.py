@@ -36,7 +36,7 @@ def _nested(value: object) -> bool:
     return isinstance(value, dict) or (isinstance(value, list) and any(isinstance(item, dict) for item in value))
 
 
-def _skill_text(name: str, upstream: bytes, description: str) -> str | None:
+def installed_skill_text(name: str, upstream: bytes, description: str) -> str | None:
     """Return an install-safe format-1 SKILL.md, or None for invalid upstream text."""
     try:
         metadata, body = parse_frontmatter(upstream.decode("utf-8"))
@@ -84,7 +84,7 @@ def _bundle_files(
     origin: Mapping[str, str],
 ) -> dict[str, bytes] | None:
     """Build the rewritten bundle once, rejecting unsafe or ambiguous relative paths."""
-    skill_md = _skill_text(name, upstream_skill_md, description)
+    skill_md = installed_skill_text(name, upstream_skill_md, description)
     if skill_md is None:
         return None
     files = {"SKILL.md": skill_md.encode("utf-8"), SIDECAR_FILE: _sidecar(origin).encode("utf-8")}
@@ -327,7 +327,7 @@ def remove_skill_bundle(
 def origin_metadata(
     source: str,
     upstream_skill_md: bytes,
-    adopted_at: str,
+    adopted_at: str | None = None,
     version: str | None = None,
     item_manifest: str | None = None,
 ) -> dict[str, str]:
@@ -335,8 +335,9 @@ def origin_metadata(
     origin = {
         "source": source,
         "sha256": hashlib.sha256(upstream_skill_md).hexdigest(),
-        "adopted_at": adopted_at,
     }
+    if adopted_at is not None:
+        origin["adopted_at"] = adopted_at
     if version is not None:
         origin["version"] = version
     if item_manifest is not None:

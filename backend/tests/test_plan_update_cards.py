@@ -76,6 +76,7 @@ def _review_then_accept_followup(db, node_id: str) -> None:
             "expected_revision": _row(db, node_id)["revision"],
             "title": "Follow up",
             "acceptance_criteria": "Follow up DOD",
+            "size": "unknown",
         },
         actor=OWNER,
         provenance="test.plan_update_cards",
