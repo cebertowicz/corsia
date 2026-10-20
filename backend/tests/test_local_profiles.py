@@ -171,9 +171,13 @@ def test_an_unreported_model_directory_reaches_the_check_as_unknown(monkeypatch,
     assert asyncio.run(downloads.download_dir("srv")) is None
 
 
-def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None):
+def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None):
     """Stub every oMLX call a new-install flight makes; ``download`` is the one under test."""
     wrote = []
+
+    async def apply_optimal(server_id, model):
+        wrote.append("optimal")
+        return optimal or runtime.OptimalResult("unsupported")
 
     async def healthy(port):
         return None
@@ -214,6 +218,7 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None):
 
     monkeypatch.setattr(local_setup, "_wait_for_download", download)
     monkeypatch.setattr(flow, "configure_model_settings", model_settings)
+    monkeypatch.setattr(flow, "apply_optimal_settings", apply_optimal)
     monkeypatch.setattr(llm.catalog_network_models, "discover_network_models", discover)
     monkeypatch.setattr(infra.state.ws, "notify_models_changed", lambda: None)
     return wrote
@@ -257,7 +262,7 @@ def test_a_download_that_outlives_the_follow_names_the_model_and_resumes_it(monk
 
     assert second["ok"] is True and second["model"] == MODEL.model
     assert attempts == [MODEL.repository] * 2
-    assert wrote == [(MODEL.repository, MODEL.context_window)]
+    assert wrote == ["optimal", (MODEL.repository, MODEL.context_window)]
 
 
 def test_a_failed_flight_points_at_the_one_setup_command(monkeypatch):
@@ -270,6 +275,40 @@ def test_a_failed_flight_points_at_the_one_setup_command(monkeypatch):
     assert result["next_action"] == (
         f"Run `{flow.SETUP_COMMAND}` again after fixing this, or add a subscription/API key.")
     assert flow.SETUP_COMMAND == "corsia local setup"
+
+
+async def _downloaded(server_id, progress, chosen):
+    return None
+
+
+def test_a_new_install_applies_the_benchmark_settings_after_the_starter_download(monkeypatch):
+    wrote = _fake_new_omlx(monkeypatch, _downloaded, optimal=runtime.OptimalResult("applied", 41.0))
+
+    result = asyncio.run(flow._run_flight(model=MODEL))
+
+    assert result["ok"] is True
+    # The benchmark write carries CORSIA's required fields, so the plain writer is skipped.
+    assert wrote == ["optimal"]
+
+
+def test_a_new_install_without_a_benchmark_writes_corsias_own_model_settings(monkeypatch):
+    wrote = _fake_new_omlx(monkeypatch, _downloaded, optimal=runtime.OptimalResult("not_found"))
+
+    assert asyncio.run(flow._run_flight(model=MODEL))["ok"] is True
+    assert wrote == ["optimal", (MODEL.repository, MODEL.context_window)]
+
+
+def test_an_already_connected_local_model_keeps_its_settings(monkeypatch):
+    async def download(server_id, progress, chosen):
+        raise AssertionError("an existing local model is never downloaded again")
+
+    wrote = _fake_new_omlx(monkeypatch, download)
+    monkeypatch.setattr("llm.local_sources.connected_local_server", lambda: {"id": "mine"})
+
+    result = asyncio.run(flow._run_flight(model=MODEL))
+
+    assert result["existing"] is True and result["server_id"] == "mine"
+    assert wrote == []
 
 
 @pytest.fixture

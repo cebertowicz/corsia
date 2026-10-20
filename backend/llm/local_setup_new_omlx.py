@@ -13,7 +13,7 @@ from llm.local_setup_disk import DiskSpaceError
 from llm.local_setup_download import StillDownloading
 from llm.local_setup_gates import local_memory_ok, limited_subscription_message, subscription_available
 from llm.local_setup_results import SETUP_COMMAND, failure_cause, failure_message, local_setup_error
-from llm.local_setup_runtime import configure_model_settings, start_managed_omlx
+from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings, start_managed_omlx
 
 
 async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
@@ -33,7 +33,11 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
     ls._record_model(model)
     await ls._download(server_id, report, model)
     ls.record_downloaded()
-    await configure_model_settings(server_id, model)
+    # Same order as a Settings download: the benchmark's settings when oMLX
+    # has them, otherwise CORSIA's own per-model settings.
+    optimal = await apply_optimal_settings(server_id, model)
+    if optimal.status != "applied" and not optimal.writer_attempted:
+        await configure_model_settings(server_id, model)
     report("Refreshing model catalog")
     from llm.catalog_network_models import discover_network_models
 
