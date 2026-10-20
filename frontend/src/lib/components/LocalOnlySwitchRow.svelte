@@ -87,7 +87,7 @@
 
 <style>
 	.local-only-setting { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
-	.local-only-setting:focus { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-md); }
+	.local-only-setting:focus { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 	.local-only-copy { min-width: 0; }
 	.local-only-label { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
 	.local-only-copy p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
