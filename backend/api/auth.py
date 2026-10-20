@@ -51,8 +51,8 @@ log = logging.getLogger(__name__)
 #: One failed password check at a time, process-wide.
 _login_lock = asyncio.Lock()
 
-#: Failed attempts per username: ``{username: (count, last_failure_monotonic)}``.
-_failures: dict[str, tuple[int, float]] = {}
+#: Failed attempts per username: ``{username: (count, last_failure_monotonic, is_account)}``.
+_failures: dict[str, tuple[int, float, bool]] = {}
 
 #: Failures allowed before a delay starts. Covers an ordinary typo or two.
 _FREE_ATTEMPTS = 3
@@ -64,13 +64,21 @@ _MAX_DELAY_SECONDS = 300
 #: Idle time after which a username's failures are forgotten entirely.
 _FAILURE_TTL_SECONDS = 3600
 #: Most usernames tracked at once. Past this, expired records are swept and
-#: then the stalest dropped, so made-up names cannot grow memory unbounded.
+#: then the stalest made-up name dropped, so made-up names cannot grow memory
+#: unbounded or push a real account's count out.
 _MAX_TRACKED_USERNAMES = 4096
-#: Most sign-in attempts allowed to wait for the hashing lock at once; the
-#: rest are refused up front rather than queued without limit.
+#: Most attempts for made-up names allowed to wait for the hashing lock at
+#: once. Accounts are not counted against it, so a burst of made-up names
+#: cannot keep the owner from signing in.
 _MAX_WAITING_ATTEMPTS = 16
+#: How long an attempt for a made-up name is held when that cap is full,
+#: before it is refused like a failed check.
+_HELD_SECONDS = 1.0
 
 _waiting_attempts = 0
+#: Usernames with an attempt waiting for the lock: one at a time per name,
+#: for every name alike, which also bounds the accounts' waiters.
+_waiting_names: set[str] = set()
 
 #: The one 401 for "no such account" and "wrong password". Telling them apart
 #: would turn this route into a username oracle.
@@ -97,7 +105,7 @@ def _retry_after(username: str) -> int:
     record = _failures.get(username)
     if record is None:
         return 0
-    failures, last_failure = record
+    failures, last_failure, _ = record
     waited = time.monotonic() - last_failure
     if waited >= _FAILURE_TTL_SECONDS:
         _failures.pop(username, None)
@@ -106,17 +114,19 @@ def _retry_after(username: str) -> int:
     return max(0, int(remaining) + 1) if remaining > 0 else 0
 
 
-def _record_failure(username: str) -> None:
+def _record_failure(username: str, *, is_account: bool) -> None:
     """Count one failed attempt for ``username``, keeping the map bounded."""
-    failures, _ = _failures.pop(username, (0, 0.0))
+    failures, _, _ = _failures.pop(username, (0, 0.0, is_account))
     now = time.monotonic()
     if len(_failures) >= _MAX_TRACKED_USERNAMES:
-        for name in [n for n, (_, at) in _failures.items() if now - at >= _FAILURE_TTL_SECONDS]:
+        for name in [n for n, (_, at, _) in _failures.items() if now - at >= _FAILURE_TTL_SECONDS]:
             del _failures[name]
-    while len(_failures) >= _MAX_TRACKED_USERNAMES:
-        # Re-insertion below keeps the dict ordered stalest-first.
-        del _failures[next(iter(_failures))]
-    _failures[username] = (failures + 1, now)
+    # Re-insertion below keeps the dict ordered stalest-first; accounts are never dropped.
+    made_up = (n for n, (_, _, account) in _failures.items() if not account)
+    while len(_failures) >= _MAX_TRACKED_USERNAMES and (stalest := next(made_up, None)) is not None:
+        del _failures[stalest]
+        made_up = (n for n, (_, _, account) in _failures.items() if not account)
+    _failures[username] = (failures + 1, now, is_account)
 
 
 def _refuse_if_penalized(username: str) -> None:
@@ -153,14 +163,27 @@ async def login(body: LoginRequest) -> dict:
         # and nothing to count; the answer is the same generic refusal.
         raise HTTPException(401, _INVALID) from None
     _refuse_if_penalized(username)
-    if _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
+    if username in _waiting_names:
         raise HTTPException(
             429,
             "Too many sign-in attempts. Try again shortly.",
             headers={"Retry-After": "1"},
         )
+    is_account = await run_in_db(accounts.account_exists, username)
+    if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
+        # Held and refused like a failed check, so the answer does not say the name is made up.
+        _waiting_names.add(username)
+        try:
+            await asyncio.sleep(_HELD_SECONDS)
+        finally:
+            _waiting_names.discard(username)
+        _record_failure(username, is_account=False)
+        log.info("Sign-in refused")
+        raise HTTPException(401, _INVALID)
 
-    _waiting_attempts += 1
+    _waiting_names.add(username)
+    if not is_account:
+        _waiting_attempts += 1
     try:
         async with _login_lock:
             # Re-checked under the lock: attempts that queued together must
@@ -168,9 +191,11 @@ async def login(body: LoginRequest) -> dict:
             _refuse_if_penalized(username)
             user = await run_in_db(accounts.check_password, username, body.password)
             if not user:
-                _record_failure(username)
+                _record_failure(username, is_account=is_account)
     finally:
-        _waiting_attempts -= 1
+        _waiting_names.discard(username)
+        if not is_account:
+            _waiting_attempts -= 1
     if not user:
         log.info("Sign-in refused")
         raise HTTPException(401, _INVALID)

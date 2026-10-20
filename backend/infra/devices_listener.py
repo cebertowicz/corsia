@@ -361,11 +361,7 @@ def ensure_host_key(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
 def host_spki_der(state_root: Path = STATE_ROOT) -> bytes:
     """Return the stable host public key as SubjectPublicKeyInfo DER."""
     _, cert_path = ensure_host_key(state_root)
-    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-    return cert.public_key().public_bytes(
-        serialization.Encoding.DER,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
+    return _parsed(cert_path, _spki_der)
 
 
 def host_spki_sha256(state_root: Path = STATE_ROOT) -> bytes:
@@ -376,10 +372,37 @@ def host_spki_sha256(state_root: Path = STATE_ROOT) -> bytes:
     return digest.finalize()
 
 
+#: Parsed host identity files by path, with each file's mtime, so the public
+#: /identity route answers without parsing them on every call.
+_parsed_files: dict[Path, tuple[int, object]] = {}
+
+
+def _parsed(path: Path, parse):
+    """Return ``parse(bytes)`` for ``path``, re-reading it only when the file changed."""
+    modified = path.stat().st_mtime_ns
+    cached = _parsed_files.get(path)
+    if cached is not None and cached[0] == modified:
+        return cached[1]
+    value = parse(path.read_bytes())
+    _parsed_files[path] = (modified, value)
+    return value
+
+
+def _spki_der(cert_pem: bytes) -> bytes:
+    return x509.load_pem_x509_certificate(cert_pem).public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+
+def _private_key(key_pem: bytes):
+    return serialization.load_pem_private_key(key_pem, password=None)
+
+
 def sign_identity_proof(nonce: bytes, authority: str, state_root: Path = STATE_ROOT) -> bytes:
     """Sign one caller nonce and dialed authority with the stable host key."""
     key_path, _ = ensure_host_key(state_root)
-    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    key = _parsed(key_path, _private_key)
     if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
         # The desktop app checks proofs as P-256 ECDSA only; any other saved key cannot prove this host.
         raise ValueError("the host key is not a P-256 key")

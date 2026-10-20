@@ -149,7 +149,7 @@ async def pair_start(body: dict):
 
 @router.get("/outside-address")
 async def outside_address():
-    """The host endpoint paired computers learn only through their local pinned route."""
+    """The saved outside address. Public on the devices listener: any peer that reaches it can read the address it dialed."""
     return {"outside_address": await run_in_db(get_devices_outside_address)}
 
 

@@ -84,6 +84,69 @@ def test_key_only_recovery_preserves_its_spki(tmp_path):
     assert recovered_spki == previous_spki
 
 
+def _verifies(key_path, signature, nonce, authority):
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    public = serialization.load_pem_private_key(key_path.read_bytes(), password=None).public_key()
+    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii")
+    try:
+        public.verify(signature, payload, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature:
+        return False
+    return True
+
+
+def test_identity_proof_parses_the_key_once_and_again_after_it_changes(tmp_path, monkeypatch):
+    devices_listener._parsed_files.clear()
+    parsed = []
+    original = serialization.load_pem_private_key
+
+    def _counting(*args, **kwargs):
+        parsed.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(devices_listener.serialization, "load_pem_private_key", _counting)
+    nonce, authority = b"n" * 16, "home.example.com:47901"
+    key_path, _ = ensure_host_key(tmp_path)
+    first = devices_listener.sign_identity_proof(nonce, authority, tmp_path)
+    devices_listener.sign_identity_proof(nonce, authority, tmp_path)
+    assert len(parsed) == 1
+
+    key_path.unlink()
+    ensure_host_key(tmp_path)
+    second = devices_listener.sign_identity_proof(nonce, authority, tmp_path)
+    monkeypatch.setattr(devices_listener.serialization, "load_pem_private_key", original)
+
+    assert _verifies(key_path, second, nonce, authority)
+    assert not _verifies(key_path, first, nonce, authority)
+    devices_listener._parsed_files.clear()
+
+
+def test_host_spki_is_read_once_and_follows_a_replaced_certificate(tmp_path, monkeypatch):
+    devices_listener._parsed_files.clear()
+    key_path, cert_path = ensure_host_key(tmp_path)
+    first = devices_listener.host_spki_der(tmp_path)
+    reads = []
+    original = devices_listener.x509.load_pem_x509_certificate
+
+    def _counting(*args, **kwargs):
+        reads.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(devices_listener.x509, "load_pem_x509_certificate", _counting)
+    assert devices_listener.host_spki_der(tmp_path) == first
+    assert reads == []
+
+    key_path.unlink()
+    cert_path.unlink()
+    ensure_host_key(tmp_path)
+    assert devices_listener.host_spki_der(tmp_path) != first
+    assert reads == [1]
+    devices_listener._parsed_files.clear()
+
+
 def test_address_hints_include_only_listener_reachable_lan_addresses():
     interfaces = {
         "en0": [
