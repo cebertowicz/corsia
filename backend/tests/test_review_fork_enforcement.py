@@ -75,11 +75,17 @@ async def test_cc_bridge_owns_token_allowlist_exact_call_and_cancel(review_env):
 
     db, aid = review_env
     row = request(db, aid)
-    provider = replace(_request(None), checkpoint_id=row["fork_id"], thread_id="reviewer")
+    provider = replace(
+        _request(None), checkpoint_id=row["fork_id"], thread_id="reviewer", mcp_config="fixture",
+    )
     with bind_bridge(provider, ARTIFACT_REVIEW_KIND, asyncio.Event()) as (_request_, handle):
         http = Request({"type": "http", "client": ("127.0.0.1", 42),
                         "headers": [(b"x-corsia-fork-id", row["fork_id"].encode())]})
         assert authenticate(http, "reviewer", handle.tool_token) is handle
+        with open(_request_.mcp_config) as stream:
+            env = json.load(stream)["mcpServers"]["corsia"]["env"]
+        assert env["CORSIA_FORK_ID"] == row["fork_id"]
+        assert env["CORSIA_FORK_TOOL_TOKEN"] == handle.tool_token
         with pytest.raises(HTTPException):
             authenticate(http, "reviewer", "forged")
         advertised = {item["function"]["name"] for item in definitions(handle)}

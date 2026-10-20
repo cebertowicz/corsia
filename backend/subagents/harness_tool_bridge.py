@@ -64,23 +64,25 @@ def write_cc_mcp_config(
     *,
     thread_id: str,
     tool_token: str,
+    fork_id: str | None = None,
 ) -> str:
     """Write a Claude Code MCP config that exposes only CORSIA tools."""
     server = Path(__file__).with_name("corsia_mcp_server.py")
     port = os.environ.get("BACKEND_PORT", str(DEFAULT_BACKEND_PORT))
     if not port.isdigit() or not 0 < int(port) < 65536:
         raise RuntimeError(f"Invalid BACKEND_PORT for Claude Code tool bridge: {port!r}")
+    env = {
+        "CORSIA_CC_TOOL_URL": f"http://127.0.0.1:{port}/api/cc/_tool-bridge/{thread_id}",
+        "CORSIA_CC_TOOL_TOKEN": tool_token,
+    }
+    if fork_id is not None:
+        env.update(CORSIA_FORK_ID=fork_id, CORSIA_FORK_TOOL_TOKEN=tool_token)
     payload = {
         "mcpServers": {
             "corsia": {
                 "command": sys.executable,
                 "args": [str(server)],
-                "env": {
-                    "CORSIA_CC_TOOL_URL": (
-                        f"http://127.0.0.1:{port}/api/cc/_tool-bridge/{thread_id}"
-                    ),
-                    "CORSIA_CC_TOOL_TOKEN": tool_token,
-                },
+                "env": env,
                 "alwaysLoad": True,
             }
         }

@@ -26,7 +26,11 @@ def bind_bridge(request, kind, cancel_event):
         handle.kind, handle.request = kind, request
         handle.tool_registry = request.tool_registry or build_tool_registry(request.working_dir)
         handle.tool_token = secrets.token_urlsafe(32)
-        config = write_cc_mcp_config(thread_id=request.thread_id, tool_token=handle.tool_token)
+        config = write_cc_mcp_config(
+            thread_id=request.thread_id,
+            tool_token=handle.tool_token,
+            fork_id=request.checkpoint_id,
+        )
         configured = request.mcp_config is not None or request.tool_registry is not None
         yield replace(request, mcp_config=config) if configured else request, handle
     finally:
