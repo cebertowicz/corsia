@@ -5,19 +5,26 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 const PROSE = 'A visible prose selection must remain painted before a comment starts.';
 const PICKED = 'visible prose selection';
 const TABLE_TEXT = 'Table text still needs selection.';
+const LONG = 'A longer paragraph that wraps across several lines so a drag can hold a multi-line selection while the whole composed document view is captured, because a one-line crop hides how the highlight reads against the page around it and against the lines it does not cover.';
 const DOC = [
 	'# Prose selection highlight', '',
 	PROSE, '',
 	'| Capability | Notes |', '| --- | --- |',
 	`| Table selection | ${TABLE_TEXT} |`, '',
 	'Paragraph after the table.', '',
+	LONG, '',
 ].join('\n');
 
 interface SelectionEvidence {
 	text: string;
 	rect: { x: number; y: number; width: number; height: number };
 	selectionColor: string;
+	textColor: string;
 }
+
+// The floors the highlight must keep for the default accent: the selection must read against the page (1.5, near what
+// common editors use) and the text over it must stay readable (WCAG 1.4.3).
+const SELECTION_MIN = 1.5, TEXT_MIN = 4.5;
 
 async function openDocument(page: Page, theme: 'light' | 'dark') {
 	const request = page.request, params = { token: TEST_TOKEN };
@@ -58,6 +65,19 @@ async function prosePoints(page: Page) {
 	}, PICKED);
 }
 
+async function wrappedPoints(page: Page, text: string, startAt: number, endAt: number) {
+	return page.locator('.cm-line', { hasText: text }).evaluate((line, { startAt, endAt }) => {
+		const node = document.createTreeWalker(line, NodeFilter.SHOW_TEXT).nextNode() as Text;
+		const point = (offset: number, end = false) => {
+			const range = document.createRange();
+			range.setStart(node, offset); range.setEnd(node, offset + 1);
+			const box = range.getBoundingClientRect();
+			return { x: end ? box.right - 1 : box.left + 1, y: box.top + box.height / 2 };
+		};
+		return { from: point(startAt), to: point(endAt, true), lineHeight: parseFloat(getComputedStyle(line).lineHeight) };
+	}, { startAt, endAt });
+}
+
 async function tableTextEnds(page: Page, text: string) {
 	return page.evaluate((text) => {
 		const cell = [...document.querySelectorAll<HTMLElement>('.cm-md-table td')].find((td) => td.textContent?.includes(text));
@@ -90,6 +110,7 @@ async function selectionEvidence(page: Page): Promise<SelectionEvidence> {
 			text: selection.toString(),
 			rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
 			selectionColor: getComputedStyle(content, '::selection').backgroundColor,
+			textColor: getComputedStyle(selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode!.parentElement!).color,
 		};
 	});
 }
@@ -147,8 +168,15 @@ async function selectionPaintShare(page: Page, before: Buffer, lineBox: { x: num
 			.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
 			.reduce((sum, value, channel) => sum + value * [0.2126, 0.7152, 0.0722][channel], 0);
 		const selected = medianPixel(afterImage.pixels), background = medianPixel(beforeImage.pixels);
-		const [light, dark] = [luminance(selected), luminance(background)].sort((a, b) => b - a);
-		return { share: painted / total, painted, total, color: evidence.selectionColor, selected, background, contrast: (light + 0.05) / (dark + 0.05) };
+		const ratio = (a: number[], b: number[]) => {
+			const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+			return (light + 0.05) / (dark + 0.05);
+		};
+		swatchContext.clearRect(0, 0, 1, 1);
+		swatchContext.fillStyle = evidence.textColor;
+		swatchContext.fillRect(0, 0, 1, 1);
+		const text = [...swatchContext.getImageData(0, 0, 1, 1).data].slice(0, 3);
+		return { share: painted / total, painted, total, color: evidence.selectionColor, selected, background, contrast: ratio(selected, background), textContrast: ratio(text, selected) };
 	}, { before: before.toString('base64'), after: after.toString('base64'), lineBox, evidence });
 }
 
@@ -159,8 +187,10 @@ async function assertPaintedSelection(page: Page, lineBox: { x: number; y: numbe
 	await page.screenshot({ path: testInfo.outputPath(`${name}.png`), clip, scale: 'css', animations: 'disabled' });
 	const result = await selectionPaintShare(page, before, lineBox, evidence);
 	console.log(`selection-paint ${name}: ${(result.share * 100).toFixed(1)}% (${result.painted}/${result.total}), ${result.color}`);
-	console.log(`selection-visibility ${name}: contrast ${result.contrast.toFixed(2)} (${result.selected.join(',')} selected / ${result.background.join(',')} background)`);
+	console.log(`selection-visibility ${name}: contrast ${result.contrast.toFixed(2)} (${result.selected.join(',')} selected / ${result.background.join(',')} background), text ${result.textContrast.toFixed(2)} (${evidence.textColor})`);
 	expect(result.share, `painted share for ${name}`).toBeGreaterThan(0.2);
+	expect.soft(result.contrast, `selected vs unselected background contrast for ${name}`).toBeGreaterThanOrEqual(SELECTION_MIN);
+	expect.soft(result.textContrast, `text over the selection contrast for ${name}`).toBeGreaterThanOrEqual(TEXT_MIN);
 }
 
 async function dragProseAndAssert(page: Page, testInfo: TestInfo, name: string) {
@@ -206,6 +236,20 @@ test.describe('@flow:doc-prose-selection-highlight @surface:documents', () => {
 			})).toBe(true);
 			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 			await dragProseAndAssert(page, testInfo, `${theme}-after-table-prose`);
+		});
+
+		test(`${theme}: a held multi-line drag reads in the composed document view`, async ({ page }, testInfo) => {
+			test.setTimeout(90_000);
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await openDocument(page, theme);
+			const { from, to, lineHeight } = await wrappedPoints(page, LONG, 12, LONG.length - 20);
+			await page.mouse.move(from.x, from.y);
+			await page.mouse.down();
+			for (let step = 1; step <= 12; step++) await page.mouse.move(from.x + ((to.x - from.x) * step) / 12, from.y + ((to.y - from.y) * step) / 12);
+			const evidence = await selectionEvidence(page);
+			expect(evidence.rect.height, 'the held selection spans several lines').toBeGreaterThan(lineHeight * 2);
+			await page.screenshot({ path: testInfo.outputPath(`${theme}-multiline-held-full.png`), scale: 'css', animations: 'disabled' });
+			await page.mouse.up();
 		});
 	}
 });
