@@ -18,6 +18,7 @@ from doceditor.comment_actions import (
     decide_suggestion, reopen_fields, validate_create,
 )
 from doceditor.comment_action_errors import decision_only_error
+from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from doceditor.comment_state_updates import update_comment
 from doceditor.comments import CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
@@ -306,10 +307,9 @@ class DocCommentUpdateTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent "
-            "thread. You may edit only comments you wrote, and resolve or acknowledge only on a "
-            "document you own or a comment you wrote; otherwise reply with doc_comment_create.")
+        return ("Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent thread. "
+                "You may edit only comments you wrote, and resolve or acknowledge only on a document you own or a "
+                "comment you wrote; otherwise reply with doc_comment_create. " + PERSON_COMMENT_RESOLVE_RULE)
 
     @property
     def parameters(self) -> dict[str, Any]:
