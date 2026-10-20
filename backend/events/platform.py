@@ -12,12 +12,13 @@ It names no connector (the no-bespoke-router guard keeps it that way).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from events import dead_letter
-from events.connectors import get_manifest
+from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, resolve_targets
@@ -31,6 +32,8 @@ DIGESTED = "digested"
 DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
+
+_NOTE_LINE_LIMIT = 2000
 
 
 @dataclass(frozen=True)
@@ -81,9 +84,38 @@ def _summary(envelope: EventEnvelope) -> str:
     return f"{envelope.type} from {envelope.provenance.get('source', 'platform')}"
 
 
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    marker = f"… [{len(text) - limit} more characters not shown]"
+    return text[:limit - len(marker)] + marker
+
+
+def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
+    """The agent's note line: the event plus the type's declared line facts.
+
+    Only declared facts show, so outside text such as an email subject never
+    reaches the line. The note's details never reach the agent, so values are
+    whole; only a line past the cap is cut, and it says how much is missing.
+    """
+    facts = []
+    for key in line_facts:
+        value = envelope.facts.get(key)
+        if value is None:
+            continue
+        rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        facts.append(f"{key}={rendered}")
+    line = _summary(envelope)
+    if facts:
+        line = f"{line}: {', '.join(facts)}"
+    return _clip(line, _NOTE_LINE_LIMIT)
+
+
 def _deliver_target(
     db: sqlite3.Connection, envelope: EventEnvelope, target: Target,
-    collapse_fact: str | None,
+    decl: EventTypeDecl,
 ) -> PlatformDelivery:
     event_id = envelope.event_id
     disposition = target.disposition
@@ -111,9 +143,11 @@ def _deliver_target(
         return PlatformDelivery(event_id, thread, WOKE)
     if _digest_seen(db, thread, event_id):
         return PlatformDelivery(event_id, thread, DUPLICATE)
+    # The person's chip keeps the plain event line; the facts are the agent's.
+    details = {**_digest_details(envelope, decl.collapse_fact), "chip": _summary(envelope)}
     append_thread_context_note(
-        db, thread_id=thread, summary=_summary(envelope),
-        details=_digest_details(envelope, collapse_fact),
+        db, thread_id=thread,
+        summary=_note_line(envelope, decl.digest_line_facts), details=details,
     )
     return PlatformDelivery(event_id, thread, DIGESTED)
 
@@ -129,13 +163,13 @@ def deliver_platform_event_sync(
 ) -> list[PlatformDelivery]:
     """Normalize, resolve and deliver one event in one write transaction."""
     envelope = normalize(connector, raw_payload, event_type)
-    collapse_fact = get_manifest(connector).decl(envelope.type).collapse_fact
+    decl = get_manifest(connector).decl(envelope.type)
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if target_filter is not None and (reason := target_filter(target, conn)) is not None
-            else _deliver_target(conn, envelope, target, collapse_fact)
+            else _deliver_target(conn, envelope, target, decl)
             for target in targets
         ]
         for delivery in deliveries:
