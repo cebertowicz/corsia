@@ -16,7 +16,7 @@
 {:else if projectCloudOff}
 	<div class="model-list-empty">This project uses local models only.</div>
 {:else if inherited}
-	<div class="model-list-empty">This chat and its workers use local models only.</div>
+	<div class="model-list-empty">This chat and its agents use local models only.</div>
 {/if}
 
 <style>

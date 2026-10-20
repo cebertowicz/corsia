@@ -34,10 +34,12 @@ describe('model sheet for a Local only thread', () => {
 		models.set([cloud('thread_local_only'), local]); open();
 		expect(text()).toContain('Qwen'); expect(text()).not.toContain('Claude Opus');
 	});
-	it('names the project only for the project cause', () => {
+	it('names the project from the payload or the fresh catalog cause', () => {
+		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, local_only_from_project: true, updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('thread_local_only'), local]); open();
-		expect(text()).not.toContain('This project uses local models only');
+		expect(text()).toContain('This project uses local models only.');
 		unmount(component!); component = null; host.innerHTML = '';
+		threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('project_cloud_off'), local]); open();
 		expect(text()).toContain('This project uses local models only.');
 	});
@@ -45,13 +47,13 @@ describe('model sheet for a Local only thread', () => {
 		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('thread_local_only'), local]); open();
 		expect(host.innerHTML.indexOf('local-only-setting')).toBeLessThan(host.innerHTML.indexOf('sheet-section-label'));
-		expect(text()).toContain('This chat and its workers use local models only.');
+		expect(text()).toContain('This chat and its agents use local models only.');
 		expect(host.querySelector('.model-list')?.textContent).not.toContain('use local models only');
 	});
 	it('an inherited worker keeps a quiet line under the list that names the scope', () => {
 		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('thread_local_only'), local]); open();
-		expect(host.querySelector('.model-list')?.textContent).toContain('This chat and its workers use local models only.');
+		expect(host.querySelector('.model-list')?.textContent).toContain('This chat and its agents use local models only.');
 		expect(text()).toContain('Set by Quarterly report');
 	});
 	it('no local model: one empty state with the thread wording and the add-local entry point', () => {

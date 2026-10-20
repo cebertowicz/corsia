@@ -12,6 +12,7 @@ from infra.db_async import run_in_db
 from api.locality_refusal import locality_refused_response
 from infra.local_only import (
     LocalityRefused,
+    family_local_only_payload,
     local_only_sources,
     require_local_only_model,
     write_family_local_only,
@@ -224,7 +225,10 @@ def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | 
         elif thread_id in local_only_sources([thread_id], db=db):
             return "ancestor_local_only"
         write_family_local_only(thread_id, local_only, utc_now_iso(), db=db)
-        return {"local_only": local_only}
+        return {
+            "local_only": local_only,
+            "threads": family_local_only_payload(thread_id, db=db),
+        }
 
 
 @router.put("/threads/{thread_id}/local-only")

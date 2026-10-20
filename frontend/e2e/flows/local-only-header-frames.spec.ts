@@ -95,7 +95,12 @@ async function serve(page: Page, state: { current: FrameState }) {
 	await page.route('**/api/threads/**/local-only**', async (route) => {
 		if (state.current.failSave) return route.abort();
 		if (state.current.pendingSave) await new Promise<void>((resolve) => { releasePendingSave = resolve; });
-		return route.fulfill({ json: { ok: true, local_only: Boolean(state.current.localOnly || state.current.pendingSave), local_only_inherited_from_thread_id: null } });
+		const localOnly = Boolean(state.current.localOnly || state.current.pendingSave);
+		return route.fulfill({ json: { ok: true, local_only: localOnly, threads: [{
+			id: 'local-only-review', local_only: localOnly, local_only_effective: localOnly,
+			local_only_from_project: false, local_only_inherited_from_thread_id: null,
+			local_only_inherited_from_title: null,
+		}] } });
 	});
 	return { releasePendingSave: () => releasePendingSave?.() };
 }
@@ -156,16 +161,16 @@ test.describe('@surface:local-only local-only header frames', () => {
 			await page.setViewportSize({ width, height });
 			await page.emulateMedia({ colorScheme: theme });
 			const frames: [string, FrameState, string][] = BEFORE
-				? [['ordinary', {}, 'This chat and its workers use local models only.']]
+				? [['ordinary', {}, 'This chat and its agents use local models only.']]
 				: [
-					['ordinary', {}, 'This chat and its workers use local models only.'],
+					['ordinary', {}, 'This chat and its agents use local models only.'],
 					['cloud-model', { cloudModel: true }, 'Switch this chat to a local model first.'],
-					['local-only-on', { localOnly: true }, 'This chat and its workers use local models only.'],
+					['local-only-on', { localOnly: true }, 'This chat and its agents use local models only.'],
 					['inherited-worker', { localOnly: true, inherited: true }, 'Set by Research review'],
 					['project-local-only', { project: true }, 'Set by this project'],
 					['no-local-ready', { noLocal: true }, 'No local model is ready.'],
-					['write-in-flight', { pendingSave: true }, 'This chat and its workers use local models only.'],
-					['save-failure', { failSave: true }, "This chat and its workers use local models only."],
+					['write-in-flight', { pendingSave: true }, 'This chat and its agents use local models only.'],
+					['save-failure', { failSave: true }, "This chat and its agents use local models only."],
 				];
 			for (const [name, next, text] of frames) {
 				state.current = next;
@@ -199,9 +204,9 @@ test.describe('@surface:local-only local-only header frames', () => {
 			}
 			if (!BEFORE) {
 				const longFrames: [string, FrameState, string][] = testInfo.project.name === 'chromium-desktop'
-					? [['local-only-on-long-title', { localOnly: true, chatTitle: longChatTitle }, 'This chat and its workers use local models only.']]
+					? [['local-only-on-long-title', { localOnly: true, chatTitle: longChatTitle }, 'This chat and its agents use local models only.']]
 					: [
-						['local-only-on-long-title', { localOnly: true, chatTitle: longChatTitle }, 'This chat and its workers use local models only.'],
+						['local-only-on-long-title', { localOnly: true, chatTitle: longChatTitle }, 'This chat and its agents use local models only.'],
 						['inherited-worker-long-parent', { localOnly: true, inherited: true, parentTitle: longParentTitle }, `Set by ${longParentTitle}`],
 					];
 				for (const [name, next, text] of longFrames) {

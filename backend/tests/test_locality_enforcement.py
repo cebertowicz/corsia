@@ -59,6 +59,20 @@ def _row(**fields):
     return {"status": "ready", "status_reason": None, "is_local": False, "litellm_model": fields["id"], **fields}
 
 
+@pytest.mark.parametrize(("thread_local_only", "cloud_off", "expected"), [
+    (False, False, None),
+    (False, True, "project_cloud_off"),
+    (True, False, "thread_local_only"),
+    (True, True, "thread_local_only"),
+])
+def test_locality_cause_prioritizes_the_thread(
+    thread_local_only: bool, cloud_off: bool, expected: str | None,
+) -> None:
+    from llm.locality import locality_cause
+
+    assert locality_cause(thread_local_only=thread_local_only, cloud_off=cloud_off) == expected
+
+
 def test_project_accounts_overlays_cloud_rows_only_in_a_cloud_off_project(world):
     from llm.account_catalog import project_accounts
 

@@ -104,11 +104,14 @@ def _locality_refusal(project_id, thread_local_only: bool, *, db) -> str | None:
     A Local only thread names its own setting, the cause that lifts first; otherwise the
     project switch names the project.
     """
-    from llm.locality import project_cloud_models_off
+    from llm.locality import locality_cause, project_cloud_models_off
 
     if thread_local_only:
-        return "thread_local_only"
-    return "project_cloud_off" if project_cloud_models_off(project_id, db=db) else None
+        return locality_cause(thread_local_only=True, cloud_off=False)
+    return locality_cause(
+        thread_local_only=False,
+        cloud_off=project_cloud_models_off(project_id, db=db),
+    )
 
 
 def _apply_locality(row: dict, refusal: str | None) -> None:

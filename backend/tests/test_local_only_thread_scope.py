@@ -28,12 +28,13 @@ def _thread(
     spawned_by: str | None = None,
     parent_thread_id: str | None = None,
     pending_model: str | None = None,
+    project_id: str | None = None,
 ) -> None:
     db.execute(
         "INSERT INTO threads("
-        "id,user_id,model,pending_model,local_only,spawned_by,parent_thread_id,created_at,updated_at"
-        ") VALUES (?,?,?,?,?,?,?,?,?)",
-        (thread_id, user_id, model, pending_model, local_only, spawned_by, parent_thread_id, "t", "t"),
+        "id,user_id,model,pending_model,local_only,project_id,spawned_by,parent_thread_id,created_at,updated_at"
+        ") VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (thread_id, user_id, model, pending_model, local_only, project_id, spawned_by, parent_thread_id, "t", "t"),
     )
 
 
@@ -390,10 +391,11 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
             "/api/threads/root/local-only?token=" + OWNER_TOKEN,
             json={"local_only": True},
         )).status_code == 403
-        assert (await client.put(
+        on_response = await client.put(
             "/api/threads/root/local-only?token=" + OWNER_SESSION_TOKEN,
             json={"local_only": True},
-        )).json()["local_only"] is True
+        )
+        assert on_response.json()["local_only"] is True
         on = _read_local_only("root", "child")
         inherited = await client.put(
             "/api/threads/child/local-only?token=" + OWNER_SESSION_TOKEN,
@@ -413,6 +415,14 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
         )
 
     assert on == [1, 1]
+    assert {row["id"]: row for row in on_response.json()["threads"]}["child"] == {
+        "id": "child",
+        "local_only": 1,
+        "local_only_effective": True,
+        "local_only_from_project": False,
+        "local_only_inherited_from_thread_id": "root",
+        "local_only_inherited_from_title": "New Chat",
+    }
     assert _read_local_only("root", "child") == [0, 0]
     assert inherited.status_code == 409
     assert inherited.json() == {
@@ -428,6 +438,42 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
         ("local_only.changed", {"local_only": True}),
         ("local_only.changed", {"local_only": False}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_local_only_route_returns_project_cause_after_turning_off(
+    isolated_db, cloud_named_cloud,
+) -> None:
+    from api import thread_mutations
+    from auth_fixtures import OWNER_SESSION_TOKEN
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES ('p','P','t','t')")
+        db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',1)")
+        db.commit()
+    finally:
+        db.close()
+    _seed({"thread_id": "root", "user_id": "steve", "local_only": 1, "project_id": "p"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_app(thread_mutations.router)), base_url="http://test",
+    ) as client:
+        response = await client.put(
+            "/api/threads/root/local-only?token=" + OWNER_SESSION_TOKEN,
+            json={"local_only": False},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["threads"] == [{
+        "id": "root",
+        "local_only": 0,
+        "local_only_effective": True,
+        "local_only_from_project": True,
+        "local_only_inherited_from_thread_id": None,
+        "local_only_inherited_from_title": None,
+    }]
 
 
 @pytest.mark.asyncio

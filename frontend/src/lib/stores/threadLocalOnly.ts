@@ -5,6 +5,7 @@ export interface ThreadLocalOnly {
 	effective: boolean;
 	/** The thread's own switch is on and it inherited nothing. */
 	own: boolean;
+	fromProject: boolean;
 	inheritedFromThreadId: string | null;
 	inheritedFromTitle: string | null;
 }
@@ -16,12 +17,27 @@ export function threadLocalOnly(thread: Thread | null | undefined): ThreadLocalO
 	return {
 		effective: thread?.local_only_effective ?? (stored || inheritedFromThreadId != null),
 		own: stored && inheritedFromThreadId == null,
+		fromProject: thread?.local_only_from_project === true,
 		inheritedFromThreadId,
 		inheritedFromTitle: thread?.local_only_inherited_from_title ?? null,
 	};
 }
 
-/** Write a thread's Local only through the person-only route; the store changes only once the save is confirmed. */
+type LocalOnlyThreadFields = Pick<
+	Thread,
+	| 'id'
+	| 'local_only'
+	| 'local_only_effective'
+	| 'local_only_from_project'
+	| 'local_only_inherited_from_thread_id'
+	| 'local_only_inherited_from_title'
+>;
+
+function isLocalOnlyThreadFields(value: unknown): value is LocalOnlyThreadFields {
+	return typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'string';
+}
+
+/** Write a thread's Local only through the person-only route; the thread store changes only once the save is confirmed. */
 export async function saveThreadLocalOnly(
 	threadId: string,
 	localOnly: boolean,
@@ -41,8 +57,21 @@ export async function saveThreadLocalOnly(
 		const body = await response.json().catch(() => null);
 		return { ok: false, error: saveFailureText(body?.message ?? body?.detail, true) };
 	}
-	threads.update((rows) => rows.map((row) => row.id === threadId
-		? { ...row, local_only: localOnly, local_only_effective: localOnly }
-		: row));
+	const body = await response.json().catch(() => null);
+	const payloadThreads: unknown[] = Array.isArray(body?.threads) ? body.threads : [];
+	const updates = new Map<string, LocalOnlyThreadFields>(
+		payloadThreads.filter(isLocalOnlyThreadFields).map((row) => [row.id, row]),
+	);
+	threads.update((rows) => rows.map((row) => {
+		const update = updates.get(row.id);
+		return update ? {
+			...row,
+			local_only: update.local_only,
+			local_only_effective: update.local_only_effective,
+			local_only_from_project: update.local_only_from_project,
+			local_only_inherited_from_thread_id: update.local_only_inherited_from_thread_id,
+			local_only_inherited_from_title: update.local_only_inherited_from_title,
+		} : row;
+	}));
 	return { ok: true };
 }

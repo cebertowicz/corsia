@@ -16,7 +16,7 @@
 
 	const thread = $derived($threads.find((row) => row.id === $activeThreadId));
 	const policy = $derived(threadLocalOnly(thread));
-	const projectCloudOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
+	const projectCloudOff = $derived(policy.fromProject || $models.some((model) => model.status_reason === 'project_cloud_off'));
 	const cause = $derived(
 		projectCloudOff || (policy.effective && !policy.own && policy.inheritedFromThreadId == null) ? 'project'
 			: policy.inheritedFromThreadId != null ? 'inherited'
@@ -45,7 +45,7 @@
 		const result = await saveThreadLocalOnly(threadId, next, auth);
 		pending = null;
 		if (result.ok) await loadModels();
-		else { restore(); error = result.error; }
+		else { restore(); void loadModels(); error = result.error; }
 	}
 
 	function openParent() {
@@ -75,7 +75,7 @@
 				{:else if needsModelSwitch}
 					Switch this chat to a local model first.
 				{:else}
-					This chat and its workers use local models only.
+					This chat and its agents use local models only.
 				{/if}
 			</p>
 			{#if error}<p class="local-only-error" role="alert">{error}</p>{/if}

@@ -96,14 +96,29 @@ def test_project_cloud_models_off_is_effective_without_an_inherited_source() -> 
     db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',1)")
     _thread(db, "thread", project_id="p")
 
-    assert _fields(_single(db, "thread")) == (True, None, None)
+    payload = _single(db, "thread")
+    assert _fields(payload) == (True, None, None)
+    assert payload["local_only_from_project"] is True
+
+
+def test_own_setting_stays_effective_when_the_project_is_also_local_only() -> None:
+    db = _db()
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','P','t','t')")
+    db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',1)")
+    _thread(db, "thread", local_only=1, project_id="p")
+
+    payload = _single(db, "thread")
+    assert _fields(payload) == (True, None, None)
+    assert payload["local_only_from_project"] is True
 
 
 def test_no_local_only_source_is_not_effective() -> None:
     db = _db()
     _thread(db, "thread")
 
-    assert _fields(_single(db, "thread")) == (False, None, None)
+    payload = _single(db, "thread")
+    assert _fields(payload) == (False, None, None)
+    assert payload["local_only_from_project"] is False
 
 
 def test_other_users_local_only_ancestor_is_ignored() -> None:

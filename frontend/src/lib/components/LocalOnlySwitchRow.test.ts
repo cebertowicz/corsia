@@ -18,7 +18,7 @@ const local = model({ id: 'omlx/qwen', name: 'Qwen', litellm_model: 'omlx@qwen',
 const cloud = model({ id: 'cc/opus', name: 'Opus', backend: 'claude-code', is_local: false });
 const marked = (reason: string) => ({ ...cloud, status: 'unavailable', status_reason: reason }) as Model;
 
-const THREAD_COPY = 'This chat and its workers use local models only.';
+const THREAD_COPY = 'This chat and its agents use local models only.';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ').trim();
@@ -84,8 +84,9 @@ describe('Local only switch row states', () => {
 		link('Set by Quarterly report')!.click();
 		expect(get(openSubagentRequest)).toBe('p0'); expect(onleave).toHaveBeenCalledOnce();
 	});
-	it('on, from the project: held, "Set by this project" links to project settings', () => {
-		models.set([local, marked('project_cloud_off')]);
+	it('on by its own switch in a cloud-off project: held, "Set by this project" links to project settings', () => {
+		thread({ local_only: 1, local_only_from_project: true });
+		models.set([local, marked('thread_local_only')]);
 		const onleave = vi.fn();
 		mountRow({ onleave });
 		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
@@ -113,7 +114,7 @@ describe('Local only switch writes', () => {
 	let resolver = () => {};
 
 	it('moves at once, shows Saving…, filters the list to local rows, and waits for the save before the badge state', async () => {
-		const fetchMock = respond(true, { ok: true, local_only: true });
+		const fetchMock = respond(true, { ok: true, local_only: true, threads: [{ id: 't1', local_only: true, local_only_effective: true, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null }] });
 		vi.stubGlobal('fetch', fetchMock);
 		mountRow();
 		toggle().click(); flushSync();
@@ -137,11 +138,11 @@ describe('Local only switch writes', () => {
 		expect(text()).toContain("Couldn’t save this change. Check your connection and try again.");
 		expect(host.querySelector('[role="alert"]')).not.toBeNull();
 		expect(get(models).find((m) => m.id === 'cc/opus')?.status_reason).toBeUndefined();
-		expect(loadModels).not.toHaveBeenCalled();
+		expect(loadModels).toHaveBeenCalledOnce();
 	});
 	it('turning it off restores the cloud rows at once and reads the catalog once saved', async () => {
 		thread({ local_only: 1 }); models.set([local, marked('thread_local_only')]);
-		const fetchMock = respond(true, { ok: true, local_only: false });
+		const fetchMock = respond(true, { ok: true, local_only: false, threads: [{ id: 't1', local_only: false, local_only_effective: false, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null }] });
 		vi.stubGlobal('fetch', fetchMock);
 		mountRow();
 		toggle().click(); flushSync();

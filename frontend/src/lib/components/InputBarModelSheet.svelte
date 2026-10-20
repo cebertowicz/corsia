@@ -27,8 +27,9 @@
 	// The project switch and a thread's Local only hide cloud rows through this one filter (the causes in LOCALITY_REFUSALS).
 	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
 	const cloudModelsOff = $derived($models.some(localityOff));
-	const projectCloudOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
-	const inheritedLocalOnly = $derived(threadLocalOnly($threads.find((thread) => thread.id === $activeThreadId)).inheritedFromThreadId != null);
+	const threadPolicy = $derived(threadLocalOnly($threads.find((thread) => thread.id === $activeThreadId)));
+	const projectCloudOff = $derived(threadPolicy.fromProject || $models.some((model) => model.status_reason === 'project_cloud_off'));
+	const inheritedLocalOnly = $derived(threadPolicy.inheritedFromThreadId != null);
 	const openProjectPolicy = () => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy');
 	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
 	const groups = $derived(groupModels(pickerModels, $activeModelId));
