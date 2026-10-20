@@ -11,7 +11,7 @@ import { token } from '$lib/stores/auth';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 const planApi = vi.hoisted(() => ({ mutateUserTask: vi.fn() }));
-const ws = vi.hoisted(() => ({ on: vi.fn(() => () => {}) }));
+const ws = vi.hoisted(() => ({ on: vi.fn((_event: string, _handler: () => void) => () => {}) }));
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/api/plans', async (importOriginal) => ({ ...(await importOriginal<object>()), ...planApi }));
 vi.mock('$lib/ws', () => ws);
@@ -98,7 +98,8 @@ describe('ReviewBar', () => {
 			},
 		});
 		await render();
-		expect(host.textContent).toContain('Setup agent needs you to do this: Set up the workspace');
+		expect(host.querySelector('.rb-who')?.textContent).toBe('Setup agent:');
+		expect(host.querySelector('.rb-ask-full')?.textContent).toBe('Needs you to do this: Set up the workspace');
 		expect(button('Done')).toBeTruthy();
 		expect(button('Won’t do')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
@@ -121,19 +122,22 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(planApi.mutateUserTask).toHaveBeenCalledWith(
 			'user-token', 'plan-1', 'mark_done', 'step-1', 3, 'mark_done:step-1:3',
 		));
-		await vi.waitFor(() => expect(host.textContent).toContain('Done'));
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('Done'));
 		expect(onAnswered).toHaveBeenCalledOnce();
 	});
 
-	it('reloads the bar read after a person-step conflict', async () => {
+	it('reloads the bar read after a person-step conflict and says why in words, never the server detail', async () => {
 		token.set('user-token');
-		planApi.mutateUserTask.mockResolvedValue({ status: 'conflict', detail: 'This step changed. Refreshing the latest state.' });
+		planApi.mutateUserTask.mockResolvedValue({ status: 'conflict', detail: 'plan node revision conflict: expected 3, current 4 (node step-1)' });
+		const step = { node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent' };
 		api.fetchReviewBar
-			.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: { node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent' } })
-			.mockResolvedValueOnce({ ...read(0), ask_raised: false });
+			.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: step })
+			.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: { ...step, node_revision: 4 } });
 		await render();
 		button('Done')!.click();
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
+		expect(host.querySelector('.rb-status')?.textContent).toBe('This step changed. Refreshing the latest state.');
+		expect(host.querySelector('.rb-receipt')).toBeNull();
 	});
 
 	it('keeps the plan-row receipt after the plans refresh removes the settled person step', async () => {
@@ -145,8 +149,8 @@ describe('ReviewBar', () => {
 		await render();
 		button('Done')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain('Done'));
-		const refresh = ws.on.mock.calls.find(([event]) => event === 'plans_changed')?.[1] as (() => void);
-		refresh();
+		const refresh = ws.on.mock.calls.find(([event]) => event === 'plans_changed')?.[1];
+		refresh?.();
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
 		expect(host.textContent).toContain('Done');
 		expect(button('Approve')).toBeUndefined();

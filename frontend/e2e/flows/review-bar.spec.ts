@@ -165,7 +165,7 @@ test('@surface:review-bar person-step and document-review bars render at 1280px'
 	addPersonStep(person.threadId, person.artifactId);
 	await open(page, person, 'default', 'light');
 	await page.setViewportSize({ width: 1280, height: 900 });
-	await expect(bar(page)).toContainText('needs you to do this: Set up the workspace');
+	await expect(bar(page).locator('.rb-ask-full')).toHaveText('Needs you to do this: Set up the workspace');
 	await expect(bar(page).getByRole('button', { name: 'Done', exact: true })).toBeVisible();
 	await page.screenshot({ path: info.outputPath('person-step-instructions.png'), animations: 'disabled' });
 
@@ -175,6 +175,57 @@ test('@surface:review-bar person-step and document-review bars render at 1280px'
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 	await page.screenshot({ path: info.outputPath('document-review.png'), animations: 'disabled' });
+});
+
+/** The person step through the review ask's shell: 1280 with the pane open (the narrow header), 1440 with it closed (the wide one) and a 393 phone. */
+const PERSON_STEP: readonly Case[] = [
+	['1280 light', 'default', 'light'], ['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'],
+];
+/** Opens a fresh person step; each answer gets its own test, so each pays for one seed and one open. */
+async function personStep(page: Page, request: APIRequestContext, name: string, mode: Mode, theme: 'light' | 'dark') {
+	const doc = await seed(request, `${name} ${mode}`);
+	addPersonStep(doc.threadId, doc.artifactId);
+	await open(page, doc, mode, theme);
+	if (mode === 'default') await page.setViewportSize({ width: 1280, height: 900 });
+	const who = bar(page).locator('.rb-who');
+	await expect(who).toHaveText(`${doc.title}:`);
+	await expect(bar(page).locator('.rb-ask-full')).toHaveText('Needs you to do this: Set up the workspace');
+	expect(await who.evaluate((el) => el.scrollWidth <= el.clientWidth), 'the owner’s name is never truncated').toBe(true);
+	return (label: 'Done' | 'Won’t do') => bar(page).getByRole('button', { name: label, exact: true });
+}
+
+journey('mark a person step done from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	const button = await personStep(page, request, 'Person done', mode, theme);
+	await settled(page);
+	await shot(page, 'person-step-ask', info);
+	await button('Done').click();
+	await expect(bar(page).locator('.rb-receipt')).toHaveText('Done');
+	await expect(bar(page).locator('.rb-receipt')).toBeFocused();
+	await settled(page);
+	await shot(page, 'person-step-done', info);
+});
+
+journey('decline a person step from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	const button = await personStep(page, request, 'Person wont', mode, theme);
+	await button('Won’t do').click();
+	await expect(bar(page).locator('.rb-receipt')).toHaveText('Won’t do');
+	await settled(page);
+	await shot(page, 'person-step-wont-do', info);
+});
+
+// A stale revision: the server refuses the answer and the bar says so, keeping the step to answer again.
+journey('a stale answer to a person step keeps it open', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	const button = await personStep(page, request, 'Person stale', mode, theme);
+	await page.route('**/api/plans/*/mutations', (route) => {
+		const body = route.request().postDataJSON() as { params: { expected_revision: number } };
+		body.params.expected_revision -= 1;
+		return route.continue({ postData: JSON.stringify(body) });
+	}, { times: 1 });
+	await button('Done').click();
+	await expect(bar(page).locator('.rb-status')).toHaveText('This step changed. Refreshing the latest state.');
+	await expect(bar(page).locator('.rb-receipt')).toHaveCount(0);
+	await settled(page);
+	await shot(page, 'person-step-conflict', info);
 });
 
 const ALL: readonly Case[] = [
