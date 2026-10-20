@@ -17,9 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter
 
@@ -27,36 +25,16 @@ import infra.build_info as build_info
 
 router = APIRouter(prefix="/api", tags=["version"])
 
-# Repo root: .corsia/. backend/ is a sibling of frontend/.
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # The contract between the desktop shell and a host. This is the one definition;
 # the shell's own copy is checked against this line (version_check.rs).
 SHELL_PROTOCOL: int = 1
 
 
-def _git_read(args: list[str]) -> str | None:
-    """Run a git command in the repo root, return stripped stdout, or None on failure.
-
-    ``--no-optional-locks`` keeps ``git status`` from refreshing the index under
-    ``index.lock``: this runs per request in the serving checkout, so a lock
-    here makes Update's ``git pull`` fail, and a timeout kill leaves it stale.
-    """
-    try:
-        out = subprocess.check_output(
-            ["git", "--no-optional-locks", *args],
-            cwd=_REPO_ROOT,
-            stderr=subprocess.DEVNULL,
-            timeout=2,
-        )
-        return out.decode("utf-8").strip()
-    except (subprocess.SubprocessError, FileNotFoundError, OSError, UnicodeDecodeError):
-        return None
-
 
 def _git(args: list[str]) -> str:
-    """Stripped stdout of a git command; empty on failure (use ``_git_read`` to tell them apart)."""
-    return _git_read(args) or ""
+    """Stripped stdout of a git command; empty on failure."""
+    return build_info._git_read(args) or ""
 
 
 def _is_dirty() -> bool | None:
@@ -64,7 +42,7 @@ def _is_dirty() -> bool | None:
 
     A failed or timed-out ``git status`` is unknown, never a clean tree.
     """
-    status = _git_read(["status", "--porcelain"])
+    status = build_info._git_read(["status", "--porcelain"])
     return None if status is None else bool(status)
 
 
@@ -97,8 +75,6 @@ def _capture_backend_build_info() -> dict:
     }
 
 
-# Frontend build stamps are owned by infra.build_info.
-
 # Captured once at module import (= server start). Cheap, no per-request cost.
 _BACKEND_BUILD: dict = _capture_backend_build_info()
 _BACKEND_BUILD["start_iso"] = _BACKEND_BUILD["build_iso"]  # alias for clarity
@@ -119,8 +95,6 @@ def _current_head_info() -> dict:
         "dirty": _is_dirty(),
     }
 
-
-# App-version selection is owned by infra.build_info.
 
 def _version_payload() -> dict:
     """Build the version payload; git and file reads block, so callers offload it.

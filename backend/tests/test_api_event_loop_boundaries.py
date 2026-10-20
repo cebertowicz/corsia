@@ -274,8 +274,7 @@ async def test_version_git_identity_never_blocks_the_event_loop(monkeypatch):
         assert worker_release.wait(timeout=5), "test did not release the git worker"
         return outputs[tuple(args)]
 
-    # Both version owners read git through this worker-thread seam.
-    monkeypatch.setattr(api_version, "_git_read", _slow_git)
+    # Both version paths share the build-info git-read seam.
     monkeypatch.setattr(build_info, "_git_read", _slow_git)
 
     version_task = asyncio.create_task(api_version.get_version())

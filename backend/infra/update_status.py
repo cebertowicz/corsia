@@ -1,15 +1,14 @@
 """Update availability for a source checkout or packaged app.
 
-Answers one question for the UI: does the branch this instance is serving have
-commits on its remote that are not on disk yet?
+Source checkouts fetch the current branch's remote ref and compare it with
+``HEAD``. Packaged apps read their build-stamped Tauri updater manifest and
+require both a newer version and an entry for this machine's Tauri platform.
 
-The result is cached process-wide with a TTL because the underlying check runs
-``git fetch`` — a network call. Poll frequency in the browser therefore does not
-determine how often the remote is contacted, and several open tabs share one
-cached answer. This mirrors the existing ``/api/system`` cache, just with a much
-longer TTL because updates land far less often than CPU/memory changes.
+The result is cached process-wide with a TTL because either path makes a
+network request. Poll frequency in the browser therefore does not determine how
+often the remote is contacted, and concurrent cache misses share one probe.
 
-An unreachable remote, a detached HEAD, or any git failure yields
+An unreachable remote, a detached HEAD, or any invalid update metadata yields
 ``available: None`` (unknown) — never a confident "up to date", which would be a
 false negative that hides a real update.
 """
@@ -17,7 +16,9 @@ false negative that hides a real update.
 from __future__ import annotations
 
 import json
+import platform
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -38,6 +39,8 @@ _PACKAGE_TIMEOUT_SECONDS = 5
 _UPDATER_ENDPOINT_RESOURCE = "updater-endpoint.json"
 
 _cache: dict = {"data": None, "ts": 0.0}
+_cache_condition = threading.Condition()
+_probe_in_flight = False
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,15 @@ def _manifest_changes(notes: object) -> dict | None:
     }
 
 
+def _tauri_platform_key() -> str:
+    """Return Tauri's updater manifest key for this machine."""
+    operating_system = platform.system().lower()
+    architecture = platform.machine().lower()
+    if operating_system == "darwin" and architecture == "arm64":
+        architecture = "aarch64"
+    return f"{operating_system}-{architecture}"
+
+
 def _packaged_probe(bundle: Path) -> UpdateStatus:
     """Compare the running app's stamped version with its build-stamped feed."""
     try:
@@ -160,6 +172,10 @@ def _packaged_probe(bundle: Path) -> UpdateStatus:
             raise RuntimeError("Packaged update manifest has no version.")
         current = semver.Version.parse(current_version)
         target = semver.Version.parse(target_version)
+        platforms = manifest.get("platforms")
+        if not isinstance(platforms, dict):
+            raise RuntimeError("Packaged update manifest has no platforms.")
+        has_current_platform = _tauri_platform_key() in platforms
         changes = _manifest_changes(manifest.get("notes"))
     except (RuntimeError, ValueError, TypeError) as exc:
         return _unknown(str(exc))
@@ -168,7 +184,7 @@ def _packaged_probe(bundle: Path) -> UpdateStatus:
         current_sha=None,
         remote_sha=None,
         commits_behind=None,
-        available=target > current,
+        available=target > current and has_current_platform,
         checked_at=time.time(),
         error=None,
         current_version=str(current),
@@ -178,7 +194,7 @@ def _packaged_probe(bundle: Path) -> UpdateStatus:
 
 
 def _probe() -> UpdateStatus:
-    """Fetch the current branch's remote ref and compare it with HEAD."""
+    """Probe git for source checkouts or the Tauri manifest for packaged apps."""
     bundle = platform_paths.app_bundle_root()
     if bundle is not None:
         return _packaged_probe(bundle)
@@ -237,15 +253,35 @@ def _probe() -> UpdateStatus:
 
 
 def update_status(force: bool = False) -> UpdateStatus:
-    """Return the cached update status, refreshing it when the TTL has expired."""
-    now = time.monotonic()
-    cached = _cache["data"]
-    if not force and cached is not None and now - _cache["ts"] < CACHE_TTL_SECONDS:
-        return cached
+    """Return cached status, coalescing simultaneous refreshes into one probe."""
+    global _probe_in_flight
+    with _cache_condition:
+        now = time.monotonic()
+        cached = _cache["data"]
+        if not force and cached is not None and now - _cache["ts"] < CACHE_TTL_SECONDS:
+            return cached
+        waited_for_probe = False
+        while _probe_in_flight:
+            waited_for_probe = True
+            _cache_condition.wait()
+        cached = _cache["data"]
+        if waited_for_probe and cached is not None:
+            return cached
+        _probe_in_flight = True
 
-    status = _probe()
-    _cache["data"] = status
-    _cache["ts"] = now
+    try:
+        status = _probe()
+    except BaseException:
+        with _cache_condition:
+            _probe_in_flight = False
+            _cache_condition.notify_all()
+        raise
+
+    with _cache_condition:
+        _cache["data"] = status
+        _cache["ts"] = time.monotonic()
+        _probe_in_flight = False
+        _cache_condition.notify_all()
     return status
 
 
@@ -263,5 +299,6 @@ def cached_changes() -> dict | None:
 
 def invalidate_cache() -> None:
     """Drop the cached answer so the next read re-probes the remote."""
-    _cache["data"] = None
-    _cache["ts"] = 0.0
+    with _cache_condition:
+        _cache["data"] = None
+        _cache["ts"] = 0.0

@@ -41,7 +41,11 @@ def frontend_build_info() -> dict:
 
 
 def _git_read(args: list[str]) -> str | None:
-    """Read source-checkout git metadata without updating its index."""
+    """Read source-checkout git metadata without updating its index.
+
+    ``--no-optional-locks`` keeps version reads from contending with Update's
+    ``git pull`` for ``index.lock`` in the serving checkout.
+    """
     try:
         output = subprocess.check_output(
             ["git", "--no-optional-locks", *args],

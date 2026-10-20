@@ -36,12 +36,13 @@ def _commit(repo: Path, content: str, subject: str) -> None:
 @pytest.mark.asyncio
 async def test_version_reports_exact_on_disk_head_and_dirty_state(tmp_path, monkeypatch):
     import api.version as api_version
+    from infra import build_info
 
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
     _commit(repo, "one", "first: subject")
-    monkeypatch.setattr(api_version, "_REPO_ROOT", repo)
+    monkeypatch.setattr(build_info, "_REPO_ROOT", repo)
 
     clean = await api_version.get_version()
     assert clean["backend"]["current_head"] == {
@@ -68,8 +69,9 @@ async def test_version_reports_exact_on_disk_head_and_dirty_state(tmp_path, monk
 @pytest.mark.asyncio
 async def test_version_reports_unavailable_head_outside_a_repository(tmp_path, monkeypatch):
     import api.version as api_version
+    from infra import build_info
 
-    monkeypatch.setattr(api_version, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(build_info, "_REPO_ROOT", tmp_path)
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
 
     result = await api_version.get_version()
@@ -92,7 +94,7 @@ async def test_app_bundle_reports_bundled_build_identity_and_service_generation(
     monkeypatch.setattr(build_info, "FRONTEND_DIR", tmp_path)
     monkeypatch.setattr(build_info, "app_bundle_root", lambda: tmp_path / "CORSIA.app")
     monkeypatch.setattr(
-        api_version.subprocess,
+        build_info.subprocess,
         "check_output",
         lambda *_a, **_k: pytest.fail("app bundle ran git"),
     )
@@ -111,6 +113,7 @@ def test_version_git_reads_never_rewrite_the_serving_index(tmp_path, monkeypatch
     import os
 
     import api.version as api_version
+    from infra import build_info
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -121,7 +124,7 @@ def test_version_git_reads_never_rewrite_the_serving_index(tmp_path, monkeypatch
     os.utime(tracked, (later, later))
     index = repo / ".git" / "index"
     before = index.stat().st_mtime_ns
-    monkeypatch.setattr(api_version, "_REPO_ROOT", repo)
+    monkeypatch.setattr(build_info, "_REPO_ROOT", repo)
 
     assert api_version._git(["status", "--porcelain"]) == ""
     assert index.stat().st_mtime_ns == before
@@ -139,13 +142,14 @@ def test_version_git_reads_never_rewrite_the_serving_index(tmp_path, monkeypatch
 def test_failed_status_read_is_unknown_never_clean(monkeypatch, failure):
     """A git status that cannot answer reports dirty as None, not False."""
     import api.version as api_version
+    from infra import build_info
 
     def fail(*_args, **_kwargs):
         raise failure
 
-    monkeypatch.setattr(api_version.subprocess, "check_output", fail)
+    monkeypatch.setattr(build_info.subprocess, "check_output", fail)
 
-    assert api_version._git_read(["status", "--porcelain"]) is None
+    assert build_info._git_read(["status", "--porcelain"]) is None
     assert api_version._is_dirty() is None
     assert api_version._current_head_info()["dirty"] is None
     assert api_version._capture_backend_build_info()["dirty"] is None
@@ -153,10 +157,11 @@ def test_failed_status_read_is_unknown_never_clean(monkeypatch, failure):
 
 def test_clean_status_read_is_false_not_unknown(monkeypatch):
     import api.version as api_version
+    from infra import build_info
 
-    monkeypatch.setattr(api_version.subprocess, "check_output", lambda *_a, **_k: b"\n")
+    monkeypatch.setattr(build_info.subprocess, "check_output", lambda *_a, **_k: b"\n")
     assert api_version._is_dirty() is False
-    monkeypatch.setattr(api_version.subprocess, "check_output", lambda *_a, **_k: b" M f\n")
+    monkeypatch.setattr(build_info.subprocess, "check_output", lambda *_a, **_k: b" M f\n")
     assert api_version._is_dirty() is True
 
 
