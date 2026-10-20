@@ -156,6 +156,24 @@ def test_app_cache_must_be_one_directory_inside_the_cache_root(monkeypatch, tmp_
         _mcp_cache_dir(name, tmp_path / "workspace", tmp_path / "state")
 
 
+def test_configured_app_path_keeps_system_dirs_after_its_own(monkeypatch, tmp_path):
+    from tools import mcp_local_transport as transport
+
+    _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("tools.shell_guard.safehouse_version_error", lambda: None)
+    monkeypatch.setattr("tools.shell_guard._safehouse_executable", lambda: tmp_path / "safehouse")
+    monkeypatch.setattr("tools.safehouse_launch.mcp_private_state_profile", lambda *_args: "(version 1)")
+    own = str(tmp_path / "own-bin")
+
+    params, profile = transport.safehouse_stdio_parameters(
+        "app", {"connected_app_id": "app"}, sys.executable, [], {"PATH": f"{own}:/bin"},
+    )
+    profile.unlink(missing_ok=True)
+
+    assert params.env["PATH"].split(":") == [own, "/bin", "/usr/bin", "/usr/sbin", "/sbin"]
+
+
 def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
     from infra import config
     from tools.host_path_policy import current_protected_host_path_policy

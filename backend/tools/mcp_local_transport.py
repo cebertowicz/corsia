@@ -21,6 +21,9 @@ _MCP_DENIED_PATH = re.compile(
     ''',
 )
 _SAFEHOUSE_INHERITED_ENV = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
+# Safehouse is a bash script that resolves its own helpers on PATH, so an app's
+# configured PATH keeps these after its own entries.
+_SYSTEM_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
 
 def _mcp_denied_paths_in(text: str) -> tuple[Path, ...]:
@@ -135,6 +138,8 @@ def safehouse_stdio_parameters(
     child_path = command_path_value
     if runtime_bin is not None:
         child_path = f"{runtime_bin}{os.pathsep}{child_path}" if child_path else str(runtime_bin)
+    path_entries = child_path.split(os.pathsep) if child_path else []
+    child_path = os.pathsep.join([*path_entries, *(entry for entry in _SYSTEM_PATH if entry not in path_entries)])
     server_env = {
         "npm_config_script_shell": "/bin/sh",
         **env,
