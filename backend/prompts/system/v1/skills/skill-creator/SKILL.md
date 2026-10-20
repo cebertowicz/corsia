@@ -9,7 +9,7 @@ Skills are small procedural memory, not documentation.
 
 ## Ground
 
-Read the existing skill completely. Inspect related project, workspace, and System skills and the effective set an agent receives. Identify trigger examples and failure cases. Reuse the canonical skill; do not add a second copy.
+Read the existing skill completely. Inspect related project, workspace, and System skills and the effective set an agent receives. Identify trigger examples and failure cases. Reuse the canonical skill; do not add a second copy. Check your skills index, including its names-only line; if nothing fits, search the library with `skill_library` action `search` (load it with `tools_load`).
 
 ## Location
 
