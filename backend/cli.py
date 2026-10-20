@@ -178,7 +178,8 @@ def cmd_remote_address(args: argparse.Namespace) -> int:
     resolves the workspace from the home bootstrap, not ``--bootstrap``.
     """
     try:
-        db_path = runtime_db_paths(load_bootstrap(Path(args.bootstrap or BOOTSTRAP_PATH)).state_root)[0]
+        state_root = Path(args.state_root) if args.state_root else load_bootstrap(Path(args.bootstrap or BOOTSTRAP_PATH)).state_root
+        db_path = runtime_db_paths(state_root)[0]
         with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as db:
             row = db.execute("SELECT value FROM settings WHERE key = 'devices'").fetchone()
         devices = json.loads(row[0]) if row else {}
@@ -268,6 +269,7 @@ def _add_bootstrap_commands(sub: argparse._SubParsersAction) -> None:
         "remote-address", help="Print the saved outside address while devices can connect"
     )
     remote.add_argument("--bootstrap", help="Bootstrap file (default: ~/.corsia/config.json)")
+    remote.add_argument("--state-root", help="State directory to read instead of the bootstrap's (the app's own)")
     remote.set_defaults(func=cmd_remote_address)
 
     setup = sub.add_parser("setup", help="Choose local or server exposure")

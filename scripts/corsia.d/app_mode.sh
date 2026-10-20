@@ -395,6 +395,9 @@ app_mode_start_swapped_update() {
 # their generic definitions.
 app_mode_install_overrides() {
     resolve_bind_host() { echo 127.0.0.1; }
+    resolve_remote_address() {
+        (cd "$BACKEND_DIR" && "$PYTHON" -m cli remote-address --state-root "$_corsia_app_state_root")
+    }
     resolve_runtime_identity() { app_mode_runtime_identity; }
     installed_release_label() {
         echo "CORSIA $(app_mode_generation "$_corsia_app_bundle" || echo unknown)"

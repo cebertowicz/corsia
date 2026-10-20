@@ -173,6 +173,17 @@ class TestCommands:
         result = _cli("remote-address", home=tmp_path)
         assert (result.returncode, result.stdout) == (0, "home.example.com\n")
 
+        # The app passes its own state root, so a checkout install's address never shows for it.
+        app_root = tmp_path / "app-state"
+        assert _cli("remote-address", "--state-root", str(app_root), home=tmp_path).stdout == ""
+        app_root.mkdir()
+        with closing(sqlite3.connect(app_root / "corsia.db")) as db, db:
+            db.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+            db.execute("INSERT INTO settings VALUES (?, ?)",
+                       (DEVICE_SETTING_KEY, json.dumps({"enabled": True, "outside_address": "app.example.com"})))
+        app = _cli("remote-address", "--state-root", str(app_root), home=tmp_path)
+        assert (app.returncode, app.stdout) == (0, "app.example.com\n")
+
 
 def test_init_force_keeps_the_recorded_setup_as_the_default(tmp_path, monkeypatch):
     import cli

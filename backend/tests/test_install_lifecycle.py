@@ -218,6 +218,18 @@ print_endpoints
     saved = run_bash(script, env=_resolver_env(bootstrap))
     assert saved.stdout == "  Local:     http://localhost:9999\n  Remote access: home.example.com\n"
 
+    # App mode reads the app's own state root, never this checkout install's saved address.
+    app_mode = f"""
+source scripts/corsia.d/runtime.sh
+source scripts/corsia.d/app_mode.sh
+app_mode_install_overrides
+_corsia_app_state_root={tmp_path / "app-state"}
+BACKEND_PORT=9999
+print_endpoints
+"""
+    app = run_bash(app_mode, env=_resolver_env(bootstrap))
+    assert app.stdout == "  Local:     http://localhost:9999\n"
+
 
 def test_health_probe_reaches_a_loopback_only_backend():
     """Every lifecycle probe targets 127.0.0.1, so a local setup stays manageable."""
