@@ -136,6 +136,16 @@ def test_producer_notices_a_version_change_at_the_same_source(isolated_db, tmp_p
     assert payload["library_version"] == "2.0.0"
 
 
+def test_withdrawal_leaves_an_installed_copy_current():
+    """Withdrawal is announced by its own notice; it never makes a copy look out of date."""
+    from library.items import item_manifest, source_ref
+    from tools.skill_library_common import current_library_item
+
+    origin = {"source": source_ref(_item()), "item_manifest": item_manifest(_item())}
+
+    assert current_library_item(origin, _item(withdrawn=True))
+
+
 def test_producer_delivers_withdrawal_again_after_a_reinstatement(isolated_db, tmp_path, monkeypatch):
     from library import producer
 
