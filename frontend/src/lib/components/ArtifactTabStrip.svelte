@@ -51,8 +51,12 @@
 		return () => observer.disconnect();
 	});
 
+	// Saves and load signals replace `tabs` in place; only an opened or closed tab
+	// changes this, so a person scrolling the strip is not pulled back mid-save.
+	const tabIds = $derived(tabs.map((tab) => tab.instanceId).join('\n'));
+
 	$effect(() => {
-		void tabs;
+		void tabIds;
 		const active = activeKey;
 		void tick().then(() => {
 			if (active) revealTab(active);

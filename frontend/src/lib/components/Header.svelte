@@ -273,8 +273,6 @@
 	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
 	@keyframes hLocalOnlyIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 	@media (prefers-reduced-motion: reduce) { .h-local-only { animation: none; } }
-	/* `chat-header` owns the split reservation so title and header controls both stay
-	   inside the chat column while the canvas tab strip occupies the remainder. */
 	.h-cond-glyph { color: var(--accent-text); flex-shrink: 0; }
 	.h-cond-tag { color: var(--text-tertiary); font-weight: var(--fw-medium); flex-shrink: 0; }
 	.h-cond-tag::before { content: '· '; }

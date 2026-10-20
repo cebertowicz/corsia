@@ -1,4 +1,5 @@
 import { get } from 'svelte/store';
+import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
 import { activeThreadId } from '$lib/stores/threads';
 import { focusPlanNode } from '$lib/planNodeFocus';
 import { openArtifactTab, openLegacyDiscussionArchiveTab, openSubagentConversationTab } from '$lib/stores/artifactWorkspace';
@@ -21,7 +22,11 @@ export async function returnToPlanNode(
 	}
 }
 
-/** Opens a plan child's subagent conversation as an artifact tab without changing drawer state. */
+/**
+ * Opens a plan child's subagent conversation as an artifact tab. A docked pane
+ * stays as it is; an overlay pane (`isPaneDrawer`) closes to show the tab, as
+ * every other artifact opener does.
+ */
 export function openPlanSubagentLeaf(
 	threadId: string | null,
 	nodeId: string,
@@ -33,6 +38,7 @@ export function openPlanSubagentLeaf(
 	openSubagentConversationTab(threadId, {
 		threadId: childThreadId, title, sourceNodeId: nodeId, sourceStepId: stepId,
 	});
+	if (isPaneDrawer()) paneOpen.set(false);
 }
 
 /** Opens a plan ask in its one canonical surface. */
@@ -52,6 +58,7 @@ export function openPlanAsk(
 		path: artifact.path ?? artifact.external_id,
 		title: artifact.title ?? nodeTitle,
 	});
+	if (isPaneDrawer()) paneOpen.set(false);
 }
 
 /** Opens a plan child's legacy discussion archive as an artifact tab. */
@@ -65,4 +72,5 @@ export function openPlanDiscussionLeaf(
 		artifactId,
 		title: `Discussion archive — ${title}`,
 	});
+	if (isPaneDrawer()) paneOpen.set(false);
 }

@@ -84,13 +84,29 @@ describe('openPlanAsk', () => {
 		expect(get(threadWorkspaces).t1).toBeUndefined();
 	});
 
-	it('preserves plan-pane state while opening documents, subagents, and discussion tabs', () => {
+	const width = window.innerWidth;
+	afterEach(() => { window.innerWidth = width; });
+
+	it('keeps a docked plan pane as it is while opening documents, subagents, and discussion tabs', () => {
+		window.innerWidth = 1440;
 		const openDecision = vi.fn();
 		openPlanAsk('t1', artifact(), 'Fallback title', openDecision);
 		openPlanSubagentLeaf('t1', 'node-1', 'child-1', 'Worker');
 		openPlanDiscussionLeaf('t1', 'artifact-2', 'Archive');
 
 		expect(get(paneOpen)).toBe(true);
+		expect(get(paneCollapsed)).toBe(false);
+	});
+
+	it.each([
+		['document', () => openPlanAsk('t1', artifact(), 'Fallback title', vi.fn())],
+		['subagent', () => openPlanSubagentLeaf('t1', 'node-1', 'child-1', 'Worker')],
+		['discussion', () => openPlanDiscussionLeaf('t1', 'artifact-2', 'Archive')],
+	])('closes an overlay plan pane so the opened %s tab is not behind it', (_kind, open) => {
+		window.innerWidth = 1024;
+		open();
+
+		expect(get(paneOpen)).toBe(false);
 		expect(get(paneCollapsed)).toBe(false);
 	});
 });
