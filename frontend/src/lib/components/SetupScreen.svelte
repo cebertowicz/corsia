@@ -5,6 +5,7 @@
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
+	import SetupWelcome from './SetupWelcome.svelte';
 	import SetupWorkFolder, { type FolderNotice } from './SetupWorkFolder.svelte';
 	import SetupConnect from './SetupConnect.svelte';
 	import SetupConnectBack from './SetupConnectBack.svelte';
@@ -26,6 +27,8 @@
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
+	import { WELCOME_TITLE } from '$lib/setupWelcome';
+	import { isSetupWide } from '$lib/stores/viewport';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'consent_required' | 'foreign_omlx_changed' | 'failed';
 	async function requestLocalStart(session: string | null, consentExisting = false, manageExisting?: boolean): Promise<LocalStartResult> {
@@ -55,6 +58,9 @@
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; app_location?: string; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
+	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
+	let welcomeSeen = $state(false);
+	const screen = $derived(page === 'account' && !$isSetupWide && !welcomeSeen ? 'welcome' : page);
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
 	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
@@ -112,7 +118,8 @@
 			if (status.macos_supported === false) return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
 			return { title: 'Move CORSIA to Applications', lede: 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.' };
 		}
-		if (page === 'account') return { title: 'Welcome to CORSIA', lede: 'Create your account. It stays on this computer.', mark: true, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
+		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
+		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
 		if (page === 'folder') return { title: 'Choose your work folder', lede: 'Your projects and files live here.', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createAccount };
 		return { title: 'Providers & models', lede: canFinish ? 'Ready to start. You can connect more here or later in Settings › Providers.' : 'Connect at least one to start chatting.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
@@ -241,15 +248,17 @@
 	});
 </script>
 
-<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : page} title={view.title} lede={view.lede} primary={view.primary} mark={view.mark} onPrimary={view.onPrimary}>
+{#snippet welcomeAside()}<SetupWelcome />{/snippet}
+<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} mark={view.mark} aside={page === 'account' && $isSetupWide ? welcomeAside : undefined} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
-		{:else if page === 'account' && canConnect}<Button variant="chip" onclick={() => { remote.reset(); page = 'connect'; }}>Connect to CORSIA on another computer</Button>
+		{:else if (screen === 'welcome' || page === 'account') && canConnect}<Button variant="chip" onclick={() => { remote.reset(); page = 'connect'; }}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
 	{#if page === 'connect'}<SetupConnect {remote} />
+	{:else if screen === 'welcome'}<SetupWelcome />
 	{:else if page === 'account'}
 		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={toFolder} onValidateConfirmation={validateConfirmation} />
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}

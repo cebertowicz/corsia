@@ -18,12 +18,14 @@
 		lede?: string;
 		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean };
 		mark?: boolean;
+		/** Fills the right half beside the body, where the mark would sit. Comes before the body in reading order. */
+		aside?: Snippet;
 		onPrimary?: () => void;
 		secondary?: Snippet;
 		children?: Snippet;
 	}
 
-	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
+	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, mark = false, aside, onPrimary, secondary, children }: Props = $props();
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
@@ -209,9 +211,10 @@
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
 			{#key page}
-				<section class="pane-scene" class:hero={mark} data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+				<section class="pane-scene" class:hero={mark || !!aside} data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
 					{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<header><h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
+					{#if aside}<div class="aside">{@render aside()}</div>{/if}
 					<div class="body" use:scrollCue>{@render children?.()}</div>
 				</section>
 			{/key}
@@ -245,6 +248,8 @@
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
 	.mark { position: absolute; width: 44%; height: 70%; object-fit: contain; right: 0; top: 12%; }
 	.hero .body, .hero .lede, .hero header { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
+	/* Level with the body, which starts one header and --space-5 down. */
+	.aside { position: absolute; top: calc(var(--space-7) + var(--space-5)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); overflow-y: auto; scrollbar-width: thin; }
 	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
 	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }

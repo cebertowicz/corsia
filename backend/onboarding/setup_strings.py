@@ -88,10 +88,11 @@ ASK_FOR_ADDRESS = "the address you give me in chat"
 GITHUB = {
     "title": "How should your agents post on GitHub?",
     "context": (
-        "Agents use GitHub to file issues and feature requests, comment, and send pull requests: "
-        "on your own repositories, and on CORSIA's when it falls short and I can fix it. They can "
-        "post as you, using your GitHub sign-in, or from their own account, so their posts stay "
-        "separate from yours. GitHub allows each person one extra machine account for this."
+        "Agents use GitHub to file issues and feature requests, comment, and send pull requests on "
+        "your repositories, and report to CORSIA when it falls short. They can post as you, using "
+        "your GitHub sign-in, or from their own account, so their posts stay separate from yours. "
+        "Reports to CORSIA come from whichever you choose; until GitHub is set up, they keep the "
+        "write-up and send it once it is. GitHub allows each person one extra machine account for this."
     ),
     "tradeoff": (
         "Posting as you takes one sign-in, and everything agents post shows your name. Their own "

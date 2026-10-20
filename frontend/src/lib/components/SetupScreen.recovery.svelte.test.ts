@@ -51,7 +51,7 @@ async function openModels({ localEligible = false, localReplies = [], progressFa
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-	flushSync(); await settle();
+	flushSync(); await settle(); click('Continue'); await settle(); // past the Welcome screen of a narrow window
 	fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 	await settle(); click('Continue'); await settle(); click('Continue'); await settle();
 	expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
@@ -70,7 +70,7 @@ describe('SetupScreen account recovery', () => {
 		}));
 		host = document.createElement('div'); document.body.appendChild(host);
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
-		flushSync(); await settle();
+		flushSync(); await settle(); click('Continue'); await settle();
 		fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 		await settle(); click('Continue'); await settle();
 		click('Continue'); await settle();

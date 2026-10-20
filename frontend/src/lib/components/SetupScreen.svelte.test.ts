@@ -51,11 +51,69 @@ afterEach(async () => {
 	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
+// The approved Welcome copy (onboarding story section 2), spelled out here so a change to the shipped strings fails this test.
+const APPROVED_WELCOME = {
+	title: 'Welcome to CORSIA',
+	lines: [
+		'Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to.',
+		'You can check that yourself. CORSIA measures how much of your time their work takes, and you can see it any time.',
+	],
+	rows: [
+		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
+		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
+		'Asks you first: sending messages or posting anything for you, making purchases, or opening files outside your work folder. You can let agents go ahead on things you approve often.',
+	],
+	account: 'Create your account. It stays on this computer.',
+};
+const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
+function expectWelcomeCopy() {
+	const welcome = host.querySelector('.welcome');
+	expect(welcome).toBeTruthy();
+	expect(Array.from(welcome!.querySelectorAll('.line')).map((line) => flat(line.textContent))).toEqual(APPROVED_WELCOME.lines);
+	expect(Array.from(welcome!.querySelectorAll('.rows li')).map((row) => flat(row.textContent))).toEqual(APPROVED_WELCOME.rows);
+	expect(flat(welcome!.querySelector('.account')?.textContent)).toBe(APPROVED_WELCOME.account);
+}
+async function remountWide() {
+	if (component) await unmount(component);
+	vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 80em)', media: query, addEventListener() {}, removeEventListener() {} }));
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+	flushSync(); await settle();
+}
+
 describe('SetupScreen', () => {
-	it('shows the account screen after status and uses the approved account copy', async () => {
+	it('below 1280 wide, Welcome is its own screen with Continue and the account form is the next screen', async () => {
 		await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Welcome to CORSIA');
-		expect(host.textContent).toContain('Create your account. It stays on this computer.');
+		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
+		expectWelcomeCopy();
+		expect(host.querySelector('#setup-name')).toBeNull();
+		expect(host.textContent).toContain('Your account');
+		expect(host.textContent).toContain('Work folder');
+		expect(host.textContent).toContain('Providers & models');
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Create your account');
+		expect(host.querySelector('.welcome')).toBeNull();
+		expect(host.querySelector('#setup-name')).toBeTruthy();
+		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
+	});
+
+	it('from 1280 wide, Welcome fills the right column beside the account form with no extra click, and reads first', async () => {
+		await remountWide();
+		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
+		expectWelcomeCopy();
+		expect(host.querySelector('.aside .welcome')).toBeTruthy();
+		const form = host.querySelector('#setup-name')!;
+		expect(form).toBeTruthy();
+		// Welcome content comes before the form in reading order.
+		expect(host.querySelector('.aside')!.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('.aside .welcome')).toBeTruthy();
+	});
+
+	it('keeps the account screen and its step names after Welcome', async () => {
+		await settle(); button('Continue')?.click(); await settle();
 		expect(host.textContent).toContain('Your account');
 		expect(host.textContent).toContain('Work folder');
 		expect(host.textContent).toContain('Providers & models');
@@ -63,7 +121,7 @@ describe('SetupScreen', () => {
 	});
 
 	it('keeps account fields when Back returns from the work-folder screen', async () => {
-		await settle(); fillAccount(); await settle();
+		await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
 		button('Back')?.click(); await settle();
@@ -72,7 +130,7 @@ describe('SetupScreen', () => {
 	});
 
 	it('creates the account only when Continue is pressed on Work folder, then opens provider rows', async () => {
-		await settle(); fillAccount(); await settle();
+		await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
 		button('Continue')?.click(); await settle();
 		expect(calls.some((call) => call.url === '/api/setup/first-account')).toBe(false);
 		button('Continue')?.click(); await settle();
