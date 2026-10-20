@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { writable } from 'svelte/store';
 import type { DocOpenRefusal } from '$lib/docOpenRefusal';
+import { isCallHeld } from './docCommentHolds';
 import { DocumentDurability } from './documentDurability';
 import type { DeviceDocument } from './deviceDocument';
 import type { DeviceRecovery } from './deviceRecovery';
@@ -154,6 +155,9 @@ export class LiveDocumentSession {
 		if (!this.updates.size) this.sync();
 		else for (const frame of this.updates.values()) this.send(frame);
 	}
+
+	/** Whether a comment this agent call made is held back while its lane works through earlier arrivals. */
+	held(callId: string): boolean { return isCallHeld(this.artifactId, callId); }
 
 	onFrame(listener: (frame: DocumentFrame) => void): () => void {
 		this.frameListeners.add(listener);

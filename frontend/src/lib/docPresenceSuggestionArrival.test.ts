@@ -11,6 +11,9 @@ import { attachDocPresenceSurface, startDocPresence } from './docPresenceRuntime
 import { docComments, loadComments } from './stores/docComments';
 import { prepareCommentArrival, revealCommentArrival } from './stores/docCommentArrivals';
 import { selectSweepMs } from './typingPace';
+import { attachPreviewFeed, CLAIM_GRACE_MS } from './stores/livePreviewFeed';
+import { isCallHeld } from './stores/docCommentHolds';
+import { textDigest, type DocumentFrame } from './stores/documentWire';
 import { emit, on } from './ws/events';
 
 const wire = vi.hoisted(() => ({ rows: [] as unknown[] }));
@@ -150,5 +153,37 @@ describe('an agent suggestion that commits before its arrival is typed in, never
 		expect(inserts(r)).toEqual([INSERT]);
 		expect(r.lanes().flatMap((l) => l.previews)).toHaveLength(0);
 		expect(get(docComments)[ART]?.map((row) => row.id)).toEqual(['s1']);
+	});
+
+	it('streamed, then held behind a busy lane past the claim grace: the preview is kept, and typing continues from it', async () => {
+		wire.rows = [earlierComment()];
+		const r = make(DOC, [commentMarks, suggestionMarks(() => ({ focus: () => {}, hover: () => {} }))]);
+		let send: (frame: Record<string, unknown>) => void = () => {};
+		cleanups.push(attachPreviewFeed(r.view, {
+			onFrame: (next) => { send = (frame) => next(frame as unknown as DocumentFrame); return () => {}; },
+			held: (callId) => isCallHeld(ART, callId),
+		}));
+		cleanups.push(startDocPresence());
+		cleanups.push(on('doc_comment_changed', () => { void loadComments(ART); }));
+		canvas(r);
+		const digest = await textDigest(DOC);
+		emit('doc_comment_changed', { type: 'doc_comment_changed', artifact_id: ART, comment_id: 'c0', author_thread_id: 'agent-a' });
+		emit('doc_activity', activity(null, 'c0', 'comment'));
+		send({ type: 'doc_preview', call_id: 'call-1', thread_id: 'agent-a', name: A.name, kind: 'suggest', digest,
+			slots: [{ slot: 0, from: 6, to: 11, at: 0, text: INSERT.slice(0, 18) }] });
+		send({ type: 'doc_preview_end', call_id: 'call-1', thread_id: 'agent-a', outcome: 'settled' });
+		const streaming = await watch(r, 2_000);
+		expect(streaming.at(-1)).toBeGreaterThan(0);
+		// The suggestion commits and is held while the lane is still on the earlier comment.
+		wire.rows = [earlierComment(), serverSuggestion()];
+		emit('doc_comment_changed', { type: 'doc_comment_changed', artifact_id: ART, comment_id: 's1', author_thread_id: 'agent-a' });
+		emit('doc_activity', activity('call-1'));
+		const waiting = await watch(r, CLAIM_GRACE_MS + 3_000);
+		const typing = await watch(r, 20_000);
+		const lengths = [...streaming, ...waiting, ...typing];
+		// Typing never goes backwards: the held preview is not lost when its grace runs out.
+		expect(lengths.every((n, i) => i === 0 || n >= lengths[i - 1])).toBe(true);
+		expect(inserts(r)).toEqual([INSERT]);
+		expect(r.lanes().flatMap((l) => l.previews)).toHaveLength(0);
 	});
 });
