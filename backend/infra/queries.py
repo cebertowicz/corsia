@@ -109,12 +109,6 @@ def get_thread_for_user(thread_id: str, user_id: str, db=None) -> Any | None:
         "SELECT * FROM threads WHERE id = ? AND user_id = ?",
         (thread_id, user_id),
     ).fetchone()
-    if row is not None:
-        from infra.local_only import add_local_only_payload_fields
-
-        payload = dict(row)
-        add_local_only_payload_fields([payload], db=_db)
-        row = payload
     if not db:
         _db.close()
     return row

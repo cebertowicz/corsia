@@ -1,4 +1,4 @@
-"""Local-only state in thread list and single-thread payloads."""
+"""Local-only state in thread list payloads."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import sqlite3
 import pytest
 
 
-
 def _db() -> sqlite3.Connection:
     from infra.schema import SCHEMA_SQL
 
@@ -16,7 +15,6 @@ def _db() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
     return db
-
 
 
 def _thread(
@@ -41,7 +39,6 @@ def _thread(
     )
 
 
-
 def _fields(row: dict) -> tuple[bool, str | None, str | None]:
     return (
         row["local_only_effective"],
@@ -50,14 +47,14 @@ def _fields(row: dict) -> tuple[bool, str | None, str | None]:
     )
 
 
-
 def _single(db, thread_id: str) -> dict:
-    from infra.queries import get_thread_for_user
+    from infra.local_only import add_local_only_payload_fields
 
-    row = get_thread_for_user(thread_id, "u", db=db)
+    row = db.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
     assert row is not None
-    return row
-
+    payload = dict(row)
+    add_local_only_payload_fields([payload], db=db)
+    return payload
 
 
 def test_own_local_only_is_effective_without_an_inherited_source() -> None:
@@ -66,7 +63,6 @@ def test_own_local_only_is_effective_without_an_inherited_source() -> None:
     _thread(db, "child", local_only=1, spawned_by="parent")
 
     assert _fields(_single(db, "child")) == (True, None, None)
-
 
 
 def test_nearest_local_only_ancestor_is_named() -> None:
@@ -78,7 +74,6 @@ def test_nearest_local_only_ancestor_is_named() -> None:
     assert _fields(_single(db, "child")) == (True, "parent", "Nearest")
 
 
-
 def test_project_cloud_models_off_is_effective_without_an_inherited_source() -> None:
     db = _db()
     db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','P','t','t')")
@@ -88,13 +83,11 @@ def test_project_cloud_models_off_is_effective_without_an_inherited_source() -> 
     assert _fields(_single(db, "thread")) == (True, None, None)
 
 
-
 def test_no_local_only_source_is_not_effective() -> None:
     db = _db()
     _thread(db, "thread")
 
     assert _fields(_single(db, "thread")) == (False, None, None)
-
 
 
 def test_other_users_local_only_ancestor_is_ignored() -> None:
@@ -105,8 +98,7 @@ def test_other_users_local_only_ancestor_is_ignored() -> None:
     assert _fields(_single(db, "child")) == (False, None, None)
 
 
-
-def test_list_and_single_thread_reads_include_local_only_payload_fields(monkeypatch) -> None:
+def test_list_read_includes_local_only_payload_fields(monkeypatch) -> None:
     from api import threads
     from connections import harness_refresh
 
@@ -132,7 +124,6 @@ def test_list_and_single_thread_reads_include_local_only_payload_fields(monkeypa
     _thread(single_db, "parent", title="Parent", local_only=1)
     _thread(single_db, "child", spawned_by="parent")
     assert _fields(_single(single_db, "child")) == (True, "parent", "Parent")
-
 
 
 def test_cyclic_family_links_are_bounded_in_the_list_read(monkeypatch) -> None:

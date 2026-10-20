@@ -107,7 +107,7 @@ def local_only_ancestor(thread: sqlite3.Row, *, db: sqlite3.Connection) -> bool:
 
 
 def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -> None:
-    """Add effective Local-only fields to list or single-thread payload rows in one batch."""
+    """Add effective Local-only fields to thread payload rows in one batch."""
     if not rows:
         return
     thread_ids = [str(row["id"]) for row in rows]
