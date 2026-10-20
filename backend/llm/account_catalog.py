@@ -60,16 +60,14 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
     try:
         project = thread_scope(thread_id, db=connection)["project_id"] if thread_id else project_id
         requested = get_account(account_id, db=connection) if account_id is not None else None
-        from llm.locality import project_cloud_models_off
-
-        cloud_models_off = project_cloud_models_off(project, db=connection)
+        cloud_refusal = _cloud_refusal(project, thread_id, db=connection)
         result = []
         pending: dict[str, str | None] = {}
         for original in rows:
             row = dict(original)
             provider = row.get("connection")
             if provider not in ("codex", "claude-code"):
-                _apply_cloud_models_off(row, cloud_models_off)
+                _apply_cloud_models_off(row, cloud_refusal)
                 result.append(row)
                 continue
             permitted = permitted_accounts(provider, project_ids=[project], db=connection)
@@ -91,7 +89,7 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             elif chosen["source_home"] is not None:
                 _read_discovered_evidence(row, chosen, connection)
             row["runnable"] = _runnable_status(row)
-            _apply_cloud_models_off(row, cloud_models_off)
+            _apply_cloud_models_off(row, cloud_refusal)
             result.append(row)
         return result
     finally:
@@ -99,12 +97,26 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             connection.close()
 
 
-def _apply_cloud_models_off(row: dict, cloud_models_off: bool) -> None:
-    """Overlay project cloud policy without deleting scoped catalog rows."""
-    if cloud_models_off and not row.get("is_local", False):
-        row.update(status="unavailable", status_reason="project_cloud_off")
+def _cloud_refusal(project_id, thread_id, *, db) -> str | None:
+    """The locality refusal in force for this scope, named as ``locality_refusal`` names it.
+
+    The project switch is read first and wins; a thread's own, inherited or project-copied
+    ``local_only`` is its plain column.
+    """
+    from llm.locality import project_cloud_models_off
+
+    if project_cloud_models_off(project_id, db=db):
+        return "project_cloud_off"
+    row = db.execute("SELECT local_only FROM threads WHERE id = ?", (thread_id,)).fetchone() if thread_id else None
+    return "thread_local_only" if row and row["local_only"] else None
+
+
+def _apply_cloud_models_off(row: dict, refusal: str | None) -> None:
+    """Overlay project or thread locality policy without deleting scoped catalog rows."""
+    if refusal and not row.get("is_local", False):
+        row.update(status="unavailable", status_reason=refusal)
         if "runnable" in row:
-            row["runnable"] = {"status": "unavailable", "status_reason": "project_cloud_off"}
+            row["runnable"] = {"status": "unavailable", "status_reason": refusal}
 
 
 def _runs_on(account, row, project, selected, db) -> dict:

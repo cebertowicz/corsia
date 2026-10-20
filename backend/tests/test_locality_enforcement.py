@@ -81,6 +81,34 @@ def test_project_accounts_overlays_cloud_rows_only_in_a_cloud_off_project(world)
     assert on[CLOUD]["status"] == "ready" and on[LOCAL]["status"] == "ready"
 
 
+def test_project_accounts_marks_cloud_rows_for_a_local_only_thread_alone(world):
+    from llm.account_catalog import project_accounts
+
+    for thread_id, local_only, project in (("lo", 1, CLOUD_ON), ("plain", 0, CLOUD_ON), ("both", 1, CLOUD_OFF)):
+        world.execute("INSERT INTO threads(id,user_id,model,project_id,local_only,created_at,updated_at) "
+                      "VALUES (?,?,?,?,?,'t','t')", (thread_id, "user", LOCAL, project, local_only))
+    world.commit()
+    rows = [
+        _row(id="codex/test", connection="codex", runnable={"status": "ready", "status_reason": None}),
+        _row(id=CLOUD, connection="openai"),
+        _row(id=LOCAL, connection="omlx", is_local=True),
+    ]
+
+    def read(thread_id):
+        return {r["id"]: r for r in project_accounts(rows, thread_id=thread_id, db=world)}
+
+    local_only = read("lo")
+    for cloud in ("codex/test", CLOUD):
+        assert (local_only[cloud]["status"], local_only[cloud]["status_reason"]) == ("unavailable", "thread_local_only")
+    assert local_only["codex/test"]["runnable"] == {"status": "unavailable", "status_reason": "thread_local_only"}
+    assert (local_only[LOCAL]["status"], local_only[LOCAL]["status_reason"]) == ("ready", None)
+
+    ordinary = read("plain")
+    assert [(r["status"], r["status_reason"]) for r in ordinary.values()] == [("ready", None)] * 3
+    # The project switch is read first, as locality_refusal reads it, so the row names the project.
+    assert read("both")[CLOUD]["status_reason"] == "project_cloud_off"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["codex/test", CLOUD])
 async def test_cloud_off_thread_resolves_to_an_unavailable_target_admission_holds(world, model):
