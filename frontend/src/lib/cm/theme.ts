@@ -25,15 +25,13 @@ export const docTheme = EditorView.theme({
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
 	// The selection is the strongest wash in the editor: --accent-subtle is a 12% wash that sits at about 1.1:1 on the page,
-	// too faint to see a drag, and it is also the matched-text wash below, so it is its own rule rather than that token.
-	// It still follows the accent (a project's, or the default); the share is per theme because the same percentage reads
-	// far fainter on the dark page. .cm-selectionMatch keeps the faint wash so a match never reads as the selection.
-	'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-		backgroundColor: 'color-mix(in srgb, var(--accent) 45%, transparent)'
-	},
-	'html[data-theme="light"] &.cm-focused .cm-selectionBackground, html[data-theme="light"] & .cm-selectionBackground, html[data-theme="light"] & ::selection': {
-		backgroundColor: 'color-mix(in srgb, var(--accent) 35%, transparent)'
-	},
+	// too faint to see a drag, and it is also the matched-text wash below, so it is its own token rather than that one.
+	// --accent-selection follows the accent (a project's, or the default) and comes from accentRoles() with every other
+	// accent role: the share that reads against the page is per accent and theme, since the same percentage of a pale
+	// colour reads far fainter than of a deep one. .cm-selectionMatch keeps the faint wash so a match never reads as
+	// the selection. The editor draws no selection layer of its own (no drawSelection), so the native ::selection is
+	// the only selection there is.
+	'::selection': { backgroundColor: 'var(--accent-selection)' },
 	'.cm-selectionMatch': { backgroundColor: 'var(--accent-wash)' },
 	'.cm-gutters': { display: 'none' },
 

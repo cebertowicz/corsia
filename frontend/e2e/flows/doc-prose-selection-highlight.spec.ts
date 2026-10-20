@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { createSession, e2eModel, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 const PROSE = 'A visible prose selection must remain painted before a comment starts.';
 const PICKED = 'visible prose selection';
@@ -22,16 +22,33 @@ interface SelectionEvidence {
 	textColor: string;
 }
 
-// The floors the highlight must keep for the default accent: the selection must read against the page (1.5, near what
-// common editors use) and the text over it must stay readable (WCAG 1.4.3).
+// The floors the highlight must keep, for the default accent and for a project's: the selection must read against the
+// page (1.5, near what common editors use) and the text over it must stay readable (WCAG 1.4.3).
 const SELECTION_MIN = 1.5, TEXT_MIN = 4.5;
+// Not a swatch's default share: a pale accent that needs more of itself over the light page to reach the floor.
+const PROJECT_ACCENT = '#ca8a04';
 
-async function openDocument(page: Page, theme: 'light' | 'dark') {
+/** A conversation inside a new project painted `accent`: opening it makes that project's colour the page's accent. */
+async function createProjectSession(request: Page['request'], title: string, accent: string) {
+	const params = { token: TEST_TOKEN };
+	const created = await request.post('/api/projects', { params, data: { name: `${title}-project`, description: 'Prose selection accent proof', status: 'active', accent_color: accent } });
+	expect(created.ok(), await created.text()).toBeTruthy();
+	const projects = await (await request.get('/api/projects', { params: { ...params, status: 'active' } })).json();
+	const project = (projects.projects || []).find((candidate: { name: string }) => candidate.name === `${title}-project`);
+	expect(project, 'the created project is listed').toBeTruthy();
+	const thread = await request.post('/api/threads', { params, data: { title, project_id: project.id, model: e2eModel() } });
+	expect(thread.ok(), await thread.text()).toBeTruthy();
+	return { threadId: (await thread.json()).thread_id as string, scopeRoot: project.path as string };
+}
+
+async function openDocument(page: Page, theme: 'light' | 'dark', accent?: string) {
 	const request = page.request, params = { token: TEST_TOKEN };
 	const title = `prose-selection-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-	const threadId = await createSession(request, title);
+	const project = accent ? await createProjectSession(request, title, accent) : null;
+	const threadId = project ? project.threadId : await createSession(request, title);
 	const roots: Array<{ kind: string; path: string }> = (await (await request.get('/api/files/tree', { params })).json()).roots;
-	const workspace = roots.find((root) => root.kind === 'workspace')?.path;
+	// A project thread may write only inside its project, and not at the project root, which its conductor owns.
+	const workspace = project ? path.join(project.scopeRoot, 'docs') : roots.find((root) => root.kind === 'workspace')?.path;
 	expect(workspace).toEqual(expect.any(String));
 	const fileName = `${title}.md`, docPath = path.join(workspace!, fileName);
 	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text: DOC, thread_id: threadId, create: true } });
@@ -45,8 +62,16 @@ async function openDocument(page: Page, theme: 'light' | 'dark') {
 	}, { threadId, docPath, fileName, artifactId, theme });
 	await loginByUrl(page, { waitForComposer: false });
 	await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+	if (accent) {
+		// A project's conversations list only inside its scope: enter it from the palette, as a person would.
+		await page.getByRole('button', { name: /Jump to/ }).click();
+		await page.locator('.palette').getByRole('button', { name: `${title}-project`, exact: true }).click();
+		await expect(page.getByRole('button', { name: 'Back to workspace' })).toBeVisible({ timeout: 10_000 });
+	}
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-md-table table')).toBeVisible({ timeout: 15_000 });
+	// The project's colour is the accent only once its scope is entered with the thread; the selection role follows it.
+	if (accent) await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--accent'))).toBe(accent);
 }
 
 async function prosePoints(page: Page) {
@@ -242,14 +267,26 @@ test.describe('@flow:doc-prose-selection-highlight @surface:documents', () => {
 			test.setTimeout(90_000);
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await openDocument(page, theme);
+			const lineBox = await page.locator('.cm-line', { hasText: LONG }).boundingBox();
+			expect(lineBox).not.toBeNull();
+			const before = await page.screenshot({ clip: lineBox!, scale: 'css', animations: 'disabled' });
 			const { from, to, lineHeight } = await wrappedPoints(page, LONG, 12, LONG.length - 20);
 			await page.mouse.move(from.x, from.y);
 			await page.mouse.down();
 			for (let step = 1; step <= 12; step++) await page.mouse.move(from.x + ((to.x - from.x) * step) / 12, from.y + ((to.y - from.y) * step) / 12);
 			const evidence = await selectionEvidence(page);
 			expect(evidence.rect.height, 'the held selection spans several lines').toBeGreaterThan(lineHeight * 2);
+			expect(LONG).toContain(evidence.text);
+			await assertPaintedSelection(page, lineBox!, before, evidence.text, testInfo, `${theme}-multiline-held`);
 			await page.screenshot({ path: testInfo.outputPath(`${theme}-multiline-held-full.png`), scale: 'css', animations: 'disabled' });
 			await page.mouse.up();
 		});
 	}
+
+	test(`light, project accent ${PROJECT_ACCENT}: a prose drag reads against the page`, async ({ page }, testInfo) => {
+		test.setTimeout(90_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await openDocument(page, 'light', PROJECT_ACCENT);
+		await dragProseAndAssert(page, testInfo, 'light-project-accent-fresh-prose');
+	});
 });
