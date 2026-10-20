@@ -20,9 +20,11 @@ _ANCESTOR_DEPTH = 64
 
 #: The thread and every thread under it through the family links.
 _FAMILY_SQL = (
-    "WITH RECURSIVE family(id) AS (SELECT ? UNION "
-    "SELECT thread.id FROM threads AS thread JOIN family "
-    "ON thread.spawned_by=family.id OR thread.parent_thread_id=family.id) "
+    "WITH RECURSIVE family(id,user_id) AS ("
+    "SELECT id,user_id FROM threads WHERE id=? UNION "
+    "SELECT thread.id,thread.user_id FROM threads AS thread JOIN family "
+    "ON (thread.spawned_by=family.id OR thread.parent_thread_id=family.id) "
+    "AND thread.user_id=family.user_id) "
 )
 
 
@@ -139,14 +141,19 @@ def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -
     # a parent holds it there, by the same walk that refuses turning it off.
     inherited = local_only_sources([str(row["id"]) for row in rows], db=db)
 
-    from llm.locality import cloud_off_project_ids
+    from llm.locality import cloud_off_project_ids, locality_cause
 
     cloud_off_projects = cloud_off_project_ids(db=db)
     for row in rows:
         source = inherited.get(row["id"])
-        row["local_only_effective"] = bool(
-            row.get("local_only") or row.get("project_id") in cloud_off_projects
+        from_project = row.get("project_id") in cloud_off_projects
+        cause = locality_cause(
+            thread_local_only=bool(row.get("local_only")), cloud_off=from_project,
         )
+        row["local_only_effective"] = bool(cause)
+        row["local_only_cause"] = "inherited" if source else {
+            "thread_local_only": "own", "project_cloud_off": "project",
+        }.get(cause)
         row["local_only_inherited_from_thread_id"] = source[0] if source else None
         row["local_only_inherited_from_title"] = source[1] if source else None
 
@@ -158,6 +165,7 @@ def write_family_local_only(thread_id: str, local_only: bool, now: str, *, db: s
         "WHERE id IN (SELECT id FROM family) AND local_only<>?",
         (thread_id, int(local_only), now, int(local_only)),
     )
+
 
 
 def send_confirmation_refusal(

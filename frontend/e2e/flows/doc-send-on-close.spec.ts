@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
 
@@ -192,7 +193,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 			.filter(({ rect }) => rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5)
 			.map(({ name, rect }) => `${name}: ${Math.round(rect.left)}..${Math.round(rect.right)} outside ${Math.round(bounds.left)}..${Math.round(bounds.right)}`);
 		return {
-			overflow: { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth },
+			overflow: { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) },
 			outside,
 		};
 	});
@@ -207,5 +208,5 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	expect(footerBox.x).toBeGreaterThanOrEqual(0);
 	expect(footerBox.x + footerBox.width).toBeLessThanOrEqual(393);
 	if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) expect(sendBox.height, 'touch target').toBeGreaterThanOrEqual(44);
-	expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 'nothing scrolls sideways').toBe(0);
+	expect(await page.evaluate(() => Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth)), 'nothing scrolls sideways').toBe(0);
 });

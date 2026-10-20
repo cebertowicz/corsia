@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { activeThread, activeThreadId, isNavAgent } from '$lib/stores/threads';
+	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
+	import { requestModelSheet } from '$lib/stores/modelSheetRequest';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { openProjectSettings as showProjectSettings, openWorkspaceSettings as showWorkspaceSettings } from '$lib/stores/settingsNavigation';
 	import { sidebarCollapsed } from '$lib/stores/ui';
@@ -41,6 +43,9 @@
 	const showMeasures = $derived(activeView === 'chat' && !isTakeover && (isConductorThread || isLaneThread));
 	const hasOverflow = $derived(overflowActions.length > 0);
 	const measuresLabel = $derived(`Measurement for ${isConductorThread ? scopeTitle : ($activeThread?.title ?? 'this agent')}`);
+	// LO1: the badge shows exactly when Local only is in force: the thread's own, inherited, or the project's.
+	const showLocalOnly = $derived(activeView === 'chat' && !isTakeover && $activeThread != null
+		&& threadLocalOnly($activeThread).effective);
 
 	function openMeasures() {
 		haptic();
@@ -62,6 +67,10 @@
 	function openThreadSettings() {
 		haptic();
 		threadSettingsOpen.update((open) => !open);
+	}
+	function openLocalOnlySettings() {
+		haptic();
+		requestModelSheet({ focusLocalOnly: true });
 	}
 	function openProjectSettings() {
 		haptic();
@@ -97,6 +106,15 @@
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		{/if}
 		<span class="h-scope">{$activeThread.title}</span>
+		<!-- The badge's slot is reserved so its appearance never moves the title. -->
+		<span class="h-local-slot">
+			{#if showLocalOnly}
+				<button class="h-local-only" onclick={openLocalOnlySettings} aria-label="Local only. Change in model settings." title="Local only. Change in model settings.">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 12h6M12 9v6"/></svg>
+					<span>Local only</span>
+				</button>
+			{/if}
+		</span>
 	{:else}
 		<span class="h-scope">{scopeTitle}</span>
 	{/if}
@@ -232,6 +250,14 @@
 	}
 	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
 	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
+	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
+	.h-local-slot { display: inline-flex; flex: 0 0 auto; min-width: var(--header-badge-slot); }
+	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
+	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
+	.h-local-only:active { transform: scale(.96); }
+	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
+	@keyframes hLocalOnlyIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+	@media (prefers-reduced-motion: reduce) { .h-local-only { animation: none; } }
 	/* An expanded document occupies the right canvas column, and ChatArtifactSplit publishes its width on main as
 	   --artifact-header-inset (unset without one). The title stays inside the chat's column, with a visible gap
 	   before the document tab strip. The header's right padding is outside this flex box, so the reservation adds
@@ -310,6 +336,11 @@
 		/* inline-flex is content-sized; override so the 1fr cell bounds the title and
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }
+		/* At 393 the badge is its icon alone in a 44px hit area; the label stays for screen readers. */
+		.h-local-slot { min-width: var(--touch-target); }
+		.h-local-only { width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
+		.h-local-only:hover { background: transparent; color: var(--text-secondary); }
+		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }
 		.h-icon { width: 44px; height: 44px; }
 		.h-back-label { display: none; }
 		.h-act.overflowable { display: none; }

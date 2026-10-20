@@ -1,4 +1,5 @@
-import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
+import { test as base } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { cueSamples, expectQuietSave, observeSaveCue, routeDocumentSaves } from '../support/docSaveCue';
 import { openLiveDocument, seedLiveDocument, serverText, typeAtDocumentEnd } from '../support/liveDocument';
 

@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -145,6 +146,10 @@ test.describe('@flow:agents-nav-management @surface:navigation compact Agent dra
 		});
 		expect(colors.attention).toBe(colors.accent);
 
+		// The rows ease their colour when they settle; read it once no transition is still running.
+		await expect.poll(() => page.locator('.scoped-item.conductor, .scoped-item.agent').evaluateAll(
+			(rows) => rows.every((row) => row.getAnimations().length === 0),
+		)).toBe(true);
 		const conductorStyle = await page.locator('.scoped-item.conductor').evaluate((element) => ({
 			color: getComputedStyle(element).color,
 			weight: getComputedStyle(element).fontWeight,

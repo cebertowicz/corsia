@@ -137,7 +137,7 @@ describe('ImageCommentLightbox', () => {
 		await settle();
 		// One comment per press of Comment.
 		expect(commentButton()!.getAttribute('aria-pressed')).toBe('false');
-		const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 		expect(textarea).not.toBeNull();
 		expect(props.draftOpen).toBe(false);
 		textarea.value = 'The whole layout is cramped';
@@ -150,7 +150,7 @@ describe('ImageCommentLightbox', () => {
 		textarea.dispatchEvent(escape);
 		await settle();
 		expect(escape.defaultPrevented).toBe(true);
-		expect(host.querySelector('textarea')).toBeNull();
+		expect(document.body.querySelector('textarea')).toBeNull();
 		expect(props.draftOpen).toBe(false);
 	});
 
@@ -412,11 +412,11 @@ describe('ImageCommentLightbox', () => {
 			await settle();
 			host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 			await settle();
-			const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
+			const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 			textarea.value = 'Too dark';
 			textarea.dispatchEvent(new Event('input', { bubbles: true }));
 			await settle();
-			host.querySelector<HTMLButtonElement>('button.submit')!.click();
+			document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 			await settle();
 			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark');
 		});
@@ -428,7 +428,7 @@ describe('ImageCommentLightbox', () => {
 			}
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'also-here' } });
 			expect(host.querySelector('[data-region-tag="2"]')!.getAttribute('aria-pressed')).toBe('true');
-			expect(host.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
+			expect(document.body.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
 		});
 
 		it('opened to move a stale pin, starts placing it again', async () => {

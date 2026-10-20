@@ -101,9 +101,15 @@ def _earlier_admission(
 
 
 @pytest.fixture(autouse=True)
-async def _clean_checkpoint_runtime():
+async def _clean_checkpoint_runtime(monkeypatch):
     from core import checkpoint_runtime
+    from infra import thread_execution
 
+    async def no_redrive(_thread_id):
+        return None
+
+    # These tests prove the cut, not the FIFO re-drive after it.
+    monkeypatch.setattr(thread_execution, "drive_thread", no_redrive)
     await checkpoint_runtime.shutdown_checkpoint_tasks()
     yield
     await checkpoint_runtime.shutdown_checkpoint_tasks()

@@ -8,13 +8,15 @@
 		disabled?: boolean;
 		/** The choice holds and cannot change right now (a start in progress): full colour, no dimming, no tap. */
 		locked?: boolean;
+		/** A rule set elsewhere holds the choice: muted and inert, while still focusable so its description remains reachable. */
+		held?: boolean;
 		size?: 'sm' | 'md';
 	}
 
-	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, size = 'md' }: Props = $props();
+	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, held = false, size = 'md' }: Props = $props();
 
 	function handle() {
-		if (disabled || locked) return;
+		if (disabled || locked || held) return;
 		onchange(!checked);
 	}
 </script>
@@ -24,7 +26,8 @@
 	class="tg {size}"
 	class:on={checked}
 	class:locked
-	aria-disabled={locked || undefined}
+	class:held
+	aria-disabled={held || locked || undefined}
 	{disabled}
 	aria-pressed={checked}
 	aria-label={ariaLabel}
@@ -75,6 +78,7 @@
 		cursor: not-allowed;
 	}
 	.tg.locked { cursor: default; }
+	.tg.held { opacity: 0.5; cursor: default; }
 	.tg:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 2px;

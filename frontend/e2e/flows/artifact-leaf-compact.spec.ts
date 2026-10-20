@@ -1,8 +1,10 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import {
 	createSession,
 	loginByUrl,
+	sidebarThread,
 	saveEvidenceScreenshot,
 	TEST_TOKEN,
 } from '../support/corsia';
@@ -73,7 +75,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).first().click();
+		await sidebarThread(page, sessionTitle).click();
 
 		// AC5 — the artifact owns the canvas and the header takes over.
 		const back = page.getByRole('button', { name: 'Chat' });
@@ -83,12 +85,12 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		const tabsAction = page.getByRole('button', { name: /Tabs \(2\)/ });
 		await expect(tabsAction).toBeVisible();
 		// Compact replaces the desktop strip rather than stacking both.
-		await expect(page.getByRole('tablist', { name: 'Open artifacts' })).toHaveCount(0);
+		await expect(page.getByRole('tablist', { name: 'Open side panel items' })).toHaveCount(0);
 		await saveEvidenceScreenshot(page, testInfo, 'artifact-leaf-compact-full', { fullPage: false });
 
 		// AC10 — the sheet traps focus.
 		await tabsAction.click();
-		const sheet = page.getByRole('dialog', { name: 'Open artifacts' });
+		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		await expect(sheet).toBeVisible();
 		await expect.poll(async () =>
 			sheet.evaluate((el, active) => el.contains(active), await page.evaluateHandle(() => document.activeElement)),
@@ -168,11 +170,11 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).first().click();
+		await sidebarThread(page, sessionTitle).click();
 		await expect(page.getByText('Back stack')).toBeVisible();
 
 		await page.getByRole('button', { name: /Tabs \(1\)/ }).click();
-		const sheet = page.getByRole('dialog', { name: 'Open artifacts' });
+		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		await expect(sheet).toBeVisible();
 
 		// One back closes the sheet only.

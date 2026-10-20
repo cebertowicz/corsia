@@ -210,13 +210,18 @@ async def replay(
     on_event = _make_on_event(live, thread_id, bcast, None)
 
     delivered = 0
-    for event in events:
-        if stop_after is not None and delivered >= stop_after:
-            break
-        if event.get("kind") == "tool_result":
-            _persist_bridge_result(db, live, thread_id, event)
-        await on_event(event)
-        delivered += 1
+    try:
+        for event in events:
+            if stop_after is not None and delivered >= stop_after:
+                break
+            if event.get("kind") == "tool_result":
+                _persist_bridge_result(db, live, thread_id, event)
+            await on_event(event)
+            delivered += 1
+    finally:
+        # _LIVE is process-wide: a replayed thread left in it is a runtime the
+        # next app lifespan in this worker refuses to shut down past.
+        _LIVE.pop(thread_id, None)
 
     messages, turns = snapshot(db, thread_id)
     return ReplayResult(
