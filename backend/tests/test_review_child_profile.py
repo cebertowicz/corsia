@@ -61,13 +61,6 @@ def _fixed_sha_tree(repo: Path, base: Path) -> tuple[Path, str]:
     _git(repo, "config", "user.email", "review-child@example.test")
     _git(repo, "config", "user.name", "Review Child")
     (repo / "allowed.txt").write_text(HEAD_CONTENT)
-    (repo / "CLAUDE.md").write_text(CLAUDE_MD_MARKER)
-    (repo / ".claude").mkdir()
-    hook_target = base / HOOK_MARKER
-    (repo / ".claude" / "settings.json").write_text(json.dumps({"hooks": {
-        "PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command":
-            f"touch {hook_target}"}]}],
-    }}))
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "review head")
     head_sha = _git(repo, "rev-parse", "HEAD")
@@ -185,16 +178,10 @@ class _ReviewPeer:
 def test_review_profile_args_leave_only_read_tools_available():
     args = claude_review_profile_args()
 
-    assert args[:6] == [
+    assert args == [
         "--restricted", "--safe-mode", "--setting-sources", "",
-        "--strict-mcp-config", "--permission-mode",
-    ]
-    assert args[args.index("--permission-mode") + 1] == "dontAsk"
-    assert args[args.index("--allowedTools") + 1:args.index("--disallowedTools")] == [
-        "Read", "Grep", "Glob",
-    ]
-    assert args[args.index("--disallowedTools") + 1:] == [
-        "Bash", "WebFetch", "WebSearch", "Write", "Edit", "Task",
+        "--strict-mcp-config", "--permission-mode", "dontAsk",
+        "--tools", "Read,Grep,Glob",
     ]
 
 
@@ -225,6 +212,13 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
         run_dir = base / "neutral-run-directory-4f30a1"
         run_dir.mkdir()
         assert head_tree != run_dir and head_tree not in run_dir.parents
+        hook_target = run_dir / HOOK_MARKER
+        (run_dir / "CLAUDE.md").write_text(CLAUDE_MD_MARKER)
+        (run_dir / ".claude").mkdir()
+        (run_dir / ".claude" / "settings.json").write_text(json.dumps({"hooks": {
+            "PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command":
+                f"touch {hook_target}"}]}],
+        }}))
         outside = base / "outside-brief.txt"
         outside.write_text(OUTSIDE_CONTENT)
         write_target = head_tree / "written-by-review-child.txt"
@@ -232,8 +226,11 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
         checks = [
             ("Read", {"file_path": str(head_tree / "allowed.txt")}),
             ("Read", {"file_path": str(outside)}),
+            ("Grep", {"pattern": OUTSIDE_CONTENT.strip(), "path": str(base)}),
+            ("Glob", {"pattern": "*.txt", "path": str(base)}),
             ("Write", {"file_path": str(write_target), "content": "must not write"}),
             ("Edit", {"file_path": str(head_tree / "allowed.txt"), "old_string": HEAD_CONTENT, "new_string": "changed"}),
+            ("Task", {"subagent_type": "general-purpose", "prompt": "read the outside brief"}),
             ("Bash", {"command": "env"}),
             ("mcp__corsia__read_file", {"path": str(head_tree / "allowed.txt")}),
             ("WebFetch", {"url": "https://example.invalid/review-child"}),
@@ -258,34 +255,38 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
         assert Path(env["HOME"]).parent == base
 
         scope = replace(claude_config_state_scope(env, str(run_dir)), allow_global_file=True)
-        profile = render_write_profile([], scope) + "(deny network*)" + (
+        profile = render_write_profile([str(run_dir)], scope) + "(deny network*)" + (
             f'(allow network-outbound (remote ip "localhost:{port}"))'
         )
         command = [
             "/usr/bin/sandbox-exec", "-p", profile, binary, "-p", "Run each requested tool call.",
-            "--output-format", "json", "--model", "claude-sonnet-4-6", "--add-dir", str(head_tree),
+            "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6", "--add-dir", str(head_tree),
             *claude_review_profile_args(),
         ]
         process = await asyncio.create_subprocess_exec(
             *command, cwd=str(run_dir), env=env,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
         assert peer.bodies, f"stock Claude sent no request: {stderr.decode()[-600:]}"
         assert process.returncode == 0, stderr.decode()[-600:]
         expected_ids = {f"review-check-{index}" for index in range(1, len(checks) + 1)}
         assert set(peer.results) == expected_ids, f"unexpected tool-result IDs: {set(peer.results)}"
 
+        events = [json.loads(line) for line in stdout.decode().splitlines() if line.strip()]
+        init = next(event for event in events if event.get("type") == "system" and event.get("subtype") == "init")
+        assert init["tools"] == ["Read", "Grep", "Glob"]
+
         tool_results = [peer.results[f"review-check-{index}"] for index in range(1, len(checks) + 1)]
         assert HEAD_CONTENT in _as_text(tool_results[0])
-        outside_result = tool_results[1]
-        assert _denied(outside_result), _as_text(outside_result)
-        assert OUTSIDE_CONTENT not in _as_text(outside_result)
-        for name, result in zip(("Write", "Edit", "Bash", "mcp__corsia__read_file", "WebFetch"), tool_results[2:]):
+        for name, result in zip(("Read", "Grep", "Glob"), tool_results[1:4]):
+            assert _denied(result), f"{name} unexpectedly succeeded: {_as_text(result)}"
+            assert OUTSIDE_CONTENT not in _as_text(result)
+        for name, result in zip(("Write", "Edit", "Task", "Bash", "mcp__corsia__read_file", "WebFetch"), tool_results[4:]):
             assert _denied(result), f"{name} unexpectedly succeeded: {_as_text(result)}"
         assert not write_target.exists()
         assert (head_tree / "allowed.txt").read_text() == HEAD_CONTENT
-        assert not (base / HOOK_MARKER).exists()
+        assert not hook_target.exists()
         assert CLAUDE_MD_MARKER not in json.dumps(peer.bodies)
     finally:
         if server is not None:

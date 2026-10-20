@@ -7,6 +7,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
+from claude_controls import confined_claude_controls
 from subagents.managed_launch import claude_project_discovery_args
 
 
@@ -15,16 +16,12 @@ def claude_review_profile_args() -> list[str]:
 
     The caller supplies the reviewed paths with ``--add-dir``. Keeping this
     profile separate from normal managed-session construction prevents a review
-    child from inheriting CORSIA MCP access or the normal broad tool set.
+    child from inheriting CORSIA MCP access, local settings, or any tool other
+    than Read, Grep, and Glob.
     """
     return [
-        "--restricted",
-        "--safe-mode",
-        "--setting-sources", "",
-        "--strict-mcp-config",
-        "--permission-mode", "dontAsk",
-        "--allowedTools", "Read", "Grep", "Glob",
-        "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Write", "Edit", "Task",
+        *confined_claude_controls(),
+        "--tools", "Read,Grep,Glob",
     ]
 
 
