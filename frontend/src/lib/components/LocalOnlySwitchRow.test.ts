@@ -72,32 +72,33 @@ describe('Local only switch row states', () => {
 		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
 		expect(text()).toContain(THREAD_COPY);
 	});
-	it('on, inherited: locked, "Set by <parent chat title>" links to that chat', () => {
+	it('on, inherited: held, "Set by <parent chat title>" links to that chat', () => {
 		thread({ local_only: 1, local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report' });
 		models.set([local, marked('thread_local_only')]);
 		const onleave = vi.fn();
 		mountRow({ onleave });
 		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
-		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().getAttribute('aria-describedby')).toBe('local-only-description');
+		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().classList.contains('held')).toBe(true); expect(toggle().classList.contains('locked')).toBe(false);
+		expect(toggle().getAttribute('aria-describedby')).toBe('local-only-description');
 		expect(text()).toContain('Set by Quarterly report');
 		link('Set by Quarterly report')!.click();
 		expect(get(openSubagentRequest)).toBe('p0'); expect(onleave).toHaveBeenCalledOnce();
 	});
-	it('on, from the project: locked, "Set by this project" links to project settings', () => {
+	it('on, from the project: held, "Set by this project" links to project settings', () => {
 		models.set([local, marked('project_cloud_off')]);
 		const onleave = vi.fn();
 		mountRow({ onleave });
 		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
-		expect(toggle().getAttribute('aria-disabled')).toBe('true');
+		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().classList.contains('held')).toBe(true); expect(toggle().classList.contains('locked')).toBe(false);
 		link('Set by this project')!.click();
 		expect(get(settingsNavigation)).toMatchObject({ section: 'projects', project: 'p1', anchor: 'project-provider-policy' });
 		expect(onleave).toHaveBeenCalledOnce();
 	});
-	it('inherited, with the parent since turned off, stays on and locked', () => {
+	it('inherited, with the parent since turned off, stays on and held', () => {
 		thread({ local_only: 1, local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report', local_only_effective: true });
 		mountRow();
 		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
-		expect(toggle().getAttribute('aria-disabled')).toBe('true');
+		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().classList.contains('held')).toBe(true);
 	});
 	it('renders no row without a thread', () => {
 		activeThreadId.set(null); mountRow();
@@ -118,7 +119,7 @@ describe('Local only switch writes', () => {
 		toggle().click(); flushSync();
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 		expect(text()).toContain('Saving…');
-		expect(toggle().getAttribute('aria-disabled')).toBe('true');
+		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().classList.contains('locked')).toBe(true); expect(toggle().classList.contains('held')).toBe(false);
 		expect(get(models).find((m) => m.id === 'cc/opus')?.status_reason).toBe('thread_local_only');
 		expect(get(threads)[0].local_only).toBeUndefined();
 		toggle().click(); flushSync();

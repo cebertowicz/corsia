@@ -22,7 +22,8 @@
 			: policy.inheritedFromThreadId != null ? 'inherited'
 				: policy.own ? 'own' : 'off',
 	);
-	const locked = $derived(cause === 'project' || cause === 'inherited');
+	// A parent or project policy is held, distinct from a full-color in-flight save lock.
+	const held = $derived(cause === 'project' || cause === 'inherited');
 	let pending = $state<boolean | null>(null);
 	const saving = $derived(pending !== null);
 	const on = $derived(pending ?? cause !== 'off');
@@ -80,7 +81,7 @@
 			{#if error}<p class="local-only-error" role="alert">{error}</p>{/if}
 		</div>
 		<div class="local-only-control">
-			<Toggle checked={on} disabled={needsLocalModel || needsModelSwitch} locked={locked || saving} ariaLabel="Local only" describedBy="local-only-description" onchange={change} />
+			<Toggle checked={on} disabled={needsLocalModel || needsModelSwitch} held={held} locked={saving} ariaLabel="Local only" describedBy="local-only-description" onchange={change} />
 			{#if saving}<span class="local-only-saving" aria-live="polite">Saving…</span>{/if}
 		</div>
 	</div>

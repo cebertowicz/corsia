@@ -173,10 +173,16 @@ test.describe('@surface:local-only local-only header frames', () => {
 					await expect(sheet.getByText('Opus 5.5', { exact: true })).toHaveCount(0);
 					await expect(sheet.getByText('Sonnet 5.5', { exact: true })).toHaveCount(0);
 				}
+				if (['inherited-worker', 'project-local-only'].includes(name)) {
+					await expect(sheet.locator('.tg')).toHaveClass(/held/);
+					await expect(sheet.locator('.tg')).not.toHaveClass(/locked/);
+				}
 				if (name === 'write-in-flight') {
 					await page.getByRole('button', { name: 'Local only', exact: true }).click();
 					await expect(page.getByRole('button', { name: 'Local only', exact: true })).toHaveAttribute('aria-pressed', 'true');
 					await expect(page.getByText('Saving…', { exact: true })).toBeVisible();
+					await expect(sheet.locator('.tg')).toHaveClass(/locked/);
+					await expect(sheet.locator('.tg')).not.toHaveClass(/held/);
 					await expect(page.locator('.h-local-only')).toHaveCount(0);
 				} else if (name === 'save-failure') {
 					await page.getByRole('button', { name: 'Local only', exact: true }).click();
