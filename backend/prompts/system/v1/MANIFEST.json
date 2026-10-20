@@ -19,10 +19,10 @@
       "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
     },
     {
-      "bytes": 3005,
+      "bytes": 3059,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "997a7ce1122b06113ee5d1d63491ba22207c826a0259f9eaf3450b17aeeadbbf"
+      "sha256": "3a5f8f31889f9deea2b8bb4ccdf2209ea228d5f0ed46fe97a58380aaad8afced"
     },
     {
       "bytes": 862,
@@ -124,16 +124,16 @@
       "sha256": "f4fd70fb0d41390fb0e9ea358060bd1bb04195c89aae6094f0ace85cae3019c7"
     },
     {
-      "bytes": 5052,
+      "bytes": 5281,
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
-      "sha256": "05d86d8920094c0fdcca4635f3a572351eb2895bfc9664e9d3379e036c3e0e95"
+      "sha256": "bfe70631bfce6a323954ab99126f0762745f2f6c37531ab2d1f77205f4f36b48"
     },
     {
-      "bytes": 4212,
+      "bytes": 3605,
       "kind": "skill",
       "path": "skills/apply-feedback/SKILL.md",
-      "sha256": "e0a2077c687bad1c64d7265aa99d4e61f4742f0bcb680d714b21f394fe7b5e3c"
+      "sha256": "0de416ebcbeda8b97a560afed2b22155a845376ee971b564164230bace602503"
     },
     {
       "bytes": 18740,
@@ -322,16 +322,16 @@
       "sha256": "1424e0d49881475bf8951e0a472426b9bd511640d3756bc52c6917ac6869e81b"
     },
     {
-      "bytes": 9662,
+      "bytes": 10037,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "d95d2bb2ea2076396b4a2cb28e05c025b8093153d0612d06c85a35c1a49b2bdc"
+      "sha256": "b2c61f6919e0c996ad8cfd15caeaff6ac0c38c6cd742e030a338723898484acc"
     },
     {
-      "bytes": 3418,
+      "bytes": 3419,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "ad16a19312444a2b58f57f22c433f68d715bab839be96abeb7a2af0605801957"
+      "sha256": "fd7c28016f7c8b28aeeb388e7151858b7f01a35ed258577081dc783aff21caa5"
     }
   ],
   "version": "v1"
