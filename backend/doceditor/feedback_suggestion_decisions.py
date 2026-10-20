@@ -25,12 +25,16 @@ def _decision_note(
     decision_event_id: str, decision: str, reason: str | None,
 ) -> None:
     count = len(suggestions)
+    document = document_name(registry_models.get_artifact(artifact_id, db=db))
     subject = "your suggestion" if count == 1 else f"{count} of your suggestions"
-    summary = f"{decided_by} {decision} {subject} on {document_name(registry_models.get_artifact(artifact_id, db=db))}"
-    details: dict[str, Any] = {"decision_event_id": decision_event_id, "artifact_id": artifact_id}
+    summary = f"{decided_by} {decision} {subject} on {document}"
+    # The person reads the transcript line, so it carries the decision alone and no "your" (whose would be unclear).
+    shown = "a suggestion" if count == 1 else f"{count} suggestions"
+    details: dict[str, Any] = {
+        "decision_event_id": decision_event_id, "artifact_id": artifact_id,
+        "chip": f"{decided_by} {decision} {shown} on {document}.",
+    }
     if decision == "accepted":
-        # The agent reads every name; the person's transcript line stays the decision alone.
-        details["chip"] = summary + "."
         # Who resolves the person's comment a suggestion answers has one source; quote it, never restate it.
         summary += f": {', '.join(_named(suggestion) for suggestion in suggestions)}. {PERSON_COMMENT_RESOLVE_RULE}"
     else:

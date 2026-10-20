@@ -83,7 +83,7 @@ def test_an_accept_all_note_names_every_suggestion_and_keeps_the_persons_line_sh
             f"Robin accepted 7 of your suggestions on Design: {named}. {PERSON_COMMENT_RESOLVE_RULE}"
         )
         details = json.loads(note["details_json"])
-        assert details["chip"] == "Robin accepted 7 of your suggestions on Design."
+        assert details["chip"] == "Robin accepted 7 suggestions on Design."
     finally:
         db.close()
 
@@ -135,6 +135,10 @@ def test_rejection_note_carries_the_deciders_reason_verbatim(isolated_db):
             "Robin rejected your suggestion on Design. "
             "Reason from the decider (verbatim): Out of scope: see section 2."
         ]
+        details = json.loads(db.execute(
+            "SELECT details_json FROM context_change_journal "
+            "WHERE object_kind='thread_context' AND object_id='author'").fetchone()[0])
+        assert details["chip"] == "Robin rejected a suggestion on Design."
         assert _plan_nodes(db, "author") == 0
     finally:
         db.close()
