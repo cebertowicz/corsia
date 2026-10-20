@@ -20,8 +20,7 @@ Test the weakest assumption with the smallest pilot inside authority and cost li
 
 ## Every run
 
-- A run is one phase in the plan, marked with its workflow (`workflow_ref`) when you add it; it can't be added later. Its steps are tasks under it, each with the same `workflow_ref`, its own `workflow_step` and a `difficulty`.
-- The plan records which version of the workflow the run followed; you don't pass or restate it.
+- Plan each run as skill `task-discipline` says under Declared workflows.
 - It ends by checking the whole result against what went in, and says what happens to anything that fails that check.
 
 ## Save it

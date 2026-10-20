@@ -29,7 +29,7 @@ Core context says who the owner is by default. Contributors keep authority over 
 1. **Reuse first.** Look for an agent that already owns the outcome (check near-synonyms in the roster). Use it.
 2. **One outcome is one agent, however big.** A project is only for work whose context nothing else should see, or that has its own way of working across several agents.
 3. **The person approves a new lasting agent's charter**: what it is for and what it may do. Any other agent sends the request to the conductor (to CORSIA outside a project) and never creates one. A temporary worker for one task needs no approval.
-4. **Check the setup worked.** Whoever sets up a new agent confirms that on its first real request it correctly decides one thing it is allowed to do, and hands one thing it is not allowed to do to whoever owns it.
+4. **Check the setup worked.** Whoever sets up a new agent reads its first real requests: it decides what it is allowed to do and hands anything else to whoever owns it. Wait for a real case of each; never stage one.
 
 ## Delegate only separable work
 

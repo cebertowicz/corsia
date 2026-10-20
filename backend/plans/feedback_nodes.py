@@ -28,9 +28,9 @@ USER_FRAMING = (
     "the current source. Send each change you agree with to them as a suggested change "
     "(doc_comment_create with quote and replacement); make it directly only when it cannot be one "
     "(it moves text across sections, or other changes depend on it), with a comment on the changed "
-    "text saying what changed and why. A comment that needs no answer gets an acknowledgement. "
+    "text saying what changed and why. Acknowledge each comment you agree with or that needs no answer. "
     + PERSON_COMMENT_RESOLVE_RULE
-    + " Reply only to ask a question, give a reason for declining, or "
+    + " Otherwise reply only to ask a question, give a reason for declining, or "
     "show evidence that a point is mistaken."
 )
 AGENT_EDIT_FRAMING = (
