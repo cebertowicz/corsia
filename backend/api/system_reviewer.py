@@ -129,6 +129,7 @@ def reviewer_scope_blocks(model_id: str) -> tuple[list[ScopeBlock], int]:
             return [ScopeBlock(name, reason) for _, name in scopes], len(scopes)
         cloud_off, refusal = _cloud_off_refusal(catalog_row(str(target.catalog_id), db=db), db)
         blocks = []
+        block: ScopeBlock | None
         for project, name in scopes:
             # Locality is the person's own setting and its fix differs from an
             # account's, so it is the scope's block whenever it applies, and a
