@@ -445,7 +445,7 @@ async def test_connected_app_reach_hides_mcp_index_and_refuses_before_session_or
 
     allowed_context = state._current_thread_id.set("project-a-thread")
     try:
-        assert "- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
+        assert f"- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
         loaded = await registry.execute("tools_load", {"names": [wrapper.name]})
         called = await registry.execute("tool_call", {"name": wrapper.name, "arguments": {}})
     finally:

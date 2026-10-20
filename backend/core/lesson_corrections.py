@@ -114,7 +114,7 @@ def placement_check_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...]) 
     else:
         # One JSON parameter keeps scope=all inside SQLite's bound-parameter limit.
         row = db.execute(
-            """SELECT count(*) AS fires, sum(overridden) AS overrides FROM (
+            f"""SELECT count(*) AS fires, sum(overridden) AS overrides FROM (
                     SELECT thread_id, history_epoch, entry_id, revision, check_name,
                            max(CASE WHEN override_reason IS NOT NULL THEN 1 ELSE 0 END) AS overridden
                     FROM lesson_placement_checks

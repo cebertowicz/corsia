@@ -332,11 +332,14 @@ def current_protected_host_path_policy(
 ) -> ProtectedHostPathPolicy:
     """Build the live policy without caching mutable environment paths."""
     from infra.config import STATE_ROOT
+
     discovered = shutil.which("safehouse")
     paths = tuple(safehouse_paths)
     if discovered is not None:
         paths = (*paths, Path(discovered))
+    # Agent shells may not replace the verified runtimes, a local app's cache, or their shared parent.
     from tools.managed_runtime import application_cache_root
+
     return ProtectedHostPathPolicy(
         home=Path.home(),
         state_root=STATE_ROOT,
