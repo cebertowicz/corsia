@@ -84,6 +84,20 @@ describe('setup provider rows', () => {
 		expect(row).toMatchObject({ meta: 'Update your oMLX, then Retry. Reference: pick-123', reportable: true, action: { label: 'Retry' } });
 	});
 
+	it.each(['other', 'connection', 'disk_full', undefined])('keeps the pick failure reference for %s without claiming a fit failure', (cause) => {
+		const check = vi.fn();
+		const row = setupLocalRow({ ...actions(), check, pick: { state: 'failed', model: null, message: null, cause, ref: 'local-123' }, eligible: true, downloading: false, ready: false, startError: '' });
+		expect(row.meta).toBe('CORSIA couldn’t choose a local model. Retry, or save a report. Reference: local-123');
+		expect(row.reportable).toBe(true);
+		row.action?.run();
+		expect(check).toHaveBeenCalledOnce();
+	});
+
+	it('names a model fit failure only when memory is its cause, retaining the reference', () => {
+		const row = setupLocalRow({ ...actions(), pick: { state: 'failed', model: null, message: null, cause: 'memory', ref: 'local-456' }, eligible: true, downloading: false, ready: false, startError: '' });
+		expect(row.meta).toBe('Couldn’t find a local model that fits this computer. Retry. Reference: local-456');
+	});
+
 	it('explains the gate from the current working and download states', () => {
 		expect(setupStartNote(false, false, false))
 			.toBe('Set up a subscription or add an API provider to continue.');

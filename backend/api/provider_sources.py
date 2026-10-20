@@ -137,6 +137,7 @@ async def get_sources(_user: dict = Depends(require_user)) -> dict[str, Any]:
 async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
+    onboarding: bool = Body(False, embed=True),
     other_omlx: Literal["stop", "keep"] | None = Body(None, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
@@ -146,9 +147,9 @@ async def setup_local_source(
         other_omlx=other_omlx,
     ):
         raise HTTPException(status_code=409, detail={"code": refusal})
-    from llm.local_setup import begin_local_setup
+    from llm.local_setup_new_omlx import begin_local_setup
 
-    return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic)
+    return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)
 
 
 

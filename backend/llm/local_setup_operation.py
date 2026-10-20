@@ -14,7 +14,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, IO
+from typing import IO
 
 from llm.local_model import LocalModel, from_recommendation, to_record
 
@@ -36,12 +36,13 @@ class Operation:
     level: float | None = None
     fp16: bool | None = None
     relative_speed: float | None = None
+    onboarding: bool = False
 
     @classmethod
-    def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None) -> Operation:
+    def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None, *, onboarding: bool = False) -> Operation:
         return cls(
             model.repository, model.download_size_bytes, model.context_window, kind, task_id,
-            model.name, model.level, model.fp16, model.relative_speed,
+            model.name, model.level, model.fp16, model.relative_speed, onboarding,
         )
 
     @property
@@ -88,7 +89,7 @@ def read() -> Operation | None:
     ):
         logger.warning("local setup operation record is malformed; treating it as absent")
         return None
-    return Operation.for_model(model, kind, task_id)
+    return Operation.for_model(model, kind, task_id, onboarding=payload.get("onboarding") is True)
 
 
 def write(operation: Operation) -> None:
@@ -98,7 +99,7 @@ def write(operation: Operation) -> None:
     try:
         with staged.open("w", encoding="utf-8") as handle:
             json.dump({"model": to_record(operation.model), "kind": operation.kind,
-                       "task_id": operation.task_id}, handle, sort_keys=True)
+                       "task_id": operation.task_id, "onboarding": operation.onboarding}, handle, sort_keys=True)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(staged, target)
@@ -128,13 +129,12 @@ def try_lock() -> IO[str] | None:
     return handle
 
 
-async def wait_for_lock(flight: Any) -> None:
-    """Wait for the durable local-operation lock and retain it on ``flight``."""
-    while flight.operation_lock is None:
+async def wait_for_lock() -> IO[str]:
+    """Wait for the durable operation lock; its owner retains the returned handle."""
+    while True:
         handle = try_lock()
         if handle is not None:
-            flight.operation_lock = handle
-            return
+            return handle
         await asyncio.sleep(0.25)
 
 
@@ -145,18 +145,3 @@ def unlock(handle: IO[str] | None) -> None:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     finally:
         handle.close()
-
-
-def finish(flight: Any, result: dict) -> dict:
-    """Record a flight's terminal result on ``flight`` and release the operation (setup and Settings)."""
-    flight.result = result
-    flight.stage = None
-    flight.following = False
-    if not result.get("downloading"):
-        # A finished task needs no follow, and a terminal oMLX error cannot be
-        # followed: removing its task id lets an explicit retry create one new
-        # task instead of replaying it. A still-downloading task keeps its id.
-        clear()
-    unlock(flight.operation_lock)
-    flight.operation_lock = None
-    return result

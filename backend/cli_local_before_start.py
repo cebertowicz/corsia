@@ -68,14 +68,14 @@ def _quiet_logs() -> Path:
 
 def _installer_mode() -> None:
     """Stream Homebrew, report the download often, and wait for it to finish."""
-    from llm import local_setup, local_setup_ownership
+    from llm import local_setup_download, local_setup_ownership
     from llm.local_setup_results import DownloadProgress
 
     local_setup_ownership.STREAM_COMMAND_OUTPUT = True
     DownloadProgress.STEP = 5
     DownloadProgress.SECONDS = HEARTBEAT_SECONDS
-    local_setup.DOWNLOAD_WAIT_SECONDS = DOWNLOAD_CEILING_SECONDS
-    local_setup.DOWNLOAD_FOLLOW_SECONDS = DOWNLOAD_CEILING_SECONDS
+    local_setup_download.DOWNLOAD_WAIT_SECONDS = DOWNLOAD_CEILING_SECONDS
+    local_setup_download.DOWNLOAD_FOLLOW_SECONDS = DOWNLOAD_CEILING_SECONDS
 
 
 def _failed(why: str) -> int:
@@ -118,7 +118,7 @@ async def _discover(stages: _Stages) -> None:
 
 
 async def _setup(force_local: bool) -> int:
-    from llm import local_setup
+    from llm import local_setup_new_omlx
     from llm.local_setup_gates import limited_subscription_message, local_memory_ok, subscription_available
 
     stages = _Stages()
@@ -137,7 +137,7 @@ async def _setup(force_local: bool) -> int:
         if not await asyncio.to_thread(local_memory_ok):
             return _needs_provider(limited=bool(notice), forced_local=force_local)
         _installer_mode()
-        result = await local_setup._run_flight(on_stage=stages)
+        result = await local_setup_new_omlx._run_flight(on_stage=stages)
     finally:
         heartbeat.cancel()
     if result.get("downloading"):

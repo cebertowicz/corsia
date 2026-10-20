@@ -117,7 +117,7 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
     operation = local_setup_operation.read()
     if operation is not None and operation.model.model != model_id:
         raise HTTPException(409, f"{operation.model.display_name} is already downloading.")
-    from llm.local_setup import begin_settings_download
+    from llm.local_setup_new_omlx import begin_settings_download
 
     return await begin_settings_download(model)
 

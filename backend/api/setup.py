@@ -302,9 +302,9 @@ async def local_download(request: Request) -> dict | Response:
         other_omlx=body.other_omlx,
     ):
         return JSONResponse(status_code=409, content={"code": refusal})
-    from llm.local_setup import begin_local_setup
+    from llm.local_setup_new_omlx import begin_local_setup
 
-    return await begin_local_setup()
+    return await begin_local_setup(onboarding=True)
 
 
 @router.get("/classifier", response_model=None)

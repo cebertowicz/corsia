@@ -1,71 +1,33 @@
-"""The setup flight on CORSIA's own oMLX: install and start it, take the pick, download it.
-
-The flight state and the oMLX calls live in ``local_setup``; they are read
-through the module at call time so one set of names is patched and observed.
-"""
+"""Orchestrate setup and Settings work through the one flight owner."""
 
 from __future__ import annotations
 
 import asyncio
 from typing import Callable
 
-from llm import local_setup as ls
-from llm import local_setup_prepare as prepare
-from llm.local_model import LocalModel, omlx_has_recommender, record_set_up
-from llm.local_setup_managed import reserve_managed_omlx_port
-from llm.local_setup_ownership import retire_legacy_owned_omlx_service
-
-
-async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
-    """Start CORSIA's supervised oMLX on its private state-root paths and port."""
-    report("Installing")
-    version = await asyncio.to_thread(ls.omlx_version)
-    needs_repair = (not await asyncio.to_thread(ls._omlx_supports_loopback_auth)
-                    or not omlx_has_recommender(version))
-    if needs_repair:
-        await asyncio.to_thread(ls._ensure_omlx, report, needs_repair=True, broken=version is None)
-    else:
-        await asyncio.to_thread(ls._ensure_omlx, report)
-    if not await asyncio.to_thread(ls._omlx_supports_loopback_auth):
-        raise RuntimeError(ls.UPDATE_OMLX_MESSAGE)
-    # The old Homebrew service is stopped only after its marker and resolved
-    # formula location prove CORSIA installed it. A user-owned oMLX is untouched.
-    await asyncio.to_thread(retire_legacy_owned_omlx_service)
-    paths, port = await asyncio.to_thread(reserve_managed_omlx_port)
-    from llm.local_setup_runtime import register_managed_server
-    from llm.providers.omlx_supervisor import start_server
-
-    server_id, key = await register_managed_server(
-        port=port, base_path=str(paths.base_path), model_dir=str(paths.model_dir),
-    )
-    report("Starting")
-    started = await start_server({"server_id": server_id})
-    if not started.get("ok"):
-        raise RuntimeError(str(started.get("message") or "CORSIA couldn't start its local model server."))
-    report("Configuring")
-    await ls.secure_local_omlx(server_id, key)
-    await ls._configure_global(server_id)
-    return server_id, port
+from infra.failure_reference import new_reference
+from llm import local_setup as ls, local_setup_operation, local_setup_prepare as prepare
+from llm.local_model import LocalModel, record_set_up
+from llm.local_profiles import format_size
+from llm.local_setup_disk import DiskSpaceError
+from llm.local_setup_download import StillDownloading
+from llm.local_setup_gates import local_memory_ok, limited_subscription_message, subscription_available
+from llm.local_setup_results import SETUP_COMMAND, failure_cause, failure_message, local_setup_error
+from llm.local_setup_runtime import configure_model_settings, start_managed_omlx
 
 
 async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
                          model: LocalModel | None = None) -> dict:
-    """Set up CORSIA's own oMLX, download the picked model and refresh the catalog.
-
-    ``model`` is a resumed flight's; otherwise the flight waits for a running
-    prepare, takes its pick, or asks the recommender itself.
-    """
     await prepare.join()
     server_id, port = await start_managed_omlx(report)
-    if model is None:
-        model = prepare.picked_model()
+    model = model or prepare.picked_model()
     if model is None:
         report("Finding the model that fits this computer")
         model = await prepare.ask(server_id, port)
     ls._record_model(model)
     await ls._download(server_id, report, model)
-    ls._flight.downloaded = True
-    await ls._configure_model_settings(server_id, model)
+    ls.record_downloaded()
+    await configure_model_settings(server_id, model)
     report("Refreshing model catalog")
     from llm.catalog_network_models import discover_network_models
 
@@ -74,7 +36,116 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
         raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
     await asyncio.to_thread(record_set_up, model)
     ls._emit("completed", model=model.repository)
-    return {
-        "ok": True, "server_id": server_id, "model": model.model,
-        "download_size": ls.format_size(model.download_size_bytes), "progress": events,
-    }
+    return {"ok": True, "server_id": server_id, "model": model.model,
+            "download_size": format_size(model.download_size_bytes), "progress": events}
+
+
+async def _run_flight(*, model: LocalModel | None = None,
+                      on_stage: Callable[[str], None] | None = None) -> dict:
+    events: list[str] = []
+
+    def report(stage: str) -> None:
+        ls.report_stage(stage)
+        events.append(stage)
+        if on_stage is not None:
+            on_stage(stage)
+
+    try:
+        result = await _setup_new_omlx(report, events, model)
+    except asyncio.CancelledError:
+        ls._release_operation_lock()
+        raise
+    except StillDownloading:
+        result = {**ls._stopped_following(ls.selected_model(), events),
+                  "next_action": f"Run `{SETUP_COMMAND}` to follow it again."}
+    except Exception as exc:
+        cause, ref = failure_cause(exc), new_reference("local")
+        ls.log.exception("Local setup failed reference=%s cause=%s", ref, cause)
+        result = {**local_setup_error(failure_message(exc)), "progress": events,
+                  "cause": cause, "ref": ref, "pre_download": ls.selected_model() is None}
+        if isinstance(exc, DiskSpaceError):
+            result["bytes_to_free"] = exc.bytes_to_free
+        ls._emit("failed", cause=cause, ref=ref)
+    await ls._notify_terminal_setup_download(result)
+    return ls.finish_flight(result)
+
+
+async def _resume(operation: local_setup_operation.Operation) -> dict:
+    await ls.wait_for_operation()
+    if operation.kind == "settings":
+        from llm.local_settings_download import _run_flight as settings_flight
+
+        return await settings_flight(operation.model)
+    return await _run_flight(model=operation.model)
+
+
+async def resume_pending_setup() -> bool:
+    """Re-follow a persisted task after restart without issuing another download."""
+    if ls._running():
+        return True
+    operation = local_setup_operation.read()
+    if operation is None:
+        return False
+    if operation.kind not in {"setup", "starter", "settings"} or not await asyncio.to_thread(local_memory_ok):
+        ls.log.warning("discarding local setup recovery record: invalid kind or insufficient memory")
+        local_setup_operation.clear()
+        return False
+    ls.start_flight(_resume(operation), "Waiting to resume local model setup", operation=operation)
+    ls._emit("resumed", model=operation.repository, kind=operation.kind)
+    return True
+
+
+async def begin_local_setup(*, no_subscription_only: bool = False,
+                            automatic: bool = False, onboarding: bool = False) -> dict:
+    """Start setup, or report its existing operation and eligibility decision."""
+    if ls._running():
+        return ls._in_progress_result()
+    if local_setup_operation.read() is not None:
+        if await resume_pending_setup():
+            return ls._in_progress_result()
+        return local_setup_error("CORSIA could not resume the local model setup safely.")
+    memory_ok = await asyncio.to_thread(local_memory_ok)
+    ls.clear_result()
+    subscription = await subscription_available() if no_subscription_only else None
+    if subscription is not None:
+        source = "Claude Code" if subscription.provider == "claude-code" else "Codex"
+        account = f" as {subscription.label}" if subscription.label else ""
+        return ls._skipped("subscription_available",
+                           f"{source} is signed in{account}, so the local model is skipped. You can add one from the app.")
+    notice = await limited_subscription_message() if no_subscription_only else None
+    if not memory_ok:
+        message = "This computer can't run a local model well. Connect a subscription or an API key in the app."
+        if notice:
+            return ls._skipped("ineligible", f"{notice}\nThis computer can't run a local model well. Connect another subscription or an API key in the app.")
+        if automatic:
+            return ls._skipped("ineligible", message)
+        ls._emit("skipped", reason="ineligible")
+        return {**local_setup_error(message), "progress": []}
+    if ls._running():
+        return ls._in_progress_result()
+    if not ls._claim_operation("setup", onboarding=onboarding):
+        await resume_pending_setup()
+        return ls._in_progress_result()
+    ls.start_flight(_run_flight(), "Installing")
+    ls._emit("started")
+    return ls._in_progress_result(notice=notice)
+
+
+async def begin_settings_download(model: LocalModel) -> dict:
+    """Start Settings work under the same exclusive lifecycle as setup."""
+    from llm.local_settings_download import _run_flight as settings_flight
+
+    if ls._running():
+        return ls._in_progress_result()
+    if local_setup_operation.read() is not None:
+        if await resume_pending_setup():
+            return ls._in_progress_result()
+        return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
+    if not await asyncio.to_thread(local_memory_ok):
+        return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
+    if not ls._claim_operation("settings", model):
+        await resume_pending_setup()
+        return ls._in_progress_result()
+    ls.start_flight(settings_flight(model), "Preparing download")
+    ls._emit("started", model=model.repository, kind="settings")
+    return ls._in_progress_result()

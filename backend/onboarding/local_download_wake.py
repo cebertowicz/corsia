@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Any, Literal
 
-from llm.local_setup import CAUSES
+from llm.local_setup_results import CAUSES
 
 log = logging.getLogger(__name__)
 

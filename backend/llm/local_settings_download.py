@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Callable
 
-from api.network_daemon_models import notify_cached_model_loaded
+from llm.network_discovery import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
 from llm.local_setup_download import StillDownloading
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 async def _managed_download(report: Callable[[str], None], model: LocalModel) -> str:
     """Download through CORSIA's managed oMLX only."""
     from llm import local_setup as ls
-    from llm.local_setup_new_omlx import start_managed_omlx
+    from llm.local_setup_runtime import start_managed_omlx
 
     server_id, _port = await start_managed_omlx(report)
     await ls._download(server_id, report, model)
@@ -89,11 +89,9 @@ async def _run_flight(model: LocalModel) -> dict:
     events: list[str] = []
 
     def report(value: str) -> None:
-        ls._flight.stage = value
-        ls._notify_models_changed()
+        ls.report_stage(value)
         events.append(value)
 
-    ls._flight.following = False
     try:
         result = await run(report, model)
     except asyncio.CancelledError:
@@ -112,56 +110,12 @@ async def _run_flight(model: LocalModel) -> dict:
         local_downloads.write(local_downloads.Download(
             model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
         ))
-    return ls.local_setup_operation.finish(ls._flight, result)
+    return ls.finish_flight(result)
 
-
-async def begin(model: LocalModel) -> dict:
-    """Start the single Settings flight, or report the already-owned operation."""
-    from llm import local_setup as ls
-    from llm import local_setup_operation
-
-    if ls._running():
-        return ls._in_progress_result()
-    if local_setup_operation.read() is not None:
-        from llm.local_setup_recovery import resume_pending_setup
-
-        if await resume_pending_setup():
-            return ls._in_progress_result()
-        return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
-    if not await asyncio.to_thread(ls.local_memory_ok):
-        return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
-    if not ls._claim_operation("settings", model):
-        from llm.local_setup_recovery import resume_pending_setup
-
-        await resume_pending_setup()
-        return ls._in_progress_result()
-    ls._flight.result = None
-    ls._flight.stage = "Preparing download"
-
-    async def flight() -> dict:
-        return await _run_flight(model)
-
-    ls._flight.task = asyncio.create_task(flight())
-    ls._flight.task.add_done_callback(ls._observe_setup_task)
-    ls._flight.task.add_done_callback(lambda _task: ls._notify_models_changed())
-    ls._emit("started", model=model.repository, kind="settings")
-    return ls._in_progress_result()
-
-
-async def resume(model: LocalModel) -> dict:
-    """Re-follow a persisted Settings download after restart without adopting setup."""
-    from llm import local_setup as ls
-
-    await ls.local_setup_operation.wait_for_lock(ls._flight)
-    ls._flight.kind = "settings"
-    ls._flight.model = model
-    ls._flight.stage = "Waiting to resume local model download"
-    return await _run_flight(model)
 
 
 async def run(report: Callable[[str], None], model: LocalModel) -> dict:
     """Complete a Settings download and preserve a separate terminal result."""
-    from llm import local_setup as ls
     from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings
     from llm.catalog_network_models import discover_network_models
 

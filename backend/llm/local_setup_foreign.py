@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from llm.local_setup_managed import OmlxProcess, foreign_omlx_processes
+from llm.managed_omlx_binary import OmlxProcess, foreign_omlx_processes
 
 log = logging.getLogger(__name__)
 OtherOmlxChoice = Literal["stop", "keep"]
@@ -91,9 +91,9 @@ def stop_foreign_omlx_processes(chosen: tuple[OmlxProcess, ...]) -> Literal["sto
 
 def _continue_after_unknown_inspection() -> None:
     """Record an unreadable process list without exposing a setup state to the user."""
-    from api.cli_install import new_reference
+    from infra.failure_reference import new_reference
 
-    ref = new_reference()
+    ref = new_reference("local")
     log.warning("could not identify running oMLX processes; continuing without stopping reference=%s", ref)
 
 

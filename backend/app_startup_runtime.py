@@ -24,15 +24,6 @@ def configure_sqlite_fetch_switch_interval() -> None:
     sys.setswitchinterval(SQLITE_FETCH_SWITCH_INTERVAL_SECONDS)
 
 
-async def retire_legacy_setup_state() -> None:
-    """Retire old local-oMLX rows before clearing their obsolete choice markers."""
-    from infra.db_async import run_in_db
-    from llm.local_setup_adoption_cleanup import cleanup_retired_legacy_setup_adoption
-    from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
-
-    await run_in_db(retire_legacy_setup_omlx_rows)
-    await asyncio.to_thread(cleanup_retired_legacy_setup_adoption)
-
 
 #: Every background loop this module starts, as (shutdown label, ``state``
 #: attribute). The lifespan cancels and joins exactly these at shutdown.
@@ -61,12 +52,11 @@ async def resume_local_setup() -> None:
     from loguru import logger
 
     from llm.local_model import backfill_legacy_record
-    from llm import local_setup_upgrade
-    from llm.local_setup_recovery import resume_pending_setup
+    from llm.local_setup_new_omlx import resume_pending_setup
     from onboarding.local_download_wake import resume_pending_local_download
 
     steps = (
-        ("retire legacy local oMLX state", retire_legacy_setup_state),
+
         ("record an earlier setup's model", lambda: asyncio.to_thread(backfill_legacy_record)),
         ("resume local setup", resume_pending_setup),
         ("resume local download notice", resume_pending_local_download),
@@ -76,8 +66,7 @@ async def resume_local_setup() -> None:
             await step()
         except Exception as exc:
             logger.warning(f"Local setup startup step failed ({label}): {exc}")
-    # Moving an earlier install's models can take minutes; startup does not wait.
-    local_setup_upgrade.start_upgrade()
+
 
 
 async def _startup_harness_discovery() -> list[dict]:

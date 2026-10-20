@@ -1,4 +1,4 @@
-"""Managed oMLX has one private state-root identity; unowned local rows retire."""
+"""Managed oMLX has one private identity; existing services and rows stay untouched."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_register_managed_server_retires_only_legacy_managed_row(isolated_db, monkeypatch, tmp_path) -> None:
+async def test_register_managed_server_preserves_existing_rows(isolated_db, monkeypatch, tmp_path) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
-    from llm.local_setup_managed import is_corsia_managed_server, reserve_managed_omlx_port
-    from llm.local_setup_ownership import marker_path
+    from llm.managed_omlx_binary import is_corsia_managed_server, reserve_managed_omlx_port
+    from llm.managed_omlx_binary import marker_path
     from llm.local_setup_runtime import LOCAL_SERVER_NAME, register_managed_server
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
@@ -37,13 +37,13 @@ async def test_register_managed_server_retires_only_legacy_managed_row(isolated_
     registered = await run_in_db(discovery.get_server, server_id)
     assert registered is not None
     assert is_corsia_managed_server(registered)
-    assert (await run_in_db(discovery.get_server, legacy_managed))["status"] == "removed"
+    assert (await run_in_db(discovery.get_server, legacy_managed))["status"] == "online"
     assert (await run_in_db(discovery.get_server, foreign_external))["status"] == "online"
 
 
 def test_managed_paths_are_a_pure_lookup(monkeypatch, tmp_path) -> None:
     """Reading the paths binds no port and creates or writes nothing (startup reads them)."""
-    from llm.local_setup_managed import managed_omlx_paths
+    from llm.managed_omlx_binary import managed_omlx_paths
     from llm.providers import omlx_process
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
@@ -57,7 +57,7 @@ def test_managed_paths_are_a_pure_lookup(monkeypatch, tmp_path) -> None:
 
 
 def test_port_reservation_fails_as_its_own_error_when_no_port_binds(monkeypatch, tmp_path) -> None:
-    from llm.local_setup_managed import ManagedPortUnavailable, reserve_managed_omlx_port
+    from llm.managed_omlx_binary import ManagedPortUnavailable, reserve_managed_omlx_port
     from llm.providers import omlx_process
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
@@ -82,7 +82,7 @@ def test_backfill_with_no_bindable_port_records_nothing_and_does_not_raise(monke
 @pytest.mark.asyncio
 async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
     import app_startup_runtime
-    from llm import local_model, local_setup_upgrade
+    from llm import local_model
 
     calls: list[str] = []
 
@@ -98,15 +98,14 @@ async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
         calls.append("notice")
 
     monkeypatch.setattr(local_model, "backfill_legacy_record", broken)
-    monkeypatch.setattr("llm.local_setup_recovery.resume_pending_setup", resumed)
+    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
-    monkeypatch.setattr("llm.local_setup_upgrade.done_path", lambda: SimpleNamespace(exists=lambda: True))
-    monkeypatch.setattr("llm.local_setup_runtime.retire_legacy_setup_omlx_rows", lambda: calls.append("retire"))
-    monkeypatch.setattr(local_setup_upgrade, "start_upgrade", lambda: calls.append("upgrade"))
+
+
 
     await app_startup_runtime.resume_local_setup()
 
-    assert calls == ["retire", "backfill", "resume", "notice", "upgrade"]
+    assert calls == ["backfill", "resume", "notice"]
 
 
 @pytest.mark.asyncio
@@ -114,8 +113,8 @@ async def test_manual_loopback_row_survives_startup_retirement_after_upgrade(iso
     import app_startup_runtime
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
-    from llm import local_model, local_setup_upgrade
-    from llm.local_setup_ownership import marker_path
+    from llm import local_model
+    from llm.managed_omlx_binary import marker_path
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     marker_path().write_text("legacy\n", encoding="utf-8")
@@ -132,30 +131,15 @@ async def test_manual_loopback_row_survives_startup_retirement_after_upgrade(iso
         return None
 
     monkeypatch.setattr(local_model, "backfill_legacy_record", lambda: None)
-    monkeypatch.setattr("llm.local_setup_recovery.resume_pending_setup", resumed)
+    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
-    monkeypatch.setattr("llm.local_setup_upgrade.done_path", lambda: SimpleNamespace(exists=lambda: True))
-    monkeypatch.setattr(local_setup_upgrade, "start_upgrade", lambda: None)
+
+
 
     await app_startup_runtime.resume_local_setup()
 
     assert (await run_in_db(discovery.get_server, manual))["status"] == "online"
 
-
-def test_legacy_service_migrates_only_after_ownership_proof(monkeypatch) -> None:
-    from llm import local_setup_ownership as ownership
-
-    commands: list[list[str]] = []
-    monkeypatch.setattr(ownership, "legacy_setup_owns_current_omlx", lambda: True)
-    monkeypatch.setattr(ownership.shutil, "which", lambda name: "/brew" if name == "brew" else None)
-    monkeypatch.setattr(ownership, "run_command", lambda command: commands.append(command))
-
-    assert ownership.retire_legacy_owned_omlx_service() is True
-    assert commands == [["/brew", "services", "stop", ownership.OMLX_FORMULA]]
-
-    monkeypatch.setattr(ownership, "legacy_setup_owns_current_omlx", lambda: False)
-    assert ownership.retire_legacy_owned_omlx_service() is False
-    assert commands == [["/brew", "services", "stop", ownership.OMLX_FORMULA]]
 
 
 def _model_row(model_id: str, litellm_model: str, provider_model_id: str) -> None:
@@ -203,7 +187,7 @@ def _add_through_settings(monkeypatch, hostname: str) -> str:
 
 def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, monkeypatch, tmp_path) -> None:
     from llm import catalog, network_discovery as discovery
-    from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
+
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     lan = _add_through_settings(monkeypatch, "192.168.1.20")
@@ -213,7 +197,7 @@ def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, 
     _model_row("lan-model", f"omlx@{lan}/someone/model", "someone/model")
     _model_row("local-model", f"omlx@{local}/someone/local", "someone/local")
 
-    assert retire_legacy_setup_omlx_rows() == []
+
 
     assert discovery.get_server(lan)["status"] == "online"
     assert catalog.get_model("lan-model")["id"] == "lan-model"
@@ -221,40 +205,6 @@ def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, 
     assert discovery.get_server(local)["status"] == "online"
     assert catalog.is_valid_model_choice(f"omlx@{local}/someone/local") is True
 
-
-def test_only_the_marker_gated_legacy_fingerprint_retires(monkeypatch, tmp_path) -> None:
-    from llm.local_setup_managed import is_retired_local_omlx
-    from llm.local_setup_ownership import marker_path
-    from llm.local_setup_runtime import LOCAL_SERVER_NAME
-
-    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    row = {
-        "provider": "omlx", "kind": "managed", "source": "manual",
-        "instance_id": "127.0.0.1:8000", "instance_name": LOCAL_SERVER_NAME,
-    }
-    assert not is_retired_local_omlx(row)
-    marker_path().write_text("legacy\n", encoding="utf-8")
-    assert is_retired_local_omlx(row)
-    assert not is_retired_local_omlx({**row, "instance_name": "Studio"})
-    assert not is_retired_local_omlx({**row, "instance_id": "127.0.0.1:9999"})
-
-
-@pytest.mark.parametrize("record", ["own-omlx-management.json", "own-omlx-use-mine"])
-def test_use_mine_adopted_row_retires_on_its_own_port(monkeypatch, tmp_path, record) -> None:
-    from llm.local_setup_managed import is_retired_local_omlx
-    from llm.local_setup_runtime import LOCAL_SERVER_NAME
-
-    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    adopted = {
-        "provider": "omlx", "kind": "managed", "source": "manual",
-        "instance_id": "127.0.0.1:10240", "instance_name": LOCAL_SERVER_NAME,
-    }
-    hand_added = {**adopted, "instance_name": "My oMLX"}
-    assert not is_retired_local_omlx(adopted)
-    (tmp_path / record).write_text("{}", encoding="utf-8")
-    assert is_retired_local_omlx(adopted)
-    assert not is_retired_local_omlx(hand_added)
-    assert not is_retired_local_omlx({**adopted, "instance_id": "192.168.1.20:10240"})
 
 
 @pytest.mark.parametrize("row", [
@@ -265,15 +215,15 @@ def test_use_mine_adopted_row_retires_on_its_own_port(monkeypatch, tmp_path, rec
     {"provider": "omlx", "kind": "managed", "instance_id": "corsia-managed"},
     {"provider": "ollama", "kind": "managed", "instance_id": "127.0.0.1:11434"},
 ])
-def test_remote_external_and_own_rows_stay(row) -> None:
-    from llm.local_setup_managed import is_retired_local_omlx
+def test_unproven_rows_are_not_claimed(row) -> None:
+    from llm.managed_omlx_binary import is_corsia_managed_server
 
-    assert not is_retired_local_omlx(row)
+    assert not is_corsia_managed_server(row)
 
 
 def test_only_state_root_row_is_corsia_managed() -> None:
     from infra.config import STATE_ROOT
-    from llm.local_setup_managed import is_corsia_managed_server
+    from llm.managed_omlx_binary import is_corsia_managed_server
 
     base = STATE_ROOT / "managed-omlx"
     row = {
@@ -297,7 +247,7 @@ _PS = "  101  1 /opt/homebrew/opt/omlx/bin/omlx serve --port 8000\n"
 
 
 def _fake_commands(monkeypatch, *, launchctl_list: str, record: list[list[str]]) -> None:
-    from llm import local_setup_managed as managed
+    from llm import managed_omlx_binary as managed
 
     def run(command, **_kwargs):
         record.append(list(command))
@@ -315,11 +265,11 @@ def _fake_commands(monkeypatch, *, launchctl_list: str, record: list[list[str]])
         "pid": 101, "ppid": 1, "name": "Python", "cmdline": _PS.split()[2:],
         "uids": SimpleNamespace(real=501), "status": "running",
     })])
-    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
+
 
 
 def test_stop_mine_boots_out_a_launchd_job_for_this_session_only(monkeypatch) -> None:
-    from llm import local_setup_foreign as foreign, local_setup_managed as managed
+    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
 
     commands: list[list[str]] = []
     _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n101\t0\thomebrew.mxcl.omlx\n", record=commands)
@@ -335,7 +285,7 @@ def test_stop_mine_boots_out_a_launchd_job_for_this_session_only(monkeypatch) ->
 
 
 def test_stop_mine_signals_a_plain_process(monkeypatch) -> None:
-    from llm import local_setup_foreign as foreign, local_setup_managed as managed
+    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
 
     commands: list[list[str]] = []
     signals: list[tuple[int, int]] = []
@@ -350,7 +300,7 @@ def test_stop_mine_signals_a_plain_process(monkeypatch) -> None:
 
 
 def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch) -> None:
-    from llm import local_setup_foreign as foreign, local_setup_managed as managed
+    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
 
     signals: list[int] = []
 
@@ -365,7 +315,7 @@ def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch
         "pid": 101, "ppid": 1, "name": "Python", "cmdline": _PS.split()[2:],
         "uids": SimpleNamespace(real=501), "status": "running",
     })])
-    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
+
     monkeypatch.setattr(foreign.os, "kill", lambda pid, _sig: signals.append(pid))
 
     processes = managed.foreign_omlx_processes()
@@ -374,18 +324,29 @@ def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch
     assert signals == [101]
 
 
-def test_corsias_own_legacy_service_is_not_a_foreign_omlx(monkeypatch) -> None:
-    from llm import local_setup_foreign as foreign, local_setup_managed as managed
-
-    _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n101\t0\thomebrew.mxcl.omlx\n", record=[])
-    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: 8000)
-    assert managed.foreign_omlx_processes() == ()
-    assert foreign.apply_foreign_omlx_choice() is None
-
-
-def test_legacy_ownership_runs_nothing_without_the_marker(monkeypatch, tmp_path) -> None:
-    from llm import local_setup_ownership as ownership
+def test_legacy_brew_service_is_offered_as_another_omlx(monkeypatch, tmp_path) -> None:
+    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    monkeypatch.setattr(ownership, "installed_omlx", lambda: pytest.fail("must not run oMLX"))
-    assert ownership.legacy_setup_owns_current_omlx() is False
+    (tmp_path / "local_setup_installed_omlx").write_text("legacy\n")
+    _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n101\t0\thomebrew.mxcl.omlx\n", record=[])
+    processes = managed.foreign_omlx_processes()
+    assert processes is not None and [p.pid for p in processes] == [101]
+    assert foreign.apply_foreign_omlx_choice() == "consent_required"
+
+
+def test_stop_child_omlx_never_unloads_its_parent_app(monkeypatch) -> None:
+    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
+
+    commands, signals = [], []
+    _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n99\t0\tcom.example.editor\n", record=commands)
+    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [SimpleNamespace(info={
+        "pid": 101, "ppid": 99, "name": "omlx", "cmdline": _PS.split()[2:],
+        "uids": SimpleNamespace(real=501), "status": "running",
+    })])
+    monkeypatch.setattr(foreign.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+    processes = managed.foreign_omlx_processes()
+    assert processes is not None and processes[0].label is None
+    assert foreign.stop_foreign_omlx_processes(processes) == "stopped"
+    assert signals == [(101, 15)]
+    assert not any(command[:2] == ["launchctl", "bootout"] for command in commands)

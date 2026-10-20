@@ -26,6 +26,7 @@ APP_FACT_KEYS = frozenset({
 })
 UNAVAILABLE_READS = {
     "your_model": "none; omit task 1's bracket",
+    "bound_model": "none; treat the bound model as unknown",
     "model_sources": "tool model_sources, once, without recheck",
     "mcp_sources": "corsia_api GET /api/mcp/sources",
     "setup": "setup_decisions.read_facts once, without web search",
@@ -223,6 +224,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
     from llm.local_setup_foreign import foreign_omlx_answer
 
     reads = await _read_facts({
+        "bound_model": lambda: run_in_db(_bound_model, model),
         "model_sources": lambda: run_in_db(_model_sources),
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
@@ -255,7 +257,6 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         tool_attempts = _unavailable("tool_attempts")
     else:
         tool_attempts = None
-    bound_model = _bound_model(model)
     return {
         "first_run_path": "app",
         "harness_ready": harness_ready,
@@ -264,7 +265,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "local_download": reads["local_download"],
         "tool_attempts": tool_attempts,
         "other_omlx": reads["other_omlx"],
-        "bound_model": bound_model,
+        "bound_model": reads["bound_model"],
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,
         "setup": reads["setup"],

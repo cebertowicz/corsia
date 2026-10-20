@@ -115,6 +115,7 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
     host_ram_bytes.cache_clear()
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", mac.omlx.admin_request)
     monkeypatch.setattr(llm.local_setup_new_omlx, "start_managed_omlx", start)
+    monkeypatch.setattr("llm.local_setup_prepare.start_managed_omlx", start)
     # start_managed_omlx owns the managed process lifecycle and supplies its port above.
     monkeypatch.setattr(local_setup, "_download", download)
     monkeypatch.setattr("llm.local_setup_runtime.wait_for_health", health)

@@ -7,8 +7,7 @@ starts that oMLX the same way setup does, then asks its recommender
 or asks itself; it never downloads without a pick. One in-process record holds
 the state, so a server restart returns it to not checked.
 
-The flight state and the oMLX calls live in ``local_setup``; they are read
-through the module at call time so one set of names is patched and observed.
+Flight state is read through its owner; runtime operations live in local_setup_runtime.
 """
 
 from __future__ import annotations
@@ -20,6 +19,8 @@ from dataclasses import dataclass, field
 from llm import local_model
 from llm.local_model import LocalModel, PickUnavailable
 from llm.local_profiles import STARTER_MODEL
+from llm.local_setup_gates import local_memory_ok
+from llm.local_setup_runtime import start_managed_omlx
 from llm.local_setup_results import failure_message
 
 log = logging.getLogger(__name__)
@@ -88,10 +89,10 @@ def _view(state: str, model: LocalModel | None = None, message: str | None = Non
 
 
 def _fail(exc: Exception) -> None:
-    from api.cli_install import new_reference
+    from infra.failure_reference import new_reference
     from llm.local_setup_results import failure_cause
 
-    ref = new_reference()
+    ref = new_reference("local")
     cause = failure_cause(exc)
     log.warning("Local model prepare failed reference=%s cause=%s", ref, cause, exc_info=exc)
     _settle(FAILED, message=failure_message(exc), cause=cause, ref=ref)
@@ -124,7 +125,7 @@ async def pick_view() -> dict:
     """What Welcome's local row shows: the state, the picked model, and why there is none."""
     from llm import local_setup as ls
 
-    if not await asyncio.to_thread(ls.local_memory_ok):
+    if not await asyncio.to_thread(local_memory_ok):
         return _view(LOW_MEMORY)
     flying = ls.flight_model()
     if flying is not None:
@@ -202,9 +203,6 @@ async def stop_prepare() -> dict:
 
 
 async def _run() -> None:
-    from llm import local_setup as ls
-    from llm.local_setup_new_omlx import start_managed_omlx
-
     try:
         server_id, port = await start_managed_omlx(lambda _stage: None)
         _prepare.server_id = server_id
@@ -231,8 +229,6 @@ async def ask(server_id: str, port: int) -> LocalModel:
     ``local_profiles.json`` (the one list CORSIA keeps) and the view says so.
     ``PickUnavailable`` (or oMLX's health failure) means it could not answer.
     """
-    from llm import local_setup as ls
-
     _settle(CHECKING)
     try:
         try:

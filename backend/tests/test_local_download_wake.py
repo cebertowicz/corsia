@@ -90,7 +90,7 @@ async def test_local_setup_caller_passes_its_ref_keyword_to_the_durable_hook(mon
     monkeypatch.setattr("onboarding.local_download_wake.notify_terminal_setup_download", called)
     monkeypatch.setattr(local_setup.local_setup_operation, "read", lambda: SimpleNamespace(task_id="flight-3"))
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(
-        kind="setup", model=LocalModel("qwen", 1024, 2048), downloaded=True,
+        kind="setup", onboarding=True, model=LocalModel("qwen", 1024, 2048), downloaded=True,
     ))
 
     await local_setup._notify_terminal_setup_download({"ok": False, "cause": "connection", "ref": "local-17"})
@@ -108,26 +108,26 @@ async def test_local_setup_caller_passes_its_ref_keyword_to_the_durable_hook(mon
 
 @pytest.mark.parametrize("error", [ImportError("port unavailable"), RuntimeError("connection dropped")])
 def test_flight_failure_cause_does_not_match_error_text(error):
-    from llm import local_setup
+    from llm.local_setup_results import failure_cause
 
-    assert local_setup._failure_cause(error) == "other"
+    assert failure_cause(error) == "other"
 
 
 @pytest.mark.asyncio
 async def test_failure_reference_matches_the_rail_and_log(monkeypatch, caplog):
-    from llm import local_setup
+    from llm import local_setup, local_setup_new_omlx as flow
     from onboarding import local_download_state
 
     async def failed_setup(*_args, **_kwargs):
         raise RuntimeError("setup refused")
 
     notify = AsyncMock()
-    monkeypatch.setattr(local_setup, "_setup_new_omlx", failed_setup)
+    monkeypatch.setattr(flow, "_setup_new_omlx", failed_setup)
     monkeypatch.setattr(local_setup, "_notify_terminal_setup_download", notify)
     monkeypatch.setattr(local_setup, "_emit", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind="setup"))
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind="setup", onboarding=True))
 
-    result = await local_setup._run_flight()
+    result = await flow._run_flight()
     rail = local_download_state.current()
 
     assert rail["state"] == "setup_failed"
@@ -141,7 +141,7 @@ async def test_stopped_following_produces_no_terminal_wake(monkeypatch):
 
     called = AsyncMock()
     monkeypatch.setattr("onboarding.local_download_wake.notify_terminal_setup_download", called)
-    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind="setup"))
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind="setup", onboarding=True))
 
     await local_setup._notify_terminal_setup_download({"ok": True, "downloading": True})
 
@@ -154,11 +154,24 @@ async def test_pre_download_failure_is_setup_failed(monkeypatch):
 
     called = AsyncMock(return_value=False)
     monkeypatch.setattr("onboarding.local_download_wake.notify_terminal_setup_download", called)
-    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind="setup"))
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind="setup", onboarding=True))
 
     await local_setup._notify_terminal_setup_download({"ok": False, "pre_download": True, "cause": "other"})
 
     assert called.await_args.args == ("local-model", "setup_failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["setup", "settings"])
+async def test_later_downloads_never_wake_onboarding(monkeypatch, kind):
+    from llm import local_setup
+
+    called = AsyncMock()
+    monkeypatch.setattr("onboarding.local_download_wake.notify_terminal_setup_download", called)
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(kind=kind, onboarding=False))
+    await local_setup._notify_terminal_setup_download({"ok": True})
+    await local_setup._notify_terminal_setup_download({"ok": False, "pre_download": True})
+    called.assert_not_awaited()
 
 
 @pytest.mark.parametrize("cause", ["connection", "disk_full", "memory", "other"])

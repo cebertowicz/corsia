@@ -164,7 +164,7 @@ def test_signed_in_omlx_source_projects_the_same_terminal_flight_as_local_downlo
 
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(result=result, downloaded=downloaded))
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
-    monkeypatch.setattr(local_sources, "installed_omlx", lambda: None)
+    monkeypatch.setattr(local_sources, "omlx_on_path", lambda: None)
 
     rail = client.get("/api/setup/local-download", headers=HOST)
     assert rail.status_code == 200
@@ -188,7 +188,7 @@ def test_settings_flight_never_projects_local_download_fields(monkeypatch):
         kind="settings", result={"ok": False, "cause": "other", "ref": "settings-42"},
     ))
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
-    monkeypatch.setattr(local_sources, "installed_omlx", lambda: None)
+    monkeypatch.setattr(local_sources, "omlx_on_path", lambda: None)
 
     source = local_sources.omlx_source((set(), set()))
 
@@ -201,7 +201,7 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
     started = AsyncMock(return_value={"ok": True})
     choice = Mock(side_effect=["consent_required", None, None])
     monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", choice)
-    monkeypatch.setattr("llm.local_setup.begin_local_setup", started)
+    monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", started)
 
     assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
     kept = client.post("/api/setup/local-download", json={"other_omlx": "keep"}, headers=JSON_HEADERS)
@@ -214,6 +214,7 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
         call(other_omlx="stop"),
     ]
     assert started.await_count == 2
+    assert started.await_args_list == [call(onboarding=True), call(onboarding=True)]
 
 
 def test_before_an_account_only_the_local_choice_is_taken(client):

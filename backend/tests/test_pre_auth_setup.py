@@ -166,7 +166,7 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
     def forbidden(*_args, **_kwargs):
         pytest.fail("polling must not inspect processes")
 
-    monkeypatch.setattr("llm.local_setup_managed.foreign_omlx_processes", forbidden)
+    monkeypatch.setattr("llm.managed_omlx_binary.foreign_omlx_processes", forbidden)
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
@@ -180,17 +180,18 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
 
 
 def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_exists(client, monkeypatch):
-    from llm import local_setup
+    from llm import local_setup_new_omlx as flow
 
     monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     calls = 0
 
-    async def begin_local_setup():
+    async def begin_local_setup(*, onboarding):
+        assert onboarding is True
         nonlocal calls
         calls += 1
         return {"ok": True, "in_progress": True, "stage": "Installing"}
 
-    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+    monkeypatch.setattr(flow, "begin_local_setup", begin_local_setup)
     first = _post(client, "/api/setup/local-download")
     second = _post(client, "/api/setup/local-download")
     assert first.status_code == second.status_code == 200
@@ -199,30 +200,31 @@ def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_e
 
 
 def test_local_download_continues_when_process_inspection_is_unknown(client, monkeypatch, caplog):
-    from llm import local_setup, local_setup_foreign
+    from llm import local_setup_new_omlx as flow, local_setup_foreign
 
     monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: None)
 
-    async def begin_local_setup():
+    async def begin_local_setup(*, onboarding):
+        assert onboarding is True
         return {"ok": True, "in_progress": True}
 
-    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+    monkeypatch.setattr(flow, "begin_local_setup", begin_local_setup)
     response = _post(client, "/api/setup/local-download")
 
     assert response.status_code == 200
     assert response.json() == {"ok": True, "in_progress": True}
-    assert "continuing without stopping reference=cli-" in caplog.text
+    assert "continuing without stopping reference=local-" in caplog.text
 
 
 def test_local_download_requires_explicit_choice_before_foreign_omlx_action(client, monkeypatch):
-    from llm import local_setup
+    from llm import local_setup_new_omlx as flow
 
     monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", lambda **_kwargs: "consent_required")
 
     async def should_not_start():
         raise AssertionError("setup must wait for the person's foreign-process choice")
 
-    monkeypatch.setattr(local_setup, "begin_local_setup", should_not_start)
+    monkeypatch.setattr(flow, "begin_local_setup", should_not_start)
     response = _post(client, "/api/setup/local-download")
 
     assert response.status_code == 409
@@ -230,17 +232,18 @@ def test_local_download_requires_explicit_choice_before_foreign_omlx_action(clie
 
 
 def test_local_download_stops_only_the_identified_foreign_process_after_choice(client, monkeypatch):
-    from llm import local_setup
+    from llm import local_setup_new_omlx as flow
 
     choices: list[str | None] = []
     monkeypatch.setattr(
         setup_api, "apply_foreign_omlx_choice",
         lambda **kwargs: choices.append(kwargs["other_omlx"]) or None,
     )
-    async def begin_local_setup():
+    async def begin_local_setup(*, onboarding):
+        assert onboarding is True
         return {"ok": True, "in_progress": True}
 
-    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+    monkeypatch.setattr(flow, "begin_local_setup", begin_local_setup)
 
     keep_running = _post(client, "/api/setup/local-download", {"other_omlx": "keep"})
     stop_foreign = _post(client, "/api/setup/local-download", {"other_omlx": "stop"})

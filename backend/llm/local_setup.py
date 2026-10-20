@@ -1,87 +1,25 @@
-"""Canonical local-model setup: one flight that installs the local model oMLX picks.
+"""The sole owner of the local-model setup flight and its lifecycle.
 
-The model is the managed oMLX recommender's pick (``local_model``), taken while
-Welcome is open (``local_setup_prepare``) or by the flight itself; nothing
-downloads without one. One explicit setup action makes at most one new oMLX
-HF-download request. oMLX
-owns the persisted download task. The backend server is the only owner of a
-setup flight: one in-process record holds the running task, its stage and the
-last terminal result, so a server restart ends the flight and clears the result.
+Orchestrators call named operations here; no caller receives mutable flight state.
+oMLX owns its persisted download task, while the adjacent operation record keeps
+its model, origin and task id so a backend restart can follow the same download.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
-from typing import Any, Callable, IO
+from typing import Any, Callable, Coroutine, IO
 
+from llm import local_setup_download, local_setup_operation
 from llm.local_model import LocalModel
-from llm.local_setup_gates import host_ram_bytes, local_memory_ok  # noqa: F401  (patched through this module)
-from llm.local_setup_gates import limited_subscription_message as _limited_subscription_message
-from llm.local_setup_gates import subscription_available as _subscription_available
-from llm.local_setup_results import failure_message as _failure_message, failure_cause as _failure_cause
-from llm.local_setup_results import SETUP_COMMAND, local_setup_error
-# Re-exported: the flight modules and their tests reach these through this module.
-from llm.local_setup_auth import (  # noqa: F401
-    SKIP_AUTH_SETTING,
-    UPDATE_OMLX_MESSAGE,
-    _omlx_supports_loopback_auth,
-    omlx_version,
-    registered_local_key,
-    secure_local_omlx,
-)
-from llm.local_setup_ownership import ensure_omlx as _ensure_omlx
-from llm.local_setup_disk import DiskSpaceError, require_free_disk
-from llm.local_setup_ownership import run_command as _run
 from llm.local_profiles import format_size
-from llm import local_setup_cancel, local_setup_download, local_setup_operation
-from llm.local_setup_download import (
-    DOWNLOAD_BACKGROUND_POLL_SECONDS,
-    DOWNLOAD_FOLLOW_SECONDS,
-    DOWNLOAD_POLL_SECONDS,
-    DOWNLOAD_WAIT_SECONDS,
-    StillDownloading,
-)
-from llm.local_setup_runtime import (
-    HEALTH_WAIT_SECONDS,
-    LOCAL_HOST,
-    LOCAL_SERVER_NAME,
-    configure_global as _configure_global,
-    configure_model_settings as _configure_model_settings,
-    omlx_answers as _omlx_answers,
-)
+from llm.local_setup_disk import require_free_disk
 
 EVENT_CATEGORY = "local_setup"
-CAUSES = frozenset({"connection", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
 log = logging.getLogger(__name__)
-
-
-async def _wait_for_download(
-    server_id: str, progress: Callable[[str], None], model: LocalModel,
-) -> None:
-    """Follow oMLX's persisted download task using this flight's live state."""
-    await local_setup_download.wait_for_download(
-        server_id, progress, model, record_task=_record_download_task, flight=_flight,
-        wait_seconds=DOWNLOAD_WAIT_SECONDS, poll_seconds=DOWNLOAD_POLL_SECONDS,
-        background_poll_seconds=DOWNLOAD_BACKGROUND_POLL_SECONDS,
-        follow_seconds=DOWNLOAD_FOLLOW_SECONDS,
-    )
-
-
-async def _download_dir(server_id: str):
-    return await local_setup_download.download_dir(server_id)
-
-
-async def _download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
-    """Check the disk oMLX downloads to, then request and follow the model's download."""
-    _flight.server_id = server_id
-    _flight.download_eta_seconds = None
-    _flight.download_stalled = False
-    model_dir = await _download_dir(server_id)
-    await asyncio.to_thread(require_free_disk, model.download_size_bytes, model_dir, model.repository)
-    report(f"Downloading {model.model} ({format_size(model.download_size_bytes)})")
-    await _wait_for_download(server_id, report, model)
 
 
 @dataclass
@@ -89,11 +27,11 @@ class _Flight:
     task: asyncio.Task | None = None
     stage: str | None = None
     result: dict | None = None
-    # The model this flight downloads, once it is picked or resumed.
     model: LocalModel | None = None
     downloaded: bool = False
     following: bool = False
     kind: str | None = None
+    onboarding: bool = False
     server_id: str | None = None
     download_eta_seconds: int | None = None
     download_stalled: bool = False
@@ -112,12 +50,8 @@ def _release_operation_lock() -> None:
     _flight.operation_lock = None
 
 
-def _claim_operation(kind: str, model: LocalModel | None = None) -> bool:
-    """Exclusively own one flight; persist its model now when it is already known.
-
-    A flight that still has to pick persists its model once it has one
-    (``_record_model``), before it can request a download.
-    """
+def _claim_operation(kind: str, model: LocalModel | None = None, *, onboarding: bool = False) -> bool:
+    """Claim the sole operation before starting work; never overwrite a persisted task."""
     lock = local_setup_operation.try_lock()
     if lock is None:
         return False
@@ -126,75 +60,150 @@ def _claim_operation(kind: str, model: LocalModel | None = None) -> bool:
             local_setup_operation.unlock(lock)
             return False
         if model is not None:
-            local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind))
+            local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind, onboarding=onboarding))
     except Exception:
         local_setup_operation.unlock(lock)
         raise
     _flight.operation_lock = lock
-    _flight.kind = kind
-    _flight.model = model
+    _flight.kind, _flight.model, _flight.onboarding = kind, model, onboarding
     _flight.downloaded = False
     return True
 
 
 def _record_model(model: LocalModel) -> None:
-    """Persist the picked model so a restarted backend resumes this flight's download."""
-    local_setup_operation.write(local_setup_operation.Operation.for_model(model, _flight.kind or "setup"))
+    """Persist the pick before any request to download it."""
+    local_setup_operation.write(local_setup_operation.Operation.for_model(
+        model, _flight.kind or "setup", onboarding=_flight.onboarding,
+    ))
     _flight.model = model
 
 
 def _record_download_task(model: LocalModel, task_id: str) -> None:
     operation = local_setup_operation.read()
-    if operation is None or operation.repository != model.repository:
-        return
-    local_setup_operation.write(local_setup_operation.Operation.for_model(model, operation.kind, task_id))
+    if operation is not None and operation.repository == model.repository:
+        local_setup_operation.write(local_setup_operation.Operation.for_model(
+            model, operation.kind, task_id, onboarding=operation.onboarding,
+        ))
+
+
+def start_flight(work: Coroutine[Any, Any, dict], stage: str, *,
+                 operation: local_setup_operation.Operation | None = None) -> None:
+    """Start claimed work, or restore the exact persisted flight for recovery."""
+    if operation is not None:
+        _flight.kind, _flight.model = operation.kind, operation.model
+        _flight.onboarding = operation.onboarding
+        _flight.downloaded = False
+    _flight.result, _flight.stage = None, stage
+    _flight.following = False
+    _flight.server_id = None
+    _flight.download_eta_seconds, _flight.download_stalled = None, False
+    _flight.task = asyncio.create_task(work)
+    _flight.task.add_done_callback(_observe_setup_task)
+    _flight.task.add_done_callback(lambda _task: _notify_models_changed())
+
+
+async def wait_for_operation() -> None:
+    """Hold the persisted operation's advisory lock before resuming its work."""
+    if _flight.operation_lock is None:
+        _flight.operation_lock = await local_setup_operation.wait_for_lock()
+
+
+def report_stage(stage: str) -> None:
+    """Publish the current stage from setup or Settings work."""
+    _flight.stage = stage
+    _notify_models_changed()
+
+
+def record_downloaded() -> None:
+    """Record that the download completed before settings or discovery can fail."""
+    _flight.downloaded = True
+
+
+def clear_result() -> None:
+    """Clear the preceding terminal result when a new request is decided."""
+    _flight.result = None
+
+
+def finish_flight(result: dict) -> dict:
+    """Publish a terminal result and release ownership, keeping unfinished downloads resumable."""
+    _flight.result, _flight.stage, _flight.following = result, None, False
+    if not result.get("downloading"):
+        local_setup_operation.clear()
+    _release_operation_lock()
+    return result
+
+
+def _download_progress(eta_seconds: int | None, stalled: bool, following: bool) -> None:
+    _flight.download_eta_seconds, _flight.download_stalled = eta_seconds, stalled
+    _flight.following = following
+
+
+async def _download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
+    """Check disk space, then follow one persisted oMLX download without sharing flight state."""
+    _flight.server_id = server_id
+    _download_progress(None, False, False)
+    model_dir = await local_setup_download.download_dir(server_id)
+    await asyncio.to_thread(require_free_disk, model.download_size_bytes, model_dir, model.repository)
+    report(f"Downloading {model.model} ({format_size(model.download_size_bytes)})")
+    await _wait_for_download(server_id, report, model)
+
+
+async def _wait_for_download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
+    await local_setup_download.wait_for_download(
+        server_id, report, model, record_task=_record_download_task, on_progress=_download_progress,
+        wait_seconds=local_setup_download.DOWNLOAD_WAIT_SECONDS,
+        follow_seconds=local_setup_download.DOWNLOAD_FOLLOW_SECONDS,
+        poll_seconds=local_setup_download.DOWNLOAD_POLL_SECONDS,
+        background_poll_seconds=local_setup_download.DOWNLOAD_BACKGROUND_POLL_SECONDS,
+    )
+
+
+def flight_task() -> asyncio.Task | None:
+    """The owned task for lifespan shutdown to cancel and join."""
+    return _flight.task
+
+
+def selected_model() -> LocalModel | None:
+    """The model retained by the current or last flight."""
+    return _flight.model
 
 
 def flight_model() -> LocalModel | None:
-    """The model the running flight downloads, else None."""
+    """The running flight's model, if picked."""
     return _flight.model if _running() else None
 
 
 def setup_stage() -> str | None:
-    """The running flight's current stage, else None."""
+    """The current stage while work is running."""
     return (_flight.stage or "Setting up local model") if _running() else None
 
 
 def setup_kind() -> str | None:
-    """Which flight the record is, else None.
-
-    "starter" is the app's add-the-default-model download into the person's own oMLX
-    (``begin_add_starter_model``); "setup" is every other flight. Both are wire values.
-    """
+    """The wire kind: setup, starter or settings."""
     return _flight.kind
 
 
 def setup_failure() -> dict | None:
-    """The last flight's result when it failed, else None."""
+    """The last failed result, if any."""
     result = _flight.result
     return result if result and not result.get("ok") else None
 
 
 def setup_stopped_following() -> dict | None:
-    """The last flight's result when CORSIA stopped following a download oMLX still runs."""
+    """The last unfinished download whose follow window ended."""
     result = _flight.result
     return result if result and result.get("downloading") else None
 
 
 def download_estimate() -> tuple[int | None, bool]:
-    """The live download ETA, or its stalled state, from the one setup flight."""
+    """The current ETA and stalled flag."""
     return _flight.download_eta_seconds, _flight.download_stalled
 
 
-async def cancel_local_setup() -> dict:
-    return await local_setup_cancel.cancel_setup(_flight, notify=_notify_models_changed, emit=_emit)
-
-
 def setup_status() -> dict[str, Any]:
-    """Bounded live state for setup and first-run download presentation."""
-    result = _flight.result
-    model = _flight.model
-    stage = setup_stage() if _running() else None
+    """Bounded live state for setup and the first-run download rail."""
+    result, model = _flight.result, _flight.model
+    stage = setup_stage()
     if _running():
         state = "downloading" if model is not None else "starting"
     elif result is None:
@@ -202,19 +211,12 @@ def setup_status() -> dict[str, Any]:
     elif result.get("downloading"):
         state = "downloading"
     else:
-        # Success follows a completed catalog refresh, so this model is usable.
         state = ("ready" if result.get("ok") else "setup_failed" if result.get("pre_download")
                  else "start_failed" if _flight.downloaded else "failed")
-    percent = None
-    if stage:
-        import re
-
-        match = re.search(r"(\d{1,3})%", stage)
-        percent = min(100, int(match.group(1))) if match else None
+    match = re.search(r"(\d{1,3})%", stage) if stage else None
     return {
-        "state": state,
-        "model": model.repository if model else None,
-        "percent": percent,
+        "state": state, "model": model.repository if model else None,
+        "percent": min(100, int(match.group(1))) if match else None,
         "eta_seconds": _flight.download_eta_seconds,
         "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
@@ -244,7 +246,6 @@ def _skipped(reason: str, message: str) -> dict:
 
 
 def _observe_setup_task(task: asyncio.Task) -> None:
-    """Retrieve a finished flight's exception so none goes unobserved."""
     if not task.cancelled() and task.exception() is not None:
         log.error("Local setup task ended with an error", exc_info=task.exception())
 
@@ -256,16 +257,12 @@ def _notify_models_changed() -> None:
 
 
 async def _notify_terminal_setup_download(result: dict) -> None:
-    """Wake first-run chat only when a setup download has reached an outcome."""
-    if _flight.kind != "setup" or result.get("downloading"):
+    """Wake onboarding only for a flight explicitly begun by onboarding."""
+    if not _flight.onboarding or _flight.kind != "setup" or result.get("downloading"):
         return
     model = _flight.model
-    if result.get("ok"):
-        outcome = "ready"
-    elif result.get("pre_download"):
-        outcome = "setup_failed"
-    else:
-        outcome = "start_failed" if _flight.downloaded else "failed"
+    outcome = ("ready" if result.get("ok") else "setup_failed" if result.get("pre_download")
+               else "start_failed" if _flight.downloaded else "failed")
     operation = local_setup_operation.read()
     flight_id = (operation.task_id if operation else None) or (model.repository if model else "local-model")
     try:
@@ -273,120 +270,41 @@ async def _notify_terminal_setup_download(result: dict) -> None:
 
         await notify_terminal_setup_download(
             flight_id, outcome, model=model.repository if model else None,
-            cause=result.get("cause"), ref=result.get("ref"),
-            bytes_to_free=result.get("bytes_to_free"),
+            cause=result.get("cause"), ref=result.get("ref"), bytes_to_free=result.get("bytes_to_free"),
         )
     except Exception:
         log.exception("Couldn't notify first-run chat of terminal local setup download")
 
 
-async def _run_flight(*, model: LocalModel | None = None,
-                      on_stage: Callable[[str], None] | None = None) -> dict:
-    """Run the one setup flight against CORSIA's managed oMLX process."""
-    events: list[str] = []
-
-    def report(stage: str) -> None:
-        _flight.stage = stage
-        _notify_models_changed()
-        events.append(stage)
-        if on_stage is not None:
-            on_stage(stage)
-
-    _flight.following = False
-    try:
-        result = await _setup_new_omlx(report, events, model)
-    except asyncio.CancelledError:
-        _release_operation_lock()
-        raise
-    except StillDownloading:
-        result = {**_stopped_following(_flight.model, events), "next_action": f"Run `{SETUP_COMMAND}` to follow it again."}
-    except Exception as exc:
-        from api.cli_install import new_reference
-
-        cause = _failure_cause(exc)
-        ref = new_reference()
-        log.exception("Local setup failed reference=%s cause=%s", ref, cause)
-        result = {
-            **local_setup_error(_failure_message(exc)), "progress": events,
-            "cause": cause, "ref": ref,
-            "pre_download": _flight.model is None,
-        }
-        if isinstance(exc, DiskSpaceError):
-            result["bytes_to_free"] = exc.bytes_to_free
-        _emit("failed", cause=cause, ref=ref)
-    await _notify_terminal_setup_download(result)
-    return local_setup_operation.finish(_flight, result)
-
-
 def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
-    """The result when the follow window ended while oMLX keeps downloading (setup and Settings)."""
     _emit("downloading_stopped", model=model.repository if model else None)
     name = model.display_name if model else "The local model"
-    return {
-        "ok": True, "downloading": True,
-        "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.",
-        "progress": events,
-    }
+    return {"ok": True, "downloading": True,
+            "message": f"{name} is still downloading in oMLX; CORSIA stopped following it.", "progress": events}
 
 
-def flight_task() -> asyncio.Task | None:
-    """The flight's task for lifespan shutdown to cancel and join, else None."""
-    return _flight.task
+async def cancel_local_setup() -> dict:
+    """Cancel exactly the owned download task and publish cancellation once."""
+    from llm.providers.omlx_endpoints import admin_request
 
-
-async def begin_local_setup(
-    *,
-    no_subscription_only: bool = False,
-    automatic: bool = False,
-) -> dict:
-    """Start the one setup flight without blocking the caller, or say why not.
-
-    Memory and the subscription are each decided once, here; the model is picked
-    by the flight (or was, by prepare). A request made while a flight runs reports
-    that flight; any other request clears the previous terminal result before it is decided.
-    """
-    if _running():
-        return _in_progress_result()
-    if local_setup_operation.read() is not None:
-        from llm.local_setup_recovery import resume_pending_setup
-
-        if await resume_pending_setup():
-            return _in_progress_result()
-        return local_setup_error("CORSIA could not resume the local model setup safely.")
-    memory_ok = await asyncio.to_thread(local_memory_ok)
-    _flight.result = None
-    subscription = await _subscription_available() if no_subscription_only else None
-    if subscription is not None:
-        source = "Claude Code" if subscription.provider == "claude-code" else "Codex"
-        account = f" as {subscription.label}" if subscription.label else ""
-        return _skipped(
-            "subscription_available",
-            f"{source} is signed in{account}, so the local model is skipped. You can add one from the app.",
+    task = _flight.task
+    if task is None or task.done():
+        return {"ok": True, "cancelled": False}
+    operation = local_setup_operation.read()
+    task_id = operation.task_id if operation else None
+    if task_id and _flight.server_id:
+        response = await admin_request(
+            {"server_id": _flight.server_id}, "POST", f"/hf/cancel/{task_id}", timeout=15.0,
         )
-    notice = await _limited_subscription_message() if no_subscription_only else None
-    if not memory_ok:
-        if notice:
-            message = "This computer can't run a local model well. Connect another subscription or an API key in the app."
-            return _skipped("ineligible", f"{notice}\n{message}")
-        message = "This computer can't run a local model well. Connect a subscription or an API key in the app."
-        if automatic:
-            return _skipped("ineligible", message)
-        _emit("skipped", reason="ineligible")
-        return {**local_setup_error(message), "progress": []}
-    if _running():
-        return _in_progress_result()
-    if not _claim_operation("setup"):
-        from llm.local_setup_recovery import resume_pending_setup
-
-        await resume_pending_setup()
-        return _in_progress_result()
-    _flight.stage = "Installing"
-    _flight.task = asyncio.create_task(_run_flight())
-    _flight.task.add_done_callback(_observe_setup_task)
-    _flight.task.add_done_callback(lambda _task: _notify_models_changed())
-    _emit("started")
-    return _in_progress_result(notice=notice)
-
-
-from llm.local_settings_download import begin as begin_settings_download  # noqa: E402
-from llm.local_setup_new_omlx import _setup_new_omlx  # noqa: E402  (reads this module's names at call time)
+        if response.status_code not in (200, 202, 204, 404, 409):
+            raise RuntimeError(f"oMLX could not cancel the model download (HTTP {response.status_code}).")
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    finish_flight({"ok": True, "cancelled": True})
+    _download_progress(None, False, False)
+    _notify_models_changed()
+    _emit("cancelled", model=operation.repository if operation else None)
+    return {"ok": True, "cancelled": True}

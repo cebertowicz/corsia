@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
+CAUSES = frozenset({"connection", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
 
 
 def local_setup_error(message: str) -> dict:

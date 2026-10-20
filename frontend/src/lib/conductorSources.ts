@@ -59,8 +59,6 @@ export interface ModelSource {
 	bytes_to_free?: number;
 }
 
-// Managed local state is reported directly on ModelSource.
-
 /** The harness sources: Claude Code and Codex. */
 export const VENDORS: Record<string, { name: string; cli: string }> = {
 	'claude-code': { name: 'Claude', cli: 'Claude Code' },
@@ -209,8 +207,6 @@ export async function setupLocalSource(t: string, otherOmlx: 'stop' | 'keep' | n
 	if (!response.ok) throw new Error(`local setup ${response.status}`);
 	return body;
 }
-
-// Foreign oMLX instances have no management route.
 
 /** Re-run every source check once; concurrent callers share the server's run. */
 export async function recheckSources(t: string): Promise<ModelSource[]> {

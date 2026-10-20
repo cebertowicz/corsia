@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 import re
-import secrets
+from infra.failure_reference import new_reference
 import signal
 import subprocess
 import tempfile
@@ -55,11 +55,6 @@ INSTALLER_STOPPED = "the installer stopped"
 
 class InstallerFailure(RuntimeError):
     """A safe, user-facing reason why an installation job could not finish."""
-
-
-def new_reference() -> str:
-    """Mint the stable public reference used by installer and local-setup failures."""
-    return f"cli-{secrets.token_hex(8)}"
 
 
 @dataclass

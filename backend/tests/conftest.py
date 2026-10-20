@@ -392,10 +392,7 @@ def _no_local_model_between_tests(monkeypatch, tmp_path_factory):
     prepare = sys.modules.get("llm.local_setup_prepare")
     if prepare is not None:
         monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
-    upgrade = sys.modules.get("llm.local_setup_upgrade")
-    if upgrade is not None:
-        # A lifespan test's upgrade task belongs to that test's event loop.
-        monkeypatch.setattr(upgrade, "_task", None)
+
 
 
 @pytest.fixture(autouse=True)

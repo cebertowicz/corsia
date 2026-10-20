@@ -10,8 +10,10 @@ import re
 from typing import Any
 
 from llm.catalog import list_models
-from llm.local_setup_managed import is_corsia_managed_server
-from llm.local_setup_ownership import omlx_on_path as installed_omlx
+from llm.managed_omlx_binary import is_corsia_managed_server
+from llm.local_setup_ownership import omlx_on_path
+from llm.local_setup_gates import local_memory_ok
+from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
@@ -73,7 +75,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     A managed server is registered by host and port, so it may be remote.
     """
     from llm.local_setup import (
-        download_estimate, format_size, local_memory_ok, setup_failure, setup_kind, setup_stage,
+        download_estimate, setup_failure, setup_kind, setup_stage,
         setup_stopped_following,
     )
     from llm.local_setup_prepare import known_model
@@ -110,7 +112,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     servers = [s for s in get_servers(provider="omlx")
                if is_corsia_managed_server(s) and s.get("status") != "disabled"]
     if not servers:
-        if installed_omlx() is None:
+        if omlx_on_path() is None:
             result = starter_source("not_installed", "oMLX is not installed", "Install oMLX")
         else:
             result = starter_source("needs_setup", "No local model server is set up", OMLX_FIX)

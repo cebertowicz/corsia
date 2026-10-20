@@ -9,7 +9,7 @@ import pytest
 
 import cli_local_before_start as before_start
 import cli_sources
-from llm import local_setup, local_setup_download, local_setup_ownership
+from llm import local_setup, local_setup_download, local_setup_ownership, local_setup_new_omlx as flow
 from llm.local_model import LocalModel
 from llm.local_setup_gates import SubscriptionSource
 from llm.local_setup_results import DownloadProgress
@@ -37,7 +37,7 @@ def entry(monkeypatch, tmp_path):
     for name in ("STREAM_COMMAND_OUTPUT",):
         monkeypatch.setattr(local_setup_ownership, name, getattr(local_setup_ownership, name))
     for name in ("DOWNLOAD_WAIT_SECONDS", "DOWNLOAD_FOLLOW_SECONDS"):
-        monkeypatch.setattr(local_setup, name, getattr(local_setup, name))
+        monkeypatch.setattr(local_setup_download, name, getattr(local_setup_download, name))
     for name in ("STEP", "SECONDS"):
         monkeypatch.setattr(DownloadProgress, name, getattr(DownloadProgress, name))
     return calls
@@ -59,7 +59,7 @@ def _flight(monkeypatch, calls, result, stages=()):
             on_stage(stage)
         return result
 
-    monkeypatch.setattr(local_setup, "_run_flight", run_flight)
+    monkeypatch.setattr(flow, "_run_flight", run_flight)
 
 
 def test_a_working_subscription_needs_no_local_model(monkeypatch, entry, capsys):
@@ -90,7 +90,7 @@ def test_no_subscription_runs_the_shared_flight_in_installer_mode(monkeypatch, e
     assert DownloadProgress.STEP == 5
     assert DownloadProgress.SECONDS == 10
     # No background hand-off: the wait and the ceiling are the same 4 hours.
-    assert local_setup.DOWNLOAD_WAIT_SECONDS == local_setup.DOWNLOAD_FOLLOW_SECONDS == 4 * 60 * 60
+    assert local_setup_download.DOWNLOAD_WAIT_SECONDS == local_setup_download.DOWNLOAD_FOLLOW_SECONDS == 4 * 60 * 60
 
 
 def test_local_flag_skips_the_subscription_check(monkeypatch, entry):

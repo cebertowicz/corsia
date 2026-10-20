@@ -1,12 +1,7 @@
-"""Install and repair only the oMLX executable whose ownership is proven.
-
-Identity belongs to local_setup_managed. Setup never upgrades a person's
-binary; its install record and current Homebrew keg must both prove ownership.
-"""
+"""Install missing oMLX and repair only a binary proven to belong to managed setup."""
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 import shutil
@@ -15,30 +10,21 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-from llm.managed_omlx_binary import is_managed_omlx_executable, managed_omlx_executable
-from llm.local_setup_managed import (  # noqa: F401 — compatibility for existing installer callers
-    BREW_SERVICE_LABEL,
-    MARKER_NAME,
-    launchd_jobs,
-    legacy_setup_owns_current_omlx,
-    mark_installed_by_setup,
-    marker_path,
-    setup_owns_current_omlx,
-)
+from llm import managed_omlx_binary as managed
 
-OMLX_FORMULA = "jundot/omlx/omlx"
-log = logging.getLogger(__name__)
 _BROKEN_RETURN_CODES = (126, 127)
 _broken_cache: dict[tuple, bool] = {}
 PROBE_TIMEOUT_SECONDS = 15
+STREAM_COMMAND_OUTPUT = False
+STREAMING = threading.Event()
+_COMMAND_ENV = {"HOMEBREW_NO_ASK": "1"}
 
 
 class OwnOmlxUpgradeRequired(RuntimeError):
-    """The executable belongs to the person and needs their update before setup."""
+    """A person's working executable needs their update before managed setup can use it."""
 
 
 def _is_broken_leftover(path: str) -> bool:
-    """Cache settled entry-point failures by path and modification time."""
     try:
         key = (path, Path(path).stat().st_mtime_ns)
     except OSError:
@@ -61,20 +47,15 @@ def _is_broken_leftover(path: str) -> bool:
 
 
 def omlx_on_path() -> str | None:
-    """Locate a person's oMLX without running it; safe for status projections."""
+    """Locate the person's PATH executable without running it."""
     path = shutil.which("omlx")
-    return None if path is None or is_managed_omlx_executable(path) else path
+    return None if path is None or managed.is_managed_omlx_executable(path) else path
 
 
 def installed_omlx() -> str | None:
-    """Return a runnable oMLX, or None for an absent/broken leftover entry point."""
+    """Return a runnable PATH oMLX; broken leftover entry points count as absent."""
     path = omlx_on_path()
     return None if path is None or _is_broken_leftover(path) else path
-
-
-STREAM_COMMAND_OUTPUT = False
-STREAMING = threading.Event()
-_COMMAND_ENV = {"HOMEBREW_NO_ASK": "1"}
 
 
 def run_command(command: list[str]) -> None:
@@ -90,55 +71,27 @@ def run_command(command: list[str]) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True, env=env)
 
 
-def command_output(command: list[str]) -> str:
-    """Run a bounded Homebrew inspection and return its non-secret output."""
-    return subprocess.run(command, check=True, capture_output=True, text=True, timeout=30).stdout.strip()
-
-
-def retire_legacy_owned_omlx_service() -> bool:
-    """Stop only the prior service positively identified as CORSIA's."""
-    if not legacy_setup_owns_current_omlx():
-        return False
-    brew = shutil.which("brew")
-    if not brew:
-        return False
-    try:
-        run_command([brew, "services", "stop", OMLX_FORMULA])
-    except (OSError, subprocess.SubprocessError) as error:
-        log.warning("could not retire CORSIA's old oMLX service: %s", error)
-        return False
-    return True
-
-
-def legacy_omlx_settings_file() -> Path:
-    """Read the old service's base-path bootstrap only after ownership is proven."""
-    bootstrap = Path.home() / "Library" / "Application Support" / "oMLX" / "base-path"
-    try:
-        moved = bootstrap.read_text(encoding="utf-8").strip()
-    except OSError:
-        moved = ""
-    base = Path(moved).expanduser() if moved else Path.home() / ".omlx"
-    return base / "settings.json"
-
-
 def homebrew_failure_message(action: str, exc: OSError | subprocess.SubprocessError) -> str:
-    """Return card-safe Homebrew repair feedback without command arguments."""
+    """Return card-safe Homebrew repair feedback."""
     stderr = str(getattr(exc, "stderr", "") or "")
     detail = next((line.strip() for line in reversed(stderr.splitlines()) if line.strip()), "")
     prefix = f"Homebrew couldn't {action} oMLX"
     return f"{prefix}: {detail}. Try again." if detail else f"{prefix}. Try again."
 
 
-def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
-                broken: bool = False) -> None:
-    """Install missing oMLX, and repair only a binary setup demonstrably owns."""
-    if managed_omlx_executable() is not None:
+def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False, broken: bool = False) -> None:
+    """Use the bundled executable, install an absent one, or repair a managed source install."""
+    if managed.managed_omlx_executable() is not None:
         return
     current = installed_omlx()
-    existing = omlx_on_path()
-    if current is None and existing is not None:
-        current, needs_repair, broken = existing, True, True
     brew = shutil.which("brew")
+    if current is None and brew and managed.marker_path().exists():
+        existing = omlx_on_path()
+        try:
+            if existing and managed.setup_owns_current_omlx(brew, existing):
+                current, needs_repair, broken = existing, True, True
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(homebrew_failure_message("check", exc)) from exc
     if current is None:
         if not brew:
             raise RuntimeError("Homebrew is required to install oMLX. Install Homebrew, then retry.")
@@ -146,19 +99,19 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
         try:
             run_command([brew, "tap", "jundot/omlx", "https://github.com/jundot/omlx"])
             try:
-                run_command([brew, "install", OMLX_FORMULA])
+                run_command([brew, "install", managed.OMLX_FORMULA])
             except (OSError, subprocess.SubprocessError) as exc:
-                if not command_output([brew, "list", "--versions", OMLX_FORMULA]):
+                if not managed.command_output([brew, "list", "--versions", managed.OMLX_FORMULA]):
                     raise exc
                 run_command([brew, "link", "--overwrite", "omlx"])
         except (OSError, subprocess.SubprocessError) as exc:
             raise RuntimeError(homebrew_failure_message("install", exc)) from exc
-        mark_installed_by_setup()
+        managed.mark_installed_by_setup()
         return
     if not needs_repair:
         return
     try:
-        owned = bool(brew) and setup_owns_current_omlx(str(brew), current)
+        owned = bool(brew) and managed.setup_owns_current_omlx(str(brew), current)
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(homebrew_failure_message("check", exc)) from exc
     if not owned:
@@ -167,17 +120,18 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
     try:
         run_command([str(brew), "tap", "jundot/omlx", "https://github.com/jundot/omlx"])
         run_command([str(brew), "update"])
-        run_command([str(brew), "reinstall" if broken else "upgrade", OMLX_FORMULA])
+        run_command([str(brew), "reinstall" if broken else "upgrade", managed.OMLX_FORMULA])
     except (OSError, subprocess.SubprocessError) as exc:
-        action = "reinstall" if broken else "update"
-        raise RuntimeError(homebrew_failure_message(action, exc)) from exc
+        raise RuntimeError(homebrew_failure_message("reinstall" if broken else "update", exc)) from exc
 
 
 _LOG_ERROR = re.compile(r"^(ERROR|CRITICAL)\b| - (ERROR|CRITICAL) - |^\w*(Error|Exception):")
 
 
 def omlx_log_detail() -> str:
-    """Return the last Homebrew service log error as a message clause, or an empty string."""
+    """Return a bounded source-install log error, without consulting brew in a packaged app."""
+    if managed.managed_omlx_executable() is not None:
+        return ""
     brew = shutil.which("brew")
     if not brew:
         return ""
@@ -190,6 +144,4 @@ def omlx_log_detail() -> str:
     except OSError:
         return ""
     errors = [line.strip() for line in lines if _LOG_ERROR.search(line.strip())]
-    if errors:
-        return f" oMLX's log says: {errors[-1][:300]} (full log: {path})"
-    return f" oMLX's log: {path}"
+    return f" oMLX's log says: {errors[-1][:300]} (full log: {path})" if errors else f" oMLX's log: {path}"

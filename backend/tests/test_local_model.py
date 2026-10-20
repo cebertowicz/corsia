@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from llm import local_model, local_setup, local_setup_operation, local_sources
-from llm import local_setup_prepare as prepare
+from llm import local_setup_prepare as prepare, local_setup_new_omlx as flow, local_setup_runtime as runtime
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, STARTER_MODEL
 from omlx_recommender_fixtures import FIXTURE, THINKING, best_rows as _best, mac_with as _mac
@@ -51,7 +51,7 @@ async def _prepared() -> dict:
 
 async def _flown(**kwargs) -> dict:
     """Get started: run the setup flight to its result."""
-    first = await local_setup.begin_local_setup(**kwargs)
+    first = await flow.begin_local_setup(**kwargs)
     task = local_setup._flight.task
     return await task if task is not None else first
 
@@ -351,7 +351,7 @@ def test_each_picked_family_thinks_on_an_agent_turn_with_its_own_sampling(monkey
     mac = _mac(monkeypatch, 64)
     model = LocalModel(f"Jundot/{model_id}", 1, 65_536)
 
-    asyncio.run(local_setup._configure_model_settings("srv", model))
+    asyncio.run(runtime.configure_model_settings("srv", model))
 
     [(path, settings)] = mac.omlx.puts()
     assert path == f"/models/{model_id}/settings"
@@ -370,12 +370,12 @@ def test_a_model_with_no_thinking_toggle_gets_none_and_a_missing_model_fails(mon
     mac = _mac(monkeypatch, 64)
     monkeypatch.setitem(THINKING, "plain-oQ4e", None)
 
-    asyncio.run(local_setup._configure_model_settings("srv", LocalModel("org/plain-oQ4e", 1, 40_960)))
+    asyncio.run(runtime.configure_model_settings("srv", LocalModel("org/plain-oQ4e", 1, 40_960)))
 
     [(_path, settings)] = mac.omlx.puts()
     assert "enable_thinking" not in settings and "mtp_enabled" not in settings
     with pytest.raises(RuntimeError, match="does not list Absent"):
-        asyncio.run(local_setup._configure_model_settings("srv", LocalModel("org/absent-oQ4e", 1, 40_960)))
+        asyncio.run(runtime.configure_model_settings("srv", LocalModel("org/absent-oQ4e", 1, 40_960)))
 
 
 def test_the_set_up_record_round_trips_and_a_bad_one_reads_as_absent():

@@ -47,8 +47,10 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		return { ...row, meta, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || outcome === 'start_failed' || cause === 'start_failed' || outcome === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
 	}
 	if (pick?.state === 'failed') {
-		if (pick.cause === 'own_omlx_upgrade_required') return { ...row, meta: localSetupRecovery({ cause: pick.cause, reference: pick.ref }), error: true, reportable: true, action: { label: 'Retry', run: check } };
-		return { ...row, meta: 'Couldn’t find a local model that fits this computer. Retry.', error: true, action: { label: 'Retry', run: check } };
+		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Retry.'
+			: pick.cause === 'own_omlx_upgrade_required' ? 'Update your oMLX, then Retry.'
+			: 'CORSIA couldn’t choose a local model. Retry, or save a report.';
+		return { ...row, meta: withReference(message, pick.ref), error: true, reportable: true, action: { label: 'Retry', run: check } };
 	}
 	return { ...row, meta: `Free and private. Runs on this computer, even offline.${size ? ` ${size} download.` : ''}`, action: { label: 'Download', run: start } };
 }

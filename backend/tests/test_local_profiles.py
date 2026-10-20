@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from llm import local_profiles, local_setup, local_setup_operation
+from llm import local_profiles, local_setup, local_setup_operation, local_setup_new_omlx as flow, local_setup_runtime as runtime, local_setup_download as downloads
 from llm.local_model import LocalModel
 
 GIB = 1024**3
@@ -69,7 +69,7 @@ def test_download_and_settings_use_the_picked_model(monkeypatch):
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     asyncio.run(local_setup._wait_for_download("srv", lambda _m: None, BIG))
-    asyncio.run(local_setup._configure_model_settings("srv", BIG))
+    asyncio.run(runtime.configure_model_settings("srv", BIG))
 
     assert calls[0] == ("POST", "/hf/download", {"repo_id": BIG.repository, "hf_token": ""})
     method, path, payload = calls[-1]
@@ -168,7 +168,7 @@ def test_an_unreported_model_directory_reaches_the_check_as_unknown(monkeypatch,
         return reply
 
     monkeypatch.setattr("llm.providers.omlx_settings.get_settings", settings)
-    assert asyncio.run(local_setup._download_dir("srv")) is None
+    assert asyncio.run(downloads.download_dir("srv")) is None
 
 
 def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None):
@@ -204,20 +204,16 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None):
     from llm.local_model import OMLX_PIN
 
     monkeypatch.setattr(local_setup, "require_free_disk", disk)
-    monkeypatch.setattr(local_setup, "_download_dir", model_dir)
-    monkeypatch.setattr(local_setup, "_omlx_supports_loopback_auth", lambda: True)
-    monkeypatch.setattr(local_setup, "omlx_version", lambda: OMLX_PIN)
-    monkeypatch.setattr(local_setup, "_ensure_omlx", lambda *a, **k: None)
-    monkeypatch.setattr(local_setup, "_run", lambda command: None)
+    monkeypatch.setattr(downloads, "download_dir", model_dir)
+
 
     async def start_managed(_report):
         return "srv", 5200
 
     monkeypatch.setattr("llm.local_setup_new_omlx.start_managed_omlx", start_managed)
-    monkeypatch.setattr(local_setup, "secure_local_omlx", secured)
-    monkeypatch.setattr(local_setup, "_configure_global", global_settings)
+
     monkeypatch.setattr(local_setup, "_wait_for_download", download)
-    monkeypatch.setattr(local_setup, "_configure_model_settings", model_settings)
+    monkeypatch.setattr(flow, "configure_model_settings", model_settings)
     monkeypatch.setattr(llm.catalog_network_models, "discover_network_models", discover)
     monkeypatch.setattr(infra.state.ws, "notify_models_changed", lambda: None)
     return wrote
@@ -234,7 +230,7 @@ def test_a_full_disk_fails_the_flight_before_the_download_is_requested(monkeypat
 
     wrote = _fake_new_omlx(monkeypatch, download, disk=full)
 
-    result = asyncio.run(local_setup._run_flight(model=BIG))
+    result = asyncio.run(flow._run_flight(model=BIG))
 
     assert result["ok"] is False and "117 GB" in result["message"]
     assert requested == [] and wrote == []
@@ -246,18 +242,18 @@ def test_a_download_that_outlives_the_follow_names_the_model_and_resumes_it(monk
     async def download(server_id, progress, chosen):
         attempts.append(chosen.repository)
         if len(attempts) == 1:
-            raise local_setup.StillDownloading()
+            raise flow.StillDownloading()
 
     wrote = _fake_new_omlx(monkeypatch, download)
 
-    first = asyncio.run(local_setup._run_flight(model=MODEL))
+    first = asyncio.run(flow._run_flight(model=MODEL))
 
     assert first["downloading"] is True and wrote == []
     assert first["message"] == "Qwen3.8 27B is still downloading in oMLX; CORSIA stopped following it."
-    assert first["next_action"] == f"Run `{local_setup.SETUP_COMMAND}` to follow it again."
+    assert first["next_action"] == f"Run `{flow.SETUP_COMMAND}` to follow it again."
 
     # The same command runs the same setup again: it resumes and writes the model's settings.
-    second = asyncio.run(local_setup._run_flight(model=MODEL))
+    second = asyncio.run(flow._run_flight(model=MODEL))
 
     assert second["ok"] is True and second["model"] == MODEL.model
     assert attempts == [MODEL.repository] * 2
@@ -269,11 +265,11 @@ def test_a_failed_flight_points_at_the_one_setup_command(monkeypatch):
         raise RuntimeError("oMLX could not start the model download (HTTP 500).")
 
     _fake_new_omlx(monkeypatch, download)
-    result = asyncio.run(local_setup._run_flight(model=MODEL))
+    result = asyncio.run(flow._run_flight(model=MODEL))
     assert result["ok"] is False
     assert result["next_action"] == (
-        f"Run `{local_setup.SETUP_COMMAND}` again after fixing this, or add a subscription/API key.")
-    assert local_setup.SETUP_COMMAND == "corsia local setup"
+        f"Run `{flow.SETUP_COMMAND}` again after fixing this, or add a subscription/API key.")
+    assert flow.SETUP_COMMAND == "corsia local setup"
 
 
 @pytest.fixture
@@ -295,9 +291,9 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
         calls.append(kwargs)
         return {"ok": True, "in_progress": True}
 
-    monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
+    monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
     monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     # With no personal process, the route delegates to the private setup flight.
 
     assert client.post("/api/providers/local/setup").json() == {"ok": True, "in_progress": True}
-    assert calls[-1] == {"no_subscription_only": False, "automatic": False}
+    assert calls[-1] == {"no_subscription_only": False, "automatic": False, "onboarding": False}

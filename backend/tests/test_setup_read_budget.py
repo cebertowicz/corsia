@@ -12,11 +12,11 @@ def test_setup_poll_and_source_read_budget(isolated_db, monkeypatch, tmp_path, c
     from infra import database
     from infra.default_port import DEFAULT_BACKEND_PORT
     from llm import local_setup, local_setup_prepare, local_sources, network_discovery
-    from llm.local_setup_managed import MANAGED_INSTANCE_ID, managed_omlx_paths
+    from llm.managed_omlx_binary import MANAGED_INSTANCE_ID, managed_omlx_paths
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
-    monkeypatch.setattr(local_setup, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(local_setup_prepare, "local_memory_ok", lambda: True)
     monkeypatch.setattr(local_setup_prepare, "_prepare", local_setup_prepare._Prepare())
     with database.get_db() as db:
         db.execute("DELETE FROM users")

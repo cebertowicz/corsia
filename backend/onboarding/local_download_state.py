@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from llm.local_setup import CAUSES as _SAFE_CAUSES
+from llm.local_setup_results import CAUSES as _SAFE_CAUSES
 
 _LIVE_STATES = frozenset({"downloading", "stopped", "failed", "starting", "setup_failed", "start_failed", "ready"})
 

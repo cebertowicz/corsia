@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import psutil
 import pytest
 
-from llm import local_setup_foreign as foreign, local_setup_managed as managed
+from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
 from llm import local_setup_ownership as installer
 
 
@@ -19,7 +19,7 @@ def _process(pid, argv, *, name="Python", uid=501, status=psutil.STATUS_RUNNING)
 @pytest.fixture
 def identity(monkeypatch, tmp_path):
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
+
     monkeypatch.setattr(managed, "launchd_jobs", lambda: {})
     monkeypatch.setattr(managed.os, "getuid", lambda: 501)
     return tmp_path
@@ -65,7 +65,7 @@ def test_same_user_unreadable_omlx_candidate_continues_without_stopping(identity
     monkeypatch.setattr(foreign, "stop_foreign_omlx_processes", lambda _p: pytest.fail("must not stop"))
 
     assert foreign.apply_foreign_omlx_choice(other_omlx="stop") is None
-    assert "continuing without stopping reference=cli-" in caplog.text
+    assert "continuing without stopping reference=local-" in caplog.text
     assert not foreign.foreign_omlx_choice_path().exists()
 
 
@@ -117,7 +117,7 @@ def test_unknown_revalidation_continues_without_stopping_or_recording_success(id
     assert foreign.apply_foreign_omlx_choice() == "consent_required"
     assert foreign.apply_foreign_omlx_choice(other_omlx="stop") is None
     assert foreign.foreign_omlx_answer() == "none"
-    assert "continuing without stopping reference=cli-" in caplog.text
+    assert "continuing without stopping reference=local-" in caplog.text
 
 
 def test_keep_both_and_status_survive_a_pid_change_without_process_reads(identity, monkeypatch):
@@ -131,7 +131,7 @@ def test_keep_both_and_status_survive_a_pid_change_without_process_reads(identit
 
 
 @pytest.mark.parametrize("marked,inside,working", [
-    (False, True, True), (True, False, True), (False, True, False),
+    (False, True, True), (True, False, True),
 ])
 def test_unowned_old_or_broken_binary_never_runs_homebrew(identity, monkeypatch, marked, inside, working):
     binary = identity / ("keg/omlx" if inside else "personal/omlx")
@@ -142,7 +142,7 @@ def test_unowned_old_or_broken_binary_never_runs_homebrew(identity, monkeypatch,
     monkeypatch.setattr(installer, "installed_omlx", lambda: str(binary) if working else None)
     monkeypatch.setattr(installer, "omlx_on_path", lambda: str(binary))
     monkeypatch.setattr(installer.shutil, "which", lambda _name: "/brew")
-    monkeypatch.setattr(installer, "command_output", lambda cmd: str(identity / "keg") if "--prefix" in cmd else "omlx 0.7")
+    monkeypatch.setattr(managed, "command_output", lambda cmd: str(identity / "keg") if "--prefix" in cmd else "omlx 0.7")
     monkeypatch.setattr(installer, "run_command", lambda _cmd: pytest.fail("personal binary must not be changed"))
     with pytest.raises(installer.OwnOmlxUpgradeRequired):
         installer.ensure_omlx(lambda _s: None, needs_repair=True)
@@ -154,17 +154,17 @@ async def test_prepare_projects_personal_binary_update_cause_and_reference(monke
 
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare(state=prepare.CHECKING))
-    monkeypatch.setattr(local_setup, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(prepare, "local_memory_ok", lambda: True)
 
     async def unowned(_report):
         raise installer.OwnOmlxUpgradeRequired("Update your oMLX, then Retry.")
 
-    monkeypatch.setattr(local_setup_new_omlx, "start_managed_omlx", unowned)
+    monkeypatch.setattr(prepare, "start_managed_omlx", unowned)
     await prepare._run()
     view = await prepare.pick_view()
     assert view["state"] == "failed"
     assert view["cause"] == "own_omlx_upgrade_required"
-    assert view["ref"].startswith("cli-")
+    assert view["ref"].startswith("local-")
     assert view["message"] == "Update your oMLX, then Retry."
 
 
@@ -175,11 +175,11 @@ def test_stop_revalidation_keeps_unknown_distinct(identity, monkeypatch):
     assert foreign.stop_foreign_omlx_processes((process,)) == "unknown"
 
 
-def test_fresh_install_records_ownership_without_creating_a_legacy_upgrade(tmp_path, monkeypatch):
-    from llm.local_setup_upgrade import pending_legacy_port
-
+def test_fresh_install_records_only_managed_ownership(tmp_path, monkeypatch):
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    monkeypatch.setattr(installer, "legacy_setup_owns_current_omlx", lambda: pytest.fail("fresh install must not probe legacy"))
+    legacy = tmp_path / "local_setup_installed_omlx"
+    legacy.write_text("legacy proof")
     managed.mark_installed_by_setup()
     assert managed.marker_path().exists()
-    assert pending_legacy_port() is None
+    assert legacy.read_text() == "legacy proof"
+    assert not (tmp_path / "legacy-omlx-upgraded").exists()

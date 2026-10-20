@@ -1,10 +1,4 @@
-"""A binding to a retired oMLX row runs once the managed server lists the same model.
-
-The catalog keeps one oMLX row per model (``UNIQUE(provider, provider_model_id)``):
-discovery on another server rewrites that row's transport rather than adding a
-second row, so a thread bound by row id keeps its row, and one bound by the old
-``omlx@<server>/<model>`` selector reaches it through the selector fallback.
-"""
+"""Existing oMLX bindings survive registration of a separate managed server."""
 
 from __future__ import annotations
 
@@ -19,12 +13,10 @@ MODEL = "someone/model"
 
 def _resolve(binding: str):
     from llm.resolution import resolve_execution_target
-
     return resolve_execution_target(binding)
 
 
 def _discover(server_id: str, provider_model_id: str) -> None:
-    """Record a model the way oMLX discovery does (``_upsert_network_model``)."""
     from infra.database import get_db
     from llm.catalog_network_models import _upsert_network_model
 
@@ -41,57 +33,12 @@ def _discover(server_id: str, provider_model_id: str) -> None:
 
 def _managed_server() -> str:
     from llm import network_discovery as discovery
-    from llm.local_setup_managed import MANAGED_INSTANCE_ID
+    from llm.managed_omlx_binary import MANAGED_INSTANCE_ID
 
     return discovery.upsert_server(
         provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name="This Mac",
         host="127.0.0.1", port=8210, status="online", kind="managed", source="corsia",
     )
-
-
-@pytest.fixture
-def retired(isolated_db, monkeypatch, tmp_path) -> str:
-    """A marker-gated legacy CORSIA loopback row, retired before its model is rediscovered."""
-    from llm import network_discovery as discovery
-    from llm.local_setup_ownership import marker_path
-    from llm.local_setup_runtime import LOCAL_SERVER_NAME, retire_legacy_setup_omlx_rows
-
-    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    marker_path().write_text("legacy\n", encoding="utf-8")
-    local = discovery.upsert_server(
-        provider="omlx", instance_id="127.0.0.1:8000", instance_name=LOCAL_SERVER_NAME,
-        host="127.0.0.1", port=8000, status="online", kind="managed", source="manual",
-    )
-    _model_row("local-model", f"omlx@{local}/{MODEL}", MODEL)
-    assert retire_legacy_setup_omlx_rows() == [local]
-    assert _resolve("local-model").available is False
-    return local
-
-
-def test_a_binding_to_a_retired_loopback_row_runs_on_the_managed_server(retired) -> None:
-    from llm.catalog import get_model_by_litellm
-
-    managed = _managed_server()
-    _discover(managed, MODEL)
-
-    for binding in ("local-model", f"omlx@{retired}/{MODEL}"):
-        target = _resolve(binding)
-        assert (target.catalog_id, target.available) == ("local-model", True)
-        assert target.transport_model == f"omlx@{managed}/{MODEL}"
-    assert get_model_by_litellm(f"omlx@{retired}/{MODEL}")["litellm_model"] == f"omlx@{managed}/{MODEL}"
-
-
-def test_no_matching_model_on_the_managed_server_stays_unavailable(retired) -> None:
-    from llm.catalog import get_model_by_litellm
-    from llm.resolution import ModelUnavailableError
-
-    managed = _managed_server()
-    _discover(managed, "someone/other")
-
-    assert _resolve("local-model").available is False
-    assert get_model_by_litellm(f"omlx@{retired}/{MODEL}")["available"] == 0
-    with pytest.raises(ModelUnavailableError):
-        _resolve(f"omlx@{managed}/{MODEL}")
 
 
 @pytest.mark.parametrize("state", ["offline", "disabled"])
@@ -108,8 +55,31 @@ def test_an_offline_or_disabled_lan_server_keeps_its_bindings(isolated_db, monke
     else:
         assert discovery.set_server_enabled(lan, False)
     assert discovery.get_server(lan)["status"] == state
-
     for binding in ("lan-model", f"omlx@{lan}/{MODEL}"):
         target = _resolve(binding)
         assert (target.catalog_id, target.transport_model) == ("lan-model", f"omlx@{lan}/{MODEL}")
     assert catalog.get_model_by_litellm(f"omlx@{lan}/{MODEL}")["litellm_model"] == f"omlx@{lan}/{MODEL}"
+
+
+@pytest.mark.asyncio
+async def test_old_setup_binding_key_and_markers_survive_new_registration(isolated_db, monkeypatch, tmp_path):
+    from infra.db_async import run_in_db
+    from infra.key_store_servers import resolve_server, set_server_key
+    from llm import network_discovery as discovery
+    from llm.local_setup_runtime import register_managed_server
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    marker = tmp_path / "local_setup_installed_omlx"
+    marker.write_text("legacy")
+    old = await run_in_db(discovery.upsert_server, provider="omlx", instance_id="127.0.0.1:8000",
+                          instance_name="This Mac", host="127.0.0.1", port=8000,
+                          status="online", kind="managed", source="manual")
+    await run_in_db(set_server_key, old, "old-test-key")
+    await run_in_db(_model_row, "old-model", f"omlx@{old}/{MODEL}", MODEL)
+    paths = managed_omlx_paths()
+    await register_managed_server(port=8210, base_path=str(paths.base_path), model_dir=str(paths.model_dir))
+    assert (await run_in_db(discovery.get_server, old))["status"] == "online"
+    assert await run_in_db(resolve_server, old) == "old-test-key"
+    assert (await run_in_db(_resolve, "old-model")).transport_model == f"omlx@{old}/{MODEL}"
+    assert marker.read_text() == "legacy"
