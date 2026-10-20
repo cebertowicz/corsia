@@ -81,7 +81,6 @@ def get_user(user_id: str, db: sqlite3.Connection | None = None) -> dict | None:
     return {"id": row["id"], "name": row["id"]} if row else None
 
 
-
 def list_users(db: sqlite3.Connection | None = None) -> list[dict]:
     """Return every account, oldest first, without any secret material."""
     rows = _db(db).execute(
