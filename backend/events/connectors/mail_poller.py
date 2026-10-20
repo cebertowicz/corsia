@@ -1,9 +1,9 @@
-"""Platform Gmail poller: screen new Inbox mail of every connected account and deliver generic events.
+"""Shared Gmail/Microsoft mail poller.
 
-The Google client owns credentials, the screen owns its stored result, and
-``events.platform`` owns idempotent routing. This loop owns only each
-account's durable Gmail history cursor and its observable state. A first run
-records the mailbox's current history id as a floor, so it never replays old
+Provider clients own credentials, the screen owns its stored result, and
+``events.platform`` owns idempotent routing. This loop owns each account's
+durable provider cursor and observable state. A first run
+records the mailbox's current position as a floor, so it never replays old
 mail. Each cycle snapshots the connected accounts and polls each one in its
 own task. Remove cancels that task; otherwise the writes own the guard: the
 screen record, the event and the cursor each re-check the account inside
@@ -20,12 +20,13 @@ import random
 import sqlite3
 import time
 from dataclasses import dataclass
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 from connections.google import client as google_client
 from connections.google import email_screen
-from connections.google.accounts import thread_key
+from connections.microsoft import client as microsoft_client
+from connections.microsoft.errors import MicrosoftError, REFRESH_TOKEN_INVALID
+from events.connectors.mail_poll_read import ADAPTERS, event_payload
 from events.connectors import gmail_feed as feed
 from events.platform import DIGESTED, FILTERED, WOKE, PlatformDelivery, deliver_platform_event_sync
 from events.resolve import Target
@@ -65,6 +66,7 @@ class Cursor:
     floor_at: str
     history_id: str
     last_success_at: str | None = None
+    provider: str = "google"
 
 
 def poller_status(account_id: str | None = None) -> dict[str, Any]:
@@ -82,7 +84,7 @@ def _set_state(state: str, reason: str | None = None, account_id: str | None = N
     if (target["state"], target["reason"]) == (state, reason):
         return
     target["state"], target["reason"] = state, reason
-    label = "gmail-poller" if account_id is None else f"gmail-poller[{account_id}]"
+    label = "mail-poller" if account_id is None else f"mail-poller[{account_id}]"
     if state == "enabled":
         log.info("%s: enabled", label)
     elif state == "disabled":
@@ -100,12 +102,21 @@ def cancel_account(account_id: str) -> None:
     _due.pop(account_id, None)
 
 
+def schedule_account(account_id: str) -> None:
+    """Mark a newly signed-in account due; the startup-owned loop does the work."""
+    _due.pop(account_id, None)
+
+
 def _account_states() -> dict[str, str]:
-    from connections.connected_accounts import GOOGLE_PROVIDER, list_accounts
+    from connections.connected_accounts import list_accounts
 
     db = get_db()
     try:
-        return {str(account["id"]): str(account["state"]) for account in list_accounts(GOOGLE_PROVIDER, db=db)}
+        return {
+            str(account["id"]): str(account["state"])
+            for provider in ADAPTERS
+            for account in list_accounts(provider, db=db)
+        }
     finally:
         db.close()
 
@@ -116,18 +127,21 @@ def _load_stored_cursor(account_id: str) -> Cursor | None:
 
     db = get_db()
     try:
-        stored = get_account(account_id, db=db)["cursor"]
+        account = get_account(account_id, db=db)
+        stored = account["cursor"]
     except ConnectedAccountError:
         return None
     finally:
         db.close()
     if not isinstance(stored, dict):
         return None
-    floor_at, history_id = stored.get("floor_at"), stored.get("history_id")
+    provider = str(account["provider"])
+    position_key = ADAPTERS[provider].cursor_key
+    floor_at, history_id = stored.get("floor_at"), stored.get(position_key)
     if not isinstance(floor_at, str) or not isinstance(history_id, str) or not history_id:
         return None
     last_success_at = stored.get("last_success_at")
-    return Cursor(account_id, floor_at, history_id, last_success_at if isinstance(last_success_at, str) else None)
+    return Cursor(account_id, floor_at, history_id, last_success_at if isinstance(last_success_at, str) else None, provider)
 
 
 def _save_cursor(cursor: Cursor, db: sqlite3.Connection | None = None) -> bool:
@@ -135,11 +149,12 @@ def _save_cursor(cursor: Cursor, db: sqlite3.Connection | None = None) -> bool:
     from connections.connected_accounts import is_connected
     from connections.account_state import set_cursor
 
-    with write_transaction(db, scope="gmail_poll_cursor") as conn:
+    with write_transaction(db, scope="mail_poll_cursor") as conn:
         if not is_connected(cursor.account_id, db=conn):
             return False
         set_cursor(cursor.account_id, {
-            "floor_at": cursor.floor_at, "history_id": cursor.history_id,
+            "floor_at": cursor.floor_at,
+            ADAPTERS[cursor.provider].cursor_key: cursor.history_id,
             "last_success_at": cursor.last_success_at,
         }, db=conn)
         return True
@@ -147,25 +162,26 @@ def _save_cursor(cursor: Cursor, db: sqlite3.Connection | None = None) -> bool:
 
 def _deliver(account_id: str, payload: dict[str, Any], db: sqlite3.Connection | None = None) -> bool:
     """Deliver one event only to resolved owners inside its account reach."""
-    from connections.connected_accounts import account_reaches_thread, is_connected
+    from connections.connected_accounts import account_reaches_thread, get_account, is_connected
 
     def inside_account_reach(target: Target, connection: sqlite3.Connection) -> str | None:
         if target.thread is None or account_reaches_thread(account_id, target.thread, db=connection):
             return None
         return "account_out_of_reach"
 
-    with write_transaction(db, scope="gmail_poll_deliver") as conn:
+    with write_transaction(db, scope="mail_poll_deliver") as conn:
         if not is_connected(account_id, db=conn):
             return False
+        provider = get_account(account_id, db=conn)["provider"]
         deliveries = deliver_platform_event_sync(
-            "gmail", payload, target_filter=inside_account_reach, db=conn,
+            ADAPTERS[str(provider)].connector, payload, target_filter=inside_account_reach, db=conn,
         )
         _record_delivery(account_id, deliveries)
         return True
 
 
 def _record_delivery(account_id: str, deliveries: list[PlatformDelivery]) -> None:
-    """Expose Gmail routing outcomes without treating an intentional scope drop as a poll failure."""
+    """Expose mail routing outcomes without treating an intentional scope drop as a poll failure."""
     status = _accounts.setdefault(account_id, _fresh_status())
     delivery = status["delivery"]
     outcomes = delivery["outcomes"]
@@ -177,53 +193,31 @@ def _record_delivery(account_id: str, deliveries: list[PlatformDelivery]) -> Non
             delivery["delivered"] += 1
 
 
+def _provider(account_id: str) -> str:
+    from connections.connected_accounts import get_account
+
+    db = get_db()
+    try:
+        return str(get_account(account_id, db=db)["provider"])
+    finally:
+        db.close()
+
+
+async def _new_cursor(account_id: str) -> Cursor:
+    provider = await run_in_db(_provider, account_id)
+    position = await ADAPTERS[provider].floor(account_id)
+    now = utc_now_iso()
+    return Cursor(account_id, now, position, now, provider)
+
+
 async def _load_cursor(account_id: str) -> tuple[Cursor | None, bool]:
     """Return ``(cursor, initialized)``; a new floor deliberately skips this cycle."""
     stored = await run_in_db(_load_stored_cursor, account_id)
     if stored is not None:
         return stored, False
-    floor = await feed.profile_history_id(account_id)
-    now = utc_now_iso()
-    cursor = Cursor(account_id, now, floor, now)
+    cursor = await _new_cursor(account_id)
     return (cursor, True) if await run_in_db(_save_cursor, cursor) else (None, True)
 
-
-def _date(headers: dict[str, str]) -> str | None:
-    raw = headers.get("date")
-    if not raw:
-        return None
-    try:
-        parsed = parsedate_to_datetime(raw)
-        return parsed.isoformat() if parsed is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def event_payload(
-    account_id: str, message: Any, screen: email_screen.Screen, history_id: str,
-) -> dict[str, Any]:
-    """Flat Gmail facts for the declared manifest; bodies never enter this payload."""
-    headers = message.headers
-    payload: dict[str, Any] = {
-        "account_id": account_id,
-        "message_id": message.message_id,
-        "thread_id": thread_key(account_id, message.thread_id),
-        "history_id": history_id,
-        "from": headers.get("from", ""),
-        "to": headers.get("to", ""),
-        "label": "INBOX",
-        "screen_status": screen.status,
-        "needs_person": screen.needs_person,
-        "injection": bool(screen.injection),
-        "injection_rule": screen.rule,
-        "kind": screen.kind,
-        "screen_model": screen.model_id,
-    }
-    if date := _date(headers):
-        payload["date"] = date
-    if screen.clean and (subject := headers.get("subject")):
-        payload["subject"] = subject
-    return payload
 
 
 def disabled_reason() -> str | None:
@@ -235,8 +229,9 @@ def disabled_reason() -> str | None:
     return None
 
 
+
 async def poll_once(account_id: str) -> None:
-    """Deliver one complete Gmail history page for one account, holding its cursor on any failure.
+    """Screen and deliver one provider page, holding the cursor on any failure.
 
     Returns early, writing nothing more, once a write finds the account no longer connected.
     """
@@ -244,26 +239,23 @@ async def poll_once(account_id: str) -> None:
     if initialized or cursor is None:
         await run_in_db(email_screen.sweep_expired)
         return
-    page = await feed.added_messages(account_id, cursor.history_id)
-    for message_id in page.message_ids:
-        try:
-            metadata = await feed.metadata(account_id, message_id)
-            full = await feed.full_message(account_id, message_id)
-        except feed.GmailMessageGone:
-            continue
-        screen = await email_screen.screen_message(account_id, message_id, full.headers, full.body)
-        if not await run_in_db(_deliver, account_id, event_payload(account_id, metadata, screen, page.history_id)):
+    adapter = ADAPTERS[cursor.provider]
+    position, page = await adapter.read(account_id, cursor.history_id)
+    async for metadata, full in adapter.messages(account_id, page):
+        screen = await email_screen.screen_message(account_id, full.message_id, full.headers, full.body)
+        payload = event_payload(account_id, metadata, screen, position, cursor.provider)
+        if not await run_in_db(_deliver, account_id, payload):
             return
-    if await run_in_db(_save_cursor, Cursor(account_id, cursor.floor_at, page.history_id, utc_now_iso())):
+    updated = Cursor(account_id, cursor.floor_at, position, utc_now_iso(), cursor.provider)
+    if await run_in_db(_save_cursor, updated):
         await run_in_db(email_screen.sweep_expired)
 
 
 async def _reset_expired_cursor(account_id: str) -> None:
-    """Skip expired Gmail history without replaying mail or emitting a gap digest."""
-    now = utc_now_iso()
-    cursor = Cursor(account_id, now, await feed.profile_history_id(account_id), now)
+    """Reset an expired provider cursor without replaying mail or emitting a gap digest."""
+    cursor = await _new_cursor(account_id)
     if await run_in_db(_save_cursor, cursor):
-        _accounts.setdefault(account_id, _fresh_status())["last_success_at"] = now
+        _accounts.setdefault(account_id, _fresh_status())["last_success_at"] = cursor.last_success_at
 
 
 async def _run_account(account_id: str) -> int:
@@ -272,10 +264,17 @@ async def _run_account(account_id: str) -> int:
     try:
         try:
             await poll_once(account_id)
-        except feed.GmailHistoryExpired:
+        except (feed.GmailHistoryExpired, microsoft_client.DeltaExpired):
             await _reset_expired_cursor(account_id)
+    except MicrosoftError as exc:
+        if exc.cause == REFRESH_TOKEN_INVALID:
+            _set_state("disabled", (await run_in_db(_account_states)).get(account_id), account_id)
+            return RECHECK_S
+        status["last_error"] = {"class": exc.cause, "at": utc_now_iso()}
+        _set_state("failing", exc.cause, account_id)
+        return BACKOFF_S
     except google_client.GoogleSignInRejected:
-        _set_state("disabled", google_client.STATUS_NEEDS_SIGN_IN, account_id)
+        _set_state("disabled", (await run_in_db(_account_states)).get(account_id), account_id)
         return RECHECK_S
     except google_client.GoogleNotConnected:
         return RECHECK_S  # Signed out or removed mid-poll; the next snapshot settles it.
@@ -327,7 +326,7 @@ async def run_cycle() -> int | None:
     return max(1, int(min(upcoming))) if upcoming else POLL_INTERVAL_S
 
 
-async def gmail_poll_loop() -> None:
+async def mail_poll_loop() -> None:
     """Run until a static off-state; each account retries at its own fixed backoff."""
     while True:
         delay = await run_cycle()

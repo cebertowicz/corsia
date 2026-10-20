@@ -11,7 +11,7 @@ import pytest
 from connections.connected_accounts import ConnectedAccountError
 from connections.microsoft import calendar, client, files, mail
 from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
-from events.connectors import microsoft_poller as poller
+from events.connectors import mail_poller as poller
 from tools import microsoft_actions as actions
 
 
@@ -48,6 +48,16 @@ async def test_pagination_and_retry_after_are_internal(monkeypatch: pytest.Monke
     out = await client.graph_pages("start", account_id="m")
     assert [row["id"] for row in out] == ["first", "second"]
     assert [call["url"] for call in FakeHttp.calls] == ["start", "start", "next"]
+
+
+@pytest.mark.asyncio
+async def test_graph_expired_delta_has_a_specific_recovery_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(410, {})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(client.DeltaExpired):
+        await client.graph_delta("expired-delta", account_id="m")
 
 
 @pytest.mark.asyncio
@@ -91,24 +101,35 @@ async def test_unscreened_message_withholds_provider_body(monkeypatch: pytest.Mo
 
 
 @pytest.mark.asyncio
-async def test_poller_initializes_then_advances_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
-    saved: list[dict[str, object]] = []
-    async def cursor(_account: str) -> dict[str, object] | None: return None if not saved else saved[-1]
-    async def save(_account: str, value: dict[str, object]) -> bool: saved.append(value); return True
-    async def search(_account: str, _query: str, _maximum: int) -> list[mail.Message]: return [mail.Message("latest", None, {}, "body")]
-    async def db(work: object, *args: object) -> object: return await work(*args)  # type: ignore[misc]
-    monkeypatch.setattr(poller, "_cursor", cursor); monkeypatch.setattr(poller, "_save_cursor", save); monkeypatch.setattr(poller, "run_in_db", db); monkeypatch.setattr(poller.mail, "search", search)
-    await poller.poll_once("m")
-    assert saved[-1]["last_message_id"] == "latest"
+async def test_poller_initializes_then_advances_cursor(isolated_db, monkeypatch: pytest.MonkeyPatch) -> None:
+    from connections.microsoft.accounts import create_microsoft_account
+    account = str(create_microsoft_account(
+        "m@example.test", reach={"mode": "all", "project_ids": [], "outside_projects": False},
+        created_by=("system", "test"), account_kind="personal", provider_subject="tenant:object",
+    )["id"])
+    async def changes(_link: str, *, account_id: str, params=None):
+        return [], "floor" if params else "next"
+    monkeypatch.setattr(client, "graph_delta", changes)
+    await poller.poll_once(account)
+    assert poller._load_stored_cursor(account).history_id == "floor"
+    await poller.poll_once(account)
+    assert poller._load_stored_cursor(account).history_id == "next"
 
 
 @pytest.mark.asyncio
 async def test_remove_during_microsoft_poll_does_not_touch_gmail() -> None:
     task = asyncio.get_running_loop().create_future()
-    poller._inflight["m"] = task  # type: ignore[assignment]
-    poller.cancel_account("m")
-    assert "m" not in poller._inflight
-    assert "m" not in getattr(__import__("events.connectors.gmail_poller", fromlist=["_inflight"]), "_inflight")
+    gmail = asyncio.get_running_loop().create_future()
+    monkeypatch_map = poller._inflight
+    monkeypatch_map["m"] = task  # type: ignore[assignment]
+    monkeypatch_map["g"] = gmail  # type: ignore[assignment]
+    try:
+        poller.cancel_account("m")
+        assert "m" not in poller._inflight and task.cancelled()
+        assert poller._inflight["g"] is gmail and not gmail.cancelled()
+    finally:
+        monkeypatch_map.pop("g", None)
+        gmail.cancel()
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,9 @@ ToolCategory = Literal[
     "discovery",
     "google",
     "microsoft",
+    "microsoft_mail",
+    "microsoft_calendar",
+    "microsoft_files",
 ]
 
 

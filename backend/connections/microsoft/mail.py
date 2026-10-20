@@ -9,6 +9,7 @@ from connections.microsoft import client
 from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
 
 MESSAGES = "https://graph.microsoft.com/v1.0/me/messages"
+MESSAGE_FIELDS = "id,conversationId,from,toRecipients,receivedDateTime,subject,body"
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ def _message(value: object) -> Message:
 async def search(account_id: str, query: str, maximum: int) -> list[Message]:
     pages = await client.graph_pages(
         MESSAGES, account_id=account_id,
-        params={"$search": f'\"{query}\"', "$top": min(maximum, 25), "$select": "id,conversationId,from,toRecipients,receivedDateTime,subject,body"},
+        params={"$search": f'\"{query}\"', "$top": min(maximum, 25), "$select": MESSAGE_FIELDS},
     )
     return [_message(item) for item in pages][:maximum]
 

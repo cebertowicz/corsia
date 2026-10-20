@@ -14,7 +14,11 @@ MICROSOFT_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         summary="Read the Microsoft sign-in's email, account kind and status",
         activity="Checking Microsoft sign-in",
     ),
-    **{name: ToolCatalogEntry("microsoft", status="active", authority="conductor-api", summary=summary, activity=activity) for name, summary, activity in (
+    **{name: ToolCatalogEntry(
+        "microsoft_calendar" if name.startswith("microsoft_calendar_") else
+        "microsoft_files" if name.startswith("microsoft_files_") else "microsoft_mail",
+        status="active", authority="conductor-api", summary=summary, activity=activity,
+    ) for name, summary, activity in (
         ("microsoft_mail_draft", "Save a Microsoft mail draft for review", "Saving Microsoft mail draft"),
         ("microsoft_mail_search", "Search Microsoft mail in one selected account", "Searching Microsoft mail"),
         ("microsoft_mail_read", "Read a screened Microsoft message", "Reading Microsoft mail"),
