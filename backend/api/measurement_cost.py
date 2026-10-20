@@ -103,10 +103,9 @@ _CONTRACT_PROVEN = (
     f"WHEN COALESCE(u.source,'')='conversation' AND COALESCE(u.model,'') LIKE 'external@%' "
     f"AND u.created_at>='2026-09-17' THEN 1 "
     f"WHEN u.cache_creation_tokens=0 AND u.cache_read_tokens=0 "
-    "AND (COALESCE(u.source,'') NOT IN ('checkpoint','host_access_action_review',"
-    f"'host_access_application_review','{CODEX_SOURCE}') "
-    "OR COALESCE(u.model,'') NOT LIKE 'claude-code/%') "
-    "AND COALESCE(u.model,'') NOT LIKE 'codex/%' THEN 1 "
+    f"AND COALESCE(u.source,'')<>'{CODEX_SOURCE}' AND COALESCE(u.model,'') NOT LIKE 'codex/%' "
+    "AND NOT (COALESCE(u.source,'') IN ('checkpoint','host_access_action_review',"
+    "'host_access_application_review') AND COALESCE(u.model,'') LIKE 'claude-code/%') THEN 1 "
     f"ELSE 0 END)=1"
 )
 ADMISSION_SQL = (
