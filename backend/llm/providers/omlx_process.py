@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shutil
 import socket
 import subprocess
 from pathlib import Path
+
+import psutil
+
+from llm.managed_omlx_binary import managed_omlx_executable
 
 
 def pid_path(runtime_dir: Path, server_id: str) -> Path:
@@ -18,19 +23,40 @@ def log_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.log"
 
 
-def read_pid(runtime_dir: Path, server_id: str) -> int | None:
-    path = pid_path(runtime_dir, server_id)
-    if not path.exists():
-        return None
+def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: int | None = None,
+             preserve_legacy: bool = False) -> int | None:
+    """Return a live spawn record, adopting only a legacy PID that owns its row's port."""
     try:
-        return int(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
+        record = json.loads(pid_path(runtime_dir, server_id).read_text())
+        if type(record) is int:
+            if preserve_legacy:
+                return None
+            if record > 0 and legacy_port_owner_pid == record:
+                write_pid(runtime_dir, server_id, record)
+                return read_pid(runtime_dir, server_id)
+            clear_pid(runtime_dir, server_id)
+            return None
+        pid = record["pid"]
+        if type(pid) is int and pid > 0:
+            proc = psutil.Process(pid)
+            if (proc.create_time() == record["create_time"] and proc.is_running()
+                    and proc.status() != psutil.STATUS_ZOMBIE):
+                return pid
+    except (OSError, ValueError, TypeError, KeyError, psutil.Error):
+        pass
+    clear_pid(runtime_dir, server_id)
+    return None
 
 
 def write_pid(runtime_dir: Path, server_id: str, pid: int) -> None:
+    """Bind the supervisor's spawn record to this process's creation time."""
+    try:
+        created = psutil.Process(pid).create_time()
+    except psutil.Error:
+        clear_pid(runtime_dir, server_id)
+        return
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    pid_path(runtime_dir, server_id).write_text(str(pid))
+    pid_path(runtime_dir, server_id).write_text(json.dumps({"pid": pid, "create_time": created}))
 
 
 def clear_pid(runtime_dir: Path, server_id: str) -> None:
@@ -91,8 +117,16 @@ def port_is_free(port: int) -> bool:
         sock.close()
 
 
-def build_argv(host: str, port: int, settings: dict) -> list[str]:
-    argv: list[str] = ["omlx", "serve", "--host", host, "--port", str(port)]
+def build_argv(
+    host: str,
+    port: int,
+    settings: dict,
+    *,
+    executable: str | None = None,
+) -> list[str]:
+    """Build argv for CORSIA's managed oMLX server."""
+    executable = executable or managed_omlx_executable() or "omlx"
+    argv: list[str] = [executable, "serve", "--host", host, "--port", str(port)]
 
     flag_map: list[tuple[str, str]] = [
         ("model_dir",                "--model-dir"),

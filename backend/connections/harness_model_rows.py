@@ -80,8 +80,18 @@ def normalize_claude_models(
     payload: dict[str, Any], *, harness_version: str, timestamp: str
 ) -> list[dict[str, Any]]:
     """Normalize Claude stream-JSON ``list_models`` rows."""
+    raw_models = payload.get("models") or []
+    default_resolved = next(
+        (
+            str(raw.get("resolvedModel") or "").strip()
+            for raw in raw_models
+            if str(raw.get("value") or "").strip() == "default"
+            and str(raw.get("resolvedModel") or "").strip()
+        ),
+        None,
+    )
     models = []
-    for raw in payload.get("models") or []:
+    for raw in raw_models:
         selector = str(raw.get("value") or "").strip()
         resolved = str(raw.get("resolvedModel") or "").strip()
         if not selector or not resolved or selector == "default":
@@ -118,6 +128,17 @@ def normalize_claude_models(
                     version=harness_version, observed_at=timestamp,
                 )
         models.append(row)
+
+    if default_resolved is not None:
+        matching = [
+            row for row in models
+            if row["resolved_identity"] == default_resolved
+        ]
+        if matching:
+            next(
+                (row for row in matching if "alias_of" not in row),
+                matching[0],
+            )["is_default"] = True
     return models
 
 

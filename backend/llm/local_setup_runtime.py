@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
-from llm.local_setup_auth import SKIP_AUTH_SETTING
-from llm.local_setup_ownership import omlx_log_detail
+from llm.local_setup_auth import SKIP_AUTH_SETTING, UPDATE_OMLX_MESSAGE, _omlx_supports_loopback_auth, omlx_version, secure_local_omlx
+from llm.local_setup_executable import ensure_omlx, omlx_log_detail
+from llm.managed_omlx_binary import MANAGED_INSTANCE_ID, reserve_managed_omlx_port
 
 log = logging.getLogger(__name__)
 
@@ -52,14 +54,55 @@ async def wait_for_health(port: int) -> None:
     )
 
 
-async def register_loopback_server(*, port: int, api_key: str | None = None) -> str:
-    """Register a healthy loopback oMLX through the existing manual path."""
-    from api.network_server_helpers import _add_omlx_server
+async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
+    """Install and supervise the private server without touching other services."""
+    from llm.local_model import omlx_has_recommender
+    from llm.providers.omlx_supervisor import start_server
 
-    result = await _add_omlx_server(SimpleNamespace(
-        hostname=LOCAL_HOST, port=port, name=LOCAL_SERVER_NAME, api_key=api_key,
-    ))
-    return str(result["server_id"])
+    report("Installing")
+    version = await asyncio.to_thread(omlx_version)
+    needs_repair = (not await asyncio.to_thread(_omlx_supports_loopback_auth)
+                    or not omlx_has_recommender(version))
+    await asyncio.to_thread(ensure_omlx, report, needs_repair=needs_repair, broken=version is None)
+    if not await asyncio.to_thread(_omlx_supports_loopback_auth):
+        raise RuntimeError(UPDATE_OMLX_MESSAGE)
+    paths, port = await asyncio.to_thread(reserve_managed_omlx_port)
+    server_id, key = await register_managed_server(
+        port=port, base_path=str(paths.base_path), model_dir=str(paths.model_dir),
+    )
+    report("Starting")
+    started = await start_server({"server_id": server_id})
+    if not started.get("ok"):
+        raise RuntimeError(str(started.get("message") or "CORSIA couldn't start its local model server."))
+    report("Configuring")
+    await secure_local_omlx(server_id, key)
+    await configure_global(server_id)
+    return server_id, port
+
+
+async def register_managed_server(*, port: int, base_path: str, model_dir: str) -> tuple[str, str]:
+    """Create CORSIA's managed row without modifying any other server row.
+
+    The generated credential stays in the server key store and is passed only to
+    CORSIA's owned subprocess through its supervisor configuration.
+    """
+    from infra.db_async import run_in_db
+    from infra.key_store_servers import resolve_server, set_server_key
+    from llm import network_discovery as discovery
+
+    def persist() -> tuple[str, str]:
+        server_id = discovery.upsert_server(
+            provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name=LOCAL_SERVER_NAME,
+            host=LOCAL_HOST, port=port, status="offline", kind="managed", source="corsia",
+        )
+        credential = resolve_server(server_id) or secrets.token_urlsafe(32)
+        set_server_key(server_id, credential)
+        discovery.set_server_metadata(
+            server_id, base_path=base_path, model_dir=model_dir, corsia_managed=True,
+        )
+        return server_id, credential
+
+    return await run_in_db(persist)
 
 
 async def configure_global(server_id: str) -> None:
@@ -174,13 +217,10 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
     """Apply only compatible benchmark performance fields in one model-settings write."""
     writer_attempted = False
     try:
-        from llm import own_omlx_management
         from llm.local_model import omlx_has_recommender
         from llm.local_setup_auth import omlx_version
         from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
 
-        if own_omlx_management.uses_mine():
-            return OptimalResult("no_omlx")
         if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
             return OptimalResult("unsupported")
         inputs = await _read_optimal_inputs(server_id, model)
@@ -201,8 +241,7 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
             return OptimalResult("offline")
         if not compatible:
             return OptimalResult("not_found")
-        if own_omlx_management.active():
-            own_omlx_management.record_originals({}, {model.model: {key: current.get(key) for key in compatible}})
+
         try:
             # The benchmark decides TurboQuant here, so CORSIA's default must not switch it on.
             corsia = {key: value for key, value in (await model_settings_payload(server_id, model)).items()

@@ -27,8 +27,8 @@ def client(isolated_db, monkeypatch):
         ):
             db.execute(
                 "INSERT INTO models (id,harness,provider,provider_model_id,"
-                "litellm_model,display_name,context_window,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,1000000,'t0','t0')",
+                "litellm_model,display_name,source,context_window,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?, 'test',1000000,'t0','t0')",
                 (model_id, harness, provider, name, model_id, name),
             )
         db.commit()

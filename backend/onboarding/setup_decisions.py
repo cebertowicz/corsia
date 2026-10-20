@@ -1,10 +1,9 @@
 """The setup decisions of a new install's first run, built by CORSIA.
 
 The conductor raises each decision unchanged and in order; the model never
-writes or edits one. Every payload is computed from facts read here: the
-person's own oMLX settings, which apps have a session folder (a stat, never a
-read), the email saved at install, and whether web search works. Strings live in
-``setup_strings``.
+writes or edits one. Every payload is computed from facts read here: which apps
+have a session folder (a stat, never a read), the email saved at install, and
+whether web search works. Strings live in ``setup_strings``.
 
 The find-projects decision's option A is the session-read consent;
 ``consent_wordings`` renders what that consent must match. The import decision's
@@ -19,7 +18,6 @@ conductor uses it to find ``source_node_id`` and never passes it on.
 from __future__ import annotations
 
 import itertools
-import os
 import re
 from dataclasses import dataclass, replace
 from typing import Any
@@ -27,7 +25,7 @@ from typing import Any
 from infra import onboarding_events as tasks
 from onboarding import setup_strings as text
 
-OMLX_SETTING = "max_concurrent_requests"
+
 SEARCH_QUERY = "CORSIA"
 MAX_NAME_CHARS = 40
 GMAIL_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
@@ -38,21 +36,15 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 class Facts:
     """What the decisions are built from.
 
-    ``omlx_differences`` is None when the person has no oMLX of their own or its
-    settings are unknown, and empty when they already match. ``omlx_managed`` is
-    whether they let CORSIA manage it, so every difference is offered;
-    ``omlx_use_mine`` whether they chose Use mine, so none is. With neither (an
-    install that never showed the choice) only concurrent requests is offered.
-    ``email`` is the address the person confirmed at install, or empty.
+    ``web_search_works`` records the setup probe, ``self_check_passed`` records
+    the caller's self-check result, ``session_apps`` are the apps with session
+    folders, and ``email`` is the address the person confirmed at install.
     """
 
-    omlx_differences: tuple[dict[str, Any], ...] | None = None
     web_search_works: bool = False
     self_check_passed: bool = True
     session_apps: tuple[str, ...] = ()
     email: str = ""
-    omlx_managed: bool = False
-    omlx_use_mine: bool = False
     agent_import: ImportCard | None = None
 
 
@@ -92,15 +84,6 @@ def _lettered(strings: dict[str, Any]) -> list[dict[str, str]]:
     return [_option(chr(ord("A") + index), label, detail)
             for index, (label, detail) in enumerate(strings["options"])]
 
-
-def _pick_one(task_title: str, strings: dict[str, str], recommendation: str,
-              **fields: str) -> dict[str, Any]:
-    """A yes/no decision: option A acts, option B declines."""
-    options = [
-        _option("A", strings["yes_label"].format(**fields), strings["yes_detail"].format(**fields)),
-        _option("B", strings["no_label"].format(**fields), strings["no_detail"].format(**fields)),
-    ]
-    return _decision(task_title, strings, options=options, recommendation=recommendation, **fields)
 
 
 def _join(items: list[str]) -> str:
@@ -185,44 +168,13 @@ def _github(email: str) -> dict[str, Any]:
                      sign_up_with=agents_email(email) or text.ASK_FOR_ADDRESS)
 
 
-def _omlx_row(row: dict[str, Any]) -> str:
-    return text.OMLX_ROW.format(label=text.OMLX_LABELS.get(row["setting"], _safe(row["setting"])),
-                                current=_safe(text.omlx_value(row["current"])),
-                                recommended=_safe(text.omlx_value(row["recommended"])))
-
-
-def _managed_omlx(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
-    """Every setting CORSIA would change on the oMLX it manages, each as current → new."""
-    server_wide = [_omlx_row(row) for row in rows if "model" not in row]
-    model_rows = [row for row in rows if "model" in row]
-    groups = [text.OMLX_GROUP_GLOBAL.format(rows=", ".join(server_wide))] if server_wide else []
-    if model_rows:
-        groups.append(text.OMLX_GROUP_MODEL.format(
-            model=_safe(model_rows[0]["model"]), rows=", ".join(_omlx_row(row) for row in model_rows)))
-    return _pick_one(tasks.TASK_CONFIG, text.OMLX_MANAGED, "A", changes="; ".join(groups))
-
-
-def omlx_decision(facts: Facts) -> dict[str, Any] | None:
-    """The oMLX settings decision, or None when nothing differs, the self-check failed, or under Use mine."""
-    if not facts.self_check_passed or facts.omlx_use_mine:
-        return None
-    if facts.omlx_managed:
-        return _managed_omlx(facts.omlx_differences) if facts.omlx_differences else None
-    entry = next((row for row in facts.omlx_differences or () if row["setting"] == OMLX_SETTING), None)
-    if entry is None:
-        return None
-    return _pick_one(tasks.TASK_CONFIG, text.OMLX, "A",
-                     current=_safe(entry["current"]), recommended=_safe(entry["recommended"]))
-
 
 def build_decisions(facts: Facts) -> list[dict[str, Any]]:
     """The complete decisions to raise, in setup-task order, each as-is."""
-    omlx = omlx_decision(facts)
     projects = find_projects(facts.session_apps)
     imported = agent_import(facts.agent_import)
     return [
         *([imported] if imported else []),
-        *([omlx] if omlx else []),
         _github(facts.email),
         *([projects] if projects else []),
     ]
@@ -306,7 +258,7 @@ def ready_sources(rows: list[dict[str, Any]]) -> set[str]:
 
 async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool = True,
                      agent_model: str | None = None) -> Facts:
-    """Read the facts. With CORSIA's own API unreachable, oMLX is left out.
+    """Read the facts used to build setup decisions.
 
     Without ``probe_web_search`` no search runs and web search reads as not working,
     so its decision stays for the conductor to settle after testing it itself.
@@ -314,28 +266,19 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
     raising it runs on.
     """
     from infra.db_async import run_in_db, run_off_db
-    from llm import own_omlx_management
 
     from onboarding.project_discovery import Roots, session_apps
 
-    omlx: tuple[dict[str, Any], ...] | None = None
-    managed = use_mine = False
     sessions = tuple(await run_off_db(session_apps, Roots.for_user()))
     rows: list[dict[str, Any]] = []
-    if self_check_passed or agent_model:
+    if agent_model:
         from api.provider_sources import list_sources
 
         rows = await run_in_db(list_sources)
-    if self_check_passed:
-        for row in rows:
-            if row.get("source") == "omlx" and row.get("omlx_settings") is not None:
-                omlx = tuple((row["omlx_settings"] or {}).get("differences") or ())
-                managed = (row.get("omlx_management") or {}).get("state") == "managed"
-                use_mine = await run_off_db(own_omlx_management.uses_mine)
+
     works = await web_search_works() if probe_web_search else False
     card = await run_in_db(import_card, agent_model, ready_sources(rows)) if agent_model else None
-    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email), managed, use_mine,
-                 card)
+    return Facts(works, self_check_passed, sessions, await run_off_db(_saved_email), card)
 
 
 async def setup_plan(*, self_check_passed: bool = True, probe_web_search: bool = True) -> dict[str, Any]:

@@ -13,7 +13,7 @@ from app_shutdown_owned_tasks import shutdown_owned_tasks as _shutdown_owned_tas
 from app_shutdown_refreshes import shutdown_refresh_owners
 from app_startup_runtime import (
     _start_runtime_services, _startup_harness_discovery as _startup_harness_discovery,
-    configure_sqlite_fetch_switch_interval, stop_runtime_logs,
+    configure_sqlite_fetch_switch_interval, resume_local_setup, stop_runtime_logs,
 )
 from app_shutdown_native import remaining_native_owners, shutdown_native_turns
 import infra.app_loop as app_loop
@@ -158,10 +158,7 @@ async def lifespan(app: FastAPI):
         from infra.settings import get_devices_enabled
         await devices_runtime.restore(app, await run_in_db(get_devices_enabled))
         await start_documents()
-        from llm.local_model import backfill_legacy_record
-        from llm.local_setup import resume_pending_setup
-        await asyncio.to_thread(backfill_legacy_record)
-        await resume_pending_setup()
+        await resume_local_setup()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(

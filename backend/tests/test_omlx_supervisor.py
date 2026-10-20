@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +31,42 @@ def test_build_argv_minimal():
     from llm.providers.omlx_supervisor import _build_argv
     argv = _build_argv("127.0.0.1", 5200, {})
     assert argv == ["omlx", "serve", "--host", "127.0.0.1", "--port", "5200"]
+
+
+def test_build_argv_uses_the_bundled_managed_binary(monkeypatch):
+    from llm.providers import omlx_process
+
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(omlx_process, "managed_omlx_executable", lambda: bundled)
+
+    assert omlx_process.build_argv("127.0.0.1", 5200, {})[0] == bundled
+
+
+def test_managed_supervisor_argv_uses_the_bundled_binary_only_for_the_managed_row(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: bundled)
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: True)
+
+    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {})
+
+    assert isinstance(argv, list)
+    assert argv[:2] == [bundled, "serve"]
+
+
+def test_legacy_supervisor_argv_uses_path_binary(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: False)
+
+    argv = sup._managed_omlx_argv("127.0.0.1", 8000, {})
+
+    assert isinstance(argv, list)
+    assert argv[:2] == ["/opt/homebrew/bin/omlx", "serve"]
 
 
 def test_build_argv_with_settings():
@@ -68,21 +105,48 @@ def test_pid_roundtrip(isolated_runtime):
     from llm.providers.omlx_supervisor import _read_pid, _write_pid, _clear_pid
     sid = "ns-pid-test"
     assert _read_pid(sid) is None
-    _write_pid(sid, 4242)
-    assert _read_pid(sid) == 4242
+    _write_pid(sid, os.getpid())
+    assert _read_pid(sid) == os.getpid()
     _clear_pid(sid)
     assert _read_pid(sid) is None
     _clear_pid(sid)
 
 
 def test_reconcile_clears_stale_pid(isolated_runtime):
-    from llm.providers.omlx_supervisor import reconcile, _write_pid, _read_pid
+    from llm.providers.omlx_supervisor import reconcile, _pid_path, _read_pid
     sid = "ns-reconcile-stale"
-    _write_pid(sid, 999999)
+    _pid_path(sid).write_text(json.dumps({"pid": 999999, "create_time": 1.0}))
     res = reconcile({"server_id": sid})
     assert res["adopted"] is False
     assert res["cleared"] is True
     assert _read_pid(sid) is None
+
+
+def test_legacy_pid_record_is_adopted_only_when_its_pid_owns_the_row_port(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-owner", 8200
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda _host, observed_port: os.getpid() if observed_port == port else None)
+
+    result = sup.reconcile({"server_id": sid, "host": "127.0.0.1", "port": port})
+
+    assert result == {"adopted": True, "cleared": False, "pid": os.getpid()}
+    assert json.loads(sup._pid_path(sid).read_text())["pid"] == os.getpid()
+
+
+def test_legacy_pid_record_without_port_ownership_is_cleared_and_never_signalled(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-foreign", 8201
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup.os, "kill", lambda *_args: pytest.fail("stale record must not signal a process"))
+
+    result = asyncio.run(sup.stop_server({"server_id": sid, "host": "127.0.0.1", "port": port}))
+
+    assert result["already_stopped"]
+    assert not sup._pid_path(sid).exists()
 
 
 def test_reconcile_adopts_live_pid(isolated_runtime):
@@ -125,7 +189,7 @@ def test_stop_server_does_not_signal_reused_pid(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     sid = "ns-stop-pid-reuse"
-    sup._write_pid(sid, 4242)
+    sup._write_pid(sid, os.getpid())
     signals = []
     exit_checks = 0
 
@@ -155,7 +219,7 @@ def test_stop_server_confirms_forced_exit_before_clearing_pid(
     from llm.providers import omlx_supervisor as sup
 
     sid = "ns-stop-forced-exit"
-    sup._write_pid(sid, 4242)
+    sup._write_pid(sid, os.getpid())
     signals = []
     observations = iter([False, True])
 
@@ -185,9 +249,9 @@ def test_stop_server_no_pid_file(isolated_runtime):
 
 
 def test_stop_server_dead_pid_idempotent(isolated_runtime):
-    from llm.providers.omlx_supervisor import stop_server, _write_pid, _read_pid
+    from llm.providers.omlx_supervisor import stop_server, _pid_path, _read_pid
     sid = "ns-stop-stale"
-    _write_pid(sid, 999999)
+    _pid_path(sid).write_text(json.dumps({"pid": 999999, "create_time": 1.0}))
     result = asyncio.run(stop_server({"server_id": sid}))
     assert result["ok"] is True
     assert result.get("already_stopped") is True
@@ -220,7 +284,8 @@ def test_start_server_missing_host_port(isolated_runtime, monkeypatch):
 
 def test_start_server_missing_omlx_binary(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
-    monkeypatch.setattr(sup.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: None)
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: None)
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: None)
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-no-binary", "host": "127.0.0.1", "port": 9999},
@@ -246,7 +311,7 @@ def test_start_server_idempotent_when_pid_owns_port(isolated_runtime, monkeypatc
 def test_start_server_port_in_use_by_foreign_pid(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: 99999)
-    monkeypatch.setattr(sup.shutil, "which", lambda n: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/opt/homebrew/bin/omlx")
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-port-conflict", "host": "127.0.0.1", "port": 9999},
     ))

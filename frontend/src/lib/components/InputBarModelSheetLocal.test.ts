@@ -142,26 +142,26 @@ describe('the picker\'s Local group', () => {
 		expect(calls).not.toContain('POST /api/providers/local/starter');
 	});
 
-	it('offers informed consent in the picker and retries setup with it', async () => {
+	it('offers to keep another oMLX running and retries setup with that choice', async () => {
 		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
 		await render();
 		setupResponses = ['consent', 'ok'];
 		button('Try again')!.click();
-		await vi.waitFor(() => expect(setupBodies).toEqual([{ consent_existing: false }]));
+		await vi.waitFor(() => expect(setupBodies).toEqual([{ other_omlx: null }]));
 		expect(setupResponses).toEqual(['ok']);
 		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
-		expect(setupBodies).toEqual([{ consent_existing: false }]);
-		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.'));
+		expect(setupBodies).toEqual([{ other_omlx: null }]);
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('Another oMLX is running. Keep it running to set up the local model.'));
 		const consent = get(toasts)[0]!;
-		expect(consent.action?.label).toBe('Use existing oMLX');
+		expect(consent.action?.label).toBe('Keep running');
 
 		await toasts.runAction(consent.id);
 
-		expect(setupBodies).toEqual([{ consent_existing: false }, { consent_existing: true }]);
+		expect(setupBodies).toEqual([{ other_omlx: null }, { other_omlx: 'keep' }]);
 		expect(calls.filter((call) => call === 'GET /api/providers/sources')).toHaveLength(3);
 	});
 
-	it('shows a setup failure if the picker consent action cannot complete', async () => {
+	it('shows a setup failure if the picker choice cannot complete', async () => {
 		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
 		await render();
 		setupResponses = ['consent', 'failure'];

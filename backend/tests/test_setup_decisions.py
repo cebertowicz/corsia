@@ -9,7 +9,6 @@ apart from the module that builds them.
 from __future__ import annotations
 
 import asyncio
-import itertools
 from unittest.mock import AsyncMock
 
 import pytest
@@ -21,9 +20,7 @@ REAL_SAVED_EMAIL = setup._saved_email
 GITHUB_TASK = "Set up GitHub"
 PROJECT_TASK = "Set up your first project"
 WEB = "Connect web search"
-OMLX_TASK = "Configuration checks"
 
-DIFFERENCE = ({"setting": "max_concurrent_requests", "current": 4, "recommended": 1},)
 SESSIONS = ("Claude Code", "Codex")
 GITHUB_OPTIONS = [
     {"id": "A", "label": "Their own account",
@@ -40,10 +37,11 @@ def _github(sign_up_with: str) -> dict:
         "title": "How should your agents post on GitHub?",
         "context": (
             "Agents use GitHub to file issues and feature requests, comment, and send pull "
-            "requests: on your own repositories, and on CORSIA's when it falls short and I can "
-            "fix it. They can post as you, using your GitHub sign-in, or from their own account, "
-            "so their posts stay separate from yours. GitHub allows each person one extra "
-            "machine account for this."
+            "requests on your repositories, and report to CORSIA when it falls short. They can "
+            "post as you, using your GitHub sign-in, or from their own account, so their posts "
+            "stay separate from yours. Reports to CORSIA are text only and go only with your OK, "
+            "from whichever you choose; until GitHub is set up, they keep the write-up and send "
+            "it once it is. GitHub allows each person one extra machine account for this."
         ),
         "tradeoff": (
             "Posting as you takes one sign-in, and everything agents post shows your name. Their "
@@ -83,82 +81,41 @@ EXPECTED_FIND_PROJECTS = {
     ],
     "other_enabled": True,
 }
-EXPECTED_OMLX = {
-    "task_title": OMLX_TASK,
-    "title": "Change one oMLX setting for CORSIA?",
-    "context": (
-        "Your oMLX runs the local models on this computer. It's set to work on 4 requests at once. "
-        "At 1, oMLX finishes one request before it starts the next, so each one gets the model's "
-        "full speed and memory instead of sharing them. I'd change only this one setting."
-    ),
-    "tradeoff": (
-        "Requests that arrive together, from CORSIA's agents or from other apps that use your "
-        "oMLX, will wait their turn instead of running alongside each other. You can change it "
-        "back in oMLX's settings at any time."
-    ),
-    "recommendation": "A",
-    "rationale": (
-        "It matches how CORSIA sets up an oMLX it installs. Choose B if other apps use your oMLX "
-        "all day."
-    ),
-    "options": [
-        {"id": "A", "label": "Change it to 1",
-         "detail": "I'll apply it now and tell you if oMLX needs a restart."},
-        {"id": "B", "label": "Leave it at 4",
-         "detail": "CORSIA still works; requests that arrive together share the model."},
-    ],
-    "other_enabled": True,
-}
-
-# omlx state -> (facts value, whether its decision is present)
-OMLX_STATES = {
-    "difference": (DIFFERENCE, True),
-    "matches": ((), False),
-    "none": (None, False),
-}
-COMBINATIONS = list(itertools.product((True, False), (True, False), tuple(OMLX_STATES)))
+COMBINATIONS = [(sessions, web_missing) for sessions in (True, False) for web_missing in (True, False)]
 
 
-def _facts(web_missing: bool, omlx: str, *, self_check: bool = True,
+def _facts(web_missing: bool, *, self_check: bool = True,
            sessions: bool = False, email: str = "you@gmail.com") -> setup.Facts:
-    return setup.Facts(OMLX_STATES[omlx][0], not web_missing, self_check,
-                       SESSIONS if sessions else (), email)
+    return setup.Facts(not web_missing, self_check, SESSIONS if sessions else (), email)
 
 
-@pytest.mark.parametrize("sessions,web_missing,omlx", COMBINATIONS)
-def test_exact_decisions_for_every_presence_combination(sessions, web_missing, omlx):
-    plan = setup.build_plan(_facts(web_missing, omlx, sessions=sessions))
+@pytest.mark.parametrize("sessions,web_missing", COMBINATIONS)
+def test_exact_decisions_for_every_presence_combination(sessions, web_missing):
+    plan = setup.build_plan(_facts(web_missing, sessions=sessions))
 
-    expected = [*([EXPECTED_OMLX] if OMLX_STATES[omlx][1] else []),
-                EXPECTED_GITHUB,
-                *([EXPECTED_FIND_PROJECTS] if sessions else [])]
+    expected = [EXPECTED_GITHUB, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
     assert plan["setup_decisions"] == expected
 
 
-@pytest.mark.parametrize("sessions,web_missing,omlx", COMBINATIONS)
-def test_only_web_search_ever_settles_and_only_when_it_works(sessions, web_missing, omlx):
-    settlements = setup.build_plan(_facts(web_missing, omlx, sessions=sessions))["setup_task_settlements"]
+@pytest.mark.parametrize("sessions,web_missing", COMBINATIONS)
+def test_only_web_search_ever_settles_and_only_when_it_works(sessions, web_missing):
+    settlements = setup.build_plan(_facts(web_missing, sessions=sessions))["setup_task_settlements"]
 
     assert settlements == ([] if web_missing else [
         {"task_title": WEB, "outcome": "done", "text": "Web search already works."}])
 
 
-@pytest.mark.parametrize("sessions,web_missing,omlx", COMBINATIONS)
-def test_every_payload_passes_plan_decision_validation(sessions, web_missing, omlx):
-    for payload in setup.build_decisions(_facts(web_missing, omlx, sessions=sessions)):
+@pytest.mark.parametrize("sessions,web_missing", COMBINATIONS)
+def test_every_payload_passes_plan_decision_validation(sessions, web_missing):
+    for payload in setup.build_decisions(_facts(web_missing, sessions=sessions)):
         decision_fields.content({key: value for key, value in payload.items() if key != "task_title"})
 
 
-def test_a_failed_self_check_leaves_out_only_the_omlx_decision():
-    plan = setup.build_plan(_facts(True, "difference", self_check=False, sessions=True))
-
-    assert plan["setup_decisions"] == [EXPECTED_GITHUB, EXPECTED_FIND_PROJECTS]
-
 
 def test_each_decision_is_raised_from_its_own_task_in_plan_order():
-    decisions = setup.build_decisions(_facts(True, "difference", sessions=True))
+    decisions = setup.build_decisions(_facts(True, sessions=True))
 
-    assert [d["task_title"] for d in decisions] == [OMLX_TASK, GITHUB_TASK, PROJECT_TASK]
+    assert [d["task_title"] for d in decisions] == [GITHUB_TASK, PROJECT_TASK]
     assert all("pick" not in d for d in decisions)
 
 
@@ -178,17 +135,12 @@ def test_the_agents_address_adds_plus_agents_for_gmail_only(email, expected):
 
 @pytest.mark.parametrize("email", ["you@example.com", ""])
 def test_github_never_invents_an_address_for_a_non_gmail_email(email):
-    github = next(d for d in setup.build_decisions(_facts(True, "none", email=email))
+    github = next(d for d in setup.build_decisions(_facts(True, email=email))
                   if d["task_title"] == GITHUB_TASK)
 
     assert github == EXPECTED_GITHUB_NO_ADDRESS
     assert "@" not in github["tradeoff"]
 
-
-def test_only_the_recommended_oomlx_setting_is_offered():
-    other = ({"setting": "something_else", "current": 1, "recommended": 2},)
-
-    assert [d["task_title"] for d in setup.build_decisions(setup.Facts(other, True))] == [GITHUB_TASK]
 
 
 def test_the_consent_wording_is_the_find_projects_decision():
@@ -201,7 +153,9 @@ def test_the_consent_wording_is_the_find_projects_decision():
 def test_no_dropped_decision_is_left_in_the_strings():
     from onboarding import setup_strings
 
-    for name in ("MCP_ONLY", "TOOLS_AND_PROJECTS", "FIRST_STEP", "WEB_ONLY", "REVIEWER", "PHONE"):
+    for name in ("MCP_ONLY", "TOOLS_AND_PROJECTS", "FIRST_STEP", "WEB_ONLY", "REVIEWER", "PHONE",
+                 "OMLX", "OMLX_MANAGED", "OMLX_GROUP_GLOBAL", "OMLX_GROUP_MODEL", "OMLX_ROW",
+                 "OMLX_RESTORE", "OMLX_RESTORE_MODEL", "OMLX_LABELS", "OMLX_DEFAULT", "omlx_value"):
         assert not hasattr(setup_strings, name), name
 
 
@@ -219,33 +173,12 @@ def saved_email(monkeypatch):
     monkeypatch.setattr(setup, "_saved_email", lambda: "you@gmail.com")
 
 
-def test_read_facts_leaves_out_oomlx_when_the_self_check_failed(monkeypatch, session_folders):
-    monkeypatch.setattr(setup, "web_search_works", AsyncMock(return_value=False))
-    session_folders.append("Codex")
 
-    facts = asyncio.run(setup.read_facts(self_check_passed=False))
-
-    assert facts == setup.Facts(None, False, False, ("Codex",), "you@gmail.com")
-
-
-def test_read_facts_takes_omlx_from_its_source_and_the_email_from_the_profile(monkeypatch):
+def test_read_facts_reads_email_and_skips_provider_sources_without_an_agent_model(monkeypatch):
     monkeypatch.setattr(setup, "web_search_works", AsyncMock(return_value=True))
-    monkeypatch.setattr("api.provider_sources.list_sources", lambda: [
-        {"source": "claude-code", "omlx_settings": {"differences": [{"setting": "x"}]}},
-        {"source": "omlx", "omlx_settings": {"differences": list(DIFFERENCE), "fingerprint": "f"}},
-    ])
+    monkeypatch.setattr("api.provider_sources.list_sources", lambda: pytest.fail("provider source read"))
 
-    assert asyncio.run(setup.read_facts()) == setup.Facts(DIFFERENCE, True, True, (), "you@gmail.com")
-
-
-@pytest.mark.parametrize("settings,expected", [(None, None), ([], ())])
-def test_unknown_and_matching_omlx_settings_read_differently(monkeypatch, settings, expected):
-    monkeypatch.setattr(setup, "web_search_works", AsyncMock(return_value=True))
-    monkeypatch.setattr("api.provider_sources.list_sources", lambda: [
-        {"source": "omlx", "omlx_settings": settings},
-    ])
-
-    assert asyncio.run(setup.read_facts()).omlx_differences == expected
+    assert asyncio.run(setup.read_facts()) == setup.Facts(True, True, (), "you@gmail.com")
 
 
 def test_the_saved_email_is_read_from_the_workspace_profile(tmp_path, monkeypatch):

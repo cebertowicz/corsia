@@ -52,24 +52,11 @@ export interface ModelSource {
 	accounts?: SourceAccount[];
 	/** The conductor's bound account when it can no longer run here: removed, or turned off for the project. */
 	lost_binding?: { label: string; reason: 'removed' | 'turned_off' } | null;
-	/** Only for the person's own oMLX: whether CORSIA manages it (J9). */
-	omlx_management?: OwnOmlxManagement | null;
-}
-
-/** `restore_failed` is a Stop managing that didn't finish; `restores` name what it puts back. */
-export interface OwnOmlxManagement {
-	state: 'managed' | 'not_managed' | 'restore_failed';
-	/** Their oMLX's version while it is too old to say which model fits. */
-	cannot_check: string | null;
-	/** The oldest oMLX release that can recommend a local model. */
-	required_version: string;
-	restores: string[];
-	/** Stopping removes the admin key CORSIA read to manage it. */
-	forgets_key: boolean;
-	/** Why CORSIA downloaded the starter model into their oMLX: it recommended none. */
-	starter_note?: string | null;
-	/** That starter model's name, which labels its background download. */
-	starter_name?: string | null;
+	/** Setup's managed local lifecycle and bounded failure facts. */
+	local_state?: string;
+	setup_error_code?: string;
+	setup_error_reference?: string;
+	bytes_to_free?: number;
 }
 
 /** The harness sources: Claude Code and Codex. */
@@ -208,25 +195,17 @@ export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; can
 	return response.json();
 }
 
-/** `manageExisting` is Welcome's choice for the person's own oMLX; leave it out where Welcome didn't show it. */
-export async function setupLocalSource(t: string, consentExisting = false, manageExisting?: boolean): Promise<LocalSetupResult> {
+/** `otherOmlx` is the person's choice for every other oMLX process; leave it null until the question appears. */
+export async function setupLocalSource(t: string, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalSetupResult> {
 	const response = await fetch('/api/providers/local/setup', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ consent_existing: consentExisting, manage_existing: manageExisting }),
+		body: JSON.stringify({ other_omlx: otherOmlx }),
 	});
 	const body = await response.json().catch(() => null);
 	const code = body?.detail?.code ?? body?.code;
 	if (response.status === 409 && code === 'consent_required') return { ok: false, code };
 	if (!response.ok) throw new Error(`local setup ${response.status}`);
 	return body;
-}
-
-/** Settings' Let CORSIA manage it or Stop managing, for the person's own oMLX; a refusal's message is safe to show. */
-export async function changeOwnOmlxManagement(t: string, action: 'start' | 'stop'): Promise<{ ok: boolean; message?: string }> {
-	const response = await fetch(`/api/providers/sources/omlx/management/${action}`, { method: 'POST', headers: { Authorization: `Bearer ${t}` } });
-	const body = await response.json().catch(() => null);
-	if (response.ok) return { ok: body?.ok !== false, message: typeof body?.message === 'string' ? body.message : undefined };
-	return { ok: false, message: typeof body?.detail === 'string' ? body.detail : undefined };
 }
 
 /** Re-run every source check once; concurrent callers share the server's run. */

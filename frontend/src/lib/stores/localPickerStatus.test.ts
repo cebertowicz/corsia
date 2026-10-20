@@ -30,11 +30,11 @@ describe('retryLocalSetup', () => {
 		expect(await retryLocalSetup('setup')).toEqual({ ok: false, code: 'consent_required' });
 	});
 
-	it('passes explicit consent when the picker action is affirmed', async () => {
+	it('passes the choice to keep another oMLX running', async () => {
 		vi.mocked(setupLocalSource).mockResolvedValue({ ok: true });
 
-		expect(await retryLocalSetup('setup', true)).toEqual({ ok: true });
-		expect(setupLocalSource).toHaveBeenCalledWith('token', true);
+		expect(await retryLocalSetup('setup', 'keep')).toEqual({ ok: true });
+		expect(setupLocalSource).toHaveBeenCalledWith('token', 'keep');
 	});
 
 	it('retries a Settings download through conductorSources after the models_updated read', async () => {

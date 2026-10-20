@@ -27,6 +27,13 @@ HEALTH_SWEEP_INTERVAL = 10
 
 _LOADED_BY_SERVER: dict[str, set[str]] = {}
 
+def notify_cached_model_loaded(server_id: str, model_id: str) -> None:
+    """Optimistically mark the newly loaded model and notify clients."""
+    from infra.state.ws import notify_models_changed
+    _LOADED_BY_SERVER.setdefault(server_id, set()).add(model_id)
+    notify_models_changed()
+
+
 def get_loaded_model_ids(server_id: str) -> set[str]:
     """Return model ids currently loaded on a swept online server."""
     return set(_LOADED_BY_SERVER.get(server_id, ()))
@@ -375,10 +382,7 @@ async def discover_and_notify(server_id: str) -> dict:
 
 
 async def refresh_online_servers() -> list[str]:
-    """Re-run model discovery for every online server (managed + external).
-
-    Public entry point for the manual discovery trigger so API routes don't reach
-    into the internal ``_discover_and_notify``. Returns the server ids refreshed."""
+    """Discover all online servers, managed and external; return their refreshed ids."""
     refreshed: list[str] = []
     for server in await run_in_db(get_servers):
         if server.get("status") == "online":
