@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 from connections.google import client as google_client
 from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread
-from connections.calendar_document import OFFSET_REQUIRED, attendee_emails, compose_document, one_line_text, parse_time
+from connections.calendar_document import OFFSET_REQUIRED, compose_document, parse_time, read_draft, read_invite
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
 from infra import config
@@ -168,20 +168,12 @@ class CalendarDraftInviteTool(Tool):
             return "Error: Couldn't save the invite draft."
 
     async def _save(self, thread_id: str, account: dict, kwargs: dict[str, Any]) -> str:
-        title = one_line_text(kwargs.get("title"), "title")
-        start, parsed_start = parse_time(kwargs.get("start"))
-        end, parsed_end = parse_time(kwargs.get("end"))
-        if parsed_end <= parsed_start:
-            raise ValueError("The invite end must be after its start.")
-        attendees = attendee_emails(kwargs.get("attendees"))
-        description = kwargs.get("description", "")
-        if not isinstance(description, str):
-            raise ValueError("The invite description must be text.")
+        invite = read_invite(kwargs)
         draft_id = kwargs.get("draft_id")
         email = str(account["address"])
-        text = compose_document(email, title, start, end, attendees, description)
-        target = {"account": email, "account_id": account["id"], "title": title, "start": start, "end": end,
-                  "attendees": attendees, "description": description}
+        text = compose_document(email, invite.title, invite.start, invite.end, invite.attendees, invite.description)
+        target = {"account": email, "account_id": account["id"], "title": invite.title, "start": invite.start,
+                  "end": invite.end, "attendees": invite.attendees, "description": invite.description}
         try:
             saved = await save_draft(
                 thread_id=thread_id, kind="invite", extension=".md", prefix="calendar-invites",
@@ -242,31 +234,19 @@ class CalendarSendInviteTool(Tool):
                 return f"Error: {NO_OPEN_DRAFT}"
             return f"Error: {verdict.text}"
         try:
-            if not verdict.data.decode("utf-8").startswith("From: "):
-                return f"Error: {BAD_DOCUMENT}"
-            target = json.loads(verdict.draft.get("target_json") or "{}")
-            if not isinstance(target, dict):
-                return f"Error: {BAD_DOCUMENT}"
-            title = one_line_text(target.get("title"), "title")
-            start, parsed_start = parse_time(target.get("start"))
-            end, parsed_end = parse_time(target.get("end"))
-            if parsed_end <= parsed_start:
-                return f"Error: {BAD_DOCUMENT}"
-            attendees = attendee_emails(target.get("attendees"))
-            description = target.get("description", "")
-            address, account_id = target.get("account"), target.get("account_id")
-            if not isinstance(description, str) or not isinstance(address, str) or not account_id:
-                return f"Error: {BAD_DOCUMENT}"
+            draft = read_draft(verdict.data, verdict.draft.get("target_json"), require_account_id=True)
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
         try:
-            account = await run_in_db(resolve_for_thread, account_id, thread_id)
+            account = await run_in_db(resolve_for_thread, draft.account_id, thread_id)
         except GoogleError as exc:
             return f"Error: Not sent: {exc}"
-        if str(account["address"]).lower() != address.lower():
+        if str(account["address"]).lower() != draft.address.lower():
             return f"Error: {BAD_DOCUMENT}"
-        return str(account["id"]), {"summary": title, "start": {"dateTime": start}, "end": {"dateTime": end},
-                "attendees": [{"email": email} for email in attendees], "description": description}
+        invite = draft.invite
+        return str(account["id"]), {"summary": invite.title, "start": {"dateTime": invite.start},
+                "end": {"dateTime": invite.end},
+                "attendees": [{"email": email} for email in invite.attendees], "description": invite.description}
 
     async def _deliver(self, draft_id: str, account_id: str, body: dict) -> str:
         return await deliver_claimed(
