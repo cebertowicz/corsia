@@ -14,7 +14,7 @@ from contextlib import AsyncExitStack
 
 from loguru import logger
 
-import infra.state as state
+from infra import state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 from tools.mcp import connect_mcp_servers, mcp_failure_class

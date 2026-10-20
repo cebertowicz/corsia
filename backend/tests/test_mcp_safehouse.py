@@ -204,6 +204,27 @@ def test_uvx_uses_only_an_unprotected_base_python(monkeypatch, tmp_path, base_in
         assert params.env["UV_PYTHON"] == str(base_python)
 
 
+def test_launch_time_runtime_download_failure_keeps_its_class(monkeypatch, tmp_path):
+    from tools import mcp_local_transport as transport
+    from tools.managed_runtime import ManagedRuntimeDownloadError
+    from tools.mcp import mcp_failure_class
+
+    def fail_download(*_args, **_kwargs):
+        raise ManagedRuntimeDownloadError("download failed: URLError")
+
+    _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(transport.shutil, "which", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tools.managed_runtime.command_path", fail_download)
+    monkeypatch.setattr("tools.shell_guard.safehouse_version_error", lambda: None)
+    monkeypatch.setattr("tools.shell_guard._safehouse_executable", lambda: tmp_path / "safehouse")
+
+    with pytest.raises(ManagedRuntimeDownloadError) as raised:
+        transport.safehouse_stdio_parameters("app", {"connected_app_id": "app"}, "npx", [], {})
+
+    assert mcp_failure_class(raised.value, {}) == "runtime_download_failed"
+
+
 def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
     from infra import config
     from tools.host_path_policy import current_protected_host_path_policy
