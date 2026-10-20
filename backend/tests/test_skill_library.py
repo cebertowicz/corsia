@@ -62,21 +62,20 @@ def test_search_reports_age_state_and_the_no_match_recovery(monkeypatch):
     assert "skill-creator" in none["hint"]
 
 
-def test_search_refreshes_notices_only_after_a_raw_index_refresh(monkeypatch):
+def test_index_refreshes_notices_only_after_a_raw_index_refresh(monkeypatch):
     from library import producer
-    from tools import skill_library
+    from tools import skill_library_common
 
     refreshes = []
     monkeypatch.setattr(producer, "request_refresh", lambda: refreshes.append(True))
-    monkeypatch.setattr(skill_library, "_installed_library_origins", lambda *_args: {})
     monkeypatch.setattr(
-        skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=False),
+        "library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=False),
     )
-    skill_library._search("pdf", "owner", None, object())
+    skill_library_common.index()
     monkeypatch.setattr(
-        skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=True),
+        "library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=True),
     )
-    skill_library._search("pdf", "owner", None, object())
+    skill_library_common.index()
 
     assert refreshes == [True]
 
@@ -124,6 +123,40 @@ def test_search_stays_under_200ms_with_one_owner_query_for_1000_items_and_30_cop
     assert result["results"][0]["state"] == "installed"
     assert len([sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]) == 1
     assert not [sql for sql in statements if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE"))]
+
+
+def test_install_repairs_registration_for_an_existing_local_library_copy(monkeypatch):
+    from library.items import source_ref
+    from tools import skill_library
+
+    item = _item()
+    copy = SimpleNamespace(
+        name="pdf", path="/tmp/pdf/SKILL.md", scope="thread",
+        corsia={"origin": {"source": source_ref(item)}},
+    )
+    repaired = []
+    db = object()
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(item,)))
+    monkeypatch.setattr(skill_library, "_effective", lambda *_args: ([copy], [copy]))
+    monkeypatch.setattr(skill_library, "_register", lambda *args: repaired.append(args))
+
+    result = skill_library._install("pdf", "owner", None, db)
+
+    assert result["error"] == "already_installed"
+    assert repaired == [("owner", "pdf", None, db)]
+
+
+def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db, monkeypatch):
+    from infra import product_events
+    from tools import skill_library
+
+    emitted = []
+    monkeypatch.setattr(skill_library, "_persistent_owner", lambda *_args: "owner")
+    monkeypatch.setattr(skill_library, "_search", lambda *_args: {"results": []})
+    monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: emitted.append((args, kwargs)))
+
+    assert skill_library._execute("search", "thread", {}, "pdf", None, False) == {"results": []}
+    assert emitted == [(("skill_library", "search"), {"thread_id": "thread", "properties": {"outcome": "empty"}})]
 
 
 def test_same_source_with_a_changed_declared_manifest_is_an_available_update():

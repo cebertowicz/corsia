@@ -28,7 +28,7 @@ def index():
     from library.index import LibraryIndexValidationError
 
     try:
-        return load_index()
+        result = load_index()
     except LibraryUnreachableError as error:
         raise LibraryIndexError(
             "library_unreachable", "the library index is unavailable; continue without it and try again later",
@@ -37,6 +37,11 @@ def index():
         raise LibraryIndexError(
             "library_invalid", "the library index is malformed; report it to the conductor and do not retry",
         ) from error
+    if result.refreshed:
+        from library.producer import request_refresh
+
+        request_refresh()
+    return result
 
 
 def effective(owner_id: str, project_id: str | None, workspace: Path, db):
@@ -123,3 +128,32 @@ def changed_paths(current: dict[str, bytes] | None, skill_md: bytes, bundle: dic
     dropped = (set(current or {}) - new_paths) - {"corsia.yaml"}
     skill_changed = current is None or current.get("SKILL.md") != skill_md
     return sorted(set(bundle) | dropped | ({"SKILL.md"} if skill_changed else set()))
+
+
+def emit_action(action: str, thread_id: str, result: dict[str, Any]) -> None:
+    """Record one privacy-safe outcome for every completed library action."""
+    from infra.product_events import emit_product_event
+
+    outcome = result.get("outcome") or result.get("error") or (
+        "empty" if action == "search" and not result.get("results") else "success"
+    )
+    emit_product_event("skill_library", action, thread_id=thread_id, properties={"outcome": outcome})
+
+
+def write_result(result: dict[str, str]) -> dict[str, Any]:
+    """Translate install-writer outcomes into actionable agent-facing errors."""
+    if result.get("outcome") == "already_here":
+        return {"error": "destination_exists", "message": "a leftover folder is already at this destination; remove it, then retry"}
+    if result.get("outcome") == "not_installed":
+        return {"error": "not_installed", "message": "this skill is not installed here; search first, then install it"}
+    if result.get("outcome") == "not_removed":
+        return {"error": "not_removed", "message": "the copy changed during removal and its folder remains; re-read or search it, then retry"}
+    if result.get("history_outcome") == "stale":
+        return {"error": "stale", "message": "the copy changed while saving; re-read or search it, then retry"}
+    if result.get("history_outcome") == "history-off":
+        return {"error": "history_off", "message": "guidance history is off for this folder, so nothing changed; turn history back on first"}
+    if result.get("reason") == "invalid_destination":
+        return {"error": "invalid_destination", "message": "this destination is invalid; choose a valid thread skill destination and retry"}
+    if result.get("reason") == "save_error":
+        return {"error": "save_error", "message": "the skill could not be saved; retry later"}
+    return {"error": "invalid_item", "message": "the library item could not be written without changing your existing skills"}

@@ -17,6 +17,8 @@ def _payload(event_type: str, **overrides):
         "name": "pdf",
         "installed_version": "1.0.0",
         "library_version": "1.1.0",
+        "item_manifest": "manifest-1",
+        "installed_at": "2026-10-19T00:00:00+00:00",
         "changed_files": ["SKILL.md", "corsia.yaml"],
         "edited": False,
         "withdrawn_reason": None,
@@ -79,20 +81,20 @@ def test_changed_notice_uses_artifact_route_and_ignores_nonidentity_facts(isolat
     assert (_wakes(owner), _notes(owner)) == (0, 1)
 
 
-def test_changed_notice_identity_includes_new_library_version():
+def test_changed_notice_identity_includes_new_item_manifest_at_the_same_version():
     first = normalize(
         library.LIBRARY_CONNECTOR, _payload(library.ITEM_CHANGED_EVENT),
     )
     later = normalize(
         library.LIBRARY_CONNECTOR,
-        _payload(library.ITEM_CHANGED_EVENT, library_version="1.2.0"),
+        _payload(library.ITEM_CHANGED_EVENT, item_manifest="manifest-2"),
     )
 
     assert first.event_id != later.event_id
-    assert first.facts["item_key"] == "pdf:1.1.0"
+    assert first.facts["item_key"] == "pdf:manifest-1"
 
 
-def test_withdrawal_wakes_once_using_the_existing_artifact_route(isolated_db):
+def test_withdrawal_wakes_again_after_reinstatement(isolated_db):
     owner = _owner()
     raw = _payload(
         library.ITEM_WITHDRAWN_EVENT,
@@ -108,6 +110,7 @@ def test_withdrawal_wakes_once_using_the_existing_artifact_route(isolated_db):
             library.ITEM_WITHDRAWN_EVENT,
             installed_version="0.9.0",
             library_version=None,
+            installed_at="2026-10-20T00:00:00+00:00",
             changed_files=["SKILL.md"],
             edited=True,
             withdrawn_reason="updated explanation",
@@ -115,5 +118,5 @@ def test_withdrawal_wakes_once_using_the_existing_artifact_route(isolated_db):
     )
 
     assert [(delivery.outcome, delivery.thread_id) for delivery in first] == [(WOKE, owner)]
-    assert [delivery.outcome for delivery in repeat] == [DUPLICATE]
-    assert (_wakes(owner), _notes(owner)) == (1, 0)
+    assert [delivery.outcome for delivery in repeat] == [WOKE]
+    assert (_wakes(owner), _notes(owner)) == (2, 0)

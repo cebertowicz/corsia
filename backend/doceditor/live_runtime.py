@@ -25,7 +25,7 @@ from doceditor.live_publication_record import WriteActor
 from doceditor.live_shared_policy import SharedLivePolicy
 from doceditor.live_setup import setup_shared
 from doceditor.live_store import LiveStore, StoreRefused
-from infra.guidance_git import guidance_target
+from infra.guidance_targets import guidance_target
 
 
 log = logging.getLogger(__name__)

@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from infra.db_async import run_off_db
+from infra.guidance_targets import guidance_target
 from tools.base import Tool
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
     announce_published_write,
-    guidance_target,
     managed_write,
     save_guided_write_and_announce,
 )

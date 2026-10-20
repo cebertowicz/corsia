@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import stat
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -20,13 +19,16 @@ from core.skill_sidecar import (
     installed_digest,
 )
 from core.skill_validation import parse_frontmatter
-from infra.guidance_git import GuidanceTarget, SaveResult, save_guidance
+from infra.guidance_git import SaveResult, save_guidance
 from infra.guidance_messages import saver_author
+from infra.guidance_targets import GuidanceTarget
+from library.installed import local_bundle
 
 ALREADY_HERE = "already_here"
 NOT_INSTALLED = "not_installed"
 INSTALLED = "installed"
 FAILED = "failed"
+NOT_REMOVED = "not_removed"
 _TOOL_GRANTS = frozenset({"allowed-tools", "hooks"})
 
 
@@ -92,6 +94,8 @@ def _bundle_files(
         if relative.casefold() == SIDECAR_FILE:
             continue
         path = Path(relative)
+        if any(part.startswith(".") for part in path.parts):
+            continue
         if relative.casefold() in taken or path.is_absolute() or ".." in path.parts:
             return None
         taken.add(relative.casefold())
@@ -102,26 +106,26 @@ def _bundle_files(
 
 
 def _current_files(target: Path) -> dict[str, bytes] | None:
-    """Read an installed bundle without following links; hidden OS files do not count as edits."""
+    """Use the single installed-bundle reader for every mutation snapshot."""
+    files, problems = local_bundle(target)
+    return files if files is not None and not problems else None
+
+
+def _remove_empty_bundle(target: Path) -> bool:
+    """Remove empty bundle directories and Finder metadata without following links."""
     try:
-        if not target.is_dir() or target.is_symlink():
-            return None
-        files: dict[str, bytes] = {}
-        for directory, subfolders, names in os.walk(target):
-            subfolders[:] = [entry for entry in subfolders if not entry.startswith(".")]
-            for entry in subfolders:
-                if not stat.S_ISDIR((Path(directory) / entry).lstat().st_mode):
-                    return None
-            for entry in names:
-                if entry.startswith("."):
-                    continue
-                path = Path(directory) / entry
-                if not stat.S_ISREG(path.lstat().st_mode):
-                    return None
-                files[path.relative_to(target).as_posix()] = path.read_bytes()
-        return files
+        if target.is_symlink():
+            return False
+        for directory, _subfolders, names in os.walk(target, topdown=False, followlinks=False):
+            folder = Path(directory)
+            for name in names:
+                path = folder / name
+                if name == ".DS_Store" and not path.is_symlink() and path.is_file():
+                    path.unlink()
+            folder.rmdir()
     except OSError:
-        return None
+        return False
+    return not target.exists()
 
 
 def _adopted_at(files: Mapping[str, bytes]) -> str | None:
@@ -183,10 +187,10 @@ def install_skill_bundle(
     )
     if destination is None:
         logger.warning("skill install failed at destination validation for {}", name)
-        return {"outcome": FAILED}
+        return {"outcome": FAILED, "reason": "invalid_destination"}
     _root, target = destination
     if target.exists() or target.is_symlink():
-        return {"outcome": ALREADY_HERE}
+        return {"outcome": ALREADY_HERE, "reason": "destination_exists"}
     writes = {target / relative: data for relative, data in files.items()}
     target_info = GuidanceTarget(f"skill, {'agent' if scope == 'thread' else scope} scope")
     try:
@@ -204,7 +208,7 @@ def install_skill_bundle(
         # A write failed before any commit, so this new folder holds only part of the bundle.
         logger.warning("skill install failed at guidance save for {}", name)
         shutil.rmtree(target, ignore_errors=True)
-        return {"outcome": FAILED}
+        return {"outcome": FAILED, "reason": "save_error"}
     if saved.outcome not in ("written", "unchanged") or saved.unsynced:
         logger.warning("skill {} guidance save: {} {}", name, saved.outcome, saved.errors or saved.reason)
     return _saved(saved)
@@ -235,15 +239,16 @@ def update_skill_bundle(
         workspace, name, scope=scope, thread_id=thread_id, project_id=project_id, db=db
     )
     if destination is None:
-        return {"outcome": FAILED}
+        return {"outcome": FAILED, "reason": "invalid_destination"}
     _root, target = destination
     previous = dict(confirmed_files) if confirmed_files is not None else _current_files(target)
     adopted_at = _adopted_at(previous) if previous is not None else None
     if previous is None or adopted_at is None:
-        return {"outcome": NOT_INSTALLED if not target.exists() else FAILED}
+        return {"outcome": NOT_INSTALLED if not target.exists() else FAILED,
+                **({"reason": "unreadable_bundle"} if target.exists() else {})}
     files = _bundle_files(name, upstream_skill_md, other_files, description, {**origin, "adopted_at": adopted_at})
     if files is None:
-        return {"outcome": FAILED}
+        return {"outcome": FAILED, "reason": "invalid_item"}
     writes = {target / relative: data for relative, data in files.items()}
     expected = {
         path: hashlib.sha256(previous[relative]).hexdigest() if relative in previous else None
@@ -267,7 +272,7 @@ def update_skill_bundle(
         )
     except OSError:
         logger.warning("skill update failed at guidance save for {}", name)
-        return {"outcome": FAILED}
+        return {"outcome": FAILED, "reason": "save_error"}
     if saved.outcome not in ("written", "unchanged") or saved.unsynced:
         logger.warning("skill {} update guidance save: {} {}", name, saved.outcome, saved.errors or saved.reason)
     return _mutation_saved(saved, "updated")
@@ -290,11 +295,12 @@ def remove_skill_bundle(
         workspace, name, scope=scope, thread_id=thread_id, project_id=project_id, db=db
     )
     if destination is None:
-        return {"outcome": FAILED}
+        return {"outcome": FAILED, "reason": "invalid_destination"}
     _root, target = destination
     previous = dict(confirmed_files) if confirmed_files is not None else _current_files(target)
     if previous is None:
-        return {"outcome": NOT_INSTALLED if not target.exists() else FAILED}
+        return {"outcome": NOT_INSTALLED if not target.exists() else FAILED,
+                **({"reason": "unreadable_bundle"} if target.exists() else {})}
     deletes = {target / relative: hashlib.sha256(data).hexdigest() for relative, data in previous.items()}
     try:
         saved = save_guidance(
@@ -309,13 +315,10 @@ def remove_skill_bundle(
         )
     except OSError:
         logger.warning("skill removal failed at guidance save for {}", name)
-        return {"outcome": FAILED}
-    if saved.outcome in ("written", "unchanged"):
-        for directory in sorted({path.parent for path in deletes}, key=lambda path: len(path.parts), reverse=True):
-            try:
-                directory.rmdir()
-            except OSError:
-                pass
+        return {"outcome": FAILED, "reason": "save_error"}
+    if saved.outcome in ("written", "unchanged") and not _remove_empty_bundle(target):
+        return {"outcome": NOT_REMOVED, "history_outcome": saved.outcome, "reason": "leftover_folder",
+                **({"guidance_history": saved.line} if saved.line else {})}
     if saved.outcome not in ("written", "unchanged") or saved.unsynced:
         logger.warning("skill {} removal guidance save: {} {}", name, saved.outcome, saved.errors or saved.reason)
     return _mutation_saved(saved, "removed")

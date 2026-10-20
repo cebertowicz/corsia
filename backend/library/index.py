@@ -6,17 +6,17 @@ from dataclasses import dataclass
 import json
 import math
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
 import time
 from typing import Any
 from urllib.request import urlopen
 
+from library.items import COMMIT, REPOSITORY, LibraryItemError, validate_relative_path
+
 INDEX_URL = "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/index.json"
 _CACHE_NAME = "index.json"
 _SHA256 = re.compile(r"^(?:sha256:)?[0-9a-fA-F]{64}$")
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 class LibraryIndexError(RuntimeError):
@@ -142,9 +142,9 @@ def _validate_skill(row: Any) -> dict[str, Any]:
     for field in ("repository", "path", "commit"):
         if not isinstance(source.get(field), str) or not source[field]:
             raise LibraryIndexValidationError(f"library index source {field} must be a non-empty string")
-    if not _REPOSITORY.fullmatch(source["repository"]):
+    if not REPOSITORY.fullmatch(source["repository"]):
         raise LibraryIndexValidationError("library index source repository must be an owner/name pair")
-    if not _COMMIT.fullmatch(source["commit"]):
+    if not COMMIT.fullmatch(source["commit"]):
         raise LibraryIndexValidationError("library index source commit must be a full 40-character SHA")
     _validate_relative_path(source["path"])
 
@@ -172,14 +172,10 @@ def _validate_skill(row: Any) -> dict[str, Any]:
 
 
 def _validate_relative_path(path: str) -> None:
-    parsed = PurePosixPath(path)
-    if (
-        not path
-        or path.startswith("/")
-        or "\\" in path
-        or any(part in ("", ".", "..") for part in parsed.parts)
-    ):
-        raise LibraryIndexValidationError(f"library index contains an unsafe relative path: {path!r}")
+    try:
+        validate_relative_path(path)
+    except LibraryItemError as error:
+        raise LibraryIndexValidationError(f"library index contains an unsafe relative path: {path!r}") from error
 
 
 def _format_age(seconds: float) -> str:

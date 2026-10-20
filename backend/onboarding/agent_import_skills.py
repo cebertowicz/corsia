@@ -208,16 +208,17 @@ def _parse(candidate: Candidate) -> str:
     from core.skill_sidecar import installed_digest_part
 
     digest = hashlib.sha256()
-    try:
-        for name in sorted(candidate.files):
+    for name in sorted(candidate.files):
+        try:
             part = installed_digest_part(name, candidate.files[name])
-            if part is not None:
-                digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
-    except (UnicodeDecodeError, ValueError):
-        # An upstream corsia.yaml is never installed unchanged, but it is part of
-        # the offered bundle's content identity. Refuse an invalid one rather
-        # than letting a malformed sidecar abort the whole discovery scan.
-        return _unreadable(candidate, BAD_HEADER)
+        except (UnicodeDecodeError, ValueError):
+            # An upstream sidecar is dropped at install. It still changes the
+            # offered bundle identity, but cannot make SKILL.md look invalid.
+            if name != "corsia.yaml":
+                return _unreadable(candidate, BAD_HEADER)
+            part = candidate.files[name]
+        if part is not None:
+            digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
     candidate.content_sha = digest.hexdigest()
     # A key is reported before any layout problem, so fixing the layout never comes first.
     if any(contains_credential(text) for text in texts.values()):

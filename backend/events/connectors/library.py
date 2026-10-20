@@ -27,6 +27,8 @@ _FACTS = (
     "name",
     "installed_version",
     "library_version",
+    "item_manifest",
+    "installed_at",
     "changed_files",
     "edited",
     "withdrawn_reason",
@@ -41,10 +43,9 @@ def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
     facts = {key: raw[key] for key in _FACTS if raw.get(key) is not None}
     name = facts.get("name")
     if name is not None:
-        # A changed item's digest groups by the item and its new version; a
-        # withdrawal has no new version and groups by its item alone.
-        version = facts.get("library_version")
-        facts["item_key"] = f"{name}:{version}" if version is not None else name
+        # Group notices by the actual reviewed item state, not a mutable version.
+        manifest = facts.get("item_manifest")
+        facts["item_key"] = f"{name}:{manifest}" if manifest is not None else name
     return facts
 
 
@@ -66,7 +67,7 @@ MANIFEST = register(ConnectorManifest(
     event_types={
         ITEM_CHANGED_EVENT: EventTypeDecl(
             ITEM_CHANGED_EVENT,
-            ("external_id", "library_version"),
+            ("external_id", "item_manifest", "installed_at"),
             _FILTERABLE,
             artifact_type=INSTALLED_SKILL_TYPE,
             artifact_integration=LIBRARY_INTEGRATION,
@@ -75,7 +76,7 @@ MANIFEST = register(ConnectorManifest(
         ),
         ITEM_WITHDRAWN_EVENT: EventTypeDecl(
             ITEM_WITHDRAWN_EVENT,
-            ("external_id",),
+            ("external_id", "item_manifest", "installed_at"),
             _FILTERABLE,
             artifact_type=INSTALLED_SKILL_TYPE,
             artifact_integration=LIBRARY_INTEGRATION,

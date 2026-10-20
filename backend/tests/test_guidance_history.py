@@ -107,7 +107,8 @@ def _enable_history_context() -> None:
 
 
 def _save(workspace: Path, path: Path, text: str, **kwargs):
-    from infra.guidance_git import guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import guidance_target
 
     target = guidance_target(path, workspace)
     assert target is not None
@@ -246,7 +247,8 @@ async def test_write_file_commits_the_saved_bytes_as_the_saver(history_scope):
 
 
 def test_save_guidance_delete_requires_the_expected_prior_hash(history_scope):
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -264,7 +266,8 @@ def test_save_guidance_delete_requires_the_expected_prior_hash(history_scope):
 
 
 def test_save_guidance_delete_refuses_a_changed_destination(history_scope):
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -282,7 +285,8 @@ def test_save_guidance_delete_refuses_a_changed_destination(history_scope):
 
 def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch):
     from infra import guidance_git
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -300,7 +304,8 @@ def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch
 
 
 def test_atomic_delete_with_a_target_fault_says_nothing_changed(history_scope):
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -316,7 +321,8 @@ def test_atomic_delete_with_a_target_fault_says_nothing_changed(history_scope):
 
 
 def test_binary_safe_history_refuses_an_oversized_file_without_writing(history_scope):
-    from infra.guidance_git import GuidanceTarget, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "large.bin"
@@ -331,7 +337,8 @@ def test_binary_safe_history_refuses_an_oversized_file_without_writing(history_s
 
 
 def test_binary_safe_history_refuses_an_oversized_file_before_a_non_atomic_target_fault(history_scope):
-    from infra.guidance_git import GuidanceTarget, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "large.bin"
@@ -428,7 +435,8 @@ def test_identical_save_adds_no_commit(history_scope):
 
 
 def test_outside_write_after_the_write_stays_dirty_and_out_of_the_commit(history_scope):
-    from infra.guidance_git import guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import guidance_target
 
     workspace, _ = history_scope
     skill = _history(workspace)
@@ -513,7 +521,8 @@ def test_a_commit_fault_retries_once_then_saves_with_the_failure(history_scope, 
 
 def test_commit_fault_restores_a_deleted_file(history_scope, monkeypatch):
     from infra import guidance_git
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -597,7 +606,8 @@ def test_file_version_reads_a_status_fault_as_a_fault_never_clean(history_scope,
 
 
 def test_a_classifier_fault_saves_and_says_history_may_be_missing(history_scope, monkeypatch):
-    from infra.guidance_git import guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import guidance_target
 
     workspace, _ = history_scope
 
