@@ -11,13 +11,15 @@ from core.corrections_input import (
 from core.corrections_recording import (
     COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
-    DECISION_SUBJECT_PREFIX,
     MESSAGE_SUBJECT_PREFIX,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
     ClassifierVersion,
     CorrectionCandidate,
+    decision_answer_arrived_at_sql,
+    decision_answer_source_id,
+    decision_answer_subject_key_sql,
     is_owner_authored_message,
     owner_message_sql_predicate,
     version_match_sql,
@@ -129,8 +131,8 @@ def pending_source_candidate_keys(
             **_before_params(before),
             "correction_event": CORRECTION_EVENT,
             "comment_prefix": COMMENT_SUBJECT_PREFIX,
-            "decision_prefix": DECISION_SUBJECT_PREFIX,
             "decision_type": DECISION_TYPE,
+            "source_kind": SOURCE_KIND_DECISION_ANSWER,
             "scan_limit": batch_size,
             "since_created_at": since,
         }
@@ -153,30 +155,27 @@ def pending_source_candidate_keys(
             """,
             {**params, "source_kind": SOURCE_KIND_DOC_COMMENT},
         ).fetchall()
-        decision_created_at = "json_extract(metadata,'$.plan_decision.answered_at')"
+        decision_created_at = decision_answer_arrived_at_sql("d")
         decision_rows = db.execute(
             f"""
-            SELECT external_id,json_extract(metadata,'$.plan_decision.answered_at')
-            FROM artifact_identities
-            WHERE integration='local' AND type=:decision_type AND state='active'
-              AND json_extract(metadata,'$.plan_decision.state')='answered'
+            SELECT d.external_id,{decision_created_at}
+            FROM artifact_identities d
+            WHERE d.integration='local' AND d.type=:decision_type AND d.state='active'
+              AND json_extract(d.metadata,'$.plan_decision.state')='answered'
               -- A coarse prefilter, never narrower than Plans' ``answer_note``, which
               -- ``source_candidate`` applies to each selected answer.
-              AND COALESCE(json_extract(metadata,'$.plan_decision.answer.text'),'')<>''
-              AND {_before_clause('plan_decision_answer', 'external_id', decision_created_at)}
-              AND (:since_created_at IS NULL
-                   OR json_extract(metadata,'$.plan_decision.answered_at') >= :since_created_at)
+              AND COALESCE(json_extract(d.metadata,'$.plan_decision.answer.text'),'')<>''
+              AND {_before_clause(SOURCE_KIND_DECISION_ANSWER, 'd.external_id', decision_created_at)}
+              AND (:since_created_at IS NULL OR {decision_created_at} >= :since_created_at)
               AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event
-                  AND e.subject_key=:decision_prefix || external_id || ':'
-                      || json_extract(metadata,'$.plan_decision.revision')
+                  AND e.subject_key={decision_answer_subject_key_sql('d')}
                   AND e.retracted_at IS NULL AND {version_filter}
               )
-            ORDER BY json_extract(metadata,'$.plan_decision.answered_at') DESC,external_id DESC
-            LIMIT :scan_limit
+            ORDER BY {decision_created_at} DESC,d.external_id DESC LIMIT :scan_limit
             """,
-            {**params, "source_kind": SOURCE_KIND_DECISION_ANSWER},
+            params,
         ).fetchall()
         return [
             *(PendingCandidateKey(None, SOURCE_KIND_DOC_COMMENT, str(row[0]), None, None, str(row[1])) for row in comment_rows),
@@ -280,7 +279,7 @@ def _decision_candidate(db, decision_id: str) -> CorrectionCandidate | None:
     if not text or not thread_id or not isinstance(thread_id, str) or revision is None or not answered_at:
         return None
     return CorrectionCandidate(
-        SOURCE_KIND_DECISION_ANSWER, f"{decision_id}:{revision}", thread_id, _project_of(db, thread_id),
+        SOURCE_KIND_DECISION_ANSWER, decision_answer_source_id(decision_id, revision), thread_id, _project_of(db, thread_id),
         owner_text(text), str(answered_at), context=agent_context(_question(body)),
         quote=text, about=str(body.get("title") or decision_id),
     )

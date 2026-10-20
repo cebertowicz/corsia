@@ -180,6 +180,26 @@ def subject_key(source_kind: str, source_id: str) -> str:
     return SUBJECT_PREFIXES[source_kind] + source_id
 
 
+def decision_answer_source_id(decision_id: str, revision: object) -> str:
+    """The stable source id for one answered revision of a plan decision."""
+    return f"{decision_id}:{revision}"
+
+
+def decision_answer_source_id_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's answered-decision source id."""
+    return f"{alias}.external_id || ':' || json_extract({alias}.metadata,'$.plan_decision.revision')"
+
+
+def decision_answer_arrived_at_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's recorded decision-answer arrival time."""
+    return f"json_extract({alias}.metadata,'$.plan_decision.answered_at')"
+
+
+def decision_answer_subject_key_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's correction-event subject key."""
+    return f"'{DECISION_SUBJECT_PREFIX}' || {decision_answer_source_id_sql(alias)}"
+
+
 def dedupe_key(candidate: CorrectionCandidate, version: ClassifierVersion) -> str:
     """Stable idempotency key for one source under one classifier version."""
     payload = json.dumps(

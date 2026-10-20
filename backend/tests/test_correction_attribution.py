@@ -49,9 +49,10 @@ def message(db, message_id: str, thread: str, at: str, *, own_turn: str | None =
 
 def legacy_fact(db, message_id: str, *, label: str = "correction", retracted: bool = False) -> None:
     """The actual pre-source-kind attributes emitted by the historical writer."""
-    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,attributes,"
-               "retracted_at) VALUES (?,?,'measurement.correction','corsia','instrumented','2026-10-15','2026-10-15',?,?)",
-               (f"legacy-{message_id}", f"legacy-{message_id}",
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes,retracted_at) VALUES (?,?,'measurement.correction','corsia','instrumented','2026-10-15',"
+               "'2026-10-15',?,?,?)",
+               (f"legacy-{message_id}", f"legacy-{message_id}", f"message:{message_id}",
                 json.dumps({"message_id": message_id, "thread_id": "ignored", "label": label, "asset_version": "c1"}),
                 "2026-10-16" if retracted else None))
 

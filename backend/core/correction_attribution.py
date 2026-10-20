@@ -10,12 +10,12 @@ released task put a third or more of such corrections on the wrong task. Turns a
 Sep 9, 2026, so earlier corrections are Unattributed by construction.
 
 Times are the source's persisted arrival time, never the fact's ``ts``: most facts were backfilled
-long after the source. Historical message facts carry ``message_id``; current facts carry
-``source_kind`` and ``source_id``. Comments and decision answers retain their recorded target
-thread in the fact and their arrival time in their canonical source row. A node outside every
-workflow is **Not in a workflow**, which is not the same as Unattributed; ``workflow_run_of`` makes
-that split. Facts labelled ``unreadable`` are never counted (``core.corrections_recording``), and
-neither are retracted ones.
+long after the source. Every source joins by its canonical ``outcome_events.subject_key``; the
+recorded target thread is carried in ``agent_thread_id``. Decision answers intentionally count in
+the workflow verdict because they are correction sources that feed the learning loop. A node outside
+every workflow is **Not in a workflow**, which is not the same as Unattributed; ``workflow_run_of``
+makes that split. Facts labelled ``unreadable`` are never counted (``core.corrections_recording``),
+and neither are retracted ones.
 """
 from __future__ import annotations
 
@@ -25,12 +25,17 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from core.corrections_recording import (
+    COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
+    DECISION_SUBJECT_PREFIX,
     LABEL_CORRECTION,
+    MESSAGE_SUBJECT_PREFIX,
     LABEL_NOT_CORRECTION,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
+    decision_answer_arrived_at_sql,
+    decision_answer_subject_key_sql,
 )
 
 NOT_IN_WORKFLOW = "not_in_workflow"
@@ -44,36 +49,33 @@ def _ts(column: str) -> str:
 
 _ATTRIBUTED_SQL = f"""
     WITH facts AS (
-      SELECT f.attributes,
-        COALESCE(json_extract(f.attributes,'$.source_kind'), '{SOURCE_KIND_MESSAGE}') AS source_kind,
-        COALESCE(json_extract(f.attributes,'$.source_id'), json_extract(f.attributes,'$.message_id')) AS source_id
+      SELECT f.subject_key,f.agent_thread_id,f.attributes
       FROM outcome_events f
       WHERE f.event_name=:event AND f.retracted_at IS NULL
         AND json_extract(f.attributes,'$.label') IN (:correction, :not_correction)
     ), sources AS (
-      SELECT f.source_kind, f.source_id, f.attributes,
-        CASE f.source_kind
-          WHEN '{SOURCE_KIND_MESSAGE}' THEN m.thread_id
-          ELSE json_extract(f.attributes,'$.thread_id')
-        END AS thread_id,
-        CASE f.source_kind
-          WHEN '{SOURCE_KIND_MESSAGE}' THEN m.created_at
-          WHEN '{SOURCE_KIND_DOC_COMMENT}' THEN c.created_at
-          WHEN '{SOURCE_KIND_DECISION_ANSWER}' THEN json_extract(d.metadata,'$.plan_decision.answered_at')
-        END AS source_at,
-        m.active_turn_id
-      FROM facts f
-      LEFT JOIN messages m ON f.source_kind='{SOURCE_KIND_MESSAGE}' AND m.id=f.source_id
-      LEFT JOIN doc_comments c ON f.source_kind='{SOURCE_KIND_DOC_COMMENT}' AND c.id=f.source_id
-      LEFT JOIN artifact_identities d ON f.source_kind='{SOURCE_KIND_DECISION_ANSWER}'
+      SELECT '{SOURCE_KIND_MESSAGE}' AS source_kind,
+        substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1) AS source_id,
+        m.created_at AS source_at,m.thread_id,m.active_turn_id,f.attributes
+      FROM facts f LEFT JOIN messages m ON f.subject_key='{MESSAGE_SUBJECT_PREFIX}' || m.id
+      WHERE f.subject_key LIKE '{MESSAGE_SUBJECT_PREFIX}%'
+      UNION ALL
+      SELECT '{SOURCE_KIND_DOC_COMMENT}',substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1),
+        c.created_at,f.agent_thread_id,NULL,f.attributes
+      FROM facts f LEFT JOIN doc_comments c ON f.subject_key='{COMMENT_SUBJECT_PREFIX}' || c.id
+      WHERE f.subject_key LIKE '{COMMENT_SUBJECT_PREFIX}%'
+      UNION ALL
+      SELECT '{SOURCE_KIND_DECISION_ANSWER}',substr(f.subject_key,length('{DECISION_SUBJECT_PREFIX}') + 1),
+        {decision_answer_arrived_at_sql('d')},f.agent_thread_id,NULL,f.attributes
+      FROM facts f LEFT JOIN artifact_identities d ON f.subject_key={decision_answer_subject_key_sql('d')}
         AND d.integration='local' AND d.type='plan-decision'
-        AND d.external_id || ':' || json_extract(d.metadata,'$.plan_decision.revision')=f.source_id
+      WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
     )
-    SELECT s.source_kind, s.source_id, s.source_at, s.attributes,
+    SELECT s.source_kind,s.source_id,s.source_at,s.attributes,
       (SELECT t.plan_node_id FROM active_turns t
         WHERE t.thread_id=s.thread_id AND t.id IS NOT s.active_turn_id
           AND {_ts('t.started_at')} < {_ts('s.source_at')}
-        ORDER BY {_ts('t.started_at')} DESC, t.turn_order DESC LIMIT 1) AS node_id
+        ORDER BY {_ts('t.started_at')} DESC,t.turn_order DESC LIMIT 1) AS node_id
     FROM sources s
 """
 
@@ -83,7 +85,7 @@ class AttributedFact:
     """One classified owner source, the classifier version that counted it, and its node."""
 
     source_kind: str
-    source_id: str | None
+    source_id: str
     source_at: str | None
     counter: str
     is_correction: bool
@@ -100,7 +102,7 @@ def attributed_facts(db: sqlite3.Connection) -> list[AttributedFact]:
         attributes = json.loads(row["attributes"])
         facts.append(AttributedFact(
             str(row["source_kind"]),
-            None if row["source_id"] is None else str(row["source_id"]),
+            str(row["source_id"]),
             None if row["source_at"] is None else str(row["source_at"]),
             str(attributes.get("asset_version")),
             attributes.get("label") == LABEL_CORRECTION,
