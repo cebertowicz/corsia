@@ -1,4 +1,7 @@
-"""Tool-catalog declarations, re-exported through ``tools.catalog``."""
+"""The tool catalog's data: one declaration per registry tool.
+
+``tools.catalog`` is the public import path; it re-exports these names with the packs and lookups that read them.
+"""
 
 from __future__ import annotations
 
@@ -254,7 +257,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Read the Google sign-in's email, scopes and status",
         activity="Checking Google sign-in",
     ),
-
     "email_draft": _Entry(
         "google", status="active", authority="conductor-api",
         summary="Save an email as a draft document for the person to review; nothing is sent",

@@ -4,6 +4,8 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
+from connections.account_state import REGISTRATION_MISCONFIGURED, REVOCATION_CAUSES, STATE_CAUSES
+from infra.connected_accounts_schema import AUDIT_TABLE_SQL, CONNECTED_ACCOUNTS_SCHEMA_SQL, _sql_values as schema_sql_values
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.migration_129_to_130_microsoft_accounts import migrate_129_to_130
@@ -35,6 +37,18 @@ def _v129() -> sqlite3.Connection:
     db.execute("PRAGMA user_version=129")
     db.commit()
     return db
+
+
+def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
+    from infra.migration_129_to_130_microsoft_accounts import (
+        _AUDIT_V130_SQL, _CONNECTED_ACCOUNTS_V130_SQL, _sql_values as migration_sql_values,
+    )
+
+    assert REGISTRATION_MISCONFIGURED in STATE_CAUSES
+    assert schema_sql_values(STATE_CAUSES) in CONNECTED_ACCOUNTS_SCHEMA_SQL
+    assert schema_sql_values(REVOCATION_CAUSES) in AUDIT_TABLE_SQL
+    assert migration_sql_values(STATE_CAUSES) in _CONNECTED_ACCOUNTS_V130_SQL
+    assert migration_sql_values(REVOCATION_CAUSES) in _AUDIT_V130_SQL
 
 
 def test_v129_registers_microsoft_account_step() -> None:

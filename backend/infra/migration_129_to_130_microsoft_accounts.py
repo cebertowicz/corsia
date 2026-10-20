@@ -3,19 +3,22 @@ from __future__ import annotations
 
 import sqlite3
 
+from connections.account_state import REVOCATION_CAUSES, STATE_CAUSES
+
+
+def _sql_values(values: frozenset[str]) -> str:
+    return ", ".join(repr(value) for value in sorted(values))
+
 
 # This is deliberately the v130 table shape. Future connected-account fields
 # must use their own migration rather than changing this historical fixture.
-_CONNECTED_ACCOUNTS_V130_SQL = """
+_CONNECTED_ACCOUNTS_V130_SQL = f"""
     CREATE TABLE connected_accounts_new (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
         provider_subject TEXT,
         account_kind TEXT CHECK(account_kind IS NULL OR account_kind IN ('personal', 'work')),
-        state_cause TEXT CHECK(state_cause IS NULL OR state_cause IN (
-            'app_registration_not_allowed', 'admin_approval_required', 'consent_cancelled',
-            'refresh_token_invalid', 'provider_unavailable', 'manual_only', 'input_refusal'
-        )),
+        state_cause TEXT CHECK(state_cause IS NULL OR state_cause IN ({_sql_values(STATE_CAUSES)})),
         address TEXT NOT NULL,
         capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
         state TEXT NOT NULL CHECK(state IN ('connected', 'needs_sign_in', 'signed_out')),
@@ -35,7 +38,7 @@ _CONNECTED_ACCOUNTS_V130_SQL = """
 """
 
 
-_AUDIT_V130_SQL = """
+_AUDIT_V130_SQL = f"""
     CREATE TABLE connected_account_audit_new (
         id INTEGER PRIMARY KEY,
         created_at TEXT NOT NULL,
@@ -43,12 +46,7 @@ _AUDIT_V130_SQL = """
         actor_kind TEXT NOT NULL CHECK(actor_kind IN ('person', 'agent', 'system')),
         actor_id TEXT NOT NULL,
         action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
-        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
-            'revoked', 'provider_unreachable', 'provider_timeout',
-            'provider_rejected', 'provider_unexpected', 'not_signed_in',
-            'manual_only', 'app_registration_not_allowed', 'admin_approval_required',
-            'consent_cancelled', 'refresh_token_invalid', 'provider_unavailable', 'input_refusal'
-        ))
+        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN ({_sql_values(REVOCATION_CAUSES)}))
     )
 """
 

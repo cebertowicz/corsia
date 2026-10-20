@@ -45,15 +45,26 @@ def _body(response: httpx.Response) -> dict | None:
     return body if isinstance(body, dict) else None
 
 
+def _is_personal_organization_response(response: httpx.Response) -> bool:
+    """The observed Graph response for the ``/organization`` API unsupported by personal accounts."""
+    body = _body(response)
+    error = body.get("error") if body is not None else None
+    code = error.get("code") if isinstance(error, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    return response.status_code == 400 and code == "BadRequest" and message == "not supported for MSA accounts"
+
+
 async def _organization_tenant(http: httpx.AsyncClient, access_token: str) -> str | None:
-    """The work tenant behind a ``both`` sign-in, or None for a personal account, which has no organization."""
+    """The work tenant behind a ``both`` sign-in, or None for Graph's personal-account response only."""
     response = await _graph(http, GRAPH_ORGANIZATION_URL, access_token)
-    if response.status_code >= 500:
+    if _is_personal_organization_response(response):
+        return None
+    if response.status_code != 200:
         raise MicrosoftError(PROVIDER_UNAVAILABLE)
-    body = _body(response) if response.status_code == 200 else None
+    body = _body(response)
     organizations = body.get("value") if body is not None else None
     if not isinstance(organizations, list) or not organizations:
-        return None
+        raise MicrosoftError(PROVIDER_UNAVAILABLE)
     tenant = organizations[0].get("id") if isinstance(organizations[0], dict) else None
     if not isinstance(tenant, str) or not tenant:
         raise MicrosoftError(PROVIDER_UNAVAILABLE)

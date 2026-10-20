@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 import httpx
 
 from connections.app_reach import AppReach
+from connections.account_state import PROVIDER_UNAVAILABLE, emit_lifecycle_event
 from connections.connected_accounts import MICROSOFT_PROVIDER, Actor
 from connections.microsoft import account_store, client
 from connections.microsoft.config import SCOPES
@@ -232,15 +233,19 @@ async def start_sign_in(
             await _complete_sign_in(query.get("code"), given)
         except MicrosoftError as exc:
             await _record_failure(pending, exc)
+            if pending.adding or exc.state_cause is None:
+                emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
             return 400, exc.browser_message, True, None
         except Exception as exc:
             # A fault in CORSIA, not Microsoft: logged by type only, since its text may carry account data.
             log.error("Microsoft sign-in callback failed inside CORSIA: %s", type(exc).__name__)
             internal = MicrosoftError(INTERNAL)
             await _record_failure(pending, internal)
+            emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=PROVIDER_UNAVAILABLE)
             return 500, internal.browser_message, True, None
         if pending.adding:
             _clear_add_failure(_adder(pending))
+        emit_lifecycle_event("connect_succeeded", pending.account_id, MICROSOFT_PROVIDER)
         log.info("Microsoft account %s signed in", pending.account_id)
         return 200, CONNECTED_PAGE, True, None
 
@@ -267,6 +272,7 @@ async def start_sign_in(
         "response_mode": "query", "scope": " ".join(SCOPES), "state": pending.state,
         "code_challenge": _challenge(pending.verifier), "code_challenge_method": "S256",
     })
+    emit_lifecycle_event("connect_started", pending.account_id, MICROSOFT_PROVIDER)
     return url, pending.account_id
 
 

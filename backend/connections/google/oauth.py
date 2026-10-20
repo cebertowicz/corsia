@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 import httpx
 
 from connections.app_reach import AppReach
+from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, emit_lifecycle_event
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
@@ -197,7 +198,9 @@ async def start_sign_in(
     account whose reach comes from ``adding_thread_id``'s scope or, for a
     person's session, the given ``reach``.
     """
-    return await run_in_db(_begin, client_file, account_id, actor, adding_thread_id, reach)
+    url, pending_account_id = await run_in_db(_begin, client_file, account_id, actor, adding_thread_id, reach)
+    emit_lifecycle_event("connect_started", pending_account_id, "google")
+    return url, pending_account_id
 
 
 def _take_pending(state: object) -> _Pending:
@@ -307,40 +310,52 @@ def _store(
         record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
 
 
+def _failure_cause(error: GoogleError) -> str:
+    return CONSENT_CANCELLED if isinstance(error, GoogleSignInError) else PROVIDER_UNAVAILABLE
+
+
 async def complete_sign_in(code: object, state: object) -> str:
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
-    if not isinstance(code, str) or not code:
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-            response = await http.post(TOKEN_URL, data={
-                "grant_type": "authorization_code", "code": code, "code_verifier": pending.verifier,
-                "client_id": pending.client_id, "client_secret": pending.client_secret,
-                "redirect_uri": pending.redirect_uri,
-            })
-    except httpx.HTTPError:
-        raise GoogleRequestFailed() from None
-    if response.status_code != 200:
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
-    try:
-        grant = response.json()
-        refresh_token, access = grant["refresh_token"], grant["access_token"]
-        scopes = sorted(str(grant.get("scope", "")).split())
-        provider_subject = client.id_token_subject(grant.get("id_token"))
-        profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
-        email = str(profile["emailAddress"])
-        refresh_token = key_store.validated_value(refresh_token)
-    except GoogleError:
+        if not isinstance(code, str) or not code:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
+                response = await http.post(TOKEN_URL, data={
+                    "grant_type": "authorization_code", "code": code, "code_verifier": pending.verifier,
+                    "client_id": pending.client_id, "client_secret": pending.client_secret,
+                    "redirect_uri": pending.redirect_uri,
+                })
+        except httpx.HTTPError:
+            raise GoogleRequestFailed() from None
+        if response.status_code != 200:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        try:
+            grant = response.json()
+            refresh_token, access = grant["refresh_token"], grant["access_token"]
+            scopes = sorted(str(grant.get("scope", "")).split())
+            provider_subject = client.id_token_subject(grant.get("id_token"))
+            profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
+            email = str(profile["emailAddress"])
+            refresh_token = key_store.validated_value(refresh_token)
+        except GoogleError:
+            raise
+        except Exception:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED) from None
+        if not set(REQUIRED_SCOPES) <= set(scopes):
+            raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
+        await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
+        from events.connectors.mail_poller import schedule_account
+
+        schedule_account(pending.account_id)
+    except GoogleError as error:
+        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=_failure_cause(error))
         raise
     except Exception:
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED) from None
-    if not set(REQUIRED_SCOPES) <= set(scopes):
-        raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
-    await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
-    from events.connectors.mail_poller import schedule_account
-
-    schedule_account(pending.account_id)
+        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=PROVIDER_UNAVAILABLE)
+        raise
+    emit_lifecycle_event("connect_succeeded", pending.account_id, "google")
     return email
 
 

@@ -15,6 +15,10 @@ import uuid
 from typing import Literal
 
 from connections.account_provider import AccountProvider
+from connections.account_state import (
+    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID,
+    REGISTRATION_MISCONFIGURED, STATE_CAUSES,
+)
 from connections.agent_add_reach import AddingScopeError, reach_for_adding_thread as _agent_add_reach
 from connections.app_lifecycle_support import _assert_selected_projects_exist
 from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
@@ -29,11 +33,7 @@ GOOGLE_PROVIDER = GOOGLE.name
 MICROSOFT_PROVIDER = MICROSOFT.name
 ACCOUNT_STATES = frozenset(("connected", "needs_sign_in", "signed_out"))
 #: Why a row needs sign-in, shown on the row: the fixed causes a provider failure maps to.
-ADMIN_APPROVAL_REQUIRED = "admin_approval_required"
-CONSENT_CANCELLED = "consent_cancelled"
-REFRESH_TOKEN_INVALID = "refresh_token_invalid"
-PROVIDER_UNAVAILABLE = "provider_unavailable"
-STATE_CAUSES = frozenset((ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, REFRESH_TOKEN_INVALID, PROVIDER_UNAVAILABLE))
+#: These are re-exported from ``account_state`` for existing consumers.
 #: Account-only reach mode: the designated CORSIA agent alone. Only the legacy migration writes it.
 ONLY_CORSIA = "corsia"
 Actor = tuple[Literal["person", "agent", "system"], str]
