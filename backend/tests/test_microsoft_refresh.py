@@ -81,9 +81,10 @@ async def test_refresh_rotates_shared_bundle_using_recorded_tenant(isolated_db, 
     assert facts(other)[1]["refresh_token"] == "old-refresh"
 
 
-async def test_failed_refresh_marks_only_refused_row_with_fixed_cause(isolated_db, monkeypatch):
+@pytest.mark.parametrize("error_name", ["invalid_grant", "invalid_client", "unauthorized_client"])
+async def test_failed_refresh_marks_only_refused_row_with_fixed_cause(isolated_db, monkeypatch, error_name):
     account, other = connect(), connect()
-    http = Http(Response(400, {"error": "invalid_grant", "error_description": "private provider text"}), [])
+    http = Http(Response(400, {"error": error_name, "error_description": "private provider text"}), [])
     monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
     with pytest.raises(MicrosoftError) as error:
         await client.access_token(account)

@@ -3,9 +3,8 @@
 Every failure is one fixed code with a fixed message (for an agent or the
 API) and a fixed browser-page text; provider response text never reaches any
 of them. Only the codes in ``STATE_CAUSES`` describe the account's state and
-are recorded on its row or as the latest failed add; the rest describe the
-request (``input_refusal``), the account (``account_not_found``,
-``already_connected``…) or CORSIA itself (``internal``).
+are recorded on its row. Other fixed codes can appear as the latest failed add,
+but do not alter a row's state.
 """
 from __future__ import annotations
 
@@ -21,6 +20,7 @@ ALREADY_NEEDS_SIGN_IN = "already_needs_sign_in"
 DIFFERENT_ACCOUNT = "different_account"
 ACCOUNT_REMOVED = "account_removed"
 INTERNAL = "internal"
+REGISTRATION_MISCONFIGURED = "registration_misconfigured"
 
 _BROWSER_RETRY = "Microsoft sign-in couldn't finish. Go back to CORSIA and try again."
 # (message, browser page) per code; ``{address}`` and ``{signed_in}`` are filled from the account.
@@ -40,6 +40,15 @@ _TEXT: dict[str, tuple[str, str]] = {
     PROVIDER_UNAVAILABLE: (
         "Microsoft had a problem with sign-in. Call microsoft_connect for a new link.",
         "Microsoft had a problem with sign-in. Go back to CORSIA and try again.",
+    ),
+    REGISTRATION_MISCONFIGURED: (
+        "CORSIA's Microsoft app isn't set up right. Check that the app exists in the registration tenant and "
+        "its supported account type matches this connection; Authentication has http://localhost under Mobile and "
+        "desktop applications and Allow public client flows is Yes; and Microsoft Graph delegated permissions are "
+        "Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access, and User.Read. Do not "
+        "create a client secret. Fix the registration through the microsoft-setup steps, then call "
+        "microsoft_connect again.",
+        "CORSIA's Microsoft app isn't set up right. Go back to CORSIA to fix it.",
     ),
     INPUT_REFUSAL: (
         "microsoft_connect needs client_id as the Application (client) ID GUID, kind as personal, work or both, "
@@ -93,7 +102,7 @@ class MicrosoftError(Exception):
 
     @property
     def state_cause(self) -> str | None:
-        """The cause to record on the row or the latest add, when this failure describes the account's state."""
+        """The cause to record on a row when this failure describes the account's state."""
         return self.cause if self.cause in STATE_CAUSES else None
 
 
@@ -110,23 +119,29 @@ def token_error_cause(status: int, payload: object) -> str:
     return PROVIDER_UNAVAILABLE
 
 
+_REGISTRATION_AADSTS_CODES = frozenset((50011, 700016, 7000218))
+_REGISTRATION_OAUTH_ERRORS = frozenset(("invalid_client", "unauthorized_client"))
+
+
 def exchange_error_cause(payload: object) -> str:
     """Map a failed authorization-code exchange to a fixed cause, never Microsoft's text.
 
-    Only consent and administrator approval are told apart, by integer AADSTS code
-    (AADSTS65004 is declined consent, never administrator approval). Anything else,
-    ``invalid_client`` and ``invalid_grant`` included, is a sign-in Microsoft
-    didn't complete: trying again is the person's only lever.
+    Consent and administrator approval take precedence over documented registration
+    errors. Other failures remain provider-unavailable, so a retry is offered only
+    when it can plausibly help.
     """
     error_codes = payload.get("error_codes") if isinstance(payload, dict) else None
     codes = {value for value in error_codes if isinstance(value, int) and not isinstance(value, bool)} if isinstance(error_codes, list) else set()
-    return redirect_codes_cause(codes, cancelled=False)
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return redirect_codes_cause(codes, cancelled=False, oauth_error=error if isinstance(error, str) else None)
 
 
-def redirect_codes_cause(aadsts_codes: set[int], *, cancelled: bool) -> str:
+def redirect_codes_cause(aadsts_codes: set[int], *, cancelled: bool, oauth_error: str | None = None) -> str:
     """The fixed cause for a failure carrying these AADSTS codes."""
     if cancelled or 65004 in aadsts_codes:
         return CONSENT_CANCELLED
     if aadsts_codes & {90094, 90095, 65001}:
         return ADMIN_APPROVAL_REQUIRED
+    if aadsts_codes & _REGISTRATION_AADSTS_CODES or oauth_error in _REGISTRATION_OAUTH_ERRORS:
+        return REGISTRATION_MISCONFIGURED
     return PROVIDER_UNAVAILABLE

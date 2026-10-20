@@ -17,7 +17,7 @@ from connections.connected_accounts import (
 from connections.microsoft import account_store, client, oauth
 from connections.microsoft.errors import (
     ACCOUNT_NOT_FOUND, ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL,
-    PROVIDER_UNAVAILABLE, MicrosoftError, exchange_error_cause, message,
+    PROVIDER_UNAVAILABLE, REGISTRATION_MISCONFIGURED, MicrosoftError, exchange_error_cause, message,
 )
 from google_account_helpers import make_only_corsia
 from infra.database import get_db
@@ -258,15 +258,62 @@ async def test_redirect_failures_are_redacted_and_observable_for_add_and_sign_in
 
 
 @pytest.mark.parametrize(("payload", "cause"), [
-    ({"error": "unauthorized_client", "error_codes": [65004]}, CONSENT_CANCELLED),
-    ({"error": "access_denied", "error_codes": [90094]}, ADMIN_APPROVAL_REQUIRED),
+    ({"error": "invalid_client", "error_codes": [65004]}, CONSENT_CANCELLED),
+    ({"error": "unauthorized_client", "error_codes": [90094]}, ADMIN_APPROVAL_REQUIRED),
     ({"error": "access_denied", "error_codes": [90095, 65001]}, ADMIN_APPROVAL_REQUIRED),
-    ({"error": "invalid_client", "error_codes": [7000218]}, PROVIDER_UNAVAILABLE),
+    ({"error": "invalid_client"}, REGISTRATION_MISCONFIGURED),
+    ({"error": "unauthorized_client"}, REGISTRATION_MISCONFIGURED),
+    ({"error": "other", "error_codes": [50011]}, REGISTRATION_MISCONFIGURED),
+    ({"error": "other", "error_codes": [700016]}, REGISTRATION_MISCONFIGURED),
+    ({"error": "other", "error_codes": [7000218]}, REGISTRATION_MISCONFIGURED),
+    ({"error": "invalid_grant", "error_codes": [99999]}, PROVIDER_UNAVAILABLE),
     ({"error": "invalid_grant", "error_codes": ["90094"]}, PROVIDER_UNAVAILABLE),
     (None, PROVIDER_UNAVAILABLE),
 ])
-def test_code_exchange_errors_use_integer_aadsts_mapping(payload, cause) -> None:
+def test_code_exchange_errors_use_documented_registration_mapping(payload, cause) -> None:
     assert exchange_error_cause(payload) == cause
+
+
+@pytest.mark.parametrize("query", [
+    {"error": "invalid_client", "error_description": "provider-detail-canary"},
+    {"error": "unauthorized_client", "error_description": "provider-detail-canary"},
+    {"error": "access_denied", "error_description": "AADSTS50011 provider-detail-canary"},
+    {"error": "access_denied", "error_description": "AADSTS700016 provider-detail-canary"},
+    {"error": "access_denied", "error_description": "AADSTS7000218 provider-detail-canary"},
+])
+def test_redirect_registration_errors_are_fixed_and_redacted(query) -> None:
+    error = oauth._redirect_error(query)
+    assert error.cause == REGISTRATION_MISCONFIGURED
+    assert "provider-detail-canary" not in error.message
+    assert "provider-detail-canary" not in error.browser_message
+
+
+async def test_registration_error_is_a_latest_add_result_not_a_row_state_cause(microsoft, isolated_db, agent_adds) -> None:
+    add_url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=("agent", "thread-a"), adding_thread_id="thread-a")
+    add_status, add_page = await _finish(add_url, error="invalid_client", error_description="AADSTS50011 provider-detail-canary")
+    assert add_status == 400
+    assert oauth.accounts_status("thread-a") == {
+        "status": "not_connected", "cause": REGISTRATION_MISCONFIGURED, "message": message(REGISTRATION_MISCONFIGURED),
+    }
+    assert _page_has(add_page, MicrosoftError(REGISTRATION_MISCONFIGURED).browser_message)
+    assert b"provider-detail-canary" not in add_page
+
+    account_id = await _connect(microsoft)
+    await account_actions.sign_out_account(account_id, actor=PERSON)
+    again_url, _ = await oauth.start_sign_in(None, None, actor=PERSON, account_id=account_id)
+    again_status, again_page = await _finish(again_url, error="invalid_client", error_description="AADSTS50011 provider-detail-canary")
+    assert again_status == 400
+    status = oauth.accounts_status(account_id=account_id)
+    assert (status["state"], status["cause"]) == ("signed_out", None)
+    assert _page_has(again_page, MicrosoftError(REGISTRATION_MISCONFIGURED).browser_message)
+    assert b"provider-detail-canary" not in again_page
+
+
+def test_registration_error_is_not_a_state_cause() -> None:
+    error = MicrosoftError(REGISTRATION_MISCONFIGURED)
+    assert error.state_cause is None
+    assert "provider-detail-canary" not in error.message
+    assert "provider-detail-canary" not in error.browser_message
 
 
 async def test_success_clears_latest_add_failure(microsoft, isolated_db, agent_adds) -> None:

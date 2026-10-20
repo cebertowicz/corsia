@@ -185,8 +185,9 @@ def _clear_add_failure(adder: str) -> None:
 def _redirect_error(query: dict[str, str]) -> MicrosoftError:
     """Classify a callback error without retaining any provider-supplied text."""
     aadsts_codes = {int(match.group(1)) for value in query.values() for match in re.finditer(r"AADSTS(\d+)", value)}
-    cancelled = query.get("error") == "access_denied" and query.get("error_subcode") == "cancel"
-    return MicrosoftError(redirect_codes_cause(aadsts_codes, cancelled=cancelled))
+    error = query.get("error")
+    cancelled = error == "access_denied" and query.get("error_subcode") == "cancel"
+    return MicrosoftError(redirect_codes_cause(aadsts_codes, cancelled=cancelled, oauth_error=error))
 
 
 async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
