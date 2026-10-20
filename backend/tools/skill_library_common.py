@@ -147,13 +147,13 @@ def write_result(result: dict[str, str]) -> dict[str, Any]:
     if result.get("outcome") == "not_installed":
         return {"error": "not_installed", "message": "this skill is not installed here; search first, then install it"}
     if result.get("outcome") == "not_removed":
-        return {"error": "not_removed", "message": "the copy changed during removal and its folder remains; re-read or search it, then retry"}
+        return {"error": "not_removed", "message": "the installed files were removed, but files that were not part of the copy remain in its folder; review them, then remove the folder"}
     if result.get("history_outcome") == "stale":
         return {"error": "stale", "message": "the copy changed while saving; re-read or search it, then retry"}
     if result.get("history_outcome") == "history-off":
         return {"error": "history_off", "message": "guidance history is off for this folder, so nothing changed; turn history back on first"}
     if result.get("reason") == "invalid_destination":
-        return {"error": "invalid_destination", "message": "this destination is invalid; choose a valid thread skill destination and retry"}
+        return {"error": "invalid_destination", "message": "this skill's folder is not a valid destination for you, so nothing changed; report it to the conductor"}
     if result.get("reason") == "save_error":
         return {"error": "save_error", "message": "the skill could not be saved; retry later"}
     return {"error": "invalid_item", "message": "the library item could not be written without changing your existing skills"}
