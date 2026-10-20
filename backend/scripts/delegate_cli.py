@@ -83,7 +83,7 @@ def cmd_send(args: argparse.Namespace) -> int:
             "  - pass --from-thread-id <your thread id>.\n"
         )
         return 2
-    body = {"message": message, "from_thread_id": from_thread_id}
+    body: dict[str, object] = {"message": message, "from_thread_id": from_thread_id}
     if args.target_scope_id:
         body["target_scope_id"] = args.target_scope_id
     if args.no_sensitive_content:
