@@ -100,7 +100,7 @@ async def test_refresh_cache_is_reused_and_legacy_bundle_refreshes_once(isolated
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("error_name", ["invalid_grant", "invalid_client", "unauthorized_client"])
+@pytest.mark.parametrize("error_name", ["invalid_grant", "interaction_required", "invalid_client", "unauthorized_client"])
 async def test_failed_refresh_marks_only_refused_row_with_fixed_cause(isolated_db, monkeypatch, error_name):
     account, other = connect(), connect()
     http = Http(Response(400, {"error": error_name, "error_description": "private provider text"}), [])

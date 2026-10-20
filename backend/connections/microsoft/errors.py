@@ -139,7 +139,7 @@ def person_message(cause: str) -> str:
 def token_error_cause(status: int, payload: object) -> str:
     """Map a refresh refusal to fixed causes without exposing provider text."""
     error = payload.get("error") if isinstance(payload, dict) else None
-    if status in (400, 401) and error in ("invalid_grant", "invalid_client", "unauthorized_client"):
+    if status in (400, 401) and error in ("invalid_grant", "interaction_required", "invalid_client", "unauthorized_client"):
         return REFRESH_TOKEN_INVALID
     return SERVICE_UNAVAILABLE
 
