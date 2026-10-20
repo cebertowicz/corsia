@@ -1,10 +1,10 @@
 {
   "files": [
     {
-      "bytes": 3576,
+      "bytes": 3560,
       "kind": "context",
       "path": "context/10-INTENT-AUTHORITY.md",
-      "sha256": "38ff342f6bc8ea0db369b0ed061e7670a7e9d861f01f02b66e65c28a64b83081"
+      "sha256": "5d1db196d8a8ddf55fbdd4d7d4db0e008d5fe51fd80d2dafe0133a4a8f7574c7"
     },
     {
       "bytes": 6058,
@@ -316,10 +316,10 @@
       "sha256": "a5f9797cae4e3ac75a8aa21fe13afa3e8ab6a7a50e9b1992158d072a7e6e29e3"
     },
     {
-      "bytes": 10745,
+      "bytes": 10428,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "856b9d59653baabe06bc11570f7d4ee97c23d6c93a8b8d04f20c56ca9779187e"
+      "sha256": "7523296285dabb88e6e256e81d44ac92608d0aa8f53dda68b18def78ca16e21b"
     }
   ],
   "version": "v1"
