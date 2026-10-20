@@ -22,8 +22,9 @@ use tokio::{net::TcpListener, sync::oneshot};
 use crate::{
     remote_config::{Locator, RemoteRecord},
     routes::{self, Dialed, LocalDial, RouteConfig, Routes, Upstream},
-    trust::Trust,
 };
+#[cfg(test)]
+use crate::trust::Trust;
 
 pub(crate) type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
 type ResolveFuture = Pin<Box<dyn Future<Output = Result<(String, u16), ProxyError>> + Send>>;
@@ -65,6 +66,7 @@ impl Drop for ProxyHandle {
     }
 }
 
+#[cfg(test)]
 pub async fn start(
     locator: Locator,
     trust: Trust,
@@ -91,6 +93,7 @@ pub async fn start_record(
     start_routes(record.locator.clone(), config, preferred_port, Arc::new(|locator| Box::pin(default_resolve(locator)))).await
 }
 
+#[cfg(test)]
 pub async fn start_with_resolver(
     locator: Locator,
     trust: Trust,
