@@ -299,7 +299,7 @@ def _publish_review(findings, *, poster, summary_ok=True, resolve_replies=()):
         publication = publish_review(
             pr_number=42, repo="owner/repo", head_sha="sha123",
             findings=list(findings), new_threads=list(findings),
-            resolve_replies=list(resolve_replies), unchanged_count=0,
+            resolve_replies=list(resolve_replies), still_raised=[],
             model_label="codex", existing_issue_comments=[],
         )
     return publication, summary
@@ -354,7 +354,7 @@ def test_summary_is_composed_after_publication_with_the_fallback_count():
         publish_review(
             pr_number=42, repo="owner/repo", head_sha="sha123",
             findings=[_finding()], new_threads=[_finding()],
-            resolve_replies=[], unchanged_count=0,
+            resolve_replies=[], still_raised=[],
             model_label="codex", existing_issue_comments=[],
         )
 
@@ -375,7 +375,7 @@ def test_reappeared_finding_reopens_and_republishes_in_original_thread():
         publication = publish_review(
             pr_number=42, repo="owner/repo", head_sha="a" * 40,
             findings=[finding], new_threads=[finding], resolve_replies=[],
-            unchanged_count=0, model_label="claude", existing_issue_comments=[],
+            still_raised=[], model_label="claude", existing_issue_comments=[],
         )
 
     set_resolved.assert_called_once_with("PRRT_1", resolved=False)
@@ -399,7 +399,7 @@ def test_reappeared_finding_falls_back_to_new_publication_if_reopen_fails():
         publication = publish_review(
             pr_number=42, repo="owner/repo", head_sha="a" * 40,
             findings=[finding], new_threads=[finding], resolve_replies=[],
-            unchanged_count=0, model_label="claude", existing_issue_comments=[],
+            still_raised=[], model_label="claude", existing_issue_comments=[],
         )
 
     post_reply.assert_not_called()
@@ -423,7 +423,7 @@ def _publish_resolution(*, reply_ok, resolve_ok, reply_needed=True):
         publish_review(
             pr_number=42, repo="owner/repo", head_sha="a" * 40,
             findings=[], new_threads=[], resolve_replies=[comment],
-            unchanged_count=0, model_label="claude", existing_issue_comments=[],
+            still_raised=[], model_label="claude", existing_issue_comments=[],
         )
     return post_reply, set_resolved, emit_event
 
