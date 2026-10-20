@@ -30,7 +30,7 @@ When a method can't do what the work needs, use the next one. Setting up or reco
 ## Asking to approve one
 
 - Name the publisher only after checking it on the maker's own site or repository, through web search or opened in the browser, never from the package's description of itself. If you can't check it, say it's community-made.
-- Say what will run and that every agent here can use it. For a program on this computer, add `It runs as you on this computer, so it can open your files and accounts the way you can, except CORSIA's private data and your stored keys.` If CORSIA installs a runtime or CLI for it, say in one line what, from whom, and that only CORSIA's agents use that copy.
+- Say what will run and who can use it: every agent in the workspace, or only this project's. For a program on this computer, add `It runs as you on this computer, so it can open your files and accounts the way you can, except CORSIA's private data and your stored keys.` If CORSIA installs a runtime or CLI for it, say in one line what, from whom, and that only CORSIA's agents use that copy.
 - A CLI acts with the person's whole account there: say which account it uses, and before its first write confirm that account and that writes are expected. Never read its stored sign-in.
 
 ## To hear about changes
