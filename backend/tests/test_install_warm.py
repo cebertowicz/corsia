@@ -519,6 +519,7 @@ async def test_a_cancelled_wait_leaves_the_warm_running_and_registered(monkeypat
 
 @pytest.mark.asyncio
 async def test_wait_true_joins_an_identical_warm_already_in_flight(monkeypatch):
+    from core import thread_warm
     from infra import state
 
     release = asyncio.Event()
@@ -530,12 +531,22 @@ async def test_wait_true_joins_an_identical_warm_already_in_flight(monkeypatch):
         await release.wait()
         return {"ok": True}
 
+    waiting = asyncio.Event()
+    real_outcome = thread_warm.await_warm_outcome
+
+    async def _outcome(task):
+        waiting.set()
+        return await real_outcome(task)
+
+    monkeypatch.setattr(thread_warm, "await_warm_outcome", _outcome)
     route = _wait_route(monkeypatch, _warm)
     first = await route.warm_session_cache("sess-1", token="")
     assert first["message"] == "Warm request submitted"
     task = state._active_warm_tasks["sess-1"]
     joined = asyncio.create_task(route.warm_session_cache("sess-1", token="", wait=True))
-    await asyncio.sleep(0.05)
+    # Release only once the joined request waits on the warm: a fixed sleep
+    # let a slow runner finish the first warm before the join reached it.
+    await asyncio.wait_for(waiting.wait(), 5)
     assert not joined.done()
     assert state._active_warm_tasks["sess-1"] is task
     release.set()
