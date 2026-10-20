@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,11 +11,12 @@ import pytest
 from api.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs
 from core.workflow_verdict_read import price_snapshot, read_snapshot
-from core.workflow_verdict_rules import freeze_plan
+from core.workflow_verdict_rules import compute, freeze_plan
 from core.workflow_verdicts import MIXED, KpiRow
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from model_identity_fixtures import seed_identity_catalog, seed_manifest
 from tests.plan_writer_authorizer import raw_plan_seed
+from tests.verdict_calibration_helpers import calibration_script
 
 NOW = datetime(2026, 10, 19, tzinfo=timezone.utc)
 OPUS = "claude-opus-5-5"
@@ -26,12 +27,13 @@ def live_workflow_owners(monkeypatch):
     """Verdicts associate definitions through the shipped live owner rule, never stored metadata."""
     from core import workflow_verdict_read
 
+    owned = {"owner": "sdlc-process", "brief-owner": "decision-brief"}
+
     def owners(thread_id, _db):
-        if thread_id != "owner":
+        if thread_id not in owned:
             return {}
-        return {"sdlc-process": SimpleNamespace(
-            skill_dir=Path("/workflows/sdlc-process"), owner="owner", named=None,
-        )}
+        workflow = owned[thread_id]
+        return {workflow: SimpleNamespace(skill_dir=Path(f"/workflows/{workflow}"), owner=thread_id, named=None)}
 
     monkeypatch.setattr(workflow_verdict_read, "thread_workflow_owners", owners)
 
@@ -148,17 +150,17 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
         ("m1", True, "c1"), ("m2", False, "c1")]
 
 
-def _definitions(db) -> None:
+def _definitions(db, *, can_decide: bool = True, workflow: str = "sdlc-process", owner: str = "owner") -> None:
     event = {"attributes": {"pr": "id"}, "dedupe": ["pr"]}
-    kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": True,
+    kpi = {"num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "better": "lower", "can_decide": can_decide,
            "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1}
     rows = [("event", "qg.escape", 1, event, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 1, {**kpi, "review": 0.2}, "2026-09-01T00:00:00Z"),
             ("kpi", "escapes", 2, {**kpi, "review": 0.5}, "2026-10-10T00:00:00Z")]
     for kind, name, version, spec, synced in rows:
         db.execute("INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,"
-                   "file_sha256,synced_at) VALUES ('owner',?,?,?,?,'/workflows/sdlc-process/measures.yaml','sha',?)",
-                   (kind, name, version, json.dumps(spec), synced))
+                   "file_sha256,synced_at) VALUES (?,?,?,?,?,?,'sha',?)",
+                   (owner, kind, name, version, json.dumps(spec), f"/workflows/{workflow}/measures.yaml", synced))
 
 
 def test_the_frozen_plan_uses_the_definitions_in_force_at_the_versions_first_run(db) -> None:
@@ -167,10 +169,21 @@ def test_the_frozen_plan_uses_the_definitions_in_force_at_the_versions_first_run
     node(db, "second", version="v2", created="2026-10-12T00:00:00Z", ended="2026-10-14T00:00:00Z")
     _, history = runs_of(read_snapshot(db, now=NOW))
     assert history.owner == "owner"
-    (v1,) = [m for m in freeze_plan(history, "v1", NOW).measures if m.source == "kpi"]
-    (v2,) = [m for m in freeze_plan(history, "v2", NOW).measures if m.source == "kpi"]
+    (v1,) = [m for m in freeze_plan(history, "v1").measures if m.source == "kpi"]
+    (v2,) = [m for m in freeze_plan(history, "v2").measures if m.source == "kpi"]
     assert (v1.definition_version, v1.margin_gap) == (1, pytest.approx(0.1))
     assert (v2.definition_version, v2.margin_gap) == (2, pytest.approx(0.4))
+
+
+def test_reached_verdicts_remain_skipped_after_an_old_event(db) -> None:
+    node(db, "run")
+    subject = "workflow:sdlc-process@v1"
+    old = (NOW - timedelta(days=400)).isoformat()
+    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,"
+               "attributes) VALUES ('reached','reached','measurement.verdict.reached','corsia','instrumented',?,?,?,"
+               "'{}')", (old, old, subject))
+    snapshot = read_snapshot(db, now=NOW)
+    assert subject in snapshot.reached and compute(snapshot) == []
 
 
 def test_kpi_rows_come_only_from_an_injected_reader(db) -> None:
@@ -207,14 +220,11 @@ def test_cost_is_the_accepted_chain_price_and_unknown_never_zero_otherwise(db) -
 
 
 def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only(db, isolated_db, capsys) -> None:
-    import importlib.util
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[2] / "scripts" / "verdict_calibration.py"
-    spec = importlib.util.spec_from_file_location("verdict_calibration", path)
-    assert spec and spec.loader
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+    script = calibration_script()
+    _definitions(db)
+    _definitions(db, workflow="decision-brief", owner="brief-owner")
+    for index in range(4):
+        node(db, f"b{index}", workflow="decision-brief", created=f"2026-10-0{index + 1}T00:00:00Z")
     for index in range(66):
         version, day = ("v1", 1 + index % 9) if index < 44 else ("v2", 10 + index % 5)
         node(db, f"r{index}", version=version, created=f"2026-10-{day:02d}T00:00:00Z",
@@ -226,8 +236,49 @@ def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only
     assert script.main([str(isolated_db)]) == 0
     out = capsys.readouterr().out
     assert "A/A splits" in out and "corrections_per_outcome" in out and "(whole verdict)" in out
+    assert "Not calibrated (no split could measure it): " in out
     assert "n=5 p50=1.00" in out and "v1 -> v2" in out and "no_baseline" in out
     assert not any(f"r{index}" in out.split() or f"m{index}" in out for index in range(66))
+
+
+def test_calibration_script_refuses_when_a_calibrated_workflow_lacks_owner_kpi_definitions(db, isolated_db) -> None:
+    _definitions(db)
+    node(db, "sdlc-run")
+    node(db, "brief-run", workflow="decision-brief", version="v1")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing owner KPI definitions in force at first use for calibration in CORSIA_WORKSPACE: decision-brief"):
+        calibration_script().main([str(isolated_db)])
+
+
+def test_calibration_script_names_every_calibrated_workflow_with_no_runs(db, isolated_db) -> None:
+    _definitions(db)
+    node(db, "sdlc-run")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing calibrated workflow history for calibration: decision-brief$"):
+        calibration_script().main([str(isolated_db)])
+
+
+def test_calibration_script_refuses_when_no_owner_kpi_can_decide(db, isolated_db) -> None:
+    _definitions(db, can_decide=False)
+    _definitions(db, workflow="decision-brief", owner="brief-owner")
+    node(db, "sdlc-run")
+    node(db, "brief-run", workflow="decision-brief")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing owner KPI definitions in force at first use for calibration in CORSIA_WORKSPACE: sdlc-process"):
+        calibration_script().main([str(isolated_db)])
+
+
+def test_calibration_script_refuses_kpis_defined_only_after_every_first_use(db, isolated_db) -> None:
+    # The KPI is in force now but was not when either sdlc-process version first ran, so no plan production
+    # freezes would hold it; the refusal reads first use, never now.
+    _definitions(db)
+    _definitions(db, workflow="decision-brief", owner="brief-owner")
+    node(db, "early-1", created="2026-08-01T00:00:00Z", ended="2026-08-02T00:00:00Z")
+    node(db, "early-2", created="2026-08-03T00:00:00Z", ended="2026-08-04T00:00:00Z")
+    node(db, "brief-run", workflow="decision-brief")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing owner KPI definitions in force at first use for calibration in CORSIA_WORKSPACE: sdlc-process$"):
+        calibration_script().main([str(isolated_db)])
 
 
 def test_read_snapshot_never_writes_so_it_runs_on_the_query_only_lane(db) -> None:

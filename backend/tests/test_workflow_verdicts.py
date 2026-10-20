@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -15,9 +16,11 @@ from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, WorkflowHistory, baseline_runs, choose_baseline, compute, decide, freeze_plan,
 )
 from core.workflow_verdicts import (
-    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
+    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
+    parse_ts,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
+from tests.verdict_calibration_helpers import calibration_script
 
 NOW = datetime(2026, 10, 19, tzinfo=timezone.utc)
 GROUP = ("model-a", "standard", "M")
@@ -53,13 +56,14 @@ def history(*sides: list[Run], definitions=()) -> WorkflowHistory:
 
 
 def plan_for(source: WorkflowHistory, version: str = "v2", *extra: PlannedMeasure) -> FrozenPlan:
-    plan = freeze_plan(source, version, NOW)
+    plan = freeze_plan(source, version)
     return FrozenPlan(plan.subject, plan.version, plan.baseline, plan.skipped, (*plan.measures, *extra),
                       plan.minimum, plan.refusals, plan.seed)
 
 
 def verdict(source: WorkflowHistory, *extra: PlannedMeasure, version: str = "v2", replaced_by: str | None = None):
-    return decide(source, plan_for(source, version, *extra), NOW, replaced_by)
+    replaced = (replaced_by, source.first_use(replaced_by)) if replaced_by is not None else None
+    return decide(source, plan_for(source, version, *extra), NOW, replaced)
 
 
 def corrections_call(new: list[Run], old: list[Run], minimum: int = 20):
@@ -116,7 +120,8 @@ def test_unconfirmed_numerator_rows_give_not_enough_data_with_k() -> None:
     new = [Run(r.run_id, r.version, r.group, r.started_at, r.terminal_at, r.state, (), 1.0,
                {KPI.name: (KpiRow("num", "self_reported", 1.0, r.terminal_at or "", True),
                            KpiRow("den", "observed", 1.0, r.terminal_at or ""))}) for r in runs("v2", 0, kpi=rows)]
-    result = verdict(history(runs("v1", 0, kpi=[("num", "observed", 0.0), ("den", "observed", 1.0)]), new), KPI)
+    result = verdict(history(runs("v1", 0, started=40, ended=30,
+                                  kpi=[("num", "observed", 0.0), ("den", "observed", 1.0)]), new), KPI)
     assert (result.word, result.reason, result.inputs) == ("not_enough_data", "kpi_unconfirmed", {"kpi": "escapes", "k": 20})
 
 
@@ -163,12 +168,145 @@ def test_harm_in_one_group_is_worse_even_when_pooled_is_better() -> None:
 
 # --- baseline and frozen plan (§3.4) -------------------------------------------------------------------------
 
-def test_baseline_is_the_nearest_version_with_the_minimum_in_shared_groups() -> None:
-    other = ("model-b", "hard", "L+")
-    source = history(runs("v0", 1, started=40, ended=30), runs("v1", 1, started=29, ended=25, group=other),
+def test_baseline_is_the_nearest_version_with_the_minimum_settled_runs() -> None:
+    source = history(runs("v0", 1, started=40, ended=30), runs("v1", 1, count=5, started=29, ended=25),
                      runs("v2", 1, started=20, ended=10))
     assert choose_baseline(source, "v2", 20, 3, NOW) == ("v0", ("v1",))
     assert plan_for(source).skipped == ("v1",) and verdict(source).inputs["skipped"] == ["v1"]
+
+
+def test_a_later_run_in_a_new_group_never_changes_the_frozen_baseline() -> None:
+    other = ("model-b", "hard", "L+")
+    before = [runs("v0", 1, started=40, ended=30), runs("v1", 1, started=29, ended=25, group=other),
+              runs("v2", 1, started=20, ended=10)]
+    later = runs("v2", 1, count=1, started=5, ended=4, group=other)
+    plans = {(freeze_plan(source, "v2").baseline, freeze_plan(source, "v2").skipped)
+             for source in (history(*before), history(*before, later))}
+    assert plans == {("v1", ())}
+    assert verdict(history(*before)).reason == "no_shared_groups"
+
+
+def test_a_rolled_back_version_keeps_its_full_history_place_in_the_order() -> None:
+    source = history(
+        runs("v1", 1, started=400, ended=390),
+        runs("v2", 1, started=40, ended=30),
+        runs("v1", 1, started=20, ended=10),
+    )
+    assert source.versions() == ["v1", "v2"]
+
+
+def test_a_version_rolled_back_before_its_minimum_is_changed_again_by_the_version_it_returned_to() -> None:
+    source = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                     runs("v1", 1, count=3, started=12, ended=10))
+    assert source.successor("v2") == ("v1", _at(12))
+    result = next(item for item in compute(Snapshot(NOW.isoformat(), (source,))) if item.plan.version == "v2")
+    assert (result.verdict.word, result.verdict.reason) == ("changed_early", "replaced_before_look_1")
+    assert {key: result.verdict.inputs[key] for key in ("k", "next")} == {"k": 4, "next": "v1"}
+    current = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15))
+    assert current.successor("v2") is None and current.successor("v1") == ("v2", _at(20))
+
+
+def test_a_successor_is_whichever_version_ran_next_after_its_last_run() -> None:
+    back_to_middle = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                             runs("v3", 1, count=3, started=12, ended=10), runs("v2", 1, count=3, started=8, ended=6))
+    assert back_to_middle.successor("v2") is None and back_to_middle.successor("v3") == ("v2", _at(8))
+    returned_then_new = history(runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                                runs("v1", 1, count=3, started=12, ended=10), runs("v3", 1, count=3, started=8, ended=6))
+    assert returned_then_new.successor("v2") == ("v1", _at(12))
+
+
+def test_after_a_rollback_the_baseline_is_the_version_actually_replaced() -> None:
+    source = history(runs("v1", 1, started=90, ended=80), runs("v2", 2, started=70, ended=60),
+                     runs("v1", 1, started=50, ended=45), runs("v3", 1, started=40, ended=30))
+    assert source.predecessors("v3") == ["v1", "v2"] and source.successor("v1") == ("v3", _at(40))
+    assert choose_baseline(source, "v3", 20, 3, parse_ts(source.first_use("v3"))) == ("v1", ())
+
+
+def test_a_baseline_settling_after_first_use_never_changes_the_frozen_plan() -> None:
+    # v1's runs end two days before v2's first use, so they settle only later; v0 stays the baseline.
+    source = history(runs("v0", 0, started=90, ended=70), runs("v1", 1, started=60, ended=38),
+                     runs("v2", 0, started=40, ended=30))
+    plans = {at: next(e.plan for e in compute(Snapshot(at, (source,))) if e.plan.version == "v2")
+             for at in (_at(37), NOW.isoformat())}
+    assert {(plan.baseline, plan.skipped) for plan in plans.values()} == {("v0", ("v1",))}
+
+
+def test_changed_again_is_never_stored_so_a_version_back_in_use_is_still_judged(monkeypatch) -> None:
+    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
+    db = sqlite3.connect(":memory:")
+    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
+    during_v1 = [runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
+                 runs("v1", 1, count=3, started=12, ended=10)]
+    early = next(e for e in compute(Snapshot(NOW.isoformat(), (history(*during_v1),))) if e.plan.version == "v2")
+    assert early.verdict.word == "changed_early" and evaluator.write_verdicts(db, [early]) == 0
+    back = history(*during_v1, runs("v2", 1, count=20, started=9, ended=5))
+    assert back.successor("v2") is None
+    later = next(e for e in compute(Snapshot(NOW.isoformat(), (back,), {early.plan.subject: early.plan}))
+                 if e.plan.version == "v2")
+    assert later.verdict.word in {"keep", "revert"} and evaluator.write_verdicts(db, [later]) == 1
+
+
+def test_frozen_plan_is_the_same_at_every_later_evaluation_time() -> None:
+    source = history(
+        runs("v1", 0, started=80, ended=50),
+        runs("v1", 5, started=50, ended=38),
+        runs("v2", 0, started=40, ended=40),
+    )
+    early = Snapshot(_at(37), (source,))
+    later = Snapshot(NOW.isoformat(), (source,))
+    early_evaluation = next(item for item in compute(early) if item.subject == "workflow:sdlc-process@v2")
+    later_evaluation = next(item for item in compute(later) if item.subject == "workflow:sdlc-process@v2")
+    assert early_evaluation == later_evaluation
+
+
+def test_unsettled_predecessor_remains_a_named_no_baseline() -> None:
+    source = history(runs("v1", 0, started=50, ended=38), runs("v2", 0, started=40, ended=40))
+    plan = freeze_plan(source, "v2")
+    assert plan.baseline is None
+    assert decide(source, plan, NOW).reason == "no_baseline"
+
+
+def test_calibration_splits_use_the_production_first_use_cutoff() -> None:
+    source = history(
+        runs("v1", 1, started=90, ended=80),
+        runs("v1", 1, started=70, ended=60),
+    )
+    ordered = sorted(source.runs, key=lambda run: (run.started_at, run.run_id))
+    midpoint = len(ordered) // 2
+    halves = [replace(run, version="a" if index < midpoint else "b") for index, run in enumerate(ordered)]
+    split = replace(source, runs=tuple(halves))
+    calls, _ = calibration_script().splits(source, NOW)
+    assert freeze_plan(split, "b").baseline == "a"
+    assert any(call != "no_baseline" for found in calls.values() for call, _ in found)
+
+
+def test_calibration_split_judges_the_same_new_side_as_production() -> None:
+    # An unpriced mixed-model run is outside every comparison group, so it cannot make cost unknown.
+    source = history(runs("v1", 1, started=90, ended=80), runs("v1", 1, started=70, ended=60),
+                     runs("v1", 1, count=1, started=55, ended=50, group=(MIXED, "standard", "M"), cost=None))
+    calls, _ = calibration_script().splits(source, NOW)
+    assert [call for call, _ in calls[COST]] == ["no_worse"]
+
+
+def test_calibration_split_refuses_without_a_production_baseline() -> None:
+    calls, words = calibration_script().splits(history(runs("v1", 1)), NOW)
+    assert words == [("not_enough_data", 20)]
+    assert {call for found in calls.values() for call, _ in found} == {"no_baseline"}
+
+
+def test_calibration_share_counts_only_splits_a_measure_could_measure() -> None:
+    # A split with no baseline says nothing about false alarms, so it never dilutes the share toward quiet.
+    script = calibration_script()
+    assert script.aa_share([("no_baseline", None), ("no_baseline", None), ("worse", 0.4), ("no_worse", 0.1)]) == (2, 0.5)
+    assert script.aa_share([("no_baseline", None)]) == (0, None)
+
+
+def test_calibration_lists_a_deciding_kpi_no_split_held_as_not_calibrated() -> None:
+    # Only a replay plan held the KPI, so no split called it: it must not read as calibrated.
+    script = calibration_script()
+    calls = {CORRECTIONS: [("no_worse", 0.1)], COST: [("no_baseline", None)]}
+    expected = sorted(f"sdlc-process/{name}" for name in (COST, "escapes"))
+    assert script.uncalibrated("sdlc-process", calls, {"escapes"}) == expected
 
 
 def test_baseline_runs_are_the_most_recent_up_to_twice_the_minimum_per_group() -> None:

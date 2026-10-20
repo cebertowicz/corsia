@@ -19,7 +19,8 @@ from infra.outcome_events import record_outcome_event
 # Calibration enables this only in a later slice. A code constant keeps production evaluation
 # read-only until an explicit reviewed change.
 VERDICT_WRITES_ENABLED = False
-STORED = frozenset({"keep", "revert", "changed_early"})  # Collecting and Not enough data are computed on read
+# Changed again, Collecting and Not enough data are computed on read: a replaced version can return to use.
+STORED = frozenset({"keep", "revert"})
 DETAIL_LIMIT = 2_000  # infra.outcome_event_attributes: measurement.verdict.reached detail
 
 
