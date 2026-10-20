@@ -8,6 +8,7 @@ import sqlite3
 import pytest
 
 from core import thread_lifecycle as lifecycle
+from core import thread_lifecycle_trims as lifecycle_trims
 from infra.database import TransactionOwnershipError
 from registry import service
 from tests.test_thread_lifecycle import (
@@ -45,6 +46,32 @@ def _reconcile(db, workspace, *, single=False):
     return service.retire_missing_temporary_under_roots(
         {"owner": workspace / "working"}, db=db,
     )
+
+
+def test_working_sweep_batches_retirement_for_all_threads(tmp_path):
+    db = _db()
+    for thread_id in ("s1", "s2"):
+        _add_session(db, thread_id, last_activity=NOW - timedelta(days=1))
+        missing = _thread_root(tmp_path, thread_id) / "working" / "missing.txt"
+        artifact_id = f"{thread_id}-missing"
+        _add_artifact_identity(db, artifact_id, path=missing, retention="ephemeral")
+        _add_artifact_registration(db, artifact_id, thread_id)
+    db.commit()
+
+    statements: list[str] = []
+    db.set_trace_callback(statements.append)
+    try:
+        lifecycle_trims._trim_working_tmp(
+            db, NOW, CFG, tmp_path, lifecycle.RetentionReport(),
+        )
+    finally:
+        db.set_trace_callback(None)
+
+    assert [statement for statement in statements
+            if statement.strip().upper() == "BEGIN IMMEDIATE"] == ["BEGIN IMMEDIATE"]
+    assert dict(db.execute("SELECT id,state FROM artifact_identities")) == {
+        "s1-missing": "tombstone", "s2-missing": "tombstone",
+    }
 
 
 @pytest.mark.parametrize("stage", ("resolve", "remove"))
