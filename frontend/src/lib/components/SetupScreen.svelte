@@ -270,7 +270,7 @@
 	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
-		{#if otherQuestion}<div class="other-omlx"><h2>Another copy of oMLX is already running</h2><p>CORSIA runs its own oMLX for the local model. Stopping it can free memory. It stays stopped until you start it.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop it</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep it running</Button></div>{/if}
+		{#if otherQuestion}<div class="other-omlx"><h2>Another copy of oMLX is already running</h2><p>CORSIA runs its own oMLX for the local model. Stopping the other copy frees memory. If it opens when you log in, it comes back next time.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop it</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep it running</Button></div>{/if}
 		{#if sourceError}<Message variant="err">{sourceError}</Message><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
