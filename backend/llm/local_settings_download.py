@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Callable
 
-from api.network_server_helpers import notify_cached_model_loaded
+from api.network_daemon_models import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
 from llm.local_setup_download import StillDownloading

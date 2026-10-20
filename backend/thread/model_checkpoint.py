@@ -53,13 +53,17 @@ def _switch_thread_row(db, request: SwitchRequest):
 
 
 def _switch_targets(db, request: SwitchRequest):
-    from llm.resolution import ModelUnavailableError, resolve_execution_target
+    """Resolve both ends through the thread's resolver; a source its policy forbids is no source."""
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
-        source = resolve_execution_target(request.source_model, db=db)
+        source = resolve_thread_target(request.source_model, thread_id=request.thread_id, db=db)
     except (ModelUnavailableError, ValueError):
         source = None
-    destination = resolve_execution_target(request.destination_model, db=db)
+    if source is not None and source.availability_reason in LOCALITY_REFUSALS:
+        source = None
+    destination = resolve_thread_target(request.destination_model, thread_id=request.thread_id, db=db)
     if not destination.available or not destination.context_window:
         raise RuntimeError(
             destination.availability_reason or "switch destination is unavailable"

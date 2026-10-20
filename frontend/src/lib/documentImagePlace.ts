@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { OpenImageRequest } from '$lib/cm/markdown-image';
 
@@ -102,6 +103,22 @@ function anchorReader(root: HTMLElement, scroller: HTMLElement, view: EditorView
 		}
 		return view.documentTop + view.lineBlockAt(from).top - box.top;
 	};
+}
+
+/**
+ * Applies the editor's transactions and lays out at once any change the reader did not make, so the text in view stays
+ * where it is while others edit the document. CodeMirror keeps the line at the top of the view in place across a change,
+ * by that change's height, when it next measures. Until then every update takes that line again from the scroll offset it
+ * measured last: a remote change followed by any other update before the next frame (a typing lane's state, comment
+ * ranges remapped onto the change) makes it hold whichever line the change moved under that offset, and the text in view
+ * moves by the change's height. Measuring right after the change keeps CodeMirror's own correction, the one thing that
+ * moves the scroller for it. The reader's own edits keep the default timing, so their caret scrolls as it always has.
+ */
+export function dispatchKeepingPlace(transactions: readonly Transaction[], view: EditorView): void {
+	view.update(transactions);
+	// lineBlockAtHeight reads the layout through readMeasured, which runs the pending measure pass now; lineBlockAt
+	// returns stored heights without measuring.
+	if (transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent) === undefined)) view.lineBlockAtHeight(0);
 }
 
 /** Reads the first visible CodeMirror line as an anchor before its tab leaves the screen. */

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { addCommentId, commentIdsAt, paintTable, unpaint, wrapRange, type Mark } from './widget-paint';
+import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, wrapRange, type Mark } from './widget-paint';
 
 const SRC = '| Item | Owner |\n|---|---|\n| Alpha | Dana and Dana |\n| Bravo | Eli |';
 const BASE = 20;
@@ -89,6 +89,41 @@ describe('wrapRange', () => {
 		range.setEnd(cell(el, 1, 0).firstChild!, 2);
 		wrapRange(range, { id: 'a', kind: 'placed', from: 0, to: 0 });
 		expect(el.innerHTML).toBe(before);
+	});
+});
+
+describe('keepingSelection', () => {
+	it('selects the same characters, in the same direction, after a paint and an unpaint rewrite the text under them', () => {
+		const el = widget(), selection = document.getSelection()!, dana = cell(el, 1, 1).firstChild!;
+		// Backwards, from inside the italic Dana to inside the first Dana, as a right-to-left drag leaves it.
+		selection.setBaseAndExtent(cell(el, 1, 1).querySelector('em')!.firstChild!, 2, dana, 1);
+		const text = selection.toString();
+		keepingSelection(el, () => paintTable(el, BASE, SRC, [{ ...mark('pending', 'Dana and Dana'), kind: 'pending' }]));
+		expect(el.querySelector('.cm-comment-pending'), 'setup: the paint wrapped the selected text').toBeTruthy();
+		expect(selection.toString()).toBe(text);
+		expect(selection.anchorNode?.textContent).toBe('Dana');
+		expect(selection.anchorNode?.parentElement?.closest('em')).toBeTruthy();
+		keepingSelection(el, () => unpaint(el));
+		expect(selection.toString()).toBe(text);
+	});
+
+	it('starts a selection at the start of a cell in that cell, not at the end of the one before', () => {
+		const el = widget(), selection = document.getSelection()!, eli = cell(el, 2, 1).firstChild!;
+		selection.setBaseAndExtent(eli, 0, eli, 2);
+		keepingSelection(el, () => paintTable(el, BASE, SRC, [{ ...mark('pending', 'El'), kind: 'pending' }]));
+		expect(selection.toString()).toBe('El');
+		expect(selection.getRangeAt(0).startContainer.parentElement?.closest('td')).toBe(cell(el, 2, 1));
+	});
+
+	it('leaves a collapsed selection, and one outside the widget, to the paint', () => {
+		const el = widget(), selection = document.getSelection()!, outside = document.body.appendChild(document.createElement('p'));
+		outside.textContent = 'outside';
+		selection.setBaseAndExtent(outside.firstChild!, 0, outside.firstChild!, 3);
+		keepingSelection(el, () => paintTable(el, BASE, SRC, [{ ...mark('pending', 'Eli'), kind: 'pending' }]));
+		expect(selection.toString()).toBe('out');
+		selection.collapse(cell(el, 2, 0), 0);
+		keepingSelection(el, () => unpaint(el));
+		expect(selection.anchorNode).toBe(cell(el, 2, 0));
 	});
 });
 

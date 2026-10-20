@@ -71,7 +71,8 @@ vi.mock('$lib/stores/docComments', async () => ({
 	flushPositions: vi.fn(),
 }));
 
-vi.mock('$lib/documentImagePlace', () => ({
+vi.mock('$lib/documentImagePlace', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/documentImagePlace')>(),
 	restoreDocumentPlace: mocks.restoreDocumentPlace,
 }));
 

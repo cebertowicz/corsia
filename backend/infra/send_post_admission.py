@@ -19,12 +19,14 @@ log = logging.getLogger("infra.send_service")
 async def target_for(
     admission: InputAdmission, supplied: ExecutionTarget | None,
 ) -> ExecutionTarget:
-    from infra.send_target import resolve_target
+    from infra.send_target import resolve_target, scope_supplied_target
 
     model = admission.accepted.target_model
+    thread_id = admission.accepted.thread_id
     if supplied is not None and supplied.catalog_id == model:
-        return supplied
-    return await resolve_target(model)
+        # A caller's own resolution may predate the thread's policy: scope it here too.
+        return await scope_supplied_target(supplied, thread_id=thread_id)
+    return await resolve_target(model, thread_id=thread_id)
 
 
 async def publish_projection(step: str, admission: InputAdmission, call: Callable) -> None:

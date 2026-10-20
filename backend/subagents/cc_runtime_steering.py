@@ -150,7 +150,10 @@ async def deliver_live_inbox_head(thread_id: str) -> bool:
     model call; written at any other time, its answer may follow the Turn's
     result and be dropped (#2204). Everything else waits for the successor Turn.
     """
-    from llm.resolution import resolve_execution_target
+    from functools import partial
+
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import resolve_thread_target
 
     async with _LIVE.lock(thread_id):
         live = _LIVE.get(thread_id)
@@ -203,10 +206,15 @@ async def deliver_live_inbox_head(thread_id: str) -> bool:
         await _broadcast(batch)
         try:
             thread_row = await run_in_db(load_thread_row, thread_id)
-            target = await run_in_db(resolve_execution_target, batch.target_model)
+            target = await run_in_db(partial(resolve_thread_target, batch.target_model, thread_id=thread_id))
         except BaseException:
             await _release_after_failure(batch)
             raise
+        if target.availability_reason in LOCALITY_REFUSALS:
+            # Policy now forbids the model: the successor Turn's admission holds the input.
+            log.info("cc live inbox delivery declined thread_id=%s reason=%s", thread_id, target.availability_reason)
+            await _release_unwritten(batch)
+            return False
         return await _feed_claimed(batch, live, thread_row, target)
 
 

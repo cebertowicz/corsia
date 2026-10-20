@@ -94,6 +94,34 @@ def test_moving_with_a_new_key_sends_and_saves_only_the_new_key(edit) -> None:
     })]
 
 
+@pytest.mark.parametrize("key", [None, "new-key"])
+def test_a_move_clears_the_private_mark_so_the_new_origin_is_not_local(edit, key) -> None:
+    from infra.database import get_db
+    from infra.key_store_servers import remove_server_key
+    from llm.locality import row_is_local
+    from llm.model_status import _server_locality
+
+    # A keyless endpoint is the case an agent can move: only a supplied key needs a person.
+    remove_server_key(edit.sid)
+    edit.nd.set_server_metadata(edit.sid, private=True)
+
+    _update(edit, "https://elsewhere.example.net/v1", key)
+
+    assert "private" not in edit.nd.get_server_metadata(edit.sid)
+    server = dict(get_db().execute("SELECT * FROM network_servers WHERE id = ?", (edit.sid,)).fetchone())
+    private, local = _server_locality([server])
+    row = {"litellm_model": f"external@{edit.sid}/m", "backend": "network", "provider": "external", "harness": "native"}
+    assert row_is_local(row, private_servers=private, local_servers=local) is False
+
+
+def test_an_edit_that_keeps_the_origin_keeps_the_private_mark(edit) -> None:
+    edit.nd.set_server_metadata(edit.sid, private=True)
+
+    _update(edit, "https://old.example.com/v2")
+
+    assert edit.nd.get_server_metadata(edit.sid)["private"] is True
+
+
 def test_a_failed_base_write_puts_the_old_key_back_and_keeps_the_old_base(edit, monkeypatch) -> None:
     def broken(*args, **kwargs):
         raise RuntimeError("metadata write failed")

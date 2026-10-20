@@ -274,7 +274,7 @@ async def _exercise_initial_replacement(
     )
     monkeypatch.setattr(
         "llm.resolution.resolve_execution_target",
-        lambda _model: target,
+        lambda _model, **_kwargs: target,
     )
     monkeypatch.setattr(
         codex_runtime,
