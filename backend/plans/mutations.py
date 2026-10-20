@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from plans import aggregates, errors, service, writer_context
+from plans import aggregates, errors, intent_words as intent_word_store, service, writer_context
 from plans.models import PlanNode
 
 _UNSET = object()
@@ -91,7 +91,7 @@ def reorder_node(
         return service._node_from_row(connection, service._node_row(connection, node_id))
 
 
-def _next_edit_values(node, title, description, acceptance_criteria, watchdog_budget_seconds, size):
+def _next_edit_values(node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size):
     """Normalize one edit and report whether requirements or size changed."""
     next_title = service.validate_node_title(title) if title is not None else node["title"]
     next_dod = (
@@ -99,16 +99,17 @@ def _next_edit_values(node, title, description, acceptance_criteria, watchdog_bu
         if acceptance_criteria is not None else node["acceptance_criteria"]
     )
     next_description = description if description is not None else node["description"]
+    next_intent = node["intent"] if intent is _UNSET else intent
     next_watchdog = node["watchdog_budget_seconds"] if watchdog_budget_seconds is _UNSET else watchdog_budget_seconds
     next_size = node["size"] if size is _UNSET else size
     if next_watchdog is not None and (
         isinstance(next_watchdog, bool) or not isinstance(next_watchdog, int) or next_watchdog <= 0
     ):
         raise service.PlanInputError("watchdog budget seconds must be a positive integer")
-    restated = (next_title, next_description, next_dod, next_watchdog) != (
-        node["title"], node["description"], node["acceptance_criteria"], node["watchdog_budget_seconds"],
+    restated = (next_title, next_description, next_dod, next_watchdog, next_intent) != (
+        node["title"], node["description"], node["acceptance_criteria"], node["watchdog_budget_seconds"], node["intent"],
     )
-    return next_title, next_description, next_dod, next_watchdog, next_size, restated
+    return next_title, next_description, next_dod, next_intent, next_watchdog, next_size, restated
 
 
 def edit_node(
@@ -117,6 +118,8 @@ def edit_node(
     title: str | None = None,
     description: str | None = None,
     acceptance_criteria: str | None = None,
+    intent: str | None | object = _UNSET,
+    intent_words: list[dict[str, str]] | None = None,
     watchdog_budget_seconds: int | None | object = _UNSET,
     difficulty_rerated: dict[str, str] | None = None,
     size: str | None | object = _UNSET,
@@ -126,7 +129,7 @@ def edit_node(
     db=None,
 ) -> PlanNode:
     """Amend durable node intent without replacing its stable identity."""
-    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated)) and watchdog_budget_seconds is _UNSET and size is _UNSET:
+    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated, intent_words)) and intent is _UNSET and watchdog_budget_seconds is _UNSET and size is _UNSET:
         raise service.PlanInputError("edit requires at least one changed field")
     if size is not _UNSET:
         from plans.size_fields import validate_size
@@ -143,31 +146,43 @@ def edit_node(
             from plans.boundary_fields import _user_step_description
 
             _user_step_description({"kind": node["kind"], "assignee": "user", "description": description})
-        next_title, next_description, next_dod, next_watchdog, next_size, restated = _next_edit_values(
-            node, title, description, acceptance_criteria, watchdog_budget_seconds, size,
+        if intent is not _UNSET:
+            from plans.intent_words import validate_intent
+            intent = validate_intent(intent)
+        next_title, next_description, next_dod, next_intent, next_watchdog, next_size, restated = _next_edit_values(
+            node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size,
         )
         size_changed = next_size != node["size"]
-        if not restated and difficulty_rerated is None and not size_changed:
+        if not restated and not intent_words and difficulty_rerated is None and not size_changed:
             return service._node_from_row(connection, node)
-        requirements_changed = next_dod != node["acceptance_criteria"]
+        requirements_changed = (
+            next_dod != node["acceptance_criteria"] or next_intent != node["intent"] or bool(intent_words)
+        )
         if restated:
             service.touch_node(
-                connection, node_id, title=next_title, description=next_description,
+                connection, node_id, title=next_title, description=next_description, intent=next_intent,
                 acceptance_criteria=next_dod, watchdog_budget_seconds=next_watchdog,
                 requirements_revision=node["requirements_revision"] + int(requirements_changed),
                 **({"size": next_size} if size_changed else {}),
             )
         else:
             # Re-rating and size declaration preserve requirements and selection.
-            service.touch_node(connection, node_id, **({"size": next_size} if size_changed else {}))
+            service.touch_node(
+                connection, node_id,
+                requirements_revision=node["requirements_revision"] + int(requirements_changed),
+                **({"size": next_size} if size_changed else {}),
+            )
+        updated = service._node_row(connection, node_id)
+        if intent_words:
+            from plans import intent_words as words
+            words.append(connection, node_id, intent_words, revision=updated["requirements_revision"])
         if requirements_changed:
             from plans import admission
 
             admission.release(node_id, "requirements_changed", db=connection)
             admission.reselect_and_reconcile(node_id, actor_id=actor_id, provenance=provenance, db=connection)
-        updated = service._node_row(connection, node_id)
         _record_edit_events(
-            connection, node_id, restated, updated, next_title, next_dod,
+            connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
             difficulty_rerated, node["size"], next_size, actor_id, provenance,
         )
         return service._node_from_row(connection, updated)
@@ -213,6 +228,7 @@ def insert_node(
     workflow_step: str | None = None,
     difficulty: str | None = None,
     size: str | None = None,
+    intent: str | None = None,
     checkpoint_exception: bool = False,
     assignee: str | None = None,
     spawn_kind: str | None = None,
@@ -234,7 +250,7 @@ def insert_node(
             acceptance_criteria=acceptance_criteria, parent_id=parent_id,
             order_key=order_key, description=description,
             workflow_ref=workflow_ref, workflow_version=workflow_version,
-            workflow_step=workflow_step, difficulty=difficulty, size=size,
+            workflow_step=workflow_step, difficulty=difficulty, size=size, intent=intent,
             checkpoint_exception=checkpoint_exception, assignee=assignee,
             spawn_kind=spawn_kind,
             watchdog_budget_seconds=watchdog_budget_seconds, follow_up_of=None,
@@ -249,6 +265,8 @@ def split_node(
     acceptance_criteria: str,
     description: str | None = None,
     size: str | None = None,
+    intent: str | None = None,
+    intent_words: list[dict[str, str]] | None = None,
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
@@ -271,6 +289,8 @@ def split_node(
             workflow_ref=source["workflow_ref"],
             workflow_version=source["workflow_version"],
             workflow_step=source["workflow_step"], difficulty=source["difficulty"], size=size,
+            intent=intent,
+            intent_node_id=(None if intent is not None else intent_word_store.canonical(connection, source["id"])["id"]),
             checkpoint_exception=False, assignee=source["assignee"],
             spawn_kind=source["spawn_kind"],
             watchdog_budget_seconds=source["watchdog_budget_seconds"],
@@ -278,6 +298,9 @@ def split_node(
             actor_id=actor_id, provenance=provenance,
             node_id=service._id(),
         )
+        if intent_words:
+            from plans import intent_words as words
+            words.append(connection, sibling.id, intent_words, revision=sibling.requirements_revision)
         service.touch_node(connection, node_id)
         service._event(
             connection, node_id, "node_split", actor_id=actor_id, provenance=provenance,

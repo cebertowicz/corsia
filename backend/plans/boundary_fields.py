@@ -26,6 +26,8 @@ _CREATE = {
     "workflow_step",
     "difficulty",
     "size",
+    "intent",
+    "intent_words",
     "checkpoint_exception",
     "assignee",
     "spawn_kind",
@@ -60,6 +62,8 @@ OPERATION_FIELDS = {
         "title",
         "description",
         "acceptance_criteria",
+        "intent",
+        "intent_words",
         "watchdog_budget_seconds",
         "difficulty_rerated",
         "size",
@@ -71,6 +75,8 @@ OPERATION_FIELDS = {
         "acceptance_criteria",
         "description",
         "size",
+        "intent",
+        "intent_words",
         "expected_revision",
     },
     "reorder": {"node_id", "order_key", "expected_revision"},
@@ -84,6 +90,8 @@ OPERATION_FIELDS = {
         "title",
         "acceptance_criteria",
         "size",
+        "intent",
+        "intent_words",
         "expected_revision",
     },
     "archive_node": {"node_id", "node_ids", "expected_revision"} | _NEXT,
@@ -123,13 +131,15 @@ OPERATION_FIELDS = {
         "title",
         "acceptance_criteria",
         "size",
+        "intent",
+        "intent_words",
         "verification_result",
         "evidence",
         "expected_revision",
     } | _NEXT,
     "add_correction": {
         "node_id", "title", "acceptance_criteria", "affected_nodes",
-        "expected_revision",
+        "intent", "intent_words", "expected_revision",
     },
     "arm_watch": {
         "node_id",
@@ -289,7 +299,7 @@ def _user_step_description(params: dict[str, Any]) -> None:
 
 def node_fields(
     params: dict[str, Any], *, workflow_version: str | None = None,
-    include_before: bool = True,
+    include_before: bool = True, intent_required: bool = True,
 ) -> dict[str, Any]:
     """Read common creation fields and reject absent durable intent.
 
@@ -298,10 +308,13 @@ def node_fields(
     """
     _user_step_description(params)
     kind = params.get("kind", "task")
-    size = (
-        require_task_size(params.get("size")) if kind == "task"
-        else validate_size(params.get("size"))
-    )
+    missing_size = kind == "task" and params.get("size") is None
+    missing_intent = kind == "task" and intent_required and params.get("intent") is None
+    if missing_size and missing_intent:
+        raise PlanInputError("task creation requires size and intent")
+    if missing_intent:
+        raise PlanInputError("task creation requires intent")
+    size = require_task_size(params.get("size")) if kind == "task" else validate_size(params.get("size"))
     return {
         "kind": kind,
         "title": text(params, "title"),
@@ -313,6 +326,8 @@ def node_fields(
         "workflow_step": params.get("workflow_step"),
         "difficulty": params.get("difficulty"),
         "size": size,
+        "intent": params.get("intent"),
+        "intent_words": params.get("intent_words"),
         "checkpoint_exception": bool(params.get("checkpoint_exception", False)),
         "assignee": params.get("assignee"),
         "spawn_kind": params.get("spawn_kind"),
@@ -327,7 +342,7 @@ def edit_fields(params: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {
         key: params[key]
         for key in (
-            "title", "description", "acceptance_criteria", "watchdog_budget_seconds",
+            "title", "description", "acceptance_criteria", "intent", "intent_words", "watchdog_budget_seconds",
         )
         if key in params
     }

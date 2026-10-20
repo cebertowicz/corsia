@@ -73,7 +73,7 @@ PLAN_AGGREGATE_NAMES = frozenset(name for name, _ in PLAN_AGGREGATE_COLUMNS)
 #: an aggregate (a test pins the partition).
 PRE_AGGREGATE_NODE_COLUMNS: tuple[str, ...] = (
     "id", "plan_id", "parent_id", "order_key", "kind", "title", "description",
-    "workflow_ref", "workflow_version", "workflow_step", "difficulty", "size",
+    "intent", "intent_node_id", "workflow_ref", "workflow_version", "workflow_step", "difficulty", "size",
     "acceptance_criteria", "checkpoint_exception", "state", "assignee",
     "spawn_kind", "owner_thread_id", "executor_thread_id", "spawned_thread_id",
     "follow_up_of", "requirements_revision", "commitment_id",

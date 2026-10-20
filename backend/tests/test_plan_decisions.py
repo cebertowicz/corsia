@@ -16,7 +16,9 @@ import threading
 import pytest
 
 from infra.schema import SCHEMA_SQL
+import plans.current as current
 import plans.decisions as decisions
+import plans.public as public
 import plans.service as service
 from plans.boundary import PlanActor
 
@@ -136,6 +138,25 @@ def _draft(db, plan, source, actor=None, **overrides):
         actor=actor or _thread_actor("worker"), provenance="tool.plans.decision",
         db=db, **_draft_kwargs(**overrides),
     ).result["decision"]
+
+
+def test_decision_review_task_without_intent_is_readable_as_no_intent(db):
+    """Server-created decision review work stays outside the plan-tool intent gate."""
+    plan, source = _delegated(db)
+
+    decision = _draft(db, plan, source)
+    detail = current.read_current_status(
+        actor=_thread_actor(), node_id=decision["node_id"], db=db,
+    )
+
+    assert detail["intent"] is None
+    assert detail["intent_words"] == []
+    assert public.intent_of(decision["node_id"], db=db) == {
+        "node_id": decision["node_id"], "title": decision["title"],
+        "requirements_revision": 1, "intent": None,
+        "acceptance_criteria": "The user answers this decision and the answer is recorded on this plan.",
+        "intent_words": [],
+    }
 
 
 def _reviewed(db, plan, source, **overrides):
