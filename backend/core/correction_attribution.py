@@ -57,12 +57,14 @@ _ATTRIBUTED_SQL = f"""
       SELECT '{SOURCE_KIND_MESSAGE}' AS source_kind,
         substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1) AS source_id,
         m.created_at AS source_at,m.thread_id,m.active_turn_id,f.attributes
-      FROM facts f LEFT JOIN messages m ON f.subject_key='{MESSAGE_SUBJECT_PREFIX}' || m.id
+      FROM facts f LEFT JOIN messages m
+        ON m.id=substr(f.subject_key,length('{MESSAGE_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{MESSAGE_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DOC_COMMENT}',substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1),
         c.created_at,f.agent_thread_id,NULL,f.attributes
-      FROM facts f LEFT JOIN doc_comments c ON f.subject_key='{COMMENT_SUBJECT_PREFIX}' || c.id
+      FROM facts f LEFT JOIN doc_comments c
+        ON c.id=substr(f.subject_key,length('{COMMENT_SUBJECT_PREFIX}') + 1)
       WHERE f.subject_key LIKE '{COMMENT_SUBJECT_PREFIX}%'
       UNION ALL
       SELECT '{SOURCE_KIND_DECISION_ANSWER}',substr(f.subject_key,length('{DECISION_SUBJECT_PREFIX}') + 1),

@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from core import correction_attribution
 from core.correction_attribution import NOT_IN_WORKFLOW, UNATTRIBUTED, attributed_facts, workflow_run_of
 from core.corrections_recording import ClassifierVersion, CorrectionCandidate, SOURCE_KIND_MESSAGE
 from jobs.corrections_recording import _record_fact
@@ -84,6 +85,17 @@ def test_only_the_answered_turn_counts_by_the_source_time_never_the_fact_time(db
     legacy_fact(db, "noise", label="unreadable")
     found = {fact.source_id: fact.node_id for fact in attributed_facts(db)}
     assert found == {"m1": "earlier", "m2": None, "m3": None, "m4": None}
+
+
+def test_source_key_joins_use_message_and_comment_primary_keys(db) -> None:
+    """The source key is canonical without turning attribution into table scans."""
+    plan = db.execute(
+        f"EXPLAIN QUERY PLAN {correction_attribution._ATTRIBUTED_SQL}",
+        {"event": "measurement.correction", "correction": "correction", "not_correction": "not_correction"},
+    ).fetchall()
+
+    details = [str(row["detail"]) for row in plan]
+    assert not any("SCAN m" in detail or "SCAN c" in detail for detail in details)
 
 
 def test_current_writer_and_legacy_attributes_both_reach_their_workflow_run(db) -> None:
