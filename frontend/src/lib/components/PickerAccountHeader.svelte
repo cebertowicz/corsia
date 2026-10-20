@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { UsageSegment } from '$lib/stores/modelGroups';
 	import type { VendorAccount } from '$lib/stores/vendorAccounts';
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from './ui/SwitchingIcon.svelte';
 
 	interface Props {
 		vendor: string;
@@ -9,6 +11,7 @@
 		chooser?: boolean;
 		open?: boolean;
 		rollover?: boolean;
+		switching?: boolean;
 		recovery?: VendorAccount | null;
 		onchoose?: () => void;
 		actionLabel?: string;
@@ -27,6 +30,7 @@
 		chooser = false,
 		open = false,
 		rollover = false,
+		switching = false,
 		recovery = null,
 		onchoose,
 		actionLabel,
@@ -44,7 +48,7 @@
 	<div class="picker-account-line">
 		{#if chooser}
 			<button type="button" class="picker-account-title press-tint" aria-expanded={open} onclick={ontoggle}>
-				<span class="vendor">{vendor}</span>
+				<span class="vendor">{vendor}</span>{#if switching && !open}<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching account" /></span>{/if}
 				{#if account}
 					<span class="separator" aria-hidden="true">{' · '}</span>
 					<span class="account-name">{rollover ? `Auto · ${account.label.name}` : account.label.name}</span>
@@ -52,7 +56,7 @@
 				<span class="chooser-caret" class:open aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
 			</button>
 		{:else}
-			<span class="picker-account-title"><span class="vendor">{vendor}</span>{#if account}<span class="separator" aria-hidden="true">{' · '}</span><span class="account-name">{account.label.name}</span>{/if}</span>
+			<span class="picker-account-title"><span class="vendor">{vendor}</span>{#if switching && !open}<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching account" /></span>{/if}{#if account}<span class="separator" aria-hidden="true">{' · '}</span><span class="account-name">{account.label.name}</span>{/if}</span>
 		{/if}
 		{#if segments.length > 0}
 			{#if breakdown.length > 0}
@@ -85,9 +89,11 @@
 <style>
 	.picker-account-header { padding: 6px 10px 4px; color: var(--text-primary); }
 	.picker-account-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; min-height: 28px; font-size: var(--text-footnote); }
-	.picker-account-title { display: flex; min-width: 0; align-items: baseline; gap: 3px; padding: 0; color: inherit; font: inherit; background: none; border: 0; border-radius: var(--radius-xs); text-align: left; }
+	.picker-account-title { display: flex; flex: 0 1 auto; min-width: 0; max-width: 100%; align-items: baseline; gap: 3px; padding: 0; color: inherit; font: inherit; background: none; border: 0; border-radius: var(--radius-xs); text-align: left; }
 	button.picker-account-title { cursor: pointer; }
-	.vendor { flex: 0 0 auto; font-size: var(--text-subhead); font-weight: 600; white-space: nowrap; }
+	.vendor { flex: 0 0 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-subhead); font-weight: 600; white-space: nowrap; }
+	/* A block with its own line box, so the icon's vertical-align sits it on the text baseline; an empty flex box would rest its bottom there. */
+	.switching-slot { display: inline-block; flex: 0 0 auto; }
 	.separator, .usage { color: var(--text-tertiary); }
 	button.usage { padding: 0; font: inherit; background: none; border: 0; cursor: pointer; }
 	.account-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

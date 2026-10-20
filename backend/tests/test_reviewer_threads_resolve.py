@@ -49,7 +49,7 @@ def test_resolved_only_fingerprint_is_published_again_and_then_resolved():
 
     assert new == [finding]
     assert resolves == []
-    assert unchanged == 0
+    assert unchanged == []
 
     reposted = _existing(fingerprint, 3)
     _, resolves, _ = classify_findings(
@@ -68,7 +68,7 @@ def test_missing_thread_snapshot_preserves_pr_level_absence_replies():
 
     assert new == []
     assert resolutions == [prior]
-    assert unchanged == 0
+    assert unchanged == []
 
 
 def test_resolved_pr_level_finding_is_republished_and_later_resolved():
@@ -81,7 +81,7 @@ def test_resolved_pr_level_finding_is_republished_and_later_resolved():
 
     assert new == [finding]
     assert resolves == []
-    assert unchanged == 0
+    assert unchanged == []
 
     reposted = _existing_pr_level(fingerprint, 9)
     _, resolves, _ = classify_findings([], [prior, resolved, reposted])
@@ -97,7 +97,7 @@ def test_classification_uses_newest_unresolved_thread_independent_of_payload_ord
 
     _, resolves, unchanged = classify_findings([], [newer, older])
 
-    assert unchanged == 0
+    assert unchanged == []
     assert [comment["id"] for comment in resolves] == [2]
 
 
@@ -490,7 +490,7 @@ def test_absent_open_review_thread_is_replied_to_and_marked_for_resolution():
     )
 
     assert new == []
-    assert unchanged == 0
+    assert unchanged == []
     assert len(resolutions) == 1
     action = resolutions[0][THREAD_ACTION_KEY]
     assert action == ReviewThreadAction("PRRT_101", 101, False, True)
@@ -531,7 +531,7 @@ def test_reappeared_finding_reopens_the_closed_thread_and_republishes():
     )
 
     assert resolutions == []
-    assert unchanged == 0
+    assert unchanged == []
     assert len(new) == 1
     assert new[0][THREAD_ACTION_KEY] == ReviewThreadAction(
         "PRRT_104", 104, True, True,
@@ -571,29 +571,33 @@ def test_human_resolved_thread_is_not_reopened_without_prior_reviewer_absence():
 
     assert new == []
     assert resolutions == []
-    assert unchanged == 1
+    assert len(unchanged) == 1
 
 
-def test_current_open_finding_is_unchanged_and_closed_absent_thread_is_ignored():
-    finding = _finding()
-    fingerprint = fingerprint_finding(finding)
-    parent = _existing(fingerprint, 108)
+def test_open_outdated_thread_carries_the_current_finding_without_reposting():
+    current = _finding(severity="block")
+    fingerprint = fingerprint_finding(current)
+    outdated_root = _existing(fingerprint, 108)
+    outdated_root["html_url"] = "https://github.com/owner/repo/pull/1#discussion_r108"
 
-    new, resolutions, unchanged = classify_findings(
-        [finding], [parent],
+    new, resolutions, still_raised = classify_findings(
+        [current], [outdated_root],
         review_thread_states={108: ReviewThreadState("PRRT_108", False)},
     )
+
     assert new == []
     assert resolutions == []
-    assert unchanged == 1
+    assert len(still_raised) == 1
+    assert still_raised[0].finding is current
+    assert still_raised[0].carrier_comment is outdated_root
 
     new, resolutions, unchanged = classify_findings(
-        [], [parent],
+        [], [outdated_root],
         review_thread_states={108: ReviewThreadState("PRRT_108", True)},
     )
     assert new == []
     assert resolutions == []
-    assert unchanged == 0
+    assert unchanged == []
 
 
 def test_pr_level_findings_remain_outside_review_thread_mutations():

@@ -24,19 +24,31 @@ describe('pane pointer input', () => {
   expect(send.mock.calls[2][0]).toMatchObject({ x: 50, y: 60, button: 'left' });
   expect(send.mock.calls[3][0]).toMatchObject({ x: 100, y: 80 });
  });
- it('sends each touch wheel delta in page pixels without waiting for a paint', () => {
-  const send = vi.fn(); const input = new BrowserPaneInput(send);
+ it('sums touch wheel deltas per display frame and preserves their order before release', () => {
+  const send = vi.fn(); const shifts = vi.fn(); const input = new BrowserPaneInput(send, shifts);
   input.press(pointer(), { x: 40, y: 400 });
   input.move(pointer('touch', 170), { x: 40, y: 340 }, .5);
   input.move(pointer('touch', 130), { x: 40, y: 260 }, .5);
-  expect(send.mock.calls.map(([message]) => message)).toEqual([
-   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 340, deltaX: 0, deltaY: 60 },
-   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 80 },
-  ]);
+  expect(send).not.toHaveBeenCalled();
+  expect(shifts.mock.calls).toEqual([[{ x: 0, y: 60 }], [{ x: 0, y: 80 }]]);
   input.move(pointer('touch', 110), { x: 40, y: 220 }, .5);
   input.release(pointer('touch', 110), { x: 40, y: 220 });
-  expect(send.mock.calls[2][0]).toMatchObject({ eventType: 'mouseWheel', deltaY: 40 });
-  paint(); expect(send).toHaveBeenCalledTimes(3);
+  expect(send.mock.calls.map(([message]) => message)).toEqual([
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 220, deltaX: 0, deltaY: 180 },
+  ]);
+  paint(); expect(send).toHaveBeenCalledTimes(1);
+ });
+
+ it('flushes coalesced wheel input before a discrete mouse press', () => {
+  const send = vi.fn(); const input = new BrowserPaneInput(send);
+  input.wheel({ x: 20, y: 30 }, { deltaX: 0, deltaY: 10 });
+  input.wheel({ x: 30, y: 40 }, { deltaX: 0, deltaY: 20 });
+  input.press(pointer('mouse'), { x: 50, y: 60 });
+  expect(send.mock.calls.map(([message]) => message)).toEqual([
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 30, y: 40, deltaX: 0, deltaY: 30 },
+   { type: 'input_mouse', eventType: 'mouseMoved', x: 50, y: 60, button: 'none', clickCount: 0 },
+   { type: 'input_mouse', eventType: 'mousePressed', x: 50, y: 60, button: 'left', clickCount: 1 }
+  ]);
  });
  it('resets a held pointer so the next press is delivered', () => {
   const send = vi.fn(); const input = new BrowserPaneInput(send);
@@ -54,6 +66,27 @@ describe('pane pointer input', () => {
   send.mockClear(); input.press(pointer(), { x: 20, y: 200 });
   input.release(pointer(), { x: 20, y: 200 }, true);
   expect(send).not.toHaveBeenCalled();
+ });
+});
+
+describe('continuous input uses one display-frame owner', () => {
+ it('combines wheel deltas with the latest pointer position into one event', () => {
+  const send = vi.fn(); const input = new BrowserPaneInput(send);
+  input.move(pointer('mouse'), {x: 1, y: 2}, 1);
+  input.wheel({x: 3, y: 4}, {deltaX: 2, deltaY: 20});
+  input.move(pointer('mouse'), {x: 5, y: 6}, 1);
+  input.wheel({x: 7, y: 8}, {deltaX: 3, deltaY: -10});
+  expect(pending.size).toBe(1);
+  paint();
+  expect(send.mock.calls.map(([message]) => message)).toEqual([
+   {type:'input_mouse',eventType:'mouseWheel',x:7,y:8,deltaX:5,deltaY:10}
+  ]);
+  input.move(pointer('mouse'), {x:9,y:10},1);
+  input.flush();
+  send({type:'input_keyboard',eventType:'keyDown',key:'a'});
+  expect(send.mock.calls.slice(-2).map(([message])=>message.eventType)).toEqual(['mouseMoved','keyDown']);
+  paint();
+  expect(send).toHaveBeenCalledTimes(3);
  });
 });
 

@@ -50,7 +50,7 @@ class TestReviewerVerdictReturn:
         with patch.object(on_pr_review, "parse_findings", return_value=[]), \
              patch.object(on_pr_review, "fetch_existing_review_comments", return_value=[]), \
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
-             patch.object(on_pr_review, "classify_review_findings", return_value=([], [], 0)), \
+             patch.object(on_pr_review, "classify_review_findings", return_value=([], [], [])), \
              patch.object(on_pr_review, "publish_review"), \
              patch.object(on_pr_review, "set_success"):
             verdict = on_pr_review._process_findings(
@@ -75,7 +75,7 @@ class TestReviewerVerdictReturn:
         with patch.object(on_pr_review, "parse_findings", return_value=findings), \
              patch.object(on_pr_review, "fetch_existing_review_comments", return_value=[]), \
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
-             patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], 0)), \
+             patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], [])), \
              patch.object(on_pr_review, "publish_review"), \
              patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
@@ -143,7 +143,7 @@ class TestReviewerVerdictReturn:
         with patch.object(on_pr_review, "parse_findings", return_value=[finding]), \
              patch.object(on_pr_review, "fetch_existing_review_comments", return_value=[]), \
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
-             patch.object(on_pr_review, "classify_review_findings", return_value=([finding], [], 0)), \
+             patch.object(on_pr_review, "classify_review_findings", return_value=([finding], [], [])), \
              patch.object(on_pr_review, "publish_review"), \
              patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
@@ -276,7 +276,7 @@ class TestReviewerVerdictReturn:
         with patch.object(on_pr_review, "parse_findings", return_value=findings), \
              patch.object(on_pr_review, "fetch_existing_review_comments", return_value=[]), \
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
-             patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], 0)), \
+             patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], [])), \
              patch.object(on_pr_review, "publish_review", side_effect=lambda **kw: published.append(kw)), \
              patch.object(on_pr_review, "set_failure") as failure, \
              patch.object(on_pr_review, "set_success", return_value=True) as success:
@@ -368,7 +368,7 @@ class TestReviewerPublicationFailures:
             reviewer_mocks["fetch_existing_issue_comments"].return_value = (
                 None if failure == "issue-comment-history" else []
             )
-            reviewer_mocks["classify_review_findings"].return_value = (findings, [], 0)
+            reviewer_mocks["classify_review_findings"].return_value = (findings, [], [])
             if failure == "lost-finding":
                 reviewer_mocks["publish_review"].side_effect = (
                     ReviewPublicationError(
@@ -1086,6 +1086,7 @@ class TestInfraRedRespectsStandingSuccess:
         with patch("reviewer.gh_api.subprocess.run", side_effect=fake), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(
                  github_reviewer_notifications, "notify_pr_info_unreadable",
              ), \
@@ -1182,7 +1183,7 @@ class TestInfraRedRespectsStandingSuccess:
              ), \
              patch.object(
                  on_pr_review, "classify_review_findings",
-                 return_value=(findings, [], 0),
+                 return_value=(findings, [], []),
              ), \
              patch.object(on_pr_review, "publish_review"), \
              patch.object(on_pr_review, "emit_product_event"):
@@ -1292,7 +1293,7 @@ class TestInfraRedRespectsStandingSuccess:
                  on_pr_review, "fetch_existing_issue_comments", return_value=[],
              ), \
              patch.object(
-                 on_pr_review, "classify_review_findings", return_value=([], [], 0),
+                 on_pr_review, "classify_review_findings", return_value=([], [], []),
              ), \
              patch.object(on_pr_review, "publish_review"), \
              patch.object(on_pr_review, "emit_product_event"), \

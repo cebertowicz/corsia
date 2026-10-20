@@ -12,6 +12,9 @@ vi.mock('$lib/stores/threadVendorAccounts', async (importOriginal) => ({
 import InputBarModelSheet from './InputBarModelSheet.svelte';
 import InputBarControls from './InputBarControls.svelte';
 import rowSource from './v7/AccountUsageRow.svelte?raw';
+import headerSource from './PickerAccountHeader.svelte?raw';
+import sheetSource from './InputBarModelSheet.svelte?raw';
+import actionRowSource from './InputBarActionRow.svelte?raw';
 import { composerCanSend } from './composerSendReadiness';
 import { token } from '$lib/stores/auth';
 import { pickerPolicy } from '$lib/stores/accountPicker';
@@ -265,17 +268,79 @@ describe('account rows while a turn is running', () => {
 		expect(get(threads)[0]).toMatchObject({ account_id: 'work' });
 	});
 
-	it('marks the held choice Switching… on its row until the next turn moves to it, as a held model switch is', () => {
+	it('marks the held choice with its accessible switching icon until the next turn moves to it', () => {
 		const held = [entry('work'), entry('personal', { selected: true, pending: true })];
 		models.set([model('opus', 'Opus', held), model('sonnet', 'Sonnet', held)]);
 		open();
 		const [work, personal] = accountRows();
 		expect(personal.classList.contains('marked')).toBe(true);
-		expect(personal.querySelector('.switch-marker')?.textContent).toBe('Switching…');
-		expect(work.querySelector('.switch-marker')).toBeNull();
+		expect(personal.querySelector('[aria-label="Switching account"]')).not.toBeNull();
+		expect(personal.querySelector('.switching-slot')).not.toBeNull();
+		// It follows the name of the account being switched to, not the usage figures at the row's end.
+		expect(personal.querySelector('.name + .switching-slot')).not.toBeNull();
+		expect(work.querySelector('[aria-label="Switching account"]')).toBeNull();
 		models.set(CATALOG);
 		flushSync();
-		expect(host.querySelector('.account-usage-row.picker .switch-marker')).toBeNull();
+		expect(host.querySelector('.account-usage-row.picker [aria-label="Switching account"]')).toBeNull();
+	});
+
+	it('shows the account icon in the collapsed header, then only on its expanded row', () => {
+		const held = [entry('work'), entry('personal', { selected: true, pending: true })];
+		models.set([model('opus', 'Opus', held), model('sonnet', 'Sonnet', held)]);
+		open(false);
+		expect(host.querySelector('.picker-account-header [aria-label="Switching account"]')).not.toBeNull();
+		expect(host.querySelector('.picker-account-header .switching-slot')).not.toBeNull();
+		host.querySelector<HTMLButtonElement>('button.picker-account-title')?.click();
+		flushSync();
+		expect(host.querySelector('.picker-account-header [aria-label="Switching account"]')).toBeNull();
+		expect(host.querySelector('.account-usage-row.picker [aria-label="Switching account"]')).not.toBeNull();
+	});
+
+	it('names the pending model icon, then keeps the failed-switch words after it fails', () => {
+		threads.set([{ id: 'thread-1', model: 'claude-code/opus', pending_model: 'claude-code/sonnet', switch_status: 'pending', updated_at: '2026-10-05T10:00:00Z', account_id: 'work', runtime_context_epoch: 7 } as never]);
+		open(false);
+		const sonnet = items().find((item) => item.textContent?.includes('Sonnet'))!;
+		expect(sonnet.querySelector('[aria-label="Switching model"]')).not.toBeNull();
+		threads.set([{ id: 'thread-1', model: 'claude-code/opus', pending_model: 'claude-code/sonnet', switch_status: 'failed', switch_error: 'Model unavailable', updated_at: '2026-10-05T10:00:00Z', account_id: 'work', runtime_context_epoch: 7 } as never]);
+		flushSync();
+		expect(sonnet.textContent).toContain('Switch failed');
+		expect(sonnet.querySelector('[aria-label="Switching model"]')).toBeNull();
+	});
+});
+
+describe('composer switching indicators', () => {
+	it('names the account switch and removes its icon when the pending account clears', () => {
+		const held = [entry('work', { selected: true, pending: true }), entry('personal')];
+		models.set([model('opus', 'Opus', held)]);
+		mountControls();
+		expect(chip()?.querySelector('[aria-label="Switching account"]')).not.toBeNull();
+		expect(chip()?.getAttribute('title')).toBe('Account switch in progress');
+		expect(chip()?.querySelector('.model-switch-slot')).not.toBeNull();
+		models.set(CATALOG);
+		flushSync();
+		expect(chip()?.querySelector('[aria-label="Switching account"]')).toBeNull();
+	});
+
+	it('names a pending model switch and keeps a failed switch as a red status dot', () => {
+		mountControls();
+		threads.set([{ id: 'thread-1', model: 'claude-code/opus', pending_model: 'claude-code/sonnet', switch_status: 'pending', updated_at: '2026-10-05T10:00:00Z', account_id: 'work', runtime_context_epoch: 7 } as never]);
+		flushSync();
+		expect(chip()?.querySelector('[aria-label="Switching model"]')).not.toBeNull();
+		expect(chip()?.getAttribute('title')).toBe('Model switch in progress');
+		threads.set([{ id: 'thread-1', model: 'claude-code/opus', pending_model: 'claude-code/sonnet', switch_status: 'failed', switch_error: 'Model unavailable', updated_at: '2026-10-05T10:00:00Z', account_id: 'work', runtime_context_epoch: 7 } as never]);
+		flushSync();
+		expect(chip()?.querySelector('[aria-label="Switching model"]')).toBeNull();
+		expect(chip()?.querySelector('[aria-label="Switch failed"]')).not.toBeNull();
+		expect(chip()?.getAttribute('title')).toBe('Model unavailable');
+	});
+});
+
+describe('switching indicator motion', () => {
+	it('puts every switching icon in an inlineSlot wrapper', () => {
+		for (const source of [rowSource, headerSource, sheetSource, actionRowSource]) {
+			expect(source).toMatch(/in:inlineSlot out:inlineSlot/);
+		}
+		expect(actionRowSource).toContain('model-switch-slot');
 	});
 });
 

@@ -16,6 +16,8 @@
 	import { turnStates } from '$lib/ws/turnState';
 	import { isThreadTurnActive } from '$lib/stores/threads';
 	import type { SheetView } from './inputBarHelpers';
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from './ui/SwitchingIcon.svelte';
 
 	let {
 		threadId,
@@ -24,6 +26,8 @@
 		isActiveModelReady,
 		canSendToModel,
 		queueUntilSwitch,
+		switchState = null,
+		switchError = null,
 		modelLabel,
 		activeModelName,
 		supportsReasoning,
@@ -46,6 +50,8 @@
 		isActiveModelReady: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
+		switchState?: 'model' | 'account' | 'failed' | null;
+		switchError?: string | null;
 		modelLabel: string;
 		activeModelName: string | undefined;
 		supportsReasoning: boolean;
@@ -191,12 +197,26 @@
 		class:unloaded={!isActiveModelReady}
 		data-sheet-trigger
 		onclick={(event) => openControlSheet(event, 'model')}
-		title={isActiveModelReady
-			? activeModelName
-			: queueUntilSwitch
+		title={switchState === 'failed'
+			? switchError ?? 'Switch failed'
+			: switchState === 'model'
 				? 'Model switch in progress'
-				: 'Pick a loaded model to send'}
+				: switchState === 'account'
+					? 'Account switch in progress'
+					: isActiveModelReady
+						? activeModelName
+						: queueUntilSwitch
+							? 'Model switch in progress'
+							: 'Pick a loaded model to send'}
 	>
+		{#if switchState}
+			<span class="model-switch-slot" in:inlineSlot out:inlineSlot>
+				<span class="model-switch-status" class:failed={switchState === 'failed'}>
+					<span class="model-switch-icon" aria-hidden={switchState === 'failed'}><SwitchingIcon ariaLabel={switchState === 'model' ? 'Switching model' : 'Switching account'} /></span>
+					<span class="model-status-dot" style="background: var(--red)" role="img" aria-label="Switch failed" aria-hidden={switchState !== 'failed'}></span>
+				</span>
+			</span>
+		{/if}
 		<span class="model-chip-name">{modelLabel}</span>
 		<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
 	</button>
@@ -304,6 +324,12 @@
 
 <style>
 	.model-chip-name { min-width: 0; }
+	.model-switch-slot { display: inline-flex; flex: 0 0 auto; align-items: center; }
+	/* Icon and failed dot share one cell, so the slot keeps the icon's size as one fades into the other. */
+	.model-switch-status { display: grid; place-items: center; }
+	.model-switch-status > * { grid-area: 1 / 1; transition: opacity var(--dur-tight) var(--ease-snap); }
+	.model-switch-icon { display: inline-flex; }
+	.model-switch-status.failed .model-switch-icon, .model-switch-status:not(.failed) .model-status-dot { opacity: 0; pointer-events: none; }
 	.ctx-estimate-marker {
 		visibility: hidden;
 		font: inherit;

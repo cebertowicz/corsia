@@ -13,7 +13,7 @@
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 
-	let { onToggleSidebar, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane = true }: {
+	let { onToggleSidebar, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
 		onToggleSidebar: () => void;
 		onTogglePane: () => void;
 		/** Opens the Measurement surface; the doorway writes its own scope first (PL-2). */
@@ -22,6 +22,8 @@
 		conductorThreadId: string | null;
 		/** False where the view has no right pane; the panel toggle would open nothing. */
 		hasPane?: boolean;
+		/** Width reserved by an expanded artifact canvas and its divider. */
+		artifactHeaderInset?: number | null;
 	} = $props();
 
 	const h = $derived($canvasHeader);
@@ -121,7 +123,12 @@
 {/snippet}
 
 <header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
-	<div class="h-leading">
+	<div
+		class="chat-header"
+		class:with-canvas={artifactHeaderInset !== null}
+		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
+	>
+		<div class="h-leading">
 		<div class="h-zone h-left">
 			<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
@@ -171,6 +178,7 @@
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
 			</button>
 		{/if}
+		</div>
 	</div>
 </header>
 
@@ -213,6 +221,13 @@
 	:global(html[data-shell="tauri"]) .shell-header.shell-inset { padding-left: 99px; }
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
+	.chat-header { display: flex; align-items: center; flex: 1; min-width: 0; }
+	/* The canvas keeps its own segment in the shared header. All chat controls, including
+	   the title, stay in the remaining segment instead of layering over its tabs. */
+	.chat-header.with-canvas {
+		flex: 0 1 calc(100% - var(--artifact-header-inset));
+		max-width: calc(100% - var(--artifact-header-inset));
+	}
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
 	.h-right { margin-left: auto; }
@@ -258,12 +273,6 @@
 	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
 	@keyframes hLocalOnlyIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 	@media (prefers-reduced-motion: reduce) { .h-local-only { animation: none; } }
-	/* An expanded document occupies the right canvas column, and ChatArtifactSplit publishes its width on main as
-	   --artifact-header-inset (unset without one). The title stays inside the chat's column, with a visible gap
-	   before the document tab strip. The header's right padding is outside this flex box, so the reservation adds
-	   it back. With the inset unset, neither rule binds: the cap exceeds the box and the gap is zero. */
-	.h-leading { max-width: calc(100% - var(--artifact-header-inset, 0px) + var(--header-inline-end)); }
-	.h-title { margin-right: min(var(--space-2), var(--artifact-header-inset, 0px)); }
 	.h-cond-glyph { color: var(--accent-text); flex-shrink: 0; }
 	.h-cond-tag { color: var(--text-tertiary); font-weight: var(--fw-medium); flex-shrink: 0; }
 	.h-cond-tag::before { content: '· '; }
@@ -310,6 +319,13 @@
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
+		/* The desktop split wrapper collapses back to the existing three mobile header cells. */
+		.chat-header, .chat-header.with-canvas {
+			grid-column: 1 / -1;
+			width: 100%; max-width: none; flex: 1;
+			display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-1);
+		}
+		.h-leading { display: contents; }
 		/* The blur stays on this masked layer so it fades out with no hard edge.
 		   Wherever the mask is below 1 the transcript shows through, so the mask stays opaque
 		   down to the bottom of the row's glyphs and then fades out linearly to the header

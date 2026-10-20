@@ -93,6 +93,15 @@
 	// Defaults to the active thread so a caller that predates the subagent
 	// leaf (#1949) keeps its existing behavior unchanged.
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
+	const boundThread = $derived($threads.find((thread) => thread.id === boundThreadId));
+	// A failed model switch is durable server state until another choice; otherwise the thread
+	// and selected account provide the two existing in-progress facts for the composer chip.
+	const switchState = $derived.by((): 'model' | 'account' | 'failed' | null => {
+		if (boundThread?.switch_status === 'failed') return 'failed';
+		if (boundThread?.pending_model) return 'model';
+		return activeModel?.runs_on?.find((entry) => entry.selected)?.pending === true ? 'account' : null;
+	});
+	const switchError = $derived(switchState === 'failed' ? boundThread?.switch_error ?? null : null);
 	// Context usage and the next-turn preview are keyed by the bound thread
 	// (#2269), so every composer inspects its own thread: the active thread with
 	// the selected model, a subagent leaf (#1949) with the worker's own model.
@@ -347,6 +356,8 @@
 		isActiveModelReady={chipReady}
 		{canSendToModel}
 		{queueUntilSwitch}
+		{switchState}
+		{switchError}
 		modelLabel={modelName}
 		activeModelName={activeModel?.name}
 		{supportsReasoning}

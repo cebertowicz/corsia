@@ -243,7 +243,7 @@
 		ontouchend={mainDrawer.onTouchEnd}
 		ontouchcancel={mainDrawer.onTouchEnd}
 	>
-		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} />
+		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} {artifactHeaderInset} />
 		<StatusBanners />
 		{#if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
 			<ThreadSettingsView

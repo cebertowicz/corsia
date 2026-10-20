@@ -102,15 +102,30 @@ describe('WorkBlock lines', () => {
 });
 
 describe('WorkBlock new marker (F2)', () => {
-	it('adds one `· new` marker and a spoken name, without repeating new in the label', () => {
-		render(markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')])));
+	it('attaches the visit divider to the collapsed chip row and keeps its spoken name', () => {
+		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
+			.map((entry) => entry.kind === 'fold' ? { ...entry, divider: { truncated: false, first_seq: 1 } } : entry);
+		render(entries);
 
 		const block = host.querySelector('[data-work-block]')!;
+		const divider = host.querySelector('[data-visit-divider]')!;
 		expect(block.hasAttribute('data-new')).toBe(true);
-		expect(host.querySelectorAll('[data-new-capsule]')).toHaveLength(1);
-		expect(host.querySelector('[data-new-capsule] i')).not.toBeNull();
-		expect(toggle().textContent?.match(/new/g)).toHaveLength(1);
+		expect(host.querySelector('[data-new-capsule]')).toBeNull();
+		expect(host.querySelector('[data-work-block]')?.contains(divider)).toBe(true);
 		expect(toggle().getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
+	});
+
+	it('moves that divider to the first new message only after the block opens', () => {
+		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
+			.map((entry) => entry.kind === 'fold' ? { ...entry, divider: { truncated: false, first_seq: 1 } } : entry);
+		render(entries);
+
+		toggle().click();
+		flushSync();
+
+		const divider = host.querySelector('[data-visit-divider]')!;
+		expect(host.querySelector('[data-work-block]')?.contains(divider)).toBe(true);
+		expect(host.querySelector('.fold-details')?.contains(divider)).toBe(true);
 	});
 
 	it('has no marker when nothing in the block is new', () => {

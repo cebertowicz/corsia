@@ -62,13 +62,14 @@ afterEach(() => {
 });
 
 describe('F2 the block that holds what is new', () => {
-	it('carries a blue dot and `new` collapsed, and names it for screen readers', () => {
+	it('attaches the visit divider to the collapsed block and keeps the spoken new state', () => {
 		messages.set(rows(work('w1', 1, '10:00:00'), work('w2', 2, '10:01:00'), said('s3', 3, '10:02:00')));
 		visitDividers.set({ [THREAD]: divider(2) });
 		render();
 		const capsule = host.querySelector<HTMLElement>('[data-work-block][data-new]');
 		expect(capsule).not.toBeNull();
-		expect(capsule!.querySelector('.fold-new')?.textContent).toContain('new');
+		expect(capsule!.querySelector('[data-new-capsule]')).toBeNull();
+		expect(capsule!.querySelector('[data-visit-divider]')).not.toBeNull();
 		expect(capsule!.querySelector('.fold-toggle')?.getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
 		expect(host.querySelectorAll('[data-work-block]')).toHaveLength(1);
 	});
@@ -87,7 +88,7 @@ describe('F2 the block that holds what is new', () => {
 });
 
 describe('F7-F11 landing', () => {
-	it('lands the capsule that carries `new` when the thread is opened any way, not only from the dot', async () => {
+	it('lands the attached divider when new work is inside a collapsed block', async () => {
 		const landed = recordLanding();
 		messages.set(rows(work('w1', 1, '10:00:00'), work('w2', 2, '10:01:00'), said('s3', 3, '10:02:00')));
 		visitDividers.set({ [THREAD]: divider(2) });
@@ -96,7 +97,7 @@ describe('F7-F11 landing', () => {
 		await tick(); flushSync();
 		runFrames();
 		expect(landed).toHaveLength(1);
-		expect(landed[0].matches('[data-work-block][data-new]')).toBe(true);
+		expect(landed[0].hasAttribute('data-visit-divider')).toBe(true);
 	});
 
 	it('lands the divider line when it sits between rows', async () => {

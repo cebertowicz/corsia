@@ -128,8 +128,9 @@ async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     """Show the open browser's page at the pane's size, pixel density and CORSIA theme."""
     # Every pane on this thread shows the one shared page, so each captures at the new size from the
     # restart that follows the viewport command and sends the resized picture at once.
-    for cast in browser_control.screencasts(thread_id):
-        cast.capture_at(round(appearance.width * appearance.scale), round(appearance.height * appearance.scale))
+    # Size the JPEG to the pane's physical pixels; compact layouts use smaller JPEGs.
+    browser_control.capture_at(thread_id, round(appearance.width * appearance.scale),
+                               round(appearance.height * appearance.scale), compact=appearance.width <= 480)
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),
                  ("set", "media", appearance.scheme)):
