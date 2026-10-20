@@ -364,10 +364,7 @@ async fn finish_exchange(
     transcript.extend_from_slice(b"name:");
     transcript.extend_from_slice(finish.name.as_bytes());
     verify_confirmation(&server_key, &transcript, &confirm_s)?;
-    let identity = match (finish.spki_sha256, finish.confirm_identity) {
-        (Some(fingerprint), Some(confirmation)) => confirmed_identity(&server_key, transcript, &fingerprint, &confirmation)?,
-        _ => return Err(PairError::Protocol("pair/finish returned an incomplete identity confirmation".into())),
-    };
+    let identity = finish_identity(&server_key, transcript, finish.spki_sha256, finish.confirm_identity)?;
     Ok(Paired {
         name: finish.name,
         trust,
@@ -376,6 +373,20 @@ async fn finish_exchange(
         identity,
         outside_address: finish.outside_address,
     })
+}
+
+/// The identity fields were added after the first pairing protocol. Their absence means the main computer needs an
+/// update, rather than that it returned a malformed response.
+fn finish_identity(
+    server_key: &[u8; 32],
+    transcript: Vec<u8>,
+    fingerprint: Option<String>,
+    confirmation: Option<String>,
+) -> Result<[u8; 32], PairError> {
+    match (fingerprint, confirmation) {
+        (Some(fingerprint), Some(confirmation)) => confirmed_identity(server_key, transcript, &fingerprint, &confirmation),
+        _ => Err(PairError::TooOld),
+    }
 }
 
 /// Read the endpoint only over the paired local route, whose TLS key is pinned.
@@ -652,6 +663,14 @@ mod tests {
         assert!(accept(&[8_u8; 32], &signed).is_err(), "a swapped fingerprint");
         assert!(accept(&fingerprint, &confirmation(&key, &transcript)).is_err(), "the name confirmation reflected");
         assert!(accept(&fingerprint[..31], &signed).is_err(), "a short fingerprint");
+    }
+
+    #[test]
+    fn pair_finish_without_either_identity_field_requires_a_main_computer_update() {
+        let key = [3_u8; 32];
+        for fields in [(None, None), (Some("identity".into()), None), (None, Some("confirmation".into()))] {
+            assert_eq!(finish_identity(&key, b"transcript".to_vec(), fields.0, fields.1), Err(PairError::TooOld));
+        }
     }
 
     #[test]

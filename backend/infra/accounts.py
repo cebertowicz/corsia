@@ -34,7 +34,7 @@ from datetime import timedelta
 from infra import user_profile
 from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
-from infra.passwords import MIN_PASSWORD_LENGTH, hash_password, verify_password
+from infra.passwords import hash_password, verify_password
 from infra.time import utc_now, utc_now_iso
 
 

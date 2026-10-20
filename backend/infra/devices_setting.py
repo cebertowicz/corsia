@@ -7,7 +7,7 @@ DEVICE_SETTING_KEY = "devices"
 
 
 def parse_devices_setting(value: object) -> tuple[bool, str | None]:
-    """Parse stored Devices settings; expose an address only while enabled."""
+    """Parse stored Devices settings into the enabled flag and outside address."""
     if isinstance(value, str):
         try:
             value = json.loads(value)

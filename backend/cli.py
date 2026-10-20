@@ -174,7 +174,8 @@ def cmd_remote_address(args: argparse.Namespace) -> int:
     """Print the saved outside address while Let other devices connect is on.
 
     Reads the bootstrap's own database read-only, so it never creates a file or
-    reads another instance's state. Prints nothing when either is missing.
+    reads another instance's state. Prints nothing when the setting or address is
+    missing; reports an unreadable store to stderr and exits 2.
     """
     try:
         bootstrap_path = Path(args.bootstrap or BOOTSTRAP_PATH)

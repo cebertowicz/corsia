@@ -855,9 +855,8 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     // A retry can find the last attempt's proxy still up (a key change leaves it running); it owns the saved port.
     replace_proxy(&app.state::<RemoteRuntime>(), None);
     let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
-    let mut saved = saved;
     let refresh = saved.clone();
-    let started = check_through_routes(app, &mut saved).await?;
+    let started = check_through_routes(app, &saved).await?;
     let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
     let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
     replace_proxy(&app.state::<RemoteRuntime>(), Some(proxy));
@@ -916,7 +915,7 @@ async fn refresh_outside_after_launch(app_dir: std::path::PathBuf, mut saved: re
 
 /// A saved route set starts through the proxy, so the version check observes the same verified connection.
 /// The set contains the local route and may also contain a saved outside route.
-async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &mut remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
+async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
     use classify::ConnectFailure;
     let started = proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)?;
     match version_check::check_through_proxy(started.port, &version_check::app_version(app)).await {
@@ -924,7 +923,7 @@ async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, save
         Ok(version_check::Compat::Incompatible { app: app_version, host }) => Err(ConnectFailure::Incompatible { app: app_version, host }),
         Ok(version_check::Compat::TooOld) => Err(ConnectFailure::TooOld),
         Err(_) if started.key_changed() => Err(ConnectFailure::KeyChanged),
-        Err(_) => Err(ConnectFailure::Network),
+        Err(error) => Err(error.connect_failure().unwrap_or(ConnectFailure::Network)),
     }
 }
 
@@ -2268,7 +2267,7 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_that_cannot_reach_the_remote_ends_on_the_unreachable_card_not_on_connecting() {
+    fn a_launch_that_gets_a_refused_connection_ends_on_the_server_card_not_on_connecting() {
         let app = launch_app();
         let closed_port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let saved = saved_studio(
@@ -2276,7 +2275,10 @@ mod tests {
             remote_config::RemoteTrust::System,
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert!(matches!(launch_state(&app), shell_state::LaunchState::Failed { failure: classify::ConnectFailure::Network | classify::ConnectFailure::Server, .. }), "{:?}", launch_state(&app));
+        assert_eq!(
+            launch_state(&app),
+            shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::Server },
+        );
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
     }
 

@@ -13,16 +13,10 @@ pub(crate) enum RemoteHost {
     Scoped { address: Ipv6Addr, scope_id: u32 },
 }
 
-/// Parse a typed address: a bare host keeps its historic meaning and
-/// `legacy_port`; an `https://` URL names its host and port (default 443).
+/// Parse a typed pairing address: a bare host uses the separately supplied
+/// port, or the historic default when no port was supplied.
 pub(crate) fn parse_pairing_address(input: &str, legacy_port: u16) -> Result<(String, u16), String> {
     let input = input.trim();
-    if has_scheme(input, "http://") {
-        return Err("remote address must use https".into());
-    }
-    if has_scheme(input, "https://") {
-        return parse_https_address(input);
-    }
     RemoteHost::parse(input)?;
     Ok((input.into(), legacy_port))
 }
@@ -50,10 +44,6 @@ pub(crate) fn parse_https_address(input: &str) -> Result<(String, u16), String> 
         return Err("remote HTTPS address needs a port from 1 to 65535".into());
     }
     Ok((host.to_owned(), port))
-}
-
-fn has_scheme(input: &str, scheme: &str) -> bool {
-    input.get(..scheme.len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
 }
 
 impl RemoteHost {
@@ -163,18 +153,12 @@ mod tests {
     }
 
     #[test]
-    fn pairing_address_accepts_only_endpoint_https_urls() {
+    fn pairing_address_accepts_only_bare_hosts() {
         assert_eq!(parse_pairing_address("studio.local", 47901), Ok(("studio.local".into(), 47901)));
-        assert_eq!(parse_pairing_address("https://outside.example", 47901), Ok(("outside.example".into(), 443)));
-        assert_eq!(parse_pairing_address("https://outside.example:47901", 47901), Ok(("outside.example".into(), 47901)));
-        assert_eq!(parse_pairing_address(" HTTPS://Outside.Example/ ", 47901), Ok(("outside.example".into(), 443)));
         assert_eq!(parse_https_address("https://[2001:db8::1]:8443"), Ok(("2001:db8::1".into(), 8443)));
-        for invalid in ["HTTP://outside.example", "https://outside.example#x", "https://", "outside.example:443", "ftp://outside.example"] {
+        for invalid in ["HTTP://outside.example", "https://outside.example", "https://outside.example:47901", "https://", "outside.example:443", "ftp://outside.example"] {
             assert!(parse_pairing_address(invalid, 47901).is_err(), "{invalid}");
         }
         assert!(parse_https_address("studio.local").is_err(), "an outside route is always an https URL");
-        for invalid in ["http://outside.example", "https://outside.example/path", "https://user@outside.example", "https://outside.example?x=1"] {
-            assert!(parse_pairing_address(invalid, 47901).is_err(), "{invalid}");
-        }
     }
 }
