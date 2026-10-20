@@ -7,7 +7,7 @@ import { textDigest, type DocumentFrame } from './documentWire';
 export interface PreviewFrameSource {
 	onFrame(listener: (frame: DocumentFrame) => void): () => void;
 	/** Whether a suggestion this call made is held back until its arrival: its preview outlasts the grace meanwhile. */
-	held?(callId: string): boolean;
+	holdsCall?(callId: string): boolean;
 }
 
 interface PreviewPart { slot: number; from: number | null; to: number | null; at: number; text: string }
@@ -65,7 +65,7 @@ export function attachPreviewFeed(view: EditorView, source: PreviewFrameSource):
 	const grace = (callId: string) => {
 		const timer = setTimeout(() => {
 			graces.delete(timer);
-			if (!stopped && source.held?.(callId)) grace(callId);
+			if (!stopped && source.holdsCall?.(callId)) grace(callId);
 			else finish(callId);
 		}, CLAIM_GRACE_MS);
 		graces.add(timer);

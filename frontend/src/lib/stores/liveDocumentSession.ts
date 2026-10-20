@@ -157,7 +157,7 @@ export class LiveDocumentSession {
 	}
 
 	/** Whether a comment this agent call made is held back while its lane works through earlier arrivals. */
-	held(callId: string): boolean { return isCallHeld(this.artifactId, callId); }
+	holdsCall(callId: string): boolean { return isCallHeld(this.artifactId, callId); }
 
 	onFrame(listener: (frame: DocumentFrame) => void): () => void {
 		this.frameListeners.add(listener);

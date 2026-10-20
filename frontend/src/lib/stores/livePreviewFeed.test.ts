@@ -11,13 +11,13 @@ const DOC = 'Hello world. The rest stays.';
 // environment is gone throws on the missing document; every view is destroyed after its test.
 const disposers = new Set<() => void>();
 
-function harness(doc = DOC, held: (callId: string) => boolean = () => false) {
+function harness(doc = DOC, holdsCall: (callId: string) => boolean = () => false) {
 	const view = new EditorView({
 		state: EditorState.create({ doc, extensions: [createTypedReveal({ canType: () => true, isInView: () => true })] }),
 		parent: document.body,
 	});
 	let listener: ((frame: DocumentFrame) => void) | null = null;
-	const stop = attachPreviewFeed(view, { onFrame: (next) => { listener = next; return () => { listener = null; }; }, held });
+	const stop = attachPreviewFeed(view, { onFrame: (next) => { listener = next; return () => { listener = null; }; }, holdsCall });
 	const dispose = () => { if (!disposers.delete(dispose)) return; stop(); view.destroy(); };
 	disposers.add(dispose);
 	return { view, send: (frame: Record<string, unknown>) => listener?.(frame as unknown as DocumentFrame), stop, dispose, listening: () => listener !== null };

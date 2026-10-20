@@ -12,7 +12,8 @@ import { docComments, loadComments } from './stores/docComments';
 import { prepareCommentArrival, revealCommentArrival } from './stores/docCommentArrivals';
 import { selectSweepMs } from './typingPace';
 import { attachPreviewFeed, CLAIM_GRACE_MS } from './stores/livePreviewFeed';
-import { isCallHeld } from './stores/docCommentHolds';
+import * as Y from 'yjs';
+import { LiveDocumentSession } from './stores/liveDocumentSession';
 import { textDigest, type DocumentFrame } from './stores/documentWire';
 import { emit, on } from './ws/events';
 
@@ -158,11 +159,12 @@ describe('an agent suggestion that commits before its arrival is typed in, never
 	it('streamed, then held behind a busy lane past the claim grace: the preview is kept, and typing continues from it', async () => {
 		wire.rows = [earlierComment()];
 		const r = make(DOC, [commentMarks, suggestionMarks(() => ({ focus: () => {}, hover: () => {} }))]);
-		let send: (frame: Record<string, unknown>) => void = () => {};
-		cleanups.push(attachPreviewFeed(r.view, {
-			onFrame: (next) => { send = (frame) => next(frame as unknown as DocumentFrame); return () => {}; },
-			held: (callId) => isCallHeld(ART, callId),
-		}));
+		// The real session is the feed's source, in a document that is itself held (its own `held` field is set).
+		const session = new LiveDocumentSession({ artifactId: ART, storeId: 'store', doc: new Y.Doc(), writable: true, send: () => true });
+		const send = (frame: Record<string, unknown>) => session.handle({ artifact_id: ART, store_id: 'store', ...frame } as unknown as DocumentFrame);
+		send({ type: 'doc_saved', held: { corsia_text: 'a', file_text: 'b', candidate_text: 'c', choice_pending: true } });
+		expect(session.held).not.toBeNull();
+		cleanups.push(attachPreviewFeed(r.view, session));
 		cleanups.push(startDocPresence());
 		cleanups.push(on('doc_comment_changed', () => { void loadComments(ART); }));
 		canvas(r);
