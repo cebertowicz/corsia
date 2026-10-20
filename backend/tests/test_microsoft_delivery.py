@@ -65,6 +65,9 @@ async def _token(_account: str) -> str:
 
 @pytest.fixture
 def microsoft(deleg_db, workspace, monkeypatch):  # noqa: F811
+    from tools import sandbox_config
+
+    monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [workspace])
     account = connect()
     monkeypatch.setattr(microsoft_actions, "_designated", _no_designated)
     monkeypatch.setattr(client, "access_token", _token)
@@ -182,7 +185,8 @@ async def test_calendar_create_claims_before_graph_and_update_refuses_blank_even
     get_db().commit()
     assert await MicrosoftCalendarUpdateTool().execute(
         _thread_id=THREAD, account_id=microsoft, draft_id=update["draft_id"], revision=update["revision"],
-    ) == "Error: event_id is required for update."
+    ) == ("Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft "
+          "with microsoft_calendar_draft, show the person, and wait for their reply.")
     assert len(calls) == 1
 
 

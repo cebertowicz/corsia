@@ -19,7 +19,8 @@ from connections.connected_accounts import store_credentials
 from connections.google.accounts import NONE_AVAILABLE
 from google_account_helpers import only_corsia_account
 from connections.google import client as google_client
-from connections.google import email_screen, gmail_read
+from connections.google import gmail_read
+from connections.mail import email_screen
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
 from infra.time import utc_now

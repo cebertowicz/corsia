@@ -18,7 +18,7 @@ import httpx
 import pytest
 
 from connections.google import client as google_client
-from connections.google import email_document
+from connections.mail import email_document
 from connections.google.accounts import NONE_AVAILABLE
 from doceditor.document_scope import revision as document_revision
 from google_account_helpers import make_only_corsia
@@ -202,6 +202,7 @@ async def test_reply_reads_message_headers_only(mail):
     assert target == {
         "reply_to": "m-100", "thread_id": "t-9", "in_reply_to": "<abc@mail.example>",
         "references": "<root@mail.example> <abc@mail.example>", "account_id": mail.account,
+        "account": EMAIL,
     }
     assert "SECRET BODY" not in (mail.workspace / saved["path"]).read_text()
 
@@ -310,7 +311,7 @@ async def test_a_draft_stays_with_the_account_it_was_written_from(mail, approve)
     db = get_db()
     db.execute(
         "UPDATE action_drafts SET target_json=? WHERE id=?",
-        (json.dumps({"account_id": "another-account"}), saved["draft_id"]),
+        (json.dumps({"account_id": "another-account", "account": EMAIL}), saved["draft_id"]),
     )
     db.commit()
     out = await EmailDraftTool().execute(

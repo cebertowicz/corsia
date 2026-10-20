@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from connections.google import client as google_client
-from connections.google import email_screen
+from connections.mail import email_screen
 from connections.microsoft import client as microsoft_client
 from connections.microsoft.errors import MicrosoftError, REFRESH_TOKEN_INVALID
 from events.connectors.mail_poll_read import ADAPTERS, event_payload
@@ -36,8 +36,8 @@ from infra.time import utc_now_iso
 
 log = logging.getLogger(__name__)
 
-DISABLE_ENV = "CORSIA_GMAIL_POLLER_DISABLE"
-TEST_ENABLE_ENV = "CORSIA_GMAIL_POLLER_TEST_ENABLE"
+DISABLE_ENV = "CORSIA_MAIL_POLLER_DISABLE"
+TEST_ENABLE_ENV = "CORSIA_MAIL_POLLER_TEST_ENABLE"
 POLL_INTERVAL_S = 120
 JITTER_S = 10.0
 RECHECK_S = 300

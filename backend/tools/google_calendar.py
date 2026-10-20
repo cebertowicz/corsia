@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import uuid
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -25,7 +22,8 @@ from connections.google.client import GoogleError, GoogleRequestFailed
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
-from tools.action_drafts import DraftError, create_draft, record_draft
+from tools.action_drafts import DraftError
+from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft, save_draft
 from tools.action_gate import Approved, Refusal, STALE_REVISION, check_action
 from tools.base import Tool
 
@@ -62,58 +60,7 @@ async def _account(kwargs: dict[str, Any]) -> dict:
     return await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
 
 
-def _workspace_root() -> Path:
-    return config.WORKSPACE.resolve()
-
-
-def _new_draft_path(thread_id: str) -> Path:
-    from core.workspace_layout import (
-        resolve_project_root,
-        resolve_thread_working_root,
-        resolve_workspace_root,
-    )
-    from infra.database import get_db
-
-    workspace = resolve_workspace_root(config.WORKSPACE)
-    db = get_db()
-    try:
-        row = db.execute("SELECT project_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
-        project_id = row["project_id"] if row else None
-        scope = resolve_project_root(workspace, project_id, db=db) if project_id else workspace
-    finally:
-        db.close()
-    if scope is None:
-        raise ValueError("The project's folder is unavailable, so the invite was not saved.")
-    return resolve_thread_working_root(scope, thread_id) / DRAFT_DIR / f"invite-{uuid.uuid4().hex[:12]}.md"
-
-
-def _relative(path: Path) -> str:
-    relative = os.path.relpath(path.resolve(), _workspace_root())
-    if relative.startswith(".."):
-        raise ValueError("The invite's folder is outside the workspace, so it was not saved.")
-    return relative
-
-
-def _open_draft(thread_id: str, draft_id: str) -> dict | None:
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        row = db.execute(
-            "SELECT id, path, state, target_json FROM action_drafts"
-            " WHERE id=? AND thread_id=? AND kind='invite'",
-            (draft_id, thread_id),
-        ).fetchone()
-    finally:
-        db.close()
-    return dict(row) if row else None
-
-
-def _read_document(relative: str) -> bytes | None:
-    from tools.action_gate import _read_bytes
-
-    return _read_bytes(relative)
-
+# Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
 
 def _event_url(calendar_id: str) -> str:
     return f"{CALENDAR}/calendars/{quote(calendar_id, safe='')}/events"
@@ -222,8 +169,6 @@ class CalendarDraftInviteTool(Tool):
             return "Error: Couldn't save the invite draft."
 
     async def _save(self, thread_id: str, account: dict, kwargs: dict[str, Any]) -> str:
-        from tools.filesystem import WriteFileTool
-
         title = one_line_text(kwargs.get("title"), "title")
         start, parsed_start = parse_time(kwargs.get("start"))
         end, parsed_end = parse_time(kwargs.get("end"))
@@ -234,34 +179,20 @@ class CalendarDraftInviteTool(Tool):
         if not isinstance(description, str):
             raise ValueError("The invite description must be text.")
         draft_id = kwargs.get("draft_id")
-        existing = None
-        if draft_id is not None:
-            existing = await run_in_db(_open_draft, thread_id, str(draft_id))
-            if existing is None or existing["state"] != "open":
-                raise ValueError(NO_OPEN_DRAFT)
-            bound = json.loads(existing["target_json"] or "{}")
-            if isinstance(bound, dict) and bound.get("account_id") not in (None, account["id"]):
-                raise ValueError(OTHER_ACCOUNT.format(address=bound.get("account") or "another account"))
         email = str(account["address"])
         text = compose_document(email, title, start, end, attendees, description)
-        path = _workspace_root() / existing["path"] if existing is not None else await run_in_db(_new_draft_path, thread_id)
-        relative = _relative(path)
-        context = {key: value for key, value in kwargs.items() if key.startswith("_")}
-        written = await WriteFileTool(workspace=config.WORKSPACE).execute(
-            path=str(path), content=text,
-            description="Calendar invite draft; the person reviews it before anything is sent.",
-            **context,
-        )
-        if isinstance(written, str) and written.startswith("Error"):
-            return written
-        data = await run_in_db(_read_document, relative)
-        if data != text.encode("utf-8"):
-            raise ValueError("The invite draft changed while it was being saved, so it is not recorded. "
-                             "Save it again with calendar_draft_invite.")
         target = {"account": email, "account_id": account["id"], "title": title, "start": start, "end": end,
                   "attendees": attendees, "description": description}
-        saved = await run_in_db(record_draft, existing["id"], data, target) if existing else await run_in_db(create_draft, thread_id, "invite", relative, data, target)
-        return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
+        try:
+            saved = await save_draft(
+                thread_id=thread_id, kind="invite", extension=".md", prefix="calendar-invites",
+                account_id=str(account["id"]), target=target, text=text, draft_id=draft_id,
+                context=kwargs, description="Calendar invite draft; the person reviews it before anything is sent.",
+            )
+        except DraftStorageRefused as exc:
+            raise ValueError(str(exc)) from None
+        path = (await run_in_db(open_draft, thread_id, saved["draft_id"], "invite"))["path"]
+        return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": path,
                            "from": email, "account_id": account["id"], "next": AFTER_DRAFT})
 
 class CalendarSendInviteTool(Tool):
@@ -301,7 +232,7 @@ class CalendarSendInviteTool(Tool):
         return await self._deliver(draft_id, *prepared)
 
     async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[str, dict] | str:
-        row = await run_in_db(_open_draft, str(thread_id), draft_id)
+        row = await run_in_db(open_draft, str(thread_id), draft_id, "invite")
         if row is None:
             return f"Error: {NO_OPEN_DRAFT}"
         if row["state"] == "sending":

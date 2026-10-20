@@ -12,7 +12,8 @@ import logging
 import re
 from typing import Any
 
-from connections.google import email_screen, gmail_read
+from connections.google import gmail_read
+from connections.mail import email_screen
 from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread, thread_key
 from connections.google.client import GoogleError
 from infra.db_async import run_in_db

@@ -9,7 +9,7 @@ import pytest
 from connections.connected_accounts import get_account
 from connections.account_state import set_state
 from connections.google import client as google_client
-from connections.google import email_screen
+from connections.mail import email_screen
 from connections.google import gmail_read
 from events.connectors import gmail_feed as feed
 from events.connectors import mail_poller as poller

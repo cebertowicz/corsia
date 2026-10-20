@@ -111,6 +111,10 @@ class DeltaExpired(MicrosoftError):
         super().__init__(PROVIDER_UNAVAILABLE)
 
 
+class _GraphUnauthorized(Exception):
+    """A Graph 401 that must refresh once before being classified as a refusal."""
+
+
 def _on_account(work, account_id: str, *args: object):  # type: ignore[no-untyped-def]
     from infra.database import get_db
 
@@ -158,6 +162,20 @@ def _cached_access_token(credentials: dict[str, Any] | None) -> str | None:
     if isinstance(token, str) and token and usable_until > time.time() + 60:
         return token
     return None
+
+
+def _drop_cached_access_token(account_id: str, held: str, *, db) -> None:  # type: ignore[no-untyped-def]
+    """Discard only the rejected token; a concurrent fresh sign-in wins unchanged."""
+    from connections.connected_accounts import store_credentials
+    from infra.database import write_transaction
+
+    with write_transaction(db, scope="microsoft_graph_401") as conn:
+        current = _usable_credentials(account_id, db=conn)
+        if current is not None and current.get("access_token") == held:
+            updated = {**current}
+            updated.pop("access_token", None)
+            updated.pop("access_token_expires_at", None)
+            store_credentials(account_id, updated, db=conn)
 
 
 async def access_token(account_id: str, *, _after_race: bool = False) -> str:
@@ -213,10 +231,7 @@ async def access_token(account_id: str, *, _after_race: bool = False) -> str:
 
 async def _check_graph(response: httpx.Response, account_id: str) -> None:
     if response.status_code == 401:
-        from connections.account_state import mark_needs_sign_in
-
-        await run_in_db(_on_account, mark_needs_sign_in, account_id)
-        raise MicrosoftError(REFRESH_TOKEN_INVALID, never_sent=True)
+        raise _GraphUnauthorized()
     if response.status_code == 410:
         raise DeltaExpired()
     if response.status_code in (400, 403, 404):
@@ -250,7 +265,14 @@ async def graph_json(
                 delay = 0
             await asyncio.sleep(delay)
             continue
-        await _check_graph(response, account_id)
+        try:
+            await _check_graph(response, account_id)
+        except _GraphUnauthorized:
+            if attempt:
+                raise MicrosoftError(REQUEST_REFUSED, never_sent=True) from None
+            await run_in_db(_on_account, _drop_cached_access_token, account_id, bearer)
+            bearer = await access_token(account_id)
+            continue
         if response.status_code in (202, 204):
             return None
         try:
@@ -308,12 +330,15 @@ async def graph_pages(
     return items
 
 
+DELTA_PAGES_PER_POLL = 4
+
+
 async def graph_delta(
     url: str, *, account_id: str, params: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], str]:
-    """Traverse a delta round completely; expose only its terminal durable link."""
+    """Read a bounded delta slice; persist nextLink until Graph supplies deltaLink."""
     items: list[dict[str, object]] = []
-    while True:
+    for _page in range(DELTA_PAGES_PER_POLL):
         page = await graph_json("GET", url, account_id=account_id, params=params)
         if not isinstance(page, dict) or not isinstance(page.get("value"), list):
             raise MicrosoftError(PROVIDER_UNAVAILABLE)
@@ -328,3 +353,4 @@ async def graph_delta(
         if not isinstance(delta_link, str) or not delta_link:
             raise MicrosoftError(PROVIDER_UNAVAILABLE)
         return items, delta_link
+    return items, url

@@ -12,16 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import uuid
 from base64 import urlsafe_b64encode
-from pathlib import Path
 from typing import Any
 
 from connections.google import client as google_client
 from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread, thread_key
 from connections.google.client import GoogleError, GoogleRequestFailed
-from connections.google.email_document import (
+from connections.mail.email_document import (
     NEEDS_BODY,
     NEEDS_RECIPIENT,
     NEEDS_SUBJECT,
@@ -36,7 +33,8 @@ from connections.google.email_gmail import GMAIL, fetch_signature, kept_reply_la
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
-from tools.action_drafts import DraftError, create_draft, record_draft
+from tools.action_drafts import DraftError
+from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft, save_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 
@@ -65,7 +63,7 @@ FROM_MISMATCH = (
     "({account}). Save the draft again with email_draft and show the person."
 )
 OTHER_ACCOUNT = (
-    "This draft was written from {address}. To send from another account, save a new draft "
+    "This draft was written from {address}. To use another account, save a new draft "
     "(omit draft_id) with that account_id and show the person."
 )
 NO_ACCOUNT = (
@@ -78,62 +76,7 @@ UNCONFIRMED = (
 )
 
 
-def _workspace_root() -> Path:
-    return config.WORKSPACE.resolve()
-
-
-def _new_draft_path(thread_id: str) -> Path:
-    """A new, unused document path in the thread's working tray."""
-    from core.workspace_layout import (
-        resolve_project_root,
-        resolve_thread_working_root,
-        resolve_workspace_root,
-    )
-    from infra.database import get_db
-
-    workspace = resolve_workspace_root(config.WORKSPACE)
-    db = get_db()
-    try:
-        row = db.execute("SELECT project_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
-        project_id = row["project_id"] if row else None
-        scope = resolve_project_root(workspace, project_id, db=db) if project_id else workspace
-    finally:
-        db.close()
-    if scope is None:
-        raise DraftRefused("The project's folder is unavailable, so the draft was not saved.")
-    return resolve_thread_working_root(scope, thread_id) / DRAFT_DIR / f"email-{uuid.uuid4().hex[:12]}.md"
-
-
-def _relative(path: Path) -> str:
-    relative = os.path.relpath(path.resolve(), _workspace_root())
-    if relative.startswith(".."):
-        raise DraftRefused("The draft's folder is outside the workspace, so it was not saved.")
-    return relative
-
-
-def _target(row: dict | None) -> dict:
-    """A stored draft's target facts; a malformed one reads as empty."""
-    try:
-        target = json.loads((row or {}).get("target_json") or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return target if isinstance(target, dict) else {}
-
-
-def _open_draft(thread_id: str, draft_id: str) -> dict | None:
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        row = db.execute(
-            "SELECT id, path, state, target_json FROM action_drafts"
-            " WHERE id=? AND thread_id=? AND kind='email'",
-            (draft_id, thread_id),
-        ).fetchone()
-    finally:
-        db.close()
-    return dict(row) if row else None
-
+# Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
 
 class EmailDraftTool(Tool):
     self_describing_errors = True
@@ -199,43 +142,26 @@ class EmailDraftTool(Tool):
         subject = text_arg(kwargs.get("subject"), NEEDS_SUBJECT, one_line=True)
         body = text_arg(kwargs.get("body"), NEEDS_BODY)
         draft_id = kwargs.get("draft_id")
-        existing = None
-        if draft_id is not None:
-            existing = await run_in_db(_open_draft, thread_id, str(draft_id))
-            if existing is None or existing["state"] != "open":
-                raise DraftRefused(NO_OPEN_DRAFT)
-            bound = _target(existing).get("account_id")
-            if bound and bound != account_id:
-                raise DraftRefused(OTHER_ACCOUNT.format(address=_bound_address(existing)))
+        existing = await run_in_db(open_draft, thread_id, str(draft_id), "email") if draft_id is not None else None
+        if existing is not None and existing["state"] != "open":
+            raise DraftRefused(NO_OPEN_DRAFT)
         reply_id = kwargs.get("reply_to_message_id")
         if reply_id:
             target, reply_label = await reply_target(account_id, str(reply_id))
         else:
-            target, reply_label = _target(existing), await kept_reply_label(account_id, existing)
-        target = {**target, "account_id": account_id}
+            target, reply_label = draft_target(existing), await kept_reply_label(account_id, existing)
+        target = {**target, "account_id": account_id, "account": address}
         signature = await fetch_signature(account_id)
         text = compose_document(address, to, cc, subject, body, signature, reply_label)
-
-        if existing is not None:
-            path = _workspace_root() / existing["path"]
-        else:
-            path = await run_in_db(_new_draft_path, thread_id)
-        relative = _relative(path)
-        context = {key: value for key, value in kwargs.items() if key.startswith("_")}
-        written = await WriteFileTool(workspace=config.WORKSPACE).execute(
-            path=str(path), content=text,
-            description="Email draft; the person reviews it before anything is sent.",
-            **context,
-        )
-        if isinstance(written, str) and written.startswith("Error"):
-            return written
-        data = await run_in_db(_read_document, relative)
-        if data is None:
-            raise DraftRefused("The draft was written but couldn't be read back, so it is not recorded.")
-        if existing is not None:
-            saved = await run_in_db(record_draft, existing["id"], data, target)
-        else:
-            saved = await run_in_db(create_draft, thread_id, "email", relative, data, target or {})
+        try:
+            saved = await save_draft(
+                thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",
+                account_id=account_id, target=target, text=text, draft_id=draft_id,
+                context=kwargs, description="Email draft; the person reviews it before anything is sent.",
+            )
+        except DraftStorageRefused as exc:
+            raise DraftRefused(str(exc)) from None
+        relative = str((await run_in_db(open_draft, thread_id, saved["draft_id"], "email"))["path"])
         return json.dumps({
             "draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
             "from": address, "account_id": account_id,
@@ -243,21 +169,7 @@ class EmailDraftTool(Tool):
         })
 
 
-def _bound_address(draft: dict) -> str:
-    """The From line the draft document carries: the account it was written from."""
-    data = _read_document(str(draft["path"]))
-    try:
-        parsed = parse_document(data.decode("utf-8")) if data else None
-    except UnicodeDecodeError:
-        parsed = None
-    return str(parsed["from"]) if parsed and parsed.get("from") else "another account"
-
-
-def _read_document(relative: str) -> bytes | None:
-    from tools.action_gate import _read_bytes
-
-    return _read_bytes(relative)
-
+# Reading and account binding are owned by tools.reviewed_drafts.
 
 class EmailSendTool(Tool):
     self_describing_errors = True
@@ -301,13 +213,13 @@ class EmailSendTool(Tool):
 
     async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[str, dict] | str:
         """The sending account and Gmail request body for an approved draft, or the error text."""
-        row = await run_in_db(_open_draft, str(thread_id), draft_id)
+        row = await run_in_db(open_draft, str(thread_id), draft_id, "email")
         if row is not None and row["state"] == "sending":
             return f"Error: {STILL_SENDING}"
         verdict = await check_action("email", draft_id, revision)
         if not isinstance(verdict, Approved):
             return f"Error: {verdict.text}"
-        target = _target(verdict.draft)
+        target = draft_target(verdict.draft)
         if not target.get("account_id"):
             return f"Error: {NO_ACCOUNT}"
         try:

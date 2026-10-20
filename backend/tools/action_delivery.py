@@ -52,6 +52,8 @@ async def deliver_claimed(
     try:
         token = await acquire()
     except Exception as exc:
+        if exc.__class__.__name__ not in {"GoogleError", "MicrosoftError"}:
+            logging.getLogger(__name__).exception("%s could not acquire delivery credentials", label)
         await _release(draft_id, label=label)
         return f"Error: Not sent: {sign_in_error(exc)}"
 

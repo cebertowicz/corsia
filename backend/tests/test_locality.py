@@ -116,7 +116,7 @@ def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
 
 
 def test_email_screen_keeps_external_loopback_behavior():
-    from connections.google.email_screen import local_endpoint_refusal
+    from connections.mail.email_screen import local_endpoint_refusal
 
     target = SimpleNamespace(harness="native", backend="network", transport_model="external@cloud/model")
     assert local_endpoint_refusal(target, lambda _model: {"api_base": "http://127.0.0.1:8000/v1"}) is None

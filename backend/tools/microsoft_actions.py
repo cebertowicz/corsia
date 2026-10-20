@@ -3,10 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import uuid
-from pathlib import Path
 from typing import Any
 
 from connections.connected_accounts import ConnectedAccountError
@@ -14,12 +11,12 @@ from connections.microsoft import calendar, client, files, mail
 from connections.microsoft.mail import thread_key
 from connections.microsoft.provider import MICROSOFT
 from connections.microsoft.errors import MicrosoftError
-from connections.google import email_screen
-from connections.google.email_document import DraftRefused, addresses, compose_document, parse_document, text_arg
-from infra import config
+from connections.mail import email_screen
+from connections.mail.email_document import DraftRefused, addresses, compose_document, parse_document, text_arg
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
-from tools.action_drafts import DraftError, create_draft, record_draft
+from tools.action_drafts import DraftError
+from tools.reviewed_drafts import DraftStorageRefused, open_draft, save_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 from tools.microsoft_account import _designated
@@ -59,7 +56,9 @@ async def _account(kwargs: dict[str, Any]) -> str:
 def _error(exc: Exception) -> str:
     if isinstance(exc, MicrosoftError):
         return f"Error: {exc.message}"
-    return f"Error: {str(exc) or 'Microsoft is unavailable. Try again later.'}"
+    if isinstance(exc, (DraftRefused, DraftStorageRefused, DraftError)):
+        return "Error: This saved draft is invalid or incomplete; nothing changed. Save it again, show the person, and wait for their reply."
+    return "Error: Microsoft is unavailable. Try again later."
 
 
 class MicrosoftMailSearchTool(Tool):
@@ -158,19 +157,7 @@ class MicrosoftFilesUploadTool(_FilesTool):
     operation = "upload"; parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "name", "content"], "properties": {"account_id": ACCOUNT_PARAM, "name": {"type": "string"}, "content": {"type": "string"}}}
 
 
-def _draft_path(thread_id: str) -> Path:
-    return config.WORKSPACE / ".threads" / thread_id / "email-drafts" / f"microsoft-{uuid.uuid4().hex[:12]}.md"
-
-
-def _draft_row(thread_id: str, draft_id: str) -> dict[str, object] | None:
-    from infra.database import get_db
-    db = get_db()
-    try:
-        row = db.execute("SELECT id,path,state,target_json FROM action_drafts WHERE id=? AND thread_id=? AND kind='email'", (draft_id, thread_id)).fetchone()
-        return dict(row) if row else None
-    finally:
-        db.close()
-
+# Reviewed-draft paths, writes, and account binding are owned by tools.reviewed_drafts.
 
 class MicrosoftMailDraftTool(Tool):
     """Save a locally reviewed Microsoft mail draft before its separate send call."""
@@ -187,19 +174,17 @@ class MicrosoftMailDraftTool(Tool):
                 return "Error: current thread identity is unavailable"
             to, cc = addresses(kwargs.get("to")), addresses(kwargs.get("cc"))
             subject, body = text_arg(kwargs.get("subject"), "subject is required", one_line=True), text_arg(kwargs.get("body"), "body is required")
-            text = compose_document(str((await run_in_db(_visible_account, account, thread_id))["address"]), to, cc, subject, body, "")
-            old = await run_in_db(_draft_row, thread_id, str(kwargs["draft_id"])) if kwargs.get("draft_id") else None
-            if old is not None and old.get("state") != "open":
-                return "Error: There is no open draft with that id in this conversation."
-            path = config.WORKSPACE / str(old["path"]) if old else _draft_path(thread_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-            relative = os.path.relpath(path, config.WORKSPACE)
-            data = text.encode("utf-8")
-            target = {"account_id": account}
-            saved = await run_in_db(record_draft, str(old["id"]), data, target) if old else await run_in_db(create_draft, thread_id, "email", relative, data, target)
-            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative, "account_id": account, "next": "Show the person this draft and wait for their reply before calling microsoft_mail_send."})
-        except (MicrosoftError, ConnectedAccountError, DraftRefused, DraftError) as exc:
+            address = str((await run_in_db(_visible_account, account, thread_id))["address"])
+            text = compose_document(address, to, cc, subject, body, "")
+            saved = await save_draft(
+                thread_id=thread_id, kind="email", extension=".md", prefix="email-drafts",
+                account_id=account, target={"account_id": account, "account": address}, text=text,
+                draft_id=kwargs.get("draft_id"), context=kwargs,
+                description="Microsoft email draft; the person reviews it before anything is sent.",
+            )
+            row = await run_in_db(open_draft, thread_id, saved["draft_id"], "email")
+            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "next": "Show the person this draft and wait for their reply before calling microsoft_mail_send."})
+        except (MicrosoftError, ConnectedAccountError, DraftRefused, DraftStorageRefused, DraftError) as exc:
             return _error(exc)
 
 
@@ -263,15 +248,20 @@ class MicrosoftCalendarDraftTool(Tool):
             thread_id = kwargs.get("_thread_id")
             if not isinstance(thread_id, str) or not thread_id or not isinstance(kwargs.get("event"), dict): return "Error: event and current thread identity are required."
             operation = kwargs.get("operation")
-            if operation == "update" and (not isinstance(kwargs.get("event_id"), str) or not kwargs["event_id"].strip()): return "Error: event_id is required for update."
-            path = config.WORKSPACE / ".threads" / thread_id / "calendar-invites" / f"microsoft-{uuid.uuid4().hex[:12]}.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            data = json.dumps({"operation": operation, "event_id": kwargs.get("event_id"), "event": kwargs["event"]}, separators=(",", ":")).encode()
-            path.write_bytes(data)
-            relative = os.path.relpath(path, config.WORKSPACE)
-            saved = await run_in_db(create_draft, thread_id, "invite", relative, data, {"account_id": account})
-            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative, "next": "Show the person this calendar change and wait for their reply before creating or updating it."})
-        except (MicrosoftError, ConnectedAccountError, DraftError) as exc: return _error(exc)
+            if operation == "create" and kwargs.get("event_id") is not None:
+                return "Error: event_id is only valid for update."
+            if operation == "update" and (not isinstance(kwargs.get("event_id"), str) or not kwargs["event_id"].strip()):
+                return "Error: event_id is required for update."
+            data = json.dumps({"operation": operation, "event_id": kwargs.get("event_id"), "event": kwargs["event"]}, separators=(",", ":"))
+            saved = await save_draft(
+                thread_id=thread_id, kind="invite", extension=".json", prefix="calendar-invites",
+                account_id=account, target={"account_id": account, "operation": operation}, text=data,
+                draft_id=kwargs.get("draft_id"), context=kwargs,
+                description="Microsoft calendar draft; the person reviews it before anything is sent.",
+            )
+            row = await run_in_db(open_draft, thread_id, saved["draft_id"], "invite")
+            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "operation": operation, "next": f"Show the person this calendar change and wait for their reply. After approval, call microsoft_calendar_{operation} with this account_id, draft_id, and revision."})
+        except (MicrosoftError, ConnectedAccountError, DraftError, DraftStorageRefused) as exc: return _error(exc)
 
 
 class _GatedCalendarTool(Tool):
@@ -284,11 +274,16 @@ class _GatedCalendarTool(Tool):
         if not isinstance(verdict, Approved): return f"Error: {verdict.text}"
         try:
             target, payload = json.loads(verdict.draft.get("target_json") or "{}"), json.loads(verdict.data)
+            draft_operation = payload.get("operation") if isinstance(payload, dict) else None
+            if draft_operation not in {"create", "update"} or not isinstance(payload.get("event"), dict):
+                return "Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft with microsoft_calendar_draft, show the person, and wait for their reply."
+            if draft_operation != self.operation:
+                return f"Error: This draft is for {draft_operation}, not {self.operation}. Call microsoft_calendar_{draft_operation} with the same account_id, draft_id, and revision."
             if kwargs.get("account_id") != target.get("account_id"):
-                return "Error: account_id does not match the draft."
+                return f"Error: account_id does not match this draft. Call microsoft_calendar_{self.operation} again with the account_id returned by microsoft_calendar_draft; to use another account, save a new draft with that account_id."
             account = await _account(kwargs)
             if self.operation == "update" and (not isinstance(payload.get("event_id"), str) or not payload["event_id"].strip()):
-                return "Error: event_id is required for update."
+                return "Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft with microsoft_calendar_draft, show the person, and wait for their reply."
             async def send(token: str) -> dict[str, object]:
                 if self.operation == "create":
                     return await calendar.create_event(account, payload["event"], token=token)

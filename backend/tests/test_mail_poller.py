@@ -6,7 +6,7 @@ import asyncio
 import pytest
 
 from connections.connected_accounts import get_account
-from connections.google import email_screen
+from connections.mail import email_screen
 from connections.microsoft import client, mail
 from connections.connected_accounts import create_account
 from connections.microsoft.provider import MICROSOFT

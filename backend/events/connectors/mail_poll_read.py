@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from connections.google import email_screen
+from connections.mail import email_screen
 from connections.google.accounts import thread_key as google_thread_key
 from connections.microsoft import client as microsoft_client, mail as microsoft_mail
 from connections.microsoft.mail import thread_key as microsoft_thread_key
