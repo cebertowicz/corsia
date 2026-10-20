@@ -21,8 +21,11 @@
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 
-	const cloudModelsOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
-	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => model.status_reason !== 'project_cloud_off') : $models);
+	// The project switch and a thread's Local only hide cloud rows through this one filter (the causes in LOCALITY_REFUSALS).
+	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
+	const cloudModelsOff = $derived($models.some(localityOff));
+	const projectCloudOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
+	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
 	const groups = $derived(groupModels(pickerModels, $activeModelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
 	// stay visible, while their account list opens only on demand, the same for every vendor and state.
@@ -159,7 +162,13 @@
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
 			{#if cloudModelsOff && !hasReadyGroup}
-				<div class="model-list-empty">This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+				<div class="model-list-empty">
+					{#if projectCloudOff}
+						This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button>
+					{:else}
+						No local model is ready.<br /><button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Set up a local model</button>
+					{/if}
+				</div>
 			{/if}
 			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
 				<div class="model-list-empty">No available models</div>
@@ -287,7 +296,7 @@
 						{/if}
 					</section>
 				{/each}
-				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
+				{#if projectCloudOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
 				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
