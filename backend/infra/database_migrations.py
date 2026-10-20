@@ -185,6 +185,7 @@ from infra.migration_125_to_126_presence_focus import migrate_125_to_126
 from infra.migration_126_to_127_user_comments_index import migrate_126_to_127
 from infra.migration_127_to_128_measure_registry import migrate_127_to_128
 from infra.migration_128_to_129_connected_accounts import migrate_128_to_129
+from infra.migration_129_to_130_project_inference_policy import migrate_129_to_130
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -798,6 +799,7 @@ MIGRATIONS[125] = migrate_125_to_126
 MIGRATIONS[126] = migrate_126_to_127
 MIGRATIONS[127] = migrate_127_to_128
 MIGRATIONS[128] = migrate_128_to_129
+MIGRATIONS[129] = migrate_129_to_130
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

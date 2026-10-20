@@ -96,13 +96,13 @@ def _settled_replacement_boundary(thread_id: str, expected_live: _Live):
     Raises unless ``expected_live`` is still the thread's bound handle at a
     settled boundary, so the caller never starts a replacement it cannot own.
     """
-    from llm.resolution import resolve_execution_target
+    from llm.resolution import resolve_thread_target
 
     identity = expected_live.corsia_turn
     if identity is None:
         raise RuntimeError("Claude Code checkpoint continuation has no Turn")
     wait_scope = expected_live.checkpoint_wait_scope
-    target = resolve_execution_target(expected_live.catalog_model_id or "")
+    target = resolve_thread_target(expected_live.catalog_model_id or "", thread_id=thread_id)
     if target.harness != "claude-code" or not target.available:
         raise RuntimeError("Claude Code checkpoint target is unavailable")
     session = expected_live.session

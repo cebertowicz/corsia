@@ -31,7 +31,8 @@ _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
 # ── the branch defines what its call sites call ──────────────────────────────
 
 @pytest.mark.parametrize("module_name", [
-    "api.network_server_helpers", "llm.network_discovery", "llm.inference_params",
+    "api.network_server_helpers", "api.network_daemon_models", "llm.network_discovery",
+    "llm.inference_params",
 ])
 def test_every_attribute_a_call_site_reaches_exists(module_name: str) -> None:
     """A renamed function and a stale call site must not survive to main."""
