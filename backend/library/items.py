@@ -23,8 +23,8 @@ class LibraryItemUnavailableError(LibraryItemError):
     """A pinned raw item file could not be retrieved."""
 
 
-_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-_COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
+REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 def source_ref(item: dict[str, Any]) -> str:
@@ -77,14 +77,14 @@ def fetch_bundle(
     """Fetch every item file from its immutable raw commit and verify before writing."""
     source = item["source"]
     repository, commit, base = source["repository"], source["commit"], source["path"]
-    if not _REPOSITORY.fullmatch(repository) or not _COMMIT.fullmatch(commit):
+    if not REPOSITORY.fullmatch(repository) or not COMMIT.fullmatch(commit):
         raise LibraryItemError("invalid library item source")
-    _safe_path(base)
+    validate_relative_path(base)
     getter = fetch or _fetch_raw
     bundle: dict[str, bytes] = {}
     for file_row in item["files"]:
         relative = file_row["path"]
-        _safe_path(relative)
+        validate_relative_path(relative)
         url = _raw_url(repository, commit, base, relative)
         try:
             data = getter(url)
@@ -109,7 +109,7 @@ def _fetch_raw(url: str) -> bytes:
         return response.read()
 
 
-def _safe_path(value: str) -> None:
+def validate_relative_path(value: str) -> None:
     parsed = PurePosixPath(value)
     if not value or value.startswith("/") or "\\" in value or any(part in ("", ".", "..") for part in parsed.parts):
         raise LibraryItemError("invalid library item path")

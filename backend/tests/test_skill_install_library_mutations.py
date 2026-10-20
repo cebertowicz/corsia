@@ -26,7 +26,7 @@ def library_skill(tmp_path):
         workspace,
         "example",
         b"---\nname: example\ndescription: first version\n---\n# First\n",
-        {"notes.md": b"first notes\n", "dropped.md": b"remove me\n"},
+        {"notes.md": b"first notes\n", "dropped.md": b"remove me\n", "scripts/lib/x.py": b"nested\n"},
         "first version",
         origin_metadata("library/example@a:skills/example", b"first", "2026-10-19T00:00:00+00:00", "1.0.0"),
         author_thread_id="owner",
@@ -41,6 +41,19 @@ def library_skill(tmp_path):
 
 def _origin(target: Path) -> dict:
     return yaml.safe_load((target / "corsia.yaml").read_text())["origin"]
+
+
+def test_bundle_skips_hidden_upstream_paths_to_match_the_installed_bundle_reader():
+    from infra.skill_install import _bundle_files
+
+    files = _bundle_files(
+        "example", b"---\nname: example\ndescription: first\n---\n# First\n",
+        {".DS_Store": b"finder", "scripts/.cache/value": b"hidden", "scripts/run.py": b"visible"},
+        "first", {"source": "library/example@a:skills/example"},
+    )
+
+    assert files is not None
+    assert set(files) == {"SKILL.md", "corsia.yaml", "scripts/run.py"}
 
 
 def test_update_replaces_the_bundle_deletes_dropped_files_and_preserves_first_adoption(library_skill):
@@ -102,14 +115,21 @@ def test_update_refuses_if_a_file_changed_after_the_writer_read_it(library_skill
     assert (target / "dropped.md").exists()
 
 
-def test_remove_deletes_the_thread_owned_bundle_in_one_guidance_save(library_skill):
-    from infra.skill_install import remove_skill_bundle
+def test_remove_deletes_nested_bundle_folders_and_finder_metadata_then_allows_reinstall(library_skill):
+    from infra.skill_install import install_skill_bundle, origin_metadata, remove_skill_bundle
 
     workspace, target = library_skill
+    (target / ".DS_Store").write_bytes(b"finder metadata")
     result = remove_skill_bundle(workspace, "example", author_thread_id="owner", thread_id="owner")
 
     assert (result["outcome"], result["history_outcome"]) == ("removed", "written")
     assert not target.exists()
+    reinstalled = install_skill_bundle(
+        workspace, "example", b"---\nname: example\ndescription: reinstalled\n---\n# Reinstalled\n", {},
+        "reinstalled", origin_metadata("library/example@b:skills/example", b"reinstalled", "2026-10-20T00:00:00+00:00"),
+        author_thread_id="owner", scope="thread", thread_id="owner",
+    )
+    assert reinstalled["outcome"] == "installed"
 
 
 @pytest.mark.parametrize("writer", ["update", "remove"])

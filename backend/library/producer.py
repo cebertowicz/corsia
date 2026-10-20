@@ -77,6 +77,8 @@ def _notice_payload(row: dict[str, Any], items: dict[str, dict[str, Any]]) -> di
         "name": name,
         "installed_version": origin.get("version"),
         "library_version": item["version"],
+        "item_manifest": item_manifest(item),
+        "installed_at": origin.get("adopted_at"),
         "changed_files": changed_files,
         "edited": edited,
         "withdrawn_reason": item["withdrawn_reason"],

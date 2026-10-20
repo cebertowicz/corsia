@@ -16,12 +16,14 @@ from tools.skill_library_common import (
     confirmed_bundle as _confirmed_bundle,
     current_library_item as _current_library_item,
     discard_confirmation as _discard_confirmation,
+    emit_action as _emit_action,
     effective as _effective,
     index as _index,
     library_origin as _library_origin,
     local_edits_token as _local_edits_token,
     persistent_owner as _persistent_owner,
     same_library_item as _same_library_item,
+    write_result as _write_result,
 )
 
 
@@ -114,20 +116,23 @@ def _execute(
         project_id = thread.get("project_id")
         try:
             if action == "search":
-                if not isinstance(query, str) or not query.strip():
-                    return _error("query_required", "search requires query; pass a few words describing the job")
-                return _search(query, owner_id, project_id, db)
-            if not isinstance(name, str) or not name.strip():
-                return _error("name_required", f"{action} requires name from a search result or your skills index")
-            if action == "install":
-                return _install(name, owner_id, project_id, db)
-            if action == "update":
-                return _update(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
-            if action == "remove":
-                return _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
-            return _error("invalid_action", "action must be search, install, update, or remove")
+                result = (_error("query_required", "search requires query; pass a few words describing the job")
+                          if not isinstance(query, str) or not query.strip()
+                          else _search(query, owner_id, project_id, db))
+            elif not isinstance(name, str) or not name.strip():
+                result = _error("name_required", f"{action} requires name from a search result or your skills index")
+            elif action == "install":
+                result = _install(name, owner_id, project_id, db)
+            elif action == "update":
+                result = _update(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
+            elif action == "remove":
+                result = _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
+            else:
+                result = _error("invalid_action", "action must be search, install, update, or remove")
         except _LibraryIndexError as error:
-            return _error(error.code, error.message)
+            result = _error(error.code, error.message)
+        _emit_action(action, thread_id, result)
+        return result
     finally:
         db.close()
 
@@ -176,10 +181,6 @@ def _search(query: str, owner_id: str, project_id: str | None, db) -> dict[str, 
     from library.items import search_items, source_ref
 
     index = _index()
-    if index.refreshed:
-        from library.producer import request_refresh
-
-        request_refresh()
     origins = _installed_library_origins(owner_id, db)
     results = []
     for item in search_items(index.skills, query):
@@ -218,11 +219,15 @@ def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, 
         return _error("not_in_library", "search first; names are exact")
     if item["withdrawn"]:
         return _error("withdrawn", f"{item['withdrawn_reason']}; remove takes out a copy you already hold")
-    effective, _local = _effective(owner_id, project_id, _workspace(), db)
+    effective, local_rows = _effective(owner_id, project_id, _workspace(), db)
     conflict = next((row for row in effective if row.name == name), None)
     if conflict is not None:
         origin = _library_origin(conflict)
         if origin and _same_library_item(origin, item):
+            if any(row.path == conflict.path for row in local_rows):
+                registration_error = _ensure_registered(owner_id, name, project_id, db)
+                if registration_error is not None:
+                    return registration_error
             return _error("already_installed", f"{name} is already installed at {conflict.path} in {conflict.scope} scope")
         return _error("name_taken", f"{name} is already provided at {conflict.path}; the library item was not installed")
     try:
@@ -240,7 +245,9 @@ def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, 
         reason="reviewed library skill install", binary_safe_history=True,
     )
     if result["outcome"] == "installed":
-        _register(owner_id, name, project_id, db)
+        registration_error = _ensure_registered(owner_id, name, project_id, db)
+        if registration_error is not None:
+            return registration_error
         return {"outcome": "installed", "name": name, "version": item["version"], "path": _path(owner_id, project_id, db, name), "files": len(item["files"])}
     return _write_result(result)
 
@@ -366,6 +373,16 @@ def _register(owner_id: str, name: str, project_id: str | None, db) -> None:
     update_surfacing(artifact["id"], surfacing=SURFACING_QUIET, parent_thread_id=owner_id, actor_thread_id=owner_id, db=db)
 
 
+def _ensure_registered(owner_id: str, name: str, project_id: str | None, db) -> dict[str, str] | None:
+    """Repair an interrupted install's missing registration on every idempotent retry."""
+    try:
+        _register(owner_id, name, project_id, db)
+    except (OSError, ValueError) as error:
+        logger.warning("library skill registration failed for {}/{}: {}", owner_id, name, error)
+        return _error("registration_failed", "the skill copy is installed but unavailable; retry install to register it")
+    return None
+
+
 def _path(owner_id: str, project_id: str | None, db, name: str) -> str:
     from core.skill_resolution import skill_scope_root
 
@@ -373,11 +390,6 @@ def _path(owner_id: str, project_id: str | None, db, name: str) -> str:
     assert root is not None
     return str(root / "skills" / name / "SKILL.md")
 
-
-def _write_result(result: dict[str, str]) -> dict[str, Any]:
-    if result.get("history_outcome") == "history-off":
-        return _error("history_off", "guidance history is off for this folder, so nothing changed; turn history back on first")
-    return _error("invalid_item", "the library item could not be written without changing your existing skills")
 
 
 def _error(code: str, message: str) -> dict[str, str]:

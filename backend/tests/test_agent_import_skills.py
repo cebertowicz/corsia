@@ -105,11 +105,12 @@ def test_an_unreadable_skill_names_the_one_thing_to_fix(home, tmp_path):
     _skill(folder / "no-description", "no-description", "")
     offers = _offers(home)
     assert {name: offers[name]["reason"] for name in (
-        "linked", "inner-link", "no-skill-md", "binary", "bad-header", "bad-sidecar", "bad-name", "no-description",
+        "linked", "inner-link", "no-skill-md", "binary", "bad-header", "bad-name", "no-description",
     )} == {
         "linked": "link", "inner-link": "link", "no-skill-md": "no_skill_md", "binary": "not_text",
-        "bad-header": "bad_header", "bad-sidecar": "bad_header", "bad-name": "bad_name", "no-description": "no_description",
+        "bad-header": "bad_header", "bad-name": "bad_name", "no-description": "no_description",
     }
+    assert offers["bad-sidecar"]["state"] == "new"
     assert "reason" not in offers["adr-writer"] and "reason" not in offers["big"]
 
 

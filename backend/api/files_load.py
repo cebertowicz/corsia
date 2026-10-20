@@ -26,7 +26,7 @@ def _live_open_setup(p: Path, project_id: str | None, thread_id: str | None, db)
     the open with a typed reason; opening again retries it.
     """
     from infra import config
-    from infra.guidance_git import guidance_target
+    from infra.guidance_targets import guidance_target
     from doceditor.document_scope import UI_THREAD
     from doceditor.live_admission import OpenRefused
     from doceditor.live_publication_record import WriteActor

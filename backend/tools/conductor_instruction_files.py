@@ -269,7 +269,8 @@ class ConductorInstructionFileReplaceTool(Tool):
 def _save(path: Path, replacement: bytes, expected_revision: str, actor_thread_id: str, kwargs: dict):
     """Blocking. Save through the one guidance-history owner, which rechecks the read
     revision under its lock, so a concurrent guidance save is never overwritten."""
-    from infra.guidance_git import GuidanceTarget, guidance_target, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget, guidance_target
     from infra.guidance_messages import saver_author
 
     target = guidance_target(path) or GuidanceTarget(

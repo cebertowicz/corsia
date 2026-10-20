@@ -28,7 +28,7 @@ from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
     commit_message, recorded_reason,
 )
-from infra.guidance_targets import GuidanceTarget, guidance_target
+from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
