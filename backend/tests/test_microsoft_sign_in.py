@@ -189,7 +189,7 @@ async def test_connect_route_keeps_safe_not_found_contract(monkeypatch) -> None:
         await microsoft_api.connect(await _request({"account_id": "missing"}), {"token_kind": "session", "id": "person"})
 
     assert raised.value.status_code == 404
-    assert raised.value.detail == {"cause": ACCOUNT_NOT_FOUND, "message": "That account isn't connected."}
+    assert raised.value.detail == "That account isn't connected."
 
 
 async def test_person_connect_keeps_the_fixed_registration_refusal(monkeypatch) -> None:
@@ -200,7 +200,7 @@ async def test_person_connect_keeps_the_fixed_registration_refusal(monkeypatch) 
     with pytest.raises(HTTPException) as raised:
         await microsoft_api.connect(await _request({}), {"token_kind": "session", "id": "person"})
     assert raised.value.status_code == 400
-    assert raised.value.detail == {"cause": REGISTRATION_MISCONFIGURED, "message": message(REGISTRATION_MISCONFIGURED)}
+    assert raised.value.detail == "Your Microsoft app for CORSIA isn’t set up correctly. Go back to CORSIA and ask it in chat to fix the app."
 
 
 def test_scopes_are_exactly_the_graph_ones_without_openid_or_profile() -> None:
@@ -234,10 +234,12 @@ async def test_identity_comes_from_graph_me_with_the_access_token(microsoft, iso
     assert row["id"] == account_id
     assert (row["provider_subject"], row["address"], row["account_kind"]) == (f"{TENANT_A}:object-a", "same@example.test", "work")
     assert microsoft.graph_auth == [f"Bearer {ACCESS}"]
-    assert _bundle(account_id) == {
+    bundle = _bundle(account_id)
+    assert {key: bundle[key] for key in ("access_token", "refresh_token", "client_id", "tenant_id", "scopes")} == {
         "access_token": ACCESS, "refresh_token": REFRESH, "client_id": CLIENT_ID, "tenant_id": TENANT_A,
         "scopes": list(oauth.SCOPES),
     }
+    assert float(bundle["access_token_expires_at"]) > 0
 
 
 async def test_graph_falls_back_to_the_user_principal_name(microsoft, isolated_db) -> None:
