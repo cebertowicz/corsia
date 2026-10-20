@@ -56,6 +56,8 @@ async function openHarnessAccounts(page: Page, provider: string, account: string
 
 test.describe('@surface:providers accounts live in settings modal', () => {
 	test('the harness gear opens canonical account rows and a flip writes only that account', async ({ page }, testInfo) => {
+		// Four viewport/theme evidence passes plus the final write exceed mock mode's suite-wide 30s ceiling.
+		test.setTimeout(60_000);
 		const writes: { url: string; body: unknown }[] = [];
 		await serveAccounts(page, writes);
 		for (const [name, width, colorScheme] of [
