@@ -8,7 +8,7 @@ import time
 import urllib.error
 
 from cli_sources import READ_TIMEOUT_SECONDS, RouteMissing, _read_token, request_json
-from llm.local_setup_results import SETUP_COMMAND
+from llm.local_setup_results import RETRY_IN_TERMINAL, SETUP_COMMAND, setup_fix
 
 SETUP_ROUTE = "/api/providers/local/setup"
 SETUP_TIMEOUT_SECONDS = 60
@@ -84,10 +84,13 @@ def _follow_server_setup(token: str, command: str) -> int:
         if state == "downloading":
             return _print_still_downloading(flight, command)
         if state in {"failed", "setup_failed", "start_failed", "stopped"}:
-            message = "Local setup stopped." if state == "stopped" else flight.get("fix") or "Local setup failed."
+            if state == "stopped":
+                return _print_terminal_error({"message": "Local setup stopped.", "next_action": f"Run `{command}` again."})
+            # The fix already ends in the retry, as a command here; memory has no retry.
+            message = setup_fix(flight.get("cause"), flight.get("bytes_to_free"), retry=RETRY_IN_TERMINAL)
             if flight.get("ref"):
                 message += f" Reference: {flight['ref']}"
-            return _print_terminal_error({"message": message, "next_action": f"Run `{command}` again."})
+            return _print_terminal_error({"message": message})
         if state != "starting":
             return _print_terminal_error({"message": "The server returned an unknown local setup state."})
         time.sleep(FOLLOW_INTERVAL_SECONDS)

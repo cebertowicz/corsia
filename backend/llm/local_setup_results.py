@@ -10,21 +10,22 @@ from fastapi import HTTPException
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
 CAUSES = frozenset({"connection", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
-_RETRY = "retry in Settings › Providers."
+RETRY_IN_APP = "retry in Settings › Providers."
+RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
-def setup_fix(cause: object, bytes_to_free: object = None) -> str:
-    """The one next step for a failed setup, read by the wake, the status route and the CLI."""
+def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP) -> str:
+    """The one next step for a failed setup, read by the wake, the status route and the CLI (with its own retry)."""
     if cause == "disk_full":
         free = f"Free {bytes_to_free} bytes," if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "Free space,"
-        return f"{free} then {_RETRY}"
+        return f"{free} then {retry}"
     if cause == "connection":
-        return f"Check the connection, then {_RETRY}"
+        return f"Check the connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
     if cause == "own_omlx_upgrade_required":
-        return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {_RETRY}"
-    return "Retry in Settings › Providers."
+        return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
+    return retry[0].upper() + retry[1:]
 
 
 def local_setup_error(message: str) -> dict:

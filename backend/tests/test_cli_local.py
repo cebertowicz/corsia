@@ -123,21 +123,18 @@ def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, ca
     }])
 
     assert cli_local.cmd_setup(_args()) == 2
-    assert capsys.readouterr().out == (
-        "Check the connection, then retry in Settings › Providers. Reference: local-test\n"
-        "Run `corsia local setup` again.\n"
-    )
+    assert capsys.readouterr().out == "Check the connection, then run `corsia local setup` again. Reference: local-test\n"
 
 
-# The first line each cause printed before the shared fix; only its tail wording changed.
-@pytest.mark.parametrize("cause, before", [
-    ("disk_full", "Free 2048 bytes, then retry"),
-    ("connection", "Check the connection, then retry"),
+# The shared fix with the terminal's retry: one next step, and none to retry for memory.
+@pytest.mark.parametrize("cause, expected", [
+    ("disk_full", "Free 2048 bytes, then run `corsia local setup` again."),
+    ("connection", "Check the connection, then run `corsia local setup` again."),
     ("memory", "Choose a subscription or API provider instead."),
-    ("own_omlx_upgrade_required", "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX"),
-    ("other", "Retry"),
+    ("own_omlx_upgrade_required", "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then run `corsia local setup` again."),
+    ("other", "Run `corsia local setup` again."),
 ])
-def test_cli_prints_the_status_routes_fix_after_the_old_leading_text(monkeypatch, capsys, cause, before):
+def test_cli_prints_the_shared_fix_with_the_command_as_its_only_retry(monkeypatch, capsys, cause, expected):
     import cli_local
     from llm import local_setup
 
@@ -147,10 +144,7 @@ def test_cli_prints_the_status_routes_fix_after_the_old_leading_text(monkeypatch
     _patch_follow(monkeypatch, [status])
 
     assert cli_local.cmd_setup(_args()) == 2
-    first, second = capsys.readouterr().out.splitlines()
-    assert first == f"{status['fix']} Reference: local-1"
-    assert first.startswith(before)
-    assert second == "Run `corsia local setup` again."
+    assert capsys.readouterr().out.splitlines() == [f"{expected} Reference: local-1"]
 
 
 def test_local_setup_idle_flight_while_following_means_the_server_restarted(monkeypatch, capsys):
