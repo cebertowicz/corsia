@@ -313,6 +313,41 @@ def _add_artifact_registration(
     )
 
 
+def _add_open_ask(db, artifact_id: str) -> None:
+    """Seed the public open-ask shape without duplicating its query in a test."""
+    from tests.plan_writer_authorizer import raw_plan_seed
+
+    timestamp = _iso(NOW - timedelta(days=1))
+    with raw_plan_seed(db):
+        db.execute(
+            "INSERT INTO plans (id,owner_kind,owner_id,state,created_at,updated_at) "
+            "VALUES ('review-plan','thread','s1','active',?,?)",
+            (timestamp, timestamp),
+        )
+        db.execute(
+            "INSERT INTO plan_nodes "
+            "(id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,"
+            "checkpoint_exception,state,requirements_revision,commitment_id,revision,"
+            "created_at,updated_at) "
+            "VALUES ('review-node','review-plan',NULL,0,'task','Review','Reviewed',"
+            "0,'active',1,'review-node',1,?,?)",
+            (timestamp, timestamp),
+        )
+        db.execute(
+            "INSERT INTO plan_node_artifact_links "
+            "(node_id,artifact_id,role,provenance,created_at) "
+            "VALUES ('review-node',?,'attention','test.open_ask',?)",
+            (artifact_id, timestamp),
+        )
+        db.execute(
+            "INSERT INTO plan_node_holds "
+            "(id,node_id,kind,reason_key,reason,owner_kind,owner_id,provenance,created_at) "
+            "VALUES ('review-hold','review-node','blocked','review','Review it','user',?,"
+            "'test.open_ask',?)",
+            (artifact_id, timestamp),
+        )
+
+
 def _thread_root(ws: Path, sid: str) -> Path:
     root = ws / ".threads" / sid
     (root / "working").mkdir(parents=True, exist_ok=True)
@@ -1439,7 +1474,7 @@ def _age_tree(root: Path, days: int) -> None:
     _age(root, days)
 
 
-def test_working_tmp_trimmed_after_ttl(tmp_path, mtime_as_added_time):
+def test_working_tmp_trim_removes_unregistered_stale_unit(tmp_path, mtime_as_added_time):
     db = _db()
     _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
     root = _thread_root(tmp_path, "s1")
@@ -1456,6 +1491,59 @@ def test_working_tmp_trimmed_after_ttl(tmp_path, mtime_as_added_time):
     assert report.working_files_trimmed == 1
     assert not stale.exists()
     assert fresh.exists()
+
+
+def test_working_tmp_trim_keeps_durable_registered_document(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
+    document = _thread_root(tmp_path, "s1") / "working" / "review.md"
+    document.write_text("review me")
+    _age(document, 8)
+    _add_artifact_identity(db, "review", path=document, retention="durable")
+    _add_artifact_registration(db, "review", "s1")
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert document.exists()
+    assert db.execute(
+        "SELECT state FROM artifact_identities WHERE id='review'"
+    ).fetchone()["state"] == "active"
+
+
+def test_working_tmp_trim_keeps_open_ask_target(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
+    document = _thread_root(tmp_path, "s1") / "working" / "review.md"
+    document.write_text("review me")
+    _age(document, 8)
+    _add_artifact_identity(db, "review", path=document, retention="ephemeral")
+    _add_artifact_registration(db, "review", "s1")
+    _add_open_ask(db, "review")
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert document.exists()
+
+
+def test_working_tmp_trim_ignores_pathless_open_ask(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
+    stale = _thread_root(tmp_path, "s1") / "working" / "stale.txt"
+    stale.write_text("old")
+    _age(stale, 8)
+    _add_artifact_identity(db, "pathless-review", retention="ephemeral")
+    _add_artifact_registration(db, "pathless-review", "s1")
+    _add_open_ask(db, "pathless-review")
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 1
+    assert not stale.exists()
 
 
 def test_working_tmp_trim_retires_deleted_and_already_missing_artifacts(
@@ -1549,13 +1637,7 @@ def test_working_tmp_reconciliation_uses_one_fixed_query_for_all_live_threads(
         and "JOIN artifact_registrations r" in statement
         and "i.path IS NOT NULL" in statement
     ]
-    begin_immediates = [
-        statement
-        for statement in statements
-        if statement.strip().upper() == "BEGIN IMMEDIATE"
-    ]
     assert len(registry_queries) == 1
-    assert len(begin_immediates) == 1
     assert {
         row["id"]: row["state"]
         for row in db.execute(

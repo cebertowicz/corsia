@@ -238,11 +238,25 @@ def _remove_empty_dir(path: Path) -> bool:
     return True
 
 
-def _active_identity_dirs(db) -> set[Path]:
-    """Each active identity path with its ancestors, so a unit check is one lookup."""
+def _protected_working_dirs(db) -> set[Path]:
+    """Read durable artifact and open-ask paths once, with their ancestors.
+
+    ``working/`` is temporary even for write-observed identities, so only a
+    durable active identity protects its path. An open ask protects its target
+    regardless of retention until the ask is cleared.
+    """
+    from plans.public import open_asks_sql
+
+    open_ask_paths = open_asks_sql(
+        "i.path",
+        joins="JOIN artifact_identities i ON i.id=l.artifact_id",
+        by="all",
+    ) + " AND i.path IS NOT NULL AND i.path != ''"
     rows = db.execute(
         "SELECT path FROM artifact_identities "
-        "WHERE state='active' AND path IS NOT NULL AND path != ''"
+        "WHERE state='active' AND retention='durable' "
+        "AND path IS NOT NULL AND path != '' "
+        "UNION " + open_ask_paths
     ).fetchall()
     protected: set[Path] = set()
     for row in rows:
@@ -260,8 +274,8 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
 
     Active, dormant, and settled temporary workers use the normal TTL. Other
     archived threads, ``scratch``, and other thread folders remain durable.
-    Keep markers, active turns, and active identities in settled-worker units
-    preserve units. Removal re-judges entries before unlinking; filesystem
+    Keep markers, active turns, durable artifact identities, and open-ask
+    targets preserve units. Removal re-judges entries before unlinking; filesystem
     errors keep and log the unit, while ``working_files_trimmed`` counts whole removals.
     """
     from core.turn_core import active_turn_thread_ids
@@ -275,7 +289,7 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
         f"OR ({_SETTLED_WORKER})",
         (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
-    active_identity_dirs = _active_identity_dirs(db)
+    protected_working_dirs = _protected_working_dirs(db)
     cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
     working_roots: dict[str, Path] = {}
     for r in rows:
@@ -304,8 +318,7 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
             continue
         for unit in units:
             try:
-                if (_row_get(r, "settled_worker")
-                        and unit.resolve(strict=False) in active_identity_dirs):
+                if unit.resolve(strict=False) in protected_working_dirs:
                     continue
                 if not _unit_is_stale(unit, cutoff):
                     continue
