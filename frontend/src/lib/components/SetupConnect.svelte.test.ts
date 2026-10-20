@@ -82,6 +82,19 @@ describe('account-screen link', () => {
 		expect(button('Continue')).toBeTruthy();
 		expect(button('Connect to CORSIA on another computer')).toBeUndefined();
 	});
+	it('stops the pre-account local download before opening the remote-computer flow', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-download' && init?.method === 'POST') return json({ ok: true, in_progress: true });
+			if (url === '/api/setup/local-download') return json({ state: 'downloading', model: 'Qwen' });
+			return json({});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await mountSetup();
+		await openConnect();
+		expect(fetchMock).toHaveBeenCalledWith('/api/setup/local-download/stop', expect.objectContaining({ method: 'POST' }));
+	});
 });
 
 describe('Choose a computer (r1, r2, r3, r6)', () => {

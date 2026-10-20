@@ -208,7 +208,13 @@ async def stop_prepare() -> dict:
 
 async def _run() -> None:
     try:
-        server_id, port = await start_managed_omlx(lambda _stage: None)
+        from llm.local_sources import local_server_for_install
+
+        resolved = await local_server_for_install(
+            lambda _stage: None, start_managed=start_managed_omlx,
+        )
+        assert resolved is not None
+        server_id, port, _existing = resolved
         _prepare.server_id = server_id
         await ask(server_id, port)
     except asyncio.CancelledError:

@@ -311,7 +311,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.cli === 'claude-ready-codex-signed-out') { await expect(page.getByRole('region', { name: 'Codex' }).getByRole('button', { name: 'Sign in', exact: true })).toBeVisible(); return; }
 	if (fixture.cli === 'install-connection') { const row = page.getByRole('region', { name: 'Claude Code' }); await expect(row).toContainText('Couldn’t download Claude Code. Check your internet connection, then retry.'); await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); }
 	if (fixture.cli === 'install-failed') { const row = page.getByRole('region', { name: 'Claude Code' }); await expect(row).toContainText('Couldn’t install Claude Code. Try again, or save a report. Reference: cli-fixture-123'); await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); }
-	if (fixture.cli && !['install-connection', 'install-failed'].includes(fixture.cli)) { await expect(page.getByRole('region', { name: 'Claude Code' })).toContainText(fixture.cli === 'ready' || fixture.cli === 'both-ready' ? 'Ready' : fixture.cli === 'signed-out' ? 'Sign in' : fixture.cli === 'not-installed' ? 'Set up' : fixture.cli === 'installing' ? 'Installing Claude Code…' : fixture.cli === 'signing-in' ? 'Finish signing in in your browser.' : fixture.cli === 'limited' ? 'usage limit' : fixture.cli === 'unusable' ? 'can’t use' : fixture.cli === 'shadow' ? 'older Claude Code' : 'Couldn’t'); }
+	if (fixture.cli && !['install-connection', 'install-failed'].includes(fixture.cli)) { await expect(page.getByRole('region', { name: 'Claude Code' })).toContainText(fixture.cli === 'ready' || fixture.cli === 'both-ready' ? 'Ready' : fixture.cli === 'signed-out' ? 'Sign in' : fixture.cli === 'not-installed' ? 'Set up' : fixture.cli === 'installing' ? 'Installing Claude Code…' : fixture.cli === 'signing-in' ? 'Finish signing in from your browser.' : fixture.cli === 'limited' ? 'usage limit' : fixture.cli === 'unusable' ? 'can’t use' : fixture.cli === 'shadow' ? 'older Claude Code' : 'Couldn’t'); }
 	if (fixture.local) {
 		const row = page.getByRole('region', { name: 'Local model' });
 		const expected = fixture.local === 'ready' ? 'Ready'
@@ -328,7 +328,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'other-no-ref' ? 'CORSIA couldn’t set up the local model. Try again.'
 			: fixture.local === 'setup-failed' ? 'CORSIA couldn’t set up the local model. Try again, or save a report.'
 			: fixture.local === 'start-failed' ? 'The local model downloaded but couldn’t start. Try again, or save a report.'
-			: fixture.local === 'other-omlx' ? 'Another oMLX is running. Quit your other oMLX, then try again.'
+			: fixture.local === 'other-omlx' ? 'The other oMLX copies changed or couldn’t stop. Retry asks again, or keep them running.'
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);

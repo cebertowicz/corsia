@@ -55,7 +55,7 @@ async def resume_local_setup() -> None:
     from infra.failure_reference import new_reference
     from llm.local_setup import record_resume_failure
     from llm.local_model import backfill_legacy_record
-    from llm.local_setup_new_omlx import resume_pending_setup
+    from llm.local_setup_flow import resume_pending_setup
     from onboarding.local_download_wake import resume_pending_local_download
 
     steps = (
@@ -69,7 +69,7 @@ async def resume_local_setup() -> None:
         except Exception:
             ref = new_reference("local")
             logging.getLogger(__name__).warning("Local setup startup step failed (%s) reference=%s", label, ref, exc_info=True)
-            if step is resume_pending_local_download:
+            if label in {"resume local setup", "resume local download notice"}:
                 record_resume_failure(ref)
 
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Coroutine, IO
 
@@ -37,6 +36,7 @@ class _Flight:
     server_id: str | None = None
     download_eta_seconds: int | None = None
     download_stalled: bool = False
+    download_percent: int | None = None
     operation_lock: IO[str] | None = None
 
 
@@ -96,7 +96,7 @@ def start_flight(work: Coroutine[Any, Any, dict], stage: str, *,
         _flight.downloaded = False
     _flight.result, _flight.stage = None, stage
     _flight.server_id = None
-    _flight.download_eta_seconds, _flight.download_stalled = None, False
+    _flight.download_eta_seconds, _flight.download_stalled, _flight.download_percent = None, False, None
     _flight.task = asyncio.create_task(work)
     _flight.task.add_done_callback(_observe_setup_task)
     _flight.task.add_done_callback(lambda _task: _notify_models_changed())
@@ -155,14 +155,16 @@ def finish_flight(result: dict) -> dict:
     return result
 
 
-def _download_progress(eta_seconds: int | None, stalled: bool) -> None:
-    _flight.download_eta_seconds, _flight.download_stalled = eta_seconds, stalled
+def _download_progress(eta_seconds: int | None, stalled: bool, percent: int | None) -> None:
+    _flight.download_eta_seconds = eta_seconds
+    _flight.download_stalled = stalled
+    _flight.download_percent = percent
 
 
 async def _download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
     """Check disk space, then follow one persisted oMLX download without sharing flight state."""
     _flight.server_id = server_id
-    _download_progress(None, False)
+    _download_progress(None, False, None)
     model_dir = await local_setup_download.download_dir(server_id)
     await asyncio.to_thread(require_free_disk, model.download_size_bytes, model_dir, model.repository)
     report(f"Downloading {model.model} ({format_size(model.download_size_bytes)})")
@@ -223,6 +225,11 @@ def download_estimate() -> tuple[int | None, bool]:
     return _flight.download_eta_seconds, _flight.download_stalled
 
 
+def download_percent() -> int | None:
+    """The structured progress reported by the current oMLX download task."""
+    return _flight.download_percent
+
+
 def terminal_outcome(result: dict | None, *, downloaded: bool = False) -> str:
     """Derive the one setup outcome, or validate an already projected wire state."""
     if result is None or result.get("cancelled"):
@@ -245,11 +252,10 @@ def setup_status() -> dict[str, Any]:
     state = ("downloading" if _flight.downloading else "starting") if _running() else terminal_outcome(
         result, downloaded=_flight.downloaded,
     )
-    match = re.search(r"(\d{1,3})%", stage) if stage else None
     failed = result or {}
     return {
         "state": state, "model": model.repository if model else None,
-        "percent": min(100, int(match.group(1))) if match else None,
+        "percent": _flight.download_percent,
         "eta_seconds": _flight.download_eta_seconds,
         "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
@@ -334,7 +340,7 @@ async def cancel_local_setup() -> dict:
     except asyncio.CancelledError:
         pass
     finish_flight({"ok": True, "cancelled": True})
-    _download_progress(None, False)
+    _download_progress(None, False, None)
     _notify_models_changed()
     _emit("cancelled", model=operation.repository if operation else None)
     return {"ok": True, "cancelled": True}

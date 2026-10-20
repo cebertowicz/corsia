@@ -18,14 +18,15 @@ from llm.local_setup_runtime import apply_optimal_settings, configure_model_sett
 
 async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
                          model: LocalModel | None = None) -> dict:
-    from llm.local_sources import connected_local_server
+    from llm.local_sources import local_server_for_install
 
-    connected = await asyncio.to_thread(connected_local_server)
-    if connected is not None:
-        return {"ok": True, "existing": True, "server_id": connected["id"],
-                "message": "A local model is already connected. Its settings are unchanged.", "progress": events}
     await prepare.join()
-    server_id, port = await start_managed_omlx(report)
+    resolved = await local_server_for_install(report, start_managed=start_managed_omlx)
+    assert resolved is not None
+    server_id, port, existing = resolved
+    if existing:
+        return {"ok": True, "existing": True, "server_id": server_id,
+                "message": "A local model is already connected. Its settings are unchanged.", "progress": events}
     model = model or prepare.picked_model()
     if model is None:
         report("Finding the model that fits this computer")
@@ -121,13 +122,14 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
         if await resume_pending_setup():
             return ls._in_progress_result()
         return local_setup_error("CORSIA could not resume the local model setup safely.")
-    from llm.local_sources import connected_local_server
+    from llm.local_sources import local_server_for_install
 
-    connected = await asyncio.to_thread(connected_local_server)
-    if connected is not None:
+    existing = await local_server_for_install(lambda _stage: None, start_if_absent=False)
+    if existing is not None:
+        server_id, _port, _is_existing = existing
         if not ls._claim_operation("setup"):
             return ls._in_progress_result()
-        return ls.finish_flight({"ok": True, "existing": True, "server_id": connected["id"],
+        return ls.finish_flight({"ok": True, "existing": True, "server_id": server_id,
                                  "message": "A local model is already connected. Its settings are unchanged."})
     memory_ok = await asyncio.to_thread(local_memory_ok)
     ls.clear_result()

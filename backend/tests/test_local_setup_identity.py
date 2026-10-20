@@ -6,7 +6,7 @@ import psutil
 import pytest
 
 from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
-from llm import local_setup_ownership as installer
+from llm import local_setup_executable as installer
 
 
 def _process(pid, argv, *, name="Python", uid=501, status=psutil.STATUS_RUNNING):
@@ -158,7 +158,7 @@ def test_unowned_old_or_broken_binary_never_runs_homebrew(identity, monkeypatch,
 
 @pytest.mark.asyncio
 async def test_prepare_projects_personal_binary_update_cause_and_reference(monkeypatch):
-    from llm import local_setup, local_setup_new_omlx, local_setup_prepare as prepare
+    from llm import local_setup, local_setup_flow, local_setup_prepare as prepare
 
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare(state=prepare.CHECKING))

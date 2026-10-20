@@ -6,21 +6,20 @@ are visible on the next read; restarting does not change the projection.
 
 from __future__ import annotations
 
-import re
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from llm.catalog import list_models
 from llm.managed_omlx_binary import managed_omlx_executable
 from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
-from llm.local_setup_ownership import omlx_on_path
+from llm.local_setup_executable import omlx_on_path
 from llm.local_setup_gates import local_memory_ok
 from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
 CHECK_AGAIN = "Check again"
-_PERCENT = re.compile(r"(\d{1,3})%")
+# Download progress comes from the setup flight's structured state.
 
 
 def catalog_membership() -> tuple[set[str], set[str]]:
@@ -50,14 +49,7 @@ def _source(source: str, name: str, state: str, reason: str | None = None,
             "reason": reason, "fix": fix, "checked_at": checked_at}
 
 
-def _stage_percent(stage: str) -> int | None:
-    """The percent in a setup stage such as "Downloading Model (8.60 GiB, 45%)", else None.
-
-    The percent exists only inside the stage text the flight reports; this is the one
-    place it is read, so the app gets a number instead of parsing wording.
-    """
-    match = _PERCENT.search(stage)
-    return min(100, int(match.group(1))) if match else None
+# Stage copy is presentation-only; callers read structured progress from local_setup.
 
 
 def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
@@ -69,6 +61,29 @@ def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None)
             setup_error_reference=flight.get("ref"),
             bytes_to_free=flight.get("bytes_to_free"),
         )
+        if flight.get("fix"):
+            result["fix"] = flight["fix"]
+
+
+async def local_server_for_install(
+    report: Callable[[str], None], *,
+    start_managed: Callable[[Callable[[str], None]], Awaitable[tuple[str, int]]] | None = None,
+    start_if_absent: bool = True,
+) -> tuple[str, int, bool] | None:
+    """Resolve the one local server serving this install: connected first, else managed."""
+    import asyncio
+
+    connected = await asyncio.to_thread(connected_local_server)
+    if connected is not None:
+        return str(connected["id"]), int(connected.get("port") or 0), True
+    if not start_if_absent:
+        return None
+    if start_managed is None:
+        from llm.local_setup_runtime import start_managed_omlx
+
+        start_managed = start_managed_omlx
+    server_id, port = await start_managed(report)
+    return server_id, port, False
 
 
 def local_omlx_servers() -> list[dict]:
@@ -91,7 +106,7 @@ def connected_local_server() -> dict | None:
 def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
     """Project every local server row; only with none is this host's binary asked."""
     from llm.local_setup import (
-        download_estimate, setup_failure, setup_kind, setup_stage,
+        download_estimate, download_percent, setup_failure, setup_kind, setup_stage,
         setup_stopped_following,
     )
     from llm.local_setup_prepare import known_model
@@ -117,7 +132,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     if stage:
         result = starter_source("needs_setup", stage, OMLX_FIX)
         result["setup_stage"] = stage
-        result["download_percent"] = _stage_percent(stage)
+        result["download_percent"] = download_percent()
         eta_seconds, stalled = download_estimate()
         result["download_eta_seconds"] = eta_seconds
         result["download_stalled"] = stalled
@@ -181,7 +196,7 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
 
 def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
     """The registered local source row and its active download state."""
-    from llm.local_setup import flight_model, setup_kind, setup_stage
+    from llm.local_setup import download_percent, flight_model, setup_kind, setup_stage
 
     result = _omlx_state(membership)
     flying = result.get("setup_downloading") or result.get("setup_error")
@@ -197,7 +212,7 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         result["settings_download"] = {
             "name": model.display_name if model else None,
             "repository": model.repository if model else None,
-            "percent": _stage_percent(stage),
+            "percent": download_percent(),
             "failed": False,
         }
     else:

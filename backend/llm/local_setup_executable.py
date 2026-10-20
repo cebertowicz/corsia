@@ -18,6 +18,7 @@ PROBE_TIMEOUT_SECONDS = 15
 STREAM_COMMAND_OUTPUT = False
 STREAMING = threading.Event()
 _COMMAND_ENV = {"HOMEBREW_NO_ASK": "1"}
+_LEGACY_SETUP_MARKER = "local_setup_installed_omlx"
 
 
 class OwnOmlxUpgradeRequired(RuntimeError):
@@ -50,6 +51,41 @@ def omlx_on_path() -> str | None:
     """Locate the person's PATH executable without running it."""
     path = shutil.which("omlx")
     return None if path is None or managed.is_managed_omlx_executable(path) else path
+
+
+def legacy_setup_marker_path() -> Path:
+    """Locate the marker written by published pre-record setup installs."""
+    from infra.config import STATE_ROOT
+
+    return Path(STATE_ROOT) / _LEGACY_SETUP_MARKER
+
+
+def legacy_setup_is_foreign() -> bool:
+    """Keep the legacy record migration off an unmarked or replaced oMLX install."""
+    current = omlx_on_path()
+    marker = legacy_setup_marker_path()
+    if current is None or not marker.exists():
+        return current is not None
+    brew = shutil.which("brew")
+    if not brew:
+        return True
+    try:
+        versions = managed.command_output([brew, "list", "--versions", managed.OMLX_FORMULA])
+        prefix = managed.command_output([brew, "--prefix", managed.OMLX_FORMULA])
+        return not bool(versions and prefix and Path(current).resolve().is_relative_to(Path(prefix).resolve()))
+    except (OSError, subprocess.SubprocessError):
+        return True
+
+
+def legacy_omlx_settings_file() -> Path:
+    """Find the pre-redesign oMLX settings used to prove its completed starter."""
+    bootstrap = Path.home() / "Library" / "Application Support" / "oMLX" / "base-path"
+    try:
+        moved = bootstrap.read_text(encoding="utf-8").strip()
+    except OSError:
+        moved = ""
+    base = Path(moved).expanduser() if moved else Path.home() / ".omlx"
+    return base / "settings.json"
 
 
 def run_command(command: list[str]) -> None:
@@ -86,21 +122,19 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False, 
                 "for a broken installation), then try again; or install the CORSIA app to use its bundled oMLX."
             )
         return
-    if current is None:
-        if not brew:
-            raise RuntimeError("Homebrew is required to install oMLX. Install Homebrew, then retry.")
-        progress("Installing oMLX")
+    if not brew:
+        raise RuntimeError("Homebrew is required to install oMLX. Install Homebrew, then retry.")
+    progress("Installing oMLX")
+    try:
+        run_command([brew, "tap", "jundot/omlx", "https://github.com/jundot/omlx"])
         try:
-            run_command([brew, "tap", "jundot/omlx", "https://github.com/jundot/omlx"])
-            try:
-                run_command([brew, "install", managed.OMLX_FORMULA])
-            except (OSError, subprocess.SubprocessError) as exc:
-                if not managed.command_output([brew, "list", "--versions", managed.OMLX_FORMULA]):
-                    raise exc
-                run_command([brew, "link", "--overwrite", "omlx"])
+            run_command([brew, "install", managed.OMLX_FORMULA])
         except (OSError, subprocess.SubprocessError) as exc:
-            raise RuntimeError(homebrew_failure_message("install", exc)) from exc
-        return
+            if not managed.command_output([brew, "list", "--versions", managed.OMLX_FORMULA]):
+                raise exc
+            run_command([brew, "link", "--overwrite", "omlx"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(homebrew_failure_message("install", exc)) from exc
 
 
 _LOG_ERROR = re.compile(r"^(ERROR|CRITICAL)\b| - (ERROR|CRITICAL) - |^\w*(Error|Exception):")

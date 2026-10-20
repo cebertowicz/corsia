@@ -2,7 +2,7 @@
 	export type AiRow = {
 		key: string; name: string; meta: string;
 		pill?: { state: 'success' | 'loading'; label: string };
-		busy?: boolean; error?: boolean; detail?: string;
+		busy?: boolean; error?: boolean; detail?: string; reference?: string;
 		/** The spinner stays beside the action (an install under way, with Cancel) instead of giving way to it. */
 		spinning?: boolean;
 		action?: { label: string; run: () => void; loading?: boolean };
@@ -41,7 +41,7 @@
 					{:else if row.busy}<Spinner size={14} />{/if}
 				{/snippet}
 			</ListRow>
-			{#if row.detail}<div class="disclosure" in:disclosureMotion out:disclosureMotion><p class="detail" class:err={row.error}>{row.detail}</p></div>{/if}
+			{#if row.detail || row.reference}<div class="disclosure" in:disclosureMotion out:disclosureMotion>{#if row.detail}<p class="detail" class:err={row.error}>{row.detail}</p>{/if}{#if row.reference}<p class="reference">Reference: {row.reference}</p>{/if}</div>{/if}
 			{#if row.confirm ?? row.more}
 				<div class="disclosure" in:disclosureMotion out:disclosureMotion><div class="inrow">{#each row.confirm ?? row.more ?? [] as item (item.label)}<Button variant="chip" size="sm" onclick={item.run}>{item.label}</Button>{/each}</div></div>
 			{/if}
@@ -56,5 +56,6 @@
 	.disclosure { display: grid; grid-template-rows: 1fr; overflow: hidden; }
 	.detail { margin: var(--space-2) 0 0; font-size: var(--text-subhead); color: var(--text-secondary); line-height: var(--lh-normal); text-wrap: pretty; }
 	.detail.err { color: var(--red-text); }
+	.reference { margin: var(--space-1) 0 0; font-size: var(--text-caption); color: var(--text-secondary); }
 	.inrow { display: flex; gap: var(--space-2); margin: var(--space-1) 0 0 calc(var(--space-2) * -1); }
 </style>

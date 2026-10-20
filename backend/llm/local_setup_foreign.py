@@ -15,6 +15,13 @@ log = logging.getLogger(__name__)
 OtherOmlxChoice = Literal["stop", "keep"]
 
 
+def _emit(action: str, **properties: object) -> None:
+    """Send foreign-oMLX transitions through local setup's existing event owner."""
+    from llm.local_setup import _emit as emit
+
+    emit(action, **properties)
+
+
 def foreign_omlx_choice_path() -> Path:
     """Return the private server record of the offered PID set and the person's answer."""
     from infra.config import STATE_ROOT
@@ -109,22 +116,27 @@ def apply_foreign_omlx_choice(*, other_omlx: OtherOmlxChoice | None = None) -> s
     remembered = record.get("choice")
     if other_omlx == "keep":
         _write_choice("keep", pids, applied=True)
+        _emit("foreign_omlx_kept", pids=pids)
         return None
     if other_omlx == "stop":
         if record.get("pids") != pids:
             _write_choice(None, pids, applied=False)
+            _emit("foreign_omlx_changed", outcome="changed", pids=pids)
             return "foreign_omlx_changed"
         _write_choice("stop", pids, applied=False)
     elif remembered == "keep":
         return None
     elif remembered != "stop" or record.get("pids") != pids:
         _write_choice(None, pids, applied=False)
+        _emit("foreign_omlx_offered", pids=pids)
         return "consent_required"
     stop_result = stop_foreign_omlx_processes(processes)
     if stop_result == "unknown":
         _continue_after_unknown_inspection()
         return None
     if stop_result != "stopped":
+        _emit("foreign_omlx_changed", outcome=stop_result, pids=pids)
         return "foreign_omlx_changed"
     _write_choice("stop", pids, applied=True)
+    _emit("foreign_omlx_stopped", pids=pids)
     return None

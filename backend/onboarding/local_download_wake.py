@@ -18,7 +18,11 @@ from llm.local_setup_results import CAUSES, setup_fix
 
 log = logging.getLogger(__name__)
 EVENT = "onboarding.local_download"
-CHIP = "Your local-model download changed."
+def chip_for(outcome: str) -> str:
+    """Name the local download's terminal outcome in the wake chip."""
+    return "Local model download ready." if outcome == "ready" else "Local model download failed."
+
+
 SUMMARY = (
     "A local model download that was active when setup handed off has reached a terminal "
     "state. Tell the person the outcome and one next step; do not rebind the CORSIA agent."
@@ -84,7 +88,7 @@ async def flush_pending_local_download(conductor_id: str | None = None) -> bool:
         delivery_id = f"local-download:{operation.flight_id}:{outcome}"
         try:
             delivered = await deliver_to_thread(
-                current, EVENT, SUMMARY, delivery_id=delivery_id, chip=CHIP,
+                current, EVENT, SUMMARY, delivery_id=delivery_id, chip=chip_for(outcome),
                 notice="## Local model download\n\n" + json.dumps(payload, sort_keys=True, ensure_ascii=False),
             )
         except Exception:

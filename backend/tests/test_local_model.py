@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from llm import local_model, local_setup, local_setup_operation, local_sources
-from llm import local_setup_prepare as prepare, local_setup_new_omlx as flow, local_setup_runtime as runtime
+from llm import local_setup_prepare as prepare, local_setup_flow as flow, local_setup_runtime as runtime
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, STARTER_MODEL
 from omlx_recommender_fixtures import FIXTURE, THINKING, best_rows as _best, mac_with as _mac

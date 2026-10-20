@@ -201,7 +201,7 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
     started = AsyncMock(return_value={"ok": True})
     choice = Mock(side_effect=["consent_required", None, None])
     monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", choice)
-    monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", started)
+    monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", started)
 
     assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
     kept = client.post("/api/setup/local-download", json={"other_omlx": "keep"}, headers=JSON_HEADERS)

@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from llm import local_setup, local_setup_operation, local_setup_new_omlx as flow
+from llm import local_setup, local_setup_operation, local_setup_flow as flow
 from llm.local_model import LocalModel
 
 PICK = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 40_960)
@@ -67,7 +67,7 @@ def test_pending_operation_is_recovered_before_a_new_managed_flight(monkeypatch)
         recovered.append(True)
         return True
 
-    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", resume_pending_setup)
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", resume_pending_setup)
 
     result = asyncio.run(flow.begin_local_setup())
 

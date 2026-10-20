@@ -14,25 +14,25 @@ from llm.network_discovery import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
 from llm.local_setup_download import StillDownloading
+from llm.local_setup_runtime import start_managed_omlx
 
 log = logging.getLogger(__name__)
 
 
-async def _managed_download(report: Callable[[str], None], model: LocalModel) -> str:
-    """Download through CORSIA's managed oMLX only."""
+async def _download_to_local_server(report: Callable[[str], None], model: LocalModel) -> str:
+    """Download through this install's connected local server, else its managed one."""
     from llm import local_setup as ls
-    from llm.local_setup_runtime import start_managed_omlx
+    from llm.local_sources import local_server_for_install
 
-    server_id, _port = await start_managed_omlx(report)
+    resolved = await local_server_for_install(report, start_managed=start_managed_omlx)
+    assert resolved is not None
+    server_id, _port, _existing = resolved
     await ls._download(server_id, report, model)
     return server_id
 
 
-async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> None:
-    """Load only a downloaded CORSIA-managed model that the existing memory gate permits."""
-    if not allowed:
-        log.warning("Skipping automatic local-model load: CORSIA does not manage this oMLX")
-        return
+async def _auto_load(server_id: str, model: LocalModel) -> None:
+    """Load a downloaded local model when the existing memory gate permits."""
     from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
 
     try:
@@ -125,7 +125,7 @@ async def run(report: Callable[[str], None], model: LocalModel) -> dict:
         report(value)
         events.append(value)
 
-    server_id = await _managed_download(stage, model)
+    server_id = await _download_to_local_server(stage, model)
     # An applied benchmark owns the one settings PUT and carries CORSIA's
     # required fields first. A missing/offline benchmark falls back to the
     # ordinary per-model writer without treating that best-effort step as a
@@ -140,5 +140,5 @@ async def run(report: Callable[[str], None], model: LocalModel) -> dict:
         raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
     # The durable record belongs to this exact local server; UI metadata never crosses servers.
     local_downloads.write(local_downloads.Download(model, speed=speed, server_id=server_id))
-    await _auto_load(server_id, model, allowed=True)
+    await _auto_load(server_id, model)
     return {"ok": True, "server_id": server_id, "model": model.model, "progress": events, "speed": speed}

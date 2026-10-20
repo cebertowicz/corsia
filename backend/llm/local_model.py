@@ -210,28 +210,35 @@ def record_set_up(model: LocalModel) -> None:
 
 
 def _starter_installed(starter: LocalModel) -> bool:
-    """Whether CORSIA's private model directory holds the completed starter."""
-    from llm.managed_omlx_binary import managed_omlx_paths
+    """Whether the published setup's oMLX directory holds its completed starter."""
     from llm.local_setup_disk import download_complete
+    from llm.local_setup_executable import legacy_omlx_settings_file
 
-    model_dir = managed_omlx_paths().model_dir
-    return download_complete(model_dir / starter.repository, starter.download_size_bytes)
+    try:
+        raw = json.loads(legacy_omlx_settings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    model = raw.get("model") if isinstance(raw, dict) else None
+    model_dir = model.get("model_dir") if isinstance(model, dict) else None
+    return isinstance(model_dir, str) and bool(model_dir) and download_complete(
+        Path(model_dir) / starter.repository, starter.download_size_bytes,
+    )
 
 
 def backfill_legacy_record() -> LocalModel | None:
     """Once at startup, record the starter a finished pre-record setup installed.
 
     Writes only when there is no record or recovery record (a setup may be mid-
-    download) and CORSIA's private model directory holds the whole starter.
+    download), the published setup marker still owns oMLX, and that oMLX holds the starter.
     Blocking: run it off the event loop.
     """
     from llm import local_setup_operation
     from llm.local_profiles import STARTER_MODEL
+    from llm.local_setup_executable import legacy_setup_is_foreign, legacy_setup_marker_path, omlx_on_path
 
-    if _record_path().exists() or local_setup_operation.record_path().exists():
-        return None
-    if not _starter_installed(STARTER_MODEL):
-        return None
+    if (_record_path().exists() or local_setup_operation.record_path().exists()
+            or not legacy_setup_marker_path().exists() or omlx_on_path() is None
+            or legacy_setup_is_foreign() or not _starter_installed(STARTER_MODEL)):        return None
     try:
         record_set_up(STARTER_MODEL)
     except OSError as error:

@@ -302,9 +302,21 @@ async def local_download(request: Request) -> dict | Response:
         other_omlx=body.other_omlx,
     ):
         return JSONResponse(status_code=409, content={"code": refusal})
-    from llm.local_setup_new_omlx import begin_local_setup
+    from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(onboarding=True)
+
+
+@router.post("/local-download/stop", response_model=None)
+async def stop_local_download(request: Request) -> dict | Response:
+    """Stop the pre-account setup flight under the same local JSON boundary that starts it."""
+    if not _trusted_json_post(request):
+        return Response(status_code=403)
+    if await run_in_db(accounts.has_users):
+        return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
+    from llm.local_setup import cancel_local_setup
+
+    return await cancel_local_setup()
 
 
 @router.get("/classifier", response_model=None)

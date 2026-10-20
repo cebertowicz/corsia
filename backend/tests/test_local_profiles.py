@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from llm import local_profiles, local_setup, local_setup_operation, local_setup_new_omlx as flow, local_setup_runtime as runtime, local_setup_download as downloads
+from llm import local_profiles, local_setup, local_setup_operation, local_setup_flow as flow, local_setup_runtime as runtime, local_setup_download as downloads
 from llm.local_model import LocalModel
 
 GIB = 1024**3
@@ -28,7 +28,7 @@ def fresh_flight(monkeypatch):
     local_setup_operation.clear()
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: None)
-    # The setup flight always targets CORSIA's private managed oMLX.
+    # Each test starts with an unclaimed local setup flight.
     yield
     local_setup_operation.clear()
 
@@ -41,7 +41,7 @@ def test_local_setup_view_reads_ram_once_per_process(monkeypatch):
     reads = []
     monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: reads.append(True) or 128 * GIB)
     local_setup_gates.host_ram_bytes.cache_clear()
-    # The setup flight always targets CORSIA's private managed oMLX.
+    # Each test starts with an unclaimed local setup flight.
     monkeypatch.setattr("llm.local_model.set_up_model", lambda: None)
     monkeypatch.setattr(local_setup_prepare, "_prepare", local_setup_prepare._Prepare())
 
@@ -214,7 +214,7 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None
     async def start_managed(_report):
         return "srv", 5200
 
-    monkeypatch.setattr("llm.local_setup_new_omlx.start_managed_omlx", start_managed)
+    monkeypatch.setattr("llm.local_setup_flow.start_managed_omlx", start_managed)
 
     monkeypatch.setattr(local_setup, "_wait_for_download", download)
     monkeypatch.setattr(flow, "configure_model_settings", model_settings)
@@ -311,6 +311,25 @@ def test_an_already_connected_local_model_keeps_its_settings(monkeypatch):
     assert wrote == []
 
 
+def test_settings_download_reuses_a_connected_local_server(monkeypatch):
+    from llm import local_settings_download
+
+    downloaded: list[str] = []
+
+    async def download(server_id, _report, _model):
+        downloaded.append(server_id)
+
+    async def must_not_start(_report):
+        raise AssertionError("Settings must not start a second managed oMLX")
+
+    monkeypatch.setattr(local_setup, "_download", download)
+    monkeypatch.setattr("llm.local_sources.connected_local_server", lambda: {"id": "mine", "port": 8000})
+    monkeypatch.setattr(local_settings_download, "start_managed_omlx", must_not_start)
+
+    assert asyncio.run(local_settings_download._download_to_local_server(lambda _stage: None, MODEL)) == "mine"
+    assert downloaded == ["mine"]
+
+
 @pytest.fixture
 def client(monkeypatch):
     from api.provider_sources import router
@@ -330,7 +349,7 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
         calls.append(kwargs)
         return {"ok": True, "in_progress": True}
 
-    monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+    monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
     monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     # With no personal process, the route delegates to the private setup flight.
 

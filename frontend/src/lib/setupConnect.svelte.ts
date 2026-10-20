@@ -7,7 +7,7 @@ type InstallFailureCause = 'connection' | 'site_refused' | 'download_unverified'
 type ConnectPhase = { phase: 'installing' | 'signing-in' | 'path-shadow' | 'failed'; installed?: boolean; accountId?: string; failed?: 'install' | 'signin'; reason?: string | null; cause?: InstallFailureCause; ref?: string | null; shadowedBinary?: string };
 export type SetupAttempt = { attempt: 'none' | 'installed' | 'install_failed' | 'signin_failed'; cause?: string; ref?: string };
 export type RowView = {
-	meta: string; ready?: boolean; busy?: boolean; spinning?: boolean; error?: boolean; detail?: string; reportable?: boolean;
+	meta: string; ready?: boolean; busy?: boolean; spinning?: boolean; error?: boolean; detail?: string; reference?: string; reportable?: boolean;
 	action?: { label: string; run: () => void };
 	confirm?: { label: string; run: () => void }[];
 	more?: { label: string; run: () => void }[];
@@ -26,14 +26,13 @@ export function installCause(cause?: InstallFailureCause | null): InstallFailure
 
 /** Keep refusal recovery distinct from retryable installer failures without exposing installer output. */
 export function installFailureCopy(cli: string, cause?: InstallFailureCause | null, ref?: string | null) {
-	const reference = ref ? ` Reference: ${ref}` : '';
 	if (installCause(cause) === 'site_refused') {
-		return { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.${reference}`, retry: false };
+		return { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.`, reference: ref ?? undefined, retry: false };
 	}
 	if (installCause(cause) === 'connection') {
 		return { meta: `Couldn’t download ${cli}. Check your internet connection, then retry.`, retry: true };
 	}
-	return { meta: `Couldn’t install ${cli}. Try again, or save a report.${reference}`, retry: true };
+	return { meta: `Couldn’t install ${cli}. Try again, or save a report.`, reference: ref ?? undefined, retry: true };
 }
 
 /** Install once on Set up, then sign in; retain setup-only attempts for the handoff. */
@@ -120,11 +119,11 @@ export function createSetupConnect(deps: ConnectDeps) {
 	function connectRow(source: ModelSource): RowView {
 		const copy = VENDOR_COPY[source.source], entry = flow[source.source];
 		if (entry?.phase === 'installing') return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true, action: { label: 'Cancel', run: () => void cancelInstall(source) } };
-		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
+		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in from your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') return { meta: 'Couldn’t finish signing in. Sign in again.', error: true, action: { label: 'Sign in', run: () => void beginSignIn(source) } };
 		if (entry?.phase === 'failed') {
 			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref);
-			return { meta: failure.meta, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source) } : undefined };
+			return { meta: failure.meta, reference: failure.reference, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source) } : undefined };
 		}
 		if (entry?.phase === 'path-shadow') return { meta: `An older ${copy.cli} at ${entry.shadowedBinary} runs instead of the one CORSIA installed. Remove it, then come back here.`, error: true, action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
 		if (source.limited) return { meta: source.resets_at ? `Signed in, but your ${copy.account} subscription has reached its usage limit until ${formatMoment(new Date(source.resets_at))}.` : `Signed in, but your ${copy.account} subscription has reached its usage limit.` };

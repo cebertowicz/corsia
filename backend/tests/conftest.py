@@ -349,9 +349,9 @@ async def _wait(pred, tries: int = 400, delay: float = 0.02) -> bool:
 @pytest.fixture(autouse=True)
 def _omlx_leftover_probe_never_runs_a_binary(monkeypatch):
     """Tests fake `shutil.which("omlx")` paths; none of them may be executed to probe."""
-    from llm import local_setup_ownership
+    from llm import local_setup_executable
 
-    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: False)
+    monkeypatch.setattr(local_setup_executable, "_is_broken_leftover", lambda _path: False)
 
 
 @pytest.fixture(autouse=True)

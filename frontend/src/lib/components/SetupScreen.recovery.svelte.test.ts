@@ -82,9 +82,9 @@ describe('SetupScreen account recovery', () => {
 
 describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'Another oMLX is running. Quit your other oMLX, then try again.'],
+		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'The other oMLX copies changed or couldn’t stop. Retry asks again, or keep them running.'],
 		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t set up the local model. Try again.'],
-		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t set up the local model. Try again. Reference: local-start-123'],
+		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t set up the local model. Try again.'],
 		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t set up the local model. Try again.'],
 	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });

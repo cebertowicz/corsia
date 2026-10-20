@@ -63,7 +63,7 @@ def failure_message(exc: Exception) -> str:
 def failure_cause(exc: Exception) -> str:
     """Classify local-flight exceptions into stable setup-status cause codes."""
     from llm.local_setup_disk import DiskSpaceError
-    from llm.local_setup_ownership import OwnOmlxUpgradeRequired
+    from llm.local_setup_executable import OwnOmlxUpgradeRequired
 
     if isinstance(exc, OwnOmlxUpgradeRequired):
         return "own_omlx_upgrade_required"
@@ -118,10 +118,17 @@ class DownloadProgress:
         if self.bytes_per_second and not self.stalled:
             self.eta_seconds = max(0, round((float(total) - current) / self.bytes_per_second))
 
-    def due(self, downloaded: object, total: object, now: float) -> int | None:
+    @staticmethod
+    def percent(downloaded: object, total: object) -> int | None:
+        """Return structured bounded download progress, if oMLX reported both sizes."""
         if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total):
             return None
-        percent = min(100, max(0, int(downloaded / total * 100)))
+        return min(100, max(0, int(downloaded / total * 100)))
+
+    def due(self, downloaded: object, total: object, now: float) -> int | None:
+        percent = self.percent(downloaded, total)
+        if percent is None:
+            return None
         step = percent // self.step * self.step
         timed = self.seconds is not None and now - self.reported_at >= self.seconds
         if not ((step and step != self.reported_step) or timed):

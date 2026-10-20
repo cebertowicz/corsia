@@ -801,7 +801,7 @@ class TestRecheck:
             calls.append(kwargs)
             return result
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").json() == result
         assert calls == [{"no_subscription_only": False, "automatic": False, "onboarding": False}]
         assert client.post("/api/providers/local/setup", json={
@@ -833,7 +833,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True, "in_progress": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup", json={"other_omlx": "keep"}).status_code == 200
         current["pid"] = 4243
         assert client.post("/api/providers/local/setup").status_code == 200
@@ -859,7 +859,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").json() == {"detail": {"code": "consent_required"}}
         assert client.post("/api/providers/local/setup", json={"other_omlx": "stop"}).status_code == 200
         assert stops == [offered]
@@ -881,7 +881,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup", json={"other_omlx": "keep"}).status_code == 200
         assert choice.read_text(encoding="utf-8") == '{"choice": "keep", "pids": [4242], "applied": true}'
 
@@ -907,7 +907,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True, "in_progress": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").status_code == 409
         assert stops == []
         assert choice.read_text(encoding="utf-8") == '{"choice": null, "pids": [4242], "applied": false}'
@@ -932,7 +932,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         current["pid"] = 4243
         response = client.post("/api/providers/local/setup")
         assert response.status_code == 409
@@ -958,7 +958,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True, "in_progress": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         response = client.post("/api/providers/local/setup")
 
         assert response.status_code == 200
@@ -971,7 +971,7 @@ class TestRecheck:
         async def should_not_start(**_kwargs):
             raise AssertionError("setup must wait for a foreign-process choice")
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", should_not_start)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", should_not_start)
         response = client.post("/api/providers/local/setup")
 
         assert response.status_code == 409
@@ -991,7 +991,7 @@ class TestRecheck:
         async def begin(**_kwargs):
             return {"ok": True, "in_progress": True}
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
         response = client.post("/api/providers/local/setup", json=body)
 
         assert response.status_code == 200
@@ -1005,7 +1005,7 @@ class TestRecheck:
         async def should_not_start(**_kwargs):
             raise AssertionError("setup must not start after a foreign-process refusal")
 
-        monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", should_not_start)
+        monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", should_not_start)
         response = client.post("/api/providers/local/setup", json={"other_omlx": "stop"})
 
         assert response.status_code == 409

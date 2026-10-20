@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from llm import local_setup_ownership as own
+from llm import local_setup_executable as own
 
 _REAL_PROBE = own._is_broken_leftover
 

@@ -80,7 +80,7 @@ def _post(client, path: str, body: dict | None = None, *, headers: dict | None =
 
 # Every pre-auth route, as the app calls it.
 ROUTES = [
-    ("GET", "/api/setup/status"), ("POST", "/api/setup/local-download"), ("POST", "/api/setup/first-account"),
+    ("GET", "/api/setup/status"), ("POST", "/api/setup/local-download"), ("POST", "/api/setup/local-download/stop"), ("POST", "/api/setup/first-account"),
     ("GET", "/api/setup/local-model"), ("POST", "/api/setup/local-model"), ("POST", "/api/setup/local-model/stop"),
 ]
 POSTS = [path for method, path in ROUTES if method == "POST"]
@@ -180,7 +180,7 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
 
 
 def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_exists(client, monkeypatch):
-    from llm import local_setup_new_omlx as flow
+    from llm import local_setup_flow as flow
 
     monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     calls = 0
@@ -200,7 +200,7 @@ def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_e
 
 
 def test_local_download_continues_when_process_inspection_is_unknown(client, monkeypatch, caplog):
-    from llm import local_setup_new_omlx as flow, local_setup_foreign
+    from llm import local_setup_flow as flow, local_setup_foreign
 
     monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: None)
 
@@ -217,7 +217,7 @@ def test_local_download_continues_when_process_inspection_is_unknown(client, mon
 
 
 def test_local_download_requires_explicit_choice_before_foreign_omlx_action(client, monkeypatch):
-    from llm import local_setup_new_omlx as flow
+    from llm import local_setup_flow as flow
 
     monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", lambda **_kwargs: "consent_required")
 
@@ -232,7 +232,7 @@ def test_local_download_requires_explicit_choice_before_foreign_omlx_action(clie
 
 
 def test_local_download_stops_only_the_identified_foreign_process_after_choice(client, monkeypatch):
-    from llm import local_setup_new_omlx as flow
+    from llm import local_setup_flow as flow
 
     choices: list[str | None] = []
     monkeypatch.setattr(

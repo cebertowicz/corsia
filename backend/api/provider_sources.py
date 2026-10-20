@@ -147,7 +147,7 @@ async def setup_local_source(
         other_omlx=other_omlx,
     ):
         raise HTTPException(status_code=409, detail={"code": refusal})
-    from llm.local_setup_new_omlx import begin_local_setup
+    from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)
 

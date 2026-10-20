@@ -280,7 +280,7 @@ async def test_download_resumes_the_same_model_operation(monkeypatch) -> None:
         resumed.append(model)
         return {"ok": True, "resumed": True}
 
-    monkeypatch.setattr("llm.local_setup_new_omlx.begin_settings_download", begin)
+    monkeypatch.setattr("llm.local_setup_flow.begin_settings_download", begin)
 
     assert await provider_local_models.download_model({"repository": MODEL.repository}, {}) == {"ok": True, "resumed": True}
     assert resumed == [MODEL]

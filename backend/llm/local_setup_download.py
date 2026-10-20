@@ -28,7 +28,7 @@ async def wait_for_download(
     model: LocalModel,
     *,
     record_task: Callable[[LocalModel, str], None],
-    on_progress: Callable[[int | None, bool], None],
+    on_progress: Callable[[int | None, bool, int | None], None],
     wait_seconds: float = DOWNLOAD_WAIT_SECONDS,
     poll_seconds: float = DOWNLOAD_POLL_SECONDS,
     background_poll_seconds: float = DOWNLOAD_BACKGROUND_POLL_SECONDS,
@@ -68,8 +68,9 @@ async def wait_for_download(
         status = str(task.get("status") or "").lower()
         observed_at = time.monotonic()
         tracker.observe(task.get("downloaded_size"), task.get("total_size"), observed_at)
-        on_progress(tracker.eta_seconds, tracker.stalled)
-        shown = tracker.due(task.get("downloaded_size"), task.get("total_size"), observed_at)
+        downloaded, total = task.get("downloaded_size"), task.get("total_size")
+        on_progress(tracker.eta_seconds, tracker.stalled, DownloadProgress.percent(downloaded, total))
+        shown = tracker.due(downloaded, total, observed_at)
         if shown is not None:
             progress(f"Downloading {model.model} ({format_size(model.download_size_bytes)}, {shown}%)")
         if status in {"completed", "complete", "success", "succeeded"}:

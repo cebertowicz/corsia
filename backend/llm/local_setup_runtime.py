@@ -14,7 +14,7 @@ import httpx
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
 from llm.local_setup_auth import SKIP_AUTH_SETTING, UPDATE_OMLX_MESSAGE, _omlx_supports_loopback_auth, omlx_version, secure_local_omlx
-from llm.local_setup_ownership import ensure_omlx, omlx_log_detail
+from llm.local_setup_executable import ensure_omlx, omlx_log_detail
 from llm.managed_omlx_binary import MANAGED_INSTANCE_ID, reserve_managed_omlx_port
 
 log = logging.getLogger(__name__)

@@ -152,7 +152,7 @@
 				setup_downloading: live.state === 'downloading', setup_stage: live.state === 'starting' ? 'starting' : undefined,
 				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
 				setup_error: ['failed', 'setup_failed', 'start_failed'].includes(live.state) ? live.cause ?? live.state : undefined,
-				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free };
+				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
 			localPending = false;
 		} catch { /* Preserve the last job projection until the next successful read. */ }
 	}
@@ -184,7 +184,16 @@
 		} catch { localStartError = 'other'; }
 		finally { localBusy = false; }
 	}
-	async function stopLocal() { const current = get(token); if (current) { await cancelLocalDownload(current); await refreshSources(); } localPending = false; }
+	async function stopLocal() {
+		const current = get(token);
+		if (current) { await cancelLocalDownload(current); await refreshSources(); }
+		else await fetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+		localPending = false;
+	}
+	async function connectToAnotherComputer() {
+		await stopLocal();
+		remote.reset(); page = 'connect';
+	}
 	async function createAccount() {
 		if (!accountValid || accountBusy) return;
 		accountBusy = true; accountError = '';
@@ -257,7 +266,7 @@
 <SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} mark={view.mark} aside={page === 'account' && $isSetupWide ? welcomeAside : undefined} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
-		{:else if (screen === 'welcome' || page === 'account') && canConnect}<Button variant="chip" onclick={() => { remote.reset(); page = 'connect'; }}>Connect to CORSIA on another computer</Button>
+		{:else if (screen === 'welcome' || page === 'account') && canConnect}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}

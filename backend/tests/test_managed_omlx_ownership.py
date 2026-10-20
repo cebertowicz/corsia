@@ -98,7 +98,7 @@ async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
         calls.append("notice")
 
     monkeypatch.setattr(local_model, "backfill_legacy_record", broken)
-    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", resumed)
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
 
 
@@ -129,7 +129,7 @@ async def test_manual_loopback_row_survives_startup_retirement_after_upgrade(iso
         return None
 
     monkeypatch.setattr(local_model, "backfill_legacy_record", lambda: None)
-    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", resumed)
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
 
 

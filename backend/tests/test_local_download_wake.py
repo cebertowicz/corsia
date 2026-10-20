@@ -75,7 +75,7 @@ async def test_failed_delivery_logs_once_and_keeps_the_same_durable_flight(monke
 
 @pytest.mark.asyncio
 async def test_startup_restores_terminal_state_without_redownloading_and_delivers_once(monkeypatch, wake):
-    from llm import local_setup, local_setup_new_omlx as flow, local_setup_operation as records
+    from llm import local_setup, local_setup_flow as flow, local_setup_operation as records
 
     _record({"ok": True}, flight_id="restart")
     delivered = AsyncMock(return_value=True)
@@ -139,7 +139,7 @@ async def test_nonterminal_cancelled_and_nononboarding_work_never_wake(monkeypat
 
 @pytest.mark.asyncio
 async def test_failure_reference_matches_the_rail_and_log(monkeypatch, wake, caplog):
-    from llm import local_setup, local_setup_new_omlx as flow
+    from llm import local_setup, local_setup_flow as flow
     from onboarding import local_download_state
 
     async def failed_setup(*_args, **_kwargs):

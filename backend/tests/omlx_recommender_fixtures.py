@@ -88,7 +88,7 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
     """A Mac with ``gib`` of memory whose managed oMLX answers from the recording."""
     import infra.state.ws
     import llm.catalog_network_models
-    import llm.local_setup_new_omlx
+    import llm.local_setup_flow
 
     mac = SimpleNamespace(omlx=FakeOmlx(int(gib), answers), started=[], health=[], downloads=[], stopped=[])
 
@@ -114,7 +114,7 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
     from llm.local_setup_gates import host_ram_bytes
     host_ram_bytes.cache_clear()
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", mac.omlx.admin_request)
-    monkeypatch.setattr(llm.local_setup_new_omlx, "start_managed_omlx", start)
+    monkeypatch.setattr(llm.local_setup_flow, "start_managed_omlx", start)
     monkeypatch.setattr("llm.local_setup_prepare.start_managed_omlx", start)
     # start_managed_omlx owns the managed process lifecycle and supplies its port above.
     monkeypatch.setattr(local_setup, "_download", download)

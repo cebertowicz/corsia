@@ -48,13 +48,32 @@ async def test_startup_delivery_failure_has_traceback_reference_and_durable_fail
     operation = records.Operation.for_model(None, "setup", onboarding=True)
     records.write(operation)
     monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
-    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", AsyncMock(return_value=False))
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", AsyncMock(return_value=False))
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", AsyncMock(side_effect=RuntimeError("notice failed")))
     await app_startup_runtime.resume_local_setup()
     status = flight.setup_status()
     assert status["state"] == "failed"
     assert status["ref"].startswith("local-")
     assert local_download_state.current()["ref"] == status["ref"]
+    assert records.read().result["ref"] == status["ref"]
+    assert any(row.exc_info and f"reference={status['ref']}" in row.message for row in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_startup_resume_failure_has_traceback_reference_and_durable_failed_state(flight, monkeypatch, caplog):
+    import app_startup_runtime
+    from llm import local_setup_operation as records
+
+    records.write(records.Operation.for_model(None, "setup", onboarding=True))
+    monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", AsyncMock(side_effect=RuntimeError("resume failed")))
+    monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", AsyncMock(return_value=None))
+
+    await app_startup_runtime.resume_local_setup()
+
+    status = flight.setup_status()
+    assert status["state"] == "failed"
+    assert status["ref"].startswith("local-")
     assert records.read().result["ref"] == status["ref"]
     assert any(row.exc_info and f"reference={status['ref']}" in row.message for row in caplog.records)
 
@@ -67,7 +86,7 @@ async def test_startup_delivery_failure_preserves_a_ready_outcome(flight, monkey
     ready = replace(records.Operation.for_model(None, "setup", onboarding=True), result={"ok": True})
     records.write(ready)
     monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
-    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", AsyncMock(return_value=False))
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", AsyncMock(return_value=False))
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", AsyncMock(side_effect=RuntimeError("notice failed")))
 
     await app_startup_runtime.resume_local_setup()
@@ -85,7 +104,7 @@ async def test_startup_delivery_failure_preserves_a_live_flight(flight, monkeypa
     task = asyncio.create_task(asyncio.Event().wait())
     flight._flight.task = task
     monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
-    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", AsyncMock(return_value=True))
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", AsyncMock(return_value=True))
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", AsyncMock(side_effect=RuntimeError("notice failed")))
     try:
         await app_startup_runtime.resume_local_setup()
@@ -98,7 +117,7 @@ async def test_startup_delivery_failure_preserves_a_live_flight(flight, monkeypa
 
 @pytest.mark.asyncio
 async def test_existing_registered_local_model_is_visible_and_setup_and_prepare_do_not_modify_it(isolated_db, flight, monkeypatch):
-    from llm import local_setup_new_omlx as flow, local_setup_prepare as prepare, local_sources
+    from llm import local_setup_flow as flow, local_setup_prepare as prepare, local_sources
     from llm import network_discovery as discovery
     from test_managed_omlx_ownership import _model_row
 
