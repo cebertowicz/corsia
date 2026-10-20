@@ -106,6 +106,12 @@ def binary_from_config(provider: str, cfg: dict) -> str | None:
         p = os.path.expanduser(c)
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
+    if provider == "github":
+        # This reads a prior verified CORSIA install only; it never turns status
+        # discovery into an unapproved network download.
+        from tools.managed_runtime import installed_command_path
+
+        return installed_command_path("gh")
     return None  # None -> not_installed
 
 

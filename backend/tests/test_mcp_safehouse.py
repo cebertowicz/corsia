@@ -122,6 +122,9 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     for prefix in ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-"):
         assert f'^/tmp/{prefix}[^/]*\\.sb$' in profile
         assert f'^/private/tmp/{prefix}[^/]*\\.sb$' in profile
+    from tools.managed_runtime import runtime_cache_root
+
+    assert f'(deny file-write* (subpath "{runtime_cache_root()}"))' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
 

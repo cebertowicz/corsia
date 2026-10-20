@@ -96,6 +96,10 @@ def mcp_private_state_profile(
         for path in denied_roots
     ]
     path_rules.append(policy.hard_floor_sandbox_rules())
+    # Local apps execute this cache but can never mutate the verified runtimes.
+    from tools.managed_runtime import runtime_cache_root
+
+    path_rules.append(f'(deny file-write* (subpath "{sbpl_path(runtime_cache_root())}"))')
     if policy.generated_profile is not None:
         path_rules.append(
             f'(deny file-read* file-write* (literal "{sbpl_path(policy.generated_profile)}"))'

@@ -147,3 +147,17 @@ def stores_token(home: Path) -> bool:
         return _TOKEN_LINE.search((home / "hosts.yml").read_bytes()) is not None
     except OSError:
         return False
+
+
+def token_source_is_plaintext(token_source: str, home: Path) -> bool:
+    """Whether gh's status report names this private home's fallback token file.
+
+    The value comes from ``gh auth status --json hosts`` and is never returned
+    to an agent.  A path comparison deliberately tolerates gh's explanatory
+    text while requiring the only fallback file CORSIA supports.
+    """
+    try:
+        token_file = (home / "hosts.yml").resolve(strict=False)
+    except OSError:
+        return False
+    return str(token_file) in token_source

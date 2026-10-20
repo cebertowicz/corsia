@@ -9,7 +9,19 @@ LOCAL_APP_NOTICE = (
 
 
 def local_app_notice(config: object) -> str | None:
-    return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
+    """Return the approval disclosure, including only a pending pinned download."""
+    if not isinstance(config, dict) or not isinstance(config.get("command"), str):
+        return None
+    notice = LOCAL_APP_NOTICE
+    from tools.managed_runtime import runtime_fetch_plan
+
+    plan = runtime_fetch_plan(config["command"])
+    if plan is None:
+        return notice
+    kind, pin = plan
+    maker = "nodejs.org" if kind == "node" else "GitHub"
+    label = "Node" if kind == "node" else "uv"
+    return f"{notice} CORSIA will download {label} from {maker} to run it."
 
 
 def _transport(config: object) -> str | None:

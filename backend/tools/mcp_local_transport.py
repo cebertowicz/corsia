@@ -4,8 +4,10 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 import tempfile
 from pathlib import Path
+import sys
 
 from tools.host_path_resolution import denied_paths_in
 from tools.mcp_config import MCPConfigError
@@ -81,6 +83,7 @@ def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list
     from mcp import StdioServerParameters
 
     from infra.config import STATE_ROOT, WORKSPACE
+    from tools.managed_runtime import ManagedRuntimeError, command_bin_dir, command_path
     from tools.safehouse_launch import direct_safehouse_argv, mcp_envelope_dir, mcp_private_state_profile, write_no_proctitle_shim
     from tools.shell_guard import _safehouse_executable, safehouse_version_error
 
@@ -101,14 +104,29 @@ def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list
     node_options = f"--require {shlex.quote(str(shim_path))}"
     if existing := env.get("NODE_OPTIONS"):
         node_options = f"{node_options} {existing}"
+    user_command = shutil.which(command, path=env.get("PATH"))
+    try:
+        resolved_command = user_command or command_path(command, path=env.get("PATH"))
+    except ManagedRuntimeError as error:
+        raise MCPConfigError(_mcp_setup_refusal(str(error))) from None
+    if resolved_command is None:
+        resolved_command = command
+    runtime_bin = command_bin_dir(command) if user_command is None and resolved_command != command else None
+    child_path = env.get("PATH", "")
+    if runtime_bin is not None:
+        child_path = f"{runtime_bin}{os.pathsep}{child_path}" if child_path else str(runtime_bin)
     server_env = {
         "npm_config_script_shell": "/bin/sh",
         **env,
+        "PATH": child_path,
         "npm_config_cache": str(cache_dir / "npm"),
         "UV_CACHE_DIR": str(cache_dir / "uv"),
         "XDG_CACHE_HOME": str(cache_dir / "xdg"),
         "NODE_OPTIONS": node_options,
     }
+    if command in {"uv", "uvx"} and runtime_bin is not None:
+        # A direct bundled interpreter plus this switch forbids uv's managed-Python download.
+        server_env |= {"UV_PYTHON": sys.executable, "UV_NO_MANAGED_PYTHON": "1"}
     descriptor, raw_profile = tempfile.mkstemp(
         dir=mcp_envelope_dir(Path(STATE_ROOT)), prefix="corsia-mcp-envelope-", suffix=".sb",
     )
@@ -118,7 +136,7 @@ def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list
         with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
             profile.write(mcp_private_state_profile(profile_path, safehouse_path, Path(STATE_ROOT)))
         argv = direct_safehouse_argv(
-            command, args, cwd, profile_path,
+            resolved_command, args, cwd, profile_path,
             env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,
             executable=lambda: safehouse_path,
         )
