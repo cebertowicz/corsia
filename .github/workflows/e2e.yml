@@ -33,7 +33,7 @@ jobs:
   e2e:
     name: Playwright UI-E2E (mock)
     runs-on: ubuntu-24.04
-    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. It restarts the backend from a captured seed before each spec file (244 times across both projects). Green full runs with that reset took 1h53m and 1h57m; 180 min is that plus about 25 min of headroom.
+    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. It restarts the backend from a captured seed before each spec file (244 times across both projects). Green full runs with that reset took 1h53m and 1h57m; 180 min is that plus about an hour of headroom.
     timeout-minutes: 180
 
     strategy:
