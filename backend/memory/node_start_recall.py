@@ -130,7 +130,7 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     user_id = caller_user_id(db, caller_thread_id)
     caller = db.execute("SELECT project_id,local_only FROM threads WHERE id=?", (caller_thread_id,)).fetchone()
     if user_id is None or caller is None:
-        return "no_terms", []
+        return "unresolved_caller", []
     cutoff = _start_cutoff(db, text.node_id)
     cloud_off = cloud_off_project_ids(db=db)
 
@@ -138,12 +138,14 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
                   *_comment_candidates(db, terms, user_id),
                   *_decision_candidates(db, terms, user_id),
                   *_rule_candidates(db, terms, user_id, caller_thread_id)]
+    if not candidates:
+        return "below_floor", []
     candidates = [
         hit for hit in candidates
         if _before(hit.created_at, cutoff) and _deliverable(hit, caller, cloud_off)
     ]
     if not candidates:
-        return "below_floor", []
+        return "withheld", []
     # Scores are primary, then newest sources, then direct person words ahead of a rule.
     candidates.sort(
         key=lambda hit: (-hit.matched.shared, -hit.matched.title_shared, _newest_first(hit.created_at), hit.kind == "rule"),

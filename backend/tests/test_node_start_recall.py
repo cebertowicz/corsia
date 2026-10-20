@@ -429,13 +429,19 @@ def test_words_after_task_start_are_excluded(db):
     assert related(db, NodeText(task.title, criteria=task.acceptance_criteria, node_id=task.id), caller_thread_id="caller", trigger="start") == []
 
 
-def test_no_terms_and_below_floor_log_their_reasons(db, logged):
+def test_each_silent_lookup_logs_its_own_reason(db, logged):
+    from memory.node_start_recall import NodeText, related
+
     assert _related(db, "Fix tests") == []
     _message(db, "partial", "past", "Export only.")
     assert _related(db) == []
+    assert related(db, NodeText("Export account ledger in CSV format"), caller_thread_id="missing", trigger="start") == []
+    db.execute("UPDATE threads SET local_only=1 WHERE id='past'")
+    _message(db, "local", "past", "Export account ledger with CSV format.", seq=2)
+    assert _related(db) == []
 
-    assert any("reason=no_terms" in line for line in logged)
-    assert any("reason=below_floor" in line for line in logged)
+    reasons = [line.split("reason=")[1].split()[0] for line in logged if line.startswith("prior_words ")]
+    assert reasons == ["no_terms", "below_floor", "unresolved_caller", "withheld"]
 
 
 def test_error_isolated_and_key_stays_absent(db, logged):
