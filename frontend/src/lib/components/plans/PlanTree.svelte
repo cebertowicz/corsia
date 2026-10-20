@@ -347,10 +347,6 @@
 		padding: 6px 8px 6px calc(8px + var(--indent)); border-radius: var(--radius-xs);
 		width: 100%;
 	}
-	/* The fold face keeps its whole width, so the actions sit beside the
-	   outcome counts when they fit and wrap below them only when they don't. */
-	.fold-row { flex-wrap: wrap; }
-	.fold-row .row-body { flex: 0 1 auto; }
 	/* A long-press opens the task menu, so it must not also select text or raise the iOS callout. */
 	@media (pointer: coarse) {
 		.tree-row.has-menu { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

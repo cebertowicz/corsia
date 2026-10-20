@@ -182,7 +182,7 @@ describe('only finished work folds: a wait days away stays a row', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
-		expect(rendered()).toEqual(['a week', '[1 completed]']);
+		expect(rendered()).toEqual(['a week', '[1 done]']);
 	});
 });
 
