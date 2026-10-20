@@ -134,6 +134,29 @@ const longHostAccessPurpose = [
 	'Report the exact setting changed, the verification performed, whether rollback was required, and any residual risk that needs a separate request.',
 ].join(' ');
 
+/**
+ * Opening Settings mounts the providers view, whose load asks for host resources, the settings model inventory and the model
+ * catalog together. A reload that lands while those are in flight aborts them and the view logs "harness inventory failed", so
+ * a test that reloads after opening Settings first waits for that load to be answered. Call it before opening Settings. On a phone
+ * Settings opens at its section list and the providers view is not mounted yet, so there is no such load to wait for.
+ */
+function providersLoadAnswered(page: Page): Promise<unknown> {
+	const pathOf = (url: string) => new URL(url).pathname;
+	let loadStarted = false;
+	page.on('request', (request) => {
+		if (pathOf(request.url()) === '/api/system/host-resources') loadStarted = true;
+	});
+	const answered = (match: (path: string) => boolean) => page.waitForResponse((response) => match(pathOf(response.url())));
+	// The plain model catalog is also read when Settings opens, before the load starts, so only a read after it counts.
+	const settled = Promise.all([
+		answered((path) => path === '/api/system/host-resources'),
+		answered((path) => path === '/api/settings/models'),
+		answered((path) => loadStarted && path === '/api/models'),
+	]);
+	settled.catch(() => {});
+	return settled;
+}
+
 async function selectThread(page: Page, title: string) {
 	const mobile = (page.viewportSize()?.width ?? 0) <= 768;
 	const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
@@ -293,6 +316,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await selectThread(page, ownerTitle);
 		await expect(page.locator('.thread-host-access')).toHaveCount(0);
 
+		const providersLoaded = (page.viewportSize()?.width ?? 0) > 768 ? providersLoadAnswered(page) : null;
 		await openSettings(page);
 		await page.getByRole('button', { name: 'System', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Host Access Review' })).toBeVisible();
@@ -303,6 +327,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			{ host_access_reviewer_model: 'mock-test-model' },
 		]);
 
+		await providersLoaded;
 		await page.reload();
 		await selectThread(page, ownerTitle);
 		const reviewTrigger = page.getByRole('button', { name: 'Review temporary host access' });

@@ -12,13 +12,18 @@ const WIDE_TABLE = [
 ].join('\n');
 
 test.describe('@flow:agent-table-mobile-overflow @surface:chat agent-sent table stays inside the bubble on mobile', () => {
+	// Focus collapses an agent message into a chip; the table only renders in the bubble with Focus off. The suite's
+	// e2eFocusRestore guard requires every spec that turns Focus off to restore it in an afterEach, which runs on failure too.
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
+	});
+
 	test('wide agent-sent table scrolls internally, never clips the viewport or widens the bubble', async ({
 		page,
 		request,
 	}, testInfo) => {
 		test.skip((page.viewportSize()?.width ?? 0) > 768, 'mobile-only reproduction');
 
-		// Focus collapses an agent message into a chip; the table only renders in the bubble with Focus off.
 		await setFocusMode(request, false);
 		const consoleErrors = captureConsoleErrors(page);
 		const sessionTitle = `e2e agent-table-mobile-overflow ${Date.now()}`;
