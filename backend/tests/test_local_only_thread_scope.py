@@ -378,7 +378,7 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
     isolated_db, cloud_named_cloud, events,
 ) -> None:
     from api import thread_mutations
-    from auth_fixtures import OTHER_TOKEN, OWNER_SESSION_TOKEN, OWNER_TOKEN
+    from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_TOKEN
 
     # The child exists before the root is turned on: no backfill is needed.
     _seed(
@@ -431,7 +431,6 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
         ("local_only.changed", {"local_only": True}),
         ("local_only.changed", {"local_only": False}),
     ]
-    assert OTHER_TOKEN  # Keep the seeded foreign-account contract explicit.
 
 
 @pytest.mark.asyncio

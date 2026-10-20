@@ -19,8 +19,7 @@ def test_v130_adds_the_local_only_column() -> None:
     migrate_130_to_131(db)
 
     columns = {row[1] for row in db.execute("PRAGMA table_info(threads)")}
-    assert "local_only" in columns
-    assert "local_only_root_thread_id" not in columns
+    assert columns == {"id", "local_only"}
     assert db.execute("SELECT local_only FROM threads").fetchone() is None
 
 
