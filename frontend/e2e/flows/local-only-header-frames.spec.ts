@@ -138,7 +138,7 @@ async function openChat(page: Page, state: FrameState) {
 }
 
 async function screenshot(page: Page, name: string, size: string, theme: string) {
-	await expect(page.locator('.version-overlay')).toHaveText(/^\s*b [0-9a-f]{7}†?\s*·\s*f [0-9a-f]{7}†?\s*·/, { timeout: 15_000 });
+	await expect(page.locator('.version-overlay')).toHaveText(/^\s*b [0-9a-f]{7}\s*·\s*f [0-9a-f]{7}\s*·/, { timeout: 15_000 });
 	await expect(page.getByRole('heading', { name: 'Hey, Sam.' })).toBeVisible();
 	expect(await page.locator('body').innerText()).not.toMatch(/\be2e\b|test[- ]run/i);
 	await page.screenshot({ path: join(OUT!, `${name}-${size}-${theme}.png`), animations: 'disabled', scale: 'css' });
