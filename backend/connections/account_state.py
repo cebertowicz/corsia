@@ -107,7 +107,8 @@ def mark_needs_sign_in(account_id: str, refresh_token: str | None = None, *, db:
 def mark_sign_in_failed(account_id: str, cause: str, *, db: sqlite3.Connection | None = None) -> bool:
     """Record why signing this row in again failed: it needs sign-in, showing ``cause``.
 
-    A connected row whose credential still works is left alone. False when the row is gone.
+    A connected row whose credential still works is left alone. The OAuth callback
+    owns its lifecycle event, so this only reports whether the row transitioned.
     """
     from connections.connected_accounts import ConnectedAccountError, get_account, is_connected, resolve_credentials
 
@@ -122,8 +123,6 @@ def mark_sign_in_failed(account_id: str, cause: str, *, db: sqlite3.Connection |
             (cause, utc_now_iso(), account_id),
         ).rowcount == 1
         provider = str(get_account(account_id, db=conn)["provider"]) if changed else None
-    if provider is not None:
-        emit_lifecycle_event("connect_failed", account_id, provider, cause=cause)
     return provider is not None
 
 

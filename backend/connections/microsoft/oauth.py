@@ -233,8 +233,7 @@ async def start_sign_in(
             await _complete_sign_in(query.get("code"), given)
         except MicrosoftError as exc:
             await _record_failure(pending, exc)
-            if pending.adding or exc.state_cause is None:
-                emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
+            emit_lifecycle_event("connect_failed", pending.account_id, MICROSOFT_PROVIDER, cause=exc.cause)
             return 400, exc.browser_message, True, None
         except Exception as exc:
             # A fault in CORSIA, not Microsoft: logged by type only, since its text may carry account data.

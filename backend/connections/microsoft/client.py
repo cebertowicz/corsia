@@ -51,7 +51,12 @@ def _is_personal_organization_response(response: httpx.Response) -> bool:
     error = body.get("error") if body is not None else None
     code = error.get("code") if isinstance(error, dict) else None
     message = error.get("message") if isinstance(error, dict) else None
-    return response.status_code == 400 and code == "BadRequest" and message == "not supported for MSA accounts"
+    return (
+        response.status_code == 400
+        and code == "BadRequest"
+        and isinstance(message, str)
+        and "not supported for MSA accounts" in message
+    )
 
 
 async def _organization_tenant(http: httpx.AsyncClient, access_token: str) -> str | None:

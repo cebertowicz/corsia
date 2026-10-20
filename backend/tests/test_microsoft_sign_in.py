@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -32,6 +33,9 @@ ACCESS = "access-token-canary"
 EVERYWHERE = AppReach(mode="all", project_ids=frozenset(), outside_projects=False)
 PERSON = ("person", "person")
 _REAL_CLIENT = httpx.AsyncClient
+MSA_ORGANIZATION_ERROR = json.loads(
+    (Path(__file__).parent / "fixtures" / "microsoft" / "organization_msa_unsupported.json").read_text()
+)
 
 
 class FakeMicrosoft:
@@ -193,12 +197,24 @@ async def test_both_reads_the_organization_to_tell_work_from_personal(microsoft,
 
 async def test_both_treats_only_graphs_msa_organization_response_as_personal(microsoft, isolated_db) -> None:
     microsoft.organization_status = 400
-    microsoft.organization_error = {"error": {"code": "BadRequest", "message": "not supported for MSA accounts"}}
+    microsoft.organization_error = MSA_ORGANIZATION_ERROR
 
     await _connect(microsoft, kind="both", tenant=None)
 
     [row] = _accounts()
     assert (row["account_kind"], row["provider_subject"]) == ("personal", "9188040d-6c67-4c5b-b112-36a304b66dad:object-a")
+
+
+async def test_both_rejects_a_different_bad_request_without_persisting_an_account(microsoft, isolated_db) -> None:
+    microsoft.organization_status = 400
+    microsoft.organization_error = {"error": {"code": "BadRequest", "message": "different Graph failure"}}
+    url, _ = await oauth.start_sign_in(CLIENT_ID, "both", actor=("system", "test"), reach=EVERYWHERE)
+
+    result, page = await _finish(url)
+
+    assert result == 400
+    assert _page_has(page, MicrosoftError(PROVIDER_UNAVAILABLE).browser_message)
+    assert _accounts() == []
 
 
 @pytest.mark.parametrize("status", (401, 403, 404, 500))
@@ -524,6 +540,30 @@ async def test_cancelling_sign_in_again_leaves_the_row_needing_sign_in(microsoft
     [row] = _accounts()
     assert (row["state"], row["state_cause"]) == ("needs_sign_in", CONSENT_CANCELLED)
     assert _bundle(account_id) is None
+
+
+async def test_failed_sign_in_again_emits_once_when_existing_credentials_still_work(microsoft, isolated_db, monkeypatch) -> None:
+    from connections import account_state
+
+    events: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        account_state, "emit_product_event",
+        lambda category, action, **kwargs: events.append((category, action, kwargs["properties"])),
+    )
+    account_id = await _connect(microsoft)
+    url, _ = await oauth.start_sign_in(None, None, actor=PERSON, account_id=account_id)
+    events.clear()
+    microsoft.token_error = True
+
+    status, _ = await _finish(url)
+
+    assert status == 400
+    [row] = _accounts()
+    assert (row["state"], row["state_cause"]) == ("connected", None)
+    assert _bundle(account_id) is not None
+    assert [(category, action, properties["cause"]) for category, action, properties in events] == [
+        ("connected_account", "connect_failed", PROVIDER_UNAVAILABLE)
+    ]
 
 
 async def test_remove_deletes_row_and_pending_without_session_revocation(microsoft, isolated_db) -> None:

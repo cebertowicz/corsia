@@ -1,6 +1,7 @@
 """Schema 129 -> 130: Microsoft account row metadata and fixed audit causes."""
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import closing
 
@@ -8,7 +9,7 @@ from connections.account_state import REGISTRATION_MISCONFIGURED, REVOCATION_CAU
 from infra.connected_accounts_schema import AUDIT_TABLE_SQL, CONNECTED_ACCOUNTS_SCHEMA_SQL, _sql_values as schema_sql_values
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_129_to_130_microsoft_accounts import migrate_129_to_130
+from infra.migration_129_to_130_microsoft_accounts import _AUDIT_V130_SQL, _CONNECTED_ACCOUNTS_V130_SQL, migrate_129_to_130
 from infra.schema import SCHEMA_VERSION
 
 
@@ -39,16 +40,18 @@ def _v129() -> sqlite3.Connection:
     return db
 
 
-def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
-    from infra.migration_129_to_130_microsoft_accounts import (
-        _AUDIT_V130_SQL, _CONNECTED_ACCOUNTS_V130_SQL, _sql_values as migration_sql_values,
-    )
+def _literal_check_values(sql: str, column: str) -> frozenset[str]:
+    match = re.search(rf"{column} TEXT CHECK\({column} IS NULL OR {column} IN \((.*?)\)\)", sql, re.DOTALL)
+    assert match is not None
+    return frozenset(re.findall(r"'([^']+)'", match.group(1)))
 
+
+def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
     assert REGISTRATION_MISCONFIGURED in STATE_CAUSES
     assert schema_sql_values(STATE_CAUSES) in CONNECTED_ACCOUNTS_SCHEMA_SQL
     assert schema_sql_values(REVOCATION_CAUSES) in AUDIT_TABLE_SQL
-    assert migration_sql_values(STATE_CAUSES) in _CONNECTED_ACCOUNTS_V130_SQL
-    assert migration_sql_values(REVOCATION_CAUSES) in _AUDIT_V130_SQL
+    assert _literal_check_values(_CONNECTED_ACCOUNTS_V130_SQL, "state_cause") == STATE_CAUSES
+    assert _literal_check_values(_AUDIT_V130_SQL, "revocation_cause") == REVOCATION_CAUSES
 
 
 def test_v129_registers_microsoft_account_step() -> None:

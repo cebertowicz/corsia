@@ -3,22 +3,19 @@ from __future__ import annotations
 
 import sqlite3
 
-from connections.account_state import REVOCATION_CAUSES, STATE_CAUSES
-
-
-def _sql_values(values: frozenset[str]) -> str:
-    return ", ".join(repr(value) for value in sorted(values))
-
 
 # This is deliberately the v130 table shape. Future connected-account fields
 # must use their own migration rather than changing this historical fixture.
-_CONNECTED_ACCOUNTS_V130_SQL = f"""
+_CONNECTED_ACCOUNTS_V130_SQL = """
     CREATE TABLE connected_accounts_new (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
         provider_subject TEXT,
         account_kind TEXT CHECK(account_kind IS NULL OR account_kind IN ('personal', 'work')),
-        state_cause TEXT CHECK(state_cause IS NULL OR state_cause IN ({_sql_values(STATE_CAUSES)})),
+        state_cause TEXT CHECK(state_cause IS NULL OR state_cause IN (
+            'admin_approval_required', 'consent_cancelled', 'provider_unavailable',
+            'refresh_token_invalid', 'registration_misconfigured'
+        )),
         address TEXT NOT NULL,
         capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
         state TEXT NOT NULL CHECK(state IN ('connected', 'needs_sign_in', 'signed_out')),
@@ -38,7 +35,7 @@ _CONNECTED_ACCOUNTS_V130_SQL = f"""
 """
 
 
-_AUDIT_V130_SQL = f"""
+_AUDIT_V130_SQL = """
     CREATE TABLE connected_account_audit_new (
         id INTEGER PRIMARY KEY,
         created_at TEXT NOT NULL,
@@ -46,7 +43,12 @@ _AUDIT_V130_SQL = f"""
         actor_kind TEXT NOT NULL CHECK(actor_kind IN ('person', 'agent', 'system')),
         actor_id TEXT NOT NULL,
         action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
-        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN ({_sql_values(REVOCATION_CAUSES)}))
+        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
+            'admin_approval_required', 'app_registration_not_allowed', 'consent_cancelled', 'input_refusal',
+            'manual_only', 'not_signed_in', 'provider_rejected', 'provider_timeout', 'provider_unavailable',
+            'provider_unexpected', 'provider_unreachable', 'refresh_token_invalid', 'registration_misconfigured',
+            'revoked'
+        ))
     )
 """
 
