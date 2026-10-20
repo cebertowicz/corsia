@@ -23,8 +23,7 @@ def test_the_rubric_names_every_size_class_in_order():
 def test_the_tool_field_carries_the_scale_with_a_short_task_requirement():
     description = MUTATION_FIELD_SCHEMAS["size"]["description"]
     assert description == (
-        f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Every task: required; "
-        "unknown if unsure."
+        f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Required on every task."
     )
     # The field ships in the plan_update schema on every Turn: the long meaning
     # stays out of it, and the prefix is no longer than the one it replaced.

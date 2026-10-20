@@ -70,7 +70,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": ["string", "null"],
         "enum": [*SIZE_CLASSES, None],
         "description": (
-            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Every task: required; unknown if unsure."
+            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Required on every task."
         ),
     },
     "difficulty_rerated": {
