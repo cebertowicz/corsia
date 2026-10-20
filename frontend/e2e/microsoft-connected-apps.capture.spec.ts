@@ -10,14 +10,14 @@ const clientId = '11111111-1111-4111-8111-111111111111';
 const tenantId = '22222222-2222-4222-8222-222222222222';
 const allProjects = { mode: 'all' as const, project_ids: [], outside_projects: false };
 const onlyCorsia = { mode: 'corsia' as const, project_ids: [], outside_projects: false };
-type State = 'connected' | 'admin' | 'cancelled' | 'expired' | 'failure' | 'many';
+type State = 'connected' | 'admin' | 'cancelled' | 'expired' | 'failure' | 'registration' | 'many';
 
 function microsoft(state: State, id = 'microsoft-work', address = 'alex@contoso.example') {
 	return {
 		id, provider: 'microsoft' as const, provider_display_name: 'Microsoft', address, capabilities: ['mail', 'calendar', 'files'],
 		state: state === 'connected' || state === 'many' ? 'connected' as const : 'needs_sign_in' as const,
 		account_kind: address.endsWith('@outlook.example') ? 'personal' as const : 'work' as const,
-		cause: state === 'admin' ? 'admin_approval_required' : state === 'cancelled' ? 'consent_cancelled' : state === 'expired' ? 'refresh_token_invalid' : state === 'failure' ? 'provider_unavailable' : null,
+		cause: state === 'admin' ? 'admin_approval_required' : state === 'cancelled' ? 'consent_cancelled' : state === 'expired' ? 'refresh_token_invalid' : state === 'failure' ? 'provider_unavailable' : state === 'registration' ? 'registration_misconfigured' : null,
 		client_id: clientId, tenant_id: tenantId, reach: allProjects,
 	};
 }
@@ -104,6 +104,15 @@ test.describe('Microsoft Connected apps capture', () => {
 			await page.reload(); await openConnectedApps(page); await open();
 			await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
 			await capture(page, testInfo, `ms-provider-failure-${label}-${theme}`);
+
+			state = 'registration';
+			await page.reload(); await openConnectedApps(page); await open();
+			await expect(page.getByText('Microsoft app needs fixing · All projects')).toBeVisible();
+			await expect(page.getByText("Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in.")).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
+			await expect(page.getByRole('button', { name: 'Copy message for IT' })).toHaveCount(0);
+			await expect(page.getByRole('link', { name: 'Manage Microsoft permissions' })).toHaveCount(0);
+			await capture(page, testInfo, `ms-registration-misconfigured-${label}-${theme}`);
 
 			state = 'connected';
 			await page.reload(); await openConnectedApps(page); await open();

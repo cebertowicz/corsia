@@ -335,9 +335,10 @@ describe('ConnectedAppsSettings', () => {
 		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };
 		const expired = { ...admin, id: 'microsoft-expired', cause: 'refresh_token_invalid' };
 		const failed = { ...admin, id: 'microsoft-failed', cause: 'provider_unavailable' };
+		const registration = { ...admin, id: 'microsoft-registration', cause: 'registration_misconfigured', reach: { mode: 'all' as const, project_ids: [], outside_projects: false } };
 		const writeText = vi.fn().mockResolvedValue(undefined);
 		Object.assign(navigator, { clipboard: { writeText } });
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [admin, cancelled, expired, failed] }) })));
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [admin, cancelled, expired, failed, registration] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
 		const open = (id: string) => { (host.querySelector(`[data-connected-account-id="${id}"] button`) as HTMLButtonElement).click(); flushSync(); };
@@ -362,6 +363,16 @@ describe('ConnectedAppsSettings', () => {
 		expect(retry?.className).toContain('primary');
 		expect(host.textContent).toContain('Where it works…');
 		expect(host.textContent).toContain('Remove');
+		open(registration.id);
+		const registrationRow = host.querySelector(`[data-connected-account-id="${registration.id}"]`) as HTMLElement;
+		expect(registrationRow.textContent).toContain('Microsoft app needs fixing · All projects');
+		expect(registrationRow.textContent).toContain("Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in.");
+		const signIn = [...registrationRow.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in');
+		expect(signIn?.className).toContain('primary');
+		expect(registrationRow.textContent).toContain('Where it works…');
+		expect(registrationRow.textContent).toContain('Remove');
+		expect(registrationRow.textContent).not.toContain('Copy message for IT');
+		expect(registrationRow.querySelector('a')).toBeNull();
 	});
 
 	it('uses Microsoft removal copy and keeps the correct provider permissions link after removal', async () => {

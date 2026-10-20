@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from api.connected_app_access import audit_actor
 from connections.app_reach import AppReach
 from connections.microsoft import oauth
-from connections.microsoft.errors import ACCOUNT_NOT_FOUND, MicrosoftError
+from connections.microsoft.errors import ACCOUNT_NOT_FOUND, REGISTRATION_MISCONFIGURED, MicrosoftError
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
 
@@ -22,6 +22,7 @@ PERSON_CAUSE_COPY = {
     "consent_cancelled": "Sign-in was cancelled. Press Sign in to try again.",
     "refresh_token_invalid": "Microsoft signed you out, so agents can’t use this account until you sign in again.",
     "provider_unavailable": "Microsoft had a problem with sign-in. Try again.",
+    REGISTRATION_MISCONFIGURED: "Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in.",
 }
 
 
@@ -69,7 +70,11 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
 
 @router.get("/status")
 async def status(user: dict = Depends(require_user)) -> dict[str, object]:
-    return await run_in_db(oauth.accounts_status, None if is_person_session(user) else await run_in_db(_agent_thread_id, user))
+    person = is_person_session(user)
+    result = await run_in_db(oauth.accounts_status, None if person else await run_in_db(_agent_thread_id, user))
+    if person and result.get("cause") == REGISTRATION_MISCONFIGURED:
+        return {**result, "message": PERSON_CAUSE_COPY[REGISTRATION_MISCONFIGURED]}
+    return result
 
 # Account-row Sign out and Remove use the established person-only controls in
 # ``api.connected_account_rows``; this router owns only Microsoft setup and status.

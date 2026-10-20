@@ -191,6 +191,27 @@ async def test_connect_route_keeps_safe_not_found_contract(monkeypatch) -> None:
     assert raised.value.detail == {"cause": ACCOUNT_NOT_FOUND, "message": "That account isn't connected."}
 
 
+async def test_person_connect_and_status_use_registration_fix_copy(monkeypatch) -> None:
+    async def start_sign_in(*_args, **_kwargs):
+        raise MicrosoftError(REGISTRATION_MISCONFIGURED)
+
+    async def database_call(*_args, **_kwargs):
+        return {"status": "not_connected", "cause": REGISTRATION_MISCONFIGURED, "message": message(REGISTRATION_MISCONFIGURED)}
+
+    monkeypatch.setattr(oauth, "start_sign_in", start_sign_in)
+    with pytest.raises(HTTPException) as raised:
+        await microsoft_api.connect(await _request({}), {"token_kind": "session", "id": "person"})
+    assert raised.value.status_code == 400
+    assert raised.value.detail == "Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in."
+
+    monkeypatch.setattr(microsoft_api, "run_in_db", database_call)
+    assert await microsoft_api.status({"token_kind": "session", "id": "person"}) == {
+        "status": "not_connected",
+        "cause": REGISTRATION_MISCONFIGURED,
+        "message": "Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in.",
+    }
+
+
 def test_scopes_are_exactly_the_graph_ones_without_openid_or_profile() -> None:
     assert oauth.SCOPES == ("Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.ReadWrite", "offline_access", "User.Read")
 
