@@ -22,7 +22,18 @@ def checks_green(repo: str, pr_number: int, head_sha: str) -> bool | None:
     """
     from reviewer.gh_helpers import get_check_runs_for_sha
 
-    checks = get_check_runs_for_sha(repo, head_sha)
+    checks = None
+    for attempt in range(MERGEABILITY_POLL_ATTEMPTS):
+        checks = get_check_runs_for_sha(repo, head_sha)
+        if checks is not None:
+            break
+        if attempt + 1 < MERGEABILITY_POLL_ATTEMPTS:
+            log.info(
+                "reviewer-gate: PR #{} sha={} — check runs unreadable, re-polling "
+                "({}/{})",
+                pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
+            )
+            time.sleep(MERGEABILITY_POLL_INTERVAL_S)
     if checks is None:
         log.warning(
             "reviewer-gate: PR #{} sha={} — check fetch unreadable "

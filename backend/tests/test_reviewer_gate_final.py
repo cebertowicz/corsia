@@ -443,7 +443,8 @@ class TestFinalGate:
         """Unreadable check state returns None — distinct from False — so the
         caller can emit a loud retryable event instead of silently holding."""
         gate_mod = _reload_gate
-        with patch("reviewer.gh_helpers.get_check_runs_for_sha", return_value=None):
+        with patch("reviewer.gh_helpers.get_check_runs_for_sha", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate.time, "sleep"):
             assert gate_mod.github_reviewer_gate.checks_green("owner/repo", 42, "abc123def") is None
 
 

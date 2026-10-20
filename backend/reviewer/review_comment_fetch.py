@@ -11,9 +11,14 @@ import json
 import logging
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any
 
+from events.connectors.github_reviewer_gate import (
+    MERGEABILITY_POLL_ATTEMPTS,
+    MERGEABILITY_POLL_INTERVAL_S,
+)
 from reviewer.gh_api import run_gh
 
 log = logging.getLogger(__name__)
@@ -214,7 +219,30 @@ def _add_thread_state(
 def _fetch_comments(
     api_path: str, pr_number: int,
 ) -> list[dict[str, Any]] | None:
-    """Fetch every page of one comment collection, or None when unreadable."""
+    """Fetch one comment collection, retrying transient unreadable reads.
+
+    One brief GitHub error (rate limit, timeout, 5xx) must not discard a
+    finished review, so this mirrors the reviewer gate's bounded PR-info
+    retry: re-read on None, return the first readable result, and return
+    None after the full budget so callers' error paths are unchanged.
+    """
+    for attempt in range(MERGEABILITY_POLL_ATTEMPTS):
+        comments = _fetch_comments_once(api_path, pr_number)
+        if comments is not None:
+            return comments
+        if attempt + 1 < MERGEABILITY_POLL_ATTEMPTS:
+            log.info(
+                "reviewer: PR #%d comment history unreadable, re-polling (%d/%d)",
+                pr_number, attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
+            )
+            time.sleep(MERGEABILITY_POLL_INTERVAL_S)
+    return None
+
+
+def _fetch_comments_once(
+    api_path: str, pr_number: int,
+) -> list[dict[str, Any]] | None:
+    """Fetch every page of one comment collection once, or None when unreadable."""
     try:
         result = run_gh(
             ["api", api_path, "--paginate", "--slurp"],
