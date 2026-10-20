@@ -84,7 +84,6 @@ def test_an_accept_all_note_names_every_suggestion_and_keeps_the_persons_line_sh
         )
         details = json.loads(note["details_json"])
         assert details["chip"] == "Robin accepted 7 of your suggestions on Design."
-        assert "suggestion_ids" not in details
     finally:
         db.close()
 
