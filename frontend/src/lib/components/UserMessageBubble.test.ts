@@ -5,7 +5,7 @@ import UserMessageBubble from './UserMessageBubble.svelte';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { activeModelId, models, type Model } from '$lib/stores/models';
-import { WAITING_FOR_LOCAL_MODEL, WAITING_FOR_MODEL } from '$lib/messageDeliveryCopy';
+import { WAITING_FOR_LOCAL_MODEL, WAITING_FOR_MODEL, WAITING_FOR_THREAD_LOCAL_MODEL } from '$lib/messageDeliveryCopy';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { formatTime } from '$lib/time';
 import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
@@ -215,6 +215,16 @@ describe('UserMessageBubble — delivery state', () => {
 		const status = wrapper.querySelector<HTMLElement>('.delivery-status');
 		expect(status?.textContent).toBe(WAITING_FOR_LOCAL_MODEL.label);
 		expect(status?.title).toBe(WAITING_FOR_LOCAL_MODEL.title);
+	});
+
+	it('renders the chat-local-only hold with its distinct recovery instruction', () => {
+		const wrapper = render(humanMsg({
+			delivery_state: 'queued', delivery_error: 'thread_local_only',
+			write_outcome: 'proved_no_write', active_turn_id: null,
+		}));
+		const status = wrapper.querySelector<HTMLElement>('.delivery-status');
+		expect(status?.textContent).toBe(WAITING_FOR_THREAD_LOCAL_MODEL.label);
+		expect(status?.title).toBe(WAITING_FOR_THREAD_LOCAL_MODEL.title);
 	});
 
 	it('hides pending copy and cancel once the server says a turn owns the input', () => {

@@ -49,6 +49,14 @@ export const WAITING_FOR_LOCAL_MODEL = {
 	title: 'Local models only is on for this project. Your message is saved and will send as soon as you switch this chat to a local model or turn Local models only off.',
 } as const;
 
+/** The chat itself excludes cloud models, so only switching this chat can resume it. */
+export const THREAD_LOCAL_ONLY = 'thread_local_only';
+
+export const WAITING_FOR_THREAD_LOCAL_MODEL = {
+	label: WAITING_FOR_LOCAL_MODEL.label,
+	title: 'This chat is set to local models only. Your message is saved and will send as soon as you switch this chat to a local model.',
+} as const;
+
 /** The same hold, written while the thread has no model at all. */
 export const NO_MODEL_SELECTED = 'no_model_selected';
 

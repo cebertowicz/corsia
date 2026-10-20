@@ -57,6 +57,19 @@ describe('deliveryPresentation', () => {
 			failed: false,
 		});
 	});
+	it('shows the chat-local-only hold without offering the project policy escape', () => {
+		const held = {
+			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
+			active_turn_id: null, delivery_error: 'thread_local_only',
+			metadata: {},
+		};
+		expect(deliveryPresentation(held)).toEqual({
+			label: 'Waiting for a local model',
+			title: 'This chat is set to local models only. Your message is saved and will send as soon as you switch this chat to a local model.',
+			pending: true,
+			failed: false,
+		});
+	});
 	it('asks for a model when the thread has none, with the same pending treatment', () => {
 		const held = {
 			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
