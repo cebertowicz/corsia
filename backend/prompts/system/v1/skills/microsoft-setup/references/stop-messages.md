@@ -10,7 +10,7 @@ Message for IT: `Please let me register applications in Microsoft Entra ID, eith
 
 ## R2 Existing app takes other account types (step 7)
 
-`Your CORSIA app on Microsoft only accepts <its supported account types>, so I can’t connect <address> with it. I’ve changed nothing, and I don’t edit an existing app’s account types. You can change them yourself in Entra (CORSIA, Authentication, Supported account types) where Microsoft allows it, or delete that app, which disconnects any account already using it. Then ask me to connect Outlook again. I can also connect an account of its type now.`
+`Your CORSIA app on Microsoft only accepts <its supported account types>, so I can’t connect <address> with it. You can change them yourself in Entra (CORSIA, Authentication, Supported account types) where Microsoft allows it, or delete that app, which disconnects any account already using it. Then ask me to connect Outlook again. I can also connect an account of its type now.`
 
 ## R3 Needs admin approval: `admin_approval_required` (step 13)
 
