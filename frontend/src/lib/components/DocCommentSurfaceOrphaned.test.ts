@@ -72,18 +72,18 @@ function edit(from: number, to: number, insert: string) {
 	screenText.set(before.slice(0, from) + insert + before.slice(to));
 	flushSync();
 }
-const group = () => host.querySelector('h3')?.textContent;
-const accept = () => host.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!;
-const alert = () => host.querySelector('[role="alert"]')?.textContent ?? null;
+const group = () => document.body.querySelector('h3')?.textContent;
+const accept = () => document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!;
+const alert = () => document.body.querySelector('[role="alert"]')?.textContent ?? null;
 const expectAttached = () => {
 	expect(group()).toBe('Open comments');
 	expect(accept().disabled).toBe(false);
-	expect(host.querySelector('.ct-orphan')).toBeNull();
+	expect(document.body.querySelector('.ct-orphan')).toBeNull();
 };
 const expectOrphaned = () => {
 	expect(group()).toBe('Text changed');
 	expect(accept().disabled).toBe(true);
-	expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
+	expect(document.body.querySelector('.ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
 };
 async function refuseAccept() {
 	mocks.flushDraft.mockResolvedValue(true);
@@ -118,7 +118,7 @@ describe('a suggestion card and the text it replaces', () => {
 		// Rejecting another suggestion reloads comments without saving the draft.
 		mocks.decideSuggestion.mockResolvedValue({ comment: { id: 'comment-1' } });
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [serverRow(true, { resolved: 1 }), typed], feedback: {} });
-		host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
+		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
 		await vi.waitFor(() => expect(mocks.fetchComments).toHaveBeenCalledTimes(2));
 		flushSync();
 		surface.set({ kind: 'thread', id: 'typed' }); flushSync();
@@ -182,7 +182,7 @@ describe('a suggestion card and the text it replaces', () => {
 		expect(alert()).toBe(STALE);
 		mocks.decideSuggestion.mockResolvedValue({ comment: { id: 'comment-1' } });
 		mocks.fetchComments.mockResolvedValueOnce({ comments: [serverRow(true, { resolved: 1 })], feedback: {} });
-		host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
+		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
 		await vi.waitFor(() => expect(get(suggestionRefusals)).toEqual({ [ARTIFACT]: {} }));
 		expect(alert()).toBeNull();
 	});
@@ -213,7 +213,7 @@ describe('a suggestion card and the text it replaces', () => {
 		edit(6, 7, 'a');
 		expectOrphaned();
 		mocks.decideSuggestion.mockRejectedValue(new Error('Network down'));
-		host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
+		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
 		await vi.waitFor(() => expect(alert()).toBe('Network down'));
 		// A failed reject says nothing about the text, so restoring the words does not answer it.
 		edit(6, 7, 'i');
@@ -244,7 +244,7 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 	const refusedThen = (next: () => void | Promise<unknown>) => async () => { await refuseAccept(); await next(); };
 	const failedReject = async () => {
 		mocks.decideSuggestion.mockRejectedValue(new Error('Network down'));
-		host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
+		document.body.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.click();
 		await vi.waitFor(() => expect(alert()).toBe('Network down'));
 	};
 	const typeAndSave = async () => {

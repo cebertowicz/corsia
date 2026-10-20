@@ -48,13 +48,13 @@ describe('Avatar accessibility', () => {
 		const trigger = host.querySelector<HTMLButtonElement>('.participant-trigger')!;
 		trigger.focus();
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')?.textContent).toContain('commented 20 s ago');
+		expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('commented 20 s ago');
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.body.querySelector('[role="dialog"]')).toBeNull();
 		trigger.click();
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+		expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
 	});
 
 	it('opens detail on hover and closes it when the pointer leaves', () => {
@@ -65,10 +65,10 @@ describe('Avatar accessibility', () => {
 		const trigger = host.querySelector<HTMLButtonElement>('.participant-trigger')!;
 		trigger.dispatchEvent(new MouseEvent('mouseenter'));
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')?.textContent).toContain('commented 20 s ago');
+		expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('commented 20 s ago');
 		trigger.dispatchEvent(new MouseEvent('mouseleave'));
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.body.querySelector('[role="dialog"]')).toBeNull();
 	});
 
 	it('closes detail when focus moves outside the stack', () => {
@@ -81,10 +81,10 @@ describe('Avatar accessibility', () => {
 		document.body.appendChild(outside);
 		trigger.focus();
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+		expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
 		trigger.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: outside }));
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')).toBeNull();
+		expect(document.body.querySelector('[role="dialog"]')).toBeNull();
 		outside.remove();
 	});
 
@@ -99,9 +99,11 @@ describe('Avatar accessibility', () => {
 		const triggers = host.querySelectorAll<HTMLElement>('.participant-trigger');
 		triggers[0].focus();
 		flushSync();
-		const dialog = host.querySelector<HTMLElement>('[role="dialog"]');
+		const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
 		expect(dialog).not.toBeNull();
-		expect(dialog!.parentElement?.classList.contains('stack')).toBe(true);
+		// The popover is portaled to `document.body`, so the stack's overlap selector can never reach it.
+		expect(dialog!.parentElement).toBe(document.body);
+		expect(dialog!.closest('.stack')).toBeNull();
 		expect(dialog!.matches(overlap)).toBe(false);
 		expect(triggers[1].matches(overlap)).toBe(true);
 		expect(host.querySelector<HTMLElement>('.stack > .participant-slot')?.matches(overlap)).toBe(true);
@@ -118,7 +120,7 @@ describe('Avatar accessibility', () => {
 		flushSync();
 		host.querySelector<HTMLButtonElement>('.participant-trigger')!.focus();
 		flushSync();
-		expect(host.querySelector('[role="dialog"]')?.textContent).toBe('Product Experience · read 2 min ago');
+		expect(document.body.querySelector('[role="dialog"]')?.textContent).toBe('Product Experience · read 2 min ago');
 	});
 
 	it('gives plain and detail avatars the same phone slot so the stack spaces evenly', () => {
@@ -143,7 +145,7 @@ describe('Avatar accessibility', () => {
 		host.querySelector<HTMLButtonElement>('.participant-trigger')!.click();
 		flushSync();
 		await tick();
-		const dialog = host.querySelector<HTMLElement>('[role="dialog"]');
+		const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
 		expect(dialog?.textContent).toContain('edited 10 s ago');
 		expect(window.innerWidth).toBe(320);
 	});

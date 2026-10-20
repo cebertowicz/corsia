@@ -29,10 +29,10 @@ describe('LocalModelDeleteDownloadModal', () => {
 		});
 		flushSync();
 
-		expect(host.textContent).toContain('8.6 GB');
-		expect(host.textContent).not.toContain('You can download it again later.');
+		expect(document.body.textContent).toContain('8.6 GB');
+		expect(document.body.textContent).not.toContain('You can download it again later.');
 		expect(fetchMock).not.toHaveBeenCalled();
-		[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Delete download')!.click();
+		[...document.body.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Delete download')!.click();
 		await tick(); await tick();
 		expect(fetchMock).toHaveBeenCalledWith('/api/providers/local/downloads/org%2Fmodel', expect.objectContaining({ method: 'DELETE' }));
 		expect(onDeleted).toHaveBeenCalledOnce();
@@ -48,7 +48,7 @@ describe('LocalModelDeleteDownloadModal', () => {
 		});
 		flushSync();
 
-		expect(host.textContent).toContain('Delete the download of Qwen');
-		expect(host.textContent).not.toContain('8 GB');
+		expect(document.body.textContent).toContain('Delete the download of Qwen');
+		expect(document.body.textContent).not.toContain('8 GB');
 	});
 });
