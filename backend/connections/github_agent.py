@@ -33,6 +33,7 @@ from connections.github_agent_home import (
     LOGIN,
     clean_env,
     default_home,
+    stores_token,
 )
 from connections.github_person import request_probe, same_login
 from infra.database import get_db
@@ -111,6 +112,8 @@ def _config(raw) -> dict:
 def _verify(binary: str, home: str) -> Verified | Failed:
     """Ask GitHub who this home's stored token belongs to; only a 401 is a definite no."""
     now = time.monotonic()
+    if not stores_token(Path(home)):
+        return Failed(True, "token_not_in_home", now)
     env = clean_env() | {"GH_CONFIG_DIR": home, "GH_PROMPT_DISABLED": "1"}
     try:
         result = subprocess.run([binary, "api", "user"], capture_output=True, env=env,

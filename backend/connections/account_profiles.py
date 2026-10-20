@@ -145,13 +145,14 @@ _PROFILES: dict[str, AccountProfile] = {
         clean_env=_codex_env, default_warm_home=_codex_warm_home,
         validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out,
         paid_capacity=_codex_paid_capacity),
-    # CORSIA's GitHub CLI keeps its token in the account's private GH_CONFIG_DIR
-    # so verified agent shells can use the same credential without Keychain access.
+    # The agents' own GitHub account. ``--insecure-storage`` keeps the token in the home's
+    # hosts.yml, never the person's keychain: only there do the read-only shell grant and the
+    # credential fingerprint cover it. ``workflow`` lets agents push workflow changes.
     "github": AccountProfile(
         provider="github", label="the agents' GitHub account", home_variable="GH_CONFIG_DIR",
         home_root=github_agent_home.home_root,
         commands={"login": ("auth", "login", "--hostname", "github.com", "--git-protocol", "https",
-                            "--web", "--scopes", "workflow", "--insecure-storage"),
+                            "--web", "--insecure-storage", "--scopes", "workflow"),
                   "status": ("auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"),
                   "logout": ("auth", "logout", "--hostname", "github.com")},
         missing_cause="github_executable_missing", in_progress_cause="github_signin_in_progress",

@@ -30,7 +30,7 @@ case "$*" in
   "auth status"*)
     if [ -f "$GH_CONFIG_DIR/hosts.yml" ]; then
       login=$(sed -n 's/^ *user: //p' "$GH_CONFIG_DIR/hosts.yml" | head -1)
-      source="${TOKEN_SOURCE:-keyring}"
+      source="${TOKEN_SOURCE:-$GH_CONFIG_DIR/hosts.yml}"
       printf '{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"%s","tokenSource":"%s"}]}}\n' "$login" "$source"
     else
       echo '{"hosts":{}}'
@@ -49,13 +49,9 @@ case "$*" in
     while [ ! -f "$APPROVE" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done
     [ -f "$APPROVE" ] || exit 1
     mkdir -p "$GH_CONFIG_DIR"
-    case "${LOGIN_STORAGE:-keyring}" in
-      plaintext) printf 'github.com:\n    user: %s\n    oauth_%s: fake\n' "$(cat "$APPROVE")" token > "$GH_CONFIG_DIR/hosts.yml";;
-      *) printf 'github.com:\n    user: %s\n' "$(cat "$APPROVE")" > "$GH_CONFIG_DIR/hosts.yml";;
-    esac
+    printf 'github.com:\n    user: %s\n    oauth_%s: fake\n' "$(cat "$APPROVE")" token > "$GH_CONFIG_DIR/hosts.yml"
     exit 0;;
   "auth logout"*)
-    [ "${LOGOUT_MODE:-ok}" = fail ] && exit 1
     [ -f "$GH_CONFIG_DIR/hosts.yml" ] || exit 1
     rm -f "$GH_CONFIG_DIR/hosts.yml"; exit 0;;
   "api user"*)
@@ -114,7 +110,7 @@ def _add():
 def _write_credential(account, login: str = BOT) -> None:
     home = Path(account["source_home"])
     home.mkdir(parents=True, exist_ok=True)
-    (home / "hosts.yml").write_text(f"github.com:\n    user: {login}\n")
+    (home / "hosts.yml").write_text(f"github.com:\n    user: {login}\n    oauth_{'token'}: fake\n")
 
 
 def _signed_in(login: str = BOT):
@@ -306,30 +302,16 @@ async def test_signin_as_the_person_is_refused_and_logged_out(agent):
 
 
 @pytest.mark.asyncio
-async def test_signin_in_corsia_owned_storage_connects(agent):
+async def test_signin_with_keyring_storage_is_refused(agent, monkeypatch):
     from connections import account_controls
 
+    monkeypatch.setenv("TOKEN_SOURCE", "keyring")
     account = await asyncio.to_thread(_add)
     await account_controls.start_signin(account["id"])
     agent.approve.write_text(BOT)
     operation = account_controls._SIGNINS[account["id"]]
     await asyncio.wait_for(asyncio.shield(operation.task), 10)
-    assert (operation.status, operation.cause) == ("completed", None)
-
-
-@pytest.mark.asyncio
-async def test_plaintext_signin_in_corsia_owned_storage_connects(agent, monkeypatch):
-    from connections import account_controls
-
-    account = await asyncio.to_thread(_add)
-    monkeypatch.setenv("LOGIN_STORAGE", "plaintext")
-    monkeypatch.setenv("TOKEN_SOURCE", str(Path(account["source_home"]) / "hosts.yml"))
-    await account_controls.start_signin(account["id"])
-    agent.approve.write_text(BOT)
-    operation = account_controls._SIGNINS[account["id"]]
-    await asyncio.wait_for(asyncio.shield(operation.task), 10)
-    assert (operation.status, operation.cause) == ("completed", None)
-    assert (Path(account["source_home"]) / "hosts.yml").exists()
+    assert (operation.status, operation.cause) == ("failed", "token_not_in_home")
 
 
 @pytest.mark.asyncio
@@ -349,7 +331,8 @@ async def test_connect_logs_out_a_stale_login_first(agent):
         await account_controls.cancel_signin(account["id"])
 
 
-def test_login_command_uses_corsia_owned_storage_and_workflow_scope():
+def test_login_command_keeps_insecure_storage_and_workflow_scope():
+    """The token must live in the home's hosts.yml: the read-only grant and fingerprint cover only that file."""
     from connections.account_profiles import profile_for
 
     login = profile_for("github").commands["login"]

@@ -124,25 +124,25 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     for prefix in ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-"):
         assert f'^/tmp/{prefix}[^/]*\\.sb$' in profile
         assert f'^/private/tmp/{prefix}[^/]*\\.sb$' in profile
-    from tools.managed_runtime import runtime_cache_root
+    from tools.managed_runtime import application_cache_root
 
-    assert f'(deny file-write* (subpath "{runtime_cache_root()}"))' in profile
+    assert f'(deny file-write* (subpath "{application_cache_root()}"))' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
 
 
-def test_mcp_profile_denies_the_app_cache_root_but_allows_own_cache(monkeypatch, tmp_path):
+def test_mcp_profile_denies_the_cache_parent_but_allows_own_cache(monkeypatch, tmp_path):
+    from tools.managed_runtime import application_cache_root
     from tools.mcp_local_transport import mcp_cache_root
     from tools.safehouse_launch import mcp_private_state_profile
 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    cache_root = mcp_cache_root()
-    own_cache = cache_root / "app-a"
+    own_cache = mcp_cache_root() / "app-a"
     profile = mcp_private_state_profile(
         tmp_path / "generated.sb", tmp_path / "safehouse", tmp_path / "state", own_cache,
     )
 
-    assert f'(deny file-write* (subpath "{cache_root}"))' in profile
+    assert f'(deny file-write* (subpath "{application_cache_root()}"))' in profile
     assert f'(allow file-write* (subpath "{own_cache}"))' in profile
 
 
@@ -177,13 +177,13 @@ def test_configured_app_path_keeps_system_dirs_after_its_own(monkeypatch, tmp_pa
 def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
     from infra import config
     from tools.host_path_policy import current_protected_host_path_policy
-    from tools.mcp_local_transport import mcp_cache_root
+    from tools.managed_runtime import application_cache_root
 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(config, "STATE_ROOT", tmp_path / "state")
     policy = current_protected_host_path_policy()
 
-    assert f'(deny file-write* (subpath "{mcp_cache_root()}"))' in policy.sandbox_rules()
+    assert f'(deny file-write* (subpath "{application_cache_root()}"))' in policy.sandbox_rules()
 
 
 def test_mcp_envelope_dir_is_agent_shell_denied(monkeypatch, tmp_path):
@@ -456,10 +456,10 @@ async def test_runtime_connects_each_app_separately_but_blocks_all_other_caches(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("target_name", ("runtime", "launch-parent", "launch-tree"))
+@pytest.mark.parametrize("target_name", ("cache-parent", "runtime", "launch-parent", "launch-tree"))
 def test_agent_shell_safehouse_refuses_runtime_and_launch_cache_writes(monkeypatch, tmp_path, target_name):
     _require_safehouse()
-    from tools.managed_runtime import runtime_cache_root
+    from tools.managed_runtime import application_cache_root, runtime_cache_root
     from tools.mcp_local_transport import mcp_cache_root
     from tools.shell_guard import _terminal_boundary_profile, safehouse_argv
 
@@ -467,12 +467,14 @@ def test_agent_shell_safehouse_refuses_runtime_and_launch_cache_writes(monkeypat
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    cache_parent = application_cache_root()
     launch_parent = mcp_cache_root()
     launch_tree = launch_parent / "app-a"
     runtime = runtime_cache_root()
-    for directory in (launch_parent, launch_tree, runtime):
+    for directory in (cache_parent, launch_parent, launch_tree, runtime):
         directory.mkdir(parents=True, exist_ok=True)
     targets = {
+        "cache-parent": cache_parent / "agent-write",
         "runtime": runtime / "agent-write",
         "launch-parent": launch_parent / "agent-write",
         "launch-tree": launch_tree / "agent-write",

@@ -97,17 +97,12 @@ def mcp_private_state_profile(
         for path in denied_roots
     ]
     path_rules.append(policy.hard_floor_sandbox_rules())
-    # Local apps execute this cache but can never mutate the verified runtimes.
-    from tools.managed_runtime import runtime_cache_root
-
-    path_rules.append(f'(deny file-write* (subpath "{sbpl_path(runtime_cache_root())}"))')
-    # A production connection starts one app at a time, so deny the shared
-    # cache root and reopen only this app's private directory.  The specific
-    # allow makes isolation independent of which apps happened to connect first.
-    from tools.mcp_local_transport import mcp_cache_root
+    # Local apps execute this cache but can never replace its verified runtime
+    # siblings or parent. Reopen only the launched app's private cache directory.
+    from tools.managed_runtime import application_cache_root
 
     path_rules.extend((
-        f'(deny file-write* (subpath "{sbpl_path(mcp_cache_root())}"))',
+        f'(deny file-write* (subpath "{sbpl_path(application_cache_root())}"))',
         f'(allow file-write* (subpath "{sbpl_path(cache_dir)}"))',
     ))
     if policy.generated_profile is not None:

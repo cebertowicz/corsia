@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import io
 from pathlib import Path
+import stat
 import tarfile
 import urllib.error
+import zipfile
 
 import pytest
 
@@ -85,12 +87,81 @@ def test_approval_notice_names_only_a_pending_runtime_fetch(monkeypatch):
     from tools import managed_runtime
 
     pin = managed_runtime.RuntimePin("test", "https://nodejs.org/test.tar.gz", "a" * 64, "tar.gz", "node/bin/node")
-    monkeypatch.setattr(managed_runtime, "runtime_fetch_plan", lambda _command: ("node", pin))
-    assert local_app_notice({"command": "npx"}) == (
+    observed_paths = []
+
+    def fetch_plan(_command, *, path=None):
+        observed_paths.append(path)
+        return "node", pin
+
+    monkeypatch.setattr(managed_runtime, "runtime_fetch_plan", fetch_plan)
+    assert local_app_notice({"command": "npx", "env": {"PATH": "/app/bin"}}) == (
         f"{LOCAL_APP_NOTICE} CORSIA will download Node from nodejs.org to run it."
     )
-    monkeypatch.setattr(managed_runtime, "runtime_fetch_plan", lambda _command: None)
+    assert observed_paths == ["/app/bin"]
+    monkeypatch.setattr(managed_runtime, "runtime_fetch_plan", lambda _command, *, path=None: ("gh", pin))
+    assert local_app_notice({"command": "gh"}) == (
+        f"{LOCAL_APP_NOTICE} CORSIA will download GitHub CLI from GitHub to run it."
+    )
+    monkeypatch.setattr(managed_runtime, "runtime_fetch_plan", lambda _command, *, path=None: None)
     assert local_app_notice({"command": "npx"}) == LOCAL_APP_NOTICE
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        tarfile.TarInfo("/absolute"),
+        tarfile.TarInfo("../escape"),
+        tarfile.TarInfo("node/bin/link"),
+    ],
+)
+def test_safe_tar_member_refuses_escaping_paths(member):
+    from tools.managed_runtime import _safe_tar_member
+
+    if member.name == "node/bin/link":
+        member.type = tarfile.SYMTYPE
+        member.linkname = "../../../escape"
+    assert not _safe_tar_member(member)
+
+
+def test_extract_refuses_unsafe_zip_symlink(tmp_path):
+    from tools import managed_runtime
+
+    archive = tmp_path / "unsafe.zip"
+    info = zipfile.ZipInfo("node/bin/link")
+    info.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with zipfile.ZipFile(archive, "w") as source:
+        source.writestr(info, "../../../escape")
+    pin = managed_runtime.RuntimePin("test", "https://example.invalid/test.zip", "a" * 64, "zip", "node/bin/node")
+
+    with pytest.raises(managed_runtime.ManagedRuntimeError, match="unsafe path"):
+        managed_runtime._extract(archive, tmp_path / "out", pin)
+
+
+def test_invalid_read_only_install_is_replaced(monkeypatch, tmp_path):
+    from tools import managed_runtime
+
+    payload = _node_archive()
+    pin = _pin(monkeypatch, payload)
+    final = tmp_path / "runtimes" / "node" / pin.version / "arm64"
+    final.mkdir(parents=True)
+    (final / ".corsia-runtime.json").write_text("{}", encoding="utf-8")
+    managed_runtime._make_read_execute_only(final)
+    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(payload))
+
+    executable = managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
+
+    assert executable.is_file()
+    assert managed_runtime.runtime_is_installed("node", root=tmp_path / "runtimes")
+
+
+def test_download_byte_cap_is_reported(monkeypatch, tmp_path):
+    from tools import managed_runtime
+
+    monkeypatch.setattr(managed_runtime, "_MAX_DOWNLOAD_BYTES", 3)
+    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"four"))
+
+    with pytest.raises(managed_runtime.ManagedRuntimeError, match="byte limit"):
+        managed_runtime._download("https://example.invalid/archive", tmp_path / "download")
 
 
 def test_persons_working_command_wins(monkeypatch, tmp_path):

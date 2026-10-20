@@ -1,4 +1,9 @@
-"""Shared protected-mode host-path policy for direct actions and terminal sandboxes."""
+"""Protected-mode host path policy.
+
+Reviewed actions consume their exact permit instead of consulting this policy.
+Without a permit, direct filesystem actions and the terminal sandbox share this
+inventory so protected execution remains consistent across tools.
+"""
 
 from __future__ import annotations
 
@@ -327,22 +332,17 @@ def current_protected_host_path_policy(
 ) -> ProtectedHostPathPolicy:
     """Build the live policy without caching mutable environment paths."""
     from infra.config import STATE_ROOT
-
     discovered = shutil.which("safehouse")
     paths = tuple(safehouse_paths)
     if discovered is not None:
         paths = (*paths, Path(discovered))
-    # Local apps may read/execute this verified cache, but agent shells cannot
-    # replace it between verification and launch.
-    from tools.managed_runtime import runtime_cache_root
-    from tools.mcp_local_transport import mcp_cache_root
-
+    from tools.managed_runtime import application_cache_root
     return ProtectedHostPathPolicy(
         home=Path.home(),
         state_root=STATE_ROOT,
         generated_profile=generated_profile,
         safehouse_paths=paths,
-        write_roots=(runtime_cache_root(), mcp_cache_root(), *write_roots),
+        write_roots=(application_cache_root(), *write_roots),
     )
 
 

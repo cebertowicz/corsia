@@ -41,9 +41,9 @@ def _mcp_app_id(name: str) -> str:
 
 def mcp_cache_root(home: Path | None = None) -> Path:
     """Return the parent of every app-private local-MCP cache."""
-    from infra.platform_paths import APPLICATION_ID
+    from tools.managed_runtime import application_cache_root
 
-    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APPLICATION_ID / "mcp"
+    return application_cache_root(home) / "mcp"
 
 
 def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:

@@ -11,6 +11,7 @@ import shutil
 import stat
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -51,6 +52,10 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
     },
 }
 _COMMAND_RUNTIME = {"node": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}
+# The largest pinned archive is far below this cap; the cap bounds a compromised or
+# malformed response before it can hold the connected-app lifecycle lock indefinitely.
+_MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+_DOWNLOAD_DEADLINE_SECONDS = 5 * 60
 
 
 def macos_arch(machine: str | None = None) -> str:
@@ -62,9 +67,14 @@ def macos_arch(machine: str | None = None) -> str:
     raise ManagedRuntimeError(f"CORSIA has no pinned runtime for architecture {normalized!r}")
 
 
+def application_cache_root(home: Path | None = None) -> Path:
+    """The CORSIA-owned cache parent whose children must not be agent-replaceable."""
+    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APPLICATION_ID
+
+
 def runtime_cache_root(home: Path | None = None) -> Path:
     """One executable cache, outside CORSIA state and private roots."""
-    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APPLICATION_ID / "runtimes"
+    return application_cache_root(home) / "runtimes"
 
 
 def _pin(kind: str, arch: str | None = None) -> tuple[str, RuntimePin]:
@@ -112,9 +122,16 @@ def runtime_fetch_plan(command: str, *, path: str | None = None, root: Path | No
 
 def _download(url: str, destination: Path) -> str:
     digest = hashlib.sha256()
+    deadline = time.monotonic() + _DOWNLOAD_DEADLINE_SECONDS
+    received = 0
     try:
         with urllib.request.urlopen(url, timeout=30) as response, destination.open("xb") as output:
             while chunk := response.read(1024 * 1024):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("pinned runtime download exceeded its deadline")
+                received += len(chunk)
+                if received > _MAX_DOWNLOAD_BYTES:
+                    raise ManagedRuntimeError("pinned runtime download exceeded its byte limit")
                 digest.update(chunk)
                 output.write(chunk)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as exc:
@@ -173,6 +190,17 @@ def _make_read_execute_only(path: Path) -> None:
     path.chmod(0o555)
 
 
+def _make_writable(path: Path) -> None:
+    """Restore enough permissions to remove a prior immutable failed install."""
+    if path.is_symlink():
+        path.unlink()
+        return
+    for item in sorted(path.rglob("*"), reverse=True):
+        if not item.is_symlink():
+            item.chmod(0o755 if item.is_dir() else 0o644)
+    path.chmod(0o755)
+
+
 def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = None) -> Path:
     """Fetch one pinned runtime atomically, or return its verified executable."""
     selected, pin = _pin(kind, arch)
@@ -180,11 +208,13 @@ def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = No
     final = _install_dir(kind, selected, pin, base)
     if _valid_install(final, kind, selected, pin):
         return _expected_executable(final, pin)
-    if final.exists():
-        shutil.rmtree(final)
-    final.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".{kind}-{pin.version}-", dir=final.parent))
+    staging: Path | None = None
     try:
+        if final.exists():
+            _make_writable(final)
+            shutil.rmtree(final)
+        final.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f".{kind}-{pin.version}-", dir=final.parent))
         archive = staging / "download"
         if _download(pin.url, archive) != pin.sha256:
             raise ManagedRuntimeError("download checksum did not match the pinned runtime")
@@ -204,7 +234,8 @@ def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = No
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         raise ManagedRuntimeError(f"pinned runtime install failed: {type(exc).__name__}") from exc
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def command_path(command: str, *, path: str | None = None, root: Path | None = None) -> str | None:

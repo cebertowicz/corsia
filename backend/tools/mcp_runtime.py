@@ -114,9 +114,13 @@ def _admit_reconnect(app_id: str) -> None:
 
 def _needs_token_result(config: dict, missing_keys: list[object]) -> dict[str, object] | None:
     """Return the durable missing-token state when this app cannot connect yet."""
-    if config.get("needs_token") is not True or config.get("secret_env") or config.get("secret_headers"):
-        if not missing_keys:
-            return None
+    needs_token = (
+        config.get("needs_token") is True
+        and not config.get("secret_env")
+        and not config.get("secret_headers")
+    ) or bool(missing_keys)
+    if not needs_token:
+        return None
     return {"state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
 
 

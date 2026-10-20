@@ -178,6 +178,7 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
             return
         refusal = profile_for(operation.provider).signin_refusal
         if refusal is not None and (refused := await run_in_db(refusal, home, identity)) is not None:
+            # The login stands in the home until the vendor's own logout removes it.
             await _cleanup(await run_in_db(get_account, operation.account_id))
             operation.status, operation.cause = "failed", refused
             return
