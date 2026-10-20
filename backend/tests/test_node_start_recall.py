@@ -113,6 +113,27 @@ def test_many_newer_one_term_comments_do_not_hide_an_older_match(db):
     assert len(lines) == 2 and "Export account ledger with CSV" in lines[1]
 
 
+@pytest.mark.parametrize("noise_body", [
+    "Reformat the subaccount, nonexport and subledger tabs; unstable.",  # terms only inside words
+    "Stable account columns, any format.",  # floor met without a title term
+])
+def test_many_comments_match_rejects_do_not_hide_a_match(db, noise_body):
+    from doc_feedback_helpers import add_comment, seed_document
+    from memory.node_start_recall import SOURCE_CANDIDATES, NodeText, related
+
+    db.execute("UPDATE threads SET user_id='owner-token'")
+    artifact = seed_document(db, "past", name="ledger-guide.md")
+    match, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+    noise = [add_comment(db, artifact, author_kind="user", author_id=None)[0]["id"] for _ in range(SOURCE_CANDIDATES + 1)]
+    db.execute("UPDATE doc_comments SET body='Export the ledger.', created_at='2026-01-01' WHERE id=?", (match["id"],))
+    db.executemany("UPDATE doc_comments SET body=?, created_at='2026-02-01' WHERE id=?", [(noise_body, comment_id) for comment_id in noise])
+    db.commit()
+
+    lines = related(db, NodeText("Export ledger", criteria="Use stable account columns and format."), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Export the ledger" in lines[1]
+
+
 def test_purged_thread_answered_decision_is_not_quoted(db):
     from plans.public import DECISION_TYPE
 

@@ -187,9 +187,30 @@ def _positional(clause: str, params: dict[str, str]) -> tuple[str, list[str]]:
     return re.sub(r":\w+", "?", clause), [params[name] for name in names]
 
 
-def _shared_terms(column: str, terms: TaskTerms) -> tuple[str, list[str]]:
-    """Count the terms ``column`` contains; never below ``match()``'s count, so the floor drops no hit."""
-    return "+".join(f"({column} LIKE ?)" for _ in terms.terms), [f"%{term}%" for term in terms.terms]
+def _hay(column: str) -> str:
+    """Select ``column`` lowered once, with a leading separator, for ``_floored``."""
+    return f"' '||lower({column}) AS hay"
+
+
+def _floored(scoped: str, order: str, terms: TaskTerms) -> tuple[str, list[object]]:
+    """Keep ``scoped`` rows (each with a ``_hay``) at the shared-term floor, best first, up to the limit.
+
+    ``shared`` and ``title_shared`` count terms starting a word; each is never below ``match()``'s
+    count, so the floor drops no hit, and exceeds it only when the terms sit in different windows.
+    """
+    title = [term for term in terms.terms if term in terms.title_terms]
+
+    def count(selected: list[str] | tuple[str, ...]) -> str:
+        return "+".join("(hay GLOB ?)" for _ in selected)
+
+    patterns = [f"*[^a-z0-9]{term}*" for term in (*terms.terms, *title)]
+    return (
+        f"""WITH scoped AS MATERIALIZED ({scoped})
+            SELECT * FROM (SELECT *,{count(terms.terms)} AS shared,{count(title)} AS title_shared FROM scoped)
+            WHERE shared>=? AND title_shared>=1
+            ORDER BY shared DESC,title_shared DESC,{order} LIMIT ?""",
+        [*patterns, floor(len(terms.terms)), SOURCE_CANDIDATES],
+    )
 
 
 def _owned_threads(alias: str) -> str:
@@ -239,17 +260,15 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off,
 def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
     from core.correction_targets import comment_target_sql
 
-    shared, params = _shared_terms("c.body", terms)
     source_scope, source_params = _source_scope("t", "c.created_at", caller, cloud_off, cutoff)
-    rows = db.execute(
-        f"""SELECT * FROM (
-              SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,{shared} AS shared
-              FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
-              LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
-              WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope})
-            WHERE shared>=? ORDER BY shared DESC,created_at DESC,id DESC LIMIT ?""",
-        [*params, user_id, *source_params, floor(len(terms.terms)), SOURCE_CANDIDATES],
-    ).fetchall()
+    query, floor_params = _floored(
+        f"""SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,{_hay('c.body')}
+            FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
+            LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
+            WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope}""",
+        "created_at DESC,id DESC", terms,
+    )
+    rows = db.execute(query, [user_id, *source_params, *floor_params]).fetchall()
     hits = []
     for row in rows:
         found = match(terms, str(row["body"]))
@@ -265,21 +284,19 @@ def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[
 
     answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
     answered_at = "json_extract(ai.metadata,'$.plan_decision.answered_at')"
-    shared, params = _shared_terms(answer, terms)
     source_scope, source_params = _source_scope("t", answered_at, caller, cloud_off, cutoff)
-    rows = db.execute(
-        f"""SELECT * FROM (
-              SELECT ai.external_id,json_extract(ai.metadata,'$.plan_decision.title') AS title,
-                     {answer} AS answer,{answered_at} AS answered_at,{shared} AS shared
-              FROM artifact_identities ai
-              JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
-              WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
-                AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
-                AND json_type(ai.metadata,'$.plan_decision.answer.text')='text'
-                AND {_owned_threads('t')} {source_scope})
-            WHERE shared>=? ORDER BY shared DESC,answered_at DESC LIMIT ?""",
-        [*params, DECISION_TYPE, user_id, *source_params, floor(len(terms.terms)), SOURCE_CANDIDATES],
-    ).fetchall()
+    query, floor_params = _floored(
+        f"""SELECT ai.external_id,json_extract(ai.metadata,'$.plan_decision.title') AS title,
+                   {answer} AS answer,{answered_at} AS answered_at,{_hay(answer)}
+            FROM artifact_identities ai
+            JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
+            WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
+              AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
+              AND json_type(ai.metadata,'$.plan_decision.answer.text')='text'
+              AND {_owned_threads('t')} {source_scope}""",
+        "answered_at DESC", terms,
+    )
+    rows = db.execute(query, [DECISION_TYPE, user_id, *source_params, *floor_params]).fetchall()
     hits = []
     for row in rows:
         text, created_at = str(row["answer"]), str(row["answered_at"])
@@ -293,32 +310,29 @@ def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[
 def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
     # Both rule fields are statement entries (core.continuity_types), so the statement is the rule's text.
     statement = "json_extract(ce.body,'$.statement')"
-    shared, shared_params = _shared_terms(statement, terms)
     source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
     fields = sorted(RULE_FIELDS)
+    top, floor_params = _floored(
+        f"""SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,
+                   {statement} AS statement,{_hay(statement)}
+            FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
+            WHERE {_owned_threads('t')} AND ce.state='active'
+              AND ce.field IN (?,?)
+              AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
+                          WHERE json_extract(value,'$.kind')='user')
+              AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
+              {source_scope}""",
+        "updated_at DESC", terms,
+    )
     rows = db.execute(
-        f"""WITH eligible AS (
-              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,
-                     {statement} AS statement,{shared} AS shared
-              FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
-              WHERE {_owned_threads('t')} AND ce.state='active'
-                AND ce.field IN (?,?)
-                AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
-                            WHERE json_extract(value,'$.kind')='user')
-                AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
-                {source_scope}
-            ), top AS (
-              SELECT * FROM eligible WHERE shared>=?
-              ORDER BY shared DESC,updated_at DESC LIMIT ?
-            )
+        f"""WITH top AS ({top})
             SELECT top.*,checkpoints.id AS checkpoint_id
             FROM top LEFT JOIN checkpoint_entry_search entry_index
               ON entry_index.thread_id=top.thread_id AND entry_index.history_epoch=top.history_epoch
              AND entry_index.entry_id=top.entry_id AND entry_index.revision=top.revision
             LEFT JOIN checkpoints ON checkpoints.generation_order=entry_index.last_generation_order
-            ORDER BY top.shared DESC,top.updated_at DESC""",
-        [*shared_params, user_id, *fields, caller_thread_id, *source_params,
-         floor(len(terms.terms)), SOURCE_CANDIDATES],
+            ORDER BY top.shared DESC,top.title_shared DESC,top.updated_at DESC""",
+        [user_id, *fields, caller_thread_id, *source_params, *floor_params],
     ).fetchall()
     hits = []
     for row in rows:
