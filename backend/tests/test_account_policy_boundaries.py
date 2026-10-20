@@ -709,7 +709,7 @@ def test_checkpoint_fork_refuses_without_a_resolved_target(removed, provider):
     # The idle fold is excluded by name and builds no target.
     reason = idle_checkpoint_exclusion_reason(db, thread, model)
     assert reason is not None and reason.name == "UNRESOLVABLE"
-    assert idle_checkpoint._resolved_target(db, model) is None
+    assert idle_checkpoint._resolved_target(db, model, thread).reason.name == "TARGET_UNAVAILABLE"
 
 
 @pytest.mark.asyncio

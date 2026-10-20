@@ -9,6 +9,7 @@ from loguru import logger
 from infra import db_async
 from infra.send_types import DeliveryFailureSide
 from llm import resolution as model_resolution
+from llm.locality import LOCALITY_REFUSALS
 from llm.resolution import ExecutionTarget, ModelUnavailableError
 
 
@@ -55,12 +56,12 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
     it. Admission classifies a resolved target as runnable, model-recoverable,
     or visibly failed below.
 
-    A project that turned cloud models off is neither: the person chose it, and
-    it lifts when they turn it back on or move the thread to a local model. So it
-    resolves to a target whose availability reason is the refusal
-    (``project_cloud_off``), which admission holds at the FIFO head like any other
-    recoverable model state. It never raises, so a race between the setting and a
-    claim lands in the same hold.
+    A locality refusal (``LOCALITY_REFUSALS``) is neither: the person chose it,
+    and it lifts when they change the policy or move the thread to a local model.
+    ``resolve_thread_target`` returns it as a target whose availability reason is
+    the refusal, which admission holds at the FIFO head like any other recoverable
+    model state. It never raises, so a race between the setting and a claim lands
+    in the same hold.
 
     ``ValueError`` means the catalog row cannot describe a deliverable target.
     That never clears by retrying and must not become queued work.
@@ -76,32 +77,22 @@ async def resolve_target(model: str, *, thread_id: str | None = None) -> Executi
 
 
 def _resolve_target_in_scope(model: str, *, thread_id: str | None) -> ExecutionTarget:
-    """Resolve one target, marked unavailable when its project forbids the model."""
+    """Resolve one target, marked unavailable when its thread's policy forbids the model."""
+    return model_resolution.resolve_thread_target(model, thread_id=thread_id)
+
+
+async def scope_supplied_target(target: ExecutionTarget, *, thread_id: str) -> ExecutionTarget:
+    """Apply the thread's policy to a target a caller resolved before admission."""
     from infra.database import get_db
 
-    db = get_db()
-    try:
-        return scoped_target(model, thread_id=thread_id, db=db)
-    finally:
-        db.close()
+    def _scope() -> ExecutionTarget:
+        db = get_db()
+        try:
+            return model_resolution.scope_to_thread(target, thread_id=thread_id, db=db)
+        finally:
+            db.close()
 
-
-def scoped_target(model: str, *, thread_id: str | None, db) -> ExecutionTarget:
-    """The one resolver of a thread's runnable target: catalog truth, then its project's policy.
-
-    Send and the claim's release predicate both read it, so a held input is released by
-    exactly the state that held it. The policy wins over the row's own reason: it is the
-    person's setting, and it is the cause that lifts first.
-    """
-    from dataclasses import replace
-
-    from llm.locality import thread_locality_refusal
-
-    target = model_resolution.resolve_execution_target(model, db=db)
-    refusal = thread_locality_refusal(model, thread_id=thread_id, db=db)
-    if refusal:
-        return replace(target, available=False, availability_reason=refusal)
-    return target
+    return await db_async.run_in_db(_scope)
 
 
 TargetAdmission = Literal["run", "wait", "fail"]
@@ -130,7 +121,9 @@ def model_admission(model: str, *, db=None, thread_id: str | None = None) -> Tar
     policy keeps its hold exactly as it created it.
     """
     try:
-        return classify_target_admission(scoped_target(model, thread_id=thread_id, db=db))
+        return classify_target_admission(
+            model_resolution.resolve_thread_target(model, thread_id=thread_id, db=db),
+        )
     except (ModelUnavailableError, ValueError):
         return "fail"
 
@@ -144,7 +137,7 @@ def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> fr
     held = frozenset(
         str(row["id"]) for row in rows
         if row["write_outcome"] == "proved_no_write"
-        and row["delivery_error"] == SELECTED_MODEL_UNAVAILABLE
+        and row["delivery_error"] in (SELECTED_MODEL_UNAVAILABLE, *LOCALITY_REFUSALS)
     )
     from connections.account_holds import ACCOUNT_HOLD_REASONS
 

@@ -1,7 +1,9 @@
-"""Per-project repository policy: branch pin and base-checkout protection.
+"""Per-project policy tables: repository policy and inference locality.
 
-``infra.project_repo_policy`` reads the rows and
-``infra.project_repo_policy_writes`` writes them.
+Repository policy is the branch pin and base-checkout protection;
+``infra.project_repo_policy`` reads the rows and ``infra.project_repo_policy_writes``
+writes them. Inference policy is the switch that turns cloud models off;
+``llm.locality`` reads and writes it.
 """
 
 from __future__ import annotations

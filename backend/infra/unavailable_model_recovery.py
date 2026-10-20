@@ -14,6 +14,7 @@ from infra.send_target import (
     classify_target_admission,
 )
 from infra.send_types import DeliveryFailureSide
+from llm.locality import LOCALITY_REFUSALS
 
 if TYPE_CHECKING:
     from infra.send_types import InboxQueuedInput
@@ -29,8 +30,10 @@ def _retained_head_kind_sql(thread: str) -> str:
     from connections.account_holds import ACCOUNT_HOLD_REASONS
 
     causes = ','.join("'" + cause + "'" for cause in ACCOUNT_HOLD_REASONS)
+    locality = ','.join("'" + cause + "'" for cause in LOCALITY_REFUSALS)
     return f"""(SELECT CASE
          WHEN held.delivery_error='{SELECTED_MODEL_UNAVAILABLE}' THEN 'model'
+         WHEN held.delivery_error IN ({locality}) THEN 'locality'
          WHEN held.delivery_error IN ({causes}) THEN 'account' END
       FROM messages AS held JOIN threads AS ht ON ht.id=held.thread_id
        WHERE held.thread_id={thread} AND held.delivery_state='queued'
@@ -72,17 +75,20 @@ def _held_thread_ids() -> list[str]:
 async def hold_unavailable_model_input(
     batch: ClaimedBatch, target: ExecutionTarget,
 ) -> InboxQueuedInput:
-    """Preserve a selected-model-unavailable batch at its FIFO boundary."""
+    """Preserve a batch whose selected model cannot run at its FIFO boundary.
+
+    When policy forbids the model, the hold's durable cause is the locality refusal
+    itself, so every reader (release, stalled kind, parent wake) tells it from an outage.
+    """
     from core.plan_turn_end import record_turn_end_logged
     from core.turn_core import settle_turn_terminal
     from infra.input_writes import release_batch_before_write
     from infra.send_broadcast import broadcast_claimed_batch
     from infra.send_types import InboxQueuedInput, InputReceipt
 
-    await run_in_db(
-        release_batch_before_write, batch, hold_error=SELECTED_MODEL_UNAVAILABLE,
-    )
-    await settle_turn_terminal(batch.turn_id, "error", SELECTED_MODEL_UNAVAILABLE)
+    cause = hold_cause(target)
+    await run_in_db(release_batch_before_write, batch, hold_error=cause)
+    await settle_turn_terminal(batch.turn_id, "error", cause)
     try:
         await broadcast_claimed_batch(batch)
     except Exception:
@@ -129,16 +135,22 @@ async def hold_unless_runnable(
     )
 
 
+def hold_cause(target: ExecutionTarget) -> str:
+    """The durable ``delivery_error`` a held input carries for ``target``."""
+    reason = target.availability_reason
+    return reason if reason in LOCALITY_REFUSALS else SELECTED_MODEL_UNAVAILABLE
+
+
 def _held_error(thread_id: str, target: ExecutionTarget) -> str:
     """Name the held model, why, and its known reset, for whoever reads the Turn end."""
     from infra.held_admission import limited_admission
 
     reason = target.availability_reason or "model_unavailable"
-    if reason == "project_cloud_off":
+    if reason in LOCALITY_REFUSALS:
         # The person's own setting, not an outage: name it so nobody reads it as one.
         from prompts.cloud_off import held_error
 
-        return held_error(target.catalog_id)
+        return held_error(target.catalog_id, reason)
     try:
         limit = limited_admission(thread_id, target.catalog_id)
     except Exception:

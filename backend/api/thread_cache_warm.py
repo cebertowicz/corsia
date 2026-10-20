@@ -13,7 +13,7 @@ from llm.context_window_discovery import ensure_context_window
 from llm.resolution import (
     ExecutionTarget,
     ModelUnavailableError,
-    resolve_execution_target,
+    resolve_thread_target,
 )
 
 router = APIRouter()
@@ -34,11 +34,10 @@ def _has_positive_context_evidence(target: ExecutionTarget) -> bool:
 
 def _warm_suppressed(suppression: str) -> dict:
     return {
-        "ok": False, "skipped": True,
+        "ok": False,
+        "skipped": True,
         "reason": suppression,
-        "message": ("This project uses local models only, so this thread was not warmed"
-                    if suppression == "project_cloud_off"
-                    else "Warm suppressed while the session has active delivery work"),
+        "message": "Warm suppressed while the session has active delivery work",
     }
 
 
@@ -56,14 +55,14 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
         sess = get_thread_for_user(thread_id, user_id, db=db)
         if not sess:
             raise HTTPException(404)
-        suppression = warm_suppression_reason(thread_id, db=db, model=sess["model"] or model)
+        suppression = warm_suppression_reason(thread_id, db=db)
         if suppression is not None:
             return _warm_suppressed(suppression)
         bound = sess["model"] or ""
         if bound and model and model != bound:
             raise HTTPException(409, "Thread is bound to a different model")
         try:
-            target = resolve_execution_target(bound or model or "", db=db)
+            target = resolve_thread_target(bound or model or "", thread_id=thread_id, db=db)
         except (ModelUnavailableError, ValueError) as exc:
             return {"ok": False, "message": str(exc)}
         effort = effective_reasoning_effort(
@@ -76,7 +75,7 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
         db.close()
 
 
-async def _prove_warm_target(target: ExecutionTarget):
+async def _prove_warm_target(target: ExecutionTarget, thread_id: str):
     if not _is_warmable_omlx_target(target):
         return {
             "ok": False,
@@ -88,7 +87,7 @@ async def _prove_warm_target(target: ExecutionTarget):
     db = get_db()
     try:
         try:
-            target = resolve_execution_target(target.catalog_id, db=db)
+            target = resolve_thread_target(target.catalog_id, thread_id=thread_id, db=db)
         except (ModelUnavailableError, ValueError) as exc:
             return {"ok": False, "message": str(exc)}
     finally:
@@ -381,7 +380,7 @@ async def warm_session_cache(
     if isinstance(loaded, dict):
         return loaded
     target, project_id, reasoning_effort = loaded
-    proved = await _prove_warm_target(target)
+    proved = await _prove_warm_target(target, thread_id)
     if isinstance(proved, dict):
         return proved
     messages, tools, prompt_shape = await _build_warm_prefix(

@@ -91,14 +91,13 @@ def test_project_cloud_off_text_is_governance_wording():
         head + "Use a ready local model: omlx@local/a, omlx@local/b."
     )
     assert project_cloud_off_text("codex/gpt-5.6-terra", [], spawn=True) == (
-        head + "No local model is ready now. Stay on your current model and do the work inline,"
+        head + "No local model is ready now. Do the work in a thread already on a local model,"
         " or check model_catalog later. Local workers run one at a time."
     )
 
 
 def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
     from prompts.cloud_off import HOLD_ACTION, held_error
-    from prompts.plan_wakes import ACCOUNT_HOLD_COPY
 
     action = (
         "Move the thread to a ready local model from model_catalog (delegate_set_model). "
@@ -109,8 +108,12 @@ def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
     assert held_error("codex/gpt-5.6-terra") == (
         "Held: this project uses local models only, so codex/gpt-5.6-terra can't run here. " + action
     )
-    assert ACCOUNT_HOLD_COPY["project_cloud_off"][1] == action
-    assert "current model" not in held_error("codex/gpt-5.6-terra")
+    assert held_error("codex/gpt-5.6-terra", "thread_local_only") == (
+        "Held: codex/gpt-5.6-terra can't run here: this chat is set to local models only;"
+        " it runs once moved to a local model. " + action
+    )
+    for cause in ("project_cloud_off", "thread_local_only"):
+        assert "current model" not in held_error("codex/gpt-5.6-terra", cause)
 
 
 def test_email_screen_keeps_external_loopback_behavior():

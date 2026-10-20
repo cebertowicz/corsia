@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from prompts import cloud_off
 
 #: What a thread is told when a plan result it did not cause reaches it. Each
 #: line is followed by the same `next` block a close returns.
@@ -308,7 +307,6 @@ ACCOUNT_HOLD_COPY: dict[str | tuple[str, bool], tuple[str, str, AccountActor]] =
     ('account_signed_out', True): ('it is signed out', "Sign in through the vendor's own CLI, then check the provider source or request its canonical refresh.", 'user'),
     'account_removed': ('the account was removed', 'Choose another permitted account if one is available; otherwise switch model.', 'user'),
     'account_project_denied': ('project policy does not permit the account', 'Restore the permitted project policy through an authorized control, or ask the user to restore it; otherwise the user can choose another permitted account if one is available, or switch model.', 'agent'),
-    'project_cloud_off': (cloud_off.HOLD_PHRASE, cloud_off.HOLD_ACTION, 'agent'),
     'project_policy_missing': ("the thread's project policy is missing", 'Restore the project or move the thread to a permitted project through an authorized control, or ask the user to do so.', 'agent'),
     ('account_model_not_discovered', False): ('the selected model has not been discovered for this account', 'Verify the signed-in account through the account controls to discover its models.', 'user'),
     ('account_model_not_discovered', True): ('the selected model has not been discovered for this account', 'Check the provider source or request its canonical refresh to discover its models.', 'source'),

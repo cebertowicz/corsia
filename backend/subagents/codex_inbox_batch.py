@@ -132,7 +132,10 @@ async def deliver_live_inbox_batch(
     thread_id: str,
 ) -> bool:
     """Steer one compatible FIFO prefix into the exact current Codex Turn."""
-    from llm.resolution import resolve_execution_target
+    from functools import partial
+
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import resolve_thread_target
     from subagents.codex_runtime import settle_dead_live_generation_if_observed
 
     dead_live = False
@@ -189,11 +192,16 @@ async def deliver_live_inbox_batch(
             await _broadcast(batch)
             try:
                 thread_row = await run_in_db(load_thread_row, thread_id)
-                target = await run_in_db(resolve_execution_target, batch.target_model)
+                target = await run_in_db(partial(resolve_thread_target, batch.target_model, thread_id=thread_id))
             except BaseException:
                 await run_in_db(release_batch_before_write, batch)
                 await _broadcast(batch)
                 raise
+            if target.availability_reason in LOCALITY_REFUSALS:
+                # Policy now forbids the model: the successor Turn's admission holds the input.
+                await run_in_db(release_batch_before_write, batch)
+                await _broadcast(batch)
+                return False
             return await _steer_claimed(batch, live, thread_row, target)
     if dead_live:
         await settle_dead_live_generation_if_observed(thread_id)

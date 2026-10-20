@@ -2,7 +2,8 @@
 
 The person chose cloud-off, so the input waits (never fails) until they turn cloud back on or
 move the thread to a local model, and the claim that releases it reads the same project policy
-that held it.
+that held it. The hold's durable cause is the refusal itself, so every reader tells it from an
+outage.
 """
 
 from __future__ import annotations
@@ -11,8 +12,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from tests.unavailable_model_support import HELD, message_row, seed_model
+from tests.unavailable_model_support import message_row, seed_model
 
+HELD = ("queued", "proved_no_write", "project_cloud_off", None)
 PROJECT = "proj-off"
 CLOUD, LOCAL = "anthropic/x", "omlx@loop/m"
 
@@ -159,11 +161,17 @@ async def test_unrelated_catalog_changes_neither_reclaim_nor_rehold(world, turn_
 
 @pytest.mark.asyncio
 async def test_the_held_head_is_still_the_one_the_hold_selectors_find(world) -> None:
-    from infra.unavailable_model_recovery import _held_thread_ids
+    from infra.database import get_db
+    from infra.unavailable_model_recovery import _held_thread_ids, held_head_kind_sql
 
     await _send_and_hold()
 
     assert _held_thread_ids() == ["t"]
+    db = get_db()
+    try:
+        assert db.execute(f"SELECT {held_head_kind_sql(repr('t'))}").fetchone()[0] == "locality"
+    finally:
+        db.close()
 
 
 def _sent(claimed) -> list[str]:

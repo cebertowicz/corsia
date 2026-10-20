@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from loguru import logger
-
 
 @dataclass(frozen=True, slots=True)
 class ExternalCheckpointContext:
@@ -215,31 +213,6 @@ def _read_history(db, thread_id: str, previous, *, exact_history: bool):
     return projection, floor, precedes
 
 
-def _readable_target(db, thread_id: str, target_catalog_id: str, harness: str):
-    """The thread row and target this harness may read a checkpoint context for, or None.
-
-    A project with cloud models off may not send the thread's history to its cloud model, so
-    no context is read for it.
-    """
-    from llm.locality import thread_locality_refusal
-    from llm.resolution import resolve_execution_target
-
-    thread_row = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
-    if thread_row is None or str(thread_row["model"] or "") != target_catalog_id:
-        return None
-    target = resolve_execution_target(target_catalog_id, db=db)
-    if target.harness != harness or not target.available:
-        return None
-    refusal = thread_locality_refusal(target_catalog_id, thread_id=thread_id, db=db)
-    if refusal:
-        logger.info(
-            "external checkpoint context skipped: thread={} model={} reason={}",
-            thread_id, target_catalog_id, refusal,
-        )
-        return None
-    return thread_row, target
-
-
 def read_external_checkpoint_context(
     thread_id: str,
     target_catalog_id: str,
@@ -254,16 +227,21 @@ def read_external_checkpoint_context(
     from infra.database import get_db
     from infra.runtime_truth import provider_boundary_snapshot, registered_checkpoint_id
     from llm.reasoning_config import effective_reasoning_effort
+    from llm.resolution import resolve_thread_target
     from registry.models import find_for_thread
     from subagents.codex_runtime_support import resolve_working_dir
 
     db = get_db()
     try:
         db.execute("BEGIN")
-        readable = _readable_target(db, thread_id, target_catalog_id, harness)
-        if readable is None:
+        thread_row = db.execute(
+            "SELECT * FROM threads WHERE id=?", (thread_id,)
+        ).fetchone()
+        if thread_row is None or str(thread_row["model"] or "") != target_catalog_id:
             return None
-        thread_row, target = readable
+        target = resolve_thread_target(target_catalog_id, thread_id=thread_id, db=db)
+        if target.harness != harness or not target.available:
+            return None
         previous = current_installed(thread_id, db=db)
         projection, floor, precedes = _read_history(
             db, thread_id, previous, exact_history=exact_history,

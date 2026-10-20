@@ -60,17 +60,15 @@ class IdleCheckpointDue:
 
 
 def _fold_model_exclusion_reason(
-    connection: sqlite3.Connection, thread_id: str, model: str,
+    connection: sqlite3.Connection, model: str,
 ) -> IdleCheckpointReason | None:
     """None when eligible; else the sole model-level exclusion for the fold.
 
-    Harness identity excludes no one. The fold-level exclusions are a
-    transport that dispatches to the managed oMLX engine (a local fold would
-    compete with foreground local turns and no admission path defers it) and a
-    cloud model in a project with cloud models off.
+    Harness identity excludes no one. The one fold-level exclusion is a
+    transport that dispatches to the managed oMLX engine: a local fold would
+    compete with foreground local turns and no admission path defers it.
     """
     from llm.local_backends import find_backend
-    from llm.locality import thread_locality_refusal
     from llm.resolution import ModelUnavailableError, resolve_execution_target
 
     try:
@@ -80,8 +78,6 @@ def _fold_model_exclusion_reason(
         # failing the Turn terminal that is being committed around this read.
         logger.warning("Idle checkpoint skipped for unresolved {}: {}", model, error)
         return IdleCheckpointReason.UNRESOLVABLE
-    if thread_locality_refusal(model, thread_id=thread_id, db=connection):
-        return IdleCheckpointReason.PROJECT_CLOUD_OFF
     if target.harness == "native":
         backend = find_backend(target.transport_model)
         if backend is not None and backend.name == "omlx":
@@ -103,7 +99,7 @@ def idle_checkpoint_exclusion_reason(
         return IdleCheckpointReason.CHILD
     if (thread["lifecycle_state"] or "active") != "active":
         return IdleCheckpointReason.ARCHIVED
-    return _fold_model_exclusion_reason(connection, thread_id, model)
+    return _fold_model_exclusion_reason(connection, model)
 
 
 def idle_checkpoint_eligible(

@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
-from api.key_session_guard import require_person_for_key
+from api.locality_policy_guard import require_person_for_locality
 from connections.provider_policy import policy_payload, set_policy, set_use_workspace
 from llm.locality import project_cloud_models_off, set_project_cloud_models_off
 from connections.vendor_accounts import AccountError
@@ -75,7 +75,7 @@ async def get_cloud_models_off(project_id: str):
 async def put_cloud_models_off(
     project_id: str, body: CloudModelsOffWrite, user: dict = Depends(require_user),
 ):
-    require_person_for_key(user, kind="project", name=project_id, action="write")
+    require_person_for_locality(user, subject="project_cloud_models_off", name=project_id)
     result = await _run(
         set_project_cloud_models_off, project_id, cloud_models_off=body.cloud_models_off,
     )

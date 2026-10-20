@@ -198,12 +198,20 @@ def test_the_server_view_reports_on_this_mac_beside_private(world, client):
         (True, False), (False, True), (False, False)]
 
 
-def test_an_agent_cannot_write_either_setting(client, world):
+def test_an_agent_cannot_write_either_setting(client, world, caplog):
+    from api.locality_policy_guard import PERSON_ONLY
     from llm.locality import project_cloud_models_off
 
+    caplog.set_level("INFO", logger="corsia.locality_audit")
     policy = client.put(f"/api/projects/{CLOUD_ON}/cloud-models-off", json={"cloud_models_off": True}, headers=_h(API))
     private = client.put("/api/settings/network-servers/loop/private", json={"private": True}, headers=_h(API))
     assert (policy.status_code, private.status_code) == (403, 403)
+    assert policy.json() == private.json() == {"detail": PERSON_ONLY}
+    refused = [r.getMessage() for r in caplog.records if r.name == "corsia.locality_audit"]
+    assert refused == [
+        f"locality policy write refused: subject=project_cloud_models_off name={CLOUD_ON} token_kind=api",
+        "locality policy write refused: subject=server_private name=loop token_kind=api",
+    ]
     assert project_cloud_models_off(CLOUD_ON, db=world) is False
     row = world.execute("SELECT metadata_json FROM network_servers WHERE id = 'loop'").fetchone()
     assert "private" not in row["metadata_json"]
@@ -222,28 +230,19 @@ def test_catalog_rows_carry_the_server_fact_as_is_local(world):
     assert rows["omlx@lan/n"]["is_local"] is True
 
 
-def test_both_person_writes_refresh_holds_notify_and_emit(client, world, monkeypatch):
-    world.execute(
-        "INSERT INTO messages(id,thread_id,role,content,created_at,input_order,target_model,delivery_state)"
-        " VALUES ('queued-1','destination','user','x','t',1,'codex/test','queued')"
-    )
-    world.commit()
-    seen = {"notified": [], "events": [], "refreshed": []}
+def test_both_person_writes_notify_and_emit(client, world, monkeypatch):
+    """The models-changed notice is what releases a locality hold; no per-thread refresh runs."""
+    seen = {"notified": [], "events": []}
     monkeypatch.setattr("api.provider_policy.notify_models_changed", lambda: seen["notified"].append("policy"))
     monkeypatch.setattr("api.network_servers.notify_models_changed", lambda: seen["notified"].append("server"))
     monkeypatch.setattr("api.provider_policy.emit_product_event", lambda *a, **k: seen["events"].append((a, k)))
     monkeypatch.setattr("api.network_servers.emit_product_event", lambda *a, **k: seen["events"].append((a, k)))
-    monkeypatch.setattr(
-        "connections.account_holds.refresh_thread_holds",
-        lambda thread_id, **_k: seen["refreshed"].append(thread_id),
-    )
 
     policy = client.put(f"/api/projects/{CLOUD_ON}/cloud-models-off", json={"cloud_models_off": True}, headers=_h(SESSION))
     private = client.put("/api/settings/network-servers/loop/private", json={"private": True}, headers=_h(SESSION))
 
     assert (policy.status_code, private.status_code) == (200, 200)
     assert seen["notified"] == ["policy", "server"]
-    assert seen["refreshed"] == ["destination"]
     assert seen["events"] == [
         (("project", "cloud_models_off.changed"), {"properties": {"project_id": CLOUD_ON, "cloud_models_off": True}}),
         (("server", "private.changed"), {"properties": {"server_id": "loop", "private": True}}),

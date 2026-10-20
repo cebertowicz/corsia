@@ -7,11 +7,15 @@ no text here tells an agent to do it.
 from __future__ import annotations
 
 HOLD_PHRASE = "this project uses local models only"
+#: The ``thread_local_only`` cause: the chat's own setting, lifted only by moving it.
+THREAD_HOLD_PHRASE = "this chat is set to local models only; it runs once moved to a local model"
 
 _USE_READY_LOCAL = "Use a ready local model"
-_STAY_INLINE = "stay on your current model and do the work inline, or check model_catalog later."
-
-NO_LOCAL_READY_TEXT = f"No local model is ready now. {_STAY_INLINE[0].upper()}{_STAY_INLINE[1:]}"
+#: With no local model ready, the only recovery is a thread already on one: never the refused model.
+NO_LOCAL_READY_TEXT = (
+    "No local model is ready now. Do the work in a thread already on a local model,"
+    " or check model_catalog later."
+)
 
 #: What to do about a held thread: its current model is the cause, so staying on it is no recovery.
 HOLD_ACTION = (
@@ -28,6 +32,25 @@ def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool
     return f"{text} Local workers run one at a time." if spawn else text
 
 
-def held_error(selector: str) -> str:
-    """The Turn-end text for an input held because its project forbids ``selector``."""
-    return f"Held: {HOLD_PHRASE}, so {selector} can't run here. {HOLD_ACTION}"
+def _held_clause(selector: str, cause: str) -> str:
+    if cause == "thread_local_only":
+        return f"{selector} can't run here: {THREAD_HOLD_PHRASE}"
+    return f"{HOLD_PHRASE}, so {selector} can't run here"
+
+
+def held_error(selector: str, cause: str = "project_cloud_off") -> str:
+    """The Turn-end text for an input held because locality policy forbids ``selector``."""
+    return f"Held: {_held_clause(selector, cause)}. {HOLD_ACTION}"
+
+
+def parent_wake_template(cause: str) -> str:
+    """The parent's wake line for a child held by locality policy, with ``{title}`` and ``{model}``.
+
+    Only the person can lift a project's policy, so the recovery named is moving the same
+    thread; the held message then runs without being sent again.
+    """
+    return (
+        "[CORSIA plan] The child delegated for {title} is held: "
+        + _held_clause("{model}", cause)
+        + f". Its plan and history are intact. {HOLD_ACTION}"
+    )

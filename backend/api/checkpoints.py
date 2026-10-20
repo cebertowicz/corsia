@@ -114,14 +114,10 @@ async def request_manual_checkpoint(thread_id: str, token: str = ""):
         ) from error
     if prepared is None:
         raise HTTPException(404)
-    from core.checkpoint_runtime import CheckpointCloudOff, CheckpointTargetLimited, request_checkpoint
+    from core.checkpoint_runtime import CheckpointTargetLimited, request_checkpoint
 
     try:
         record = await request_checkpoint(*prepared)
-    except CheckpointCloudOff as error:
-        raise HTTPException(
-            409, {"message": str(error), "reason": error.reason_key}
-        ) from error
     except CheckpointTargetLimited as error:
         raise HTTPException(
             409, {"message": str(error), "reason": "target_limited"}

@@ -13,10 +13,8 @@ from core.checkpoint_capture import (
     terminal_failure as _terminal_failure,
 )
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
-from core.checkpoint_fold_gate import refuse_cloud_off_target as _refuse_cloud_off_target
 from core.checkpoint_fold_gate import refuse_limited_target as _refuse_limited_target
 from core.checkpoint_types import (
-    CheckpointCloudOff,
     CheckpointNotAdmitted,
     CheckpointRecord,
     CheckpointRequest,
@@ -250,7 +248,6 @@ async def request_checkpoint(
     if provider_request is None:
         raise CheckpointNotAdmitted("checkpoint provider capacity is unavailable")
     _validate_pair(request, provider_request)
-    await _refuse_cloud_off_target(provider_request)
     await _refuse_limited_target(provider_request)
     try:
         record = await run_in_db(checkpoint_store.create_running, request)
@@ -287,24 +284,21 @@ async def request_idle_checkpoint(turn_id: str, admission):
         if provider_request is None:
             raise CheckpointNotAdmitted("idle checkpoint has no warm provider request")
         _validate_pair(request, provider_request)
-    refusal = None
+    target_limited = False
     if request is not None and provider_request is not None:
-        # Read outside the shield below so a cancelled fire is not held by the gate. A refusal
-        # consumes the marker as a counted refusal and never raises into the Turn terminal.
+        # Read outside the shield below so a cancelled fire is not held by the gate.
         try:
-            await _refuse_cloud_off_target(provider_request)
             await _refuse_limited_target(provider_request)
-        except (CheckpointCloudOff, CheckpointTargetLimited) as error:
-            refusal = (IdleCheckpointReason.PROJECT_CLOUD_OFF if isinstance(error, CheckpointCloudOff)
-                       else IdleCheckpointReason.TARGET_LIMITED)
+        except CheckpointTargetLimited:
+            target_limited = True
             request = provider_request = None
     result, cancelled = await _commit_idle_marker(
         idle_checkpoint_store.consume_idle_marker,
         turn_id,
         request,
     )
-    if refusal is not None and result.disposition is IdleCheckpointDisposition.REFUSED:
-        result = replace(result, reason=refusal)
+    if target_limited and result.disposition is IdleCheckpointDisposition.REFUSED:
+        result = replace(result, reason=IdleCheckpointReason.TARGET_LIMITED)
     if (
         result.disposition is IdleCheckpointDisposition.ADMITTED
         and result.record is not None

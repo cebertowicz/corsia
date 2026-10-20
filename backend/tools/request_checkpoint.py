@@ -118,11 +118,7 @@ class RequestCheckpointTool(Tool):
             CheckpointNotReady,
             prepare_external_checkpoint,
         )
-        from core.checkpoint_runtime import (
-            CheckpointCloudOff,
-            CheckpointTargetLimited,
-            request_checkpoint,
-        )
+        from core.checkpoint_runtime import CheckpointTargetLimited, request_checkpoint
 
         thread_id = kwargs.get("_thread_id")
         if not isinstance(thread_id, str) or not thread_id:
@@ -168,9 +164,6 @@ class RequestCheckpointTool(Tool):
                 "turn's most recent work may not be included. Continue as normal; "
                 "the fold installs on its own."
             )
-        except CheckpointCloudOff as error:
-            _emit(thread_id, "refused", error.reason_key, request_reason)
-            return _refusal_message(error.reason_key, {})
         except CheckpointTargetLimited:
             _emit(thread_id, "refused", "target_limited", request_reason)
             return _refusal_message("target_limited", {})

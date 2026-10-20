@@ -127,7 +127,12 @@ def project_cloud_models_off(project_id: str | None, *, db) -> bool:
 
 
 def set_project_cloud_models_off(project_id: str, *, cloud_models_off: bool, db=None) -> dict:
-    """Set the sole project cloud-model policy and return its public shape."""
+    """Set the sole project cloud-model policy and return its public shape.
+
+    The policy is an idempotent boolean set by a person's own session, so the write takes no
+    compare-and-set revision: two writers can only agree on the last value, never lose an update.
+    Held inputs are re-offered by the caller's catalog notification, whose claim re-resolves them.
+    """
     from connections.vendor_accounts import AccountError
     from infra.database import write_transaction
 
@@ -140,25 +145,11 @@ def set_project_cloud_models_off(project_id: str, *, cloud_models_off: bool, db=
                ON CONFLICT(project_id) DO UPDATE SET cloud_models_off = excluded.cloud_models_off""",
             (project_id, int(cloud_models_off)),
         )
-        _refresh_project_holds(project_id, db=connection)
     return {"project_id": project_id, "cloud_models_off": cloud_models_off}
 
 
-def _refresh_project_holds(project_id: str, *, db) -> None:
-    """Re-project the holds of every project thread that has queued input, as a policy write must.
-
-    The policy is an idempotent boolean set by a person's own session, so the write takes no
-    compare-and-set revision: two writers can only agree on the last value, never lose an update.
-    """
-    from connections.account_holds import refresh_thread_holds
-
-    for row in db.execute(
-        "SELECT t.id FROM threads t WHERE t.project_id = ? AND EXISTS ("
-        " SELECT 1 FROM messages m WHERE m.thread_id = t.id AND m.input_order IS NOT NULL"
-        " AND m.delivery_state = 'queued' AND m.active_turn_id IS NULL)",
-        (project_id,),
-    ).fetchall():
-        refresh_thread_holds(str(row["id"]), db=db)
+#: Every refusal ``locality_refusal`` can name; holds, their release and the stalled kind key on it.
+LOCALITY_REFUSALS = ("project_cloud_off", "thread_local_only")
 
 
 def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> str | None:
@@ -191,7 +182,7 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
     return "thread_local_only" if thread_local_only else "project_cloud_off"
 
 
-def _thread_project(thread_id: str | None, db) -> str | None:
+def thread_project(thread_id: str | None, db) -> str | None:
     """The thread's project from its canonical scope; a missing thread has none to enforce."""
     from connections.account_policy import AccountAdmissionError, thread_scope
 
@@ -201,21 +192,3 @@ def _thread_project(thread_id: str | None, db) -> str | None:
         return thread_scope(thread_id, db=db)["project_id"]
     except AccountAdmissionError:
         return None
-
-
-def thread_locality_refusal(model: str, *, thread_id: str | None, db) -> str | None:
-    """Return the refusal for sending a thread's content to ``model`` in its project, if any.
-
-    The one call path for every site that sends a thread's history to a model, so a project with
-    cloud models off is enforced the same way at send time and in background work. A model with
-    no catalog row has nothing to judge here; its own resolution refuses it.
-    """
-    from llm.resolution import catalog_row
-
-    row = catalog_row(model, db=db)
-    if row is None:
-        return None
-    return locality_refusal(
-        row, thread_local_only=False, project_id=_thread_project(thread_id, db), db=db,
-    )
-

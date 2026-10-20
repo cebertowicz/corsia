@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from core.checkpoint_types import (
-    CheckpointCloudOff, CheckpointTargetLimited, ProviderCheckpointRequest,
-)
+from core.checkpoint_types import CheckpointTargetLimited, ProviderCheckpointRequest
 from infra.db_async import run_in_db
 
 
@@ -27,25 +25,3 @@ async def refuse_limited_target(provider_request: ProviderCheckpointRequest) -> 
     )
     if held is not None:
         raise CheckpointTargetLimited(held)
-
-
-async def refuse_cloud_off_target(provider_request: ProviderCheckpointRequest) -> None:
-    """Refuse a fold whose own target the thread's project may not use, before any provider call.
-
-    Eligibility feeds previews and idle markers that were read earlier, so the policy is read
-    again here, at the one dispatch point. A DB read only: it creates no row and arms nothing.
-    """
-    from infra.database import get_db
-    from llm.locality import thread_locality_refusal
-
-    def refused() -> str | None:
-        db = get_db()
-        try:
-            return thread_locality_refusal(
-                provider_request.target.catalog_id, thread_id=provider_request.thread_id, db=db,
-            )
-        finally:
-            db.close()
-
-    if await run_in_db(refused):
-        raise CheckpointCloudOff()

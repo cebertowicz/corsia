@@ -16,6 +16,7 @@ from api.network_server_billing import billing_views, router as network_server_b
 from api.network_server_jobs import router as network_server_jobs_router
 from api.network_server_lifecycle import router as network_server_lifecycle_router
 from api.key_session_guard import audit_key_write, require_person_for_key
+from api.locality_policy_guard import require_person_for_locality
 from api.providers import mask_key
 from api.network_daemon_models import (
     list_daemon_models, notify_cached_model_loaded, notify_cached_model_unloaded,
@@ -282,7 +283,7 @@ async def set_server_private(
     server_id: str, body: PrivateBody, user: dict = Depends(require_user),
 ):
     """Set the person's private-network mark without replacing server metadata."""
-    require_person_for_key(user, kind="server", name=server_id, action="write")
+    require_person_for_locality(user, subject="server_private", name=server_id)
     server = await run_in_db(nd.get_server, server_id)
     if not server:
         raise HTTPException(404, detail="Server not found")

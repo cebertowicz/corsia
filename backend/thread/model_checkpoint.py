@@ -27,8 +27,6 @@ class SwitchCheckpointContext:
     source_binary: str | None
     destination_binary: str | None
     destination_mcp_config: str | None
-    #: Why the source was treated as unusable for locality, when it was; None otherwise.
-    source_refusal: str | None = None
 
 
 def _current_cc_config(thread_id: str) -> str | None:
@@ -54,27 +52,18 @@ def _switch_thread_row(db, request: SwitchRequest):
     return thread_row
 
 
-def _source_refusal(db, request: SwitchRequest) -> str | None:
-    """Why the switch's source model may not be used by its thread's project, if it may not."""
-    from llm.locality import thread_locality_refusal
-
-    try:
-        return thread_locality_refusal(request.source_model, thread_id=request.thread_id, db=db)
-    except ValueError:
-        return None
-
-
 def _switch_targets(db, request: SwitchRequest):
-    """Resolve both ends; a source its project may not use is unusable, like a missing one."""
-    from llm.resolution import ModelUnavailableError, resolve_execution_target
+    """Resolve both ends through the thread's resolver; a source its policy forbids is no source."""
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
-        source = resolve_execution_target(request.source_model, db=db)
-        if _source_refusal(db, request):
-            source = None
+        source = resolve_thread_target(request.source_model, thread_id=request.thread_id, db=db)
     except (ModelUnavailableError, ValueError):
         source = None
-    destination = resolve_execution_target(request.destination_model, db=db)
+    if source is not None and source.availability_reason in LOCALITY_REFUSALS:
+        source = None
+    destination = resolve_thread_target(request.destination_model, thread_id=request.thread_id, db=db)
     if not destination.available or not destination.context_window:
         raise RuntimeError(
             destination.availability_reason or "switch destination is unavailable"
@@ -98,7 +87,6 @@ def read_switch_checkpoint_context(
         db.execute("BEGIN")
         thread_row = _switch_thread_row(db, request)
         source, destination = _switch_targets(db, request)
-        source_refusal = _source_refusal(db, request) if source is None else None
         previous = current_installed(request.thread_id, db=db)
         projection = render_portable_history(
             request.thread_id, db=db,
@@ -120,7 +108,6 @@ def read_switch_checkpoint_context(
             _current_cc_config(request.thread_id)
             if destination.harness == "claude-code"
             else None,
-            source_refusal,
         )
     finally:
         db.close()
@@ -139,11 +126,8 @@ async def prepare_source_checkpoint(
 
     context = await run_in_db(read_switch_checkpoint_context, request)
     if context.source_target is None:
-        # No resolved source target means its harness is unknown too; a source its project
-        # may not use is the same unusable source under its own reason.
-        return warm_capture_refused(
-            request.thread_id, "unknown", context.source_refusal or "source_unresolved",
-        )
+        # No resolved source target means its harness is unknown too.
+        return warm_capture_refused(request.thread_id, "unknown", "source_unresolved")
     if (
         context.source_target.harness == "native"
         and context.source_target.provider == "omlx"

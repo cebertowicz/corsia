@@ -23,12 +23,8 @@ def warm_suppression_reason(
     thread_id: str,
     *,
     db: sqlite3.Connection,
-    model: str | None = None,
 ) -> str | None:
     """Return the canonical delivery owner that currently forbids warming.
-
-    A ``model`` the thread's project forbids (cloud models off) also forbids it: a warm sends
-    the thread's prefix to that model.
 
     A row held under ``NO_MODEL_SELECTED`` has no delivery owner: only the
     person choosing a model lifts that hold, so it does not forbid a warm.
@@ -50,13 +46,6 @@ def warm_suppression_reason(
     ).fetchone()
     if queued is not None:
         return "queued_input"
-    if model:
-        from llm.locality import thread_locality_refusal
-
-        refusal = thread_locality_refusal(model, thread_id=thread_id, db=db)
-        if refusal:
-            logger.info("warm skipped: thread={} model={} reason={}", thread_id, model, refusal)
-        return refusal
     return None
 
 
