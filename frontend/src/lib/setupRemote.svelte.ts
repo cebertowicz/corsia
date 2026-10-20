@@ -105,8 +105,8 @@ export function createSetupRemote(deps: Deps = {}) {
 		get view(): { title: string; lede?: string; primary?: { label: string; disabled?: boolean }; onPrimary?: () => void } {
 			if (stage === 'code') {
 				// A typed address only answers when sharing is already on, so its lede and pictures skip the turn-on step and never show the address.
-				if (target?.target.kind === 'address') return { title: 'Enter the code', lede: `On the main computer, ${openPath} and press New code. Then type the four letters here.` };
-				return { title: 'Enter the code', lede: `On ${target?.label ?? ''}: ${SETTINGS_PATH}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.` };
+				if (target?.target.kind === 'address') return { title: 'Enter the code', lede: `On the main computer, ${openPath} and press New code. Then type the four characters here.` };
+				return { title: 'Enter the code', lede: `On ${target?.label ?? ''}: ${SETTINGS_PATH}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four characters here.` };
 			}
 			// Nothing found with no address typed: the way forward is to look again; a typed address brings Continue back.
 			if (this.phase === 'none' && target === null) return { title: 'Connect to CORSIA on another computer', primary: { label: 'Look again' }, onPrimary: () => this.lookAgain() };

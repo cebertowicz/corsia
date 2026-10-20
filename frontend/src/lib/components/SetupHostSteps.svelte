@@ -6,17 +6,17 @@
 	/**
 	 * What to do on the other computer, as numbered pictures of its own screen: Settings › System, the Let other devices
 	 * connect row switched on, and the row showing a code. The row is the component Settings renders, scaled down and
-	 * inert, with four dashes where the letters appear so there is nothing here to type by mistake. Not one card in a
+	 * inert, with four dashes where the code appears so there is nothing here to type by mistake. Not one card in a
 	 * window frame: each step is its own labelled crop. `show` picks the crops (numbered in the order shown): all three for
 	 * a discovered computer, only the row switched on for the nothing-found screen, and without that one for a typed address,
 	 * which answers only when sharing is already on.
 	 */
 	type Step = 'open' | 'on' | 'code';
-	const { name = '', show = ['open', 'on', 'code'], large = false }: { name?: string; show?: Step[]; large?: boolean } = $props();
+	const { name = '', typed = false, show = ['open', 'on', 'code'], large = false }: { name?: string; typed?: boolean; show?: Step[]; large?: boolean } = $props();
 
 	const base: DevicesView = { ...EMPTY_VIEW, load: 'ready', enabled: true, announced: true, hostName: 'This computer', addresses: [] };
-	// A typed address (a name with a dot or colon) is not the computer's name, so the crops never paint it as "Visible as".
-	const shown = $derived(/[.:]/.test(name) ? base.hostName : name);
+	// A typed address is not the computer's name, so the crops never paint it as "Visible as".
+	const shown = $derived(typed ? base.hostName : name);
 	const on = $derived<DevicesView>({ ...base, hostName: shown });
 	const code = $derived<DevicesView>({ ...base, hostName: shown, pairing: 'code', code: '––––', endsInSeconds: 540 });
 </script>

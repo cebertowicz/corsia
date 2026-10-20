@@ -215,7 +215,7 @@ describe('Enter the code (r7)', () => {
 		await mountSetup();
 		await toCodeScreen();
 		expect(host.querySelector('h1')?.textContent).toBe('Enter the code');
-		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On Alex’s Mac mini: ${flat(SETTINGS_PATH)}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.`);
+		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On Alex’s Mac mini: ${flat(SETTINGS_PATH)}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four characters here.`);
 		expect(boxes()).toHaveLength(4);
 		expect(document.activeElement).toBe(boxes()[0]);
 		const steps = host.querySelectorAll('[data-testid="host-steps"] li');
@@ -225,6 +225,7 @@ describe('Enter the code (r7)', () => {
 		expect(host.querySelector('.titlebar, .lights')).toBeNull();
 		expect(Array.from(host.querySelectorAll<HTMLInputElement>('[data-testid="host-steps"] input')).map((box) => box.value).join('')).toBe('––––');
 		expect(host.querySelector('[data-testid="host-steps"]')?.hasAttribute('inert')).toBe(true);
+		expect(flat(host.querySelector('[data-testid="host-steps"]')?.textContent)).toContain('Visible as Alex’s Mac mini');
 		expect(sidebar()).toContain('Enter the code');
 	});
 	it('with a typed address, the lede names the main computer, never shows the address, and skips the turn-on picture', async () => {
@@ -233,7 +234,7 @@ describe('Enter the code (r7)', () => {
 		await typeAddress('home.example.com');
 		button('Continue')?.click();
 		await settle();
-		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On the main computer, ${flat(SETTINGS_PATH).replace(/^Open/, 'open')} and press New code. Then type the four letters here.`);
+		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On the main computer, ${flat(SETTINGS_PATH).replace(/^Open/, 'open')} and press New code. Then type the four characters here.`);
 		const steps = Array.from(host.querySelectorAll('[data-testid="host-steps"] li'));
 		expect(steps.map((step) => step.querySelector('.n')?.textContent)).toEqual(['1', '2']);
 		expect(steps.map((step) => flat(step.querySelector('.label')?.textContent))).toEqual([flat(SETTINGS_PATH), 'Press New code']);

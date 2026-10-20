@@ -7,9 +7,11 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import sqlite3
 import subprocess
 import sys
 import threading
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -186,20 +188,35 @@ render_service_plist generation-test
     assert arguments[arguments.index("--host") + 1] == host
 
 
-def test_print_endpoints_hides_the_tailnet_for_a_local_setup(tmp_path):
+def test_print_endpoints_names_only_a_saved_outside_address(tmp_path):
+    from infra.platform_paths import load_bootstrap, runtime_db_paths
+
     script = """
 source scripts/corsia.d/runtime.sh
 BACKEND_PORT=9999
 tailscale() { echo 100.64.0.9; }
 print_endpoints
 """
-    local = run_bash(script, env=_resolver_env(_bootstrap(tmp_path, **LOCAL)))
-    assert local.stdout == "  Local:     http://localhost:9999\n"
-    server = run_bash(
-        script,
-        env=_resolver_env(_bootstrap(tmp_path, setup="server", bind_host="0.0.0.0")),
+    home = tmp_path / "home"
+    init = subprocess.run(
+        [sys.executable, "-m", "cli", "init", "--workspace", str(tmp_path / "work"), "--setup", "server"],
+        cwd=BACKEND,
+        env={**{k: v for k, v in os.environ.items() if k not in {"CORSIA_WORKSPACE", "CORSIA_STATE_DIR"}},
+             "HOME": str(home), "CORSIA_ANALYTICS_DISABLE": "1"},
+        text=True, capture_output=True, check=False,
     )
-    assert "Tailscale: http://100.64.0.9:9999" in server.stdout
+    assert init.returncode == 0, init.stderr
+    bootstrap = home / ".corsia" / "config.json"
+    unsaved = run_bash(script, env=_resolver_env(bootstrap))
+    assert unsaved.stdout == "  Local:     http://localhost:9999\n"
+    db_path = runtime_db_paths(load_bootstrap(bootstrap).state_root)[0]
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(db_path)) as db, db:
+        db.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("INSERT INTO settings VALUES ('devices', ?)",
+                   (json.dumps({"enabled": True, "outside_address": "home.example.com"}),))
+    saved = run_bash(script, env=_resolver_env(bootstrap))
+    assert saved.stdout == "  Local:     http://localhost:9999\n  Remote access: home.example.com\n"
 
 
 def test_health_probe_reaches_a_loopback_only_backend():

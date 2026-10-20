@@ -52,7 +52,7 @@
 
 {#if remote.stage === 'code'}
 	<div class="scroll" class:more={moreBelow} class:above={moreAbove} bind:this={pane} onscroll={paneEdges}>
-		<SetupHostSteps name={remote.label} show={remote.typedTarget ? ['open', 'code'] : undefined} />
+		<SetupHostSteps name={remote.label} typed={remote.typedTarget} show={remote.typedTarget ? ['open', 'code'] : undefined} />
 		<div class="code">
 			<CodeInput label="Code" bind:value={remote.code} invalid={remote.invalid} disabled={remote.busy} refocus={remote.refocus} focusAt={0} onsubmit={(entered) => void remote.submit(entered)} />
 			{#if remote.refusal}

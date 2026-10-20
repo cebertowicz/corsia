@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
 
@@ -23,6 +26,7 @@ from infra.platform_paths import (
     WorkspaceSelection,
     default_state_root,
     load_bootstrap,
+    runtime_db_paths,
     write_bootstrap,
 )
 
@@ -165,6 +169,29 @@ def cmd_bind_host(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_remote_address(args: argparse.Namespace) -> int:
+    """Print the saved outside address while Let other devices connect is on.
+
+    Reads the bootstrap's own database read-only, so it never creates a file or
+    reads another instance's state. Prints nothing when either is missing. It
+    reads the row infra.settings writes without importing it: that import
+    resolves the workspace from the home bootstrap, not ``--bootstrap``.
+    """
+    try:
+        db_path = runtime_db_paths(load_bootstrap(Path(args.bootstrap or BOOTSTRAP_PATH)).state_root)[0]
+        with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as db:
+            row = db.execute("SELECT value FROM settings WHERE key = 'devices'").fetchone()
+        devices = json.loads(row[0]) if row else {}
+    except (OSError, TypeError, ValueError, sqlite3.Error):
+        return 0
+    if not isinstance(devices, dict):
+        return 0
+    address = devices.get("outside_address")
+    if devices.get("enabled") is True and isinstance(address, str) and address:
+        print(address)
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     """Record the setup choice and the bind host that goes with it."""
     try:
@@ -215,11 +242,11 @@ def _runtime_paths_for_workspace(
 
 # Commands that run before a workspace exists. The other sub-CLIs import
 # infra.config at module level, which refuses until one is configured.
-_BOOTSTRAP_FREE = {"init", "bind-host", "setup"}
+_BOOTSTRAP_FREE = {"init", "bind-host", "remote-address", "setup"}
 
 
 def _add_bootstrap_commands(sub: argparse._SubParsersAction) -> None:
-    """Register ``init``, ``bind-host`` and ``setup``."""
+    """Register ``init``, ``bind-host``, ``remote-address`` and ``setup``."""
     init = sub.add_parser("init", help="First-run setup — configure workspace path")
     init.add_argument(
         "--workspace", "--path", dest="path", help="Workspace path (skips the prompt)"
@@ -236,6 +263,12 @@ def _add_bootstrap_commands(sub: argparse._SubParsersAction) -> None:
     )
     bind_host.add_argument("--bootstrap", help="Bootstrap file (default: ~/.corsia/config.json)")
     bind_host.set_defaults(func=cmd_bind_host)
+
+    remote = sub.add_parser(
+        "remote-address", help="Print the saved outside address while devices can connect"
+    )
+    remote.add_argument("--bootstrap", help="Bootstrap file (default: ~/.corsia/config.json)")
+    remote.set_defaults(func=cmd_remote_address)
 
     setup = sub.add_parser("setup", help="Choose local or server exposure")
     setup.add_argument("setup", choices=sorted(SETUP_BINDS))

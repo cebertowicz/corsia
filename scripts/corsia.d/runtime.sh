@@ -104,12 +104,8 @@ resolve_bind_host() {
 print_endpoints() {
     echo "  Local:     http://localhost:$BACKEND_PORT"
     local outside_address
-    outside_address="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
-import sys
-sys.path.insert(0, sys.argv[1])
-from infra.settings import get_devices_outside_address
-print(get_devices_outside_address() or "")
-' "$BACKEND_DIR" 2>/dev/null)" || outside_address=""
+    # Saved in Settings › System and printed only while Let other devices connect is on.
+    outside_address="$(cd "$BACKEND_DIR" && "$PYTHON" -m cli remote-address ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"} 2>/dev/null)" || outside_address=""
     [ -n "$outside_address" ] && echo "  Remote access: $outside_address"
     return 0
 }
