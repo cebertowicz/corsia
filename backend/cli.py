@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+import json
 import os
 import sqlite3
 import sys
@@ -20,7 +21,6 @@ from infra.bind_host import (
     resolve_bind_host,
     write_setup,
 )
-from infra.settings import get_devices_enabled, get_devices_outside_address
 from infra.platform_paths import (
     LegacyRuntimePaths,
     RuntimePaths,
@@ -181,8 +181,11 @@ def cmd_remote_address(args: argparse.Namespace) -> int:
         db_path = runtime_db_paths(state_root)[0]
         with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
-            enabled = get_devices_enabled(db=db)
-            address = get_devices_outside_address(db=db)
+            row = db.execute("SELECT value FROM settings WHERE key = ?", ("devices",)).fetchone()
+            value = json.loads(row["value"]) if row else {}
+            enabled = value.get("enabled") is True if isinstance(value, dict) else False
+            address = value.get("outside_address") if isinstance(value, dict) else None
+            address = address if isinstance(address, str) and address else None
     except (OSError, TypeError, ValueError, sqlite3.Error):
         print("Remote access could not be read.", file=sys.stderr)
         return 2

@@ -24,7 +24,7 @@ pub struct Paired {
     pub host: String,
     pub port: u16,
     /// Stable host identity, confirmed by every successful new pairing.
-    pub identity: Option<[u8; 32]>,
+    pub identity: [u8; 32],
     /// Optional bare host[:port] learned while this local pinned connection was established.
     pub outside_address: Option<String>,
 }
@@ -373,7 +373,7 @@ async fn finish_exchange(
         trust,
         host: endpoint.host.clone(),
         port: endpoint.port,
-        identity: Some(identity),
+        identity,
         outside_address: finish.outside_address,
     })
 }
@@ -797,7 +797,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(paired.name, "Studio");
-        assert_eq!(paired.identity, Some(identity.pin), "a fresh pairing always confirms the host identity");
+        assert_eq!(paired.identity, identity.pin, "a fresh pairing always confirms the host identity");
         server.await.unwrap();
 
         let requests = requests.lock().unwrap();
@@ -833,9 +833,16 @@ mod tests {
             crate::version_check::check("127.0.0.1", port, &paired.trust, "0.4.1-dev.230").await.unwrap(),
             crate::version_check::Compat::Ok
         );
-        let proxy = crate::proxy::start(
-            crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
-            paired.trust.clone(),
+        let proxy_record = crate::remote_config::RemoteRecord {
+            locator: crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            trust: crate::remote_config::RemoteTrust::from(&paired.trust),
+            name: "disposable".into(),
+            proxy_port: 0,
+            identity: Some(BASE64.encode(paired.identity)),
+            outside: None,
+        };
+        let proxy = crate::proxy::start_record(
+            &proxy_record,
             0,
             || panic!("a matching disposable host key must not trigger key_changed"),
         )
@@ -854,9 +861,16 @@ mod tests {
         spki_sha256[0] ^= 1;
         let key_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let observed_key_change = std::sync::Arc::clone(&key_changed);
-        let wrong_proxy = crate::proxy::start(
-            crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
-            wrong_trust,
+        let wrong_record = crate::remote_config::RemoteRecord {
+            locator: crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            trust: crate::remote_config::RemoteTrust::from(&wrong_trust),
+            name: "disposable".into(),
+            proxy_port: 0,
+            identity: Some(BASE64.encode(paired.identity)),
+            outside: None,
+        };
+        let wrong_proxy = crate::proxy::start_record(
+            &wrong_record,
             0,
             move || observed_key_change.store(true, std::sync::atomic::Ordering::SeqCst),
         )

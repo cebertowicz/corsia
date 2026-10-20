@@ -111,7 +111,7 @@
 						{#if dirty}
 							<Button variant="chip" size="sm" type="submit">Save</Button>
 						{:else if view.outside}
-							<Button variant="chip" size="sm" onclick={() => void saveOutside('')}>Remove</Button>
+							<Button variant="chip" size="sm" ariaLabel="Delete outside address" onclick={() => void saveOutside('')}>Delete</Button>
 						{/if}
 					</Field>
 					{#if view.devicesPort}

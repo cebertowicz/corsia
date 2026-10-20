@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, 
 
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
-from infra import accounts, config, setup_progress, user_profile
+from infra import account_validation, accounts, config, setup_progress, user_profile
 from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
@@ -373,9 +373,9 @@ async def first_account(request: Request) -> dict | Response:
             accounts.create_first_account, body.username, body.password,
             call_name=body.name, email=body.email or "", first_run_path="app",
         )
-    except accounts.FirstAccountExists:
+    except account_validation.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
-    except accounts.AccountError as error:
+    except account_validation.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
     except Exception:
         # No user field is in this message; the traceback names only the failing step.

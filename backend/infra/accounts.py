@@ -33,11 +33,11 @@ from datetime import timedelta
 
 from infra import user_profile
 from infra.account_validation import (
-    AccountError as AccountError,
-    FirstAccountExists as FirstAccountExists,
-    USERNAME_PATTERN as USERNAME_PATTERN,
-    _require_password as _require_password,
-    normalize_username as normalize_username,
+    AccountError,
+    FirstAccountExists,
+    USERNAME_PATTERN,
+    _require_password,
+    normalize_username,
 )
 from infra.database import get_db, write_transaction
 from infra.passwords import MIN_PASSWORD_LENGTH as MIN_PASSWORD_LENGTH, hash_password, verify_password

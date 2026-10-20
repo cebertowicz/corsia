@@ -110,7 +110,7 @@ print_endpoints() {
     echo "  Local:     http://localhost:$BACKEND_PORT"
     local outside_address
     outside_address="$(resolve_remote_address 2>/dev/null)" || outside_address=""
-    [ -n "$outside_address" ] && echo "  Remote access: $outside_address"
+    [ -n "$outside_address" ] && echo "  Outside address: $outside_address"
     return 0
 }
 

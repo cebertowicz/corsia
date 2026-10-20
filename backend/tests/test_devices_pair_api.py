@@ -15,7 +15,7 @@ from spake2 import SPAKE2_Symmetric
 import api.devices as devices_api
 from core.device_pairing import PAIRING_IDENTITY, _split_key
 from core.devices_runtime import runtime
-from infra.devices_listener import _key_paths, host_spki_sha256
+from infra.devices_identity import _key_paths, host_spki_sha256
 from infra.settings import set_devices_outside_address
 from main import app
 

@@ -216,7 +216,7 @@ print_endpoints
         db.execute("INSERT INTO settings VALUES ('devices', ?)",
                    (json.dumps({"enabled": True, "outside_address": "home.example.com"}),))
     saved = run_bash(script, env=_resolver_env(bootstrap))
-    assert saved.stdout == "  Local:     http://localhost:9999\n  Remote access: home.example.com\n"
+    assert saved.stdout == "  Local:     http://localhost:9999\n  Outside address: home.example.com\n"
 
     # App mode reads the app's own state root, never this checkout install's saved address.
     app_mode = f"""

@@ -17,17 +17,7 @@ from starlette.responses import JSONResponse
 
 from infra.auth import authenticate, is_person_session, token_from_request
 from infra.db_async import run_in_db
-# Preserve listener imports while identity storage, cache, and signing have one owner.
-from infra.devices_identity import (
-    _key_paths as _key_paths,
-    _parsed_files as _parsed_files,
-    ensure_host_key as ensure_host_key,
-    host_spki_der as host_spki_der,
-    host_spki_sha256 as host_spki_sha256,
-    serialization as serialization,
-    sign_identity_proof as sign_identity_proof,
-    x509 as x509,
-)
+from infra.devices_identity import ensure_host_key
 from infra.devices_server import DevicesServer
 from infra.dns_sd import DNSServiceAnnouncement
 
@@ -70,7 +60,16 @@ def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str
     return [value for _, _, value in sorted(set(addresses))]
 
 
-_PUBLIC_API_ROUTES = frozenset({("GET", "/api/health"), ("GET", "/api/version"), ("GET", "/api/auth/status"), ("POST", "/api/auth/login"), ("POST", "/api/devices/pair/start"), ("POST", "/api/devices/pair/finish"), ("GET", "/api/devices/outside-address"), ("POST", "/api/devices/identity")})
+_PUBLIC_API_ROUTES = frozenset({
+    ("GET", "/api/health"),
+    ("GET", "/api/version"),
+    ("GET", "/api/auth/status"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/devices/pair/start"),
+    ("POST", "/api/devices/pair/finish"),
+    ("GET", "/api/devices/outside-address"),
+    ("POST", "/api/devices/identity"),
+})
 _LOCAL_ONLY_POST_ROUTES = frozenset({("POST", "/api/devices/pair/start"), ("POST", "/api/devices/pair/finish")})
 _FORWARDING_HEADERS = frozenset({b"forwarded", b"x-forwarded-for", b"x-real-ip"})
 

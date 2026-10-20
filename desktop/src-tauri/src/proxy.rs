@@ -64,23 +64,6 @@ impl Drop for ProxyHandle {
     }
 }
 
-#[cfg(test)]
-pub async fn start(
-    locator: Locator,
-    trust: crate::trust::Trust,
-    preferred_port: u16,
-    on_key_changed: impl Fn() + Send + Sync + 'static,
-) -> Result<ProxyHandle, ProxyError> {
-    start_with_resolver(
-        locator,
-        trust,
-        preferred_port,
-        on_key_changed,
-        Arc::new(|locator| Box::pin(default_resolve(locator))),
-    )
-    .await
-}
-
 /// The proxy for a saved record: its local route, and its outside route when one is saved.
 pub async fn start_record(
     record: &RemoteRecord,
@@ -89,17 +72,6 @@ pub async fn start_record(
 ) -> Result<ProxyHandle, ProxyError> {
     let config = RouteConfig::from_record(record, on_key_changed).map_err(ProxyError::Transport)?;
     start_routes(record.locator.clone(), config, preferred_port, Arc::new(|locator| Box::pin(default_resolve(locator)))).await
-}
-
-#[cfg(test)]
-pub async fn start_with_resolver(
-    locator: Locator,
-    trust: crate::trust::Trust,
-    preferred_port: u16,
-    on_key_changed: impl Fn() + Send + Sync + 'static,
-    resolver: Resolver,
-) -> Result<ProxyHandle, ProxyError> {
-    start_routes(locator, RouteConfig::single(trust, on_key_changed), preferred_port, resolver).await
 }
 
 pub(crate) async fn start_routes(
@@ -374,11 +346,10 @@ mod tests {
     }
 
     async fn proxy_for(port: u16, pin: [u8; 32], on_key_changed: impl Fn() + Send + Sync + 'static) -> ProxyHandle {
-        start_with_resolver(
+        start_routes(
             Locator::Address { host: "127.0.0.1".into(), port },
-            Trust::Pinned { spki_sha256: pin },
+            RouteConfig::single(Trust::Pinned { spki_sha256: pin }, on_key_changed),
             0,
-            on_key_changed,
             Arc::new(move |_| Box::pin(async move { Ok(("127.0.0.1".into(), port)) })),
         )
         .await
@@ -618,11 +589,10 @@ mod tests {
     }
 
     async fn proxy_with(resolver: Resolver, pin: [u8; 32]) -> ProxyHandle {
-        start_with_resolver(
+        start_routes(
             Locator::DnsSd { instance: "Studio".into() },
-            Trust::Pinned { spki_sha256: pin },
+            RouteConfig::single(Trust::Pinned { spki_sha256: pin }, || {}),
             0,
-            || {},
             resolver,
         )
         .await

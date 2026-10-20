@@ -13,7 +13,7 @@ from core.device_pairing import PairingError, transcript_prefix
 from core.devices_runtime import runtime
 from infra.auth import require_human_user
 from infra.db_async import run_in_db
-from infra.devices_listener import host_spki_der, host_spki_sha256, sign_identity_proof
+from infra.devices_identity import host_spki_der, host_spki_sha256, sign_identity_proof
 from infra.local_connection import is_direct_loopback
 from infra.product_events import emit_product_event
 from infra.settings import get_devices_outside_address, set_devices_enabled, set_devices_outside_address

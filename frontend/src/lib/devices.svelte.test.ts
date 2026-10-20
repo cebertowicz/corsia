@@ -114,6 +114,13 @@ describe('createDevices', () => {
 		expect(calls[1]).toMatchObject({ url: '/api/devices', method: 'PUT', body: JSON.stringify({ outside_address: 'home.example.com:99999' }) });
 	});
 
+	it('uses the outside-address fallback for a server failure instead of its detail', async () => {
+		const devices = createDevices();
+		await devices.read();
+		responses.push(json({ detail: 'internal detail' }, 500), json(api()));
+		expect(await devices.setOutside('home.example.com')).toBe('Couldn’t save the outside address. Try again.');
+	});
+
 	it('displays the server-normalized outside address and clears it', async () => {
 		const devices = createDevices();
 		await devices.read();

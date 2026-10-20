@@ -132,13 +132,13 @@ export function createDevices(options: Options = {}) {
 		view = { ...view, endsInSeconds: remaining };
 	}
 
-	async function write(path: string, init: RequestInit): Promise<DevicesApi | null> {
+	async function write(path: string, init: RequestInit, fallback: string): Promise<DevicesApi | null> {
 		const response = await fetch(path, { ...init, headers: headers(init.body !== undefined) });
 		if (response.status === 403) { forcedReadOnly = true; await read(); return null; }
 		if (!response.ok) {
 			const body: unknown = await response.json().catch(() => null);
 			const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail?: unknown }).detail : null;
-			throw new Error(typeof detail === 'string' ? detail : 'Couldn’t save the outside address. Try again.');
+			throw new Error(response.status >= 400 && response.status < 500 && typeof detail === 'string' ? detail : fallback);
 		}
 		return await response.json() as DevicesApi;
 	}
@@ -147,7 +147,7 @@ export function createDevices(options: Options = {}) {
 		const before = view;
 		view = { ...view, enabled: next, busy: next ? 'starting' : null, listener: 'ok', pairing: 'idle', code: null, endsInSeconds: null };
 		try {
-			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ enabled: next }) });
+			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ enabled: next }) }, 'Couldn’t update device connections. Try again.');
 			if (api) accept(api);
 		} catch {
 			view = { ...before, load: before.load };
@@ -157,7 +157,7 @@ export function createDevices(options: Options = {}) {
 
 	async function newCode() {
 		try {
-			const api = await write('/api/devices/code', { method: 'POST' });
+			const api = await write('/api/devices/code', { method: 'POST' }, 'Couldn’t make a new code. Try again.');
 			if (api) accept(api);
 		} catch {
 			await read();
@@ -167,7 +167,7 @@ export function createDevices(options: Options = {}) {
 	/** Saves the outside address (empty clears it). Returns the refusal line, or null once saved. */
 	async function setOutside(text: string): Promise<string | null> {
 		try {
-			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ outside_address: text }) });
+			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ outside_address: text }) }, 'Couldn’t save the outside address. Try again.');
 			if (api) accept(api);
 			return null;
 		} catch (error) {

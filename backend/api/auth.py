@@ -40,7 +40,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from infra import accounts, token_admin
+from infra import account_validation, accounts, token_admin
 from infra.auth import authenticate, token_from_request
 from infra.db_async import run_in_db
 from infra.time import utc_storage_iso_to_api
@@ -157,8 +157,8 @@ async def login(body: LoginRequest) -> dict:
     """Exchange a username and password for a 30-day session token."""
     global _waiting_attempts
     try:
-        username = accounts.normalize_username(body.username)
-    except accounts.AccountError:
+        username = account_validation.normalize_username(body.username)
+    except account_validation.AccountError:
         # No account can carry a malformed name, so there is nothing to hash
         # and nothing to count; the answer is the same generic refusal.
         raise HTTPException(401, _INVALID) from None

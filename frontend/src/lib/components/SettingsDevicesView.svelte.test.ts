@@ -96,4 +96,9 @@ describe('SettingsDevicesView', () => {
 		expect(text).toContain('Paired computers use this when they’re away from this network. Only add an address you’ve already set up, forwarded to port 47901.');
 		expect(text).not.toMatch(/Never send|router|1956/);
 	});
+	it('labels permanent removal of the outside address as Delete', () => {
+		show({ enabled: true, announced: true, outside: 'home.example.com' }, { onOutside: async () => null } as never);
+		const remove = Array.from(host.querySelectorAll('button')).find((button) => flat(button.textContent) === 'Delete');
+		expect(remove?.getAttribute('aria-label')).toBe('Delete outside address');
+	});
 });

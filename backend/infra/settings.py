@@ -6,27 +6,11 @@ import json
 import logging
 import re
 import sqlite3
-from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 
+from infra.database import get_db, write_transaction
+
 log = logging.getLogger(__name__)
-
-
-def get_db() -> sqlite3.Connection:
-    """The thread's connection. infra.database resolves a workspace on import, which the
-    bootstrap CLI reading an explicit connection does not have yet, so it loads on first use."""
-    from infra import database
-
-    return database.get_db()
-
-
-def write_transaction(
-    db: sqlite3.Connection | None, *, scope: str
-) -> AbstractContextManager[sqlite3.Connection]:
-    """infra.database.write_transaction, loaded on first use (see get_db)."""
-    from infra import database
-
-    return database.write_transaction(db, scope=scope)
 
 
 def _now() -> str:

@@ -856,12 +856,8 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     replace_proxy(&app.state::<RemoteRuntime>(), None);
     let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
     let mut saved = saved;
-    let refresh = saved.outside.is_some().then(|| saved.clone());
-    let started = if saved.outside.is_some() {
-        check_through_routes(app, &mut saved).await?
-    } else {
-        check_saved_route(app, &mut saved).await?
-    };
+    let refresh = Some(saved.clone());
+    let started = check_through_routes(app, &mut saved).await?;
     let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
     let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
     replace_proxy(&app.state::<RemoteRuntime>(), Some(proxy));
@@ -920,26 +916,8 @@ async fn refresh_outside_after_launch(app_dir: std::path::PathBuf, mut saved: re
     }
 }
 
-/// A record with one route: check the host's version on that route, then start its proxy, as before outside routes.
-async fn check_saved_route<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &mut remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
-    use classify::ConnectFailure;
-    let trust = trust::Trust::try_from(&saved.trust).map_err(|_| ConnectFailure::KeyChanged)?;
-    let (host, port) = match &saved.locator {
-        remote_config::Locator::Address { host, port } => (host.clone(), *port),
-        remote_config::Locator::DnsSd { instance } => discovery::resolve(instance, Duration::from_secs(15)).await.map_err(|_| ConnectFailure::Network)?,
-    };
-    match version_check::check(&host, port, &trust, &version_check::app_version(app)).await {
-        Ok(version_check::Compat::Ok) => {}
-        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Err(ConnectFailure::Incompatible { app: app_version, host }),
-        Ok(version_check::Compat::TooOld) => return Err(ConnectFailure::TooOld),
-        Err(error) => return Err(error.connect_failure().unwrap_or(ConnectFailure::Server)),
-    }
-    refresh_outside_address(saved, &host, port).await;
-    proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)
-}
-
-/// A record with an outside route: only the proxy knows which route reaches the host and proves it, so it starts
-/// first and the version check goes through it.
+/// A saved route set starts through the proxy, so the version check observes the same verified connection.
+/// The set contains the local route and may also contain a saved outside route.
 async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &mut remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
     use classify::ConnectFailure;
     let started = proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)?;
@@ -1083,8 +1061,8 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
         trust: remote_config::RemoteTrust::from(&paired.trust),
         name: paired.name.clone(),
         proxy_port: 0,
-        identity: paired.identity.map(|identity| BASE64.encode(identity)),
-        outside: outside_route(paired.outside_address.as_deref(), paired.identity.is_some()),
+        identity: Some(BASE64.encode(paired.identity)),
+        outside: outside_route(paired.outside_address.as_deref(), true),
     };
     let started = match proxy::start_record(&record, 0, key_changed_callback(app, &paired.name)).await {
         Ok(started) => started,
@@ -2355,7 +2333,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let record = saved_studio(remote_config::Locator::Address { host: "127.0.0.1".into(), port: 1 }, remote_config::RemoteTrust::System);
         let (unregistered, restored) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
-        let proxy = tauri::async_runtime::block_on(proxy::start(record.locator.clone(), trust::Trust::System, 0, || {})).expect("a proxy");
+        let proxy = tauri::async_runtime::block_on(proxy::start_record(&record, 0, || {})).expect("a proxy");
         let mut entry = RemoteEntry {
             app: app.handle(),
             app_dir: folder.path(),
