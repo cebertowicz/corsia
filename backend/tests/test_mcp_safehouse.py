@@ -386,6 +386,9 @@ async def test_runtime_connects_each_app_separately_but_blocks_all_other_caches(
     app.write_text(_PYTHON_SERVER, encoding="utf-8")
     app_a_cache = _mcp_cache_dir("app-a", workspace, state)
     never_connected_cache = _mcp_cache_dir("never-connected", workspace, state)
+    # A cache left by an earlier connect: without it the write fails on the
+    # missing directory and never reaches the Safehouse rule under test.
+    never_connected_cache.mkdir(parents=True, exist_ok=True)
     configs = {
         "app-a": ("app_a", {"connected_app_id": "app-a", "command": sys.executable, "args": [str(app)], "env": {
             "MCP_WRITE_TARGET": str(app_a_cache / "self-write"),
