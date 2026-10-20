@@ -165,6 +165,27 @@ async function openProjectProviders(page: Page, name: string): Promise<Locator> 
 	return region;
 }
 
+/** Seed the long-name layout case through the real disposable backend, not the modal-response fixture. */
+async function seedProject(page: Page, name: string): Promise<{ id: string }> {
+	const params = new URLSearchParams({ token: TEST_TOKEN });
+	const response = await page.request.post(`/api/projects?${params}`, {
+		data: { name, description: '', accent_color: '#007faa' },
+	});
+	expect(response.ok()).toBeTruthy();
+	return (await response.json()).project as { id: string };
+}
+
+async function openSeededProjectProviders(page: Page, name: string): Promise<Locator> {
+	await page.keyboard.press('Control+k');
+	await expect(page.locator('.palette')).toBeVisible();
+	await page.locator('.palette').getByRole('button', { name, exact: true }).click();
+	await page.getByRole('button', { name: 'Project settings' }).click();
+	const region = page.getByRole('region', { name: 'Project providers' });
+	await expect(region).toBeVisible();
+	await region.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+	return region;
+}
+
 async function openEndpoints(page: Page, serverName: string) {
 	await openSettings(page);
 	await openSettingsSection(page, 'Providers');
@@ -222,6 +243,9 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 		mkdirSync(OUT!, { recursive: true });
 		const state: State = { models: catalogs.plain, servers: [servers.remoteOff], cloudOff: false, failSave: false };
 		await serve(page, state);
+		const longProjectName = 'Western Washington workflow workshop working group workspace';
+		// Both browser projects share this disposable backend; seed once so the real-create check remains singular.
+		if (testInfo.project.name === 'chromium-desktop') await seedProject(page, longProjectName);
 		let stamp = 0;
 		const projectThemes = [
 			'Market research', 'Product planning', 'Design review', 'Launch preparation',
@@ -251,12 +275,14 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			let region = await openProjectProviders(page, await begin(width, height, theme));
 			if (!BEFORE) await expect(region.getByText('Local models only').first()).toBeVisible();
 			await shot(`${prefix}project-page`, size, theme);
-			if (!BEFORE && size === '1440') {
+			if (!BEFORE) {
 				Object.assign(state, { models: catalogs.plain, cloudOff: false, failSave: false });
 				await begin(width, height, theme);
-				const longProjectName = 'Western Washington workflow workshop working group workspace';
-				region = await openProjectProviders(page, longProjectName);
-				await expect(page.locator('.shell-header .h-scope')).toHaveText(longProjectName);
+				region = await openSeededProjectProviders(page, longProjectName);
+				const scopeName = page.locator('.shell-header .h-scope');
+				await expect(scopeName).toHaveText(longProjectName);
+				await expect(scopeName).toHaveCSS('text-overflow', 'ellipsis');
+				expect(await scopeName.evaluate((element) => element.scrollWidth > element.clientWidth)).toBeTruthy();
 				await shot('project-long-name', size, theme);
 			}
 			if (!BEFORE) {

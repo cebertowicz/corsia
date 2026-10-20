@@ -249,6 +249,7 @@ describe('Header title overflow', () => {
 		const start = headerSource.indexOf('.h-scope {');
 		const rule = headerSource.slice(start, headerSource.indexOf('}', start));
 		expect(rule).toContain('min-width: 0;');
+		expect(rule).toContain('max-width: 24rem;');
 		expect(rule).toContain('text-overflow: ellipsis;');
 	});
 });
