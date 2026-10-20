@@ -129,9 +129,9 @@ def _on_account(work, account_id: str, *args: object):  # type: ignore[no-untype
 
 def _usable_credentials(account_id: str, *, db) -> dict[str, str] | None:  # type: ignore[no-untyped-def]
     """The account's bundle only while it is connected: a signed-out or removed account lends nothing."""
-    from connections.connected_accounts import is_connected, resolve_google_credentials
+    from connections.connected_accounts import is_connected, resolve_credentials
 
-    return resolve_google_credentials(account_id, db=db) if is_connected(account_id, db=db) else None
+    return resolve_credentials(account_id, db=db) if is_connected(account_id, db=db) else None
 
 
 async def access_token(account_id: str) -> str:
@@ -139,7 +139,8 @@ async def access_token(account_id: str) -> str:
 
     A refused refresh marks only this account ``needs_sign_in``; no other account changes.
     """
-    from connections.connected_accounts import backfill_google_subject, mark_needs_sign_in
+    from connections.connected_accounts import backfill_subject
+    from connections.account_state import mark_needs_sign_in
 
     stored = await run_in_db(_on_account, _usable_credentials, account_id)
     if stored is None:
@@ -170,7 +171,7 @@ async def access_token(account_id: str) -> str:
     if not isinstance(token, str) or not token:
         raise GoogleRequestFailed(response.status_code)
     if provider_subject is not None:
-        await run_in_db(_on_account, backfill_google_subject, account_id, provider_subject)
+        await run_in_db(_on_account, backfill_subject, account_id, provider_subject)
     return token
 
 
@@ -182,7 +183,7 @@ async def request_json(
 
     ``account_id`` is None only with a ``token`` for an account that has no row yet (sign-in).
     """
-    from connections.connected_accounts import mark_needs_sign_in
+    from connections.account_state import mark_needs_sign_in
 
     if token is None and account_id is None:
         raise GoogleNotConnected()
