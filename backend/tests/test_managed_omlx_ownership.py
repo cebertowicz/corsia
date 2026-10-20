@@ -232,25 +232,43 @@ def test_only_the_marker_gated_legacy_fingerprint_retires(monkeypatch, tmp_path)
         "provider": "omlx", "kind": "managed", "source": "manual",
         "instance_id": "127.0.0.1:8000", "instance_name": LOCAL_SERVER_NAME,
     }
-    assert not is_retired_local_omlx(row, ["127.0.0.1"])
+    assert not is_retired_local_omlx(row)
     marker_path().write_text("legacy\n", encoding="utf-8")
-    assert is_retired_local_omlx(row, ["127.0.0.1"])
-    assert not is_retired_local_omlx({**row, "instance_name": "Studio"}, ["127.0.0.1"])
-    assert not is_retired_local_omlx({**row, "instance_id": "127.0.0.1:9999"}, ["127.0.0.1"])
+    assert is_retired_local_omlx(row)
+    assert not is_retired_local_omlx({**row, "instance_name": "Studio"})
+    assert not is_retired_local_omlx({**row, "instance_id": "127.0.0.1:9999"})
 
 
-@pytest.mark.parametrize("row,hosts", [
-    ({"provider": "omlx", "kind": "managed", "instance_id": "192.168.1.20:8000"}, ["192.168.1.20"]),
-    ({"provider": "omlx", "kind": "managed", "instance_id": "studio.local:8000"}, ["studio.local"]),
-    ({"provider": "omlx", "kind": "managed", "instance_id": "127.0.0.1:8000"}, ["127.0.0.1", "100.64.0.9"]),
-    ({"provider": "omlx", "kind": "external", "instance_id": "127.0.0.1:9000"}, ["127.0.0.1"]),
-    ({"provider": "omlx", "kind": "managed", "instance_id": "corsia-managed"}, ["127.0.0.1"]),
-    ({"provider": "ollama", "kind": "managed", "instance_id": "127.0.0.1:11434"}, ["127.0.0.1"]),
+@pytest.mark.parametrize("record", ["own-omlx-management.json", "own-omlx-use-mine"])
+def test_use_mine_adopted_row_retires_on_its_own_port(monkeypatch, tmp_path, record) -> None:
+    from llm.local_setup_managed import is_retired_local_omlx
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    adopted = {
+        "provider": "omlx", "kind": "managed", "source": "manual",
+        "instance_id": "127.0.0.1:10240", "instance_name": LOCAL_SERVER_NAME,
+    }
+    hand_added = {**adopted, "instance_name": "My oMLX"}
+    assert not is_retired_local_omlx(adopted)
+    (tmp_path / record).write_text("{}", encoding="utf-8")
+    assert is_retired_local_omlx(adopted)
+    assert not is_retired_local_omlx(hand_added)
+    assert not is_retired_local_omlx({**adopted, "instance_id": "192.168.1.20:10240"})
+
+
+@pytest.mark.parametrize("row", [
+    {"provider": "omlx", "kind": "managed", "instance_id": "192.168.1.20:8000"},
+    {"provider": "omlx", "kind": "managed", "instance_id": "studio.local:8000"},
+    {"provider": "omlx", "kind": "managed", "instance_id": "127.0.0.1:8000"},
+    {"provider": "omlx", "kind": "external", "instance_id": "127.0.0.1:9000"},
+    {"provider": "omlx", "kind": "managed", "instance_id": "corsia-managed"},
+    {"provider": "ollama", "kind": "managed", "instance_id": "127.0.0.1:11434"},
 ])
-def test_remote_external_and_own_rows_stay(row, hosts) -> None:
+def test_remote_external_and_own_rows_stay(row) -> None:
     from llm.local_setup_managed import is_retired_local_omlx
 
-    assert not is_retired_local_omlx(row, hosts)
+    assert not is_retired_local_omlx(row)
 
 
 def test_only_state_root_row_is_corsia_managed() -> None:

@@ -87,33 +87,37 @@ def is_loopback_host(host: object) -> bool:
         return False
 
 
-def is_retired_local_omlx(server: dict, hosts: list[str]) -> bool:
-    """Whether an oMLX row names a process on this Mac that CORSIA does not own.
+#: Files v0.4's "Use mine" and "manage my oMLX" choices left in the state root.
+_LEGACY_ADOPTION_RECORDS = ("own-omlx-management.json", "own-omlx-use-mine")
 
-    CORSIA routes only its private managed oMLX on this Mac. An
-    oMLX the person added on another machine (any non-loopback host) and an
-    explicit External provider stay theirs. ``hosts`` are the row's known
-    endpoint hosts; a row with none is judged by its ``host:port`` instance id.
+
+def is_retired_local_omlx(server: dict) -> bool:
+    """Whether an oMLX row is one an older setup registered on its own.
+
+    v0.4 setup registered its loopback oMLX as a manual ``This Mac`` row
+    (origin/dev local_setup_runtime.register_loopback_server): CORSIA's old
+    service on its port behind the install marker, or the person's oMLX that
+    "Use mine" or "manage my oMLX" adopted, behind that choice's record. Those
+    rows retire. A server the person added by hand under another name or port,
+    one on another machine, and an External provider stay theirs.
     """
-    if server.get("provider") != "omlx" or server.get("kind") == "external":
+    if (
+        server.get("provider") != "omlx"
+        or server.get("kind") == "external"
+        or server.get("source") != "manual"
+    ):
         return False
-    # Setup v0.4 auto-registered only this marker-gated fingerprint (origin/dev
-    # local_setup_runtime.register_loopback_server); other manual rows stay routable.
-    if server.get("source") == "manual":
-        from llm.local_setup_ownership import marker_path
-        from llm.local_setup_runtime import LOCAL_SERVER_NAME
-        from llm.local_setup_upgrade import legacy_omlx_port
+    from infra.config import STATE_ROOT
+    from llm.local_setup_ownership import marker_path
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME
+    from llm.local_setup_upgrade import legacy_omlx_port
 
-        port = legacy_omlx_port()
-        return (
-            marker_path().exists()
-            and server.get("instance_id") == f"127.0.0.1:{port}"
-            and server.get("instance_name") == LOCAL_SERVER_NAME
-        )
-    # Setup's own row is rewritten in place whenever setup registers it.
-    if server.get("instance_id") == MANAGED_INSTANCE_ID:
+    instance_id = str(server.get("instance_id") or "")
+    if server.get("instance_name") != LOCAL_SERVER_NAME or not instance_id.startswith("127.0.0.1:"):
         return False
-    return False
+    if marker_path().exists() and instance_id == f"127.0.0.1:{legacy_omlx_port()}":
+        return True
+    return any((Path(STATE_ROOT) / name).exists() for name in _LEGACY_ADOPTION_RECORDS)
 
 
 def is_corsia_managed_server(server: dict, metadata: dict | None = None) -> bool:
