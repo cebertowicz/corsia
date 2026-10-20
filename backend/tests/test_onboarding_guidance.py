@@ -115,6 +115,12 @@ def test_settings_keys_is_spelled_by_the_one_constant():
             assert spelling == SETTINGS_KEYS
 
 
+def test_the_key_how_to_says_never_in_chat_before_where_to_find_the_key():
+    web_search = WEB_SEARCH.read_text(encoding="utf-8")
+    warning = web_search.index("The key goes only in Settings › Keys, never here in chat.")
+    assert warning < web_search.index("Press Add API Key")
+
+
 def test_first_run_sets_the_reviewer_in_chat_and_never_enables_auto_approve():
     first_run = FIRST_RUN.read_text(encoding="utf-8")
     task_3 = first_run.split("## Task 3:", 1)[1].split("## Task 4:", 1)[0]
