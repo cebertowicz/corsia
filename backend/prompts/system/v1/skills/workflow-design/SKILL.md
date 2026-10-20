@@ -7,7 +7,7 @@ description: Use when building or improving a workflow, the steps for one kind o
 
 A workflow is how one kind of recurring work gets done: the steps, who does each one, and where the person is asked. It is only for recurring work; a one-off is a plan, however big.
 
-A new workflow starts when the person asks for one, or when the weekly review of their time (skill `time-to-agent`) finds them doing the same work by hand and they say yes to taking it over. Either way, this is the method.
+A new workflow starts when recurring work has none that fits (skill `task-discipline`), when the person asks for one, or when the weekly review of their time (skill `time-to-agent`) finds them doing the same work by hand and they say yes to taking it over. Taking work off the person needs that yes; each way, this is the method.
 
 ## Method, in order
 

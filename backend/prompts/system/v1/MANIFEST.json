@@ -220,10 +220,10 @@
       "sha256": "8c11d102b6b8ca00a143efb88c67eba152d1f68754b980a2bccee34b1f16bb43"
     },
     {
-      "bytes": 3526,
+      "bytes": 3532,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "948e32268226acdd45cff97d9d4b3e56927011d315c98212095ba86047510122"
+      "sha256": "454b63507bc2fab11e05a0f3d35d7b30fc8a69e6b740f095012e07df96a68cd1"
     },
     {
       "bytes": 4409,
@@ -328,10 +328,10 @@
       "sha256": "575ec4631f88193f7824e1834186a2a4d1472ee6984ec023fcc615fd5751fc32"
     },
     {
-      "bytes": 3169,
+      "bytes": 3276,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "bc7857c90424b9b32609b31c84e7832ab9c7d9289936245c162cec90c5c7f46e"
+      "sha256": "c52ed0deea4ea3339d5e0610c3ca29d0ba4e94f3181efe87e8d95206f44ad199"
     }
   ],
   "version": "v1"
