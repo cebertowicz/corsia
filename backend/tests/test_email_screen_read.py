@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from connections.connected_accounts import store_google_credentials
+from connections.connected_accounts import store_credentials
 from connections.google.accounts import NONE_AVAILABLE
 from google_account_helpers import only_corsia_account
 from connections.google import client as google_client
@@ -114,7 +114,7 @@ def mail(isolated_db, tmp_path, monkeypatch):
 
     monkeypatch.setattr(google_client.httpx, "AsyncClient", factory)
     account = only_corsia_account(ACCOUNT, created_by=("system", "test"), state="connected")
-    store_google_credentials(str(account["id"]), {
+    store_credentials(str(account["id"]), {
         "client_id": "id-0123", "client_secret": "secret-0123", "refresh_token": "refresh-0123",
     })
     model = FakeModel()

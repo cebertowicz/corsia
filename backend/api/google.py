@@ -71,12 +71,12 @@ def _agent_thread_id(user: dict, missing_thread_message: str) -> str:
 
 
 def _visible(account_id: str, thread_id: str) -> bool:
-    from connections.google.accounts import visible_google_account
+    from connections.connected_accounts import GOOGLE_PROVIDER, visible_account
     from infra.database import get_db
 
     db = get_db()
     try:
-        return visible_google_account(account_id, thread_id, db=db) is not None
+        return visible_account(account_id, thread_id, db=db, provider=GOOGLE_PROVIDER) is not None
     finally:
         db.close()
 

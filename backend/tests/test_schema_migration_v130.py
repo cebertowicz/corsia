@@ -62,3 +62,45 @@ def test_migration_adds_metadata_and_accepts_manual_only_audit() -> None:
         )
         db.commit()
         assert not migrate_to_current(db, 130).migrated
+
+
+def _snapshot(db: sqlite3.Connection, table: str, columns: str = "*") -> list[tuple]:
+    return [tuple(row) for row in db.execute(f"SELECT {columns} FROM {table} ORDER BY 1,2")]
+
+
+def test_existing_google_accounts_survive_byte_for_byte_in_every_reach_mode() -> None:
+    from infra import key_store
+
+    with closing(_v129()) as db:
+        db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES ('project-a','a','t','t')")
+        for account_id, mode, outside in (("g-all", "all", 0), ("g-selected", "selected", 1), ("g-corsia", "corsia", 0)):
+            key = f"connected-account--google--{account_id}"
+            db.execute(
+                "INSERT INTO connected_accounts(id,provider,provider_subject,address,capabilities_json,state,reach_mode,"
+                "outside_projects,credential_key,cursor_json,created_by_kind,created_by_id,signed_in_by_kind,"
+                "signed_in_by_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (account_id, "google", f"subject-{account_id}", f"{account_id}@example.test", '["mail","calendar","files"]',
+                 "connected", mode, outside, key, '{"history_id":"7"}', "person", "person", "person", "person",
+                 "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"),
+            )
+        db.execute("INSERT INTO connected_account_reach(account_id,project_id) VALUES ('g-selected','project-a')")
+        db.commit()
+        for account_id in ("g-all", "g-selected", "g-corsia"):
+            key_store.set_managed_value(
+                f"connected-account--google--{account_id}", '{"client_id":"c","client_secret":"s","refresh_token":"r"}', db=db,
+            )
+        columns = ",".join(row["name"] for row in db.execute("PRAGMA table_info(connected_accounts)"))
+        before = (
+            _snapshot(db, "connected_accounts", columns), _snapshot(db, "connected_account_reach"),
+            _snapshot(db, "key_store_entries"),
+        )
+
+        assert migrate_to_current(db, 130).migrated
+
+        after = (
+            _snapshot(db, "connected_accounts", columns), _snapshot(db, "connected_account_reach"),
+            _snapshot(db, "key_store_entries"),
+        )
+        assert after == before
+        assert len(before[0]) == 3 and len(before[1]) == 1 and len(before[2]) >= 3
+        assert _snapshot(db, "connected_accounts", "account_kind,state_cause") == [(None, None)] * 3

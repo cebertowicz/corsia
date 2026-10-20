@@ -7,12 +7,14 @@ import sqlite3
 import uuid
 
 from connections.connected_accounts import (
-    GOOGLE_CAPABILITIES,
     GOOGLE_PROVIDER,
     ONLY_CORSIA,
     credential_key,
 )
 from infra import key_store, key_store_values
+
+# What a migrated Google row reached at v129, frozen with the schema below.
+_GOOGLE_CAPABILITIES_V129 = ("mail", "calendar", "files")
 
 # Historical schema is deliberately frozen here: later account columns belong to
 # their own forward step and must not appear in a 128 -> 129 upgrade.
@@ -130,7 +132,7 @@ def migrate_128_to_129(conn: sqlite3.Connection) -> None:
         "created_at,updated_at"
         ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (account_id, GOOGLE_PROVIDER, None, address.strip(),
-         json.dumps(GOOGLE_CAPABILITIES, separators=(",", ":")), state, ONLY_CORSIA, 0, key,
+         json.dumps(_GOOGLE_CAPABILITIES_V129, separators=(",", ":")), state, ONLY_CORSIA, 0, key,
          json.dumps(cursor, separators=(",", ":"), sort_keys=True) if cursor is not None else None,
          "system", "legacy_google_migration", "system", "legacy_google_migration", now, now),
     )

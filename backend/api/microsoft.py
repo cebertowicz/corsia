@@ -46,7 +46,7 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
             reach=ALL_PROJECTS if person else None,
         )
     except MicrosoftError as exc:
-        raise HTTPException(400, exc.cause) from None
+        raise HTTPException(400, {"cause": exc.cause, "message": exc.message}) from None
     return {"url": url, "account_id": account_id}
 
 

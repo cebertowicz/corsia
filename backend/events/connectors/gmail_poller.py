@@ -101,11 +101,11 @@ def cancel_account(account_id: str) -> None:
 
 
 def _account_states() -> dict[str, str]:
-    from connections.connected_accounts import google_accounts
+    from connections.connected_accounts import GOOGLE_PROVIDER, list_accounts
 
     db = get_db()
     try:
-        return {str(account["id"]): str(account["state"]) for account in google_accounts(db=db)}
+        return {str(account["id"]): str(account["state"]) for account in list_accounts(GOOGLE_PROVIDER, db=db)}
     finally:
         db.close()
 
@@ -132,7 +132,8 @@ def _load_stored_cursor(account_id: str) -> Cursor | None:
 
 def _save_cursor(cursor: Cursor, db: sqlite3.Connection | None = None) -> bool:
     """Write the cursor on its account's row only while that account is connected."""
-    from connections.connected_accounts import is_connected, set_cursor
+    from connections.connected_accounts import is_connected
+    from connections.account_state import set_cursor
 
     with write_transaction(db, scope="gmail_poll_cursor") as conn:
         if not is_connected(cursor.account_id, db=conn):

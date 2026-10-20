@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 
 import pytest
 
-from connections.connected_accounts import google_accounts, resolve_google_credentials
+from connections.connected_accounts import GOOGLE_PROVIDER, resolve_credentials
 from google_account_helpers import ONLY_CORSIA_REACH
 from infra import key_store, key_store_values
 from infra.database import initialize_schema
@@ -41,10 +42,24 @@ def _dev_128() -> sqlite3.Connection:
 
 
 def google_account(*, db):  # type: ignore[no-untyped-def]
-    """The single account a legacy migration may create, or None."""
-    accounts = google_accounts(db=db)
-    assert len(accounts) <= 1
-    return accounts[0] if accounts else None
+    """The single account a legacy migration may create, or None, read from the frozen v129 table.
+
+    Live account code reads the current schema, so it is never pointed at a v129 table.
+    """
+    rows = db.execute(
+        "SELECT id,address,state,reach_mode,outside_projects,cursor_json FROM connected_accounts WHERE provider=?",
+        (GOOGLE_PROVIDER,),
+    ).fetchall()
+    assert len(rows) <= 1
+    if not rows:
+        return None
+    row = rows[0]
+    reach = [r["project_id"] for r in db.execute("SELECT project_id FROM connected_account_reach WHERE account_id=?", (row["id"],))]
+    return {
+        "id": row["id"], "address": row["address"], "state": row["state"],
+        "reach": {"mode": row["reach_mode"], "project_ids": sorted(reach), "outside_projects": bool(row["outside_projects"])},
+        "cursor": json.loads(row["cursor_json"]) if row["cursor_json"] else None,
+    }
 
 
 def _seed_legacy(db: sqlite3.Connection) -> None:
@@ -74,7 +89,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         assert account["address"] == ACCOUNT
         assert account["reach"] == ONLY_CORSIA_REACH
         assert account["cursor"] == CURSOR
-        assert resolve_google_credentials(str(account["id"]), db=db) == {
+        assert resolve_credentials(str(account["id"]), db=db) == {
             "client_id": "client-id", "client_secret": "client-secret", "refresh_token": "refresh-token",
         }
         assert get_setting("google_account", db=db) is None
@@ -156,7 +171,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         assert account["address"] == ACCOUNT
         assert account["cursor"] == CURSOR
         assert account["state"] == "needs_sign_in"
-        assert resolve_google_credentials(str(account["id"]), db=db) is None
+        assert resolve_credentials(str(account["id"]), db=db) is None
         assert get_setting("google_account", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
         assert not migrate_to_current(db, 129).migrated
@@ -277,7 +292,7 @@ def test_dev_128_upgrades_to_the_complete_connected_accounts_schema() -> None:
 
 def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
     """Remove deletes the account row; its audit record must outlive it."""
-    from connections.google import account_actions
+    from connections import account_actions
 
     with closing(_dev_128()) as db:
         _seed_legacy(db)
@@ -286,6 +301,7 @@ def test_account_history_survives_remove_with_foreign_keys_enabled() -> None:
         assert account is not None
         account_id = str(account["id"])
 
+        migrate_to_current(db, SCHEMA_VERSION)  # Remove runs on the current schema.
         db.execute("PRAGMA foreign_keys=ON")
         account_actions._remove_locally(account_id, ("person", "owner"), db=db)
 

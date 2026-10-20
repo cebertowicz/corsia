@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from connections.app_lifecycle import create_app, create_pending_app
-from connections.connected_accounts import create_google_account_for_thread
+from connections.connected_accounts import GOOGLE_PROVIDER, create_account_for_thread
 from connections.app_reach import get_app, key_entry_names
 from infra.database import initialize_schema
 
@@ -292,7 +292,7 @@ def test_agent_added_apps_and_accounts_have_the_same_reach(connected_apps_client
     actor["thread_id"] = thread_id
 
     app = client.post("/api/mcp/servers", json={"name": f"{thread_id} app", "config": {"command": "app"}, "key_refs": []})
-    account = create_google_account_for_thread(
+    account = create_account_for_thread(GOOGLE_PROVIDER,
         f"{thread_id}@example.test", actor_thread_id=thread_id, created_by=("agent", thread_id), db=db,
     )
 
