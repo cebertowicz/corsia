@@ -454,3 +454,47 @@ def test_one_batch_that_fails_to_close_does_not_hold_back_the_others(review_env,
     monkeypatch.setattr(feedback_batches, "close_batch", real)
     feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
     assert {b["state"] for b in batches(db)} == {"delivered"}
+
+
+def test_review_node_carries_the_requesting_nodes_canonical_intent_when_present(review_env):
+    from plans import feedback_nodes, service
+
+    db, aid = review_env
+    requester = public.ensure_plan("thread", "requester", db=db)
+    canonical = service.add_node(
+        requester.id, kind="task", title="Canonical", intent="Preserve the outcome",
+        acceptance_criteria="Outcome is preserved", db=db,
+    )
+    requesting = service.add_node(
+        requester.id, kind="task", title="Inherited", acceptance_criteria="Review starts",
+        intent_node_id=canonical.id, db=db,
+    )
+    without = feedback_nodes.create_review_node(
+        db, "reviewer", {
+            "id": "review-without-intent", "artifact_id": aid, "requester_display": "Requester", "note": "",
+        },
+    )
+    with_request = feedback_nodes.create_review_node(
+        db, "second", {
+            "id": "review-with-intent", "artifact_id": aid, "requester_display": "Requester", "note": "",
+            "requesting_node_id": requesting.id,
+        },
+    )
+
+    direct = feedback_nodes.create_review_node(
+        db, "third", {
+            "id": "review-direct-intent", "artifact_id": aid, "requester_display": "Requester", "note": "",
+            "requesting_node_id": canonical.id,
+        },
+    )
+    unknown = feedback_nodes.create_review_node(
+        db, "fourth", {
+            "id": "review-unknown-intent", "artifact_id": aid, "requester_display": "Requester", "note": "",
+            "requesting_node_id": "no-such-node",
+        },
+    )
+
+    assert public.get_node(without.node_id, db=db).intent_node_id is None
+    assert public.get_node(with_request.node_id, db=db).intent_node_id == canonical.id
+    assert public.get_node(direct.node_id, db=db).intent_node_id == canonical.id
+    assert public.get_node(unknown.node_id, db=db).intent_node_id is None
