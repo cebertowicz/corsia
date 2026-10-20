@@ -19,10 +19,10 @@
       "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
     },
     {
-      "bytes": 2912,
+      "bytes": 2823,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "8813a4cbdb5801a12b60eabfbc80145395b7c049d63597f8ee7f6864af5ac7f7"
+      "sha256": "6627c2bb24401947833a2b294cd65d02b9e03eda4a741176b2b0ff8e1728f9ea"
     },
     {
       "bytes": 862,
@@ -244,10 +244,10 @@
       "sha256": "437ebbc92573a717e40c3d2aeaf4f1f5e2f4544a4ed1ee3453b5d3284322f304"
     },
     {
-      "bytes": 1364,
+      "bytes": 1486,
       "kind": "skill",
       "path": "skills/decision-brief/corsia.yaml",
-      "sha256": "3dc03ff4c72c34d2b9b7cc9943e899bcdb4448c9097e6e687810abe255ede676"
+      "sha256": "1e624418e958e1934035f068e77d400200fc554ff1d8238fa5fa96c60add3f0f"
     },
     {
       "bytes": 5507,

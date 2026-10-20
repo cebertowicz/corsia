@@ -2,10 +2,10 @@
 
 A task held for the user with nothing to act on reads red while the user's
 queue is empty, so the plan looks stalled and no one moves it. An agent's
-``block_node`` on the user therefore names its ask. A choice is a raised
-decision, which already holds its source task (``plans.wait_causes``), so a
-block beside one is refused. A finished thing to judge is a registered
-artifact the plan's thread owns: the block links it to the task with the existing
+``block_node`` on the user therefore names its ask. A choice answerable
+without opening anything is a raised decision, which already holds its source
+task (``plans.wait_causes``), so a block beside one is refused. Anything the
+user must read to answer is a registered artifact the plan's thread owns: the block links it to the task with the existing
 ``attention`` role and raises it in the user's one attention pile. When the
 user clears that ask, the holds it placed clear and the agent is told
 (``cleared``). ``shared/planning/plans-simplify-2026-09-29.md``.
@@ -21,10 +21,10 @@ import plans.service as service
 from plans.node_states import open_user_block_sql
 
 NO_ASK = (
-    "work waits on the user only with something they can act on. For a "
-    "choice, even one inside a document, raise a decision on this task: it "
-    "holds the task by itself, so do not block it. For a finished thing they "
-    "must judge (a draft to send, a design, an image), register it and pass "
+    "work waits on the user only with something they can act on. If they can "
+    "answer without opening anything, raise a decision on this task: it holds "
+    "the task by itself, so do not block it. If they must read something to "
+    "answer (a draft to send, a design, requirements), register it and pass "
     "its artifact id as ask_artifact_id. Ask anything else in chat."
 )
 DECISION_HOLDS = (
