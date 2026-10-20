@@ -1,6 +1,6 @@
 ---
 name: connect-tools
-description: Use when work needs to read from, act on or hear about a tool, service or account that isn't connected, when the person asks to connect or set one up, or when a source turns up mid-work. Not for a one-off lookup.
+description: Use when work needs a tool, service or account that isn't connected yet, or the person asks to connect one. Not for a one-off lookup.
 ---
 
 # Connect your tools
@@ -59,4 +59,4 @@ Then tell the person in one line what you can now see and still can't.
 
 ## Recurring work with no ready connection
 
-Package what you built so other agents here reuse it unchanged. Sharing beyond this computer comes later, with the person's approval.
+Package what you built so other agents here reuse it unchanged. Sharing it beyond this computer needs the person's approval.

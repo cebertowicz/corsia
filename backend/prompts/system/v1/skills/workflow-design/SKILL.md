@@ -1,6 +1,6 @@
 ---
 name: workflow-design
-description: Use when building or improving a workflow, meaning how one kind of recurring work gets done, with its steps, who does each, and where the person is asked. Not for a one-off, which is a plan.
+description: Use when building or improving a workflow, the steps for one kind of recurring work, who does each and where the person is asked. Not for a one-off.
 ---
 
 # Workflow design

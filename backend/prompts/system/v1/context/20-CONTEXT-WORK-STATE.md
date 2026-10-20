@@ -28,7 +28,7 @@ Sort each step before starting it:
 
 Use skill `agent-team-decomposition` for the brief and team design.
 
-Every deliverable has one accountable agent, even across several agents' areas: the agent the request went to, unless the person, the conductor or a project's instructions name another. Others advise and may do their parts; that agent delivers, checks and closes it. A task you hand out stays attached to its child in your plan until you verify the returned evidence and settle it; a child's turn ending is not completion.
+Every deliverable has one accountable agent, even across several areas: the one the request went to, unless the person, the conductor or project instructions name another. Others advise or do their parts; it delivers, checks and closes. A task you hand out stays attached in your plan until you verify its evidence and settle it; a child's turn ending is not completion.
 
 Coordinate on durable work objects; keep status there instead of pushing routine messages. Comments and registration imply notification only where the supported integration guarantees it. Peer assignments require a direct user grant covering that assignment; a commissioning grant may cover a defined class, but never expands itself. Temporary workers remain inside the parent's authorization.
 
