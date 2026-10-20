@@ -27,12 +27,10 @@ STATE_CAUSES = frozenset((
     ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, REGISTRATION_MISCONFIGURED, REFRESH_TOKEN_INVALID, PROVIDER_UNAVAILABLE,
 ))
 MANUAL_ONLY = "manual_only"
-INPUT_REFUSAL = "input_refusal"
 AUDIT_ACTIONS = frozenset(("connect", "sign_in", "sign_out", "remove"))
 REVOCATION_CAUSES = frozenset((
     "revoked", "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected", "not_signed_in",
-    APP_REGISTRATION_NOT_ALLOWED, ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, REGISTRATION_MISCONFIGURED,
-    REFRESH_TOKEN_INVALID, PROVIDER_UNAVAILABLE, MANUAL_ONLY, INPUT_REFUSAL,
+    MANUAL_ONLY,
 ))
 LIFECYCLE_ACTIONS = frozenset(("connect_started", "connect_succeeded", "connect_failed", "signed_out", "removed"))
 

@@ -44,10 +44,8 @@ _AUDIT_V130_SQL = """
         actor_id TEXT NOT NULL,
         action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
         revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
-            'admin_approval_required', 'app_registration_not_allowed', 'consent_cancelled', 'input_refusal',
-            'manual_only', 'not_signed_in', 'provider_rejected', 'provider_timeout', 'provider_unavailable',
-            'provider_unexpected', 'provider_unreachable', 'refresh_token_invalid', 'registration_misconfigured',
-            'revoked'
+            'manual_only', 'not_signed_in', 'provider_rejected', 'provider_timeout', 'provider_unexpected',
+            'provider_unreachable', 'revoked'
         ))
     )
 """

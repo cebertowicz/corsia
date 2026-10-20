@@ -50,6 +50,7 @@ def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
     assert REGISTRATION_MISCONFIGURED in STATE_CAUSES
     assert schema_sql_values(STATE_CAUSES) in CONNECTED_ACCOUNTS_SCHEMA_SQL
     assert schema_sql_values(REVOCATION_CAUSES) in AUDIT_TABLE_SQL
+    assert REVOCATION_CAUSES.isdisjoint(STATE_CAUSES)
     assert _literal_check_values(_CONNECTED_ACCOUNTS_V130_SQL, "state_cause") == STATE_CAUSES
     assert _literal_check_values(_AUDIT_V130_SQL, "revocation_cause") == REVOCATION_CAUSES
 
