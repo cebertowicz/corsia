@@ -130,7 +130,7 @@ def _attach_revision_and_seed_worker(
     """Attach a delegated revision and create its worker-owned revision step."""
     if worker is None:
         return None
-    from plans import delegation
+    from plans import delegation, intent_words
     from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES, bounded
 
     delegation.attach_spawned_thread(
@@ -140,8 +140,9 @@ def _attach_revision_and_seed_worker(
     worker_step = service.add_node(
         worker_plan.id, kind="task", title=f"Revise: {title}",
         acceptance_criteria=str(revision.acceptance_criteria),
-        description=bounded(feedback, REVISION_BRIEF_MAX_BYTES), actor_id=actor_id,
-        provenance=provenance, db=connection,
+        description=bounded(feedback, REVISION_BRIEF_MAX_BYTES),
+        intent_node_id=intent_words.canonical(connection, revision.id)["id"],
+        actor_id=actor_id, provenance=provenance, db=connection,
     )
     return worker_step.id
 

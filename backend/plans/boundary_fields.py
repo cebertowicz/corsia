@@ -139,7 +139,7 @@ OPERATION_FIELDS = {
     } | _NEXT,
     "add_correction": {
         "node_id", "title", "acceptance_criteria", "affected_nodes",
-        "expected_revision",
+        "intent", "intent_words", "expected_revision",
     },
     "arm_watch": {
         "node_id",

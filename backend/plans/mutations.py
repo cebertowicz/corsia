@@ -153,7 +153,7 @@ def edit_node(
             node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size,
         )
         size_changed = next_size != node["size"]
-        if not restated and difficulty_rerated is None and not size_changed:
+        if not restated and not intent_words and difficulty_rerated is None and not size_changed:
             return service._node_from_row(connection, node)
         requirements_changed = (
             next_dod != node["acceptance_criteria"] or next_intent != node["intent"] or bool(intent_words)
@@ -182,7 +182,7 @@ def edit_node(
             admission.release(node_id, "requirements_changed", db=connection)
             admission.reselect_and_reconcile(node_id, actor_id=actor_id, provenance=provenance, db=connection)
         _record_edit_events(
-            connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
+            connection, node_id, requirements_changed, updated, next_title, next_dod,
             difficulty_rerated, node["size"], next_size, actor_id, provenance,
         )
         return service._node_from_row(connection, updated)

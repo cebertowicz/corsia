@@ -48,6 +48,11 @@ def _is_person_message(row: sqlite3.Row) -> bool:
     return row["role"] == "user" and '"sender_kind":"agent"' not in (row["metadata"] or "").replace(" ", "")
 
 
+def _is_agent_message(row: sqlite3.Row) -> bool:
+    """Whether a consumed message is an agent's words, not a person's."""
+    return row["role"] == "assistant" or '"sender_kind":"agent"' in (row["metadata"] or "").replace(" ", "")
+
+
 def _message_quote(connection: sqlite3.Connection, plan_id: str, quote: str):
     rows = connection.execute(
         """SELECT m.id,m.content,m.role,m.metadata,m.created_at FROM messages m
@@ -178,7 +183,7 @@ def capture_origin(connection: sqlite3.Connection, plan_id: str, node_id: str, *
             for row in person
         ), revision=revision)
         return True
-    agent = next((row for row in rows if row["role"] == "assistant"), None)
+    agent = next((row for row in rows if _is_agent_message(row)), None)
     if agent is not None:
         append(connection, node_id, [{"quote": agent["content"], "author": "agent", "role": "origin",
                                       "source_kind": "message", "source_id": agent["id"]}], revision=revision)

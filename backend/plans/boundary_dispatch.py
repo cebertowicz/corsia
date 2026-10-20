@@ -162,15 +162,15 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         )
     if operation == "reorder":
         return _reorder(params, common)
-    from plans import corrections
-
+    from plans import corrections, intent_words
     return corrections.add(
-        params["node_id"],
-        title=fields.text(params, "title"),
+        params["node_id"], title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
-        affected_nodes=params.get("affected_nodes"),
-        **fields.expected(params),
-        **common,
+        affected_nodes=params.get("affected_nodes"), intent=params.get("intent"),
+        intent_words=intent_words.resolve_words(
+            db, plan_id, params.get("intent_words"), actor_id=acting,
+        ),
+        **fields.expected(params), **common,
     )
 
 
