@@ -10,7 +10,7 @@ import pytest
 from connections.account_actions import sign_out_account
 from connections.connected_accounts import ConnectedAccountError, create_account, get_account, resolve_credentials, store_credentials
 from connections.microsoft import client
-from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID
+from connections.microsoft.errors import MicrosoftError, REFRESH_TOKEN_INVALID, SERVICE_UNAVAILABLE
 from connections.microsoft.provider import MICROSOFT
 from infra.database import get_db
 from tools import microsoft_actions
@@ -156,7 +156,7 @@ async def test_transient_refresh_failure_keeps_connected_state(isolated_db, monk
     account = connect()
     http = Http(Response(503, {"error": "private provider text"}), [])
     monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
-    with pytest.raises(MicrosoftError, match=PROVIDER_UNAVAILABLE):
+    with pytest.raises(MicrosoftError, match=SERVICE_UNAVAILABLE):
         await client.access_token(account)
     assert facts(account)[0]["state"] == "connected"
 

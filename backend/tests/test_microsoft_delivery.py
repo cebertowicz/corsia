@@ -8,10 +8,11 @@ from typing import Any
 
 import httpx
 import pytest
+from jsonschema import validate
 
 from connections.connected_accounts import store_credentials
 from connections.microsoft import calendar, client
-from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE, SERVICE_UNAVAILABLE
 from infra.database import get_db
 from delegation_fixtures import deleg_db  # noqa: F401
 from tests.test_action_gate import THREAD, _admit, _bind, workspace  # noqa: F401
@@ -100,6 +101,31 @@ async def _calendar_draft(account: str, *, operation: str, event_id: str | None 
     return json.loads(result)
 
 
+async def test_calendar_draft_revision_accepts_its_returned_draft_id(microsoft, workspace, monkeypatch) -> None:
+    from infra import config
+
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", config._resolve_workspace_selection(workspace))
+    tool = MicrosoftCalendarDraftTool()
+    first_args = {
+        "account_id": microsoft,
+        "operation": "create",
+        "event": {"subject": "Planning", "start": {"dateTime": "2026-10-20T09:00:00-07:00"}},
+    }
+    validate(first_args, tool.parameters)
+    first = json.loads(await tool.execute(_thread_id=THREAD, **first_args))
+
+    revised_args = {
+        **first_args,
+        "draft_id": first["draft_id"],
+        "event": {"subject": "Revised planning", "start": {"dateTime": "2026-10-20T10:00:00-07:00"}},
+    }
+    validate(revised_args, tool.parameters)
+    revised = json.loads(await tool.execute(_thread_id=THREAD, **revised_args))
+
+    assert revised["draft_id"] == first["draft_id"]
+    assert revised["revision"] != first["revision"]
+
+
 def _approve(monkeypatch: pytest.MonkeyPatch) -> None:
     async def approved(_kind: str, draft_id: str, _revision: str) -> Approved:
         row = _row(draft_id)
@@ -150,7 +176,7 @@ async def test_mail_graph_400_releases_claim_with_named_refusal(microsoft, monke
     result = await MicrosoftMailSendTool().execute(
         _thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"],
     )
-    assert result == "Error: Not sent: Microsoft refused this request. Check the draft or event details and try again."
+    assert result == "Error: Not sent: Microsoft refused this request. Check the ids, names or fields you passed and try again."
     assert _row(saved["draft_id"])["state"] == "open"
 
 
@@ -236,7 +262,10 @@ async def test_refresh_lost_race_uses_winner_token_without_disabling_account(del
     assert len(calls) == 1 and disabled == []
 
 
-@pytest.mark.parametrize(("raised", "logged"), [(RuntimeError("db fault"), True), (MicrosoftError(PROVIDER_UNAVAILABLE), False)])
+@pytest.mark.parametrize(
+    ("raised", "logged"),
+    [(RuntimeError("db fault"), True), (MicrosoftError(PROVIDER_UNAVAILABLE), False), (MicrosoftError(SERVICE_UNAVAILABLE), False)],
+)
 async def test_delivery_logs_only_unexpected_credential_failures(monkeypatch, caplog, raised, logged):
     async def db_call(*_args: object) -> None: return None
     async def acquire() -> str: raise raised

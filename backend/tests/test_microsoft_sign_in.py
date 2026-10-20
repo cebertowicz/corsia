@@ -479,6 +479,22 @@ async def test_add_failure_status_expires_with_pending_lifetime(microsoft, isola
     assert oauth.accounts_status("expiry-thread") == {"status": "not_connected"}
 
 
+async def test_status_keeps_a_failed_second_add_visible_without_changing_single_account(microsoft, isolated_db) -> None:
+    account_id = await _connect(microsoft)
+    failed_url, _ = await oauth.start_sign_in(
+        CLIENT_ID, "work", TENANT_A, actor=PERSON, reach=EVERYWHERE,
+    )
+    assert (await _finish(failed_url, error="access_denied", error_subcode="cancel"))[0] == 400
+
+    status = oauth.accounts_status()
+    assert status["accounts"] == [oauth.accounts_status(account_id=account_id)]
+    assert status["latest_failed_add"] == {
+        "cause": CONSENT_CANCELLED,
+        "message": message(CONSENT_CANCELLED),
+    }
+    assert oauth.accounts_status(account_id=account_id) == status["accounts"][0]
+
+
 async def test_code_exchange_failure_page_never_echoes_code_or_provider_detail(microsoft, isolated_db) -> None:
     microsoft.token_error = True
     url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=("system", "test"), reach=EVERYWHERE)
@@ -719,6 +735,7 @@ def test_microsoft_tool_contract_is_pinned() -> None:
         "additionalProperties": False,
         "properties": {"account_id": {"type": "string", "description": "Optional account_id returned by microsoft_connect or a previous microsoft_status result."}},
     }
+    assert "latest_failed_add" in status.description
     assert connect.self_describing_errors and status.self_describing_errors
 
 

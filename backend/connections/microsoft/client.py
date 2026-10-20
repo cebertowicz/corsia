@@ -13,6 +13,7 @@ from connections.microsoft.errors import (
     PROVIDER_UNAVAILABLE,
     REFRESH_TOKEN_INVALID,
     REQUEST_REFUSED,
+    SERVICE_UNAVAILABLE,
     MicrosoftError,
     token_error_cause,
 )
@@ -108,7 +109,7 @@ class DeltaExpired(MicrosoftError):
     """Graph no longer retains this mailbox's delta cursor."""
 
     def __init__(self) -> None:
-        super().__init__(PROVIDER_UNAVAILABLE)
+        super().__init__(SERVICE_UNAVAILABLE)
 
 
 class _GraphUnauthorized(Exception):
@@ -196,7 +197,7 @@ async def access_token(account_id: str, *, _after_race: bool = False) -> str:
                 "refresh_token": stored["refresh_token"], "scope": " ".join(stored["scopes"]),
             })
     except httpx.HTTPError:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+        raise MicrosoftError(SERVICE_UNAVAILABLE) from None
     body = _body(response)
     if response.status_code != 200:
         cause = token_error_cause(response.status_code, body)
@@ -205,7 +206,7 @@ async def access_token(account_id: str, *, _after_race: bool = False) -> str:
         raise MicrosoftError(cause)
     token = body.get("access_token") if body is not None else None
     if not isinstance(token, str) or not token:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(SERVICE_UNAVAILABLE)
     replacement = body.get("refresh_token") if body is not None else None
     expires_in = body.get("expires_in") if body is not None else None
     updated = {
@@ -226,7 +227,7 @@ async def access_token(account_id: str, *, _after_race: bool = False) -> str:
     if current is None:
         raise MicrosoftError(REFRESH_TOKEN_INVALID)
     if _after_race:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(SERVICE_UNAVAILABLE)
     return await access_token(account_id, _after_race=True)
 
 
@@ -238,9 +239,9 @@ async def _check_graph(response: httpx.Response, account_id: str) -> None:
     if response.status_code in (400, 403, 404):
         raise MicrosoftError(REQUEST_REFUSED, never_sent=True)
     if 400 <= response.status_code < 500:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True)
+        raise MicrosoftError(SERVICE_UNAVAILABLE, never_sent=True)
     if response.status_code >= 500:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(SERVICE_UNAVAILABLE)
 
 
 async def _graph_response(
@@ -256,9 +257,9 @@ async def _graph_response(
                     method, url, headers={"Authorization": f"Bearer {bearer}", **headers}, **request,
                 )
         except (httpx.ConnectError, httpx.ConnectTimeout):
-            raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True) from None
+            raise MicrosoftError(SERVICE_UNAVAILABLE, never_sent=True) from None
         except httpx.HTTPError:
-            raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+            raise MicrosoftError(SERVICE_UNAVAILABLE) from None
         if response.status_code == 429 and attempt == 0:
             try:
                 delay = max(0, min(int(response.headers.get("Retry-After", "1")), 60))
@@ -277,14 +278,14 @@ async def _graph_response(
             bearer = await access_token(account_id)
             continue
         return response
-    raise MicrosoftError(PROVIDER_UNAVAILABLE)
+    raise MicrosoftError(SERVICE_UNAVAILABLE)
 
 
 def _json(response: httpx.Response) -> Any:
     try:
         return response.json()
     except ValueError:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+        raise MicrosoftError(SERVICE_UNAVAILABLE) from None
 
 
 async def graph_json(
@@ -314,16 +315,16 @@ async def graph_pages(
 ) -> list[dict[str, object]]:
     """Collect no more than the requested Graph items, refusing malformed provider bodies."""
     if max_items is not None and max_items < 1:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(REQUEST_REFUSED, never_sent=True)
     items: list[dict[str, object]] = []
     next_url: str | None = url
     while next_url and (max_items is None or len(items) < max_items):
         page = await graph_json("GET", next_url, account_id=account_id, params=params)
         if not isinstance(page, dict):
-            raise MicrosoftError(PROVIDER_UNAVAILABLE)
+            raise MicrosoftError(SERVICE_UNAVAILABLE)
         value = page.get("value")
         if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
-            raise MicrosoftError(PROVIDER_UNAVAILABLE)
+            raise MicrosoftError(SERVICE_UNAVAILABLE)
         remaining = None if max_items is None else max_items - len(items)
         items.extend(value if remaining is None else value[:remaining])
         candidate = page.get("@odata.nextLink")
@@ -343,9 +344,9 @@ async def graph_delta(
     for _page in range(DELTA_PAGES_PER_POLL):
         page = await graph_json("GET", url, account_id=account_id, params=params)
         if not isinstance(page, dict) or not isinstance(page.get("value"), list):
-            raise MicrosoftError(PROVIDER_UNAVAILABLE)
+            raise MicrosoftError(SERVICE_UNAVAILABLE)
         if any(not isinstance(item, dict) for item in page["value"]):
-            raise MicrosoftError(PROVIDER_UNAVAILABLE)
+            raise MicrosoftError(SERVICE_UNAVAILABLE)
         items.extend(page["value"])
         next_link = page.get("@odata.nextLink")
         if isinstance(next_link, str) and next_link:
@@ -353,6 +354,6 @@ async def graph_delta(
             continue
         delta_link = page.get("@odata.deltaLink")
         if not isinstance(delta_link, str) or not delta_link:
-            raise MicrosoftError(PROVIDER_UNAVAILABLE)
+            raise MicrosoftError(SERVICE_UNAVAILABLE)
         return items, delta_link
     return items, url

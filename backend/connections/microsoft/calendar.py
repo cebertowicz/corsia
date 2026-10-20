@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import quote
 
 from connections.microsoft import client
-from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, SERVICE_UNAVAILABLE
 
 EVENTS = "https://graph.microsoft.com/v1.0/me/calendar/events"
 CALENDAR_VIEW = "https://graph.microsoft.com/v1.0/me/calendarView"
@@ -15,7 +15,7 @@ LIST_LIMIT = 25
 
 def _event(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or not isinstance(value.get("id"), str):
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(SERVICE_UNAVAILABLE)
     return {key: value.get(key) for key in ("id", "subject", "start", "end", "webLink")}
 
 
