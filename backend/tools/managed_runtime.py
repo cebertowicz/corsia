@@ -245,10 +245,6 @@ def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = No
             os.replace(unpacked, final)
             _make_read_execute_only(final)
             return _expected_executable(final, pin)
-        except ManagedRuntimeDownloadError:
-            if kind in {"node", "uv"}:
-                raise
-            raise ManagedRuntimeError("pinned runtime download failed") from None
         except ManagedRuntimeError:
             raise
         except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
