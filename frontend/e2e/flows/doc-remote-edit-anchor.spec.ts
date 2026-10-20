@@ -134,6 +134,28 @@ async function pair(browser: Browser, document: LiveDocument, width: number, hei
 	return { writer, reader, close: async () => { await writerContext.close(); await readerContext.close(); } };
 }
 
+/** Leaves the reader a measured distance from the live edge after CodeMirror has settled its scroll height. */
+async function readNearEnd(page: Page, remaining: number): Promise<void> {
+	const scroller = page.locator('.cm-scroller');
+	await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+	await expect.poll(() => scroller.evaluate((element) =>
+		Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+	)).toBeLessThanOrEqual(2);
+	await page.waitForTimeout(500);
+	await scroller.evaluate((element, distance) => { element.scrollTop -= distance; }, remaining);
+	await expect.poll(() => scroller.evaluate((element) =>
+		Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+	)).toBe(remaining);
+}
+
+/** Appends a remote change in the writer's editor, so the reader receives the real collaboration broadcast. */
+async function append(writer: Page, text: string): Promise<void> {
+	await writer.evaluate(({ editorView, text }) => {
+		const view = eval(editorView);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: text } });
+	}, { editorView, text });
+}
+
 const LAYOUTS = [[1440, 900], [393, 852]] as const;
 
 function agentBody(): string {
@@ -250,6 +272,33 @@ for (const [width, height] of LAYOUTS) {
 		}
 		for (const result of results) {
 			expect.soft(result.maxDrift, `${result.name}: the text in view never moves`).toBeLessThanOrEqual(3);
+		}
+	});
+}
+
+for (const [width, height] of LAYOUTS) {
+	test(`@surface:live-document remote appends follow only a reader near the end at ${width}`, async ({ browser, request }, testInfo) => {
+		test.skip((width <= 768) !== (testInfo.project.name === 'chromium-mobile'), 'One layout per project.');
+		test.setTimeout(180_000);
+		const document = await seedLiveDocument(request, `append-${width}`, body());
+		const live = await pair(browser, document, width, height);
+		try {
+			await readNearEnd(live.reader, 40);
+			await append(live.writer, `\n\n${BLOCK(3)}`);
+			await expect(live.reader.locator('.cm-content')).toContainText('Inserted paragraph 2');
+			await expect.poll(() => live.reader.locator('.cm-scroller').evaluate((element) =>
+				Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
+			)).toBeLessThanOrEqual(2);
+
+			await readNearEnd(live.reader, 200);
+			const before = await anchorLine(live.reader);
+			await append(live.writer, `\n\n${BLOCK(3)}`);
+			await expect(live.reader.locator('.cm-content')).toContainText('Inserted paragraph 2');
+			const after = await anchorLine(live.reader);
+			expect(after.line, 'a reader farther from the end keeps the same top line').toBe(before.line);
+			expect(Math.abs(after.top - before.top), 'the held top line stays in place').toBeLessThanOrEqual(3);
+		} finally {
+			await live.close();
 		}
 	});
 }

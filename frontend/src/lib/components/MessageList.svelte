@@ -24,6 +24,7 @@
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
+	import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
@@ -169,7 +170,7 @@
 			? buildTranscriptPresentation([presentation.pendingContextDigest], focusMode, null, 'run:pending-context') : []),
 		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || isHumanMessage(msg)), focusMode),
 	]);
-	const NEAR_BOTTOM_PX = 80;
+	// Chat and documents share the imported live-edge threshold.
 	// Programmatic scrolling ends on any real gesture; never undo a user's reread.
 	let pendingReleaseFrame: number | null = null;
 	// A deferred pin abandons itself when a newer gesture takes over.
