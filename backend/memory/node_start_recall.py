@@ -14,7 +14,6 @@ from time import perf_counter
 
 from loguru import logger as log
 
-from core.continuity_render import ContinuitySnapshotEntry
 from core.correction_notes import local_clock
 from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
 from infra.product_events import emit_product_event
@@ -187,22 +186,22 @@ def _source_scope(alias: str, timestamp: str, caller: sqlite3.Row, cloud_off: se
 
 def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
     owner_filter, owner_params = owner_message_sql_predicate("m")
-    shared, shared_params = _shared_terms("m.content", terms)
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
+    # Messages rank by bm25 over the FTS index; a LIKE floor here would scan every
+    # FTS match before the limit and cost far more than the ranking it replaces.
     rows = db.execute(
-        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title,{shared} AS shared
+        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title
             FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
             JOIN threads t ON t.id=m.thread_id
             WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
               AND {_owned_threads('t')} {source_scope}
-              AND {shared}>=?
               AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=COALESCE((
                 SELECT MAX(c.through_seq) FROM checkpoints c JOIN threads ct ON ct.id=c.thread_id
                 WHERE c.thread_id=? AND c.status='installed' AND c.history_epoch=ct.history_epoch
               ), 0))
             ORDER BY bm25(messages_fts),m.created_at DESC LIMIT ?""",
-        [*shared_params, f"role:user AND ({_fts_terms(terms)})", *owner_params.values(), user_id, *source_params,
-         *shared_params, floor(len(terms.terms)), caller_thread_id, caller_thread_id, SOURCE_CANDIDATES],
+        [f"role:user AND ({_fts_terms(terms)})", *owner_params.values(), user_id, *source_params,
+         caller_thread_id, caller_thread_id, SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
@@ -269,26 +268,16 @@ def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[
     return hits
 
 
-def _primary_text_sql(body: str) -> str:
-    """Return the SQL form of ``ContinuitySnapshotEntry.primary_text`` for the rule-field contract."""
-    return (
-        f"CASE WHEN json_type({body},'$.statement') IS NOT NULL THEN json_extract({body},'$.statement') "
-        f"WHEN json_type({body},'$.result') IS NOT NULL THEN json_extract({body},'$.result') "
-        f"WHEN json_type({body},'$.kind') IS NOT NULL AND json_type({body},'$.reference') IS NOT NULL "
-        f"AND json_type({body},'$.state') IS NOT NULL THEN json_extract({body},'$.kind') || ' ' "
-        f"|| json_extract({body},'$.reference') || ': ' || json_extract({body},'$.state') ELSE '' END"
-    )
-
-
 def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
-    primary_text = _primary_text_sql("ce.body")
-    shared, shared_params = _shared_terms(primary_text, terms)
+    # Both rule fields are statement entries (core.continuity_types), so the statement is the rule's text.
+    statement = "json_extract(ce.body,'$.statement')"
+    shared, shared_params = _shared_terms(statement, terms)
     source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
     fields = sorted(RULE_FIELDS)
     rows = db.execute(
         f"""WITH eligible AS (
-              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.field,ce.body,ce.updated_at,
-                     {primary_text} AS primary_text,{shared} AS shared
+              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,
+                     {statement} AS statement,{shared} AS shared
               FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
               WHERE {_owned_threads('t')} AND ce.state='active'
                 AND ce.field IN (?,?)
@@ -311,10 +300,7 @@ def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cu
     ).fetchall()
     hits = []
     for row in rows:
-        entry = ContinuitySnapshotEntry(
-            int(row["entry_id"]), str(row["field"]), json.loads(row["body"]), int(row["revision"]),
-        )
-        found = match(terms, entry.primary_text or "")
+        found = match(terms, str(row["statement"] or ""))
         if found:
             pointer = f' → get_checkpoints(checkpoint_id="{row["checkpoint_id"]}")' if row["checkpoint_id"] else ""
             line = f'{local_clock(str(row["updated_at"]))} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}”{pointer}'
