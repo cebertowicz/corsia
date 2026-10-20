@@ -46,6 +46,8 @@ Charter rules: goals over tactics, one canonical source per fact, no live status
 
 ## 3. Coordination model
 
+For each new project, before choosing, ask once: `A project has its own way of working: who does what, and when you're asked. I'll pick one that fits this kind of work, adjust it to you and tell you what I'm proposing. Should I go ahead on my own, or walk through it with you?` On their own: propose it in one message and go ahead. Walk through: settle each choice with them.
+
 Published coordination models are listed in `.corsia/coordination-models/INDEX.md` in the workspace, a read-only copy CORSIA generates from its packaged models. If that file is missing, say the published models could not be read, that the proposal is from scratch and may miss published guidance, then draft the model with this skill. Do not claim a published model was loaded. Otherwise pick one that fits before drafting; install its `context/` files, then write only what is local to this project in `context/COORDINATION-MODEL.md`, which loads last; a model update only replaces the installed model files, not this one.
 
 Write `context/COORDINATION-MODEL.md`, only what the project needs: who owns which class of work; roster rules; the path for changes affecting the owner's commitments; work intake (inputs and cadences, standing grants, approval gate); context and memory layers (project-specific preferences live in project `context/`, written by the conductor, and never override System rules); routing defaults only where tolerance differs from the workspace spawn policy; a table of work or state to canonical route to owner and closure. Mark what is generic and what is project-specific. Keep a **Cross-thread notices** section only you write, each entry dated with an expiry.
