@@ -109,8 +109,11 @@ def node_detail(db, plan_row, node_id: str, *, actor, clock: str | None = None) 
     node = next((n for n in facts["nodes"] if n["id"] == node_id), None)
     if durable is None or node is None:
         raise PlanError(f"node {node_id!r} is not in this plan; read plan_read() for its rows")
+    from plans import intent_words
+
     return {
         **dict(durable),
+        **intent_words.detail(db, durable),
         **node,
         "ages": _ages(node, clock),
         "execution_time": node["node_cost"]["own"]["execution"],

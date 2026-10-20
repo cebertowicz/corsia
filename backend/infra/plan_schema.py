@@ -1,20 +1,17 @@
 """Structured-plan schema: plans, nodes, admission, review, and cost.
 
-One module per durable domain, composed into `SCHEMA_SQL` by the schema owner;
-Plans' DDL lives here and in the three Plans modules this one composes.
+One module per durable domain, composed into `SCHEMA_SQL` by the schema owner; Plans' DDL lives here and in the three Plans modules this one composes.
 """
-
 from __future__ import annotations
-
 from infra.plan_aggregates_schema import (
     NODE_AGGREGATE_COLUMNS, NODE_AGGREGATE_INDEXES_SQL, NODE_UPDATE_TRIGGER_SQL,
     PLAN_AGGREGATE_COLUMNS, TOUCH_INDEXES_SQL, column_ddl,
 )
 from infra.plan_events_schema import PLAN_EVENTS_SCHEMA_SQL
+from infra.plan_intent_schema import PLAN_INTENT_SCHEMA_SQL
 from infra.plan_pane_views_schema import PLAN_PANE_VIEWS_SCHEMA_SQL
 from infra.plan_status_schema import PLAN_STATUS_DIRTY_SCHEMA_SQL
 from infra.unattributed_dispatch_schema import UNATTRIBUTED_DISPATCH_SCHEMA_SQL
-
 #: A hold's identity never changes and it is cleared once. Its own constant so
 #: a schema step that must rewrite one recorded fact re-creates this guard
 #: from the one definition (migration_58_to_59).
@@ -39,7 +36,6 @@ HOLD_UPDATE_GUARD_SQL = """
         SELECT RAISE(ABORT, 'plan hold identity and clearance are immutable');
     END;
 """
-
 STRUCTURED_PLAN_SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS plans (
         id TEXT PRIMARY KEY,
@@ -56,7 +52,6 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         UNIQUE(owner_kind, owner_id)
     );
     CREATE INDEX IF NOT EXISTS idx_plans_parent ON plans(parent_plan_id);
-
     CREATE TABLE IF NOT EXISTS plan_nodes (
         id TEXT PRIMARY KEY,
         plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
@@ -65,6 +60,8 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         kind TEXT NOT NULL CHECK (kind IN ('phase', 'track', 'task')),
         title TEXT NOT NULL CHECK (length(trim(title)) > 0),
         description TEXT,
+        intent TEXT,
+        intent_node_id TEXT REFERENCES plan_nodes(id),
         workflow_ref TEXT,
         workflow_version TEXT,
         workflow_step TEXT,
@@ -105,10 +102,13 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         ON plan_nodes(follow_up_of);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_commitment
         ON plan_nodes(commitment_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_plan_nodes_intent_node ON plan_nodes(intent_node_id);
     -- A wait reads a step's child, and an executor's work, by thread.
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_spawned_thread ON plan_nodes(spawned_thread_id);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_executor_thread ON plan_nodes(executor_thread_id);
     {NODE_AGGREGATE_INDEXES_SQL}
+
+    {PLAN_INTENT_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS plan_node_dependencies (
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,

@@ -48,7 +48,7 @@ def _now() -> str:
 
 #: Columns a caller may set with the revision bump (named by code, never input).
 _TOUCH_COLUMNS = frozenset({
-    "state", "order_key", "title", "description", "acceptance_criteria",
+    "state", "order_key", "title", "description", "intent", "intent_node_id", "acceptance_criteria",
     "watchdog_budget_seconds", "requirements_revision", "archived_at", "size",
     "commitment_id", "spawned_thread_id", "spawn_kind", "sent_back",
 })
@@ -133,7 +133,9 @@ def _node_from_row(
     return PlanNode(
         id=row["id"], plan_id=row["plan_id"], parent_id=row["parent_id"],
         order_key=row["order_key"], kind=row["kind"], title=row["title"],
-        description=row["description"], workflow_ref=workflow["workflow_ref"],
+        description=row["description"], intent=row["intent"] if "intent" in row.keys() else None,
+        intent_node_id=row["intent_node_id"] if "intent_node_id" in row.keys() else None,
+        workflow_ref=workflow["workflow_ref"],
         workflow_version=workflow["workflow_version"], workflow_step=workflow["workflow_step"],
         difficulty=workflow["difficulty"], size=workflow["size"],
         acceptance_criteria=row["acceptance_criteria"],
@@ -228,9 +230,7 @@ def _event(connection: sqlite3.Connection, node_id: str, event: str, *, actor_id
 
 def record_runner_event(*args, **kwargs) -> bool:
     """Expose append-only runner audit events without coupling source modules."""
-
     from plans.runner_events import record
-
     return record(*args, **kwargs)
 
 def ensure_plan(owner_kind: str, owner_id: str, *, db=None) -> Plan:
@@ -241,9 +241,7 @@ def ensure_plan(owner_kind: str, owner_id: str, *, db=None) -> Plan:
 
 def _create_node(*args, **kwargs) -> PlanNode:
     """Expose the extracted canonical node-creation writer."""
-
     from plans.node_creation import create_node
-
     return create_node(*args, **kwargs)
 
 def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
@@ -251,6 +249,7 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
              description: str | None = None, workflow_ref: str | None = None,
              workflow_version: str | None = None, workflow_step: str | None = None,
              difficulty: str | None = None, size: str | None = None,
+             intent: str | None = None, intent_node_id: str | None = None,
              checkpoint_exception: bool = False,
              assignee: str | None = None, spawn_kind: str | None = None,
              watchdog_budget_seconds: int | None = None,
@@ -263,8 +262,8 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
             acceptance_criteria=acceptance_criteria, parent_id=parent_id,
             order_key=order_key, description=description,
             workflow_ref=workflow_ref, workflow_version=workflow_version,
-            workflow_step=workflow_step, difficulty=difficulty, size=size,
-            checkpoint_exception=checkpoint_exception, assignee=assignee,
+            workflow_step=workflow_step, difficulty=difficulty, size=size, intent=intent,
+            intent_node_id=intent_node_id, checkpoint_exception=checkpoint_exception, assignee=assignee,
             spawn_kind=spawn_kind,
             watchdog_budget_seconds=watchdog_budget_seconds, follow_up_of=None,
             actor_id=actor_id, provenance=provenance, node_id=_id(),
@@ -278,7 +277,6 @@ def get_node(node_id: str, *, db=None) -> PlanNode:
 def add_dependency(*args, **kwargs):
     """Expose the extracted dependency writer without an import cycle."""
     from plans.dependencies import add_dependency as add
-
     return add(*args, **kwargs)
 
 def remove_dependency(*args, **kwargs):
@@ -368,16 +366,18 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
     return _node_from_row(connection, _node_row(connection, node_id))
 
 def add_follow_up(node_id: str, *, title: str, acceptance_criteria: str,
-                  size: str | None = None, actor_id: str | None = None,
+                  size: str | None = None, intent: str | None = None,
+                  intent_words: list[dict[str, str]] | None = None, actor_id: str | None = None,
                   provenance: str = "plan_service", db=None) -> PlanNode:
     """Expose the extracted bounded follow-up writer."""
     from plans.followups import add_follow_up as add
 
     return add(node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
-               actor_id=actor_id, provenance=provenance, db=db)
+               intent=intent, intent_words=intent_words, actor_id=actor_id, provenance=provenance, db=db)
 
 def accept_with_follow_up(node_id: str, *, title: str, acceptance_criteria: str,
-                          size: str | None = None, actor_id: str | None = None,
+                          size: str | None = None, intent: str | None = None,
+                          intent_words: list[dict[str, str]] | None = None, actor_id: str | None = None,
                           provenance: str = "plan_service",
                           verification_result: str | None = None, verified_by: str | None = None,
                           expected_revision: int | None = None, db=None) -> tuple[PlanNode, PlanNode]:
@@ -386,7 +386,7 @@ def accept_with_follow_up(node_id: str, *, title: str, acceptance_criteria: str,
 
     return accept(
         node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
-        actor_id=actor_id, provenance=provenance,
+        intent=intent, intent_words=intent_words, actor_id=actor_id, provenance=provenance,
         verification_result=verification_result, verified_by=verified_by,
         expected_revision=expected_revision, db=db,
     )

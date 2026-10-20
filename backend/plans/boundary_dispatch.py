@@ -110,16 +110,17 @@ def _reorder(params: dict[str, Any], common: dict) -> dict:
     return {"node": node_projection(moved)}
 
 
-def _dispatch_structure(plan_id, operation, params, common, db, workflow_version, acting):
-    """Add, reshape, or re-specify nodes; ``acting`` is the writing thread, if any."""
-    created = fields.node_fields(
-        params, workflow_version=workflow_version, include_before=operation == "insert",
-    ) if operation in {"add", "insert"} else {}
+def _dispatch_structure(plan_id, operation, params, common, db, workflow_version, actor):
+    """Add, reshape, or re-specify nodes through the canonical evidence paths."""
+    acting = actor.thread_id if actor.kind == "thread" else None
     if operation in {"add", "insert"}:
-        node = (
-            service.add_node(plan_id, **created, **common)
-            if operation == "add" else mutations.insert_node(plan_id, **created, **common)
+        from plans import intent_creation
+
+        created, resolved_words = intent_creation.prepare(
+            db, plan_id, params, workflow_version=workflow_version, operation=operation, actor=actor,
         )
+        node = service.add_node(plan_id, **created, **common) if operation == "add" else mutations.insert_node(plan_id, **created, **common)
+        intent_creation.capture(db, plan_id, node, resolved_words, actor=actor)
         if "depends_on_node_id" in params:
             from plans import dependencies
 
@@ -136,17 +137,27 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         from plans.boundary import node_projection
         return {"node": node_projection(node), "rank": line}
     if operation == "edit":
+        from plans import intent_words
+        changed = fields.edit_fields(params)
+        if "intent_words" in changed:
+            changed["intent_words"] = intent_words.resolve_words(
+                db, plan_id, changed["intent_words"], actor_id=acting,
+            )
         mutations.edit_node(
-            params["node_id"], **fields.edit_fields(params),
-            **fields.expected(params), **common,
+            params["node_id"], **changed, **fields.expected(params), **common,
         )
 
         return admission.result(params["node_id"], db=db)
     if operation == "split":
+        from plans import intent_words
+
+        requested_words = params.get("intent_words")
         return mutations.split_node(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
             description=params.get("description"), size=fields.require_task_size(params.get("size")),
+            intent=params.get("intent"),
+            intent_words=intent_words.resolve_words(db, plan_id, requested_words, actor_id=acting),
             **fields.expected(params), **common,
         )
     if operation == "reorder":
@@ -285,10 +296,13 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
             verified_by=actor.audit_id, **expected, **common,
         )
         return after.after_close(node_id, "accepted", params, common, executor=acting)
+    from plans import intent_words
+
     _node, follow_up = service.accept_with_follow_up(
         node_id, title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
-        size=fields.require_task_size(params.get("size")),
+        size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
+        intent_words=intent_words.resolve_words(db, service._node_row(db, node_id)["plan_id"], params.get("intent_words"), actor_id=acting),
         verification_result="passed", verified_by=actor.audit_id,
         **expected, **common,
     )
@@ -379,8 +393,7 @@ def _route(plan_id, operation, params, actor, common, db, workflow_version):
         return watch_operations.resolve(plan_id, params, actor, db)
     if operation in _STRUCTURE_OPERATIONS:
         return _dispatch_structure(
-            plan_id, operation, params, common, db, workflow_version,
-            actor.thread_id if actor.kind == "thread" else None,
+            plan_id, operation, params, common, db, workflow_version, actor,
         )
     if operation in _SETTLEMENT_OPERATIONS:
         return _dispatch_settlement(operation, params, actor, common, db)

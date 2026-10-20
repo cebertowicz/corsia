@@ -15,6 +15,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from automation.continuation.sources.harvest import HarvestSource
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import mutations, service
 from plans.boundary import PlanActor, mutate
@@ -41,9 +43,21 @@ def db() -> Iterator[sqlite3.Connection]:
                VALUES (?,?, 'project-1',?,'test/model','t','t')""",
             (thread_id, user_id, spawned_by),
         )
+    _seed_authority(connection)
     connection.commit()
     yield connection
     connection.close()
+
+
+_AUTHORITY_QUOTE = "Deliver this plan change."
+
+
+def _seed_authority(db, thread_id: str = "parent") -> None:
+    _init_messages_fts(db)
+    accept_thread_input(
+        thread_id, role="user", content=_AUTHORITY_QUOTE, intent="apply_now",
+        message_id=f"{thread_id}-authority", db=db,
+    )
 
 
 def _notifications():
@@ -82,6 +96,7 @@ def _seed_delivery_db(path) -> str:
            VALUES ('parent','user-1','project-1','test/model','t','t')"""
     )
     plan = service.ensure_plan("thread", "parent", db=connection)
+    _seed_authority(connection)
     connection.commit()
     connection.close()
     return plan.id
@@ -189,7 +204,8 @@ def test_actor_bound_mutation_notifies_once_and_failed_or_replayed_writes_are_si
     request = {
         "kind": "task",
         "title": "Implement",
-        "acceptance_criteria": "Focused tests pass", "size": "unknown",
+        "acceptance_criteria": "Focused tests pass", "size": "unknown", "intent": "Implement the requested work",
+        "intent_words": [{"quote": _AUTHORITY_QUOTE, "role": "authority"}],
     }
 
     deferred = mutate(
@@ -252,7 +268,8 @@ def test_committed_mutation_result_survives_broadcast_failure(db, monkeypatch):
         {
             "kind": "task",
             "title": "Committed",
-            "acceptance_criteria": "Mutation result returns", "size": "unknown",
+            "acceptance_criteria": "Mutation result returns", "size": "unknown", "intent": "Confirm committed mutation delivery",
+            "intent_words": [{"quote": _AUTHORITY_QUOTE, "role": "authority"}],
         },
         actor=actor,
         provenance="test",
@@ -293,7 +310,8 @@ def test_api_mutation_via_real_db_worker_reaches_registered_socket(
                 "params": {
                     "kind": "task",
                     "title": "Deliver",
-                    "acceptance_criteria": "Socket receives the nudge", "size": "unknown",
+                    "acceptance_criteria": "Socket receives the nudge", "size": "unknown", "intent": "Deliver the plan change to its socket",
+                    "intent_words": [{"quote": _AUTHORITY_QUOTE, "role": "authority"}],
                 },
             },
         )
@@ -331,7 +349,8 @@ async def test_tool_mutation_via_real_db_worker_reaches_registered_socket(
         params={
             "kind": "task",
             "title": "Deliver",
-            "acceptance_criteria": "Socket receives the nudge", "size": "unknown",
+            "acceptance_criteria": "Socket receives the nudge", "size": "unknown", "intent": "Deliver the plan change to its socket",
+            "intent_words": [{"quote": _AUTHORITY_QUOTE, "role": "authority"}],
         },
     )
     await asyncio.sleep(0)
@@ -364,7 +383,8 @@ async def test_plan_writer_thread_delivers_one_frame_on_the_application_loop(
                 {
                     "kind": "task",
                     "title": "Deliver from a worker",
-                    "acceptance_criteria": "The plan pane receives one frame", "size": "unknown",
+                    "acceptance_criteria": "The plan pane receives one frame", "size": "unknown", "intent": "Deliver one plan-change frame",
+            "intent_words": [{"quote": _AUTHORITY_QUOTE, "role": "authority"}],
                 },
                 actor=PlanActor("parent", "user-1", "project-1"),
                 provenance="test.worker_thread",
