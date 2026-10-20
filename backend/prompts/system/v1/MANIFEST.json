@@ -64,10 +64,10 @@
       "sha256": "33a8d6359786e2644ed7749f7aeac428ebe9e4eed8196de80ecccad8eba98f94"
     },
     {
-      "bytes": 734,
+      "bytes": 738,
       "kind": "coordination-model",
       "path": "coordination-models/INDEX.md",
-      "sha256": "29dc8cce075e4f4bbfef41142d81322607370f6f59455b5b58edc9bb037ff392"
+      "sha256": "f7289c115fc71202d2bba531eeb9361df4a615e95bb7abf804f7128e8f97e762"
     },
     {
       "bytes": 807,
