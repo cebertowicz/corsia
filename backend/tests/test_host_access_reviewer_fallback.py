@@ -347,10 +347,12 @@ async def test_the_completed_review_event_says_whether_the_fallback_reviewed(out
 @pytest.mark.asyncio
 @pytest.mark.parametrize("out", [True, False])
 async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(outage, monkeypatch, out):
+    from connections.claude_unlisted import base_identity
     from host_access import review_telemetry
     from llm.isolated_structured import IsolatedStructuredTelemetry
 
     rows: list[tuple[tuple, dict]] = []
+    reported: dict[str, str] = {}
     monkeypatch.setattr(
         review_telemetry, "record_llm_usage", lambda *a, **k: rows.append((a, k))
     )
@@ -362,6 +364,7 @@ async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(o
         outage.models[OUT] = ("usage_limited", RESET)
 
     async def fake(target, **kwargs):
+        reported[target.catalog_id] = target.expected_reported_model
         kwargs["telemetry_sink"](IsolatedStructuredTelemetry(
             catalog_id=target.catalog_id, harness=target.harness, transport_model=target.transport_model,
             reported_model=target.expected_reported_model, prompt_tokens=5, completion_tokens=2,
@@ -380,8 +383,11 @@ async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(o
 
     await _request()
 
+    # The row names the concrete model the reviewer reported, on the account
+    # of the target that ran it.
+    ran, account = (REQUESTER, "account-sonnet") if out else (OUT, "account-opus")
     assert [(args[1], kwargs["vendor_account_id"]) for args, kwargs in rows] == [
-        (REQUESTER, "account-sonnet") if out else (OUT, "account-opus"),
+        (f"claude-code/{base_identity(reported[ran])}", account),
     ]
 
 
