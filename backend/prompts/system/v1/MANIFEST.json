@@ -232,10 +232,10 @@
       "sha256": "d47dff72abeba9631215f76969db69855bccaa48f2fd95abb62d95f550478042"
     },
     {
-      "bytes": 4600,
+      "bytes": 4618,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "578c71a6ec526822830dbbff337ab6564f54c0fae650bb4217e45dfb3645e1a1"
+      "sha256": "90f5ed359b3247f0ad42ac5355b2cde50c354b2cab8ece01a1832c8794aa848c"
     },
     {
       "bytes": 4409,
