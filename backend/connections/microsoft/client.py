@@ -165,17 +165,18 @@ def _cached_access_token(credentials: dict[str, Any] | None) -> str | None:
 
 
 def _drop_cached_access_token(account_id: str, held: str, *, db) -> None:  # type: ignore[no-untyped-def]
-    """Discard only the rejected token; a concurrent fresh sign-in wins unchanged."""
+    """Expire only the rejected token; a concurrent fresh sign-in wins unchanged.
+
+    The token field stays because a stored Microsoft bundle requires it; an expiry
+    in the past makes the next ``access_token`` call refresh instead of reuse it.
+    """
     from connections.connected_accounts import store_credentials
     from infra.database import write_transaction
 
     with write_transaction(db, scope="microsoft_graph_401") as conn:
         current = _usable_credentials(account_id, db=conn)
         if current is not None and current.get("access_token") == held:
-            updated = {**current}
-            updated.pop("access_token", None)
-            updated.pop("access_token_expires_at", None)
-            store_credentials(account_id, updated, db=conn)
+            store_credentials(account_id, {**current, "access_token_expires_at": "0"}, db=conn)
 
 
 async def access_token(account_id: str, *, _after_race: bool = False) -> str:
@@ -242,17 +243,17 @@ async def _check_graph(response: httpx.Response, account_id: str) -> None:
         raise MicrosoftError(PROVIDER_UNAVAILABLE)
 
 
-async def graph_json(
-    method: str, url: str, *, account_id: str, params: dict[str, Any] | None = None,
-    body: dict[str, object] | None = None, token: str | None = None,
-) -> Any:
-    """One Graph JSON call with a bounded throttle retry and fixed error causes."""
+async def _graph_response(
+    method: str, url: str, *, account_id: str, token: str | None, headers: dict[str, str],
+    conflict_cause: str | None = None, **request: Any,
+) -> httpx.Response:
+    """Send one Graph request: one throttle retry, one retry after a rejected token."""
     bearer = token or await access_token(account_id)
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
                 response = await http.request(
-                    method, url, headers={"Authorization": f"Bearer {bearer}"}, params=params, json=body,
+                    method, url, headers={"Authorization": f"Bearer {bearer}", **headers}, **request,
                 )
         except (httpx.ConnectError, httpx.ConnectTimeout):
             raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True) from None
@@ -265,6 +266,8 @@ async def graph_json(
                 delay = 0
             await asyncio.sleep(delay)
             continue
+        if response.status_code == 409 and conflict_cause is not None:
+            raise MicrosoftError(conflict_cause)
         try:
             await _check_graph(response, account_id)
         except _GraphUnauthorized:
@@ -273,13 +276,26 @@ async def graph_json(
             await run_in_db(_on_account, _drop_cached_access_token, account_id, bearer)
             bearer = await access_token(account_id)
             continue
-        if response.status_code in (202, 204):
-            return None
-        try:
-            return response.json()
-        except ValueError:
-            raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+        return response
     raise MicrosoftError(PROVIDER_UNAVAILABLE)
+
+
+def _json(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+
+
+async def graph_json(
+    method: str, url: str, *, account_id: str, params: dict[str, Any] | None = None,
+    body: dict[str, object] | None = None, token: str | None = None,
+) -> Any:
+    """One Graph JSON call with fixed error causes."""
+    response = await _graph_response(
+        method, url, account_id=account_id, token=token, headers={}, params=params, json=body,
+    )
+    return None if response.status_code in (202, 204) else _json(response)
 
 
 async def graph_bytes(
@@ -287,24 +303,10 @@ async def graph_bytes(
     conflict_cause: str | None = None, token: str | None = None,
 ) -> Any:
     """Upload opaque bytes through Graph without logging their contents."""
-    bearer = token or await access_token(account_id)
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-            response = await http.request(
-                method, url, headers={"Authorization": f"Bearer {bearer}", "Content-Type": "text/plain; charset=utf-8"},
-                content=content, params=params,
-            )
-    except (httpx.ConnectError, httpx.ConnectTimeout):
-        raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True) from None
-    except httpx.HTTPError:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
-    if response.status_code == 409 and conflict_cause is not None:
-        raise MicrosoftError(conflict_cause)
-    await _check_graph(response, account_id)
-    try:
-        return response.json()
-    except ValueError:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+    return _json(await _graph_response(
+        method, url, account_id=account_id, token=token, conflict_cause=conflict_cause,
+        headers={"Content-Type": "text/plain; charset=utf-8"}, content=content, params=params,
+    ))
 
 
 async def graph_pages(

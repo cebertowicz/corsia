@@ -82,6 +82,22 @@ async def test_graph_second_401_is_a_refusal_not_a_sign_in_flip(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_upload_401_drops_the_held_token_and_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(401, {}), Response(201, {"id": "file"})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    tokens = iter(["stale", "fresh"])
+    async def token(_account: str) -> str: return next(tokens)
+    dropped: list[tuple[object, ...]] = []
+    async def db_call(_work: object, *args: object) -> None: dropped.append(args)
+    monkeypatch.setattr(client, "access_token", token)
+    monkeypatch.setattr(client, "run_in_db", db_call)
+    assert await client.graph_bytes("PUT", "upload", account_id="m", content=b"note") == {"id": "file"}
+    assert dropped == [(client._drop_cached_access_token, "m", "stale")]
+    assert [call["headers"]["Authorization"] for call in FakeHttp.calls] == ["Bearer stale", "Bearer fresh"]
+    assert {call["headers"]["Content-Type"] for call in FakeHttp.calls} == {"text/plain; charset=utf-8"}
+
+
+@pytest.mark.asyncio
 async def test_pagination_stops_after_the_requested_items(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeHttp.calls, FakeHttp.responses = [], [Response(200, {"value": [{"id": "first"}], "@odata.nextLink": "next"})]
     monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())

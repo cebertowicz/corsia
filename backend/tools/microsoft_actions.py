@@ -223,6 +223,7 @@ class MicrosoftMailSendTool(Tool):
             return await deliver_claimed(
                 draft_id,
                 acquire=lambda: client.access_token(account),
+                provider_errors=(MicrosoftError,),
                 send=lambda token: mail.send(account, parsed["to"], parsed["subject"], parsed["body"], cc=parsed["cc"], token=token),
                 result_id=lambda result: result,
                 success=lambda _result, _external_id: json.dumps({"sent": True, "account_id": account}),
@@ -292,6 +293,7 @@ class _GatedCalendarTool(Tool):
             return await deliver_claimed(
                 draft_id,
                 acquire=lambda: client.access_token(account),
+                provider_errors=(MicrosoftError,),
                 send=send,
                 result_id=lambda result: result.get("id") if isinstance(result, dict) else None,
                 success=lambda result, _external_id: json.dumps(result),

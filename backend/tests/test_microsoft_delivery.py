@@ -11,6 +11,7 @@ import pytest
 
 from connections.connected_accounts import store_credentials
 from connections.microsoft import calendar, client
+from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
 from infra.database import get_db
 from delegation_fixtures import deleg_db  # noqa: F401
 from tests.test_action_gate import THREAD, _admit, _bind, workspace  # noqa: F401
@@ -233,3 +234,18 @@ async def test_refresh_lost_race_uses_winner_token_without_disabling_account(del
     monkeypatch.setattr(account_state, "mark_needs_sign_in", lambda account_id, *args: disabled.append(account_id))
     assert await client.access_token(microsoft) == "winner"
     assert len(calls) == 1 and disabled == []
+
+
+@pytest.mark.parametrize(("raised", "logged"), [(RuntimeError("db fault"), True), (MicrosoftError(PROVIDER_UNAVAILABLE), False)])
+async def test_delivery_logs_only_unexpected_credential_failures(monkeypatch, caplog, raised, logged):
+    async def db_call(*_args: object) -> None: return None
+    async def acquire() -> str: raise raised
+    async def send(_token: str) -> str: raise AssertionError("must not send without credentials")
+    monkeypatch.setattr(action_delivery, "run_in_db", db_call)
+    out = await action_delivery.deliver_claimed(
+        "draft", acquire=acquire, provider_errors=(MicrosoftError,), send=send, result_id=lambda r: r,
+        success=lambda _r, _i: "sent", sign_in_error=lambda _e: "sign in", request_error=str,
+        never_sent=lambda _e: False, still_sending="busy", claim_error="claim", unconfirmed="unknown", label="test",
+    )
+    assert out == "Error: Not sent: sign in"
+    assert ("could not acquire delivery credentials" in caplog.text) is logged

@@ -67,6 +67,17 @@ def _relative(path: Path) -> str:
     return relative
 
 
+def _draft_path(
+    thread_id: str, existing: dict[str, Any] | None, prefix: str, kind: str, extension: str,
+) -> tuple[Path, str]:
+    """Resolve (blocking: database and filesystem) where a draft is written."""
+    if existing:
+        path = _workspace_root() / str(existing["path"])
+    else:
+        path = _working_root(thread_id) / prefix / f"{kind}-{uuid.uuid4().hex[:12]}{extension}"
+    return path, _relative(path)
+
+
 def open_draft(thread_id: str, draft_id: str, kind: str, *, db: sqlite3.Connection | None = None) -> dict[str, Any] | None:
     conn = db if db is not None else get_db()
     try:
@@ -98,15 +109,14 @@ async def save_draft(
 ) -> dict[str, Any]:
     """Write and record a reviewed draft under the canonical thread working root."""
     existing = await run_in_db(checked_open_draft, thread_id, draft_id, kind, account_id)
-    path = _workspace_root() / str(existing["path"]) if existing else _working_root(thread_id) / prefix / f"{kind}-{uuid.uuid4().hex[:12]}{extension}"
-    relative = _relative(path)
+    path, relative = await run_in_db(_draft_path, thread_id, existing, prefix, kind, extension)
     written = await WriteFileTool(workspace=config.WORKSPACE, allowed_dir=_workspace_root()).execute(
         path=str(path), content=text, description=description,
         **{key: value for key, value in context.items() if key.startswith("_")},
     )
     if isinstance(written, str) and written.startswith("Error"):
         raise DraftStorageRefused(written.removeprefix("Error: "))
-    data = _read_bytes(relative)
+    data = await run_in_db(_read_bytes, relative)
     if data != text.encode("utf-8"):
         raise DraftStorageRefused(CHANGED_WHILE_SAVING)
     if existing:

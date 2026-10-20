@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 import uuid
 
 import pytest
@@ -197,3 +198,47 @@ async def test_mail_draft_resolves_sender_through_shared_visibility(isolated_db,
     assert result["account_id"] == account and result["draft_id"]
     document = (config.WORKSPACE / result["path"]).read_text()
     assert "mail@example.test" in document and "Draft body" in document
+
+
+class GraphHttp:
+    """Graph refuses the cached token once; the token endpoint issues a new one."""
+
+    def __init__(self, calls):
+        self.calls = calls
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, url, **kwargs):
+        self.calls.append("refresh")
+        return Response(200, {"access_token": "renewed-access", "expires_in": 3600})
+
+    async def request(self, method, url, **kwargs):
+        bearer = kwargs["headers"]["Authorization"].removeprefix("Bearer ")
+        self.calls.append(bearer)
+        return Response(401 if bearer == "cached-access" else 200, {"id": "ok"})
+
+
+async def test_graph_401_expires_the_cached_token_in_the_real_store_then_retries(isolated_db, monkeypatch):
+    account = connect()
+    store_credentials(account, {
+        **facts(account)[1], "access_token": "cached-access", "access_token_expires_at": str(time.time() + 3600),
+    })
+    calls = []
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: GraphHttp(calls))
+    assert await client.graph_json("GET", "item", account_id=account) == {"id": "ok"}
+    assert calls == ["cached-access", "refresh", "renewed-access"]
+    row, bundle = facts(account)
+    assert row["state"] == "connected" and row["state_cause"] is None
+    assert bundle["access_token"] == "renewed-access"
+
+
+async def test_graph_401_leaves_a_newer_token_alone(isolated_db):
+    account = connect()
+    store_credentials(account, {**facts(account)[1], "access_token": "newer-access", "access_token_expires_at": "9999999999"})
+    await client.run_in_db(client._on_account, client._drop_cached_access_token, account, "older-access")
+    bundle = facts(account)[1]
+    assert (bundle["access_token"], bundle["access_token_expires_at"]) == ("newer-access", "9999999999")

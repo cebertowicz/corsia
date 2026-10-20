@@ -24,6 +24,7 @@ async def deliver_claimed(
     draft_id: str,
     *,
     acquire: Callable[[], Awaitable[Token]],
+    provider_errors: tuple[type[Exception], ...],
     send: Callable[[Token], Awaitable[Result]],
     result_id: Callable[[Result], str | None],
     success: Callable[[Result, str], str],
@@ -39,7 +40,8 @@ async def deliver_claimed(
 
     A claim remains ``sending`` after an unconfirmed request, missing provider id,
     or mark-sent failure. That makes a retry refuse instead of duplicating the
-    person-approved action.
+    person-approved action. An ``acquire`` failure outside ``provider_errors``
+    (the provider's own fixed refusals) is logged as unexpected.
     """
     try:
         await run_in_db(claim_for_send, draft_id)
@@ -52,7 +54,7 @@ async def deliver_claimed(
     try:
         token = await acquire()
     except Exception as exc:
-        if exc.__class__.__name__ not in {"GoogleError", "MicrosoftError"}:
+        if not isinstance(exc, provider_errors):
             logging.getLogger(__name__).exception("%s could not acquire delivery credentials", label)
         await _release(draft_id, label=label)
         return f"Error: Not sent: {sign_in_error(exc)}"

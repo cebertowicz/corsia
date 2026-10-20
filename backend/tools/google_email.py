@@ -246,6 +246,7 @@ class EmailSendTool(Tool):
         return await deliver_claimed(
             draft_id,
             acquire=lambda: google_client.access_token(account_id),
+            provider_errors=(GoogleError,),
             send=lambda bearer: google_client.request_json(
                 "POST", SEND_URL, account_id=account_id, body=body, token=bearer,
             ),

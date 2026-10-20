@@ -273,6 +273,7 @@ class CalendarSendInviteTool(Tool):
         return await deliver_claimed(
             draft_id,
             acquire=lambda: google_client.access_token(account_id),
+            provider_errors=(GoogleError,),
             send=lambda bearer: google_client.request_json(
                 "POST", _event_url("primary"), account_id=account_id, body=body,
                 params={"sendUpdates": "all"}, token=bearer,
