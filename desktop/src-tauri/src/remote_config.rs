@@ -63,7 +63,8 @@ pub struct RemoteRecord {
     pub trust: RemoteTrust,
     pub name: String,
     pub proxy_port: u16,
-    /// Stable paired-host fingerprint. Missing marks a legacy single-route record.
+    /// Stable paired-host fingerprint. Older pinned records derive it on load;
+    /// older system-trusted records learn it on their next successful local connection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,7 +105,33 @@ fn write_config(app_dir: &Path, config: &AppConfig) -> Result<(), String> {
 }
 
 pub fn load_remote(app_dir: &Path) -> Result<Option<RemoteRecord>, String> {
-    Ok(read_config(app_dir)?.remote)
+    let mut config = read_config(app_dir)?;
+    let migrated = config.remote.as_mut().is_some_and(migrate_identity);
+    if migrated {
+        write_config(app_dir, &config)?;
+    }
+    Ok(config.remote)
+}
+
+/// Pinned records written before stable identities existed already contain the
+/// paired host's SPKI hash. Preserve that proof by making it explicit on load.
+fn migrate_identity(remote: &mut RemoteRecord) -> bool {
+    if remote.identity.is_some() {
+        return false;
+    }
+    let RemoteTrust::Pinned { spki_sha256 } = &remote.trust else { return false };
+    remote.identity = Some(spki_sha256.clone());
+    true
+}
+
+/// Apply a background refresh only while the saved pairing is still the one it read.
+pub fn save_refreshed_remote(app_dir: &Path, expected: &RemoteRecord, remote: RemoteRecord) -> Result<(), String> {
+    let mut config = read_config(app_dir)?;
+    if config.remote.as_ref() == Some(expected) {
+        config.remote = Some(remote);
+        write_config(app_dir, &config)?;
+    }
+    Ok(())
 }
 
 pub fn save_remote(app_dir: &Path, remote: RemoteRecord) -> Result<(), String> {
@@ -131,7 +158,7 @@ mod tests {
             trust: RemoteTrust::Pinned { spki_sha256: BASE64.encode([7_u8; 32]) },
             name: "Studio".into(),
             proxy_port: 47911,
-            identity: None,
+            identity: Some(BASE64.encode([7_u8; 32])),
             outside: None,
         }
     }
@@ -161,6 +188,38 @@ mod tests {
 
         let stored: serde_json::Value = serde_json::from_slice(&fs::read(temporary.path().join(CONFIG_FILE)).unwrap()).unwrap();
         assert_eq!(stored, serde_json::json!({"other": "kept"}));
+    }
+
+    #[test]
+    fn legacy_pinned_record_is_migrated_on_load() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::write(temporary.path().join(CONFIG_FILE), r#"{"remote":{"locator":{"kind":"dns_sd","instance":"Studio"},"trust":{"kind":"pinned","spki_sha256":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="},"name":"Studio","proxy_port":47911}}"#).unwrap();
+        let record = load_remote(temporary.path()).unwrap().unwrap();
+        assert_eq!(record.identity, Some(BASE64.encode([7_u8; 32])));
+        assert!(fs::read_to_string(temporary.path().join(CONFIG_FILE)).unwrap().contains("identity"));
+    }
+
+    #[test]
+    fn a_trusted_legacy_identity_is_saved_without_replacing_a_forgotten_pairing() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut legacy = record();
+        legacy.trust = RemoteTrust::System;
+        legacy.identity = None;
+        save_remote(temporary.path(), legacy.clone()).unwrap();
+        assert_eq!(load_remote(temporary.path()).unwrap(), Some(legacy.clone()));
+        let mut refreshed = legacy.clone();
+        refreshed.identity = Some(BASE64.encode([7_u8; 32]));
+        refreshed.outside = Some(OutsideRoute { url: "https://home.example.com".into(), trust: RemoteTrust::System });
+        save_refreshed_remote(temporary.path(), &legacy, refreshed.clone()).unwrap();
+        assert_eq!(load_remote(temporary.path()).unwrap(), Some(refreshed.clone()));
+        forget_remote(temporary.path()).unwrap();
+        save_refreshed_remote(temporary.path(), &refreshed, refreshed.clone()).unwrap();
+        assert_eq!(load_remote(temporary.path()).unwrap(), None);
+        let mut replacement = record();
+        replacement.name = "Replacement".into();
+        save_remote(temporary.path(), replacement.clone()).unwrap();
+        save_refreshed_remote(temporary.path(), &refreshed, refreshed.clone()).unwrap();
+        assert_eq!(load_remote(temporary.path()).unwrap(), Some(replacement));
     }
 
     #[test]

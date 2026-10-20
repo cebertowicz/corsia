@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from fastapi import Depends, FastAPI, WebSocket
 from fastapi.testclient import TestClient
@@ -82,7 +85,7 @@ def test_peers_beyond_this_network_get_nothing_even_on_public_routes(sessions, p
     refused = client.get("/api/health")
 
     assert refused.status_code == 403
-    assert refused.json() == {"reason": "not_on_this_network"}
+    assert refused.json() == json.loads((Path(__file__).resolve().parents[2] / "testdata/pairing-not-local.json").read_text())
     with pytest.raises(WebSocketDisconnect) as socket:
         with client.websocket_connect("/ws"):
             pass
@@ -104,7 +107,7 @@ def test_pairing_refuses_loopback_forwarded_and_public_peers_on_each_route(sessi
     refused = _client(peer, outside_enabled=True).post(path, headers=headers, json={})
 
     assert refused.status_code == 403
-    assert refused.json() == {"reason": "not_on_this_network"}
+    assert refused.json() == json.loads((Path(__file__).resolve().parents[2] / "testdata/pairing-not-local.json").read_text())
 
 
 def test_login_succeeds_over_the_forwarded_outside_route(sessions):

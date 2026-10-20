@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { token } from '$lib/stores/auth';
 import { handleMessage } from '$lib/ws/handlers';
-import { createDevices, parseOutside, viewFromApi, type DevicesApi } from './devices.svelte';
+import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
 
 // The fake clock lets a started reader's fetches and promise chains finish without waiting on real time.
 const settle = () => vi.advanceTimersByTimeAsync(0);
@@ -49,13 +49,6 @@ describe('viewFromApi', () => {
 	});
 });
 
-describe('parseOutside', () => {
-	it('refuses http:// with the one approved line, and strips an https:// prefix', () => {
-		expect(parseOutside('http://home.example.com')).toEqual({ error: 'Type the outside address without http://, like home.example.com.' });
-		expect(parseOutside('https://home.example.com/')).toEqual({ address: 'home.example.com' });
-		expect(parseOutside('home.example.com:8443')).toEqual({ address: 'home.example.com:8443' });
-	});
-});
 
 describe('createDevices', () => {
 	let calls: { url: string; method: string; body?: string; auth?: string }[];
@@ -110,6 +103,26 @@ describe('createDevices', () => {
 		responses.push(json(api({ enabled: false, announced_name: null, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' } })));
 		await devices.setEnabled(true);
 		expect(devices.view).toMatchObject({ enabled: false, listener: 'all-ports-taken' });
+	});
+
+	it('submits the typed outside address and shows the backend refusal', async () => {
+		const devices = createDevices();
+		await devices.read();
+		const refusal = 'Type a name, like home.example.com, or a name and port, like home.example.com:8443.';
+		responses.push(json({ detail: refusal }, 400), json(api()));
+		expect(await devices.setOutside('home.example.com:99999')).toBe(refusal);
+		expect(calls[1]).toMatchObject({ url: '/api/devices', method: 'PUT', body: JSON.stringify({ outside_address: 'home.example.com:99999' }) });
+	});
+
+	it('displays the server-normalized outside address and clears it', async () => {
+		const devices = createDevices();
+		await devices.read();
+		responses.push(json(api({ outside_address: 'home.example.com:8443' })));
+		expect(await devices.setOutside(' https://home.example.com:8443/ ')).toBeNull();
+		expect(devices.view.outside).toBe('home.example.com:8443');
+		responses.push(json(api({ outside_address: null })));
+		expect(await devices.setOutside('')).toBeNull();
+		expect(devices.view.outside).toBeNull();
 	});
 
 	it('asks for a new code with POST', async () => {

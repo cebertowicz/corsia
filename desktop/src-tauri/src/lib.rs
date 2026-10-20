@@ -856,6 +856,7 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     replace_proxy(&app.state::<RemoteRuntime>(), None);
     let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
     let mut saved = saved;
+    let refresh = saved.outside.is_some().then(|| saved.clone());
     let started = if saved.outside.is_some() {
         check_through_routes(app, &mut saved).await?
     } else {
@@ -864,6 +865,9 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
     let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
     replace_proxy(&app.state::<RemoteRuntime>(), Some(proxy));
+    if let Some(refresh) = refresh {
+        tauri::async_runtime::spawn(refresh_outside_after_launch(app_dir, refresh));
+    }
     Ok(())
 }
 
@@ -881,8 +885,38 @@ fn outside_route(address: Option<&str>, has_identity: bool) -> Option<remote_con
 
 async fn refresh_outside_address(saved: &mut remote_config::RemoteRecord, host: &str, port: u16) {
     let Ok(trust) = trust::Trust::try_from(&saved.trust) else { return };
-    if let Ok(address) = pairing::outside_address(host, port, trust).await {
-        saved.outside = outside_route(address.as_deref(), saved.identity.is_some());
+    if saved.identity.is_none() {
+        match routes::local_identity(host, port, trust.clone()).await {
+            Ok(identity) => saved.identity = Some(BASE64.encode(identity)),
+            Err(error) => {
+                log::warn!("could not learn local host identity: {}", error.into_message());
+                return;
+            }
+        }
+    }
+    match pairing::outside_address(host, port, trust).await {
+        Ok(address) => saved.outside = outside_route(address.as_deref(), saved.identity.is_some()),
+        Err(error) => log::warn!("could not refresh outside address: {error:?}"),
+    }
+}
+
+async fn refresh_outside_after_launch(app_dir: std::path::PathBuf, mut saved: remote_config::RemoteRecord) {
+    let original = saved.clone();
+    let local = match &saved.locator {
+        remote_config::Locator::Address { host, port } => Some((host.clone(), *port)),
+        remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
+            Ok(address) => Some(address),
+            Err(error) => {
+                log::warn!("could not resolve local host for outside address refresh: {error:?}");
+                None
+            }
+        },
+    };
+    if let Some((host, port)) = local {
+        refresh_outside_address(&mut saved, &host, port).await;
+        if let Err(error) = remote_config::save_refreshed_remote(&app_dir, &original, saved) {
+            log::warn!("could not save refreshed outside address: {error}");
+        }
     }
 }
 
@@ -910,14 +944,7 @@ async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, save
     use classify::ConnectFailure;
     let started = proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)?;
     match version_check::check_through_proxy(started.port, &version_check::app_version(app)).await {
-        Ok(version_check::Compat::Ok) => {
-            let local = match &saved.locator {
-                remote_config::Locator::Address { host, port } => Some((host.clone(), *port)),
-                remote_config::Locator::DnsSd { instance } => discovery::resolve(instance, Duration::from_secs(15)).await.ok(),
-            };
-            if let Some((host, port)) = local { refresh_outside_address(saved, &host, port).await; }
-            Ok(started)
-        }
+        Ok(version_check::Compat::Ok) => Ok(started),
         Ok(version_check::Compat::Incompatible { app: app_version, host }) => Err(ConnectFailure::Incompatible { app: app_version, host }),
         Ok(version_check::Compat::TooOld) => Err(ConnectFailure::TooOld),
         Err(_) if started.key_changed() => Err(ConnectFailure::KeyChanged),
@@ -994,6 +1021,7 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
         PairError::TooManyTries => "too_many_tries",
         PairError::Paused => "paused",
         PairError::Busy => "busy",
+        PairError::NotLocal => "not_local",
         // The host's key moved under a pairing that just trusted it. CORSIA is running there, so the server line would
         // be false; the local line is true and names the fix (a new code).
         PairError::KeyChanged => ConnectFailure::Local.reason(),

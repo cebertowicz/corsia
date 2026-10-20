@@ -222,7 +222,7 @@ async def test_devices_tls_listener_keeps_login_public_but_refuses_pairing_on_lo
         assert public[3].status_code == 401
         assert public[3].json() != {"reason": "sign_in_required"}
         assert [response.status_code for response in public[4:]] == [403, 403]
-        assert [response.json() for response in public[4:]] == [{"reason": "not_on_this_network"}] * 2
+        assert [response.json() for response in public[4:]] == [{"detail": {"reason": "not_on_this_network"}}] * 2
 
         for method, path in (("GET", "/api/auth/login"), ("POST", "/api/version")):
             refused = await remote.request(method, path)
@@ -279,7 +279,7 @@ async def test_devices_tls_listener_proves_identity_with_the_key_its_tls_present
     assert base64.b64decode(proof.json()["spki"]) == spki
     presented.public_key().verify(
         base64.b64decode(proof.json()["signature"]),
-        b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode(),
+        b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode() + b"\0" + base64.b64decode(proof.json()["tls_spki_sha256"]),
         ec.ECDSA(hashes.SHA256()),
     )
     assert [response.status_code for response in refused] == [400, 400]

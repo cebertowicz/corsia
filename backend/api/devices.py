@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -52,14 +53,29 @@ def _outside_address(value: object) -> str | None:
     if not isinstance(value, str):
         raise HTTPException(400, "outside_address must be a string or null")
     text = value.strip()
+    if not text:
+        return None
     if re.match(r"^http://", text, re.IGNORECASE):
         raise HTTPException(400, "Type the outside address without http://, like home.example.com.")
     text = re.sub(r"^https://", "", text, flags=re.IGNORECASE).removesuffix("/")
-    if not text:
-        return None
-    if re.search(r"[\s/]", text) or not re.fullmatch(r"[^:]+(?::\d{1,5})?", text):
-        raise HTTPException(400, "Type a name, like home.example.com, or a name and port, like home.example.com:8443.")
-    return text
+    message = "Type a name, like home.example.com, or a name and port, like home.example.com:8443."
+    endpoint = re.fullmatch(r"([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?", text)
+    if endpoint is None:
+        raise HTTPException(400, message)
+    host, port = endpoint.groups()
+    labels = host.removesuffix(".").split(".")
+    if len(host) > 253 or any(not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in labels):
+        raise HTTPException(400, message)
+    # URL clients interpret a numeric final label as an IPv4 address. Refuse
+    # malformed numeric hosts here rather than saving a route they cannot use.
+    if re.fullmatch(r"(?:[0-9]+|0[xX][0-9A-Fa-f]+)", labels[-1]):
+        try:
+            ipaddress.IPv4Address(host.removesuffix("."))
+        except ValueError:
+            raise HTTPException(400, message) from None
+    if port is not None and not 1 <= int(port) <= 65535:
+        raise HTTPException(400, message)
+    return f"{host}:{int(port)}" if port is not None else host
 
 
 def _pairing_error(error: PairingError) -> HTTPException:
@@ -84,6 +100,7 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
         address = _outside_address(body["outside_address"])
         await run_in_db(set_devices_outside_address, address)
         runtime.outside_address = address
+        _emit("outside_address_saved" if address else "outside_address_cleared")
         return runtime.snapshot(include_code=True)
     enabled = body.get("enabled")
     if not isinstance(enabled, bool):
@@ -149,7 +166,7 @@ async def pair_start(body: dict):
 
 @router.get("/outside-address")
 async def outside_address():
-    """The saved outside address. Public on the devices listener: any peer that reaches it can read the address it dialed."""
+    """The saved outside address is public because it is the hostname a person types."""
     return {"outside_address": await run_in_db(get_devices_outside_address)}
 
 
@@ -177,9 +194,8 @@ async def pair_finish(body: dict):
         "name": name,
         "outside_address": await run_in_db(get_devices_outside_address),
     }
-    if confirm_identity is not None:
-        result["spki_sha256"] = base64.b64encode(identity).decode()
-        result["confirm_identity"] = base64.b64encode(confirm_identity).decode()
+    result["spki_sha256"] = base64.b64encode(identity).decode()
+    result["confirm_identity"] = base64.b64encode(confirm_identity).decode()
     return result
 
 
@@ -196,7 +212,9 @@ async def identity(body: dict):
         raise HTTPException(400, "identity proof requires a 32-byte nonce and authority")
     if authority != authority.lower() or any(ord(char) > 127 for char in authority):
         raise HTTPException(400, "identity authority must be lower-case ASCII")
+    tls_spki_sha256 = host_spki_sha256()
     return {
         "spki": base64.b64encode(host_spki_der()).decode(),
-        "signature": base64.b64encode(sign_identity_proof(nonce, authority)).decode(),
+        "tls_spki_sha256": base64.b64encode(tls_spki_sha256).decode(),
+        "signature": base64.b64encode(sign_identity_proof(nonce, authority, tls_spki_sha256=tls_spki_sha256)).decode(),
     }

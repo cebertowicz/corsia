@@ -8,7 +8,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from infra.database import get_db, write_transaction
+# Explicit read-only connections also serve the bootstrap CLI, before a workspace exists.
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,10 @@ def _now() -> str:
 
 def get_setting(key: str, *, db: sqlite3.Connection | None = None) -> dict | None:
     """Read object-valued JSON, optionally on the caller's named connection."""
-    db = db if db is not None else get_db()
+    if db is None:
+        from infra.database import get_db
+
+        db = get_db()
     row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     if not row:
         return None
@@ -71,6 +74,8 @@ def get_update_schedule(
 
 def set_setting(key: str, value: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Upsert JSON in the named caller's transaction or a standalone owner."""
+    from infra.database import write_transaction
+
     with write_transaction(db, scope="set_setting") as connection:
         connection.execute(
             "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
@@ -186,6 +191,8 @@ def set_devices_outside_address(address: str | None, *, db: sqlite3.Connection |
 
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Deep-merge updates into an existing setting."""
+    from infra.database import write_transaction
+
     with write_transaction(db, scope="save_setting_merge") as conn:
         current = get_setting(key, db=conn) or {}
         set_setting(key, _deep_merge(current, updates), db=conn)
@@ -198,6 +205,8 @@ def save_agent_defaults(updates: dict) -> None:
 
 def delete_agent_default(key: str) -> None:
     """Remove one agent default rather than persisting a null override."""
+    from infra.database import write_transaction
+
     with write_transaction(None, scope="delete_agent_default") as db:
         agents = get_setting("agents", db=db) or {}
         defaults = agents.get("defaults") if isinstance(agents, dict) else None

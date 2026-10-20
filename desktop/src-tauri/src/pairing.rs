@@ -23,7 +23,7 @@ pub struct Paired {
     pub trust: Trust,
     pub host: String,
     pub port: u16,
-    /// Stable host identity; absent only when pairing a host predating identity confirmation.
+    /// Stable host identity, confirmed by every successful new pairing.
     pub identity: Option<[u8; 32]>,
     /// Optional bare host[:port] learned while this local pinned connection was established.
     pub outside_address: Option<String>,
@@ -36,6 +36,7 @@ pub enum PairError {
     TooManyTries,
     Paused,
     Busy,
+    NotLocal,
     Unreachable(ConnectFailure),
     TooOld,
     /// The host presented a key other than the pinned one: not a network failure.
@@ -52,7 +53,7 @@ impl PairError {
             Self::TooOld => Some(ConnectFailure::TooOld),
             Self::KeyChanged => Some(ConnectFailure::KeyChanged),
             Self::Protocol(_) => Some(ConnectFailure::Server),
-            Self::WrongCode | Self::Expired | Self::TooManyTries | Self::Paused | Self::Busy => None,
+            Self::WrongCode | Self::Expired | Self::TooManyTries | Self::Paused | Self::Busy | Self::NotLocal => None,
         }
     }
 }
@@ -364,8 +365,7 @@ async fn finish_exchange(
     transcript.extend_from_slice(finish.name.as_bytes());
     verify_confirmation(&server_key, &transcript, &confirm_s)?;
     let identity = match (finish.spki_sha256, finish.confirm_identity) {
-        (None, None) => None, // A paired old host remains a legacy single-route record.
-        (Some(fingerprint), Some(confirmation)) => Some(confirmed_identity(&server_key, transcript, &fingerprint, &confirmation)?),
+        (Some(fingerprint), Some(confirmation)) => confirmed_identity(&server_key, transcript, &fingerprint, &confirmation)?,
         _ => return Err(PairError::Protocol("pair/finish returned an incomplete identity confirmation".into())),
     };
     Ok(Paired {
@@ -373,7 +373,7 @@ async fn finish_exchange(
         trust,
         host: endpoint.host.clone(),
         port: endpoint.port,
-        identity,
+        identity: Some(identity),
         outside_address: finish.outside_address,
     })
 }
@@ -467,6 +467,7 @@ async fn pair_status(response: reqwest::Response) -> PairError {
         Some("expired") => PairError::Expired,
         Some("too_many_tries") => PairError::TooManyTries,
         Some("paused") => PairError::Paused,
+        Some("not_on_this_network") => PairError::NotLocal,
         _ => PairError::Protocol(format!("pairing request failed with HTTP {status}")),
     }
 }
@@ -582,6 +583,8 @@ mod tests {
                         serde_json::json!({
                             "confirm_s": BASE64.encode(confirmation(&server_key, &transcript)),
                             "name": "Studio",
+                            "spki_sha256": BASE64.encode(pin),
+                            "confirm_identity": BASE64.encode(confirmation(&server_key, &[transcript.as_slice(), b"spki:", &pin].concat())),
                         })
                     };
                     Ok::<_, Infallible>(json_response(response))
@@ -598,6 +601,14 @@ mod tests {
             }
         });
         (port, task)
+    }
+
+    #[tokio::test]
+    async fn same_network_refusal_reaches_the_frontend_reason() {
+        let response = hyper::Response::builder().status(403)
+            .body(include_str!("../../../testdata/pairing-not-local.json")).unwrap();
+        assert_eq!(pair_status(reqwest::Response::from(response)).await, PairError::NotLocal);
+        assert!(matches!(crate::remote_pair_error(PairError::NotLocal), crate::RemotePairResponse::Failure { reason, .. } if reason == "not_local"));
     }
 
     #[test]
@@ -786,7 +797,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(paired.name, "Studio");
-        assert_eq!(paired.identity, None, "a host that confirms no identity stays a legacy single-route record");
+        assert_eq!(paired.identity, Some(identity.pin), "a fresh pairing always confirms the host identity");
         server.await.unwrap();
 
         let requests = requests.lock().unwrap();

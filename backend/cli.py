@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+
 import os
 import sqlite3
 import sys
@@ -20,6 +20,7 @@ from infra.bind_host import (
     resolve_bind_host,
     write_setup,
 )
+from infra.settings import get_devices_enabled, get_devices_outside_address
 from infra.platform_paths import (
     LegacyRuntimePaths,
     RuntimePaths,
@@ -173,22 +174,19 @@ def cmd_remote_address(args: argparse.Namespace) -> int:
     """Print the saved outside address while Let other devices connect is on.
 
     Reads the bootstrap's own database read-only, so it never creates a file or
-    reads another instance's state. Prints nothing when either is missing. It
-    reads the row infra.settings writes without importing it: that import
-    resolves the workspace from the home bootstrap, not ``--bootstrap``.
+    reads another instance's state. Prints nothing when either is missing.
     """
     try:
         state_root = Path(args.state_root) if args.state_root else load_bootstrap(Path(args.bootstrap or BOOTSTRAP_PATH)).state_root
         db_path = runtime_db_paths(state_root)[0]
         with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as db:
-            row = db.execute("SELECT value FROM settings WHERE key = 'devices'").fetchone()
-        devices = json.loads(row[0]) if row else {}
+            db.row_factory = sqlite3.Row
+            enabled = get_devices_enabled(db=db)
+            address = get_devices_outside_address(db=db)
     except (OSError, TypeError, ValueError, sqlite3.Error):
-        return 0
-    if not isinstance(devices, dict):
-        return 0
-    address = devices.get("outside_address")
-    if devices.get("enabled") is True and isinstance(address, str) and address:
+        print("Remote access could not be read.", file=sys.stderr)
+        return 2
+    if enabled and address:
         print(address)
     return 0
 

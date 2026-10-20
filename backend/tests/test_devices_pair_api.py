@@ -87,7 +87,7 @@ def test_python_first_vector_has_a_fixed_name_bound_confirm_s():
     assert confirm_s.hex() == "944a40f6df11c32fd42a3a2652610d84113da85571c5d6f62a9e8867423be7e0"
 
 
-def _vector_server_finish(identity: bytes | None) -> tuple[bytes, str, bytes | None]:
+def _vector_server_finish(identity: bytes) -> tuple[bytes, str, bytes]:
     """DevicePairing as the server of the python_first vector exchange, finishing it for `identity`."""
     from core.device_pairing import DevicePairing, transcript_prefix
 
@@ -110,8 +110,9 @@ def _vector_server_finish(identity: bytes | None) -> tuple[bytes, str, bytes | N
 def test_identity_confirmation_leaves_the_recorded_confirm_s_unchanged():
     """An app from before identity confirmation reads only confirm_s; it must be the value the old host sent."""
     recorded = "769283af1c3f09aed33889af759908eb13bc42066f70baeee10499e383bc63b7"  # DevicePairing before the change
-    confirm_s, name, confirm_identity = _vector_server_finish(None)
-    assert (confirm_s.hex(), name, confirm_identity) == (recorded, "Studio", None)
+    confirm_s, name, confirm_identity = _vector_server_finish(bytes(32))
+    assert (confirm_s.hex(), name) == (recorded, "Studio")
+    assert len(confirm_identity) == 32
 
     confirm_s, _, confirm_identity = _vector_server_finish(bytes(range(32)))
     assert confirm_s.hex() == recorded

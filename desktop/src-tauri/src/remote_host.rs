@@ -31,7 +31,11 @@ pub(crate) fn parse_pairing_address(input: &str, legacy_port: u16) -> Result<(St
 /// paths, queries and fragments are not configuration and are never silently
 /// dropped. The host comes back lowercased and without IPv6 brackets.
 pub(crate) fn parse_https_address(input: &str) -> Result<(String, u16), String> {
-    let url = Url::parse(input.trim()).map_err(|_| "remote address is not a valid https URL".to_owned())?;
+    let input = input.trim();
+    if input.ends_with(':') {
+        return Err("remote HTTPS address needs a port from 1 to 65535".into());
+    }
+    let url = Url::parse(input).map_err(|_| "remote address is not a valid https URL".to_owned())?;
     if url.scheme() != "https" {
         return Err("remote address must use https".into());
     }
@@ -41,7 +45,11 @@ pub(crate) fn parse_https_address(input: &str) -> Result<(String, u16), String> 
     let host = url.host_str().ok_or_else(|| "remote HTTPS address needs a host".to_owned())?;
     let host = host.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')).unwrap_or(host);
     RemoteHost::parse(host)?;
-    Ok((host.to_owned(), url.port().unwrap_or(443)))
+    let port = url.port().unwrap_or(443);
+    if port == 0 {
+        return Err("remote HTTPS address needs a port from 1 to 65535".into());
+    }
+    Ok((host.to_owned(), port))
 }
 
 fn has_scheme(input: &str, scheme: &str) -> bool {
@@ -136,6 +144,22 @@ mod tests {
         assert_eq!(RemoteHost::parse("studio.local").unwrap().authority(1), "studio.local:1");
         assert_eq!(RemoteHost::parse("10.0.0.2").unwrap().authority(1), "10.0.0.2:1");
         assert!(RemoteHost::parse("fe80::1%no-such-interface0").is_err());
+    }
+
+    #[test]
+    fn outside_address_contract_vectors_are_accepted_or_rejected_by_the_desktop_boundary() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!("../../../testdata/outside-address-vectors.json")).unwrap();
+        for vector in vectors["accepted"].as_array().unwrap() {
+            // The API owns normalization; the desktop converts its saved endpoint.
+            let normalized = vector["normalized"].as_str().unwrap();
+            let (host, port) = normalized.rsplit_once(':').map(|(host, port)| (host, port.parse::<u16>().unwrap())).unwrap_or((normalized, 443));
+            assert_eq!(parse_https_address(&format!("https://{normalized}")), Ok((host.to_ascii_lowercase(), port)), "{normalized}");
+        }
+        for value in vectors["rejected"].as_array().unwrap() {
+            let input = value.as_str().unwrap();
+            let url = if input.starts_with("http://") { input.to_owned() } else { format!("https://{input}") };
+            assert!(parse_https_address(&url).is_err(), "{input}");
+        }
     }
 
     #[test]

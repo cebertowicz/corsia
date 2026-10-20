@@ -21,7 +21,7 @@ fn local_failure_moves_to_an_unproven_outside() {
     assert_eq!(routes.current(), Route::Local);
     routes.local_failed(Instant::now());
     assert_eq!(routes.current(), Route::Outside);
-    assert!(!routes.is_proven(Route::Outside), "outside proves itself afresh after a switch");
+    assert!(!routes.is_proven(Route::Outside, &[1; 32]), "outside proves itself afresh after a switch");
 }
 
 #[test]
@@ -34,9 +34,10 @@ fn outside_reprobe_is_bounded_and_switches_back_only_after_proof() {
     assert!(!routes.should_probe_local(start + Duration::from_secs(31), RouteSelector::LOCAL_REPROBE));
     // A request can continue on outside while this separate probe is pending.
     assert_eq!(routes.current(), Route::Outside);
-    routes.local_proven();
+    routes.local_proven([1; 32]);
     assert_eq!(routes.current(), Route::Local);
-    assert!(routes.is_proven(Route::Local));
+    assert!(routes.is_proven(Route::Local, &[1; 32]));
+    assert!(!routes.is_proven(Route::Local, &[2; 32]), "a changed TLS certificate proves itself again");
     assert!(!routes.should_probe_local(start + Duration::from_secs(90), RouteSelector::LOCAL_REPROBE), "no probe while on local");
 }
 
@@ -45,13 +46,14 @@ fn outside_reprobe_is_bounded_and_switches_back_only_after_proof() {
 struct Prover {
     pkcs8: Vec<u8>,
     spki: Vec<u8>,
+    tls_spki_sha256: [u8; 32],
     /// Signs this authority instead of the one asked: a proof captured on one route and replayed on another.
     replayed_for: Option<String>,
 }
 
 impl Prover {
     fn honest(key: &HostKey) -> Self {
-        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), replayed_for: None }
+        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), tls_spki_sha256: key.tls.pin, replayed_for: None }
     }
 
     fn answer(&self, body: &[u8]) -> String {
@@ -60,8 +62,8 @@ impl Prover {
         let authority = self.replayed_for.clone().unwrap_or_else(|| asked["authority"].as_str().unwrap().to_owned());
         let rng = SystemRandom::new();
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &self.pkcs8, &rng).unwrap();
-        let signature = key.sign(&rng, &[IDENTITY_CONTEXT, &nonce, b"\0", authority.as_bytes()].concat()).unwrap();
-        serde_json::json!({ "spki": BASE64.encode(&self.spki), "signature": BASE64.encode(signature.as_ref()) }).to_string()
+        let signature = key.sign(&rng, &[IDENTITY_CONTEXT, &nonce, b"\0", authority.as_bytes(), b"\0", &self.tls_spki_sha256].concat()).unwrap();
+        serde_json::json!({ "spki": BASE64.encode(&self.spki), "tls_spki_sha256": BASE64.encode(self.tls_spki_sha256), "signature": BASE64.encode(signature.as_ref()) }).to_string()
     }
 }
 
@@ -92,7 +94,8 @@ async fn serve(config: Arc<rustls::ServerConfig>, name: &'static str, prover: Op
                 let service = service_fn(move |request: Request<Incoming>| {
                     let (prover, forwarded, proofs) = (prover.clone(), Arc::clone(&forwarded), Arc::clone(&proofs));
                     async move {
-                        let is_proof = request.method() == Method::POST && request.uri().path() == IDENTITY_PATH;
+                        let path = request.uri().path().to_owned();
+                        let is_proof = request.method() == Method::POST && path == IDENTITY_PATH;
                         let body = request.into_body().collect().await.unwrap().to_bytes();
                         let (status, text) = match (&prover, is_proof) {
                             (Some(prover), true) => {
@@ -102,7 +105,12 @@ async fn serve(config: Arc<rustls::ServerConfig>, name: &'static str, prover: Op
                             (None, true) => (StatusCode::NOT_FOUND, String::new()),
                             (_, false) => {
                                 forwarded.fetch_add(1, SeqCst);
-                                (StatusCode::OK, name.to_owned())
+                                let text = match path.as_str() {
+                                    "/api/devices/outside-address" => serde_json::json!({"outside_address": format!("127.0.0.1:{port}")}).to_string(),
+                                    "/api/version" => serde_json::json!({"app": {"version": "0.4.1", "shell_protocol": crate::version_check::SHELL_PROTOCOL}}).to_string(),
+                                    _ => name.to_owned(),
+                                };
+                                (StatusCode::OK, text)
                             }
                         };
                         Ok::<_, Infallible>(Response::builder().status(status).body(Full::new(Bytes::from(text))).unwrap())
@@ -188,18 +196,15 @@ async fn a_pinned_local_route_is_proven_by_its_handshake_alone() {
 }
 
 #[tokio::test]
-async fn a_forwarder_trusted_by_the_system_is_proven_by_the_hosts_signature() {
+async fn a_relayed_host_proof_with_a_different_connection_spki_is_refused() {
     let (host, forwarder) = (test_tls::generated_p256_host(), test_tls::generated_ca_forwarder());
     let outside = serve(forwarder.config, "outside", Some(Prover::honest(&host))).await;
     let refusals = Arc::new(AtomicUsize::new(0));
     let config = paired(&host, Some((outside.port, system())), Some(forwarder.ca), &refusals);
     let proxy = proxy_for(config, Arc::new(AtomicU16::new(dead_port().await))).await;
 
-    assert_eq!(get(&proxy).await, (StatusCode::OK, "outside".into()), "a dead local route falls back to outside");
-    assert_eq!(get(&proxy).await, (StatusCode::OK, "outside".into()));
-    assert_eq!(outside.proofs.load(SeqCst), 1, "outside proves itself once per switch, not per request");
-    assert_eq!(outside.forwarded.load(SeqCst), 2);
-    assert!(!proxy.key_changed());
+    assert_refused(&proxy, &outside, &refusals).await;
+    assert_eq!(outside.proofs.load(SeqCst), 1, "the relay cannot reuse a host proof on its own TLS connection");
 }
 
 /// Every refusal ends forwarding through both routes, tells the owner once, and never reaches the refused route.
@@ -249,8 +254,8 @@ async fn a_proof_signed_for_another_address_is_refused() {
 
 #[tokio::test]
 async fn a_local_route_that_never_answers_falls_back_after_its_budget() {
-    let (host, forwarder) = (test_tls::generated_p256_host(), test_tls::generated_ca_forwarder());
-    let outside = serve(forwarder.config, "outside", Some(Prover::honest(&host))).await;
+    let host = test_tls::generated_p256_host();
+    let outside = serve(Arc::clone(&host.tls.config), "outside", Some(Prover::honest(&host))).await;
     // Accepts TCP and never speaks TLS: a saved address that now leads nowhere useful.
     let silent = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let silent_port = silent.local_addr().unwrap().port();
@@ -261,7 +266,7 @@ async fn a_local_route_that_never_answers_falls_back_after_its_budget() {
         }
     });
     let refusals = Arc::new(AtomicUsize::new(0));
-    let config = paired(&host, Some((outside.port, system())), Some(forwarder.ca), &refusals);
+    let config = paired(&host, Some((outside.port, system())), Some(host.tls.certificate.clone()), &refusals);
     let proxy = proxy_for(config, Arc::new(AtomicU16::new(silent_port))).await;
 
     let started = Instant::now();
@@ -276,11 +281,11 @@ async fn a_local_route_that_never_answers_falls_back_after_its_budget() {
 
 #[tokio::test]
 async fn outside_hands_back_to_local_once_local_proves_itself() {
-    let (host, forwarder) = (test_tls::generated_p256_host(), test_tls::generated_ca_forwarder());
-    let outside = serve(forwarder.config, "outside", Some(Prover::honest(&host))).await;
+    let host = test_tls::generated_p256_host();
+    let outside = serve(Arc::clone(&host.tls.config), "outside", Some(Prover::honest(&host))).await;
     let local = serve(Arc::clone(&host.tls.config), "local", None).await;
     let refusals = Arc::new(AtomicUsize::new(0));
-    let config = RouteConfig { reprobe: Duration::ZERO, ..paired(&host, Some((outside.port, system())), Some(forwarder.ca), &refusals) };
+    let config = RouteConfig { reprobe: Duration::ZERO, ..paired(&host, Some((outside.port, system())), Some(host.tls.certificate.clone()), &refusals) };
     let local_port = Arc::new(AtomicU16::new(dead_port().await));
     let proxy = proxy_for(config, Arc::clone(&local_port)).await;
 
@@ -297,6 +302,71 @@ async fn outside_hands_back_to_local_once_local_proves_itself() {
     }
     assert_eq!(answered, "local", "a proven local route carries requests again");
     assert_eq!(refusals.load(SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_local_success_refresh_makes_the_outside_route_available_in_the_current_session() {
+    let host = test_tls::generated_p256_host();
+    let local = serve(Arc::clone(&host.tls.config), "host", Some(Prover::honest(&host))).await;
+    let mut saved = RemoteRecord { locator: Locator::Address { host: "127.0.0.1".into(), port: local.port },
+        trust: RemoteTrust::Pinned { spki_sha256: BASE64.encode(host.tls.pin) }, name: "Studio".into(), proxy_port: 0,
+        identity: Some(BASE64.encode(host.tls.pin)), outside: None };
+    crate::refresh_outside_address(&mut saved, "127.0.0.1", local.port).await;
+    assert_eq!(saved.outside.as_ref().unwrap().url, format!("https://127.0.0.1:{}", local.port));
+    let mut config = RouteConfig::from_record(&saved, || {}).unwrap();
+    config.tls = client_tls(Some(host.tls.certificate.clone()));
+    let proxy = proxy_for(config, Arc::new(AtomicU16::new(dead_port().await))).await;
+    assert_eq!(get(&proxy).await, (StatusCode::OK, "host".into()));
+}
+
+#[tokio::test]
+async fn an_established_outside_launch_does_not_wait_for_the_local_refresh() {
+    let host = test_tls::generated_p256_host();
+    let outside = serve(Arc::clone(&host.tls.config), "outside", Some(Prover::honest(&host))).await;
+    let silent = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = silent.local_addr().unwrap().port();
+    let held = tokio::spawn(async move {
+        let mut streams = Vec::new();
+        while let Ok((stream, _)) = silent.accept().await { streams.push(stream); }
+    });
+    let saved = RemoteRecord { locator: Locator::Address { host: "127.0.0.1".into(), port },
+        trust: RemoteTrust::Pinned { spki_sha256: BASE64.encode(host.tls.pin) }, name: "Studio".into(), proxy_port: 0,
+        identity: Some(BASE64.encode(host.tls.pin)),
+        outside: Some(OutsideRoute { url: format!("https://127.0.0.1:{}", outside.port), trust: system() }) };
+    let directory = tempfile::tempdir().unwrap();
+    crate::remote_config::save_remote(directory.path(), saved.clone()).unwrap();
+    let refresh = tokio::spawn(crate::refresh_outside_after_launch(directory.path().to_owned(), saved.clone()));
+    let mut config = RouteConfig::from_record(&saved, || {}).unwrap();
+    config.tls = client_tls(Some(host.tls.certificate.clone()));
+    let proxy = proxy_for(config, Arc::new(AtomicU16::new(port))).await;
+    let version = tokio::time::timeout(Duration::from_secs(5), crate::version_check::check_through_proxy(proxy.port, "0.4.1")).await.unwrap().unwrap();
+    assert_eq!(version, crate::version_check::Compat::Ok);
+    assert!(!refresh.is_finished(), "launch waited for the incidental local refresh");
+    refresh.abort();
+    held.abort();
+}
+
+#[tokio::test]
+async fn a_trusted_legacy_local_connection_learns_the_identity_and_enables_the_saved_outside_route() {
+    let host = test_tls::generated_p256_host();
+    let local = serve(Arc::clone(&host.tls.config), "local", Some(Prover::honest(&host))).await;
+    let port = local.port;
+    let dial: LocalDial = Arc::new(move || Box::pin(async move { super::dial("127.0.0.1", port).await }));
+    let config = RouteConfig { tls: client_tls(Some(host.tls.certificate.clone())), ..RouteConfig::single(Trust::System, || {}) };
+    let routes = Routes::new(config, dial).unwrap();
+    let temporary = tempfile::tempdir().unwrap();
+    let legacy = RemoteRecord { locator: Locator::Address { host: "127.0.0.1".into(), port }, trust: RemoteTrust::System,
+        name: "Studio".into(), proxy_port: 0, identity: None, outside: None };
+    crate::remote_config::save_remote(temporary.path(), legacy.clone()).unwrap();
+    let mut saved = crate::remote_config::load_remote(temporary.path()).unwrap().unwrap();
+    saved.identity = Some(BASE64.encode(routes.learn_local_identity().await.unwrap()));
+    assert_eq!(saved.identity, Some(BASE64.encode(host.tls.pin)));
+    saved.outside = crate::outside_route(Some("home.example.com:8443"), saved.identity.is_some());
+    crate::remote_config::save_refreshed_remote(temporary.path(), &legacy, saved.clone()).unwrap();
+    let loaded = crate::remote_config::load_remote(temporary.path()).unwrap().unwrap();
+    assert_eq!(loaded, saved);
+    assert!(RouteConfig::from_record(&loaded, || {}).unwrap().outside.is_some());
+    assert_eq!(local.proofs.load(SeqCst), 1);
 }
 
 #[tokio::test]

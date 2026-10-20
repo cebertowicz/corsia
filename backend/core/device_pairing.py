@@ -197,8 +197,8 @@ class DevicePairing:
         exchange_id: str,
         confirm_c: bytes,
         name: str,
-        identity: bytes | None = None,
-    ) -> tuple[bytes, str, bytes | None]:
+        identity: bytes,
+    ) -> tuple[bytes, str, bytes]:
         self._require_active()
         exchange = self._exchanges.pop(exchange_id, None)
         if exchange is None or exchange.generation != self._generation or exchange.expires_at <= self._clock():
@@ -222,13 +222,11 @@ class DevicePairing:
         self._on_update()
         confirmation_transcript = transcript + b"name:" + normalized_name.encode("utf-8")
         confirm_s = hmac.new(server_key, confirmation_transcript, hashlib.sha256).digest()
-        confirm_identity = None
-        if identity is not None:
-            confirm_identity = hmac.new(
-                server_key,
-                confirmation_transcript + b"spki:" + identity,
-                hashlib.sha256,
-            ).digest()
+        confirm_identity = hmac.new(
+            server_key,
+            confirmation_transcript + b"spki:" + identity,
+            hashlib.sha256,
+        ).digest()
         return confirm_s, normalized_name, confirm_identity
 
     def _require_active(self) -> None:

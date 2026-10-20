@@ -83,7 +83,8 @@ pub(crate) fn generated_p256_host() -> HostKey {
     let temporary = tempfile::tempdir().expect("create temporary certificate directory");
     let file = |name: &str| temporary.path().join(name).to_str().expect("temporary path is UTF-8").to_owned();
     run_openssl(&["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", &file("key.pem"),
-        "-out", &file("cert.pem"), "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"]);
+        "-out", &file("cert.pem"), "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+        "-addext", "basicConstraints=CA:FALSE"]);
     let (certificate, pkcs8) = der_pair(&file("cert.pem"), &file("key.pem"), &file);
     let (_, parsed) = X509Certificate::from_der(&certificate).expect("parse generated certificate");
     let spki = parsed.tbs_certificate.subject_pki.raw.to_vec();

@@ -271,7 +271,7 @@ async fn forward_trusted(
     mut request: Request<Incoming>,
     state: Arc<ProxyState>,
 ) -> Result<Response<ProxyBody>, String> {
-    let Upstream { mut sender, authority } = state.routes.connect().await.map_err(routes::RouteError::into_message)?;
+    let Upstream { mut sender, authority, .. } = state.routes.connect().await.map_err(routes::RouteError::into_message)?;
     let client_upgrade = is_upgrade_request(&request).then(|| hyper::upgrade::on(&mut request));
     rewrite_request(&mut request, &authority)?;
     let request = request.map(|body| body.map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>).boxed());
