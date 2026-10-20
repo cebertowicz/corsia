@@ -2,10 +2,10 @@
 
 A task held for the user with nothing to act on reads red while the user's
 queue is empty, so the plan looks stalled and no one moves it. An agent's
-``block_node`` on the user therefore names its ask. A real tradeoff is a raised
-decision, which already holds its source task (``plans.wait_causes``), so a
-block beside one is refused. Something to review or approve is a registered
-artifact the plan's thread owns: the block links it to the task with the existing
+``block_node`` on the user therefore names its ask. A choice answerable
+as asked, even one from a document, is a raised decision, which already holds
+its source task (``plans.wait_causes``), so a block beside one is refused.
+Anything the user must judge itself is a registered artifact the plan's thread owns: the block links it to the task with the existing
 ``attention`` role and raises it in the user's one attention pile. When the
 user clears that ask, the holds it placed clear and the agent is told
 (``cleared``). ``shared/planning/plans-simplify-2026-09-29.md``.
@@ -21,11 +21,12 @@ import plans.service as service
 from plans.node_states import open_user_block_sql
 
 NO_ASK = (
-    "work waits on the user only with something they can act on. For "
-    "something to review or approve, register the document or image and pass "
-    "its artifact id as ask_artifact_id. For a real tradeoff with nothing to "
-    "review, raise a decision on this task: it holds the task by itself, so do "
-    "not block it. Ask anything else in chat."
+    "work waits on the user only with something they can act on. For a choice "
+    "they can answer as asked, even one from a document, raise a decision "
+    "on this task: it holds the task by itself, so do not block it. If they "
+    "must judge the thing itself (a draft to send, a design, requirements), "
+    "register it and pass its artifact id as ask_artifact_id. Ask anything "
+    "else in chat."
 )
 DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "

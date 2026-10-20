@@ -6,6 +6,11 @@ application review when it cannot run and the person turned fallback on;
 otherwise the requesting thread's own model. The requester's model supplies
 only the model identity: every review still runs as one fresh isolated call
 over the application payload, never a fork of the requester's transcript.
+
+Every candidate resolves under the requesting thread's locality policy, so a
+lease's purpose and command are never disclosed to a model the person's
+project or chat setting has ruled out: a refused reviewer is an unavailable
+one, and a fallback candidate has to pass the same policy.
 """
 
 from __future__ import annotations
@@ -187,20 +192,26 @@ def _choose_reviewer(
 
 
 async def _resolve_runnable(selected: str, requester_thread_id: str | None):
-    """Resolve one exact reviewer model, or raise why it cannot run now."""
+    """Resolve one exact reviewer model under the requester's locality policy, or raise why it cannot run now."""
 
     def resolve():
-        """Resolve the exact target and the account its review runs on."""
+        """Resolve the exact target, then the account its review runs on if it may run."""
         from infra.database import get_db
-        from llm.resolution import resolve_execution_target
+        from llm.resolution import resolve_thread_target
 
         db = get_db()
         try:
-            target = resolve_execution_target(selected, db=db)
-            target = replace(
-                target,
-                account_id=_requester_reviewer_account(db, target, requester_thread_id),
+            target = resolve_thread_target(
+                selected, thread_id=requester_thread_id, db=db,
             )
+            # A target policy already refused needs no account: resolving one
+            # would either waste the read or raise the account's own cause and
+            # bury the reason the person's setting gave.
+            if target.available:
+                target = replace(
+                    target,
+                    account_id=_requester_reviewer_account(db, target, requester_thread_id),
+                )
         finally:
             db.close()
         if not target.available:
@@ -274,7 +285,8 @@ async def resolve_reviewer_target(
     model only when the fallback setting is on, and only for an application
     review. A pinned (per-action) review keeps its exact binding and never
     falls back. Only "cannot run" falls back: a reviewer that ran and failed
-    is never resolved here.
+    is never resolved here. A model the requester's project or chat setting
+    has ruled out counts as one that cannot run, for the fallback too.
     """
     choice = await run_in_db(
         lambda: _choose_reviewer(expected_catalog_id, requester_thread_id)

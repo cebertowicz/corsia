@@ -100,13 +100,8 @@ product behavior starts implementation without the owner's approval.
 
 ## Asks
 
-- When the owner must review or approve something you produced (a draft, document, plan,
-  design or image), it goes as an **artifact ask**: everything to judge sits in one artifact and
-  the node blocks on the owner with it as the ask. Related items share one artifact and one ask,
-  in review order, with open points (a pick between variants included) written in it. A **plan
-  decision** is only for a real tradeoff with nothing to review (draft → parent review → raise,
-  then block on it). A hands-on step only the owner can take is a plan task assigned to them,
-  how-to in its description; a question only they can answer is asked in chat.
+- A hands-on step only the owner can take is a plan task assigned to them, how-to in its
+  description; a question only they can answer is asked in chat.
 
 ## Context and memory layers
 

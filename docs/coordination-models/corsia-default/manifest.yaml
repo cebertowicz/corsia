@@ -20,8 +20,8 @@ files:  # ref: true is a starter-kit file pinned by repo-relative path, never co
     sha256: 4db0e4b21c16398f8cd2726eb35ed63aa4af9c73340e7eaea5523ef9ebdff685
   - kind: rules
     path: context/COORDINATION-CORE.md
-    bytes: 9673
-    sha256: 38e1a4e1b87b1dd38764ea60ac18223e663e70f8408a9691da1745ae8e1db2e4
+    bytes: 9176
+    sha256: a3dca4e0d0f1095d552c6f87f36a52aa539abc26430f22535eb296b4f2c105c9
   - kind: project-layer-template
     path: context/COORDINATION-MODEL.md.tmpl
     bytes: 740

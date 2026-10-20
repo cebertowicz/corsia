@@ -13,16 +13,16 @@
       "sha256": "c060283fe1bcfc602f3988ca0fc6cb0b3d931c2f58bca3a1f3874a9ce5c9c0b9"
     },
     {
-      "bytes": 3478,
+      "bytes": 3410,
       "kind": "context",
       "path": "context/30-VERIFICATION-COMPLETION.md",
-      "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
+      "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
     },
     {
-      "bytes": 3028,
+      "bytes": 2887,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "02730e5359ff9e7068d8dc81a9c900d8fd818aef98402daab6cbbc5f88cc4e05"
+      "sha256": "d6e21536597fb270103afc455a1c1aedb7af5219226f94d4beb7af996985aac8"
     },
     {
       "bytes": 862,
@@ -76,10 +76,10 @@
       "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
     },
     {
-      "bytes": 9673,
+      "bytes": 9176,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
-      "sha256": "38e1a4e1b87b1dd38764ea60ac18223e663e70f8408a9691da1745ae8e1db2e4"
+      "sha256": "a3dca4e0d0f1095d552c6f87f36a52aa539abc26430f22535eb296b4f2c105c9"
     },
     {
       "bytes": 740,
@@ -115,7 +115,7 @@
       "bytes": 6130,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "dd34f75f4c80a209ecba6c729fe9275dd57b90237da0e31bde9ff191a7df5e02"
+      "sha256": "0d3232633812609f77b86e4a9b22b22d71d4b95c16ad545bd8a20214cc9bb2bb"
     },
     {
       "bytes": 3541,
@@ -128,6 +128,12 @@
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
       "sha256": "23827a97c54bd33200a196356b1f39259ba4c640bb173694ebda1585fa15fa55"
+    },
+    {
+      "bytes": 2264,
+      "kind": "skill",
+      "path": "skills/apply-feedback/SKILL.md",
+      "sha256": "32b406e16637e0321581223fa5515973b0993173dbfa205a2b79251d21c55d51"
     },
     {
       "bytes": 19066,
@@ -232,22 +238,22 @@
       "sha256": "09150443b712dcccd43cb76a8786629d9f80f36d0d14b48d773fb86834bc4d46"
     },
     {
-      "bytes": 3324,
+      "bytes": 2976,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "4b145388ce9d7832ae5b8a05335b9de8a04e5eb309a66099fb30881209a2b1f3"
+      "sha256": "437ebbc92573a717e40c3d2aeaf4f1f5e2f4544a4ed1ee3453b5d3284322f304"
     },
     {
-      "bytes": 1364,
+      "bytes": 1529,
       "kind": "skill",
       "path": "skills/decision-brief/corsia.yaml",
-      "sha256": "3dc03ff4c72c34d2b9b7cc9943e899bcdb4448c9097e6e687810abe255ede676"
+      "sha256": "6b63ac77ebfd2b95cebe9dc7cb7ad407a12411f079fd3a9ceb74cd1b5f21bf7d"
     },
     {
-      "bytes": 5581,
+      "bytes": 5507,
       "kind": "skill",
       "path": "skills/engineering-standards/SKILL.md",
-      "sha256": "2b57c674da411c245a4895a64210d3e733873cde6f88d27774e678abc6fd1674"
+      "sha256": "fd74dc1306bc8cab9ad79060175df3b7cb225d6ac21b312c21ce37f09c6151f5"
     },
     {
       "bytes": 4438,
