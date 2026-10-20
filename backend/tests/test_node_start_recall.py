@@ -224,6 +224,37 @@ def test_callers_own_live_rule_is_not_quoted(db):
     assert _related(db) == []
 
 
+def test_closer_agent_recorded_rules_do_not_hide_a_user_rule(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from memory.node_start_recall import MAX_HITS
+
+    agent = {"kind": "message", "reference": "agent"}
+    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[
+        *[
+            {"entry_id": index, "field": "active_constraints", "body": {"statement": "Export account ledger in CSV format with stable export columns.", "source_refs": [agent]}, "revision": 1}
+            for index in range(1, MAX_HITS + 3)
+        ],
+        {"entry_id": 99, "field": "active_constraints", "body": {"statement": "Export the ledger as CSV.", "source_refs": [{"kind": "user", "reference": "message"}]}, "revision": 1},
+    ])
+
+    assert any("Export the ledger as CSV" in line for line in _related(db))
+
+
+def test_purged_thread_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='past'")
+    db.commit()
+
+    assert _related(db) == []
+
+
 def test_live_transcript_messages_are_excluded_but_folded_messages_are_eligible(db):
     db.execute(
         "INSERT INTO checkpoints (id,thread_id,history_epoch,through_seq,through_message_id,trigger,mode,status,source_harness,source_model,writer_harness,writer_model,continuity_base_revision,continuity_base_snapshot_json,started_at,installed_at) "

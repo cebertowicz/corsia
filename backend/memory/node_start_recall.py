@@ -268,25 +268,32 @@ def _decision_candidates(db, terms, user_id) -> list[_Hit]:
 
 def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
     rows = entry_rank_rows_matching(db, _fts_terms(terms), user_id, None, SOURCE_CANDIDATES, SOURCE_CANDIDATES)
-    scored = [
-        (found, row) for row in rows
-        if row["field"] in RULE_FIELDS and row["canonical_state"] == "active"
+    owned = _owned_thread_ids(db, user_id, {str(row["thread_id"]) for row in rows})
+    # Every eligible row is decoded: whether the person is the source is only in
+    # the snapshot body, so cutting to the best few first could hide their rule.
+    rows = [
+        row for row in rows
+        if row["thread_id"] in owned and row["field"] in RULE_FIELDS and row["canonical_state"] == "active"
         and not (row["thread_id"] == caller_thread_id and not row["historical"])
-        if (found := match(terms, str(row["search_text"])))
     ]
-    scored.sort(key=lambda pair: (-pair[0].shared, -pair[0].title_shared, pair[1]["relevance"]))
-    selected = scored[:MAX_HITS]
-    scores = {(row["thread_id"], row["history_epoch"], row["entry_id"]): found for found, row in selected}
     hits = []
-    for row, entry in decoded_entries(hydrate_entry_rows(db, [row for _found, row in selected])):
+    for row, entry in decoded_entries(hydrate_entry_rows(db, rows)):
         if not any(ref.get("kind") == "user" for ref in entry.body.get("source_refs", []) if isinstance(ref, dict)):
             continue
         found, created_at = match(terms, entry.primary_text or ""), str(row["latest_generated_at"] or row["first_generated_at"] or "")
         if not found or not created_at:
             continue
         line = f'{local_clock(created_at)} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}” → get_checkpoints(checkpoint_id="{row["latest_id"]}")'
-        hits.append(_Hit(scores[(row["thread_id"], row["history_epoch"], row["entry_id"])], created_at, "rule", line, thread_project(str(row["thread_id"]), db)))
+        hits.append(_Hit(found, created_at, "rule", line, thread_project(str(row["thread_id"]), db)))
     return hits
+
+
+def _owned_thread_ids(db, user_id: str, thread_ids: set[str]) -> set[str]:
+    if not thread_ids:
+        return set()
+    marks = ",".join("?" for _ in thread_ids)
+    rows = db.execute(f"SELECT t.id FROM threads t WHERE t.id IN ({marks}) AND {_owned_threads('t')}", [*thread_ids, user_id]).fetchall()
+    return {str(row["id"]) for row in rows}
 
 
 def _local_source(db, source_project: str | None, caller_project: str | None) -> bool:
