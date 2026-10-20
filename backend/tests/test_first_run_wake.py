@@ -485,7 +485,8 @@ class TestAppPath:
         assert "Never read the local download yourself." in reference
         assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
         assert "when your question is still unanswered, end your turn: that question stays open" in reference
-        assert "make no plan call for a step (no `start`, no `mark_done`)" in reference
+        assert "never track a step itself in the plan (no `start`, no `mark_done`" in reference
+        assert "the tasks step 6 makes are follow-up work, so do make them" in reference
         assert "already shows that same outcome, say nothing" in reference
         assert "Done for now. Anything I skipped, ask me any time and I'll set it up." in reference
 
