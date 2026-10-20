@@ -15,6 +15,11 @@ USER_STEP_TRIED_MARKER = "Already tried:"
 USER_STEP_DESCRIPTION_REFUSAL = (
     "user steps need instructions with 'Already tried: …'; add what you tried"
 )
+PERSON_STEP_DESCRIPTION_LIMIT = 400
+PERSON_STEP_DESCRIPTION_LIMIT_REFUSAL = (
+    "Put the how-to in a document, register it and pass instructions_artifact_id; "
+    "keep the description to one line."
+)
 
 _CREATE = {
     "kind",
@@ -33,6 +38,7 @@ _CREATE = {
     "spawn_kind",
     "watchdog_budget_seconds",
     "depends_on_node_id",
+    "instructions_artifact_id",
 }
 
 #: Operations that end their executor's work on a task.
@@ -295,6 +301,8 @@ def _user_step_description(params: dict[str, Any]) -> None:
         or not description.casefold().split(USER_STEP_TRIED_MARKER.casefold(), 1)[1].strip()
     ):
         raise PlanInputError(USER_STEP_DESCRIPTION_REFUSAL)
+    if len(description) > PERSON_STEP_DESCRIPTION_LIMIT:
+        raise PlanInputError(PERSON_STEP_DESCRIPTION_LIMIT_REFUSAL)
 
 
 def node_fields(

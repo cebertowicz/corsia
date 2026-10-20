@@ -175,6 +175,7 @@ from plans.watch_resolution import resolve_delivered_event
 
 # Document feedback and shared-document ownership tasks (doceditor/, registry/).
 from plans.artifact_links import link as link_node_artifact
+from plans.user_step_instructions import read_for_artifact as person_step_instructions
 from plans.feedback_nodes import (
     create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
 )
