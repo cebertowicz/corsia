@@ -166,7 +166,7 @@ async def _check_graph(response: httpx.Response, account_id: str) -> None:
 
 
 async def graph_json(
-    method: str, url: str, *, account_id: str, params: dict[str, object] | None = None,
+    method: str, url: str, *, account_id: str, params: dict[str, Any] | None = None,
     body: dict[str, object] | None = None,
 ) -> Any:
     """One Graph JSON call with a bounded throttle retry and fixed error causes."""

@@ -178,7 +178,7 @@ class MicrosoftMailDraftTool(Tool):
                 return "Error: current thread identity is unavailable"
             to, cc = addresses(kwargs.get("to")), addresses(kwargs.get("cc"))
             subject, body = text_arg(kwargs.get("subject"), "subject is required", one_line=True), text_arg(kwargs.get("body"), "body is required")
-            text = compose_document(str((await run_in_db(resolve_for_thread, account, thread_id))["address"]), to, cc, subject, body, "")
+            text = compose_document(str((await run_in_db(_visible_account, account, thread_id))["address"]), to, cc, subject, body, "")
             old = await run_in_db(_draft_row, thread_id, str(kwargs["draft_id"])) if kwargs.get("draft_id") else None
             if old is not None and old.get("state") != "open":
                 return "Error: There is no open draft with that id in this conversation."

@@ -158,3 +158,23 @@ def test_microsoft_account_resolution_refuses_google_unknown_and_unreached_alike
             microsoft_actions._visible_account(selector, thread)
         errors.append(str(error.value))
     assert errors == ["Microsoft account is unavailable to this thread"] * 3
+
+
+async def test_mail_draft_resolves_sender_through_shared_visibility(isolated_db, monkeypatch):
+    import json
+
+    from infra import config
+    from tests.event_routing_helpers import mk_session
+
+    thread, account = mk_session("draft-caller"), connect()
+
+    async def designated(_kwargs):
+        return None
+
+    monkeypatch.setattr(microsoft_actions, "_designated", designated)
+    result = json.loads(await microsoft_actions.MicrosoftMailDraftTool().execute(
+        _thread_id=thread, account_id=account, to=["recipient@example.test"], subject="Review me", body="Draft body",
+    ))
+    assert result["account_id"] == account and result["draft_id"]
+    document = (config.WORKSPACE / result["path"]).read_text()
+    assert "mail@example.test" in document and "Draft body" in document
