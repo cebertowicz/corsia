@@ -179,6 +179,7 @@ test.describe('@surface:local-only local-only header frames', () => {
 				if (['inherited-worker', 'project-local-only'].includes(name)) {
 					await expect(sheet.locator('.tg')).toHaveClass(/held/);
 					await expect(sheet.locator('.tg')).not.toHaveClass(/locked/);
+					await expect(sheet.locator('.tg')).toHaveCSS('opacity', '0.5');
 				}
 				if (name === 'write-in-flight') {
 					await page.getByRole('button', { name: 'Local only', exact: true }).click();
@@ -186,6 +187,7 @@ test.describe('@surface:local-only local-only header frames', () => {
 					await expect(page.getByText('Saving…', { exact: true })).toBeVisible();
 					await expect(sheet.locator('.tg')).toHaveClass(/locked/);
 					await expect(sheet.locator('.tg')).not.toHaveClass(/held/);
+					await expect(sheet.locator('.tg')).toHaveCSS('opacity', '1');
 					await expect(page.locator('.h-local-only')).toHaveCount(0);
 				} else if (name === 'save-failure') {
 					await page.getByRole('button', { name: 'Local only', exact: true }).click();
