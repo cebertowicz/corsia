@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from llm.catalog import list_models
-from llm.managed_omlx_binary import is_corsia_managed_server
+from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_executable
 from llm.local_setup_ownership import omlx_on_path
 from llm.local_setup_gates import local_memory_ok
 from llm.local_profiles import format_size
@@ -112,7 +112,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     servers = [s for s in get_servers(provider="omlx")
                if is_corsia_managed_server(s) and s.get("status") != "disabled"]
     if not servers:
-        if omlx_on_path() is None:
+        if managed_omlx_executable() is None and omlx_on_path() is None:
             result = starter_source("not_installed", "oMLX is not installed", "Install oMLX")
         else:
             result = starter_source("needs_setup", "No local model server is set up", OMLX_FIX)

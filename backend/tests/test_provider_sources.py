@@ -673,6 +673,17 @@ class TestOmlx:
         omlx = _sources(client)["omlx"]
         assert omlx["state"] == "not_installed" and omlx["name"] == "Local model"
 
+    def test_the_bundled_binary_with_no_server_needs_setup_not_install(
+        self, isolated_db, client, monkeypatch,
+    ):
+        monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: None)
+        monkeypatch.setattr(
+            "llm.local_sources.managed_omlx_executable",
+            lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx",
+        )
+        omlx = _sources(client)["omlx"]
+        assert (omlx["state"], omlx["reason"]) == ("needs_setup", "No local model server is set up")
+
     def test_a_reachable_explicit_external_endpoint_is_ready_without_a_local_binary(
         self, isolated_db, client, monkeypatch,
     ):
