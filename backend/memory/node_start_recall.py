@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import cache
 import json
 import sqlite3
 from time import perf_counter
@@ -19,7 +20,7 @@ from core.corrections_recording import is_owner_authored_message, owner_message_
 from memory.checkpoint_entry_rows import entry_rows_matching
 from memory.checkpoint_search import caller_user_id
 from memory.checkpoint_search_entries import continuity_entries
-from memory.task_match import Match, NodeText, TaskTerms, match, task_terms
+from memory.task_match import Match, NodeText, TaskTerms, floor, match, task_terms
 
 MAX_HITS = 3
 SOURCE_CANDIDATES = 100
@@ -136,11 +137,16 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     if user_id is None:
         return "no_terms", []
     caller_project, cutoff = _caller_context(db, caller_thread_id, text.node_id)
+
+    @cache
+    def local(project: str | None) -> bool:
+        return _local_source(db, project, caller_project)
+
     candidates = [
-        *_message_candidates(db, terms, user_id, caller_thread_id, caller_project, cutoff),
-        *_comment_candidates(db, terms, user_id, caller_project, cutoff),
-        *_decision_candidates(db, terms, user_id, caller_project, cutoff),
-        *_rule_candidates(db, terms, user_id, caller_project, cutoff),
+        *_message_candidates(db, terms, user_id, caller_thread_id, local, cutoff),
+        *_comment_candidates(db, terms, user_id, local, cutoff),
+        *_decision_candidates(db, terms, user_id, local, cutoff),
+        *_rule_candidates(db, terms, user_id, local, cutoff),
     ]
     if not candidates:
         return "below_floor", []
@@ -174,11 +180,12 @@ def _fts_terms(terms: TaskTerms) -> str:
     return " OR ".join(f'"{term}"*' for term in terms.terms)
 
 
-def _like_clause(column: str, terms: TaskTerms) -> tuple[str, list[str]]:
-    return " OR ".join(f"{column} LIKE ?" for _ in terms.terms), [f"%{term}%" for term in terms.terms]
+def _shared_terms(column: str, terms: TaskTerms) -> tuple[str, list[str]]:
+    """Count the terms ``column`` contains; never below ``match()``'s count, so the floor drops no hit."""
+    return "+".join(f"({column} LIKE ?)" for _ in terms.terms), [f"%{term}%" for term in terms.terms]
 
 
-def _message_candidates(db, terms, user_id, caller_thread_id, caller_project, cutoff) -> list[_Hit]:
+def _message_candidates(db, terms, user_id, caller_thread_id, local, cutoff) -> list[_Hit]:
     owner_filter, owner_params = owner_message_sql_predicate("m")
     rows = db.execute(
         f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title,t.project_id
@@ -195,7 +202,7 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller_project, cu
     ).fetchall()
     hits = []
     for row in rows:
-        if not _before(str(row["created_at"]), cutoff) or not _local_source(db, row["project_id"], caller_project):
+        if not _before(str(row["created_at"]), cutoff) or not local(row["project_id"]):
             continue
         if not is_owner_authored_message(role=row["role"], content=row["content"], metadata=row["metadata"]):
             continue
@@ -206,20 +213,22 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller_project, cu
     return hits
 
 
-def _comment_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hit]:
+def _comment_candidates(db, terms, user_id, local, cutoff) -> list[_Hit]:
     from core.correction_targets import comment_target_sql
 
-    clause, params = _like_clause("c.body", terms)
+    shared, params = _shared_terms("c.body", terms)
     rows = db.execute(
-        f"""SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,t.project_id
-            FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
-            LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
-            WHERE c.author_kind='user' AND t.user_id=? AND t.purged_at IS NULL AND ({clause})
-            ORDER BY c.created_at DESC,c.id DESC LIMIT ?""", [user_id, *params, SOURCE_CANDIDATES],
+        f"""SELECT * FROM (
+              SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,t.project_id,{shared} AS shared
+              FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
+              LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
+              WHERE c.author_kind='user' AND t.user_id=? AND t.purged_at IS NULL)
+            WHERE shared>=? ORDER BY shared DESC,created_at DESC,id DESC LIMIT ?""",
+        [*params, user_id, floor(len(terms.terms)), SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
-        if not _before(str(row["created_at"]), cutoff) or not _local_source(db, row["project_id"], caller_project):
+        if not _before(str(row["created_at"]), cutoff) or not local(row["project_id"]):
             continue
         found = match(terms, str(row["body"]))
         if found:
@@ -229,16 +238,20 @@ def _comment_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hit
     return hits
 
 
-def _decision_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hit]:
+def _decision_candidates(db, terms, user_id, local, cutoff) -> list[_Hit]:
     from plans.public import DECISION_TYPE, answer_note
 
-    clause, params = _like_clause("json_extract(ai.metadata,'$.plan_decision.answer.text')", terms)
+    shared, params = _shared_terms("json_extract(ai.metadata,'$.plan_decision.answer.text')", terms)
     rows = db.execute(
-        f"""SELECT ai.external_id,ai.metadata,t.project_id FROM artifact_identities ai
-            JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
-            WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
-              AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
-              AND t.user_id=? AND ({clause}) LIMIT ?""", [DECISION_TYPE, user_id, *params, SOURCE_CANDIDATES],
+        f"""SELECT * FROM (
+              SELECT ai.external_id,ai.metadata,t.project_id,{shared} AS shared,
+                     json_extract(ai.metadata,'$.plan_decision.answered_at') AS answered_at
+              FROM artifact_identities ai
+              JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
+              WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
+                AND json_extract(ai.metadata,'$.plan_decision.state')='answered' AND t.user_id=?)
+            WHERE shared>=? ORDER BY shared DESC,answered_at DESC LIMIT ?""",
+        [*params, DECISION_TYPE, user_id, floor(len(terms.terms)), SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
@@ -246,7 +259,7 @@ def _decision_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hi
             body = json.loads(row["metadata"]).get("plan_decision")
         except (TypeError, ValueError, AttributeError):
             continue
-        if not isinstance(body, dict) or not _local_source(db, row["project_id"], caller_project):
+        if not isinstance(body, dict) or not local(row["project_id"]):
             continue
         text = answer_note(body.get("answer"))
         created_at = str(body.get("answered_at") or "")
@@ -259,9 +272,9 @@ def _decision_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hi
     return hits
 
 
-def _rule_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hit]:
+def _rule_candidates(db, terms, user_id, local, cutoff) -> list[_Hit]:
     rows = entry_rows_matching(db, _fts_terms(terms), user_id, None, SOURCE_CANDIDATES, SOURCE_CANDIDATES)
-    project_cache: dict[str, str | None] = {}
+    thread_project = cache(lambda thread_id: _thread_project(db, thread_id))
     hits = []
     for row in rows:
         if row["field"] not in RULE_FIELDS:
@@ -272,9 +285,8 @@ def _rule_candidates(db, terms, user_id, caller_project, cutoff) -> list[_Hit]:
         entry = next((item for item in entries if item.entry_id == row["entry_id"] and item.field == row["field"] and item.revision == row["revision"]), None)
         if entry is None or not any(ref.get("kind") == "user" for ref in entry.body.get("source_refs", []) if isinstance(ref, dict)):
             continue
-        project = project_cache.setdefault(str(row["thread_id"]), _thread_project(db, str(row["thread_id"])))
         created_at = str(row["latest_generated_at"] or row["first_generated_at"] or "")
-        if not created_at or not _before(created_at, cutoff) or not _local_source(db, project, caller_project):
+        if not created_at or not _before(created_at, cutoff) or not local(thread_project(str(row["thread_id"]))):
             continue
         found = match(terms, entry.primary_text or "")
         if found:

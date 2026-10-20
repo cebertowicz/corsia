@@ -96,6 +96,61 @@ def test_decision_without_free_text_is_not_quoted(db):
     assert _related(db) == []
 
 
+def test_many_newer_one_term_comments_do_not_hide_an_older_match(db):
+    from doc_feedback_helpers import add_comment, seed_document
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    db.execute("UPDATE threads SET user_id='owner-token'")
+    artifact = seed_document(db, "past", name="ledger-guide.md")
+    match, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+    noise = [add_comment(db, artifact, author_kind="user", author_id=None)[0]["id"] for _ in range(SOURCE_CANDIDATES + 1)]
+    db.execute("UPDATE doc_comments SET body='Export account ledger with CSV format.', created_at='2026-01-01' WHERE id=?", (match["id"],))
+    db.executemany("UPDATE doc_comments SET body='Export later.', created_at='2026-02-01' WHERE id=?", [(comment_id,) for comment_id in noise])
+    db.commit()
+
+    lines = _related(db)
+
+    assert len(lines) == 2 and "Export account ledger with CSV" in lines[1]
+
+
+def test_many_one_term_decision_answers_do_not_hide_a_match(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES
+    from plans.public import DECISION_TYPE
+
+    def decision(decision_id: str, text: str, answered_at: str) -> tuple:
+        body = {"state": "answered", "thread_id": "past", "answered_at": answered_at, "title": "Ledger", "answer": {"option_id": "other", "text": text}}
+        return (decision_id, DECISION_TYPE, decision_id, json.dumps({"plan_decision": body}))
+
+    noise = [decision(f"noise-{index}", "Export later.", "2026-02-01") for index in range(SOURCE_CANDIDATES + 1)]
+    rows = [*noise, decision("z-match", "Export account ledger with CSV format.", "2026-01-01")]
+    db.executemany(
+        "INSERT INTO artifact_identities (id,integration,type,external_id,state,retention,metadata,created_at,updated_at) "
+        "VALUES (?,'local',?,?,'active','durable',?,'2026-01-01','2026-01-01')", rows,
+    )
+    db.commit()
+
+    lines = _related(db)
+
+    assert len(lines) == 2 and "answer to decision" in lines[1]
+
+
+def test_locality_is_read_once_per_project(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','2026-01-01','2026-01-01')")
+    db.execute("UPDATE threads SET project_id='one'")
+    for index in range(SOURCE_CANDIDATES):
+        _message(db, f"message-{index}", "past", "Export account ledger with CSV format.", seq=index + 1)
+    reads: list[str] = []
+    db.set_trace_callback(lambda sql: reads.append(sql) if "project_inference_policies" in sql else None)
+
+    lines = _related(db)
+
+    db.set_trace_callback(None)
+    assert len(lines) == 4
+    assert len(reads) == 1
+
+
 def test_only_user_sourced_active_rule_is_quoted(db):
     from checkpoint_retrieval_fixtures import _install_checkpoint
 
