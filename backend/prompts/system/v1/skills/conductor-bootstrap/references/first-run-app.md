@@ -50,7 +50,7 @@ When `setup.setup_decisions` holds the import decision (title `Bring over what y
    - Connected means Connected apps shows it working (for a CLI, the CLI answers) and one real read came back. Retry once at most; then name the cause and the fix, and make it a task. Nothing here holds up the hand-off.
    - If more than two are left: connect two, list the rest in one line, and make each one a task.
    - On "not now" or "nothing": `I'll suggest them as they come up.` Never ask again during setup.
-6. **Email and calendar.** Post: `Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?` If they're not sure, ask what they open to read it. Outlook covers Outlook, Hotmail, Live and Microsoft 365.
+6. **Email and calendar.** If they named Gmail, Google Drive or Google Calendar in step 5, don't ask: go to Gmail or Google below. Otherwise post: `Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?` If they're not sure, ask what they open to read it. Outlook covers Outlook, Hotmail, Live and Microsoft 365.
    - **Outlook, both, or something else:** first write one line in the workspace's `context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`: Outlook for Outlook and for both, Other for anything else. Replace an `- **Email app:**` line that is already there. Never write it in `USER.md`, and never change the `- **Email:**` line, which is the account's address.
    - **Gmail or Google:** follow skill `google-setup` from its step 2.
    - **Outlook:** when your skills list includes `microsoft-setup`, follow it from its step 1. Otherwise post `I can't connect Outlook, but I've noted which one you use.`
