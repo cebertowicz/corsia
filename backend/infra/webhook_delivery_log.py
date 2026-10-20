@@ -111,6 +111,20 @@ def last_check_suite_without_id(*, db=None) -> str | None:
     return row[0] if row else None
 
 
+def repo_delivered_since(repo: str, since: str, *, db=None) -> bool:
+    """Whether any webhook delivery for ``repo`` arrived since the UTC timestamp."""
+    return (repo_last_delivered_at(repo, db=db) or "") >= since
+
+
+def repo_last_delivered_at(repo: str, *, db=None) -> str | None:
+    """The latest delivery timestamp for a repository, if it has one."""
+    connection = db if db is not None else get_db()
+    row = connection.execute(
+        "SELECT MAX(created_at) FROM webhook_deliveries WHERE repo=?", (repo,),
+    ).fetchone()
+    return str(row[0]) if row and row[0] is not None else None
+
+
 def object_recorded(object_key: str, *, db=None) -> bool:
     """Whether any source already recorded this GitHub object.
 

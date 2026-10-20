@@ -310,6 +310,9 @@ async def _admission_unit(
         )
         if outcome is not None:
             return outcome
+        if event_type == "check_suite" and payload.get("action") == "completed":
+            from events.connectors.github_head_checks import observe_admitted_check_suite
+            observe_admitted_check_suite(payload)
         internal_event = _schedule(event_type, payload, delivery_id)
         if isinstance(internal_event, AdmissionOutcome):
             return internal_event
