@@ -154,9 +154,15 @@ async def test_devices_open_streams_stop_under_grace_and_50_cycles_release_resou
                     durations.append(time.monotonic() - started)
                     response.raise_for_status()
                     assert durations[-1] < 2, (cycle, durations[-1])
-                assert await stable_counts(client) == baseline, f"resource leak at cycle {cycle + 1}"
+                counts = await stable_counts(client)
+                assert all(counts[k] <= baseline[k] for k in baseline), (
+                    f"resource leak at cycle {cycle + 1}: {counts} > {baseline}"
+                )
+                # A startup worker can still retire after the quiet window. A
+                # leak is growth, so later cycles compare against the new floor.
+                baseline = counts
             final = await stable_counts(client)
-            assert final == baseline
+            assert all(final[k] <= baseline[k] for k in baseline)
             print(f"I9 cycles=50 baseline={baseline} final={final} stop_max={max(durations):.4f}s")
         code, elapsed = backend.terminate()
         assert code in (0, -signal.SIGTERM)
