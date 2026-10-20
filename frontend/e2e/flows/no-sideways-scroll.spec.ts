@@ -45,6 +45,8 @@ const EXCLUDED_ROUTES: Record<string, string> = {
 	'/_design/artifacts': 'internal design showcase for the artifact pane, not a reader surface',
 	'/_design/context-chip-probe': 'internal probe for the context chip, not a reader surface',
 	'/_design/focus-outcomes': 'internal design showcase for Focus outcomes, not a reader surface',
+	'/_design/remote-connect': 'internal review frames for remote connect, not a reader surface',
+	'/_design/setup-motion': 'internal motion evidence for setup, not a reader surface',
 };
 
 // ---- Discovery from source ------------------------------------------------
@@ -336,7 +338,7 @@ async function seed(
 		return route.fulfill({ json: {
 			definition_version: 1, period: mockPeriod(new URL(route.request().url()).searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous),
 			coverage: { priced_records: 1_600, usage_records: 2_000 }, not_api_priced_records: 3,
-			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400 }],
+			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400, models: [] }],
 			actual: { subscription_records: 1_600, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: { subscription_dollars: null, overage_dollars: null, subscription_facts: 0, overage_facts: 0, subscription_coverage: 'none', overage_coverage: 'none', overlapping_overage: [], allocation: 'unavailable' } },
 		} });
 	});

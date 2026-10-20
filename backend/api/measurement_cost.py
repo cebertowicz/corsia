@@ -66,7 +66,13 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # agrees with them. Cache tokens additionally need the writer's token contract:
 # the ledger keeps no per-row contract marker, so the recorded source is the only
 # evidence, and it must agree with the model's harness prefix. Claude Code rows
-# were always written disjoint (#1215). Codex rows before the 2026-08-20
+# were always written disjoint (#1215). Two more Claude Code writers have kept
+# Anthropic's disjoint buckets since their first ledger row: source 'checkpoint'
+# began with #1764 (2026-09-15), whose Claude Code rows are
+# ``from_anthropic(...).ledger_row()`` in ``core.checkpoint_cc_io``; the
+# host-access reviewer has copied the CLI's input, cache-creation and cache-read
+# counts field for field since its first row (2026-07-21,
+# ``llm.isolated_structured._capture_claude_telemetry``). Codex rows before the 2026-08-20
 # disjoint contract (#1056) may be thread-cumulative or cache-inclusive,
 # which neither a zero cache nor a matching total disproves. A Codex row is
 # priced only when its id is a 24-hex receipt id: ``_receipt_id`` (turn usage,
@@ -75,7 +81,11 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # path is per-call and disjoint: ``subagents.codex_app_server_notifications.record_usage``
 # emits ``CumulativeTurnVolume.observe`` deltas as ``TokenUsage.ledger_row()``, and
 # ``core.checkpoint_codex_result.CodexCheckpointCapture.publish_calls`` writes each
-# one. Direct writes use ``uuid4()[:12]`` (hyphenated, so never 24 hex). An External conversation row
+# one. Direct writes use ``uuid4()[:12]`` (hyphenated, so never 24 hex). The
+# host-access reviewer's Codex rows always recorded cache creation NULL, as
+# Codex reports no cache-creation count (``infra.provider_usage.from_codex``),
+# so those rows stop at 'tokens_unreported' above; a reviewer Codex row with
+# every bucket reported is written by ``from_codex``. An External conversation row
 # is disjoint from 2026-09-17: the native path normalizes OpenAI-compatible
 # usage into disjoint buckets in ``infra.provider_usage.from_litellm``, present in
 # this repository's first commit, and the later rows carry cache reads larger
@@ -85,12 +95,15 @@ _BUCKETS_REPORTED = " AND ".join(f"typeof(u.{bucket})='integer' AND u.{bucket}>=
 _TOTAL_AGREES = (
     "(u.total_tokens IS NULL OR u.total_tokens=" + "+".join(f"u.{bucket}" for bucket in _BUCKETS) + ")"
 )
+_REVIEW_SOURCES = "'host_access_action_review','host_access_application_review'"
 # Evaluated as an explicit 0/1 so a NULL source or model can never reach
 # ``NOT NULL`` (which is NULL, not true) and fall through to 'ok'.
 _CONTRACT_PROVEN = (
-    f"(CASE WHEN COALESCE(u.source,'')='{CLAUDE_CODE_SOURCE}' AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
+    f"(CASE WHEN COALESCE(u.source,'') IN ('{CLAUDE_CODE_SOURCE}','checkpoint',{_REVIEW_SOURCES}) "
+    "AND COALESCE(u.model,'') LIKE 'claude-code/%' THEN 1 "
     f"WHEN COALESCE(u.source,'') IN ('{CODEX_SOURCE}','checkpoint') AND COALESCE(u.model,'') LIKE 'codex/%' "
     f"AND length(u.id)=24 AND u.id NOT GLOB '*[^0-9a-f]*' THEN 1 "
+    f"WHEN COALESCE(u.source,'') IN ({_REVIEW_SOURCES}) AND COALESCE(u.model,'') LIKE 'codex/%' THEN 1 "
     f"WHEN COALESCE(u.source,'')='conversation' AND COALESCE(u.model,'') LIKE 'external@%' "
     f"AND u.created_at>='2026-09-17' THEN 1 "
     f"WHEN u.cache_creation_tokens=0 AND u.cache_read_tokens=0 "
@@ -195,7 +208,8 @@ def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     resolve = IdentityResolver(db)
     shapes = [dict(row) for row in rows]
     for shape in shapes:
-        shape["model"] = resolve(shape).key
+        identity = resolve(shape)
+        shape["model"], shape["model_label"] = identity.key, identity.label
     return shapes
 
 
@@ -322,6 +336,25 @@ def _pooled(series: list[dict[str, Any]], window: Window, grain: Grain) -> dict[
     }
 
 
+def _excluded_models(classified: list[dict[str, Any]], grain: Grain) -> dict[str, list[dict[str, Any]]]:
+    """Name each latest-window exclusion by the label of the resolved identity it retained."""
+    grouped: dict[str, dict[str, int]] = {}
+    for row in classified:
+        kind = str(row["outcome"])
+        if kind not in _EXCLUDED_TEXT or str(row["period"]) not in grain.latest.periods:
+            continue
+        models = grouped.setdefault(kind, {})
+        label = str(row["model_label"])
+        models[label] = models.get(label, 0) + int(row["records"])
+    return {
+        kind: [
+            {"label": label, "records": records}
+            for label, records in sorted(models.items(), key=lambda item: (-item[1], item[0]))
+        ]
+        for kind, models in grouped.items()
+    }
+
+
 def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build Cost from Measurement's already prepared scope and outcome periods.
 
@@ -341,6 +374,7 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
     for row in classified:
         if str(row["period"]) in grain.latest.periods:
             records[row["outcome"]] += int(row["records"])
+    excluded_models = _excluded_models(classified, grain)
     return {
         "definition_version": 1,
         "series": series,
@@ -348,6 +382,9 @@ def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None =
         "previous": _pooled(every, grain.previous, grain) if every else None,
         "coverage": {"priced_records": records["priced"], "usage_records": sum(records.values())},
         "not_api_priced_records": records["not_api_priced"],
-        "excluded": [{"kind": kind, "text": text, "records": records[kind]} for kind, text in _EXCLUDED_TEXT.items() if records[kind]],
+        "excluded": [
+            {"kind": kind, "text": text, "records": records[kind], "models": excluded_models[kind]}
+            for kind, text in _EXCLUDED_TEXT.items() if records[kind]
+        ],
         "actual": build_actual(db, params),
     }

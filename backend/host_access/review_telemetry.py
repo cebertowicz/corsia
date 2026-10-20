@@ -10,8 +10,10 @@ from loguru import logger
 from host_access.failure_reasons import ReviewTerminal, classify_failure
 from infra.db_async import run_in_db
 from infra.llm_usage import record_llm_usage
+from infra.provider_usage import from_codex, unmeasured_ledger_row
 from infra.product_events import emit_product_event
 from llm.isolated_structured import IsolatedStructuredTelemetry
+from subagents.usage_model import detached_usage_model_id
 
 
 ReviewKind = Literal["application", "action"]
@@ -30,6 +32,18 @@ def usage_thread_id(
 
 _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens",
                  "cache_read_tokens", "total_tokens", "cost_usd")
+
+
+def _recorded_usage(telemetry: IsolatedStructuredTelemetry) -> dict[str, int | float | None]:
+    """Reviewer tokens in the disjoint ledger contract; Codex's cached subset converts once, in its owner."""
+    if telemetry.harness != "codex":
+        return {name: getattr(telemetry, name) for name in _USAGE_FIELDS}
+    codex_usage = from_codex({
+        "inputTokens": telemetry.prompt_tokens,
+        "cachedInputTokens": telemetry.cache_read_tokens,
+        "outputTokens": telemetry.completion_tokens,
+    })
+    return dict(codex_usage.ledger_row() if codex_usage is not None else unmeasured_ledger_row())
 
 
 @dataclass(slots=True)
@@ -51,10 +65,11 @@ class ReviewTelemetry:
     async def record_usage(self) -> None:
         while self.unrecorded:
             telemetry = self.unrecorded.pop(0)
-            usage = {name: getattr(telemetry, name) for name in _USAGE_FIELDS}
             try:
                 await run_in_db(
-                    record_llm_usage, self.thread_id, telemetry.catalog_id, usage,
+                    record_llm_usage, self.thread_id,
+                    detached_usage_model_id(telemetry, telemetry.reported_model),
+                    _recorded_usage(telemetry),
                     source=f"host_access_{self.review_kind}_review",
                     ttft_ms=None, harness=telemetry.harness,
                     vendor_account_id=self.account_id,
