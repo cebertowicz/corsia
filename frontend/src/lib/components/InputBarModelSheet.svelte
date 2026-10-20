@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, threads } from '$lib/stores/threads';
+	import { activeThreadId, threadLocalOnly, threads } from '$lib/stores/threads';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { activeModelId, beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, models, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
 	import { accountSegments, canonicalName, groupModels, groupStatusSegments, rowNote, usageBreakdown, type ModelGroup } from '$lib/stores/modelGroups';
@@ -15,6 +15,7 @@
 	import { openProjectSettings, requestProviderCard, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import PickerLocalStatus from './PickerLocalStatus.svelte';
+	import LocalOnlySwitchRow from './LocalOnlySwitchRow.svelte';
 	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
 	import { canAddLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
@@ -25,6 +26,7 @@
 	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
 	const cloudModelsOff = $derived($models.some(localityOff));
 	const projectCloudOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
+	const inheritedLocalOnly = $derived(threadLocalOnly($threads.find((thread) => thread.id === $activeThreadId)).inheritedFromThreadId != null);
 	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
 	const groups = $derived(groupModels(pickerModels, $activeModelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
@@ -158,6 +160,7 @@
 
 
 <div class="action-sheet model-sheet">
+	<LocalOnlySwitchRow onsetuplocal={() => showAddLocal = true} onleave={onclose} />
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
@@ -297,6 +300,7 @@
 					</section>
 				{/each}
 				{#if projectCloudOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
+				{#if !projectCloudOff && inheritedLocalOnly && hasReadyGroup}<div class="model-list-empty">This chat and its workers use local models only.</div>{/if}
 				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
