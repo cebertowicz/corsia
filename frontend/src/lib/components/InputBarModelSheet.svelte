@@ -21,7 +21,9 @@
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 
-	const groups = $derived(groupModels($models, $activeModelId));
+	const cloudModelsOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
+	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => model.status_reason !== 'project_cloud_off') : $models);
+	const groups = $derived(groupModels(pickerModels, $activeModelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
 	// stay visible, while their account list opens only on demand, the same for every vendor and state.
 	let opened = $state<Record<string, boolean>>({});
@@ -54,8 +56,10 @@
 	});
 
 	// Starter, setup, and Settings download states show in the Local group while the picker is open.
-	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
-	const hasLocalGroup = $derived(groups.some(isLocalGroup));
+	// The group that hosts this computer's oMLX setup status is keyed on the oMLX row, not on `is_local`: a trusted device's group says "Local" but is not this computer.
+	const hostsLocalSetup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
+	const hasLocalSetupGroup = $derived(groups.some(hostsLocalSetup));
+	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
@@ -154,7 +158,10 @@
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if groups.length === 0 && !$localStatus}
+			{#if cloudModelsOff && !hasReadyGroup}
+				<div class="model-list-empty">This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+			{/if}
+			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
@@ -209,7 +216,7 @@
 							name={group.name}
 							groupKey={group.key}
 							count={group.rows.length}
-							local={isLocalGroup(group) && usable}
+							local={group.rows.some((model) => model.is_local === true) && usable}
 							open={open}
 							status={headStatus}
 							subtitle={subtitle}
@@ -222,7 +229,7 @@
 
 
 							{/if}
-						{#if $localStatus && isLocalGroup(group)}
+						{#if $localStatus && hostsLocalSetup(group)}
 								{#if $localStatus.retry === 'settings'}
 									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
 								{:else}
@@ -280,7 +287,8 @@
 						{/if}
 					</section>
 				{/each}
-				{#if !hasLocalGroup && ($localStatus || $canAddLocalModel)}
+				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
+				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
 						{#if $localStatus}

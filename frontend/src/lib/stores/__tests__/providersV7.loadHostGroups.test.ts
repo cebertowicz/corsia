@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { harnessInventoryError, hostGroups, loadHostGroups } from '../providersV7';
+import { groupByHost, harnessInventoryError, hostGroupSnapshot, hostGroups, loadHostGroups } from '../providersV7';
 import { vendorAccounts } from '../vendorAccounts';
+import { networkServers, type NetworkServer } from '../networkServers';
 
 const codexRow = { id: 'codex/gpt-5.6-sol', harness: 'codex', provider: 'codex', display_name: 'GPT-5.6-Sol', enabled: 1, available: 1 };
 
@@ -81,5 +82,21 @@ describe('loadHostGroups harness cards', () => {
 		stubFetch(true, 'unavailable');
 		await loadHostGroups();
 		expect(get(hostGroups).some((group) => group.key === 'agent-clis')).toBe(false);
+	});
+});
+
+describe('hostGroups server rows', () => {
+	afterEach(() => { hostGroupSnapshot.set([]); networkServers.set([]); });
+
+	it('reads each server from the server list, so a saved Trusted device mark shows before the next snapshot', () => {
+		const studio = {
+			id: 's1', provider: 'omlx', instance_id: 'i1', instance_name: 'Studio', kind: 'managed', port: 8000, status: 'online',
+			endpoints: [{ id: 'e1', server_id: 's1', host: '192.168.1.20', kind: 'lan' }], private: false,
+		} as unknown as NetworkServer;
+		hostGroupSnapshot.set(groupByHost([], [studio], null));
+		networkServers.set([{ ...studio, private: true }]);
+
+		const provider = get(hostGroups).flatMap((group) => group.providers).find((row) => row.server?.id === 's1');
+		expect(provider?.server?.private).toBe(true);
 	});
 });

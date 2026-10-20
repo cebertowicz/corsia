@@ -90,6 +90,10 @@ describe('ProjectSettingsView', () => {
 		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
 
 		await vi.waitFor(() => expect(host.querySelector('.page-title')?.textContent).toBe('CORSIA'));
+		const heading = host.querySelector('h2.project-title');
+		expect(heading?.textContent).toBe('CORSIA');
+		expect(heading?.classList.contains('page-title')).toBe(true);
+		expect(heading?.parentElement?.firstElementChild).toBe(heading);
 		expect(host.textContent).toContain('Working folder missing');
 
 		button('Choose folder')!.click();
