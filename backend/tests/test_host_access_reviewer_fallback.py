@@ -695,6 +695,19 @@ async def test_a_locality_refusal_does_not_tell_the_agent_to_wait_for_the_review
     )
 
 
+@pytest.mark.asyncio
+async def test_a_pinned_locality_refusal_says_apply_again_not_change_settings(cloud_off):
+    """A pinned review never re-resolves, so a Settings change can't help this lease."""
+    _configure(fallback=False)
+
+    assert await _action_refusal() == (
+        "This lease's reviewer can't run (it's a cloud model and this project "
+        "uses local models only). Your action was not reviewed. Apply again; if "
+        "the new application is refused too, its refusal names the fix."
+    )
+    assert cloud_off.calls == []
+
+
 def test_every_locality_refusal_has_its_own_words():
     """A new refusal must bring its phrase, or the agent would read a bare code."""
     from llm.locality import LOCALITY_REFUSALS

@@ -59,8 +59,7 @@ def _moment_text(moment: datetime) -> str:
 def outage_cause(outage: ReviewerOutage) -> str:
     """Plain words for why one reviewer cannot run, with its reset time when known."""
     if outage.reason in LOCALITY_REFUSALS:
-        phrase = LOCALITY_PHRASES.get(outage.reason, outage.reason.replace("_", " "))
-        return f"it's a cloud model and {phrase}"
+        return f"it's a cloud model and {LOCALITY_PHRASES[outage.reason]}"
     if outage.reason == "usage_limited":
         moment = _local(outage.resets_at)
         return f"usage limit until {_moment_text(moment)}" if moment else "usage limit"
@@ -124,9 +123,20 @@ def application_guidance(
 
 
 def action_guidance(exc: ReviewerUnavailableError) -> str:
-    """Guidance for an action whose lease reviewer cannot run (pinned review)."""
+    """Guidance for an action whose lease reviewer cannot run (pinned review).
+
+    A pinned review never re-resolves, so neither waiting nor a Settings change
+    lifts a locality refusal of its model: only a new application can reach a
+    reviewer the chat may use, and that application's own refusal names any fix.
+    """
     if exc.pinned and exc.fallback_enabled:
         return _PINNED_APPLY_AGAIN
+    if exc.pinned and exc.outage.reason in LOCALITY_REFUSALS:
+        return (
+            f"This lease's reviewer can't run ({outage_cause(exc.outage)}). Your "
+            "action was not reviewed. Apply again; if the new application is "
+            "refused too, its refusal names the fix."
+        )
     return application_guidance(exc, subject="action")
 
 
