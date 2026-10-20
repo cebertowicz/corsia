@@ -9,8 +9,14 @@ const localSource = writable<ModelSource | undefined>(undefined);
 
 /** What the picker's Local group says about a download or a failed setup; null when neither. */
 export const localStatus = derived(localSource, localPickerStatus);
-/** The picker may offer the shared add-model sheet only on Macs that pass the API memory gate. */
-export const canAddLocalModel = derived(localSource, (source) => source?.eligible === true);
+/** The picker may offer the shared add-model sheet only on CORSIA's online local service. */
+export const canAddLocalModel = derived(localSource, (source) =>
+	source?.eligible === true && source.corsia_omlx_online === true,
+);
+/** Without CORSIA's local service, preserve the existing setup route. */
+export const canSetUpLocalModel = derived(localSource, (source) =>
+	source?.eligible === true && source.corsia_omlx_online !== true,
+);
 
 async function read(): Promise<void> {
 	const t = get(token);
@@ -21,10 +27,10 @@ async function read(): Promise<void> {
 }
 
 /** ``message`` is the backend's specific refusal when it gave one. */
-export type LocalSetupRetry = { ok: boolean; code?: 'consent_required'; message?: string };
+export type LocalSetupRetry = { ok: boolean; message?: string };
 
 /** Try again: preserve each download's owner route; Settings retries its durable repository. */
-export async function retryLocalSetup(kind: LocalPickerRetry, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalSetupRetry> {
+export async function retryLocalSetup(kind: LocalPickerRetry): Promise<LocalSetupRetry> {
 	const t = get(token);
 	if (!t) return { ok: false };
 	let result: LocalSetupRetry = { ok: true };
@@ -39,8 +45,7 @@ export async function retryLocalSetup(kind: LocalPickerRetry, otherOmlx: 'stop' 
 				result = { ok: true };
 			}
 		} else {
-			const response = await setupLocalSource(t, otherOmlx);
-			result = { ok: response.ok, code: response.code };
+			result = { ok: (await setupLocalSource(t)).ok };
 		}
 	} catch (caught) { result = { ok: false, message: caught instanceof Error ? caught.message : undefined }; }
 	await read();

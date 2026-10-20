@@ -202,3 +202,24 @@ def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     body = r.json()
     assert body["ok"] is False
     assert "retired" in body["message"]
+
+
+def test_loading_a_model_clears_why_it_was_not_auto_loaded(client, tmp_path, monkeypatch):
+    from llm import local_downloads
+    from llm.local_model import LocalModel
+
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
+    local_downloads.write(local_downloads.Download(model, server_id="ns-test"))
+    local_downloads.set_detail(model.model, "Not loaded: needs 174 GB of memory, 123 GB free")
+
+    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": True})), \
+            patch("llm.network_discovery.discover_and_notify", new=AsyncMock()):
+        r = client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": model.model})
+
+    assert r.status_code == 200, r.text
+    assert local_downloads.get(model.model).detail is None
+
+
+def _auth() -> dict[str, str]:
+    return dict(zip(("token",), (_TOKEN,)))

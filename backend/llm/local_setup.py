@@ -59,7 +59,7 @@ def _claim_operation(kind: str, model: LocalModel | None = None, *, onboarding: 
         return False
     try:
         previous = local_setup_operation.read()
-        if previous is not None and (previous.result is None or previous.result.get("downloading")):
+        if previous is not None and previous.in_flight:
             local_setup_operation.unlock(lock)
             return False
         local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind, onboarding=onboarding))
@@ -135,7 +135,7 @@ def restore_terminal_flight(operation: local_setup_operation.Operation) -> None:
 def record_resume_failure(ref: str) -> None:
     """Publish a referenced startup delivery failure through the same durable flight."""
     operation = local_setup_operation.read()
-    if _running() or (operation is not None and operation.result is not None and not operation.result.get("downloading")):
+    if _running() or (operation is not None and not operation.in_flight):
         return
     operation = operation or local_setup_operation.Operation.for_model(None, "setup", onboarding=True)
     local_setup_operation.write(operation)
@@ -152,6 +152,9 @@ def finish_flight(result: dict) -> dict:
         local_setup_operation.write(replace(operation, result=result, downloaded=_flight.downloaded))
     _flight.downloading = bool(result.get("downloading"))
     _release_operation_lock()
+    from infra.state.ws import schedule_models_changed
+
+    schedule_models_changed()  # open Providers screens re-read the setup state instead of polling it
     return result
 
 

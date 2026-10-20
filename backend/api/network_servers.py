@@ -34,6 +34,7 @@ from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
+from llm.managed_omlx_binary import is_corsia_managed_server
 from llm.locality import server_locality
 from llm.providers import for_provider
 
@@ -90,6 +91,7 @@ async def list_servers():
     for s in servers:
         s.update(await run_in_db(_network_view, s["id"]))
         s.update(billing[s["id"]])
+        s["corsia_omlx"] = s.get("status") == "online" and is_corsia_managed_server(s)
     keys = await run_in_db(server_keys, [s["id"] for s in servers])
     return {"servers": [_public_server_view(s, keys) for s in servers]}
 
@@ -222,6 +224,9 @@ async def load_model(server_id: str, body: ModelBody):
         raise HTTPException(status, detail=result.get("message", "Load failed"))
 
     notify_cached_model_loaded(server_id, body.model)
+    from llm import local_downloads
+
+    local_downloads.set_detail(body.model, None)
     import asyncio
     asyncio.create_task(nd.discover_and_notify(server_id))
 

@@ -45,6 +45,7 @@ def _parse_omlx_status(response) -> dict[str, dict]:
             "engine_type": (model.get("engine_type") or "").lower(),
             "context_length": extract_context_length(model),
             "size_bytes": int(model.get("estimated_size") or 0) or None,
+            "pinned": bool(model.get("pinned")),
         }
         status_alias = (model.get("model_alias") or "").strip()
         if status_alias:

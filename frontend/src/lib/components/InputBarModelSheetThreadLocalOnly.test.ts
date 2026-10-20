@@ -5,6 +5,7 @@ vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('$lib/stores/localPickerStatus', () => ({
 	localStatus: { subscribe: (run: (value: unknown) => void) => { run(null); return () => {}; } },
 	canAddLocalModel: { subscribe: (run: (value: unknown) => void) => { run(false); return () => {}; } },
+	canSetUpLocalModel: { subscribe: (run: (value: unknown) => void) => { run(false); return () => {}; } },
 	retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {},
 }));
 

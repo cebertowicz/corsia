@@ -18,7 +18,8 @@ from llm import local_setup, local_setup_operation
 
 GIB = 1024**3
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "omlx_recommendations_v0.7.1rc1.json").read_text())
-THINKING = FIXTURE["thinking_default"]
+# The recording predates the quality-first pick, which now lands on Gemma 4 31B at 32-64 GiB: same family as 26B, so same default.
+THINKING = {**FIXTURE["thinking_default"], "gemma-4-31B-it-oQ3e-mtp": False, "gemma-4-31B-it-oQ4e-mtp": False}
 
 
 def best_rows(gib: int) -> list[dict]:

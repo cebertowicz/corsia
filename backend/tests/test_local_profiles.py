@@ -311,7 +311,31 @@ def test_an_already_connected_local_model_keeps_its_settings(monkeypatch):
     assert wrote == []
 
 
-def test_settings_download_reuses_a_connected_local_server(monkeypatch):
+def test_a_persons_own_omlx_never_stands_in_for_corsias_server(monkeypatch):
+    from llm import local_sources
+
+    own = {"id": "mine", "provider": "omlx", "kind": "network", "status": "online", "port": 8000}
+    legacy = {"id": "old", "provider": "omlx", "kind": "managed", "status": "online", "port": 8200}
+    managed = {"id": "corsia-managed", "provider": "omlx", "kind": "managed", "source": "corsia",
+               "instance_id": "corsia-managed", "status": "online", "port": 8210}
+    servers = [own, legacy]
+    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda: servers)
+    monkeypatch.setattr(local_sources, "catalog_membership",
+                        lambda: ({"omlx@mine", "omlx@old", "omlx@corsia-managed"}, set()))
+    started: list[str] = []
+
+    async def start_managed(_report):
+        started.append("corsia-managed")
+        servers.append(managed)
+        return "corsia-managed", 8210
+
+    assert local_sources.connected_local_server() is None
+    resolved = asyncio.run(local_sources.local_server_for_install(lambda _stage: None, start_managed=start_managed))
+    assert resolved == ("corsia-managed", 8210, False) and started == ["corsia-managed"]
+    assert local_sources.connected_local_server() == managed
+
+
+def test_settings_download_uses_only_corsias_managed_server(monkeypatch):
     from llm import local_settings_download
 
     downloaded: list[str] = []
@@ -319,15 +343,14 @@ def test_settings_download_reuses_a_connected_local_server(monkeypatch):
     async def download(server_id, _report, _model):
         downloaded.append(server_id)
 
-    async def must_not_start(_report):
-        raise AssertionError("Settings must not start a second managed oMLX")
+    async def start_managed(_report):
+        return "corsia-managed", 8210
 
     monkeypatch.setattr(local_setup, "_download", download)
-    monkeypatch.setattr("llm.local_sources.connected_local_server", lambda: {"id": "mine", "port": 8000})
-    monkeypatch.setattr(local_settings_download, "start_managed_omlx", must_not_start)
+    monkeypatch.setattr(local_settings_download, "start_managed_omlx", start_managed)
 
-    assert asyncio.run(local_settings_download._download_to_local_server(lambda _stage: None, MODEL)) == "mine"
-    assert downloaded == ["mine"]
+    assert asyncio.run(local_settings_download._managed_download(lambda _stage: None, MODEL)) == "corsia-managed"
+    assert downloaded == ["corsia-managed"]
 
 
 @pytest.fixture
@@ -350,8 +373,6 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
         return {"ok": True, "in_progress": True}
 
     monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
-    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
-    # With no personal process, the route delegates to the private setup flight.
 
     assert client.post("/api/providers/local/setup").json() == {"ok": True, "in_progress": True}
     assert calls[-1] == {"no_subscription_only": False, "automatic": False, "onboarding": False}
@@ -364,23 +385,8 @@ def test_route_returns_backend_recovery_when_starting_fails(client, monkeypatch)
         return local_setup_error("could not start")
 
     monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
-    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
 
     response = client.post("/api/providers/local/setup")
 
     assert response.status_code == 200
     assert response.json()["fix"] == "CORSIA couldn’t set up the local model."
-
-
-def test_route_returns_backend_recovery_for_a_changed_foreign_omlx(client, monkeypatch):
-    from api import provider_sources
-
-    monkeypatch.setattr(provider_sources, "apply_foreign_omlx_choice", lambda **_kwargs: "foreign_omlx_changed")
-
-    response = client.post("/api/providers/local/setup")
-
-    assert response.status_code == 409
-    assert response.json() == {"detail": {
-        "code": "foreign_omlx_changed",
-        "fix": "CORSIA couldn’t stop another oMLX server. Try again, or leave it running.",
-    }}

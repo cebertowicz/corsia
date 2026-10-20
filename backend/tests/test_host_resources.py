@@ -85,8 +85,9 @@ async def test_check_can_load_warns_when_exceeds_safe_reserve():
             res = await check_can_load(estimated_gb=20, target_provider="omlx")
     assert res["ok"] is False
     assert res["warning"] is not None
-    assert "below 8 gb safe reserve" in res["warning"].lower()
+    assert res["warning"] == "Loading would leave 5.0 GB of memory free (below the 8 GB safe reserve)."
     assert res["after_load_gb"] == 5
+    assert res["safe_reserve_gb"] == 8
 
 
 @pytest.mark.asyncio
@@ -96,8 +97,9 @@ async def test_check_can_load_warns_when_load_exceeds_total_free():
         with patch("infra.host_resources._gather_local_loaded", return_value=fake_loaded):
             res = await check_can_load(estimated_gb=100, target_provider="omlx")
     assert res["ok"] is False
-    assert "exceed" in res["warning"].lower()
-    assert "kill" in res["warning"].lower() or "swap" in res["warning"].lower()
+    # One sentence with the numbers, in the app's own word (memory); the dialog's hint owns the swap/kill consequence.
+    assert res["warning"] == "Loading would need 70.0 GB more memory than is free."
+    assert "RAM" not in res["warning"]
 
 
 @pytest.mark.asyncio

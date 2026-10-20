@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -19,8 +19,6 @@ from connections.source_state import HARNESS_PROVIDERS, check_harness_source, ro
 from infra.auth import require_user, require_user_header_only
 from infra.db_async import run_in_db, run_off_db
 from llm import local_sources, network_discovery
-from llm.local_setup_foreign import apply_foreign_omlx_choice
-from llm.local_setup_results import setup_fix
 from llm.local_sources import CHECK_AGAIN, external_sources, omlx_source
 
 log = logging.getLogger(__name__)
@@ -131,7 +129,11 @@ async def _recheck() -> None:
 
 @router.get("/sources")
 async def get_sources(_user: dict = Depends(require_user)) -> dict[str, Any]:
-    return {"sources": await run_in_db(list_sources)}
+    from llm.local_keep_loaded import annotate_download_will_pin
+
+    sources = await run_in_db(list_sources)
+    await annotate_download_will_pin(sources)
+    return {"sources": sources}
 
 
 @router.post("/local/setup")
@@ -139,18 +141,9 @@ async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
     onboarding: bool = Body(False, embed=True),
-    other_omlx: Literal["stop", "keep"] | None = Body(None, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
-    """Start managed setup after an explicit choice about an identified foreign process."""
-    if refusal := await asyncio.to_thread(
-        apply_foreign_omlx_choice,
-        other_omlx=other_omlx,
-    ):
-        detail = {"code": refusal}
-        if refusal == "foreign_omlx_changed":
-            detail["fix"] = setup_fix("other_omlx")
-        raise HTTPException(status_code=409, detail=detail)
+    """Start managed setup; memory, not another oMLX, decides what loads."""
     from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)

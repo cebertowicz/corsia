@@ -20,12 +20,81 @@ class _Response:
         return self._body
 
 
-async def _server_in_db(_function, *_args, **_kwargs):
-    return [{"id": "server", "kind": "managed", "status": "online"}]
+async def _server_in_db(function, *args, **kwargs):
+    return function(*args, **kwargs)
 
 
 async def _no_loaded(_config):
     return []
+
+
+def _omlx_rows(monkeypatch, servers: list[dict], managed: set[str] = frozenset()) -> None:
+    """Rows the route sees; only ids in ``managed`` satisfy the one managed-server rule."""
+    monkeypatch.setattr(provider_local_models, "get_servers", lambda **_kwargs: servers)
+    monkeypatch.setattr(provider_local_models, "is_corsia_managed_server", lambda server: server["id"] in managed)
+    monkeypatch.setattr(provider_local_models, "run_in_db", _server_in_db)
+
+
+def _corsia_server(monkeypatch, servers: list[dict]) -> None:
+    _omlx_rows(monkeypatch, servers, {server["id"] for server in servers})
+
+
+@pytest.mark.asyncio
+async def test_server_refuses_a_persons_own_omlx_without_an_admin_call(monkeypatch) -> None:
+    _omlx_rows(monkeypatch, [{"id": "studio", "status": "online", "source": "discovered"}])
+    called = False
+
+    async def recommendations(_server_id):
+        nonlocal called
+        called = True
+        return {"best": [MODEL]}
+
+    monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(provider_local_models, "ask_recommendations", recommendations)
+
+    with pytest.raises(HTTPException) as raised:
+        await provider_local_models._recommendations()
+
+    assert raised.value.status_code == 409
+    assert raised.value.detail == "Local models aren't set up. Select Set up to continue."
+    assert not called
+
+
+@pytest.mark.asyncio
+async def test_server_selects_corsias_own_omlx_over_a_persons_own(monkeypatch) -> None:
+    studio = {"id": "studio", "status": "online", "source": "discovered"}
+    corsia = {"id": "corsia-omlx", "status": "online"}
+    _omlx_rows(monkeypatch, [studio, corsia], {"corsia-omlx"})
+
+    assert await provider_local_models._server() == corsia
+
+
+@pytest.mark.asyncio
+async def test_offline_managed_omlx_is_not_selected(monkeypatch) -> None:
+    _omlx_rows(monkeypatch, [{"id": "corsia-omlx", "status": "offline"}], {"corsia-omlx"})
+
+    with pytest.raises(HTTPException, match="local model server isn't running"):
+        await provider_local_models._server()
+
+
+@pytest.mark.asyncio
+async def test_two_online_managed_rows_name_that_cause(monkeypatch) -> None:
+    _corsia_server(monkeypatch, [{"id": "a", "status": "online"}, {"id": "b", "status": "online"}])
+
+    with pytest.raises(HTTPException, match="more than one"):
+        await provider_local_models._server()
+
+
+@pytest.mark.parametrize("managed_online", [True, False])
+def test_source_projection_agrees_with_the_managed_server_rule(monkeypatch, managed_online) -> None:
+    from llm import local_sources
+
+    rows = [{"id": "studio", "status": "online"}, {"id": "corsia", "status": "online" if managed_online else "offline"}]
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership=None, _servers=None: {})
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: rows)
+    monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda server: server["id"] == "corsia")
+
+    assert local_sources.omlx_source()["corsia_omlx_online"] is managed_online
 
 
 async def _known_disk_model(_config):
@@ -33,7 +102,7 @@ async def _known_disk_model(_config):
 
 
 def _route_with_known_model(monkeypatch) -> None:
-    monkeypatch.setattr(provider_local_models, "run_in_db", _server_in_db)
+    _corsia_server(monkeypatch, [{"id": "server", "status": "online"}])
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_loaded", _no_loaded)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", _known_disk_model)
     monkeypatch.setattr("llm.local_model.set_up_model", lambda: None)
@@ -214,10 +283,9 @@ async def test_recommendations_leave_records_when_disk_listing_fails(monkeypatch
     assert local_downloads.get(MODEL.model) is not None
 
 
-@pytest.mark.asyncio
-async def test_recommendations_include_memory_and_download_volume_free_disk(monkeypatch, tmp_path) -> None:
+def _ready_recommender(monkeypatch, tmp_path, sections: dict[str, list[LocalModel]], room_gib: int) -> None:
     async def recommended(_server_id):
-        return {"best": [MODEL]}
+        return sections
 
     async def server():
         return {"id": "server"}
@@ -230,6 +298,7 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
 
     monkeypatch.setattr(provider_local_models, "local_memory_ok", lambda: True)
     monkeypatch.setattr(provider_local_models, "host_ram_bytes", lambda: 64 * 1024**3)
+    monkeypatch.setattr(provider_local_models, "model_room_bytes", lambda: room_gib * 1024**3)
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: True)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.1")
     monkeypatch.setattr(provider_local_models, "_server", server)
@@ -242,13 +311,40 @@ async def test_recommendations_include_memory_and_download_volume_free_disk(monk
         lambda *_args: {"state": "ready", "free_bytes": 20 * 1000**3},
     )
 
+
+@pytest.mark.asyncio
+async def test_recommendations_include_memory_and_download_volume_free_disk(monkeypatch, tmp_path) -> None:
+    _ready_recommender(monkeypatch, tmp_path, {"best": [MODEL]}, room_gib=22)
+
     result, _sections = await provider_local_models._recommendations()
 
     assert result["memory_gb"] == 64
+    assert result["memory_room_gb"] == 22
     assert result["disk_free_gb"] == 20
-    assert result["sections"]["best"] == [{
-        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3},
+    assert result["recommended_repository"] == MODEL.repository
+    assert result["models"] == [{
+        **MODEL.view(), "disk": {"state": "ready", "free_bytes": 20 * 1000**3}, "fits_now": True,
     }]
+
+
+@pytest.mark.asyncio
+async def test_recommended_row_is_setups_pick_not_omlxs_first_row(monkeypatch, tmp_path) -> None:
+    huge = LocalModel("Jundot/DeepSeek-V4-Flash", 1_000_000, 32_768, resident_bytes=163 * 1024**3)
+    small = LocalModel("Jundot/Qwen3.6-35B-A3B", 1_000_000, 32_768, resident_bytes=40 * 1024**3)
+    _ready_recommender(monkeypatch, tmp_path, {"best": [huge], "faster": [small]}, room_gib=68)
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert result["recommended_repository"] == small.repository
+
+
+@pytest.mark.asyncio
+async def test_no_recommended_row_without_a_model(monkeypatch, tmp_path) -> None:
+    _ready_recommender(monkeypatch, tmp_path, {"best": [], "unlock": [MODEL]}, room_gib=68)
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert result["recommended_repository"] is None
 
 
 @pytest.mark.asyncio
@@ -315,3 +411,93 @@ async def _model_dir():
     from pathlib import Path
 
     return Path("/tmp")
+
+
+_TERMINAL_RESULTS = [
+    {"ok": True, "state": "ready"},
+    {"ok": False, "state": "stopped", "cause": "cancelled"},
+    {"ok": False, "state": "failed", "cause": "other"},
+]
+
+
+def _operation_with(model: LocalModel, result: dict | None) -> local_setup_operation.Operation:
+    return local_setup_operation.replace(local_setup_operation.Operation.for_model(model, "settings", "task"), result=result)
+
+
+def _route_a_download(monkeypatch) -> None:
+    monkeypatch.setattr(provider_local_models, "_recommendations", lambda: _recommendations_for(MODEL))
+    monkeypatch.setattr(provider_local_models, "_server", lambda: _model_server())
+    monkeypatch.setattr(provider_local_models, "download_dir", lambda _server_id: _model_dir())
+    monkeypatch.setattr(provider_local_models, "download_disk_space", lambda *_args: {"state": "ready"})
+
+
+@pytest.mark.parametrize("result", _TERMINAL_RESULTS)
+@pytest.mark.asyncio
+async def test_a_terminal_operation_blocks_neither_another_download_nor_its_own_delete(monkeypatch, result, tmp_path) -> None:
+    _route_a_download(monkeypatch)
+    started: list[LocalModel] = []
+
+    async def begin(model):
+        started.append(model)
+        return {"ok": True}
+
+    monkeypatch.setattr("llm.local_setup_flow.begin_settings_download", begin)
+    other = LocalModel("Jundot/Other", 1_000_000, 32_768)
+    monkeypatch.setattr(provider_local_models.local_setup_operation, "read", lambda: _operation_with(other, result))
+    assert await provider_local_models.download_model({"repository": MODEL.repository}, {}) == {"ok": True}
+    assert started == [MODEL]
+
+    _route_with_known_model(monkeypatch)
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    monkeypatch.setattr(provider_local_models.local_setup_operation, "read", lambda: _operation_with(MODEL, result))
+
+    async def admin_request(_config, method, path, **_kwargs):
+        return _Response(200, {} if method == "DELETE" else {"models": []})
+
+    async def discovered(_server_id):
+        return {"ok": True}
+
+    monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
+    monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
+    monkeypatch.setattr("llm.local_setup._emit", lambda action, **properties: None)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
+
+
+@pytest.mark.parametrize("result", [None, {"ok": True, "downloading": True}])
+@pytest.mark.asyncio
+async def test_an_in_flight_operation_still_blocks_another_download_and_its_own_delete(monkeypatch, result) -> None:
+    _route_a_download(monkeypatch)
+    other = LocalModel("Jundot/Other", 1_000_000, 32_768)
+    monkeypatch.setattr(provider_local_models.local_setup_operation, "read", lambda: _operation_with(other, result))
+    with pytest.raises(HTTPException, match="Other is already downloading"):
+        await provider_local_models.download_model({"repository": MODEL.repository}, {})
+
+    _route_with_known_model(monkeypatch)
+    monkeypatch.setattr(provider_local_models.local_setup_operation, "read", lambda: _operation_with(MODEL, result))
+    with pytest.raises(HTTPException, match="while it is downloading"):
+        await provider_local_models.delete_download(MODEL.repository, {})
+
+
+@pytest.mark.asyncio
+async def test_models_are_one_list_setup_pick_first_then_fitting_by_quality_then_speed(monkeypatch, tmp_path) -> None:
+    def row(name, smarts, speed, gib):
+        return LocalModel(f"Jundot/{name}", 1_000_000, 32_768, resident_bytes=gib * 1024**3,
+                          smarts_level=smarts, tokens_per_second=speed)
+
+    slow_smart = row("slow-smart", 4.0, 20.0, 10)
+    fast_smart = row("fast-smart", 4.0, 60.0, 10)
+    plain = row("plain", 2.0, 90.0, 10)
+    too_big = row("too-big", 5.0, 30.0, 50)
+    # A model oMLX lists in two sections appears once; ``unlock`` rows are not offered.
+    # oMLX's own first fitting row (slow-smart) is setup's pick and leads; the rest sort.
+    sections = {"best": [too_big, slow_smart], "faster": [plain, fast_smart, slow_smart], "unlock": [row("unlock", 5.0, 9.0, 200)]}
+    _ready_recommender(monkeypatch, tmp_path, sections, room_gib=22)
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert [m["repository"] for m in result["models"]] == [
+        "Jundot/slow-smart", "Jundot/fast-smart", "Jundot/plain", "Jundot/too-big",
+    ]
+    assert [m["fits_now"] for m in result["models"]] == [True, True, True, False]
+    assert result["recommended_repository"] == "Jundot/slow-smart"

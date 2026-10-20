@@ -44,7 +44,7 @@ def test_failed_settings_download_projects_a_durable_retry_target(monkeypatch, t
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     local_downloads.write(local_downloads.Download(model, status="failed", detail="network unavailable"))
-    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership: {"state": "ready"})
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready"})
     monkeypatch.setattr(local_setup, "setup_kind", lambda: "settings")
     monkeypatch.setattr(local_setup, "setup_stage", lambda: None)
     # The source reflects only CORSIA's managed local oMLX row.
@@ -53,5 +53,238 @@ def test_failed_settings_download_projects_a_durable_retry_target(monkeypatch, t
     source = local_sources.omlx_source((set(), set()))
 
     assert source["settings_download"] == {
-        "name": "Qwen 3.8 27B", "repository": model.repository, "percent": None, "failed": True,
+        "name": "Qwen 3.8 27B", "repository": model.repository, "percent": None, "failed": True, "downloaded": False,
     }
+
+
+def test_a_download_past_its_bytes_projects_as_finishing(monkeypatch) -> None:
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready"})
+    monkeypatch.setattr(local_setup, "setup_kind", lambda: "settings")
+    monkeypatch.setattr(local_setup, "flight_model", lambda: model)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    shown = {}
+    for stage in ("Downloading Qwen3.8-27B-oQ4e (1 MB, 100%)", "Refreshing model catalog", "Loading model"):
+        monkeypatch.setattr(local_setup, "setup_stage", lambda stage=stage: stage)
+        shown[stage] = local_sources.omlx_source((set(), set()))["settings_download"]["finishing"]
+
+    assert shown == {"Downloading Qwen3.8-27B-oQ4e (1 MB, 100%)": False,
+                     "Refreshing model catalog": True, "Loading model": True}
+
+
+def test_why_a_downloaded_model_is_not_loaded_is_kept_and_cleared(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
+    local_downloads.write(local_downloads.Download(model, server_id="local-server"))
+
+    local_downloads.set_detail(model.model, "Not loaded: needs 174 GB of memory, 123 GB free")
+    assert local_downloads.get(model.model).view()["detail"] == "Not loaded: needs 174 GB of memory, 123 GB free"
+    local_downloads.set_detail(model.model, None)
+    assert local_downloads.get(model.model).detail is None
+    local_downloads.set_detail("missing-model", "ignored")
+    assert local_downloads.get("missing-model") is None
+
+
+# --- the flight after the bytes land ---------------------------------------------------------
+
+def _flight_world(monkeypatch, tmp_path, *, server_status: str):
+    """A real server row in the test DB, a fake download that ends at once, and a fake oMLX listing."""
+    from llm import catalog_network_models, local_setup, local_setup_operation, local_settings_download
+    from llm import network_discovery as nd
+    from llm.local_setup_runtime import OptimalResult
+
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+    monkeypatch.setattr(local_setup_operation, "_state_root", lambda: tmp_path)
+    monkeypatch.setattr(local_setup, "_emit", lambda *_args, **_kwargs: None)
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
+    server_id = nd.upsert_server("omlx", "flight-instance", "This Mac", "127.0.0.1", 8210, server_status, source="corsia")
+    listed: list[list[str]] = []
+
+    async def downloaded(_report, _model):
+        return server_id
+
+    async def settings(*_args, **_kwargs):
+        return OptimalResult("offline")
+
+    async def fetch(*_args, **_kwargs):
+        return [{"id": model.model}], {}
+
+    def reconcile(_server_id, _server, canonical_models, _status, _now, result):
+        listed.append([row["id"] for row in canonical_models])
+        result["ok"] = True
+        return result
+
+    monkeypatch.setattr(local_settings_download, "_managed_download", downloaded)
+    monkeypatch.setattr("llm.local_setup_runtime.apply_optimal_settings", settings)
+    monkeypatch.setattr("llm.local_setup_runtime.configure_model_settings", settings)
+    monkeypatch.setattr("llm.network_endpoints.build_api_base", lambda _sid: "http://127.0.0.1:8210/v1")
+    monkeypatch.setattr("llm.network_endpoints.build_mgmt_base", lambda _sid: "http://127.0.0.1:8210/api")
+    monkeypatch.setattr(catalog_network_models, "_fetch_omlx_canonical_models", fetch)
+    monkeypatch.setattr(catalog_network_models, "_reconcile_network_models", reconcile)
+
+    async def no_keep_loaded(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(local_settings_download, "keep_loaded", no_keep_loaded)
+    return model, server_id, listed
+
+
+def test_a_server_marked_offline_mid_download_is_listed_with_no_failed_record(monkeypatch, tmp_path) -> None:
+    """The sweep can flag a busy oMLX offline while it finalizes; the download that just used it says otherwise."""
+    import asyncio
+
+    from llm import local_settings_download
+    from llm import network_discovery as nd
+
+    model, server_id, listed = _flight_world(monkeypatch, tmp_path, server_status="offline")
+
+    result = asyncio.run(local_settings_download._run_flight(model))
+
+    assert result["ok"] is True
+    assert listed == [[model.model]]
+    assert nd.get_server(server_id)["status"] == "online"
+    record = local_downloads.get(model.model)
+    assert record is not None and record.status == "available"
+    assert not [entry for entry in local_downloads.all() if entry.status == "failed"]
+
+
+def test_a_disabled_server_is_never_revived_by_the_download(monkeypatch, tmp_path) -> None:
+    import asyncio
+
+    from llm import local_settings_download
+    from llm import network_discovery as nd
+
+    model, server_id, _listed = _flight_world(monkeypatch, tmp_path, server_status="disabled")
+
+    asyncio.run(local_settings_download._run_flight(model))
+
+    assert nd.get_server(server_id)["status"] == "disabled"
+
+
+def test_a_refresh_that_really_fails_says_the_model_is_downloaded(monkeypatch, tmp_path) -> None:
+    import asyncio
+
+    from llm import local_settings_download, local_sources
+
+    model, _server_id, _listed = _flight_world(monkeypatch, tmp_path, server_status="online")
+
+    async def broken(*_args, **_kwargs):
+        raise OSError("connection reset")
+
+    monkeypatch.setattr("llm.catalog_network_models._fetch_omlx_canonical_models", broken)
+
+    result = asyncio.run(local_settings_download._run_flight(model))
+
+    assert result["ok"] is False and result["downloaded"] is True
+    assert result["message"] == "Qwen 3.8 27B is downloaded but couldn't be added. Retry to finish adding it."
+    assert "Couldn't download" not in result["message"]
+    record = local_downloads.get(model.model)
+    assert record.status == "failed" and record.downloaded is True
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready"})
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    monkeypatch.setattr("llm.local_setup.setup_kind", lambda: "settings")
+    monkeypatch.setattr("llm.local_setup.setup_stage", lambda: None)
+    assert local_sources.omlx_source((set(), set()))["settings_download"]["downloaded"] is True
+
+
+def _failed_record_world(monkeypatch, tmp_path, *, downloaded: bool, listed: list[str],
+                         listed_on: str = "corsia-server") -> LocalModel:
+    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
+    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
+    local_downloads.write(local_downloads.Download(model, status="failed", detail="refresh failed", downloaded=downloaded))
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready"})
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [{"id": "corsia-server"}, {"id": "own-server"}])
+    monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda server: server["id"] == "corsia-server")
+    monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: [
+        {"litellm_model": f"omlx@{listed_on}/{name}", "enabled": True} for name in listed])
+    monkeypatch.setattr("llm.local_setup.setup_kind", lambda: "settings")
+    monkeypatch.setattr("llm.local_setup.setup_stage", lambda: None)
+    return model
+
+
+def test_a_downloaded_not_listed_record_settles_once_the_model_is_listed(monkeypatch, tmp_path) -> None:
+    model = _failed_record_world(monkeypatch, tmp_path, downloaded=True, listed=["Qwen3.8-27B-oQ4e"])
+
+    # The sources read hides the failure but writes nothing; the Add model list settles the record.
+    assert "settings_download" not in local_sources.omlx_source((set(), set()))
+    assert local_downloads.get(model.model) is not None
+    local_sources.settle_listed_failures()
+    assert local_downloads.get(model.model) is None
+
+
+def test_a_failed_record_whose_model_is_not_listed_still_shows(monkeypatch, tmp_path) -> None:
+    for downloaded in (True, False):
+        model = _failed_record_world(monkeypatch, tmp_path, downloaded=downloaded, listed=["Other-Model-oQ4e"])
+
+        shown = local_sources.omlx_source((set(), set()))["settings_download"]
+
+        assert shown["failed"] is True and shown["downloaded"] is downloaded
+        assert local_downloads.get(model.model) is not None
+
+
+def test_the_same_model_on_the_persons_own_omlx_does_not_settle_a_failed_record(monkeypatch, tmp_path) -> None:
+    for downloaded in (True, False):
+        model = _failed_record_world(monkeypatch, tmp_path, downloaded=downloaded,
+                                     listed=["Qwen3.8-27B-oQ4e"], listed_on="own-server")
+
+        shown = local_sources.omlx_source((set(), set()))["settings_download"]
+
+        assert shown["failed"] is True and shown["downloaded"] is downloaded
+        assert local_downloads.get(model.model) is not None
+
+
+def test_a_download_that_never_finished_still_says_it_could_not_download(monkeypatch, tmp_path) -> None:
+    import asyncio
+
+    from llm import local_settings_download
+
+    model, _server_id, _listed = _flight_world(monkeypatch, tmp_path, server_status="online")
+
+    async def failed(_report, _model):
+        raise RuntimeError("network unavailable")
+
+    monkeypatch.setattr(local_settings_download, "_managed_download", failed)
+
+    result = asyncio.run(local_settings_download._run_flight(model))
+
+    assert result["message"] == "Couldn't download Qwen 3.8 27B. Try again."
+    assert local_downloads.get(model.model).downloaded is False
+
+
+def test_a_setup_download_projects_like_a_settings_download(monkeypatch) -> None:
+    model = LocalModel("Jundot/DeepSeek-V4-Flash-0731", 1_000_000, 32_768, "DeepSeek V4 Flash 0731")
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready", "local_state": "downloading"})
+    monkeypatch.setattr(local_setup, "setup_kind", lambda: "setup")
+    monkeypatch.setattr(local_setup, "flight_model", lambda: model)
+    monkeypatch.setattr(local_setup, "setup_stage", lambda: "Downloading DeepSeek-V4-Flash-0731 (1 MB, 12%)")
+    monkeypatch.setattr(local_setup, "download_percent", lambda: 12)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+
+    source = local_sources.omlx_source((set(), set()))
+
+    assert source["settings_download"] == {
+        "name": "DeepSeek V4 Flash 0731", "repository": model.repository, "size_bytes": 1_000_000,
+        "percent": 12, "failed": False, "finishing": False,
+    }
+
+
+def test_a_setup_that_has_not_picked_a_model_projects_no_download(monkeypatch) -> None:
+    monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready", "local_state": "starting"})
+    monkeypatch.setattr(local_setup, "setup_kind", lambda: "setup")
+    monkeypatch.setattr(local_setup, "flight_model", lambda: None)
+    monkeypatch.setattr(local_setup, "setup_stage", lambda: "Starting")
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+
+    assert "settings_download" not in local_sources.omlx_source((set(), set()))
+
+
+def test_finishing_a_setup_flight_nudges_open_screens(monkeypatch) -> None:
+    nudges: list[int] = []
+    monkeypatch.setattr("infra.state.ws.schedule_models_changed", lambda: nudges.append(1))
+    monkeypatch.setattr(local_setup.local_setup_operation, "read", lambda: None)
+    monkeypatch.setattr(local_setup, "_release_operation_lock", lambda: None)
+
+    local_setup.finish_flight({"ok": False})
+
+    assert nudges == [1]

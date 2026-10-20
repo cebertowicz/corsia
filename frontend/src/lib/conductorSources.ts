@@ -31,7 +31,7 @@ export interface ModelSource {
 	/** Which download is running or failed: the starter model for the person's own oMLX, or the full setup. */
 	setup_kind?: 'starter' | 'setup' | 'settings';
 	/** A Settings-initiated local download; its repository is retained so a durable failure can retry the same recommendation. */
-	settings_download?: { name: string; repository: string | null; percent: number | null; failed: boolean };
+	settings_download?: { name: string; repository: string | null; /** Memory the model needs once loaded; the download size when oMLX gives none. */ size_bytes?: number | null; percent: number | null; failed: boolean; /** Whether the model will be kept loaded (pinned) when it finishes: the backend's pin rule. */ will_pin?: boolean; /** The bytes are on disk; CORSIA is refreshing the catalog and loading the model. */ finishing?: boolean; /** On a failure: the bytes are on disk and only listing the model failed. */ downloaded?: boolean };
 	/** The starter download's last reported percent; absent before one is known. */
 	download_percent?: number | null;
 	/** Remaining transfer time from measured throughput; absent until there is a sample. */
@@ -52,6 +52,8 @@ export interface ModelSource {
 	setup_error_code?: string;
 	setup_error_reference?: string;
 	bytes_to_free?: number;
+	/** CORSIA's own local service is online and can safely receive downloads. */
+	corsia_omlx_online?: boolean;
 }
 
 /** The harness sources: Claude Code and Codex. */
@@ -77,15 +79,21 @@ export function anyReady(sources: ModelSource[]): boolean {
 
 export type LocalPickerRetry = 'starter' | 'setup' | 'settings';
 
+/** Local setup ended in a failure the person can retry. */
+export function localSetupFailed(source: ModelSource | undefined): boolean {
+	return ['failed', 'setup_failed', 'start_failed'].includes(source?.local_state ?? '');
+}
+
 /** What the model picker's Local group says about a download in progress or a failed setup; null when neither. */
 export function localPickerStatus(source: ModelSource | undefined): { line: string; retry: LocalPickerRetry | null } | null {
 	if (!source) return null;
 	const settings = source.settings_download;
 	if (settings && !settings.failed) {
+		if (settings.finishing) return { line: `Loading ${settings.name}`, retry: null };
 		return { line: `Downloading ${settings.name} · ${settings.percent ?? 0}%`, retry: null };
 	}
 	if (settings?.failed) return {
-		line: `Couldn't download ${settings.name}.`,
+		line: settings.downloaded ? `${settings.name} is downloaded but couldn't be added.` : `Couldn't download ${settings.name}.`,
 		retry: settings.repository ? 'settings' : null,
 	};
 	if (source.local_state === 'downloading') {
@@ -93,7 +101,7 @@ export function localPickerStatus(source: ModelSource | undefined): { line: stri
 		if (source.download_stalled) return { line: percent === null ? 'Download paused' : `Download paused at ${percent}%`, retry: null };
 		return { line: percent === null ? 'Downloading' : `Downloading ${percent}%`, retry: null };
 	}
-	if (['failed', 'setup_failed', 'start_failed'].includes(source.local_state ?? '')) {
+	if (localSetupFailed(source)) {
 		return { line: 'Setup failed', retry: source.setup_kind === 'settings' ? null : source.setup_kind ?? null };
 	}
 	return null;
@@ -119,7 +127,6 @@ export type LocalSetupResult = {
 	message?: string;
 	next_action?: string;
 	progress?: string[];
-	code?: 'consent_required';
 };
 
 export type LocalModelRecommendation = {
@@ -130,25 +137,37 @@ export type LocalModelRecommendation = {
 	/** Structured oMLX recommender facts; display wording belongs to localModelRecommendationMeta. */
 	quantization_bits?: number;
 	relative_speed?: number;
+	/** oMLX's quality estimate, 0.5 to 5 dots, and its estimated decode speed. */
+	smarts_level?: number;
+	tokens_per_second?: number;
+	/** Whether the model fits the memory free for a model now. */
+	fits_now?: boolean;
+	/** Memory oMLX says the model needs once loaded; absent when oMLX gives none. */
+	resident_bytes?: number;
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
 };
 
-export type LocalModelDownload = { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null };
+export type LocalModelDownload = { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null; /** For an available model, why CORSIA did not load it. */ detail?: string | null };
 
 export type LocalModelRecommendations = {
 	state?: string;
 	message?: string;
-	sections?: Record<string, LocalModelRecommendation[]>;
+	/** Setup's pick (the recommended row) first, then fits-now models, then the rest, each by quality then speed. */
+	models?: LocalModelRecommendation[];
 	/** Durable Settings download records for the add-model sheet. */
 	downloads?: LocalModelDownload[];
 	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
 	memory_gb?: number;
+	/** Memory a model may take now: free memory less the load reserve, the room setup's pick uses. */
+	memory_room_gb?: number;
+	/** The row setup would pick now, by the same fit rule; null when the list has none. */
+	recommended_repository?: string | null;
 	disk_free_gb?: number;
 };
 
 async function localRouteError(response: Response, fallback: string): Promise<Error> {
 	const body = await response.json().catch(() => null);
-	return new Error(typeof body?.detail === 'string' ? body.detail : fallback);
+	return Object.assign(new Error(typeof body?.detail === 'string' ? body.detail : fallback), { status: response.status });
 }
 
 /** Settings' local-model recommendations, checked by oMLX for this computer. */
@@ -192,15 +211,12 @@ export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; can
 	return response.json();
 }
 
-/** `otherOmlx` is the person's choice for every other oMLX process; leave it null until the question appears. */
-export async function setupLocalSource(t: string, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalSetupResult> {
+export async function setupLocalSource(t: string): Promise<LocalSetupResult> {
 	const response = await fetch('/api/providers/local/setup', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ other_omlx: otherOmlx }),
+		body: JSON.stringify({}),
 	});
 	const body = await response.json().catch(() => null);
-	const code = body?.detail?.code ?? body?.code;
-	if (response.status === 409 && code === 'consent_required') return { ok: false, code };
 	if (!response.ok) throw new Error(`local setup ${response.status}`);
 	return body;
 }

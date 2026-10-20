@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -28,6 +28,8 @@ class Download:
     detail: str | None = None
     # The local server that completed the download; absent for legacy records.
     server_id: str | None = None
+    # On a failed record: the bytes are on disk and only listing the model failed.
+    downloaded: bool = False
 
     def view(self) -> dict:
         return {
@@ -82,6 +84,7 @@ def all() -> list[Download]:
             model, status, speed if isinstance(speed, (int, float)) else None,
             detail if isinstance(detail, str) else None,
             server_id if isinstance(server_id, str) else None,
+            item.get("downloaded") is True,
         ))
     return sorted(result, key=lambda entry: entry.model.repository)
 
@@ -98,6 +101,13 @@ def forget(model_id: str) -> None:
         _write_raw(values)
 
 
+def set_detail(model_id: str, detail: str | None) -> None:
+    """Say why a downloaded model is not loaded (None clears it); a failed or absent record is left alone."""
+    record = get(model_id)
+    if record is not None and record.status == "available" and record.detail != detail:
+        write(replace(record, detail=detail))
+
+
 def reconcile(on_disk: set[str]) -> None:
     """Forget completed Settings downloads that oMLX no longer has on disk."""
     for download in all():
@@ -110,7 +120,7 @@ def write(download: Download) -> None:
     values[download.model.model] = {
         "model": to_record(download.model), "status": download.status,
         "speed": download.speed, "detail": download.detail,
-        "server_id": download.server_id,
+        "server_id": download.server_id, "downloaded": download.downloaded,
     }
     _write_raw(values)
 

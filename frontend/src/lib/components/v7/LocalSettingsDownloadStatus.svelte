@@ -9,6 +9,7 @@
 	interface Props { onStatusChange?: (hasDownload: boolean) => void; }
 	const { onStatusChange = () => {} }: Props = $props();
 	let download = $state<ModelSource['settings_download'] | null>(null);
+	const sizeLabel = $derived(download?.size_bytes ? `${(download.size_bytes / 1024 ** 3).toFixed(1)} GB` : '');
 	let busy = $state(false);
 	let error = $state('');
 	let stop: (() => void) | null = null;
@@ -59,13 +60,15 @@
 	onDestroy(() => { stop?.(); onStatusChange(false); });
 </script>
 
-{#if download}
+<!-- Once the bytes are on disk the model's own row takes over; a download row there would read "Downloading 0%". -->
+{#if download && !download.finishing}
 	<ModelRow
 		name={download.name ?? 'Model'}
-		state={download.failed ? 'error' : 'loading'}
-		meta={download.failed ? "Couldn't download this model. Try again." : `Downloading ${download.percent ?? 0}%`}
+		state={download.failed ? 'error' : 'default'}
+		meta={download.failed ? (download.downloaded ? "Downloaded, but couldn't be added. Retry to finish adding it." : "Couldn't download this model. Try again.") : [sizeLabel, `Downloading ${download.percent ?? 0}%`].filter(Boolean).join(' · ')}
 		progress={download.percent ?? 0}
-		puck={false}
+		downloading={!download.failed}
+		downloadingOn={download.will_pin === true}
 		onCancel={download.failed ? undefined : cancel}
 		onRetry={download.failed ? retry : undefined}
 		onDeleteDownload={download.failed ? deleteFailedDownload : undefined}

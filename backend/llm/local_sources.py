@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 
 from llm.catalog import list_models
-from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error
+from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_executable, managed_omlx_install_error
 from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_executable import omlx_on_path
@@ -42,10 +42,39 @@ def catalog_membership() -> tuple[set[str], set[str]]:
     return available, enabled
 
 
+def settle_listed_failures() -> None:
+    """Forget failed Settings records whose model CORSIA's own oMLX now lists.
+
+    The Add model list read calls this, so no sources read ever writes a record.
+    """
+    from llm import local_downloads
+
+    failures = [entry for entry in local_downloads.all() if entry.status == "failed"]
+    listed = _listed_on_managed(get_servers(provider="omlx")) if failures else set()
+    for entry in failures:
+        if entry.model.model in listed:
+            local_downloads.forget(entry.model.model)
+
+
+def _listed_on_managed(servers: list[dict]) -> set[str]:
+    """Model ids the catalog lists on CORSIA's own oMLX, where Settings downloads land.
+
+    A person's own oMLX listing the same model says nothing about a download into CORSIA's.
+    """
+    managed = {f"omlx@{s['id']}/" for s in servers if is_corsia_managed_server(s)}
+    return {row["litellm_model"].partition("/")[2]
+            for row in list_models(provider="omlx", include_unavailable=False)
+            if row["litellm_model"].startswith(tuple(managed))} if managed else set()
+
+
 def _source(source: str, name: str, state: str, reason: str | None = None,
             fix: str | None = None, checked_at: str | None = None) -> dict[str, Any]:
     return {"source": source, "name": name, "state": state, "prior_state": None,
             "reason": reason, "fix": fix, "checked_at": checked_at}
+
+
+#: Stages after the bytes are on disk: the model is no longer downloading.
+_FINISHING_STAGES = {"Refreshing model catalog", "Loading model"}
 
 
 def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
@@ -70,7 +99,7 @@ async def local_server_for_install(
     start_managed: Callable[[Callable[[str], None]], Awaitable[tuple[str, int]]] | None = None,
     start_if_absent: bool = True,
 ) -> tuple[str, int, bool] | None:
-    """Resolve the one local server serving this install: connected first, else managed."""
+    """Resolve the one local server for this install: CORSIA's own oMLX, started when absent."""
     import asyncio
 
     connected = await asyncio.to_thread(connected_local_server)
@@ -86,9 +115,12 @@ async def local_server_for_install(
     return server_id, port, False
 
 
-def local_omlx_servers() -> list[dict]:
-    """Every registered oMLX row with a loopback endpoint, regardless of its install origin."""
-    return [server for server in get_servers(provider="omlx")
+def local_omlx_servers(servers: list[dict] | None = None) -> list[dict]:
+    """Every registered oMLX row with a loopback endpoint, regardless of its install origin.
+
+    Pass the oMLX rows a caller already read to avoid reading them again.
+    """
+    return [server for server in (get_servers(provider="omlx") if servers is None else servers)
             if server.get("status") != "disabled" and any(
                 endpoint_on_this_mac(endpoint_base(
                     parse_server_metadata(server["id"], server.get("metadata_json")) or {},
@@ -97,13 +129,18 @@ def local_omlx_servers() -> list[dict]:
 
 
 def connected_local_server() -> dict | None:
-    """An existing local server that is online and has a usable catalog model."""
+    """CORSIA's own oMLX when it is online and has a usable catalog model.
+
+    A person's own oMLX is never this install's server, however many models it lists.
+    """
     available, _enabled = catalog_membership()
     return next((server for server in local_omlx_servers()
-                 if server.get("status") == "online" and f"omlx@{server['id']}" in available), None)
+                 if is_corsia_managed_server(server) and server.get("status") == "online"
+                 and f"omlx@{server['id']}" in available), None)
 
 
-def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
+def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
+                omlx_rows: list[dict] | None = None) -> dict[str, Any]:
     """Project every local server row; only with none is this host's binary asked."""
     from llm.local_setup import setup_kind
     from llm.local_setup_prepare import known_model
@@ -125,7 +162,7 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         return result
 
     name = "Local model"
-    servers = local_omlx_servers()
+    servers = local_omlx_servers(omlx_rows)
     if not servers:
         install_error = managed_omlx_install_error()
         if install_error:
@@ -181,32 +218,46 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     """The registered local source row and its active download state."""
     from llm.local_setup import download_percent, flight_model, setup_kind, setup_stage
 
-    result = _omlx_state(membership)
+    servers = get_servers(provider="omlx")
+    result = _omlx_state(membership, servers)
+    result["corsia_omlx_online"] = any(
+        is_corsia_managed_server(server) and server.get("status") == "online"
+        for server in servers
+    )
     flying = result.get("local_state") in {"downloading", "starting", "failed", "setup_failed", "start_failed"}
     current_kind = setup_kind()
     kind = current_kind if flying or current_kind == "settings" else None
     result["setup_kind"] = kind
-    # Settings downloads share the durable flight but never borrow setup's
-    # fallback semantics. A terminal Settings failure belongs to its durable
-    # Settings record so the next sources read can offer the exact retry.
-    stage = setup_stage() if kind == "settings" else None
+    # A Settings download, and a setup that has picked its model, are the same
+    # download to the person: both show on the oMLX row and in the Add model
+    # sheet. Settings never borrows setup's fallback semantics, and a terminal
+    # Settings failure belongs to its durable Settings record so the next
+    # sources read can offer the exact retry.
+    shows_download = kind == "settings" or (current_kind == "setup" and flight_model() is not None)
+    stage = setup_stage() if shows_download else None
     if stage:
         model = flight_model()
         result["settings_download"] = {
             "name": model.display_name if model else None,
             "repository": model.repository if model else None,
+            "size_bytes": (model.resident_bytes or model.download_size_bytes) if model else None,
             "percent": download_percent(),
             "failed": False,
+            "finishing": stage in _FINISHING_STAGES,
         }
     else:
         from llm import local_downloads
 
-        failed = next((entry for entry in local_downloads.all() if entry.status == "failed"), None)
+        # A failure whose model CORSIA's oMLX now lists no longer describes it; the Add model list settles the record.
+        failures = [entry for entry in local_downloads.all() if entry.status == "failed"]
+        listed = _listed_on_managed(servers) if failures else set()
+        failed = next((entry for entry in failures if entry.model.model not in listed), None)
         if failed is not None:
             result["settings_download"] = {
                 "name": failed.model.display_name,
                 "repository": failed.model.repository,
                 "percent": None,
                 "failed": True,
+                "downloaded": failed.downloaded,
             }
     return result

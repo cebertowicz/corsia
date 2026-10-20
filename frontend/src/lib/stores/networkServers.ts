@@ -67,6 +67,8 @@ export interface NetworkServer {
 	private?: boolean;
 	has_key?: boolean;
 	masked_key?: string;
+	/** True only for CORSIA's keyed loopback oMLX service. */
+	corsia_omlx?: boolean;
 	/** How the endpoint is billed; null when unset. */
 	billing?: ServerBilling | null;
 	/** Fences billing writes; sent back unchanged. */

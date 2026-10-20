@@ -23,6 +23,14 @@
 		onInfo?: () => void;
 		onCancel?: () => void;
 		onRetry?: () => void;
+		/** A pinned model oMLX didn't load at start: load it now even though memory is short. */
+		onLoadAnyway?: () => void;
+		/** A download in progress: a standard row with its switch off-limits until the model is on disk. */
+		downloading?: boolean;
+		/** On a downloading row: whether the switch will be on once the model is kept loaded. */
+		downloadingOn?: boolean;
+		/** A local model loading into memory: its switch is on, since the switch is the keep-loaded pin, and off-limits until it loads. */
+		loadingOn?: boolean;
 		/** Settings-owned local downloads can be removed from this row's action menu. */
 		onDeleteDownload?: () => void;
 	}
@@ -42,10 +50,15 @@
 		onInfo,
 		onCancel,
 		onRetry,
+		onLoadAnyway,
+		downloading = false,
+		downloadingOn = false,
+		loadingOn = false,
 		onDeleteDownload,
 	}: Props = $props();
 
-	const showCancel = $derived(state === 'loading' || state === 'cache_warming' || state === 'queued');
+	// Cancel only where there is something to cancel: oMLX's own start preload has no job.
+	const showCancel = $derived((state === 'loading' || state === 'cache_warming' || state === 'queued' || downloading) && !!onCancel);
 	const showRetry = $derived(state === 'error');
 	const showInfo = $derived(!showCancel && !showRetry);
 	const menu = createRowMenu<string>(() => !!onDeleteDownload);
@@ -62,6 +75,7 @@
 		'',
 	);
 	const rowClass = $derived(
+		downloading ? 'dl-row' :
 		state === 'loaded' ? 'loaded' :
 		state === 'loading' ? 'loading-row' :
 		state === 'cache_warming' ? 'warming-row' :
@@ -73,7 +87,10 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
 <div class="mr {rowClass}" class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
-		{#if (state === 'loading' || state === 'cache_warming') && !puck}
+		{#if downloading || loadingOn}
+			{@const on = downloading ? downloadingOn : loadingOn}
+			<button type="button" class="tg sm" class:on aria-label={on ? toggleLabels[0] : toggleLabels[1]} disabled></button>
+		{:else if (state === 'loading' || state === 'cache_warming') && !puck}
 			<!-- Keeps the grid column so the name stays aligned with its neighbours. -->
 		{:else if state === 'loading' || state === 'cache_warming'}
 			<span class="puck" class:warming={state === 'cache_warming'}>
@@ -126,7 +143,7 @@
 	<ModelRowActions {showInfo} {showCancel} {showRetry} {onInfo} {onCancel} {onRetry} />
 
 	{#if warning}
-		<span class="warn" role="status">{warning}</span>
+		<span class="warn" role="status">{warning}{#if onLoadAnyway} <button type="button" class="link-btn" onclick={(event) => { event.stopPropagation(); onLoadAnyway?.(); }}>Load anyway</button>{/if}</span>
 	{:else if note}
 		<span class="note">{note}</span>
 	{/if}
@@ -183,19 +200,27 @@
 	}
 	.mr.loaded:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
-	.mr.loading-row { background: var(--amber-bg); }
+	.mr.loading-row { background: transparent; }
 	.mr.loading-row::before {
 		content: '';
 		position: absolute; left: 0; top: 4px; bottom: 4px;
 		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--amber);
+		background: var(--text-tertiary);
 	}
 	.mr.loading-row::after {
 		content: '';
 		position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--amber) 0%, var(--amber) var(--p, 0%), transparent var(--p, 0%));
+		background: linear-gradient(90deg, var(--text-tertiary) 0%, var(--text-tertiary) var(--p, 0%), transparent var(--p, 0%));
 		border-radius: 1px;
 	}
+
+	/* A download is a standard row: its neutral bar spans the row, edge to edge. */
+	.mr.dl-row::after {
+		content: '';
+		position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+		background: linear-gradient(90deg, var(--text-tertiary) 0%, var(--text-tertiary) var(--p, 0%), transparent var(--p, 0%));
+	}
+	.tg:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.mr.warming-row { background: var(--sky-bg); }
 	.mr.warming-row::before {
@@ -237,9 +262,11 @@
 		font-variant-numeric: tabular-nums;
 		flex-shrink: 0;
 	}
-	.meta.loading { color: var(--amber); font-weight: 500; }
+	.meta.loading { color: var(--text-secondary); font-weight: 500; }
 	.meta.warming { color: var(--sky); font-weight: 500; }
 	.meta.error   { color: var(--red); font-weight: 500; }
+	.link-btn { border: 0; background: transparent; padding: 0; margin-left: var(--space-1); color: var(--accent-text); font: inherit; cursor: pointer; }
+	.link-btn:hover { text-decoration: underline; }
 	.note { grid-area: warn; color: var(--text-tertiary); font-size: var(--text-footnote); }
 
 	.caps { display: flex; gap: 4px; align-items: center; }
@@ -290,8 +317,8 @@
 	.puck {
 		--w: 30px; --h: 17px;
 		width: var(--w); height: var(--h);
-		background: var(--amber-bg);
-		border: 1px solid var(--amber-line);
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border);
 		border-radius: var(--radius-pill);
 		position: relative; overflow: hidden;
 		box-shadow: inset 0 1px 1px rgba(0,0,0,0.3);
@@ -303,7 +330,7 @@
 	.puck::before {
 		content: '';
 		position: absolute; inset: 0;
-		background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 40%, transparent), transparent);
+		background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-tertiary) 40%, transparent), transparent);
 		background-size: 200% 100%;
 		animation: shimmer 1.4s linear infinite;
 	}
@@ -313,7 +340,7 @@
 	}
 	.puck > .fill {
 		position: absolute; left: 0; top: 0; bottom: 0;
-		background: linear-gradient(180deg, var(--amber), #d97706);
+		background: var(--text-tertiary);
 		opacity: 0.5;
 	}
 	.puck.warming > .fill {

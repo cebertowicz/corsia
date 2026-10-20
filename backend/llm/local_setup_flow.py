@@ -7,6 +7,7 @@ from typing import Callable
 
 from infra.failure_reference import new_reference
 from llm import local_setup as ls, local_setup_operation, local_setup_prepare as prepare
+from llm.local_keep_loaded import keep_loaded
 from llm.local_model import LocalModel, record_set_up
 from llm.local_profiles import format_size
 from llm.local_setup_disk import DiskSpaceError
@@ -46,6 +47,8 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
     if not result.get("ok"):
         raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
     await asyncio.to_thread(record_set_up, model)
+    report("Loading model")
+    await keep_loaded(server_id, model)
     ls._emit("completed", model=model.repository)
     return {"ok": True, "server_id": server_id, "model": model.model,
             "download_size": format_size(model.download_size_bytes), "progress": events}
@@ -100,7 +103,7 @@ async def resume_pending_setup() -> bool:
     operation = local_setup_operation.read()
     if operation is None:
         return False
-    if operation.result is not None and not operation.result.get("downloading"):
+    if not operation.in_flight:
         ls.restore_terminal_flight(operation)
         return False
     if operation.kind not in {"setup", "settings"} or not await asyncio.to_thread(local_memory_ok):
@@ -118,7 +121,7 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
     if ls._running():
         return ls._in_progress_result()
     operation = local_setup_operation.read()
-    if operation is not None and (operation.result is None or operation.result.get("downloading")):
+    if operation is not None and operation.in_flight:
         if await resume_pending_setup():
             return ls._in_progress_result()
         return local_setup_error("CORSIA could not resume the local model setup safely.")
@@ -165,7 +168,7 @@ async def begin_settings_download(model: LocalModel) -> dict:
     if ls._running():
         return ls._in_progress_result()
     operation = local_setup_operation.read()
-    if operation is not None and (operation.result is None or operation.result.get("downloading")):
+    if operation is not None and operation.in_flight:
         if await resume_pending_setup():
             return ls._in_progress_result()
         return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
