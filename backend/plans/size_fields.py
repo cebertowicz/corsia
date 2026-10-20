@@ -6,6 +6,19 @@ from core.size_rating import SIZE_CLASSES, SIZE_MEANING, SIZE_SCALE_DESCRIPTION
 from plans import service
 
 
+TASK_SIZE_REQUIRED = (
+    f"size is required: pass a size class; use unknown when you cannot tell. "
+    f"{SIZE_MEANING} {SIZE_SCALE_DESCRIPTION}."
+)
+
+
+def require_task_size(value: object) -> str:
+    """Return a task's declared size or explain the allowed unknown fallback."""
+    if value is None:
+        raise service.PlanInputError(TASK_SIZE_REQUIRED)
+    return validate_size(value)
+
+
 def validate_size(value: object) -> str | None:
     """Return a valid nullable declaration or an actionable input error."""
     if value is None:

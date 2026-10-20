@@ -72,7 +72,7 @@ async def test_class2_add_without_kind_defaults_to_task(isolated_db):
     plan, _task = _scene(db, thread_id)
 
     result = await _update(db, thread_id, _body(
-        plan.id, "add", {"title": "New work", "acceptance_criteria": "Done"},
+        plan.id, "add", {"title": "New work", "acceptance_criteria": "Done", "size": "unknown"},
         "add-no-kind",
     ))
 

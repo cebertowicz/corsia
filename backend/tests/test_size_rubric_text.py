@@ -9,7 +9,7 @@ import pytest
 
 from core.size_rating import SIZE_CLASSES, SIZE_MEANING, SIZE_SCALE_DESCRIPTION, SIZE_TOOL_PREFIX
 from plans import service
-from plans.size_fields import validate_size
+from plans.size_fields import TASK_SIZE_REQUIRED, require_task_size, validate_size
 from tools.plan_field_schemas import MUTATION_FIELD_SCHEMAS
 
 _SKILL = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills/task-discipline/SKILL.md"
@@ -20,9 +20,12 @@ def test_the_rubric_names_every_size_class_in_order():
     assert tuple(named) == SIZE_CLASSES
 
 
-def test_the_tool_field_carries_the_scale_with_a_short_meaning_and_tells_agents_to_set_it():
+def test_the_tool_field_carries_the_scale_with_a_short_task_requirement():
     description = MUTATION_FIELD_SCHEMAS["size"]["description"]
-    assert description == f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Set it on every task you add."
+    assert description == (
+        f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Every task: required; "
+        "unknown if unsure."
+    )
     # The field ships in the plan_update schema on every Turn: the long meaning
     # stays out of it, and the prefix is no longer than the one it replaced.
     assert SIZE_MEANING not in description
@@ -41,8 +44,13 @@ def test_the_skill_states_the_exact_rubric_once_in_its_general_plan_guidance():
     assert "under 15 min" not in workflow and "(see **Size**)" in workflow
 
 
-def test_the_refusal_quotes_the_same_rubric():
-    with pytest.raises(service.PlanInputError) as error:
+def test_the_refusals_quote_the_same_rubric():
+    with pytest.raises(service.PlanInputError) as invalid:
         validate_size("huge")
-    assert SIZE_MEANING in str(error.value)
-    assert SIZE_SCALE_DESCRIPTION in str(error.value)
+    assert SIZE_MEANING in str(invalid.value)
+    assert SIZE_SCALE_DESCRIPTION in str(invalid.value)
+
+    with pytest.raises(service.PlanInputError) as missing:
+        require_task_size(None)
+    assert str(missing.value) == TASK_SIZE_REQUIRED
+    assert "unknown" in str(missing.value)

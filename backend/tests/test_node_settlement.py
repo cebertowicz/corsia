@@ -71,7 +71,7 @@ SETTLING = {
 STRUCTURAL = {
     "reorder": {"order_key": 0},
     # The sibling inherits the decision's user assignee, so it is a person step.
-    "split": {"title": "Split part", "acceptance_criteria": "Split DOD",
+    "split": {"title": "Split part", "acceptance_criteria": "Split DOD", "size": "unknown",
               "description": "Answer the split part.\n\nAlready tried: the agent cannot decide it."},
 }
 
