@@ -58,16 +58,17 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
     """
     connection = db or get_db()
     try:
-        project = thread_scope(thread_id, db=connection)["project_id"] if thread_id else project_id
+        scope = thread_scope(thread_id, db=connection) if thread_id else None
+        project = scope["project_id"] if scope else project_id
         requested = get_account(account_id, db=connection) if account_id is not None else None
-        cloud_refusal = _cloud_refusal(project, thread_id, db=connection)
+        cloud_refusal = _locality_refusal(project, bool(scope and scope["local_only"]), db=connection)
         result = []
         pending: dict[str, str | None] = {}
         for original in rows:
             row = dict(original)
             provider = row.get("connection")
             if provider not in ("codex", "claude-code"):
-                _apply_cloud_models_off(row, cloud_refusal)
+                _apply_locality(row, cloud_refusal)
                 result.append(row)
                 continue
             permitted = permitted_accounts(provider, project_ids=[project], db=connection)
@@ -89,7 +90,7 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             elif chosen["source_home"] is not None:
                 _read_discovered_evidence(row, chosen, connection)
             row["runnable"] = _runnable_status(row)
-            _apply_cloud_models_off(row, cloud_refusal)
+            _apply_locality(row, cloud_refusal)
             result.append(row)
         return result
     finally:
@@ -97,21 +98,20 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             connection.close()
 
 
-def _cloud_refusal(project_id, thread_id, *, db) -> str | None:
+def _locality_refusal(project_id, thread_local_only: bool, *, db) -> str | None:
     """The locality refusal in force for this scope, named as ``locality_refusal`` names it.
 
-    The project switch is read first and wins; a thread's own, inherited or project-copied
-    ``local_only`` is its plain column.
+    A Local only thread names its own setting, the cause that lifts first; otherwise the
+    project switch names the project.
     """
     from llm.locality import project_cloud_models_off
 
-    if project_cloud_models_off(project_id, db=db):
-        return "project_cloud_off"
-    row = db.execute("SELECT local_only FROM threads WHERE id = ?", (thread_id,)).fetchone() if thread_id else None
-    return "thread_local_only" if row and row["local_only"] else None
+    if thread_local_only:
+        return "thread_local_only"
+    return "project_cloud_off" if project_cloud_models_off(project_id, db=db) else None
 
 
-def _apply_cloud_models_off(row: dict, refusal: str | None) -> None:
+def _apply_locality(row: dict, refusal: str | None) -> None:
     """Overlay project or thread locality policy without deleting scoped catalog rows."""
     if refusal and not row.get("is_local", False):
         row.update(status="unavailable", status_reason=refusal)

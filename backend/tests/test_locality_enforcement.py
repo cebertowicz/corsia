@@ -105,8 +105,7 @@ def test_project_accounts_marks_cloud_rows_for_a_local_only_thread_alone(world):
 
     ordinary = read("plain")
     assert [(r["status"], r["status_reason"]) for r in ordinary.values()] == [("ready", None)] * 3
-    # The project switch is read first, as locality_refusal reads it, so the row names the project.
-    assert read("both")[CLOUD]["status_reason"] == "project_cloud_off"
+    assert read("both")[CLOUD]["status_reason"] == "thread_local_only"
 
 
 @pytest.mark.asyncio
