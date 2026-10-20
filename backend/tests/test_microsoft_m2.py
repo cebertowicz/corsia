@@ -214,7 +214,7 @@ async def test_graph_adapters_cover_mail_calendar_and_drive_actions(monkeypatch:
     await files.upload_item("m", "note.txt", "contents")
 
     assert page_calls[0][0] == mail.MESSAGES
-    assert page_calls[1][0] == calendar.EVENTS
+    assert page_calls[1][0] == calendar.CALENDAR_VIEW
     assert page_calls[2][0] == f"{files.DRIVE}/root/children"
     assert page_calls[3][0] == f"{files.DRIVE}/items/folder%2Fid/children"
     assert any(method == "POST" and url == "https://graph.microsoft.com/v1.0/me/sendMail" and body is not None for method, url, body in json_calls)

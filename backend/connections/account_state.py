@@ -17,7 +17,7 @@ from infra.time import utc_now_iso
 if TYPE_CHECKING:
     from connections.connected_accounts import Actor
 
-APP_REGISTRATION_NOT_ALLOWED = "app_registration_not_allowed"
+# Application-registration blocks are setup-only and do not describe account state.
 ADMIN_APPROVAL_REQUIRED = "admin_approval_required"
 CONSENT_CANCELLED = "consent_cancelled"
 REGISTRATION_MISCONFIGURED = "registration_misconfigured"

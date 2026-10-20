@@ -62,8 +62,25 @@ async def fetch(account_id: str, message_id: str) -> Message:
     return _message(value)
 
 
-async def send(account_id: str, recipients: list[str], subject: str, body: str) -> None:
+async def send(
+    account_id: str, recipients: list[str], subject: str, body: str, *, cc: list[str] | None = None,
+    token: str | None = None,
+) -> str:
     if not recipients or not all(isinstance(item, str) and item.strip() for item in recipients):
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
-    payload: dict[str, object] = {"message": {"subject": subject, "body": {"contentType": "Text", "content": body}, "toRecipients": [{"emailAddress": {"address": item}} for item in recipients]}}
-    await client.graph_json("POST", "https://graph.microsoft.com/v1.0/me/sendMail", account_id=account_id, body=payload)
+        raise MicrosoftError("request_refused", never_sent=True)
+    if cc is not None and not all(isinstance(item, str) and item.strip() for item in cc):
+        raise MicrosoftError("request_refused", never_sent=True)
+    payload: dict[str, object] = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "Text", "content": body},
+            "toRecipients": [{"emailAddress": {"address": item}} for item in recipients],
+            "ccRecipients": [{"emailAddress": {"address": item}} for item in cc or []],
+        },
+    }
+    request = {"account_id": account_id, "body": payload}
+    if token is not None:
+        request["token"] = token
+    await client.graph_json("POST", "https://graph.microsoft.com/v1.0/me/sendMail", **request)
+    # Graph returns 202 without an external message id; acceptance is the durable proof.
+    return "accepted"

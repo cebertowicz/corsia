@@ -24,7 +24,7 @@ def connect(tenant="consumers"):
         account_kind="personal" if tenant == "consumers" else "work", provider_subject=f"{tenant}:{uuid.uuid4()}",
     )["id"])
     store_credentials(account, {
-        "access_token": "old-access", "refresh_token": "old-refresh", "client_id": "client",
+        "access_token": "old-access", "access_token_expires_at": "0", "refresh_token": "old-refresh", "client_id": "client",
         "tenant_id": tenant, "scopes": ["User.Read", "Mail.Read"],
     })
     return account

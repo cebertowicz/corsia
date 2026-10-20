@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from api.connected_app_access import audit_actor
 from connections.app_reach import AppReach
 from connections.microsoft import oauth
-from connections.microsoft.errors import ACCOUNT_NOT_FOUND, MicrosoftError
+from connections.microsoft.errors import ACCOUNT_NOT_FOUND, MicrosoftError, person_message
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
 
@@ -54,8 +54,8 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
         )
     except MicrosoftError as exc:
         if exc.cause == ACCOUNT_NOT_FOUND:
-            raise HTTPException(404, {"cause": exc.cause, "message": NOT_FOUND}) from None
-        raise HTTPException(400, {"cause": exc.cause, "message": exc.message}) from None
+            raise HTTPException(404, NOT_FOUND) from None
+        raise HTTPException(400, person_message(exc.cause)) from None
     return {"url": url, "account_id": signing_in}
 
 

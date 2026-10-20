@@ -42,7 +42,7 @@ PENDING_SECONDS = 600
 PENDING_MAX = 8
 #: The key a person's own failed add is kept under; an agent's is its thread id.
 PERSON_ADDS = "person"
-WRONG_FLOW_PAGE = "This isn't the Microsoft sign-in CORSIA is waiting for."
+WRONG_FLOW_PAGE = "This isn’t the Microsoft sign-in CORSIA is waiting for. Go back to CORSIA and try again."
 CONNECTED_PAGE = "Microsoft is connected. You can close this tab and go back to CORSIA."
 #: OAuth protocol error names (RFC 6749 §5.2) safe to log; anything else logs as ``other``.
 _PROTOCOL_ERRORS = frozenset((

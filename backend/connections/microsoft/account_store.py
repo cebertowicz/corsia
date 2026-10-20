@@ -2,6 +2,7 @@
 signs in again with, and the row and credentials a finished sign-in creates or renews."""
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 from connections.connected_accounts import MICROSOFT_PROVIDER
@@ -48,8 +49,12 @@ def store(pending: _Pending, grant: dict[str, object], identity: client.Identity
     from connections.account_state import mark_signed_in, record_audit
 
     subject = provider_subject(identity)
+    expires_in = grant.get("expires_in")
     bundle = {
         "access_token": key_store.validated_value(grant["access_token"]),
+        "access_token_expires_at": str(time.time() + expires_in)
+        if isinstance(expires_in, (int, float)) and not isinstance(expires_in, bool) and expires_in > 0
+        else str(time.time()),
         "refresh_token": key_store.validated_value(grant["refresh_token"]),
         "client_id": pending.client_id, "tenant_id": "consumers" if identity.kind == "personal" else identity.tenant_id,
         "scopes": list(SCOPES),

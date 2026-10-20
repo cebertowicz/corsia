@@ -24,14 +24,8 @@ from connections.google.calendar_document import (
 from connections.google.client import GoogleError, GoogleRequestFailed
 from infra import config
 from infra.db_async import run_in_db
-from tools.action_drafts import (
-    DraftError,
-    claim_for_send,
-    create_draft,
-    mark_sent,
-    record_draft,
-    release_claim,
-)
+from tools.action_delivery import deliver_claimed
+from tools.action_drafts import DraftError, create_draft, record_draft
 from tools.action_gate import Approved, Refusal, STALE_REVISION, check_action
 from tools.base import Tool
 
@@ -345,50 +339,24 @@ class CalendarSendInviteTool(Tool):
                 "attendees": [{"email": email} for email in attendees], "description": description}
 
     async def _deliver(self, draft_id: str, account_id: str, body: dict) -> str:
-        try:
-            await run_in_db(claim_for_send, draft_id)
-        except DraftError:
-            return f"Error: {STILL_SENDING}"
-        except Exception:
-            log.exception("calendar_send_invite could not claim the invite")
-            return "Error: Not sent: couldn't check the invite draft. Try again."
-        try:
-            bearer = await google_client.access_token(account_id)
-        except GoogleError as exc:
-            await self._release(draft_id)
-            return f"Error: Not sent: {exc}"
-        except Exception:
-            log.exception("calendar_send_invite could not get a Google sign-in")
-            await self._release(draft_id)
-            return "Error: Not sent: couldn't reach Google. Try again later."
-        try:
-            sent = await google_client.request_json(
+        return await deliver_claimed(
+            draft_id,
+            acquire=lambda: google_client.access_token(account_id),
+            send=lambda bearer: google_client.request_json(
                 "POST", _event_url("primary"), account_id=account_id, body=body,
                 params={"sendUpdates": "all"}, token=bearer,
-            )
-        except google_client.GoogleSignInRejected as exc:
-            await self._release(draft_id)
-            return f"Error: Not sent: {exc}"
-        except GoogleRequestFailed as exc:
-            if exc.never_sent:
-                await self._release(draft_id)
-                return f"Error: Not sent: {exc}"
-            return f"Error: {UNCONFIRMED}"
-        except Exception:
-            log.exception("calendar_send_invite outcome unknown")
-            return f"Error: {UNCONFIRMED}"
-        event_id = sent.get("id") if isinstance(sent, dict) else None
-        if not isinstance(event_id, str) or not event_id:
-            return f"Error: {UNCONFIRMED}"
-        try:
-            await run_in_db(mark_sent, draft_id, event_id)
-        except Exception:
-            log.exception("calendar_send_invite: Google accepted the event but the draft could not be marked sent")
-        return json.dumps({"event_id": event_id, "html_link": sent.get("htmlLink")})
-
-    @staticmethod
-    async def _release(draft_id: str) -> None:
-        try:
-            await run_in_db(release_claim, draft_id)
-        except Exception:
-            log.exception("calendar_send_invite: the claim could not be released")
+            ),
+            result_id=lambda sent: sent.get("id") if isinstance(sent, dict) else None,
+            success=lambda sent, event_id: json.dumps({
+                "event_id": event_id,
+                "html_link": sent.get("htmlLink") if isinstance(sent, dict) else None,
+            }),
+            sign_in_error=lambda exc: str(exc) if isinstance(exc, GoogleError) else "couldn't reach Google. Try again later.",
+            request_error=str,
+            never_sent=lambda exc: isinstance(exc, google_client.GoogleSignInRejected)
+            or isinstance(exc, GoogleRequestFailed) and exc.never_sent,
+            still_sending=STILL_SENDING,
+            claim_error="Not sent: couldn't check the invite draft. Try again.",
+            unconfirmed=UNCONFIRMED,
+            label="calendar_send_invite",
+        )

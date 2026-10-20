@@ -35,14 +35,8 @@ from connections.google.email_document import (
 from connections.google.email_gmail import GMAIL, fetch_signature, kept_reply_label, reply_target
 from infra import config
 from infra.db_async import run_in_db
-from tools.action_drafts import (
-    DraftError,
-    claim_for_send,
-    create_draft,
-    mark_sent,
-    record_draft,
-    release_claim,
-)
+from tools.action_delivery import deliver_claimed
+from tools.action_drafts import DraftError, create_draft, record_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 
@@ -336,55 +330,25 @@ class EmailSendTool(Tool):
         return str(account["id"]), body
 
     async def _deliver(self, draft_id: str, account_id: str, body: dict) -> str:
-        """Claim the draft, send it once, and settle it by what Google proved."""
-        try:
-            await run_in_db(claim_for_send, draft_id)
-        except DraftError:
-            return f"Error: {STILL_SENDING}"
-        except Exception:
-            log.exception("email_send could not claim the draft")
-            return "Error: Not sent: couldn't check the draft. Try again."
-        try:
-            bearer = await google_client.access_token(account_id)
-        except GoogleError as exc:
-            await self._release(draft_id)
-            return f"Error: Not sent: {exc}"
-        except Exception:
-            log.exception("email_send could not get a Google sign-in")
-            await self._release(draft_id)
-            return "Error: Not sent: couldn't reach Google. Try again later."
-        # From here the request may have reached Gmail: only a proof that it did not
-        # (never connected, or a 4xx) returns the draft to open.
-        try:
-            sent = await google_client.request_json(
+        """Send through the shared claimed-delivery lifecycle."""
+        return await deliver_claimed(
+            draft_id,
+            acquire=lambda: google_client.access_token(account_id),
+            send=lambda bearer: google_client.request_json(
                 "POST", SEND_URL, account_id=account_id, body=body, token=bearer,
-            )
-        except google_client.GoogleSignInRejected as exc:
-            await self._release(draft_id)
-            return f"Error: Not sent: {exc}"
-        except GoogleRequestFailed as exc:
-            if exc.never_sent:
-                await self._release(draft_id)
-                return f"Error: Not sent: {exc}"
-            return f"Error: {UNCONFIRMED}"
-        except Exception:
-            log.exception("email_send outcome unknown")
-            return f"Error: {UNCONFIRMED}"
-        message_id = sent.get("id") if isinstance(sent, dict) else None
-        if not isinstance(message_id, str) or not message_id:
-            return f"Error: {UNCONFIRMED}"
-        try:
-            await run_in_db(mark_sent, draft_id, message_id)
-        except Exception:
-            log.exception("email_send: Gmail accepted the message but the draft could not be marked sent")
-        return json.dumps({
-            "sent_message_id": message_id, "thread_id": thread_key(account_id, sent.get("threadId")),
-            "account_id": account_id,
-        })
-
-    @staticmethod
-    async def _release(draft_id: str) -> None:
-        try:
-            await run_in_db(release_claim, draft_id)
-        except Exception:
-            log.exception("email_send: the claim could not be released")
+            ),
+            result_id=lambda sent: sent.get("id") if isinstance(sent, dict) else None,
+            success=lambda sent, message_id: json.dumps({
+                "sent_message_id": message_id,
+                "thread_id": thread_key(account_id, sent.get("threadId")),
+                "account_id": account_id,
+            }),
+            sign_in_error=lambda exc: str(exc) if isinstance(exc, GoogleError) else "couldn't reach Google. Try again later.",
+            request_error=str,
+            never_sent=lambda exc: isinstance(exc, google_client.GoogleSignInRejected)
+            or isinstance(exc, GoogleRequestFailed) and exc.never_sent,
+            still_sending=STILL_SENDING,
+            claim_error="Not sent: couldn't check the draft. Try again.",
+            unconfirmed=UNCONFIRMED,
+            label="email_send",
+        )

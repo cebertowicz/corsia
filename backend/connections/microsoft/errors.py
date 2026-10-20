@@ -23,6 +23,7 @@ DIFFERENT_ACCOUNT = "different_account"
 ACCOUNT_REMOVED = "account_removed"
 INTERNAL = "internal"
 FILE_NAME_CONFLICT = "file_name_conflict"
+REQUEST_REFUSED = "request_refused"
 
 _BROWSER_RETRY = "Microsoft sign-in couldn’t finish. Go back to CORSIA and try again."
 # (message, browser page) per code; ``{address}`` and ``{signed_in}`` are filled from the account.
@@ -89,6 +90,10 @@ _TEXT: dict[str, tuple[str, str]] = {
         "A file with that name already exists; choose another name.",
         _BROWSER_RETRY,
     ),
+    REQUEST_REFUSED: (
+        "Microsoft refused this request. Check the draft or event details and try again.",
+        _BROWSER_RETRY,
+    ),
 }
 CODES = frozenset(_TEXT)
 
@@ -96,7 +101,7 @@ CODES = frozenset(_TEXT)
 class MicrosoftError(Exception):
     """A safe Microsoft result; provider response text must never leave this package."""
 
-    def __init__(self, cause: str, **fields: str) -> None:
+    def __init__(self, cause: str, *, never_sent: bool = False, **fields: str) -> None:
         if cause not in _TEXT:
             raise ValueError(f"unknown Microsoft sign-in result {cause!r}")
         message, browser = _TEXT[cause]
@@ -104,6 +109,7 @@ class MicrosoftError(Exception):
         self.cause = cause
         self.message = message.format(**fields)
         self.browser_message = browser.format(**fields)
+        self.never_sent = never_sent
 
     @property
     def state_cause(self) -> str | None:
@@ -112,8 +118,17 @@ class MicrosoftError(Exception):
 
 
 def message(cause: str) -> str:
-    """The fixed message for a recorded cause."""
+    """The fixed message for an agent-facing cause."""
     return _TEXT[cause][0]
+
+
+def person_message(cause: str) -> str:
+    """The fixed person-facing copy for an API response, never agent instructions."""
+    return {
+        PROVIDER_UNAVAILABLE: "Microsoft had a problem with sign-in. Try again.",
+        SIGN_IN_BUSY: "Too many Microsoft sign-ins are waiting. Finish one or wait ten minutes, then try again.",
+        INPUT_REFUSAL: "Microsoft sign-in needs the app details CORSIA asked for. Go back to CORSIA and try again.",
+    }.get(cause, _TEXT[cause][1])
 
 
 def token_error_cause(status: int, payload: object) -> str:

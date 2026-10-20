@@ -9,7 +9,7 @@ from connections.account_state import REGISTRATION_MISCONFIGURED, REVOCATION_CAU
 from infra.connected_accounts_schema import AUDIT_TABLE_SQL, CONNECTED_ACCOUNTS_SCHEMA_SQL, _sql_values as schema_sql_values
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_131_to_132_microsoft_accounts import _AUDIT_V131_SQL, _CONNECTED_ACCOUNTS_V131_SQL, migrate_131_to_132
+from infra.migration_131_to_132_microsoft_accounts import _AUDIT_V132_SQL, _CONNECTED_ACCOUNTS_V132_SQL, migrate_131_to_132
 from infra.schema import SCHEMA_VERSION
 
 
@@ -51,8 +51,8 @@ def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
     assert schema_sql_values(STATE_CAUSES) in CONNECTED_ACCOUNTS_SCHEMA_SQL
     assert schema_sql_values(REVOCATION_CAUSES) in AUDIT_TABLE_SQL
     assert REVOCATION_CAUSES.isdisjoint(STATE_CAUSES)
-    assert _literal_check_values(_CONNECTED_ACCOUNTS_V131_SQL, "state_cause") == STATE_CAUSES
-    assert _literal_check_values(_AUDIT_V131_SQL, "revocation_cause") == REVOCATION_CAUSES
+    assert _literal_check_values(_CONNECTED_ACCOUNTS_V132_SQL, "state_cause") == STATE_CAUSES
+    assert _literal_check_values(_AUDIT_V132_SQL, "revocation_cause") == REVOCATION_CAUSES
 
 
 def test_v131_registers_microsoft_account_step() -> None:

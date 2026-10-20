@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from connections.connected_accounts import ConnectedAccountError
-from connections.microsoft import calendar, files, mail
+from connections.microsoft import calendar, client, files, mail
 from connections.microsoft.mail import thread_key
 from connections.microsoft.provider import MICROSOFT
 from connections.microsoft.errors import MicrosoftError
@@ -18,7 +18,8 @@ from connections.google import email_screen
 from connections.google.email_document import DraftRefused, addresses, compose_document, parse_document, text_arg
 from infra import config
 from infra.db_async import run_in_db
-from tools.action_drafts import DraftError, claim_for_send, create_draft, mark_sent, record_draft, release_claim
+from tools.action_delivery import deliver_claimed
+from tools.action_drafts import DraftError, create_draft, record_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
 from tools.microsoft_account import _designated
@@ -56,7 +57,9 @@ async def _account(kwargs: dict[str, Any]) -> str:
 
 
 def _error(exc: Exception) -> str:
-    return f"Error: {getattr(exc, 'cause', str(exc))}" if str(exc) else "Error: provider_unavailable"
+    if isinstance(exc, MicrosoftError):
+        return f"Error: {exc.message}"
+    return f"Error: {str(exc) or 'Microsoft is unavailable. Try again later.'}"
 
 
 class MicrosoftMailSearchTool(Tool):
@@ -117,6 +120,8 @@ class MicrosoftCalendarListTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> str:
+        if not calendar.is_iso_datetime(kwargs.get("start")) or not calendar.is_iso_datetime(kwargs.get("end")):
+            return "Error: start and end must be ISO-8601 datetimes."
         try:
             events = await calendar.list_events(
                 await _account(kwargs), kwargs.get("start"), kwargs.get("end"),
@@ -134,7 +139,11 @@ class _FilesTool(Tool):
             account = await _account(kwargs)
             if self.operation == "list": result = await files.list_items(account, kwargs.get("parent_id", "root"))
             elif self.operation == "read": result = await files.read_item(account, kwargs.get("item_id"))
-            else: result = await files.upload_item(account, kwargs.get("name"), kwargs.get("content"))
+            else:
+                name, content = kwargs.get("name"), kwargs.get("content")
+                if not isinstance(name, str) or not name or "/" in name or not isinstance(content, str):
+                    return "Error: name must not be empty or contain '/', and content must be text."
+                result = await files.upload_item(account, name, content)
             return json.dumps({"files": result} if self.operation == "list" else result)
         except (MicrosoftError, ConnectedAccountError) as exc:
             return _error(exc)
@@ -194,6 +203,12 @@ class MicrosoftMailDraftTool(Tool):
             return _error(exc)
 
 
+MAIL_STILL_SENDING = "Not sent: an earlier Microsoft send did not finish, so it may already have gone out. Check the person's Sent mail before saving a new draft."
+MAIL_UNCONFIRMED = "Microsoft did not confirm the send, so the email may have gone out. Do not send this draft again: check the person's Sent mail first."
+CALENDAR_STILL_SENDING = "Not sent: an earlier Microsoft calendar change did not finish, so it may already have happened. Check the person's calendar before saving a new draft."
+CALENDAR_UNCONFIRMED = "Microsoft did not confirm the calendar change, so the event may exist. Do not send this draft again: check the person's calendar first."
+
+
 class MicrosoftMailSendTool(Tool):
     """Send only the person-reviewed draft revision that action_gate approves."""
     self_describing_errors = True
@@ -213,18 +228,27 @@ class MicrosoftMailSendTool(Tool):
             if kwargs.get("account_id") != target.get("account_id"):
                 return "Error: account_id does not match the draft."
             account = await _account(kwargs)
+            row = await run_in_db(_visible_account, kwargs.get("account_id"), kwargs.get("_thread_id"))
             parsed = parse_document(verdict.data.decode("utf-8"))
             if parsed is None:
                 return "Error: Not sent: the draft document is invalid."
-            await run_in_db(claim_for_send, draft_id)
-            await mail.send(account, parsed["to"], parsed["subject"], parsed["body"])
-            await run_in_db(mark_sent, draft_id, "microsoft")
-            return json.dumps({"sent": True, "account_id": account})
+            if parsed["from"] is not None and parsed["from"].lower() != str(row["address"]).lower():
+                return "Error: Not sent: the From line does not match the Microsoft account this draft was written from."
+            return await deliver_claimed(
+                draft_id,
+                acquire=lambda: client.access_token(account),
+                send=lambda token: mail.send(account, parsed["to"], parsed["subject"], parsed["body"], cc=parsed["cc"], token=token),
+                result_id=lambda result: result,
+                success=lambda _result, _external_id: json.dumps({"sent": True, "account_id": account}),
+                sign_in_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft sign-in is unavailable. Try again later.",
+                request_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft could not send this request.",
+                never_sent=lambda exc: isinstance(exc, MicrosoftError) and exc.never_sent,
+                still_sending=MAIL_STILL_SENDING,
+                claim_error="Not sent: could not check the draft. Try again.",
+                unconfirmed=MAIL_UNCONFIRMED,
+                label="microsoft_mail_send",
+            )
         except (MicrosoftError, ConnectedAccountError, DraftError) as exc:
-            try:
-                await run_in_db(release_claim, draft_id)
-            except Exception as release_error:
-                log.warning("could not release Microsoft mail draft claim: %s", type(release_error).__name__)
             return _error(exc)
 
 
@@ -239,7 +263,7 @@ class MicrosoftCalendarDraftTool(Tool):
             thread_id = kwargs.get("_thread_id")
             if not isinstance(thread_id, str) or not thread_id or not isinstance(kwargs.get("event"), dict): return "Error: event and current thread identity are required."
             operation = kwargs.get("operation")
-            if operation == "update" and not isinstance(kwargs.get("event_id"), str): return "Error: event_id is required for update."
+            if operation == "update" and (not isinstance(kwargs.get("event_id"), str) or not kwargs["event_id"].strip()): return "Error: event_id is required for update."
             path = config.WORKSPACE / ".threads" / thread_id / "calendar-invites" / f"microsoft-{uuid.uuid4().hex[:12]}.json"
             path.parent.mkdir(parents=True, exist_ok=True)
             data = json.dumps({"operation": operation, "event_id": kwargs.get("event_id"), "event": kwargs["event"]}, separators=(",", ":")).encode()
@@ -263,9 +287,26 @@ class _GatedCalendarTool(Tool):
             if kwargs.get("account_id") != target.get("account_id"):
                 return "Error: account_id does not match the draft."
             account = await _account(kwargs)
-            result = await (calendar.create_event(account, payload["event"]) if self.operation == "create" else calendar.update_event(account, payload["event_id"], payload["event"]))
-            await run_in_db(mark_sent, draft_id, str(result["id"]))
-            return json.dumps(result)
+            if self.operation == "update" and (not isinstance(payload.get("event_id"), str) or not payload["event_id"].strip()):
+                return "Error: event_id is required for update."
+            async def send(token: str) -> dict[str, object]:
+                if self.operation == "create":
+                    return await calendar.create_event(account, payload["event"], token=token)
+                return await calendar.update_event(account, payload["event_id"], payload["event"], token=token)
+            return await deliver_claimed(
+                draft_id,
+                acquire=lambda: client.access_token(account),
+                send=send,
+                result_id=lambda result: result.get("id") if isinstance(result, dict) else None,
+                success=lambda result, _external_id: json.dumps(result),
+                sign_in_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft sign-in is unavailable. Try again later.",
+                request_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft could not send this request.",
+                never_sent=lambda exc: isinstance(exc, MicrosoftError) and exc.never_sent,
+                still_sending=CALENDAR_STILL_SENDING,
+                claim_error="Not sent: could not check the calendar draft. Try again.",
+                unconfirmed=CALENDAR_UNCONFIRMED,
+                label=f"microsoft_calendar_{self.operation}",
+            )
         except (MicrosoftError, ConnectedAccountError, DraftError, ValueError, KeyError, TypeError) as exc: return _error(exc)
 
 

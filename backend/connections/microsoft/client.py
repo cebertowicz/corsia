@@ -2,13 +2,20 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from connections.microsoft.config import CONSUMER_TENANT_ID
-from connections.microsoft.errors import PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID, MicrosoftError, token_error_cause
+from connections.microsoft.errors import (
+    PROVIDER_UNAVAILABLE,
+    REFRESH_TOKEN_INVALID,
+    REQUEST_REFUSED,
+    MicrosoftError,
+    token_error_cause,
+)
 from infra.db_async import run_in_db
 
 TIMEOUT_SECONDS = 20.0
@@ -136,13 +143,31 @@ def _store_refreshed(account_id: str, held: str, updated: dict[str, Any], *, db)
         return True
 
 
-async def access_token(account_id: str) -> str:
-    """Refresh the connected row using its recorded authority, retaining rotated credentials."""
+def _cached_access_token(credentials: dict[str, Any] | None) -> str | None:
+    """Return a saved token only when it remains safe to use for one request."""
+    if credentials is None:
+        return None
+    token = credentials.get("access_token")
+    expires_at = credentials.get("access_token_expires_at")
+    try:
+        usable_until = float(expires_at)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(token, str) and token and usable_until > time.time() + 60:
+        return token
+    return None
+
+
+async def access_token(account_id: str, *, _after_race: bool = False) -> str:
+    """Return a reusable token or refresh it without losing another caller's rotation."""
     from connections.account_state import mark_needs_sign_in
 
     stored = await run_in_db(_on_account, _usable_credentials, account_id)
     if stored is None:
         raise MicrosoftError(REFRESH_TOKEN_INVALID)
+    cached = _cached_access_token(stored)
+    if cached is not None:
+        return cached
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.post(authority_url(stored["tenant_id"]), data={
@@ -161,12 +186,27 @@ async def access_token(account_id: str) -> str:
     if not isinstance(token, str) or not token:
         raise MicrosoftError(PROVIDER_UNAVAILABLE)
     replacement = body.get("refresh_token") if body is not None else None
-    updated = {**stored, "access_token": token}
+    expires_in = body.get("expires_in") if body is not None else None
+    updated = {
+        **stored,
+        "access_token": token,
+        "access_token_expires_at": str(time.time() + expires_in)
+        if isinstance(expires_in, (int, float)) and not isinstance(expires_in, bool) and expires_in > 0
+        else str(time.time()),
+    }
     if isinstance(replacement, str) and replacement:
         updated["refresh_token"] = replacement
-    if not await run_in_db(_on_account, _store_refreshed, account_id, stored["refresh_token"], updated):
+    if await run_in_db(_on_account, _store_refreshed, account_id, stored["refresh_token"], updated):
+        return token
+    current = await run_in_db(_on_account, _usable_credentials, account_id)
+    cached = _cached_access_token(current)
+    if cached is not None:
+        return cached
+    if current is None:
         raise MicrosoftError(REFRESH_TOKEN_INVALID)
-    return token
+    if _after_race:
+        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+    return await access_token(account_id, _after_race=True)
 
 
 async def _check_graph(response: httpx.Response, account_id: str) -> None:
@@ -174,25 +214,31 @@ async def _check_graph(response: httpx.Response, account_id: str) -> None:
         from connections.account_state import mark_needs_sign_in
 
         await run_in_db(_on_account, mark_needs_sign_in, account_id)
-        raise MicrosoftError(REFRESH_TOKEN_INVALID)
+        raise MicrosoftError(REFRESH_TOKEN_INVALID, never_sent=True)
     if response.status_code == 410:
         raise DeltaExpired()
-    if response.status_code >= 400:
+    if response.status_code in (400, 403, 404):
+        raise MicrosoftError(REQUEST_REFUSED, never_sent=True)
+    if 400 <= response.status_code < 500:
+        raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True)
+    if response.status_code >= 500:
         raise MicrosoftError(PROVIDER_UNAVAILABLE)
 
 
 async def graph_json(
     method: str, url: str, *, account_id: str, params: dict[str, Any] | None = None,
-    body: dict[str, object] | None = None,
+    body: dict[str, object] | None = None, token: str | None = None,
 ) -> Any:
     """One Graph JSON call with a bounded throttle retry and fixed error causes."""
-    bearer = await access_token(account_id)
+    bearer = token or await access_token(account_id)
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
                 response = await http.request(
                     method, url, headers={"Authorization": f"Bearer {bearer}"}, params=params, json=body,
                 )
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True) from None
         except httpx.HTTPError:
             raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
         if response.status_code == 429 and attempt == 0:
@@ -214,16 +260,18 @@ async def graph_json(
 
 async def graph_bytes(
     method: str, url: str, *, account_id: str, content: bytes, params: dict[str, str] | None = None,
-    conflict_cause: str | None = None,
+    conflict_cause: str | None = None, token: str | None = None,
 ) -> Any:
     """Upload opaque bytes through Graph without logging their contents."""
-    bearer = await access_token(account_id)
+    bearer = token or await access_token(account_id)
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.request(
                 method, url, headers={"Authorization": f"Bearer {bearer}", "Content-Type": "text/plain; charset=utf-8"},
                 content=content, params=params,
             )
+    except (httpx.ConnectError, httpx.ConnectTimeout):
+        raise MicrosoftError(PROVIDER_UNAVAILABLE, never_sent=True) from None
     except httpx.HTTPError:
         raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
     if response.status_code == 409 and conflict_cause is not None:

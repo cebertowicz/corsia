@@ -4,9 +4,9 @@ from __future__ import annotations
 import sqlite3
 
 
-# This is deliberately the v131 table shape. Future connected-account fields
-# must use their own migration rather than changing this historical fixture.
-_CONNECTED_ACCOUNTS_V131_SQL = """
+# This is deliberately the v132 target table shape for this forward migration.
+# Future connected-account fields must use their own migration.
+_CONNECTED_ACCOUNTS_V132_SQL = """
     CREATE TABLE connected_accounts_new (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
@@ -35,7 +35,7 @@ _CONNECTED_ACCOUNTS_V131_SQL = """
 """
 
 
-_AUDIT_V131_SQL = """
+_AUDIT_V132_SQL = """
     CREATE TABLE connected_account_audit_new (
         id INTEGER PRIMARY KEY,
         created_at TEXT NOT NULL,
@@ -60,7 +60,7 @@ def migrate_131_to_132(conn: sqlite3.Connection) -> None:
     """
     reach_rows = list(conn.execute("SELECT account_id,project_id FROM connected_account_reach"))
     conn.execute("DROP TABLE connected_account_reach")
-    conn.execute(_CONNECTED_ACCOUNTS_V131_SQL)
+    conn.execute(_CONNECTED_ACCOUNTS_V132_SQL)
     conn.execute("""
         INSERT INTO connected_accounts_new(
             id,provider,provider_subject,account_kind,state_cause,address,capabilities_json,state,reach_mode,
@@ -85,7 +85,7 @@ def migrate_131_to_132(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_connected_account_reach_project ON connected_account_reach(project_id, account_id)")
     conn.executemany("INSERT INTO connected_account_reach(account_id,project_id) VALUES (?,?)", reach_rows)
 
-    conn.execute(_AUDIT_V131_SQL)
+    conn.execute(_AUDIT_V132_SQL)
     conn.execute("""
         INSERT INTO connected_account_audit_new(id,created_at,account_id,actor_kind,actor_id,action,revocation_cause)
         SELECT id,created_at,account_id,actor_kind,actor_id,action,revocation_cause FROM connected_account_audit

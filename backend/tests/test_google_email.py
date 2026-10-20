@@ -35,7 +35,7 @@ from tests.test_google_sign_in import (  # noqa: F401  (fixtures)
     conductor,
     google,
 )
-from tools import action_gate, google_email
+from tools import action_delivery, action_gate, google_email
 from tools.action_drafts import claim_for_send, create_draft, mark_sent, record_draft
 from tools.action_gate import Approved
 from tools.google_email import EmailDraftTool, EmailSendTool
@@ -421,7 +421,7 @@ async def test_a_lost_claim_race_sends_nothing(mail, approve, monkeypatch):
 
         raise DraftError("The draft is not open.")
 
-    monkeypatch.setattr(google_email, "claim_for_send", lost)
+    monkeypatch.setattr(action_delivery, "claim_for_send", lost)
     assert await _send(mail, saved) == f"Error: {google_email.STILL_SENDING}"
     assert mail.sent_requests() == []
 
