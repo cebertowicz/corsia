@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from './support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection } from './support/corsia';
 
 const outputDir = resolve(dirname(fileURLToPath(import.meta.url)), process.env.CORSIA_CAPTURE_DIR ?? 'test-results/microsoft-connected-apps');
