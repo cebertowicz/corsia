@@ -32,7 +32,6 @@ const NOT_AN_OVERLAY: Record<string, string> = {
 	'lib/components/VersionOverlay.svelte': 'a status chip mounted at the app root',
 	'lib/components/Lightbox.svelte': 'mounted by HomeOverlays beside the app root, above every pane',
 	'lib/components/CommandPalette.svelte': 'mounted by HomeOverlays beside the app root, above every pane',
-	'lib/components/MeasurementScopePicker.svelte': 'the tap-away layer of a dropdown on the measurement page, which has no canvas',
 	'lib/components/ReviewBar.svelte': 'the review capsule, drawn inside the document it reviews',
 	'lib/components/DocViewer.css': 'the selection chip, drawn inside the document it comments on',
 };

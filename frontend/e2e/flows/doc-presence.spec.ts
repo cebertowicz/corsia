@@ -108,7 +108,8 @@ test.describe('@flow:doc-presence @surface:doc-presence @surface:documents docum
 			expect(Math.abs((lefts[1] - lefts[0]) - (lefts[2] - lefts[1]))).toBeLessThanOrEqual(1);
 		}
 
-		const detail = stack.getByRole('dialog');
+		// Popover is portaled to document.body, so it is not a descendant of its avatar stack.
+		const detail = page.getByRole('dialog');
 		await latest.focus();
 		await expect(detail).toHaveText(new RegExp(`^${escapeRegExp(readers[1])} · read `));
 		await expectUncovered(page, detail);
