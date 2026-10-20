@@ -2,10 +2,10 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import { activeThreadId, reasoningEffort, threads } from '$lib/stores/threads';
 import { saveReasoningEffort } from '$lib/stores/threadEffort';
-import { subagentMeta } from '$lib/stores/subagents';
+import { subagentMeta, subagentThreadRows } from '$lib/stores/subagents';
 
 const listed = () => get(threads).find((s) => s.id === 's1')?.reasoning_effort ?? null;
-const worker = () => get(subagentMeta).get('w1')?.thread?.reasoning_effort;
+const worker = () => get(subagentThreadRows).get('w1')?.reasoning_effort;
 
 beforeEach(() => {
 	activeThreadId.set('s1');
@@ -13,8 +13,8 @@ beforeEach(() => {
 	threads.set([{ id: 's1', reasoning_effort: 'low' } as never]);
 	subagentMeta.set(new Map([['w1', {
 		childThreadId: 'w1', parentThreadId: 's1', name: 'Worker', provider: 'cc', status: 'running',
-		thread: { reasoning_effort: 'low' },
 	}]]));
+	subagentThreadRows.set(new Map([['w1', { reasoning_effort: 'low' }]]));
 });
 
 afterEach(() => {
@@ -23,6 +23,7 @@ afterEach(() => {
 	reasoningEffort.set(null);
 	threads.set([]);
 	subagentMeta.set(new Map());
+	subagentThreadRows.set(new Map());
 });
 
 describe('saveReasoningEffort', () => {

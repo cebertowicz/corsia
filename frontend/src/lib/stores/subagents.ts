@@ -29,9 +29,10 @@ const TERMINAL_STATUSES: ReadonlySet<SubStatus> = new Set<SubStatus>(['closed', 
 
 /**
  * The thread-row fields, beyond the model, that the composer's effort and switch
- * controls read. The thread list never holds a worker, so a worker carries them
- * here and the composer reads them the way it reads any thread's. The worker's
- * selected model is not here: threadModelFor holds every thread's, a worker's too.
+ * controls read. The thread list never holds a worker, so its row lives in
+ * `subagentThreadRows`, beside this registry and not in it, and the composer reads
+ * it the way it reads any thread's. The worker's selected model is not here:
+ * threadModelFor holds every thread's, a worker's too.
  */
 export type SubagentThreadFields = Partial<Pick<
 	Thread,
@@ -47,10 +48,12 @@ export interface SubagentRef {
 	status: SubStatus;
 	model?: string;
 	cwd?: string;
-	thread?: SubagentThreadFields;
 }
 
 export const subagentMeta = writable<Map<string, SubagentRef>>(new Map());
+
+/** A worker's thread row, by worker id: the fields the thread list would hold if it held workers. */
+export const subagentThreadRows = writable<Map<string, SubagentThreadFields>>(new Map());
 
 export const openSubagentRequest = writable<string | null>(null);
 
@@ -72,7 +75,6 @@ export function registerSubagent(
 			status,
 			model: prev?.model,
 			cwd: prev?.cwd,
-			thread: prev?.thread,
 		});
 		return n;
 	});
@@ -80,13 +82,8 @@ export function registerSubagent(
 
 /** Fold effort, project and switch fields into a worker's row; a thread that is no worker is ignored. */
 export function patchSubagentThread(childId: string, fields: SubagentThreadFields): void {
-	subagentMeta.update((m) => {
-		const prev = m.get(childId);
-		if (!prev) return m;
-		const n = new Map(m);
-		n.set(childId, { ...prev, thread: { ...prev.thread, ...fields } });
-		return n;
-	});
+	if (!get(subagentMeta).has(childId)) return;
+	subagentThreadRows.update((m) => new Map(m).set(childId, { ...m.get(childId), ...fields }));
 }
 
 export function setSubagentStatus(childId: string, status: SubStatus): void {
@@ -122,6 +119,12 @@ export function setSubagentParent(childId: string, parentThreadId: string): void
 /** Drop a thread the server does not consider a subagent. */
 export function forgetSubagent(childId: string): void {
 	subagentMeta.update((m) => {
+		if (!m.has(childId)) return m;
+		const n = new Map(m);
+		n.delete(childId);
+		return n;
+	});
+	subagentThreadRows.update((m) => {
 		if (!m.has(childId)) return m;
 		const n = new Map(m);
 		n.delete(childId);
@@ -182,7 +185,7 @@ export async function hydrateSubagentThread(
 		// either early return. Only a field nobody has set yet is filled: a live
 		// frame or the user's own change is newer than this response.
 		const foldThreadFields = () => {
-			const known = get(subagentMeta).get(threadId)?.thread;
+			const known = get(subagentThreadRows).get(threadId);
 			const fields: SubagentThreadFields = {};
 			if (known?.reasoning_effort === undefined) {
 				fields.reasoning_effort = typeof truth?.reasoning_effort === 'string' ? truth.reasoning_effort : null;

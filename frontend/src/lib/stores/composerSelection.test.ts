@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { composerSelectionFor } from './composerSelection';
 import { _resetThreadModelTruthForTests, acceptThreadModelTruth } from './models';
 import { activeModelId } from './modelsState';
-import { subagentMeta } from './subagents';
+import { subagentMeta, subagentThreadRows } from './subagents';
 import { activeThreadId, reasoningEffort, threads } from './threads';
 
 beforeEach(() => {
@@ -19,8 +19,8 @@ beforeEach(() => {
 	]);
 	subagentMeta.set(new Map([['worker', {
 		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running', model: 'provider-report-at-start',
-		thread: { reasoning_effort: 'none', project_id: 'project-1' },
 	}]]));
+	subagentThreadRows.set(new Map([['worker', { reasoning_effort: 'none', project_id: 'project-1' }]]));
 });
 
 afterEach(() => {
@@ -29,6 +29,7 @@ afterEach(() => {
 	reasoningEffort.set(null);
 	threads.set([]);
 	subagentMeta.set(new Map());
+	subagentThreadRows.set(new Map());
 	_resetThreadModelTruthForTests();
 });
 

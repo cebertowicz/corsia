@@ -1,5 +1,4 @@
-import { patchSubagentThread } from './subagents';
-import { threads } from './threads';
+import { updateThreadRow } from './threadRow';
 
 export interface ThreadModelSwitchState {
 	pending_model?: string | null;
@@ -37,10 +36,7 @@ export function applyPendingThreadModelSwitch(
 		switch_error: null,
 		switch_operation_id: body.operation_id,
 	};
-	patchSubagentThread(threadId, pending);
-	threads.update((rows) => rows.map((thread) => (
-		thread.id === threadId ? { ...thread, ...pending } : thread
-	)));
+	updateThreadRow(threadId, pending);
 	return {
 		kind: 'pending',
 		operationId: body.operation_id,

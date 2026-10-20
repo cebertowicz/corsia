@@ -1,11 +1,11 @@
 import { get } from 'svelte/store';
-import { patchSubagentThread, subagentMeta } from './subagents';
+import { subagentThreadRows } from './subagents';
+import { updateThreadRow } from './threadRow';
 import { activeThreadId, reasoningEffort, threads } from './threads';
 
 /** A thread's effort wherever it lives: the open thread's global, its list row, or a worker's own row. */
 function writeThreadEffort(threadId: string, effort: string | null): void {
-	threads.update(ss => ss.map(s => s.id === threadId ? { ...s, reasoning_effort: effort } : s));
-	patchSubagentThread(threadId, { reasoning_effort: effort });
+	updateThreadRow(threadId, { reasoning_effort: effort });
 	if (threadId === get(activeThreadId)) reasoningEffort.set(effort);
 }
 
@@ -13,7 +13,7 @@ function writeThreadEffort(threadId: string, effort: string | null): void {
 export async function saveReasoningEffort(threadId: string, effort: string | null, token: string): Promise<boolean> {
 	const prev = threadId === get(activeThreadId)
 		? get(reasoningEffort)
-		: get(threads).find(s => s.id === threadId)?.reasoning_effort ?? get(subagentMeta).get(threadId)?.thread?.reasoning_effort ?? null;
+		: get(threads).find(s => s.id === threadId)?.reasoning_effort ?? get(subagentThreadRows).get(threadId)?.reasoning_effort ?? null;
 	writeThreadEffort(threadId, effort);
 	try {
 		const res = await fetch(`/api/threads/${threadId}?token=${token}`, {

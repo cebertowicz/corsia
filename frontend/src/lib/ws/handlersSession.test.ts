@@ -3,14 +3,14 @@ import { get } from 'svelte/store';
 
 import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, threadModelFor } from '$lib/stores/models';
 import { composerSelectionFor } from '$lib/stores/composerSelection';
-import { subagentMeta } from '$lib/stores/subagents';
+import { subagentMeta, subagentThreadRows } from '$lib/stores/subagents';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { handleMessage } from './handlers';
 
 const resetHeartbeat = () => {};
 const worker = () => {
 	const ref = get(subagentMeta).get('worker');
-	return ref && { ...ref.thread, model: threadModelFor('worker') };
+	return ref && { ...get(subagentThreadRows).get('worker'), model: threadModelFor('worker') };
 };
 
 // A worker is not in the thread list: its composer reads the worker's own row.
@@ -30,6 +30,7 @@ afterEach(() => {
 	activeModelId.set(null);
 	threads.set([]);
 	subagentMeta.set(new Map());
+	subagentThreadRows.set(new Map());
 });
 
 describe('session_updated for a worker', () => {

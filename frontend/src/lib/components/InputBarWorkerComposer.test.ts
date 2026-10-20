@@ -8,7 +8,7 @@ import { connectionState } from '$lib/stores/connection';
 import { _resetCheckpointsForTests } from '$lib/stores/checkpoints';
 import { clearAllContextUsage } from '$lib/stores/contextUsageByThread';
 import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, finishThreadModelSwitch, models, threadModelFor } from '$lib/stores/models';
-import { subagentMeta } from '$lib/stores/subagents';
+import { subagentMeta, subagentThreadRows } from '$lib/stores/subagents';
 import { activeThreadId, reasoningEffort, threads } from '$lib/stores/threads';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
@@ -72,8 +72,8 @@ beforeEach(() => {
 	threads.set([{ id: 'parent', model: PARENT_MODEL, reasoning_effort: 'medium' } as never]);
 	subagentMeta.set(new Map([['worker', {
 		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running', model: 'provider-report-at-start',
-		thread: { reasoning_effort: 'none' },
 	}]]));
+	subagentThreadRows.set(new Map([['worker', { reasoning_effort: 'none' }]]));
 	models.set([model(PARENT_MODEL, 'Parent-9B'), model(WORKER_MODEL, 'Worker-9B'), model(NEXT_MODEL, 'Next-9B')]);
 	globalThis.fetch = vi.fn(async () => new Response(
 		JSON.stringify({ model: NEXT_MODEL, model_updated_at: '2026-10-20T10:00:01.000000' }),
@@ -93,6 +93,7 @@ afterEach(() => {
 	reasoningEffort.set(null);
 	threads.set([]);
 	subagentMeta.set(new Map());
+	subagentThreadRows.set(new Map());
 	models.set([]);
 	clearAllContextUsage();
 });
@@ -161,7 +162,7 @@ describe('worker composer reads and changes its own thread', () => {
 		const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
 		expect(url).toContain('/api/threads/worker');
 		expect(init.body).toBe(JSON.stringify({ reasoning_effort: 'medium' }));
-		expect(get(subagentMeta).get('worker')?.thread?.reasoning_effort).toBe('medium');
+		expect(get(subagentThreadRows).get('worker')?.reasoning_effort).toBe('medium');
 		expect(get(reasoningEffort)).toBe('high');
 	});
 });

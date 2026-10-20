@@ -9,6 +9,7 @@ import {
 	setSubagentInit,
 	setSubagentStatus,
 	subagentMeta,
+	subagentThreadRows,
 } from './subagents';
 
 /**
@@ -44,6 +45,7 @@ function respondWith(body: unknown, ok = true): void {
 
 beforeEach(() => {
 	subagentMeta.set(new Map());
+	subagentThreadRows.set(new Map());
 	_resetSubagentHydrationForTests();
 });
 
@@ -185,7 +187,7 @@ describe('hydration folds the worker\'s effort and project', () => {
 		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
 		const ref = get(subagentMeta).get('child-1');
 		expect(ref).toMatchObject({ status: 'closed' });
-		expect(ref?.thread).toMatchObject({ reasoning_effort: 'high', project_id: 'project-1' });
+		expect(get(subagentThreadRows).get('child-1')).toMatchObject({ reasoning_effort: 'high', project_id: 'project-1' });
 	});
 
 	it('lands them when a live frame moved the status mid-flight', async () => {
@@ -195,7 +197,7 @@ describe('hydration folds the worker\'s effort and project', () => {
 			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low' }) };
 		}) as never);
 		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
-		expect(get(subagentMeta).get('child-1')?.thread?.reasoning_effort).toBe('low');
+		expect(get(subagentThreadRows).get('child-1')?.reasoning_effort).toBe('low');
 	});
 
 	it('fills only a field nobody has set, so a later change or a live frame is never overwritten', async () => {
@@ -205,8 +207,8 @@ describe('hydration folds the worker\'s effort and project', () => {
 			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low', project_id: 'project-1' }) };
 		}) as never);
 		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
-		const ref = get(subagentMeta).get('child-1');
-		expect(ref?.thread?.reasoning_effort).toBe('high');
-		expect(ref?.thread?.project_id).toBe('project-1');
+		const row = get(subagentThreadRows).get('child-1');
+		expect(row?.reasoning_effort).toBe('high');
+		expect(row?.project_id).toBe('project-1');
 	});
 });
