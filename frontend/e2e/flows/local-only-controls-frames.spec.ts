@@ -80,6 +80,20 @@ const policy = {
 type State = { models: unknown[]; servers: unknown[]; cloudOff: boolean; failSave: boolean; failPrivate?: boolean; canAddLocal?: boolean; hold?: Promise<void> | null };
 
 async function serve(page: Page, state: State) {
+	await page.routeWebSocket((url) => url.pathname === '/ws', (socket) => {
+		const server = socket.connectToServer();
+		socket.onMessage((payload) => server.send(payload));
+		server.onMessage((payload) => {
+			try {
+				const frame = JSON.parse(String(payload));
+				if (frame?.type === 'auth_ok' && frame.user && typeof frame.user === 'object') {
+					socket.send(JSON.stringify({ ...frame, user: { ...frame.user, name: 'Sam' } }));
+					return;
+				}
+			} catch { /* Forward non-JSON frames unchanged. */ }
+			socket.send(payload);
+		});
+	});
 	await page.route('**/api/system/host-resources?**', (route) => route.fulfill({ json: {
 		device_name: 'Studio', total_gb: 64, free_gb: 34, models_used_gb: 0, other_used_gb: 0, safe_free_gb: 8, safe_reserve_gb: 8, by_provider: {},
 	} }));
@@ -148,6 +162,7 @@ async function openSheetInProject(page: Page, name: string) {
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByRole('button', { name: 'New chat' }).first().click();
 	await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
+	await expect(page.locator('.empty-chat h2')).toHaveText('Hey, Sam.');
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
 }
