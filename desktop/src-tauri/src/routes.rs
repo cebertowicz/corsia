@@ -25,7 +25,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use x509_parser::prelude::{FromDer, SubjectPublicKeyInfo};
 
-use crate::{pairing::RemoteHost, proxy::ProxyBody, remote_config::{OutsideRoute, RemoteRecord}, trust::{self, Trust}};
+use crate::{proxy::ProxyBody, remote_config::{OutsideRoute, RemoteRecord}, remote_host::RemoteHost, trust::{self, Trust}};
 
 pub(crate) const KEY_CHANGED_MESSAGE: &str = "the host's key changed, so nothing is forwarded to it";
 const IDENTITY_PATH: &str = "/api/devices/identity";
@@ -129,7 +129,7 @@ impl Routes {
             (None, _) => None,
             (Some(_), None) => return Err("an outside route needs the paired host's identity".into()),
             (Some(outside), Some(identity)) => {
-                let (host, port) = crate::pairing::parse_https_address(&outside.url)?;
+                let (host, port) = crate::remote_host::parse_https_address(&outside.url)?;
                 Some((identity, Outside { host, port, trust: Trust::try_from(&outside.trust)? }))
             }
         };

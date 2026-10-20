@@ -340,7 +340,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{pairing::RemoteHost, routes::KEY_CHANGED_MESSAGE, trust::Trust};
+    use crate::{remote_host::RemoteHost, routes::KEY_CHANGED_MESSAGE, trust::Trust};
     use hyper::{body::Frame, header::{CONNECTION, UPGRADE}, upgrade};
     use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, task::JoinHandle};
 

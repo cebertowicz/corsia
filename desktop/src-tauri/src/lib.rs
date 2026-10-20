@@ -34,6 +34,7 @@ mod pairing;
 mod proxy;
 mod release_proof;
 mod remote_config;
+mod remote_host;
 mod routes;
 mod remote_lifecycle;
 mod service_management;
@@ -999,7 +1000,7 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
     let locator = match request.target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
         RemoteTarget::Address { host, port } => {
-            let (host, parsed_port) = pairing::parse_pairing_address(&host, port.unwrap_or(47_901))
+            let (host, parsed_port) = remote_host::parse_pairing_address(&host, port.unwrap_or(47_901))
                 .map_err(|_| "invalid remote address")?;
             remote_config::Locator::Address { host, port: parsed_port }
         },
