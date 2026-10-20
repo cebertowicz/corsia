@@ -128,7 +128,7 @@ def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -
         "ROW_NUMBER() OVER (PARTITION BY ancestors.root_id ORDER BY ancestors.depth ASC) AS rank "
         "FROM ancestors JOIN roots ON roots.id=ancestors.root_id "
         "JOIN threads AS ancestor ON ancestor.id=ancestors.id "
-        "WHERE ancestor.local_only=1 AND ancestor.user_id=roots.user_id"
+        "WHERE ancestor.local_only=1 AND ancestor.user_id=roots.user_id AND ancestor.id<>roots.id"
         ") SELECT root_id, id, title FROM ranked WHERE rank=1",
         thread_ids,
     ).fetchall()
@@ -139,7 +139,9 @@ def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -
     cloud_off_projects = cloud_off_project_ids(db=db)
     for row in rows:
         own_setting = bool(row.get("local_only"))
-        source = None if own_setting else inherited.get(row["id"])
+        # A worker copies its parent's column at spawn, so the ancestor, not the
+        # column, says whether the setting is locked to a parent.
+        source = inherited.get(row["id"])
         row["local_only_effective"] = bool(
             own_setting or source or row.get("project_id") in cloud_off_projects
         )

@@ -57,12 +57,24 @@ def _single(db, thread_id: str) -> dict:
     return payload
 
 
-def test_own_local_only_is_effective_without_an_inherited_source() -> None:
+def test_copied_column_still_names_the_local_only_parent() -> None:
     db = _db()
-    _thread(db, "parent", local_only=1)
+    _thread(db, "parent", title="Parent", local_only=1)
+    _thread(db, "child", local_only=1, spawned_by="parent")
+
+    assert _fields(_single(db, "child")) == (True, "parent", "Parent")
+
+
+def test_own_setting_after_parent_turned_off_is_unlocked() -> None:
+    from infra.local_only import local_only_ancestor
+
+    db = _db()
+    _thread(db, "parent", title="Parent", local_only=0)
     _thread(db, "child", local_only=1, spawned_by="parent")
 
     assert _fields(_single(db, "child")) == (True, None, None)
+    child = db.execute("SELECT * FROM threads WHERE id = 'child'").fetchone()
+    assert local_only_ancestor(child, db=db) is False
 
 
 def test_nearest_local_only_ancestor_is_named() -> None:
