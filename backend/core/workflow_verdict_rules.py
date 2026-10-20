@@ -286,14 +286,11 @@ def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
     first = _prefix(plan, deciding, new, old, plan.minimum, now)
     inputs = {"baseline": plan.baseline, "skipped": list(plan.skipped)}
     if replaced_by is not None:
-        successor, cutoff = replaced_by[0], parse_ts(replaced_by[1])
+        # The successor first ran after this version's last run, so every run of this version predates it.
         own = _side(history, plan.version)
-        reached = first is not None and max(parse_ts(r.started_at) for r in new[:first]) < cutoff
-        pending = any(not r.settled(window, now) for r in own if parse_ts(r.started_at) < cutoff)
-        if not reached and not pending:
-            k = sum(1 for r in own if parse_ts(r.started_at) < cutoff)
+        if first is None and all(r.settled(window, now) for r in own):
             return Verdict("changed_early", "replaced_before_look_1", 0, (),
-                           {**inputs, "version": plan.version, "k": k, "next": successor})
+                           {**inputs, "version": plan.version, "k": len(own), "next": replaced_by[0]})
     if first is None:
         counted = [c for c in overall if c.role != "shown" and c.call not in BLOCKED | {"unknown"}]
         groups = sorted({g for c in counted for g in c.groups})

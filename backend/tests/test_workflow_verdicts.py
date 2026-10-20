@@ -294,6 +294,13 @@ def test_calibration_split_refuses_without_a_production_baseline() -> None:
     assert {call for found in calls.values() for call, _ in found} == {"no_baseline"}
 
 
+def test_calibration_share_counts_only_splits_a_measure_could_measure() -> None:
+    # A split with no baseline says nothing about false alarms, so it never dilutes the share toward quiet.
+    script = calibration_script()
+    assert script.aa_share([("no_baseline", None), ("no_baseline", None), ("worse", 0.4), ("no_worse", 0.1)]) == (2, 0.5)
+    assert script.aa_share([("no_baseline", None)]) == (0, None)
+
+
 def test_baseline_runs_are_the_most_recent_up_to_twice_the_minimum_per_group() -> None:
     older, recent = runs("v1", 1, count=10, started=70, ended=50), runs("v1", 1, count=45, started=60, ended=30)
     kept = baseline_runs(history(older, recent), "v1", 20, 3, NOW)

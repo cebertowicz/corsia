@@ -236,6 +236,7 @@ def test_calibration_script_reads_a_fixture_read_only_and_prints_aggregates_only
     assert script.main([str(isolated_db)]) == 0
     out = capsys.readouterr().out
     assert "A/A splits" in out and "corrections_per_outcome" in out and "(whole verdict)" in out
+    assert "Not calibrated (no split could measure it): " in out
     assert "n=5 p50=1.00" in out and "v1 -> v2" in out and "no_baseline" in out
     assert not any(f"r{index}" in out.split() or f"m{index}" in out for index in range(66))
 
@@ -245,7 +246,7 @@ def test_calibration_script_refuses_when_a_calibrated_workflow_lacks_owner_kpi_d
     node(db, "sdlc-run")
     node(db, "brief-run", workflow="decision-brief", version="v1")
     db.commit()
-    with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE: decision-brief"):
+    with pytest.raises(SystemExit, match="missing owner KPI definitions in force at first use for calibration in CORSIA_WORKSPACE: decision-brief"):
         calibration_script().main([str(isolated_db)])
 
 
@@ -263,7 +264,20 @@ def test_calibration_script_refuses_when_no_owner_kpi_can_decide(db, isolated_db
     node(db, "sdlc-run")
     node(db, "brief-run", workflow="decision-brief")
     db.commit()
-    with pytest.raises(SystemExit, match="missing owner KPI definitions for calibration in CORSIA_WORKSPACE: sdlc-process"):
+    with pytest.raises(SystemExit, match="missing owner KPI definitions in force at first use for calibration in CORSIA_WORKSPACE: sdlc-process"):
+        calibration_script().main([str(isolated_db)])
+
+
+def test_calibration_script_refuses_kpis_defined_only_after_every_first_use(db, isolated_db) -> None:
+    # The KPI is in force now but was not when either sdlc-process version first ran, so no plan production
+    # freezes would hold it; the refusal reads first use, never now.
+    _definitions(db)
+    _definitions(db, workflow="decision-brief", owner="brief-owner")
+    node(db, "early-1", created="2026-08-01T00:00:00Z", ended="2026-08-02T00:00:00Z")
+    node(db, "early-2", created="2026-08-03T00:00:00Z", ended="2026-08-04T00:00:00Z")
+    node(db, "brief-run", workflow="decision-brief")
+    db.commit()
+    with pytest.raises(SystemExit, match="missing owner KPI definitions in force at first use for calibration in CORSIA_WORKSPACE: sdlc-process$"):
         calibration_script().main([str(isolated_db)])
 
 
