@@ -29,6 +29,34 @@ def test_only_a_compatible_omlx_release_passes_the_auth_version_check(monkeypatc
     assert local_setup_auth._omlx_supports_loopback_auth() is expected
 
 
+def test_managed_version_uses_the_bundled_binary_not_path(monkeypatch):
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    commands: list[list[str]] = []
+    monkeypatch.setattr(local_setup_auth, "managed_omlx_executable", lambda: bundled)
+    monkeypatch.setattr(
+        local_setup_auth.subprocess,
+        "run",
+        lambda command, **_kwargs: (commands.append(command) or subprocess.CompletedProcess(command, 0, stdout="0.7.0rc1")),
+    )
+
+    assert local_setup_auth.omlx_version() == "0.7.0rc1"
+    assert commands == [[bundled, "--version"]]
+
+
+def test_existing_omlx_version_uses_only_the_persons_path_binary(monkeypatch):
+    person_omlx = "/opt/homebrew/bin/omlx"
+    commands: list[list[str]] = []
+    monkeypatch.setattr(local_setup_auth, "installed_omlx", lambda: person_omlx)
+    monkeypatch.setattr(
+        local_setup_auth.subprocess,
+        "run",
+        lambda command, **_kwargs: (commands.append(command) or subprocess.CompletedProcess(command, 0, stdout="0.7.0rc1")),
+    )
+
+    assert local_setup_auth.existing_omlx_version() == "0.7.0rc1"
+    assert commands == [[person_omlx, "--version"]]
+
+
 def test_an_unqueryable_omlx_version_fails_closed(monkeypatch):
     monkeypatch.setattr(
         local_setup_auth.subprocess, "run",

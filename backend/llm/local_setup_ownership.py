@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from llm.managed_omlx_binary import is_managed_omlx_executable, managed_omlx_executable
 from llm.local_setup_managed import (  # noqa: F401 — compatibility for existing installer callers
     BREW_SERVICE_LABEL,
     MARKER_NAME,
@@ -60,8 +61,9 @@ def _is_broken_leftover(path: str) -> bool:
 
 
 def omlx_on_path() -> str | None:
-    """Locate the executable without running it; safe for status projections."""
-    return shutil.which("omlx")
+    """Locate a person's oMLX without running it; safe for status projections."""
+    path = shutil.which("omlx")
+    return None if path is None or is_managed_omlx_executable(path) else path
 
 
 def installed_omlx() -> str | None:
@@ -130,6 +132,8 @@ def homebrew_failure_message(action: str, exc: OSError | subprocess.SubprocessEr
 def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False,
                 broken: bool = False) -> None:
     """Install missing oMLX, and repair only a binary setup demonstrably owns."""
+    if managed_omlx_executable() is not None:
+        return
     current = installed_omlx()
     existing = omlx_on_path()
     if current is None and existing is not None:

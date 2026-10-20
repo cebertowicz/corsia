@@ -74,8 +74,33 @@ def _port_owner_pid(host: str, port: int) -> int | None:
     return process.port_owner_pid(host, port)
 
 
-def _build_argv(host: str, port: int, settings: dict) -> list[str]:
-    return process.build_argv(host, port, settings)
+def _build_argv(
+    host: str,
+    port: int,
+    settings: dict,
+    *,
+    executable: str | None = None,
+) -> list[str]:
+    return process.build_argv(host, port, settings, executable=executable)
+
+
+def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict[str, Any]:
+    """Resolve the managed executable before building a server command."""
+    try:
+        executable = process.managed_omlx_executable()
+    except RuntimeError as exc:
+        return {"ok": False, "message": str(exc)}
+    executable = executable or shutil.which("omlx")
+    if not executable:
+        return {
+            "ok": False,
+            "message": (
+                "omlx binary not found on PATH. Install oMLX "
+                "(`brew install omlx` or pip install omlx) and retry."
+            ),
+        }
+    return _build_argv(host, port, settings, executable=executable)
+
 
 async def _wait_for_healthy(
     host: str, port: int, timeout_s: float, *, server_id: str | None = None,
@@ -263,19 +288,10 @@ async def start_server(cfg: dict) -> dict[str, Any]:
             ),
         }
 
-    omlx_bin = shutil.which("omlx")
-    if not omlx_bin:
-        return {
-            "ok": False,
-            "message": (
-                "omlx binary not found on PATH. Install oMLX "
-                "(`brew install omlx` or pip install omlx) and retry."
-            ),
-        }
-
     settings = await run_in_db(_resolve_settings, cfg)
-    argv = _build_argv(host, int(port), settings)
-    argv[0] = omlx_bin
+    argv = _managed_omlx_argv(host, int(port), settings)
+    if isinstance(argv, dict):
+        return argv
 
     log_path = _log_path(sid)
     spawned = _spawn_process(argv, log_path)

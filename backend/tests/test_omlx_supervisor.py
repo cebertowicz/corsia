@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -30,6 +29,29 @@ def test_build_argv_minimal():
     from llm.providers.omlx_supervisor import _build_argv
     argv = _build_argv("127.0.0.1", 5200, {})
     assert argv == ["omlx", "serve", "--host", "127.0.0.1", "--port", "5200"]
+
+
+def test_build_argv_uses_the_bundled_managed_binary(monkeypatch):
+    from llm.providers import omlx_process
+
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(omlx_process, "managed_omlx_executable", lambda: bundled)
+
+    assert omlx_process.build_argv("127.0.0.1", 5200, {})[0] == bundled
+
+
+def test_managed_supervisor_argv_ignores_a_different_path_binary(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: bundled)
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+
+    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {})
+
+    assert isinstance(argv, list)
+    assert argv[:2] == [bundled, "serve"]
+    assert "start" not in argv and "stop" not in argv
 
 
 def test_build_argv_with_settings():
@@ -220,7 +242,8 @@ def test_start_server_missing_host_port(isolated_runtime, monkeypatch):
 
 def test_start_server_missing_omlx_binary(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
-    monkeypatch.setattr(sup.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: None)
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: None)
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: None)
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-no-binary", "host": "127.0.0.1", "port": 9999},
@@ -246,7 +269,7 @@ def test_start_server_idempotent_when_pid_owns_port(isolated_runtime, monkeypatc
 def test_start_server_port_in_use_by_foreign_pid(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: 99999)
-    monkeypatch.setattr(sup.shutil, "which", lambda n: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/opt/homebrew/bin/omlx")
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-port-conflict", "host": "127.0.0.1", "port": 9999},
     ))

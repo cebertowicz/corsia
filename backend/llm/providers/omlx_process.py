@@ -9,6 +9,8 @@ import socket
 import subprocess
 from pathlib import Path
 
+from llm.managed_omlx_binary import managed_omlx_executable
+
 
 def pid_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.pid"
@@ -91,8 +93,16 @@ def port_is_free(port: int) -> bool:
         sock.close()
 
 
-def build_argv(host: str, port: int, settings: dict) -> list[str]:
-    argv: list[str] = ["omlx", "serve", "--host", host, "--port", str(port)]
+def build_argv(
+    host: str,
+    port: int,
+    settings: dict,
+    *,
+    executable: str | None = None,
+) -> list[str]:
+    """Build argv for CORSIA's managed oMLX server."""
+    executable = executable or managed_omlx_executable() or "omlx"
+    argv: list[str] = [executable, "serve", "--host", host, "--port", str(port)]
 
     flag_map: list[tuple[str, str]] = [
         ("model_dir",                "--model-dir"),

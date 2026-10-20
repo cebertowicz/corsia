@@ -27,6 +27,52 @@ def test_the_tap_is_added_with_the_repository_url_before_the_install(monkeypatch
     ]
 
 
+def test_packaged_setup_uses_the_bundled_omlx_without_brew(monkeypatch):
+    commands: list[list[str]] = []
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(local_setup_ownership, "managed_omlx_executable", lambda: bundled)
+    monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
+    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+
+    local_setup_ownership.ensure_omlx(lambda _stage: None, needs_repair=True)
+
+    assert commands == []
+
+
+def test_packaged_setup_reports_a_damaged_app_without_brew(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        local_setup_ownership,
+        "managed_omlx_executable",
+        lambda: (_ for _ in ()).throw(RuntimeError(
+            "The CORSIA app is damaged: its bundled oMLX executable is missing.")),
+    )
+    monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
+
+    with pytest.raises(RuntimeError, match="CORSIA app is damaged"):
+        local_setup_ownership.ensure_omlx(lambda _stage: None)
+
+    assert commands == []
+
+
+def test_bundled_omlx_on_path_is_not_the_persons_omlx(monkeypatch):
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda _name: bundled)
+    monkeypatch.setattr(local_setup_ownership, "is_managed_omlx_executable", lambda path: path == bundled)
+
+    assert local_setup_ownership.omlx_on_path() is None
+    assert local_setup_ownership.installed_omlx() is None
+
+
+def test_persons_brew_omlx_stays_visible_when_the_bundle_exists(monkeypatch):
+    brew_omlx = "/opt/homebrew/bin/omlx"
+    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda _name: brew_omlx)
+    monkeypatch.setattr(local_setup_ownership, "is_managed_omlx_executable", lambda _path: False)
+
+    assert local_setup_ownership.omlx_on_path() == brew_omlx
+    assert local_setup_ownership.installed_omlx() == brew_omlx
+
+
 def test_homebrew_inspection_has_a_bounded_timeout(monkeypatch):
     seen: dict[str, object] = {}
 

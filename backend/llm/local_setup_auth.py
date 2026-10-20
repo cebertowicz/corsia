@@ -20,6 +20,7 @@ import subprocess
 from packaging.version import InvalidVersion, Version
 
 from llm.local_setup_ownership import installed_omlx
+from llm.managed_omlx_binary import managed_omlx_executable
 from llm.providers.omlx_endpoints import OmlxAdminError, admin_request, setup_admin_key
 
 SKIP_AUTH_SETTING = "skip_api_key_verification"
@@ -34,11 +35,13 @@ MINIMUM_OMLX = Version("0.7.0rc1")
 UPDATE_OMLX_MESSAGE = "Update oMLX, then retry."
 
 
-def omlx_version() -> str | None:
-    """Return a usable installed oMLX version, without changing the installation."""
+def _omlx_version(executable: str | None) -> str | None:
+    """Return ``executable``'s usable version without changing its installation."""
+    if executable is None:
+        return None
     try:
         result = subprocess.run(
-            ["omlx", "--version"], capture_output=True, text=True, timeout=15, check=False,
+            [executable, "--version"], capture_output=True, text=True, timeout=15, check=False,
         )
         version = result.stdout.strip()
         if result.returncode != 0:
@@ -47,6 +50,16 @@ def omlx_version() -> str | None:
         return version
     except (OSError, subprocess.TimeoutExpired, InvalidVersion):
         return None
+
+
+def omlx_version() -> str | None:
+    """Return CORSIA's managed oMLX version without changing its installation."""
+    return _omlx_version(managed_omlx_executable() or "omlx")
+
+
+def existing_omlx_version() -> str | None:
+    """Return the person's PATH oMLX version without changing it."""
+    return _omlx_version(installed_omlx())
 
 
 def omlx_version_is_compatible(version: str | None) -> bool:
@@ -61,7 +74,7 @@ def _omlx_supports_loopback_auth(version: str | None = None) -> bool:
 
 def foreign_omlx_failure() -> str | None:
     """Explain why a person's oMLX cannot be adopted without touching it."""
-    version = omlx_version()
+    version = existing_omlx_version()
     if version is None:
         if not installed_omlx():
             return None  # absent or a broken leftover: the caller installs one instead
