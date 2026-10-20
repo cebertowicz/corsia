@@ -117,8 +117,13 @@ function isRemoteAppend(transaction: Transaction): boolean {
 /**
  * Applies the editor's transactions and lays out at once any change the reader did not make, so the text in view stays
  * where it is while others edit the document. A remote append follows the live edge when the reader is already as near
- * it as chat considers near; every other remote edit keeps the current top-line anchor. The reader's own edits keep the
- * default timing, so their caret scrolls as it always has.
+ * it as chat considers near; every other remote edit keeps the current top-line anchor. CodeMirror keeps the line at the
+ * top of the view in place across a change, by that change's height, when it next measures. Until then every update takes
+ * that line again from the scroll offset it measured last: a remote change followed by any other update before the next
+ * frame (a typing lane's state, comment ranges remapped onto the change) makes it hold whichever line the change moved
+ * under that offset, and the text in view moves by the change's height. Measuring right after the change keeps
+ * CodeMirror's own correction, the one thing that moves the scroller for it. The reader's own edits keep the default
+ * timing, so their caret scrolls as it always has.
  */
 export function dispatchKeepingPlace(transactions: readonly Transaction[], view: EditorView): void {
 	const scroller = view.scrollDOM;
