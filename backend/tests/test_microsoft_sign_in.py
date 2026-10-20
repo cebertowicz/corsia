@@ -5,6 +5,7 @@ import asyncio
 import html
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -459,7 +460,6 @@ async def test_success_clears_latest_add_failure(microsoft, isolated_db, agent_a
 
 
 async def test_add_failure_status_expires_with_pending_lifetime(microsoft, isolated_db, agent_adds, monkeypatch) -> None:
-    monkeypatch.setattr(oauth, "PENDING_SECONDS", 0.01)
     url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=("agent", "expiry-thread"), adding_thread_id="expiry-thread")
     listener = oauth._pending[_query(url)["state"]].listener
 
@@ -469,7 +469,9 @@ async def test_add_failure_status_expires_with_pending_lifetime(microsoft, isola
     assert not oauth._pending
     assert listener.bound_addresses() == []
 
-    await asyncio.sleep(0.05)
+    # Move only this module's clock past the lifetime; a wall-clock wait races a loaded host.
+    later = oauth.time.monotonic() + oauth.PENDING_SECONDS
+    monkeypatch.setattr(oauth, "time", SimpleNamespace(monotonic=lambda: later))
 
     assert oauth.accounts_status("expiry-thread") == {"status": "not_connected"}
 

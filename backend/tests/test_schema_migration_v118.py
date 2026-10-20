@@ -162,6 +162,6 @@ def test_runner_upgrades_a_117_database_in_one_transaction(tmp_path):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert result.migrated is True
     assert (result.from_version, result.to_version) == (117, 132)
-    assert version == 131
+    assert version == 132
     assert [(k, json.loads(v)["session_id"]) for k, v in rows] == [(NEW_KEY, "ws")]
     assert title == "CORSIA"

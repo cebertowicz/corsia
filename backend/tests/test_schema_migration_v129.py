@@ -232,7 +232,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 131
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 132
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:
