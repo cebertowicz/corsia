@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { dispatchKeepingPlace, restoreDocumentPlace } from './documentImagePlace';
+import { NEAR_BOTTOM_PX } from './nearBottom';
 
 const SRC = '/api/files/content?path=%2Fws%2Fa.png';
 const image = { instanceId: 'tab-1', src: SRC, alt: 'a', from: 40, to: 60, scrollTop: 300, top: 0 };
@@ -264,6 +265,60 @@ describe('dispatchKeepingPlace', () => {
 		view.dispatch({ selection: { anchor: 2 } });
 		expect(view.state.doc.toString()).toBe('xone\ntwo\nthree');
 		expect(measured()).toBe(false);
+		view.destroy();
+	});
+
+	/** An editor whose scroller reports a 1000px document in a 400px view, `fromEnd` px above its end; records scroll writes. */
+	function reading(fromEnd: number, doc = 'one\ntwo\nthree\n\n') {
+		const view = new EditorView({ doc, parent: root, dispatchTransactions: dispatchKeepingPlace });
+		const writes: number[] = [];
+		let top = 1000 - 400 - fromEnd;
+		Object.defineProperties(view.scrollDOM, {
+			scrollHeight: { configurable: true, get: () => 1000 },
+			clientHeight: { configurable: true, get: () => 400 },
+			scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = value; writes.push(value); } },
+		});
+		return { view, writes };
+	}
+
+	it('follows text another writer appends when the reader is within the near-bottom distance of the end', () => {
+		const { view, writes } = reading(NEAR_BOTTOM_PX - 1);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'four\n' } });
+		expect(writes).toEqual([1000]);
+		view.destroy();
+	});
+
+	it('keeps the place of a reader at or beyond the near-bottom distance when text is appended', () => {
+		const { view, writes } = reading(NEAR_BOTTOM_PX);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'four\n' } });
+		expect(writes).toEqual([]);
+		view.destroy();
+	});
+
+	it('does not follow a near-bottom reader for remote edits that are not appends', () => {
+		const { view, writes } = reading(10);
+		const end = view.state.doc.length;
+		view.dispatch({ changes: { from: end - 1, insert: '\n' } });
+		view.dispatch({ changes: { from: 0, insert: 'zero\n' } });
+		view.dispatch({ changes: { from: view.state.doc.length - 2, to: view.state.doc.length } });
+		expect(writes).toEqual([]);
+		view.destroy();
+	});
+
+	it("leaves a near-bottom reader's own append to the editor's default scrolling", () => {
+		const { view, writes } = reading(10);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'x' }, userEvent: 'input.type' });
+		expect(writes).toEqual([]);
+		view.destroy();
+	});
+
+	it('follows a near-bottom reader when a batch carries an append alongside an edit higher up', () => {
+		const { view, writes } = reading(10);
+		const above = view.state.update({ changes: { from: 0, insert: 'zero\n' } });
+		const append = above.state.update({ changes: { from: above.state.doc.length, insert: 'four\n' } });
+		view.dispatch([above, append]);
+		expect(view.state.doc.toString()).toBe('zero\none\ntwo\nthree\n\nfour\n');
+		expect(writes).toEqual([1000]);
 		view.destroy();
 	});
 });
