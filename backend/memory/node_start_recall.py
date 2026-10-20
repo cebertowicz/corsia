@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 import json
 import re
 import sqlite3
@@ -21,7 +22,7 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
-from memory.task_match import Match, NodeText, TaskTerms, floor, match, task_terms
+from memory.task_match import Match, NodeText, TaskTerms, first_term_at, match, task_terms
 
 MAX_HITS = 3
 SOURCE_CANDIDATES = 100
@@ -30,6 +31,8 @@ RESULT_KEY = "prior_words"
 _NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
 _STARTED_HOWS = frozenset({"started", "auto_selected"})
 _HEADER = "Earlier words from the person that match this task, newest first; where they differ, the newer one governs."
+_MATCH_FUNCTION = "prior_words_match"
+_OWNER_FUNCTION = "prior_words_owner"
 
 
 @dataclass(frozen=True)
@@ -131,6 +134,7 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
         return "unresolved_caller", []
     cutoff = _start_cutoff(db, text.node_id)
     cloud_off = cloud_off_project_ids(db=db)
+    _ensure_functions(db)
 
     candidates = [*_message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff),
                   *_comment_candidates(db, terms, user_id, caller, cloud_off, cutoff),
@@ -162,24 +166,43 @@ def _start_cutoff(db, node_id: str | None) -> str | None:
     return str(row["updated_at"]) if row and row["updated_at"] else None
 
 
-def _fts_floor(terms: TaskTerms) -> str:
-    """An FTS query for messages holding a title term and ``floor`` distinct terms.
+def _ensure_functions(db) -> None:
+    """Add the matcher and owner check to ``db`` once; SQLite refuses to redefine one under an open statement."""
+    try:
+        db.execute(f"SELECT {_MATCH_FUNCTION}('[[],[]]','')").fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such function" not in str(exc):
+            raise
+        db.create_function(_MATCH_FUNCTION, 2, _sql_match, deterministic=True)
+        db.create_function(_OWNER_FUNCTION, 3, _sql_owner, deterministic=True)
 
-    Each prefix term matches every token ``match()`` counts for it, so the floor drops no hit.
+
+@lru_cache(maxsize=8)
+def _decoded(encoded: str) -> TaskTerms:
+    terms, title_terms = json.loads(encoded)
+    return TaskTerms(tuple(terms), frozenset(title_terms))
+
+
+def _encoded(terms: TaskTerms) -> str:
+    return json.dumps([list(terms.terms), sorted(terms.title_terms)])
+
+
+def _sql_match(encoded: str, words: str | None) -> bool:
+    """``match()`` as SQL, so each reader's ``LIMIT`` counts only rows it accepts."""
+    return match(_decoded(encoded), words or "") is not None
+
+
+def _sql_owner(role: str | None, content: str | None, metadata: str | None) -> bool:
+    return is_owner_authored_message(role=role, content=content, metadata=metadata)
+
+
+def _fts_title(terms: TaskTerms) -> str:
+    """An FTS query for user messages whose content holds a title term.
+
+    Only narrows the scan: every message ``match()`` accepts has a word starting with a title term.
     """
-    quoted = {term: f'"{term}"*' for term in terms.terms}
-    title = " OR ".join(quoted[term] for term in terms.terms if term in terms.title_terms)
-    return f"({title}) AND ({_at_least(floor(len(terms.terms)), list(quoted.values()))})"
-
-
-def _at_least(count: int, terms: list[str]) -> str:
-    """An FTS expression true when at least ``count`` of ``terms`` match."""
-    if count == 1:
-        return " OR ".join(terms)
-    return " OR ".join(
-        f"({term} AND ({_at_least(count - 1, terms[index + 1:])}))"
-        for index, term in enumerate(terms[:len(terms) - count + 1])
-    )
+    title = " OR ".join(f'"{term}"*' for term in terms.terms if term in terms.title_terms)
+    return f"role:user AND content:({title})"
 
 
 def _positional(clause: str, params: dict[str, str]) -> tuple[str, list[str]]:
@@ -188,30 +211,9 @@ def _positional(clause: str, params: dict[str, str]) -> tuple[str, list[str]]:
     return re.sub(r":\w+", "?", clause), [params[name] for name in names]
 
 
-def _hay(column: str) -> str:
-    """Select ``column`` lowered once, with a leading separator, for ``_floored``."""
-    return f"' '||lower({column}) AS hay"
-
-
-def _floored(scoped: str, order: str, terms: TaskTerms) -> tuple[str, list[object]]:
-    """Keep ``scoped`` rows (each with a ``_hay``) at the shared-term floor, best first, up to the limit.
-
-    ``shared`` and ``title_shared`` count terms starting a word; each is never below ``match()``'s
-    count, so the floor drops no hit, and exceeds it only when the terms sit in different windows.
-    """
-    title = [term for term in terms.terms if term in terms.title_terms]
-
-    def count(selected: list[str] | tuple[str, ...]) -> str:
-        return "+".join("(hay GLOB ?)" for _ in selected)
-
-    patterns = [f"*[^a-z0-9]{term}*" for term in (*terms.terms, *title)]
-    return (
-        f"""WITH scoped AS MATERIALIZED ({scoped})
-            SELECT * FROM (SELECT *,{count(terms.terms)} AS shared,{count(title)} AS title_shared FROM scoped)
-            WHERE shared>=? AND title_shared>=1
-            ORDER BY shared DESC,title_shared DESC,{order} LIMIT ?""",
-        [*patterns, floor(len(terms.terms)), SOURCE_CANDIDATES],
-    )
+def _matching(column: str, terms: TaskTerms) -> tuple[str, list[object]]:
+    """The predicate keeping rows whose ``column`` ``match()`` accepts."""
+    return f"AND {_MATCH_FUNCTION}(?,{column})", [_encoded(terms)]
 
 
 def _owned_threads(alias: str) -> str:
@@ -233,22 +235,21 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off,
     owner_filter, owner_params = _positional(*owner_message_sql_predicate("m"))
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
     caller_cut = current_installed_through_seq(caller_thread_id, db=db) or 0
-    # The FTS query applies the floor before the limit; bm25 only orders eligible messages.
+    matching, match_params = _matching("m.content", terms)
     rows = db.execute(
-        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title
+        f"""SELECT m.id,m.thread_id,m.content,m.created_at,t.title
             FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
             JOIN threads t ON t.id=m.thread_id
             WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
               AND {_owned_threads('t')} {source_scope}
               AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=?)
-            ORDER BY bm25(messages_fts),m.created_at DESC LIMIT ?""",
-        [f"role:user AND ({_fts_floor(terms)})", *owner_params, user_id, *source_params,
-         caller_thread_id, caller_cut, SOURCE_CANDIDATES],
+              AND {_OWNER_FUNCTION}(m.role,m.content,m.metadata) {matching}
+            ORDER BY m.created_at DESC LIMIT ?""",
+        [_fts_title(terms), *owner_params, user_id, *source_params,
+         caller_thread_id, caller_cut, *match_params, SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
-        if not is_owner_authored_message(role=row["role"], content=row["content"], metadata=row["metadata"]):
-            continue
         found = match(terms, str(row["content"]))
         if found:
             line = f'{local_clock(str(row["created_at"]))} · message in “{row["title"]}” · “{_excerpt(found)}” → get_thread_history(thread_id="{row["thread_id"]}")'
@@ -260,14 +261,15 @@ def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_
     from core.correction_targets import comment_target_sql
 
     source_scope, source_params = _source_scope("t", "c.created_at", caller, cloud_off, cutoff)
-    query, floor_params = _floored(
-        f"""SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,{_hay('c.body')}
+    matching, match_params = _matching("c.body", terms)
+    rows = db.execute(
+        f"""SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path
             FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
             LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
-            WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope}""",
-        "created_at DESC,id DESC", terms,
-    )
-    rows = db.execute(query, [user_id, *source_params, *floor_params]).fetchall()
+            WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope} {matching}
+            ORDER BY c.created_at DESC,c.id DESC LIMIT ?""",
+        [user_id, *source_params, *match_params, SOURCE_CANDIDATES],
+    ).fetchall()
     hits = []
     for row in rows:
         found = match(terms, str(row["body"]))
@@ -284,18 +286,19 @@ def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[
     answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
     answered_at = "json_extract(ai.metadata,'$.plan_decision.answered_at')"
     source_scope, source_params = _source_scope("t", answered_at, caller, cloud_off, cutoff)
-    query, floor_params = _floored(
+    matching, match_params = _matching(answer, terms)
+    rows = db.execute(
         f"""SELECT ai.external_id,json_extract(ai.metadata,'$.plan_decision.title') AS title,
-                   {answer} AS answer,{answered_at} AS answered_at,{_hay(answer)}
+                   {answer} AS answer,{answered_at} AS answered_at
             FROM artifact_identities ai
             JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
             WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
               AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
               AND json_type(ai.metadata,'$.plan_decision.answer.text')='text'
-              AND {_owned_threads('t')} {source_scope}""",
-        "answered_at DESC", terms,
-    )
-    rows = db.execute(query, [DECISION_TYPE, user_id, *source_params, *floor_params]).fetchall()
+              AND {_owned_threads('t')} {source_scope} {matching}
+            ORDER BY answered_at DESC LIMIT ?""",
+        [DECISION_TYPE, user_id, *source_params, *match_params, SOURCE_CANDIDATES],
+    ).fetchall()
     hits = []
     for row in rows:
         text, created_at = str(row["answer"]), str(row["answered_at"])
@@ -311,27 +314,25 @@ def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cu
     statement = "json_extract(ce.body,'$.statement')"
     source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
     fields = sorted(RULE_FIELDS)
-    top, floor_params = _floored(
-        f"""SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,
-                   {statement} AS statement,{_hay(statement)}
-            FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
-            WHERE {_owned_threads('t')} AND ce.state='active'
-              AND ce.field IN (?,?)
-              AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
-                          WHERE json_extract(value,'$.kind')='user')
-              AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
-              {source_scope}""",
-        "updated_at DESC", terms,
-    )
+    matching, match_params = _matching(statement, terms)
     rows = db.execute(
-        f"""WITH top AS ({top})
+        f"""WITH top AS (
+              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,{statement} AS statement
+              FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
+              WHERE {_owned_threads('t')} AND ce.state='active'
+                AND ce.field IN (?,?)
+                AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
+                            WHERE json_extract(value,'$.kind')='user')
+                AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
+                {source_scope} {matching}
+              ORDER BY ce.updated_at DESC LIMIT ?)
             SELECT top.*,checkpoints.id AS checkpoint_id
             FROM top LEFT JOIN checkpoint_entry_search entry_index
               ON entry_index.thread_id=top.thread_id AND entry_index.history_epoch=top.history_epoch
              AND entry_index.entry_id=top.entry_id AND entry_index.revision=top.revision
             LEFT JOIN checkpoints ON checkpoints.generation_order=entry_index.last_generation_order
-            ORDER BY top.shared DESC,top.title_shared DESC,top.updated_at DESC""",
-        [user_id, *fields, caller_thread_id, *source_params, *floor_params],
+            ORDER BY top.updated_at DESC""",
+        [user_id, *fields, caller_thread_id, *source_params, *match_params, SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
@@ -347,7 +348,7 @@ def _excerpt(found: Match) -> str:
     text = " ".join(found.span.split())
     if len(text) <= 280:
         return text
-    first = min((text.lower().find(term) for term in found.matched_terms if text.lower().find(term) >= 0), default=0)
+    first = first_term_at(found.matched_terms, text)
     start = max(0, min(first - 120, len(text) - 277))
     end = min(len(text), start + 277)
     prefix = "…" if start else ""

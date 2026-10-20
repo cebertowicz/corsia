@@ -458,10 +458,10 @@ def test_cloud_off_messages_cannot_fill_the_candidate_window(db):
     assert any("deliverable-message" not in line and "Export ledger as CSV format" in line for line in _related(db))
 
 
-def test_one_rare_term_messages_do_not_outrank_a_match_out_of_the_window(db):
+def test_newer_messages_the_matcher_rejects_do_not_hide_an_older_match(db):
     from memory.node_start_recall import SOURCE_CANDIDATES
 
-    # Common terms score near zero in bm25, so a rare term repeated outranks the match.
+    # Each newer message holds title terms but stays below the floor, so none takes a window slot.
     common = [(f"common-{index}", "Export account notes.") for index in range(10 * SOURCE_CANDIDATES)]
     rare = [(f"rare-{index}", "Ledger ledger ledger.") for index in range(SOURCE_CANDIDATES + 1)]
     db.executemany(
@@ -474,6 +474,33 @@ def test_one_rare_term_messages_do_not_outrank_a_match_out_of_the_window(db):
     lines = _related(db)
 
     assert len(lines) == 2 and "Export the account ledger" in lines[1]
+
+
+def test_a_task_term_naming_the_role_column_does_not_count_for_a_message(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES, NodeText, related
+
+    noise = [(f"noise-{index}", "Export export export.") for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user',?,'{}','2026-02-01T12:00:00+00:00',?,'delivered')",
+        [(message_id, body, seq) for seq, (message_id, body) in enumerate(noise, start=2)],
+    )
+    _message(db, "match", "past", "Export the ledger for each user.")
+
+    lines = related(db, NodeText("Export user ledger"), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Export the ledger for each user" in lines[1]
+
+
+def test_long_quote_is_cut_around_the_matched_word_not_a_longer_one(db):
+    from memory.node_start_recall import NodeText, related
+
+    filler = "Earlier notes about the catalog and its many sections. " * 5
+    _message(db, "long", "past", filler + "Log rotation must keep a week of files.")
+
+    lines = related(db, NodeText("Log rotation"), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Log rotation must keep" in lines[1]
 
 
 def test_limits_to_three_lines_and_one_rule(db):
