@@ -34,7 +34,8 @@ const TRY_ENDINGS: Record<string, string> = {
 	turn_terminal: 'run ended',
 };
 
-const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+/** Compact count formatting shared by plan details and finished-work summaries. */
+export const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
 export function nextMove(causes: OperatorExecutionCause[]): string | null {
 	const owners = [...new Set(
@@ -63,7 +64,7 @@ export function duration(totalSeconds: number): string {
 }
 
 export function tokens(value: number): string {
-	return `${compact.format(value)} tokens`;
+	return `${compactNumber.format(value)} tokens`;
 }
 
 /** A measured fact stays visibly partial when any matching usage was not recorded. */
@@ -75,7 +76,7 @@ function lowerBound(value: string, incomplete: boolean): string {
 export function tokenLine(amount: OperatorCostAmount): string | null {
 	if (amount.tokens.known !== null) {
 		return lowerBound(
-			compact.format(amount.tokens.known),
+			compactNumber.format(amount.tokens.known),
 			amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0,
 		);
 	}
