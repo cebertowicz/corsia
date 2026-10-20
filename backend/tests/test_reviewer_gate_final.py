@@ -266,7 +266,7 @@ class TestFinalGate:
         }
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=draft_pr_info) as mock_fetch, \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch("infra.product_events.emit_product_event",
                    side_effect=lambda s, e, **kw: emitted.append((s, e))), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
@@ -444,7 +444,7 @@ class TestFinalGate:
         caller can emit a loud retryable event instead of silently holding."""
         gate_mod = _reload_gate
         with patch("reviewer.gh_helpers.get_check_runs_for_sha", return_value=None), \
-             patch.object(gate_mod.github_reviewer_gate.time, "sleep"):
+             patch("infra.transient_read.time.sleep"):
             assert gate_mod.github_reviewer_gate.checks_green("owner/repo", 42, "abc123def") is None
 
 
@@ -518,7 +518,7 @@ class TestMergeableGate:
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=pr_info) as mock_fetch, \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(gate_mod, "emit_product_event"):
 
@@ -526,7 +526,7 @@ class TestMergeableGate:
 
         mock_run.assert_not_called()
         # UNKNOWN is retried up to the full budget before giving up (BUG #574).
-        assert mock_fetch.call_count == gate_mod.github_reviewer_gate.MERGEABILITY_POLL_ATTEMPTS
+        assert mock_fetch.call_count == gate_mod.github_reviewer_gate.TRANSIENT_READ_ATTEMPTS
 
     def test_gate_fires_after_transient_unknown_mergeability(self, _reload_gate):
         """The #574 fix: UNKNOWN that settles to MERGEABLE fires the reviewer."""
@@ -538,7 +538,7 @@ class TestMergeableGate:
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info",
                           side_effect=[unknown, unknown, ready]) as mock_fetch, \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer",
                           side_effect=lambda *a, **kw: run_reviewer.append(1)), \
              patch.object(gate_mod, "emit_product_event"):
@@ -552,7 +552,7 @@ class TestMergeableGate:
         gate_mod = _reload_gate
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(gate_mod, "emit_product_event"):
@@ -574,7 +574,7 @@ class TestMergeableGate:
 
         with patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
-             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
+             patch.object(gate_mod.github_reviewer_gate, "TRANSIENT_READ_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(
                  github_reviewer_notifications, "notify_pr_info_unreadable",

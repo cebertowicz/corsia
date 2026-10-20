@@ -220,7 +220,7 @@ class TestWorkflowFailureOutcomes:
 
     # -- Gate policy: errored reviewer = RED, emit reviewer.errored (CHANGE 2)
 
-    @patch("reviewer.review_comment_fetch.time.sleep")
+    @patch("infra.transient_read.time.sleep")
     @patch("reviewer.on_pr_review._review_diff")
     @patch("reviewer.reviewer_runner.invoke_cc_subagent")
     @patch("reviewer.on_pr_review.set_pending")

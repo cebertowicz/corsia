@@ -11,13 +11,13 @@ import json
 import logging
 import re
 import subprocess
-import time
 from dataclasses import dataclass
 from typing import Any
 
-from events.connectors.github_reviewer_gate import (
-    MERGEABILITY_POLL_ATTEMPTS,
-    MERGEABILITY_POLL_INTERVAL_S,
+from infra.transient_read import (
+    TRANSIENT_READ_ATTEMPTS,
+    TRANSIENT_READ_INTERVAL_S,
+    retry_transient_read,
 )
 from reviewer.gh_api import run_gh
 
@@ -226,17 +226,13 @@ def _fetch_comments(
     retry: re-read on None, return the first readable result, and return
     None after the full budget so callers' error paths are unchanged.
     """
-    for attempt in range(MERGEABILITY_POLL_ATTEMPTS):
-        comments = _fetch_comments_once(api_path, pr_number)
-        if comments is not None:
-            return comments
-        if attempt + 1 < MERGEABILITY_POLL_ATTEMPTS:
-            log.info(
-                "reviewer: PR #%d comment history unreadable, re-polling (%d/%d)",
-                pr_number, attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
-            )
-            time.sleep(MERGEABILITY_POLL_INTERVAL_S)
-    return None
+    return retry_transient_read(
+        lambda: _fetch_comments_once(api_path, pr_number),
+        attempts=TRANSIENT_READ_ATTEMPTS,
+        interval_s=TRANSIENT_READ_INTERVAL_S,
+        log_label=lambda: f"reviewer: PR #{pr_number} comment history unreadable",
+        log_retry=log.info,
+    )
 
 
 def _fetch_comments_once(

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from loguru import logger as log
 
+from infra.transient_read import (
+    TRANSIENT_READ_ATTEMPTS,
+    TRANSIENT_READ_INTERVAL_S,
+    retry_transient_read,
+)
+
 _REVIEWER_CHECK_NAME = "qa/llm-reviewer"
 _TERMINAL_GREEN_STATES = {"SUCCESS", "SKIPPED", "NEUTRAL"}
-MERGEABILITY_POLL_ATTEMPTS = 8
-MERGEABILITY_POLL_INTERVAL_S = 4.0
 _TRANSIENT_MERGEABLE = "UNKNOWN"
 
 
@@ -22,18 +25,16 @@ def checks_green(repo: str, pr_number: int, head_sha: str) -> bool | None:
     """
     from reviewer.gh_helpers import get_check_runs_for_sha
 
-    checks = None
-    for attempt in range(MERGEABILITY_POLL_ATTEMPTS):
-        checks = get_check_runs_for_sha(repo, head_sha)
-        if checks is not None:
-            break
-        if attempt + 1 < MERGEABILITY_POLL_ATTEMPTS:
-            log.info(
-                "reviewer-gate: PR #{} sha={} — check runs unreadable, re-polling "
-                "({}/{})",
-                pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
-            )
-            time.sleep(MERGEABILITY_POLL_INTERVAL_S)
+    checks = retry_transient_read(
+        lambda: get_check_runs_for_sha(repo, head_sha),
+        attempts=TRANSIENT_READ_ATTEMPTS,
+        interval_s=TRANSIENT_READ_INTERVAL_S,
+        log_label=lambda: (
+            f"reviewer-gate: PR #{pr_number} sha={head_sha[:8]} "
+            "— check runs unreadable"
+        ),
+        log_retry=log.info,
+    )
     if checks is None:
         log.warning(
             "reviewer-gate: PR #{} sha={} — check fetch unreadable "
@@ -98,27 +99,29 @@ def fetch_pr_info_awaiting_mergeability(
     worker time.
     """
     pr_info: dict[str, Any] | None = None
-    for attempt in range(MERGEABILITY_POLL_ATTEMPTS):
+
+    def fetch_reviewable_pr_info() -> dict[str, Any] | None:
+        nonlocal pr_info
         pr_info = fetch_pr_info(repo, pr_number)
-        if pr_info is not None and pr_info["isDraft"]:
+        if pr_info is None:
+            return None
+        if pr_info["isDraft"] or not mergeability_is_unknown(pr_info):
             return pr_info
-        if pr_info is not None and not mergeability_is_unknown(pr_info):
-            return pr_info
-        if attempt + 1 < MERGEABILITY_POLL_ATTEMPTS:
-            if pr_info is None:
-                log.info(
-                    "reviewer-gate: PR #{} sha={} — PR info unreadable, re-polling "
-                    "({}/{})",
-                    pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
-                )
-            else:
-                log.info(
-                    "reviewer-gate: PR #{} sha={} — mergeable=UNKNOWN, re-polling "
-                    "({}/{})",
-                    pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
-                )
-            time.sleep(MERGEABILITY_POLL_INTERVAL_S)
-    return pr_info
+        return None
+
+    result = retry_transient_read(
+        fetch_reviewable_pr_info,
+        attempts=TRANSIENT_READ_ATTEMPTS,
+        interval_s=TRANSIENT_READ_INTERVAL_S,
+        log_label=lambda: (
+            f"reviewer-gate: PR #{pr_number} sha={head_sha[:8]} "
+            "— PR info unreadable"
+            if pr_info is None
+            else f"reviewer-gate: PR #{pr_number} sha={head_sha[:8]} — mergeable=UNKNOWN"
+        ),
+        log_retry=log.info,
+    )
+    return result if result is not None else pr_info
 
 
 def mergeability_is_unknown(pr_info: dict[str, Any]) -> bool:

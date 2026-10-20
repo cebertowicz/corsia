@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from events.connectors.github_reviewer_gate import MERGEABILITY_POLL_ATTEMPTS
+from infra.transient_read import TRANSIENT_READ_ATTEMPTS
 from reviewer.review_comment_fetch import (
     fetch_existing_issue_comments,
     fetch_existing_review_comments,
@@ -22,7 +22,7 @@ from reviewer_threads_fixtures import _mock_run
 @pytest.fixture(autouse=True)
 def _no_retry_sleep():
     """The unreadable-read retry must never really sleep 4 s in these tests."""
-    with patch("time.sleep") as sleep:
+    with patch("infra.transient_read.time.sleep") as sleep:
         yield sleep
 
 
@@ -99,8 +99,8 @@ def test_fetch_returns_none_only_after_the_full_retry_budget(mock_run, _no_retry
     )
     out = fetch_existing_issue_comments(42, "owner/repo")
     assert out is None
-    assert mock_run.call_count == MERGEABILITY_POLL_ATTEMPTS
-    assert _no_retry_sleep.call_count == MERGEABILITY_POLL_ATTEMPTS - 1
+    assert mock_run.call_count == TRANSIENT_READ_ATTEMPTS
+    assert _no_retry_sleep.call_count == TRANSIENT_READ_ATTEMPTS - 1
 
 
 @pytest.mark.parametrize(
