@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { openPlanAsk, returnToPlanNode } from '$lib/planLeafReturn';
+import { openPlanAsk, openPlanDiscussionLeaf, openPlanSubagentLeaf, returnToPlanNode } from '$lib/planLeafReturn';
 import { registerNodeFocus, registerPlanSurface } from '$lib/planNodeFocus';
 import { activeThreadId } from '$lib/stores/threads';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
+import { paneCollapsed } from '$lib/stores/paneCollapsed';
+import { paneOpen } from '$lib/stores/paneOpen';
 import type { OperatorArtifactLink } from '$lib/api/plans';
 
 describe('returnToPlanNode', () => {
@@ -58,7 +60,11 @@ describe('openPlanAsk', () => {
 		...over,
 	});
 
-	beforeEach(() => threadWorkspaces.set({}));
+	beforeEach(() => {
+		threadWorkspaces.set({});
+		paneOpen.set(true);
+		paneCollapsed.set(false);
+	});
 
 	it('opens a document in the artifact surface', () => {
 		const openDecision = vi.fn();
@@ -76,5 +82,15 @@ describe('openPlanAsk', () => {
 
 		expect(openDecision).toHaveBeenCalledOnce();
 		expect(get(threadWorkspaces).t1).toBeUndefined();
+	});
+
+	it('preserves plan-pane state while opening documents, subagents, and discussion tabs', () => {
+		const openDecision = vi.fn();
+		openPlanAsk('t1', artifact(), 'Fallback title', openDecision);
+		openPlanSubagentLeaf('t1', 'node-1', 'child-1', 'Worker');
+		openPlanDiscussionLeaf('t1', 'artifact-2', 'Archive');
+
+		expect(get(paneOpen)).toBe(true);
+		expect(get(paneCollapsed)).toBe(false);
 	});
 });

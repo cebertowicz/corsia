@@ -1,6 +1,4 @@
 import { get } from 'svelte/store';
-import { paneCollapsed } from '$lib/stores/paneCollapsed';
-import { paneOpen } from '$lib/stores/paneOpen';
 import { activeThreadId } from '$lib/stores/threads';
 import { focusPlanNode } from '$lib/planNodeFocus';
 import { openArtifactTab, openLegacyDiscussionArchiveTab, openSubagentConversationTab } from '$lib/stores/artifactWorkspace';
@@ -23,7 +21,7 @@ export async function returnToPlanNode(
 	}
 }
 
-/** Opens a plan child's subagent conversation as an artifact tab, collapsing the pane behind it. */
+/** Opens a plan child's subagent conversation as an artifact tab without changing drawer state. */
 export function openPlanSubagentLeaf(
 	threadId: string | null,
 	nodeId: string,
@@ -35,8 +33,6 @@ export function openPlanSubagentLeaf(
 	openSubagentConversationTab(threadId, {
 		threadId: childThreadId, title, sourceNodeId: nodeId, sourceStepId: stepId,
 	});
-	paneOpen.set(false);
-	paneCollapsed.set(true);
 }
 
 /** Opens a plan ask in its one canonical surface. */
@@ -56,7 +52,6 @@ export function openPlanAsk(
 		path: artifact.path ?? artifact.external_id,
 		title: artifact.title ?? nodeTitle,
 	});
-	paneOpen.set(false);
 }
 
 /** Opens a plan child's legacy discussion archive as an artifact tab. */
@@ -70,5 +65,4 @@ export function openPlanDiscussionLeaf(
 		artifactId,
 		title: `Discussion archive — ${title}`,
 	});
-	paneOpen.set(false);
 }
