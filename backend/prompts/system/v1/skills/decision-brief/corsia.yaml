@@ -8,7 +8,7 @@ workflow:
       difficulty: {default: standard, hard_if: "no approved objective covers the choice"}
     - id: long-form
       title: Analysis and evidence in an artifact
-      required: true
+      required: false          # skip with reason when the decision carries everything needed
       check: artifact holding options, trade-offs and evidence
       after: [product-chain]
       difficulty: {default: standard}
@@ -21,7 +21,7 @@ workflow:
     - id: decision
       title: Plan decision raised
       required: true
-      check: plan decision raised with options, one recommendation (pick one) or a pre-ticked set (pick any), and a link to the long-form artifact
+      check: plan decision raised with options and one recommendation (pick one) or a pre-ticked set (pick any), answerable as asked without reading the linked document; if they must judge the thing itself, make it an artifact ask instead
       after: [brief]
       difficulty: {default: routine}
       quality:
