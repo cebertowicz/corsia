@@ -59,6 +59,11 @@ def _refusal_message(reason_key: str, details: dict[str, object]) -> str:
         return "A checkpoint is already in progress for this thread."
     if reason_key in {"target_unavailable", "model_unavailable"}:
         return "This thread's model is unavailable, so a checkpoint cannot run now."
+    if reason_key == "project_cloud_off":
+        return (
+            "This project uses local models only, so a checkpoint cannot run on this "
+            "thread's model. Continue working."
+        )
     if reason_key == "warm_capture_refused":
         return "The provider session cannot be folded right now. Try after your next turn."
     return "Checkpoint is not available right now. Continue working and try after a later boundary."

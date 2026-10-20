@@ -60,12 +60,16 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
     try:
         project = thread_scope(thread_id, db=connection)["project_id"] if thread_id else project_id
         requested = get_account(account_id, db=connection) if account_id is not None else None
+        from llm.locality import project_cloud_models_off
+
+        cloud_models_off = project_cloud_models_off(project, db=connection)
         result = []
         pending: dict[str, str | None] = {}
         for original in rows:
             row = dict(original)
             provider = row.get("connection")
             if provider not in ("codex", "claude-code"):
+                _apply_cloud_models_off(row, cloud_models_off)
                 result.append(row)
                 continue
             permitted = permitted_accounts(provider, project_ids=[project], db=connection)
@@ -87,11 +91,20 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             elif chosen["source_home"] is not None:
                 _read_discovered_evidence(row, chosen, connection)
             row["runnable"] = _runnable_status(row)
+            _apply_cloud_models_off(row, cloud_models_off)
             result.append(row)
         return result
     finally:
         if db is None:
             connection.close()
+
+
+def _apply_cloud_models_off(row: dict, cloud_models_off: bool) -> None:
+    """Overlay project cloud policy without deleting scoped catalog rows."""
+    if cloud_models_off and not row.get("is_local", False):
+        row.update(status="unavailable", status_reason="project_cloud_off")
+        if "runnable" in row:
+            row["runnable"] = {"status": "unavailable", "status_reason": "project_cloud_off"}
 
 
 def _runs_on(account, row, project, selected, db) -> dict:

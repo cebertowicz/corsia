@@ -209,6 +209,70 @@ def resolve_execution_target(
             connection.close()
 
 
+def resolve_thread_target(
+    model: str | None, *, thread_id: str | None, db=None
+) -> ExecutionTarget:
+    """Resolve the target a thread's content may be sent to: catalog truth, then locality policy.
+
+    The one resolver for every path that sends a thread's content to a model (send, claim
+    release, native per-call refresh, folds, titles, cache warming, harness steering). A
+    target its policy forbids comes back unavailable with the refusal as its reason, so
+    each caller's existing unavailable branch enforces it. Read errors propagate: a policy
+    that cannot be read never lets the call through.
+    """
+    if db is None:
+        from infra.database import get_db
+
+        connection = get_db()
+        try:
+            return resolve_thread_target(model, thread_id=thread_id, db=connection)
+        finally:
+            connection.close()
+    return scope_to_thread(resolve_execution_target(model, db=db), thread_id=thread_id, db=db)
+
+
+def resolve_locality_permitted(model: str, *, thread_id: str, db=None) -> ExecutionTarget:
+    """``resolve_thread_target`` for a call already under way: a locality refusal raises.
+
+    Any other availability is the caller's to judge, as it was before policy applied.
+    """
+    from llm.locality import LOCALITY_REFUSALS
+
+    target = resolve_thread_target(model, thread_id=thread_id, db=db)
+    if not target.available and target.availability_reason in LOCALITY_REFUSALS:
+        from prompts.cloud_off import held_error
+
+        raise ModelUnavailableError(
+            target.catalog_id, held_error(target.catalog_id, target.availability_reason),
+        )
+    return target
+
+
+def scope_to_thread(target: ExecutionTarget, *, thread_id: str | None, db) -> ExecutionTarget:
+    """Apply a thread's locality policy to a target already resolved from the catalog.
+
+    The policy wins over the row's own reason: it is the person's setting, and the cause
+    that lifts first.
+    """
+    from dataclasses import replace
+
+    from llm.locality import locality_refusal, thread_project
+
+    row = _target_row(target.catalog_id, db=db)
+    if row is None:
+        return target
+    refusal = locality_refusal(
+        # The thread's own local-only flag is read here once threads carry one.
+        row, thread_local_only=False, project_id=thread_project(thread_id, db), db=db,
+    )
+    if refusal is None:
+        return target
+    from loguru import logger
+
+    logger.info("locality refused {} for thread {}: {}", target.catalog_id, thread_id, refusal)
+    return replace(target, available=False, availability_reason=refusal)
+
+
 def resolve_harness_selector(
     harness: Literal["claude-code", "codex"], selector: str, *, db=None
 ) -> ExecutionTarget:

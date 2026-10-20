@@ -45,7 +45,8 @@ def checkpoint_eligibility(
 
     from infra.checkpoint_queries import current_installed
     from infra.queries import get_thread_for_user
-    from llm.resolution import resolve_execution_target
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import resolve_thread_target
 
     if thread_row is None:
         thread_row = get_thread_for_user(thread_id, user_id, db=db)
@@ -67,10 +68,12 @@ def checkpoint_eligibility(
         return CheckpointEligibility(
             False, "no_sealed_boundary", thread_row, previous, boundary, None, projection,
         )
-    target = resolve_execution_target(str(thread_row["model"] or ""), db=db)
+    target = resolve_thread_target(str(thread_row["model"] or ""), thread_id=thread_id, db=db)
     if not target.available:
+        reason = target.availability_reason
         return CheckpointEligibility(
-            False, "model_unavailable", thread_row, previous, boundary, target, projection,
+            False, reason if reason in LOCALITY_REFUSALS else "model_unavailable",
+            thread_row, previous, boundary, target, projection,
         )
     if previous is not None and boundary.seq <= previous.through_seq:
         return CheckpointEligibility(

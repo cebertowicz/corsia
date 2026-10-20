@@ -381,7 +381,7 @@ def test_warm_endpoint_uses_final_target_for_prefix_probe_and_dispatch(
 ):
     from api import thread_cache_warm as api_runtime
     from infra import state
-    from llm.resolution import resolve_execution_target as real_resolve
+    from llm.resolution import resolve_thread_target as real_resolve
 
     catalog_id = "oMLX/qwen"
     stale_selection = "omlx@stale-server/qwen"
@@ -412,11 +412,11 @@ def test_warm_endpoint_uses_final_target_for_prefix_probe_and_dispatch(
     )
     resolved: list[tuple[str, object]] = []
 
-    def _resolve(selected, *, db):
+    def _resolve(selected, *, thread_id, db):
         resolved.append((selected, db))
-        return real_resolve(selected, db=db)
+        return real_resolve(selected, thread_id=thread_id, db=db)
 
-    monkeypatch.setattr(api_runtime, "resolve_execution_target", _resolve, raising=False)
+    monkeypatch.setattr(api_runtime, "resolve_thread_target", _resolve, raising=False)
 
     async def _repair(model: str):
         assert model == catalog_id

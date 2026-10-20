@@ -9,6 +9,10 @@ one F1 wake that names the held model and the recovery.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from infra.input_admission import accept_thread_input
 from infra.send_target import SELECTED_MODEL_UNAVAILABLE
 from plans import admission, delegation_child_lifecycle, projections, service, status
@@ -34,14 +38,14 @@ def _queue(db, message_id: str = "m1") -> None:
     )
 
 
-def _hold_head(db) -> None:
-    """Leave the worker's head as admission holds it for an unavailable model."""
+def _hold_head(db, cause: str = SELECTED_MODEL_UNAVAILABLE) -> None:
+    """Leave the worker's head as admission holds it, with ``cause`` as its durable error."""
     _queue(db)
     db.execute(
         """UPDATE messages SET write_outcome='proved_no_write', delivery_error=?,
                target_model='native/model', active_turn_id=NULL
            WHERE id='m1'""",
-        (SELECTED_MODEL_UNAVAILABLE,),
+        (cause,),
     )
 
 
@@ -156,3 +160,42 @@ def test_f1_for_a_held_worker_says_it_resumes_when_its_model_is_ready(db):
     assert "delegate_set_model" in content
     assert "resumes on its own once that model is ready again" in content
     assert "may be refused again" not in content
+
+
+@pytest.mark.parametrize("cause", ["project_cloud_off", "thread_local_only"])
+def test_a_locality_held_worker_reads_stalled_for_its_policy(db, cause):
+    step, _plan, node = delegated(db)
+    _start(db, node)
+    _turn(db, "error")
+    _hold_head(db, cause)
+
+    assert _row(db, step.id)["reason"] == (
+        "The delegated child is stalled: local models only; its model can't run"
+    )
+    assert _row(db, node.id, WORKER)["reason"] == (
+        "Stalled: local models only; its model can't run"
+    )
+
+
+@pytest.mark.parametrize("cause,clause", [
+    ("project_cloud_off", "this project uses local models only, so native/model can't run here"),
+    ("thread_local_only", "native/model can't run here: the worker is set to local models only"),
+])
+def test_f1_for_a_locality_held_worker_names_its_cause_and_the_move(db, cause, clause):
+    """Only the person lifts the policy: the wake names moving the worker, never a re-send or a wait."""
+    delegated(db)
+    _turn(db, "error")
+    _hold_head(db, cause)
+
+    delegation_child_lifecycle.notify_turn_error(db, "worker", turn_id="turn-1", error="Held")
+
+    appended = wakes(db)
+    assert len(appended) == 1
+    assert str(appended[0]["id"]).startswith("plan-wake:child_held_local_only:")
+    assert json.loads(appended[0]["metadata"])["summary"] == "Delegated worker is held: local models only"
+    content = str(appended[0]["content"])
+    assert f"is held: {clause}. Its plan and history are intact." in content
+    assert "Move the worker to a ready local model from model_catalog (delegate_set_model)." in content
+    assert "this chat" not in content
+    assert "resumes on its own" not in content
+    assert "delegate_send" not in content
