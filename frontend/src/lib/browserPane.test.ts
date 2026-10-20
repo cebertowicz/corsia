@@ -98,17 +98,23 @@ describe('browser pane input helpers', () => {
 	});
 
 	it('fills the band a predicted scroll uncovers with the frame edge colour, not stretched pixels', () => {
-		const probe = { imageSmoothingQuality: 'low', drawImage: vi.fn(), getImageData: () => ({ data: [250, 248, 246, 255] }) };
+		const probe = { imageSmoothingQuality: 'low', drawImage: vi.fn() };
 		vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(probe as never);
-		const fills: Array<{ style: string; rect: number[] }> = [];
+		const smoothing: boolean[] = [];
 		const context = {
-			fillStyle: '', save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), clip: vi.fn(), drawImage: vi.fn(),
-			fillRect(...rect: number[]) { fills.push({ style: this.fillStyle, rect }); }
+			imageSmoothingEnabled: true, save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), clip: vi.fn(),
+			drawImage: vi.fn(function (this: { imageSmoothingEnabled: boolean }) { smoothing.push(this.imageSmoothingEnabled); })
 		};
-		drawShifted(context as never, new Image(), 400, 800, 10, 20, 200, 400, { x: 0, y: 60 }, 0.5);
-		expect(context.drawImage).toHaveBeenCalledOnce();
-		expect(context.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 400, 800, 10, -10, 200, 400);
-		expect(probe.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 799, 400, 1, 0, 0, 1, 1);
-		expect(fills).toEqual([{ style: 'rgb(250, 248, 246)', rect: [10, 390, 200, 30] }]);
+		const frame = new Image();
+		drawShifted(context as never, frame, 400, 800, 10, 20, 200, 400, { x: 0, y: 60 }, 0.5);
+		expect(probe.drawImage).toHaveBeenCalledWith(frame, 0, 799, 400, 1, 0, 0, 1, 1);
+		expect(probe.imageSmoothingQuality).toBe('high');
+		expect(context.drawImage.mock.calls).toEqual([
+			[frame, 0, 0, 400, 800, 10, -10, 200, 400],
+			[expect.any(HTMLCanvasElement), 0, 0, 1, 1, 10, 390, 200, 30]
+		]);
+		// The band is the one blended edge pixel stretched flat, never smoothed into a gradient.
+		expect(smoothing).toEqual([true, false]);
+		expect(context.restore).toHaveBeenCalledOnce();
 	});
 });

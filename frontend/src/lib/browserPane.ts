@@ -38,27 +38,26 @@ type ScrollFrame = { scrollOffsetX?: unknown; scrollOffsetY?: unknown; scrollMax
 /** How long a predicted scroll waits for a real frame that moves the page before it is dropped, in ms. */
 export const SCROLL_CONFIRM_MS = 300;
 
-const edgeColours = new WeakMap<HTMLImageElement, Map<string, string | null>>();
+const edgeSamples = new WeakMap<HTMLImageElement, Map<string, HTMLCanvasElement | null>>();
 
-/** The blended colour of one edge row or column, so an uncovered band reads as page background. Read once per frame. */
-function edgeColour(source: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): string | null {
+/** One edge row or column blended into a single pixel, so an uncovered band reads as page background. Made once per frame. */
+function edgeSample(source: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): HTMLCanvasElement | null {
 	const key = `${sx},${sy},${sw},${sh}`;
-	const known = edgeColours.get(source) ?? new Map<string, string | null>();
-	edgeColours.set(source, known);
-	if (!known.has(key)) known.set(key, readEdgeColour(source, sx, sy, sw, sh));
+	const known = edgeSamples.get(source) ?? new Map<string, HTMLCanvasElement | null>();
+	edgeSamples.set(source, known);
+	if (!known.has(key)) known.set(key, sampleEdge(source, sx, sy, sw, sh));
 	return known.get(key) ?? null;
 }
 
-function readEdgeColour(source: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): string | null {
+function sampleEdge(source: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): HTMLCanvasElement | null {
 	const probe = document.createElement('canvas');
 	probe.width = probe.height = 1;
-	const context = probe.getContext('2d', { willReadFrequently: true });
+	const context = probe.getContext('2d');
 	if (!context) return null;
 	// High-quality downscaling blends the whole row into the one pixel instead of sampling its middle.
 	context.imageSmoothingQuality = 'high';
 	context.drawImage(source, sx, sy, sw, sh, 0, 0, 1, 1);
-	const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-	return `rgb(${red}, ${green}, ${blue})`;
+	return probe;
 }
 
 /** Draws the frame moved by the predicted scroll; the band it uncovers takes the colour of the frame's edge. */
@@ -70,19 +69,15 @@ export function drawShifted(context: CanvasRenderingContext2D, source: HTMLImage
 	context.drawImage(source, 0, 0, sourceWidth, sourceHeight, left - shift.x * scale, top - shift.y * scale, drawWidth, drawHeight);
 	const horizontal = Math.min(drawWidth, Math.abs(shift.x * scale));
 	const vertical = Math.min(drawHeight, Math.abs(shift.y * scale));
+	// The one-pixel sample stretched without smoothing is a flat fill of the page's own edge colour.
+	context.imageSmoothingEnabled = false;
 	if (horizontal) {
-		const colour = edgeColour(source, shift.x > 0 ? sourceWidth - 1 : 0, 0, 1, sourceHeight);
-		if (colour) {
-			context.fillStyle = colour;
-			context.fillRect(shift.x > 0 ? left + drawWidth - horizontal : left, top, horizontal, drawHeight);
-		}
+		const sample = edgeSample(source, shift.x > 0 ? sourceWidth - 1 : 0, 0, 1, sourceHeight);
+		if (sample) context.drawImage(sample, 0, 0, 1, 1, shift.x > 0 ? left + drawWidth - horizontal : left, top, horizontal, drawHeight);
 	}
 	if (vertical) {
-		const colour = edgeColour(source, 0, shift.y > 0 ? sourceHeight - 1 : 0, sourceWidth, 1);
-		if (colour) {
-			context.fillStyle = colour;
-			context.fillRect(left, shift.y > 0 ? top + drawHeight - vertical : top, drawWidth, vertical);
-		}
+		const sample = edgeSample(source, 0, shift.y > 0 ? sourceHeight - 1 : 0, sourceWidth, 1);
+		if (sample) context.drawImage(sample, 0, 0, 1, 1, left, shift.y > 0 ? top + drawHeight - vertical : top, drawWidth, vertical);
 	}
 	context.restore();
 }
