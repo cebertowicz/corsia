@@ -147,31 +147,3 @@ def stores_token(home: Path) -> bool:
         return _TOKEN_LINE.search((home / "hosts.yml").read_bytes()) is not None
     except OSError:
         return False
-
-
-def token_source_is_plaintext(token_source: str, home: Path) -> bool:
-    """Whether gh's status report names this private home's fallback token file.
-
-    The value comes from ``gh auth status --json hosts`` and is never returned
-    to an agent.  A path comparison deliberately tolerates gh's explanatory
-    text while requiring the only fallback file CORSIA supports.
-    """
-    try:
-        token_file = (home / "hosts.yml").resolve(strict=False)
-    except OSError:
-        return False
-    return str(token_file) in token_source
-
-
-def token_source_is_keychain(token_source: str) -> bool:
-    """Whether gh reported the macOS Keychain-backed storage CORSIA requires."""
-    return token_source.strip().casefold() == "keyring"
-
-
-def remove_plaintext_token(home: str) -> bool:
-    """Delete the only plaintext gh fallback without reading its token."""
-    try:
-        Path(home, "hosts.yml").unlink(missing_ok=True)
-    except OSError:
-        return False
-    return True

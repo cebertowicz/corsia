@@ -10,13 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from pathlib import Path
 
-from connections.github_agent_home import (
-    remove_plaintext_token,
-    token_source_is_keychain,
-    token_source_is_plaintext,
-)
 from connections.models import get_connection
 
 log = logging.getLogger(__name__)
@@ -38,18 +32,12 @@ def same_login(left: str | None, right: str | None) -> bool:
     return left is not None and right is not None and left.casefold() == right.casefold()
 
 
-def signin_refusal(home: str, facts: dict[str, str]) -> str | None:
-    """Why a completed sign-in may not become the agents' account; None when it may.
+def signin_refusal(_home: str, facts: dict[str, str]) -> str | None:
+    """Refuse only a CORSIA sign-in that is the person's own GitHub login.
 
-    GitHub CLI must report macOS Keychain storage. A plaintext ``hosts.yml``
-    fallback is removed before vendor logout and this account cannot connect.
-    A sign-in of the person's own login is refused outright.
+    CORSIA's GitHub CLI owns its GH_CONFIG_DIR and intentionally stores its
+    credential there so verified agent shells do not depend on login Keychain access.
     """
-    token_source = facts.get("token_source", "")
-    if token_source_is_plaintext(token_source, Path(home)):
-        return "keychain_unavailable" if remove_plaintext_token(home) else "plaintext_cleanup_failed"
-    if not token_source_is_keychain(token_source):
-        return "keychain_unavailable"
     if same_login(person_login(), facts.get("login")):
         return "person_account"
     return None

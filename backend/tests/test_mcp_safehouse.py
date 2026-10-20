@@ -114,7 +114,7 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     _workspace, state = _configure_roots(monkeypatch, tmp_path, symlinked=True)
     lexical = tmp_path / "state-link"
     profile = mcp_private_state_profile(
-        tmp_path / "generated.sb", Path("/usr/local/bin/safehouse"), lexical,
+        tmp_path / "generated.sb", Path("/usr/local/bin/safehouse"), lexical, tmp_path / "mcp-cache" / "app",
     )
 
     assert profile.startswith("(allow default)\n")
@@ -131,19 +131,19 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     assert '(allow signal (target same-sandbox))' in profile
 
 
-def test_mcp_profile_denies_peer_cache_but_not_own_cache(monkeypatch, tmp_path):
+def test_mcp_profile_denies_the_app_cache_root_but_allows_own_cache(monkeypatch, tmp_path):
     from tools.mcp_local_transport import mcp_cache_root
     from tools.safehouse_launch import mcp_private_state_profile
 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    own_cache = mcp_cache_root() / "app-a"
-    peer_cache = mcp_cache_root() / "app-b"
+    cache_root = mcp_cache_root()
+    own_cache = cache_root / "app-a"
     profile = mcp_private_state_profile(
-        tmp_path / "generated.sb", tmp_path / "safehouse", tmp_path / "state", (peer_cache,),
+        tmp_path / "generated.sb", tmp_path / "safehouse", tmp_path / "state", own_cache,
     )
 
-    assert f'(deny file-write* (subpath "{peer_cache}"))' in profile
-    assert f'(deny file-write* (subpath "{own_cache}"))' not in profile
+    assert f'(deny file-write* (subpath "{cache_root}"))' in profile
+    assert f'(allow file-write* (subpath "{own_cache}"))' in profile
 
 
 def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
@@ -359,6 +359,69 @@ async def test_local_mcp_safehouse_blocks_cross_app_cache_writes(monkeypatch, tm
         assert "Operation not permitted" in await registry.get("mcp_app_b_write_path").execute()
     assert (app_a_cache / "self-write").exists()
     assert not (app_a_cache / "cross-write").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_runtime_connects_each_app_separately_but_blocks_all_other_caches(monkeypatch, tmp_path):
+    """Production's one-app-at-a-time path cannot weaken app-cache isolation."""
+    _require_safehouse()
+    workspace, state = _configure_roots(monkeypatch, tmp_path)
+    from infra import state as infra_state
+    from tools import mcp_runtime
+    from tools.mcp_local_transport import _mcp_cache_dir
+    from tools.registry import ToolRegistry
+
+    app = tmp_path / "server.py"
+    app.write_text(_PYTHON_SERVER, encoding="utf-8")
+    app_a_cache = _mcp_cache_dir("app-a", workspace, state)
+    never_connected_cache = _mcp_cache_dir("never-connected", workspace, state)
+    configs = {
+        "app-a": ("app_a", {"connected_app_id": "app-a", "command": sys.executable, "args": [str(app)], "env": {
+            "MCP_WRITE_TARGET": str(app_a_cache / "self-write"),
+        }}),
+        "app-b": ("app_b", {"connected_app_id": "app-b", "command": sys.executable, "args": [str(app)], "env": {
+            "MCP_WRITE_TARGET": str(app_a_cache / "cross-write"),
+        }}),
+    }
+
+    async def run_in_db(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return configs[args[0]]
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "record_runtime_app_state":
+            return None
+        raise AssertionError(fn.__name__)
+
+    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
+    monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
+    monkeypatch.setattr(mcp_runtime, "_app_stacks", {})
+    monkeypatch.setattr(mcp_runtime, "_app_tools", {})
+    monkeypatch.setattr(mcp_runtime, "_app_servers", {})
+    monkeypatch.setattr(mcp_runtime, "_app_configs", {})
+    monkeypatch.setattr(mcp_runtime, "_app_states", {})
+    monkeypatch.setattr(mcp_runtime, "_reconnect_at", {})
+    monkeypatch.setattr(mcp_runtime, "_stopped", False)
+    monkeypatch.setattr(mcp_runtime, "run_in_db", run_in_db)
+    monkeypatch.setattr(infra_state, "_agent", None)
+
+    try:
+        assert (await mcp_runtime.apply_connected_app_runtime("connect", "app-a"))["state"] == "working"
+        assert "wrote:" in await mcp_runtime._registry.get("mcp_app_a_write_path").execute()
+        assert (await mcp_runtime.apply_connected_app_runtime("connect", "app-b"))["state"] == "working"
+        denied_a = await mcp_runtime._registry.get("mcp_app_b_write_path").execute()
+        configs["app-b"][1]["env"]["MCP_WRITE_TARGET"] = str(never_connected_cache / "cross-write")
+        assert (await mcp_runtime.apply_connected_app_runtime("restart", "app-b"))["state"] == "working"
+        denied_never = await mcp_runtime._registry.get("mcp_app_b_write_path").execute()
+    finally:
+        await mcp_runtime.stop_mcp_runtime()
+
+    assert "Operation not permitted" in denied_a
+    assert "Operation not permitted" in denied_never
+    assert (app_a_cache / "self-write").exists()
+    assert not (app_a_cache / "cross-write").exists()
+    assert not (never_connected_cache / "cross-write").exists()
 
 
 @pytest.mark.integration

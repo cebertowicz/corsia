@@ -17,7 +17,6 @@ from tools.mcp_local_transport import (
     _mcp_denial_guidance,
     _mcp_denied_paths_in,
     mcp_oserror_detail as _mcp_oserror_detail,
-    peer_cache_dirs,
     safehouse_stdio_parameters as _safehouse_stdio_parameters,
 )
 from tools.registry import ToolRegistry, _is_reserved_execution_param
@@ -203,7 +202,7 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
-async def _open_session(name: str, config: dict, stack: AsyncExitStack, peer_cache_dirs: tuple = ()):
+async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
     from tools.mcp_oauth_auth import OAuthGrantAuth
@@ -219,7 +218,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack, peer_cac
 
         env = {**(config.get("env") or {}), **secret_env}
         params, profile_path = await asyncio.to_thread(
-            _safehouse_stdio_parameters, name, config, config["command"], config.get("args", []), env, peer_cache_dirs,
+            _safehouse_stdio_parameters, name, config, config["command"], config.get("args", []), env,
         )
         stack.callback(profile_path.unlink, missing_ok=True)
         try:
@@ -266,10 +265,10 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack, peer_cac
     return session, auth, instructions if isinstance(instructions, str) else None, transport_task
 
 
-async def _discover_tools(name: str, config: dict, stack: AsyncExitStack, peer_cache_dirs: tuple = ()):
+async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     allowlist = allowed_names(config)
     tool_timeout = timeout_seconds(config, "tool_timeout", 30)
-    session, auth, instructions, transport_task = await _open_session(name, config, stack, peer_cache_dirs)
+    session, auth, instructions, transport_task = await _open_session(name, config, stack)
     discovered = []
     cursor = None
     while True:
@@ -293,8 +292,8 @@ async def _discover_tools(name: str, config: dict, stack: AsyncExitStack, peer_c
 class _ServerConnection:
     """Enter and exit SDK task groups in one task, isolated from its callers."""
 
-    def __init__(self, name: str, config: dict, peer_cache_dirs: tuple = ()):
-        self.name, self.config, self.peer_cache_dirs = name, config, peer_cache_dirs
+    def __init__(self, name: str, config: dict):
+        self.name, self.config = name, config
         self.ready = asyncio.get_running_loop().create_future()
         self.stop = asyncio.Event()
         self.error = "connection closed; restart the backend to reconnect the MCP server"
@@ -303,7 +302,7 @@ class _ServerConnection:
     async def _run(self):
         try:
             async with AsyncExitStack() as stack:
-                wrappers, transport_task = await _discover_tools(self.name, self.config, stack, self.peer_cache_dirs)
+                wrappers, transport_task = await _discover_tools(self.name, self.config, stack)
                 for wrapper in wrappers:
                     wrapper._connection = self
                 self.ready.set_result(wrappers)
@@ -366,16 +365,13 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
     """
     errors: dict[str, str] = {}
     registry.mcp_server_configs = {**getattr(registry, "mcp_server_configs", {}), **mcp_servers}
-    from infra.config import STATE_ROOT, WORKSPACE
     from tools.catalog import TOOL_CATALOG
 
     for name, config in mcp_servers.items():
         connection = None
         try:
             deadline = timeout_seconds(config, "connect_timeout", 10)
-            connection = _ServerConnection(
-                name, config, peer_cache_dirs(name, mcp_servers, WORKSPACE, STATE_ROOT),
-            )
+            connection = _ServerConnection(name, config)
             wrappers = await asyncio.wait_for(asyncio.shield(connection.ready), deadline)
             names = [tool.name for tool in wrappers]
             if len(names) != len(set(names)) or any(registry.has(tool) or tool in TOOL_CATALOG for tool in names):

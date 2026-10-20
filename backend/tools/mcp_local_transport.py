@@ -54,18 +54,6 @@ def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
     return cache_dir
 
 
-def peer_cache_dirs(name: str, configs: dict, workspace: Path, state_root: Path) -> tuple[Path, ...]:
-    """Return caches the named local app must not be able to write."""
-    cache_dirs = {
-        app_name: _mcp_cache_dir(config.get("connected_app_id") or _mcp_app_id(app_name), workspace, state_root)
-        for app_name, config in configs.items()
-        if isinstance(config, dict) and config.get("command")
-        and isinstance(config.get("connected_app_id", _mcp_app_id(app_name)), str)
-        and config.get("connected_app_id", _mcp_app_id(app_name))
-    }
-    return tuple(cache_dir for app_name, cache_dir in cache_dirs.items()
-                 if app_name != name and cache_dir != cache_dirs.get(name))
-
 
 def _mcp_denial_guidance(text: str) -> str | None:
     """Clarify only path-aware denials imposed by the MCP private-state profile."""
@@ -102,7 +90,6 @@ def safehouse_stdio_parameters(
     command: str,
     args: list[str],
     env: dict[str, str],
-    peer_cache_dirs: tuple[Path, ...] = (),
 ):
     """Build a fail-closed direct-exec Safehouse launch for one local app."""
     from mcp import StdioServerParameters
@@ -129,15 +116,18 @@ def safehouse_stdio_parameters(
     node_options = f"--require {shlex.quote(str(shim_path))}"
     if existing := env.get("NODE_OPTIONS"):
         node_options = f"{node_options} {existing}"
-    user_command = shutil.which(command, path=env.get("PATH"))
+    inherited_path = os.environ.get("PATH", "")
+    configured_path = env.get("PATH")
+    command_path_value = configured_path if configured_path is not None else inherited_path
+    user_command = shutil.which(command, path=command_path_value)
     try:
-        resolved_command = user_command or command_path(command, path=env.get("PATH"))
+        resolved_command = user_command or command_path(command, path=command_path_value)
     except ManagedRuntimeError as error:
         raise MCPConfigError(_mcp_setup_refusal(str(error))) from None
     if resolved_command is None:
         resolved_command = command
     runtime_bin = command_bin_dir(command) if user_command is None and resolved_command != command else None
-    child_path = env.get("PATH", "")
+    child_path = command_path_value
     if runtime_bin is not None:
         child_path = f"{runtime_bin}{os.pathsep}{child_path}" if child_path else str(runtime_bin)
     server_env = {
@@ -160,7 +150,7 @@ def safehouse_stdio_parameters(
         safehouse_path = _safehouse_executable()
         with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
             profile.write(mcp_private_state_profile(
-                profile_path, safehouse_path, Path(STATE_ROOT), peer_cache_dirs,
+                profile_path, safehouse_path, Path(STATE_ROOT), cache_dir,
             ))
         argv = direct_safehouse_argv(
             resolved_command, args, cwd, profile_path,
