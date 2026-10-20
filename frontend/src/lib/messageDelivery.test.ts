@@ -44,6 +44,19 @@ describe('deliveryPresentation', () => {
 			failed: false,
 		});
 	});
+	it('shows the local-model hold for a message blocked by project cloud policy', () => {
+		const held = {
+			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
+			active_turn_id: null, delivery_error: 'project_cloud_off',
+			metadata: {},
+		};
+		expect(deliveryPresentation(held)).toEqual({
+			label: 'Waiting for a local model',
+			title: 'Local models only is on for this project. Your message is saved and will send as soon as you switch this chat to a local model or turn Local models only off.',
+			pending: true,
+			failed: false,
+		});
+	});
 	it('asks for a model when the thread has none, with the same pending treatment', () => {
 		const held = {
 			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,

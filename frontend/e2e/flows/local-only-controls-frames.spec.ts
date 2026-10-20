@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { assistantMessages, loginByUrl, openSettings, openSettingsSection, sendChatMessage, waitForWsConnected } from '../support/corsia';
+import { assistantMessages, loginByUrl, openSettings, openSettingsSection, sendChatMessage, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 
@@ -112,14 +112,16 @@ async function serve(page: Page, state: State) {
 		: route.fulfill({ json: { ok: true } }));
 }
 
-async function createProject(page: Page, name: string) {
+async function createProject(page: Page, name: string): Promise<{ id: string }> {
 	await page.keyboard.press('Control+k');
 	await expect(page.locator('.palette')).toBeVisible();
 	await page.locator('.palette .res').filter({ hasText: 'New project' }).click();
 	const modal = page.getByRole('dialog');
 	await modal.getByRole('textbox', { name: 'Name' }).fill(name);
+	const created = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/projects' && response.request().method() === 'POST');
 	await modal.getByRole('button', { name: 'Create project' }).click();
 	await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible({ timeout: 10_000 });
+	return (await (await created).json()).project as { id: string };
 }
 
 async function openProjectProviders(page: Page, name: string): Promise<Locator> {
@@ -148,6 +150,35 @@ async function openSheetInProject(page: Page, name: string) {
 	await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
+}
+
+async function openHeldCloudOffChat(page: Page, state: State, name: string) {
+	const projectName = `${name} project`;
+	const projectResponse = await page.request.post(`/api/projects?token=${encodeURIComponent(TEST_TOKEN)}`, {
+		data: { name: projectName, description: '', accent_color: '#007faa' },
+	});
+	expect(projectResponse.ok()).toBeTruthy();
+	const project = (await projectResponse.json()).project as { id: string };
+	const created = await page.request.post(`/api/threads?token=${encodeURIComponent(TEST_TOKEN)}`, {
+		data: { title: name, project_id: project.id, model: 'claude-code/opus' },
+	});
+	expect(created.ok()).toBeTruthy();
+	const threadId = (await created.json()).thread_id as string;
+	await page.route(`**/api/threads/${threadId}/messages?**`, (route) => route.fulfill({ json: {
+		messages: [{
+			id: `${threadId}:held`, thread_id: threadId, role: 'user', content: 'Please summarize the customer interviews.',
+			created_at: '2026-10-19T00:00:00Z', delivery_state: 'queued', delivery_error: 'project_cloud_off',
+			write_outcome: 'proved_no_write', active_turn_id: null, metadata: { delivery_intent: 'apply_now' },
+		}], has_more: false, oldest_id: null,
+	} }));
+	Object.assign(state, { models: catalogs.someLocal, cloudOff: true });
+	await loginByUrl(page, { waitForComposer: false });
+	await page.keyboard.press('Control+k');
+	await expect(page.locator('.palette')).toBeVisible();
+	await page.locator('.palette').getByRole('button', { name: projectName, exact: true }).click();
+	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	await page.locator('.thread-title', { hasText: name }).click();
+	await expect(page.locator('.delivery-status')).toHaveText('Waiting for a local model');
 }
 
 test.describe('@surface:provider-policy local-only controls frames', () => {
@@ -217,6 +248,11 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				await expect(saving).toBeDisabled();
 				await shot('project-saving', size, theme);
 				release(); state.hold = null;
+			}
+
+			if (!BEFORE) {
+				await openHeldCloudOffChat(page, state, `held cloud message ${await begin(width, height, theme)}`);
+				await shot('chat-held-cloud-off', size, theme);
 			}
 
 			// Endpoints tab.
