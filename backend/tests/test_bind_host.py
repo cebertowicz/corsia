@@ -203,7 +203,7 @@ class TestOmlxFollowsTheBind:
             return fn(*args)
 
         monkeypatch.setattr(sup, "run_in_db", fake_run_in_db)
-        monkeypatch.setattr(sup, "_read_pid", lambda sid: None)
+        monkeypatch.setattr(sup, "_read_pid", lambda sid, **_kwargs: None)
         monkeypatch.setattr(sup, "_port_owner_pid", lambda host, port: None)
         monkeypatch.setattr(sup.shutil, "which", lambda name: "/opt/homebrew/bin/omlx")
         monkeypatch.setattr(sup, "_resolve_settings", lambda cfg: {})

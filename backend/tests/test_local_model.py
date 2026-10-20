@@ -175,7 +175,7 @@ def test_the_starter_names_itself_from_its_profile_and_keeps_the_name_through_it
     # The name is the profile's, never the repository id's, and the records that carry the model keep it.
     assert LocalModel(STARTER_MODEL.repository, 1, 32_768).display_name == "Ternary Bonsai 2 27B"
     assert local_model.from_recommendation(local_model.to_record(STARTER_MODEL)).display_name == "Ternary Bonsai 2"
-    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "starter")
+    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "setup")
     assert operation.model.display_name == "Ternary Bonsai 2"
 
 

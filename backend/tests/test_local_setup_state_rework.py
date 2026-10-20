@@ -45,7 +45,7 @@ async def test_startup_delivery_failure_has_traceback_reference_and_durable_fail
     from llm import local_setup_operation as records
     from onboarding import local_download_state
 
-    operation = replace(records.Operation.for_model(None, "setup", onboarding=True), result={"ok": False})
+    operation = records.Operation.for_model(None, "setup", onboarding=True)
     records.write(operation)
     monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
     monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", AsyncMock(return_value=False))
@@ -57,6 +57,43 @@ async def test_startup_delivery_failure_has_traceback_reference_and_durable_fail
     assert local_download_state.current()["ref"] == status["ref"]
     assert records.read().result["ref"] == status["ref"]
     assert any(row.exc_info and f"reference={status['ref']}" in row.message for row in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_startup_delivery_failure_preserves_a_ready_outcome(flight, monkeypatch):
+    import app_startup_runtime
+    from llm import local_setup_operation as records
+
+    ready = replace(records.Operation.for_model(None, "setup", onboarding=True), result={"ok": True})
+    records.write(ready)
+    monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
+    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", AsyncMock(return_value=False))
+    monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", AsyncMock(side_effect=RuntimeError("notice failed")))
+
+    await app_startup_runtime.resume_local_setup()
+
+    assert records.read().result == {"ok": True}
+    assert flight._flight.task is None
+
+
+@pytest.mark.asyncio
+async def test_startup_delivery_failure_preserves_a_live_flight(flight, monkeypatch):
+    import app_startup_runtime
+    from llm import local_setup_operation as records
+
+    records.write(records.Operation.for_model(None, "setup", onboarding=True))
+    task = asyncio.create_task(asyncio.Event().wait())
+    flight._flight.task = task
+    monkeypatch.setattr("llm.local_model.backfill_legacy_record", lambda: None)
+    monkeypatch.setattr("llm.local_setup_new_omlx.resume_pending_setup", AsyncMock(return_value=True))
+    monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", AsyncMock(side_effect=RuntimeError("notice failed")))
+    try:
+        await app_startup_runtime.resume_local_setup()
+        assert records.read().result is None
+        assert flight._flight.task is task and not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

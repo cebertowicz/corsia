@@ -86,8 +86,9 @@ def _follow_server_setup(token: str, command: str) -> int:
         if state in {"failed", "setup_failed", "start_failed", "stopped"}:
             if state == "stopped":
                 return _print_terminal_error({"message": "Local setup stopped.", "next_action": f"Run `{command}` again."})
-            # The fix already ends in the retry, as a command here; memory has no retry.
-            message = setup_fix(flight.get("cause"), flight.get("bytes_to_free"), retry=RETRY_IN_TERMINAL)
+            # The flight says what happened; the fix gives its terminal-specific next step.
+            message = str(flight.get("message") or "Local setup failed.")
+            message += "\n" + setup_fix(flight.get("cause"), flight.get("bytes_to_free"), retry=RETRY_IN_TERMINAL)
             if flight.get("ref"):
                 message += f" Reference: {flight['ref']}"
             return _print_terminal_error({"message": message})
@@ -117,8 +118,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
     except urllib.error.HTTPError as error:
         if _consent_required(error):
             return _print_terminal_error({
-                "message": "Another oMLX is running.",
-                "next_action": "Open the CORSIA app and choose whether to stop it or keep both running.",
+                "message": "Another copy of oMLX is already running on this computer.",
+                "next_action": "Open the CORSIA app and choose whether to stop it or keep it running.",
             })
         return _print_terminal_error({
             "message": f"Local setup could not start on the backend: {error}",

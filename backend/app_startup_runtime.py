@@ -25,7 +25,6 @@ def configure_sqlite_fetch_switch_interval() -> None:
     sys.setswitchinterval(SQLITE_FETCH_SWITCH_INTERVAL_SECONDS)
 
 
-
 #: Every background loop this module starts, as (shutdown label, ``state``
 #: attribute). The lifespan cancels and joins exactly these at shutdown.
 RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
@@ -60,7 +59,6 @@ async def resume_local_setup() -> None:
     from onboarding.local_download_wake import resume_pending_local_download
 
     steps = (
-
         ("record an earlier setup's model", lambda: asyncio.to_thread(backfill_legacy_record)),
         ("resume local setup", resume_pending_setup),
         ("resume local download notice", resume_pending_local_download),
@@ -73,7 +71,6 @@ async def resume_local_setup() -> None:
             logging.getLogger(__name__).warning("Local setup startup step failed (%s) reference=%s", label, ref, exc_info=True)
             if step is resume_pending_local_download:
                 record_resume_failure(ref)
-
 
 
 async def _startup_harness_discovery() -> list[dict]:

@@ -91,11 +91,12 @@ def read() -> Operation | None:
     # fields): malformed here, so it is discarded and the next request starts afresh.
     if (
         "model" not in payload or (model is None and payload.get("model") is not None)
-        or kind not in {"setup", "starter", "settings"}
+        or kind not in {"setup", "settings"}
         or (task_id is not None and not isinstance(task_id, str))
         or (payload.get("result") is not None and not isinstance(payload["result"], dict))
     ):
-        logger.warning("local setup operation record is malformed; treating it as absent")
+        logger.warning("discarding an invalid or retired local setup operation record")
+        clear()
         return None
     return replace(
         Operation.for_model(model, kind, task_id, onboarding=payload.get("onboarding") is True),

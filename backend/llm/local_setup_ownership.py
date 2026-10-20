@@ -1,4 +1,4 @@
-"""Install missing oMLX and repair only a binary proven to belong to managed setup."""
+"""Ensure managed setup has an oMLX executable without modifying an existing one."""
 
 from __future__ import annotations
 
@@ -100,7 +100,6 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False, 
                 run_command([brew, "link", "--overwrite", "omlx"])
         except (OSError, subprocess.SubprocessError) as exc:
             raise RuntimeError(homebrew_failure_message("install", exc)) from exc
-        managed.mark_installed_by_setup()
         return
 
 

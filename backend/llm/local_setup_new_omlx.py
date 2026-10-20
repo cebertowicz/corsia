@@ -102,7 +102,7 @@ async def resume_pending_setup() -> bool:
     if operation.result is not None and not operation.result.get("downloading"):
         ls.restore_terminal_flight(operation)
         return False
-    if operation.kind not in {"setup", "starter", "settings"} or not await asyncio.to_thread(local_memory_ok):
+    if operation.kind not in {"setup", "settings"} or not await asyncio.to_thread(local_memory_ok):
         ls.log.warning("discarding local setup recovery record: invalid kind or insufficient memory")
         local_setup_operation.clear()
         return False

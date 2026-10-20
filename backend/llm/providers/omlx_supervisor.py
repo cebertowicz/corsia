@@ -42,38 +42,33 @@ HEALTH_POLL_INTERVAL_S = 0.5
 SIGTERM_GRACE_S = 5.0
 
 
-def _identity_dir():
-    from llm.managed_omlx_binary import managed_omlx_paths
-
-    return managed_omlx_paths().base_path
-
-
 def is_corsia_process(pid: int) -> bool:
     """Match an observed process to the supervisor's durable spawn records, regardless of argv."""
-    for path in _identity_dir().glob("omlx-*.pid"):
-        if process.read_pid(path.parent, path.stem.removeprefix("omlx-")) == pid:
+    for path in RUNTIME_DIR.glob("omlx-*.pid"):
+        if process.read_pid(path.parent, path.stem.removeprefix("omlx-"), preserve_legacy=True) == pid:
             return True
     return False
 
 
 def _pid_path(server_id: str):
-    return process.pid_path(_identity_dir(), server_id)
+    return process.pid_path(RUNTIME_DIR, server_id)
 
 
 def _log_path(server_id: str):
     return process.log_path(RUNTIME_DIR, server_id)
 
 
-def _read_pid(server_id: str) -> int | None:
-    return process.read_pid(_identity_dir(), server_id)
+def _read_pid(server_id: str, *, host: str | None = None, port: int | None = None) -> int | None:
+    owner = _port_owner_pid(host, port) if host is not None and port is not None else None
+    return process.read_pid(RUNTIME_DIR, server_id, legacy_port_owner_pid=owner)
 
 
 def _write_pid(server_id: str, pid: int) -> None:
-    process.write_pid(_identity_dir(), server_id, pid)
+    process.write_pid(RUNTIME_DIR, server_id, pid)
 
 
 def _clear_pid(server_id: str) -> None:
-    process.clear_pid(_identity_dir(), server_id)
+    process.clear_pid(RUNTIME_DIR, server_id)
 
 
 def _process_alive(pid: int) -> bool:
@@ -103,12 +98,21 @@ def _build_argv(
     return process.build_argv(host, port, settings, executable=executable)
 
 
+def _is_managed_omlx_row(settings: dict) -> bool:
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    return settings.get("base_path") == str(managed_omlx_paths().base_path)
+
+
 def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict[str, Any]:
-    """Resolve the managed executable before building a server command."""
-    try:
-        executable = process.managed_omlx_executable()
-    except RuntimeError as exc:
-        return {"ok": False, "message": str(exc)}
+    """Resolve the bundled executable only for CORSIA's setup-created row."""
+    if _is_managed_omlx_row(settings):
+        try:
+            executable = process.managed_omlx_executable()
+        except RuntimeError as exc:
+            return {"ok": False, "message": str(exc)}
+    else:
+        executable = None
     executable = executable or shutil.which("omlx")
     if not executable:
         return {
@@ -204,7 +208,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         return {"ok": False, "message": "start_server: cfg has no host/port"}
     host = _listen_host(host)
 
-    existing_pid = _read_pid(sid)
+    existing_pid = _read_pid(sid, host=host, port=int(port))
     if existing_pid and _process_alive(existing_pid):
         owner = _port_owner_pid(host, port)
         if owner == existing_pid:
@@ -216,7 +220,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
                 "message": f"oMLX already running on {host}:{port} (pid {existing_pid})",
             }
         return {"ok": False, "pid": existing_pid,
-                "message": "The supervised oMLX process is still running but is not serving its endpoint. Stop it in Settings, then retry."}
+                "message": "The local model isn't responding. Stop it in Settings › Providers, then retry."}
 
     owner = _port_owner_pid(host, port)
     if owner is not None and (existing_pid is None or owner != existing_pid):
@@ -267,8 +271,10 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     if not sid:
         return {"ok": False, "message": "stop_server: missing server_id in cfg"}
 
+    host, port = await run_in_db(_resolve_endpoint, cfg)
+    host = _listen_host(host) if host else None
     had_record = _pid_path(sid).exists()
-    pid = _read_pid(sid)
+    pid = _read_pid(sid, host=host, port=int(port) if port else None)
     if not pid:
         return {"ok": had_record, "already_stopped": had_record, "message": "Not running"}
 
@@ -295,7 +301,7 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     if not exited:
         exited = _process_exited(pid)
 
-    if not exited and _read_pid(sid) != pid:
+    if not exited and _read_pid(sid, host=host, port=int(port) if port else None) != pid:
         exited = True
     if not exited:
         try:
@@ -321,11 +327,11 @@ def reconcile(cfg: dict) -> dict[str, Any]:
     if not sid:
         return {"adopted": False, "cleared": False, "pid": None}
     had_record = _pid_path(sid).exists()
-    pid = _read_pid(sid)
+    host, port = _resolve_endpoint_via_freshness(cfg)
+    pid = _read_pid(sid, host=host, port=int(port) if port else None)
     if pid is None:
         return {"adopted": False, "cleared": had_record, "pid": None}
     if _process_alive(pid):
-        host, port = _resolve_endpoint_via_freshness(cfg)
         if host and port:
             _mark_endpoint_alive(sid, host, int(port))
         return {"adopted": True, "cleared": False, "pid": pid}

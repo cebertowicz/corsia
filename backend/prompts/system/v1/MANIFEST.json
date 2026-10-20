@@ -184,10 +184,10 @@
       "sha256": "a743fa588e4c5dacd441061c6f65c3e1ec3eddbd2f659a3dfa5f2dea470d375f"
     },
     {
-      "bytes": 4446,
+      "bytes": 4288,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/local-model-offer.md",
-      "sha256": "a7eb7925b5d1a7ae99ece143e5a54a5353279dd49da2521f5213b09afc067873"
+      "sha256": "617fe31f79d812e8ed09c53f265d21db272798918a32cd486a15b8381081b11b"
     },
     {
       "bytes": 5753,

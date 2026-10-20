@@ -13,7 +13,6 @@ import psutil
 
 from infra.platform_paths import app_bundle_root
 
-MARKER_NAME = "managed-omlx-installed"
 OMLX_FORMULA = "jundot/omlx/omlx"
 MANAGED_DIR = "managed-omlx"
 MANAGED_INSTANCE_ID = "corsia-managed"
@@ -38,20 +37,6 @@ def is_managed_omlx_executable(path: str | Path) -> bool:
         return executable is not None and Path(path).resolve() == Path(executable).resolve()
     except (RuntimeError, OSError):
         return False
-
-
-def marker_path() -> Path:
-    """The proof record for binaries installed by managed setup."""
-    from infra.config import STATE_ROOT
-
-    return Path(STATE_ROOT) / MARKER_NAME
-
-
-def mark_installed_by_setup() -> None:
-    """Record a new managed install without claiming any prior installation."""
-    path = marker_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("installed by corsia managed setup\n", encoding="utf-8")
 
 
 def command_output(command: list[str]) -> str:

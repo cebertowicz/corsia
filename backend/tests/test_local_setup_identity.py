@@ -142,15 +142,11 @@ def test_keep_both_and_status_survive_a_pid_change_without_process_reads(identit
     assert foreign.foreign_omlx_answer() == "kept_both"
 
 
-@pytest.mark.parametrize("marked,inside,working", [
-    (False, True, True), (True, False, True),
-])
-def test_unowned_old_or_broken_binary_never_runs_homebrew(identity, monkeypatch, marked, inside, working):
+@pytest.mark.parametrize("inside,working", [(True, True), (False, True)])
+def test_unowned_old_or_broken_binary_never_runs_homebrew(identity, monkeypatch, inside, working):
     binary = identity / ("keg/omlx" if inside else "personal/omlx")
     binary.parent.mkdir()
     binary.touch()
-    if marked:
-        managed.marker_path().touch()
     monkeypatch.setattr(installer, "_is_broken_leftover", lambda _path: not working)
     monkeypatch.setattr(installer, "omlx_on_path", lambda: str(binary))
     monkeypatch.setattr(installer.shutil, "which", lambda _name: "/brew")
@@ -187,11 +183,7 @@ def test_stop_revalidation_keeps_unknown_distinct(identity, monkeypatch):
     assert foreign.stop_foreign_omlx_processes((process,)) == "unknown"
 
 
-def test_fresh_install_records_only_managed_ownership(tmp_path, monkeypatch):
+def test_managed_paths_do_not_create_an_install_marker(tmp_path, monkeypatch):
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    legacy = tmp_path / "local_setup_installed_omlx"
-    legacy.write_text("legacy proof")
-    managed.mark_installed_by_setup()
-    assert managed.marker_path().exists()
-    assert legacy.read_text() == "legacy proof"
-    assert not (tmp_path / "legacy-omlx-upgraded").exists()
+    assert managed.managed_omlx_paths().base_path == tmp_path / "managed-omlx"
+    assert not (tmp_path / "managed-omlx-installed").exists()

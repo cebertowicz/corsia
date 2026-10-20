@@ -54,7 +54,7 @@ def test_a_slow_omlx_is_present_and_not_cached(leftover, monkeypatch):
     assert own._broken_cache == {}
 
 
-def test_setup_refuses_to_repair_a_marked_broken_entry_point(leftover, monkeypatch):
+def test_setup_refuses_to_repair_a_broken_entry_point(leftover, monkeypatch):
     _probe(monkeypatch, subprocess.CompletedProcess([], 126, "", ""))
     commands: list[list[str]] = []
 
@@ -66,7 +66,6 @@ def test_setup_refuses_to_repair_a_marked_broken_entry_point(leftover, monkeypat
     monkeypatch.setattr(own, "run_command", run)
     from llm import managed_omlx_binary
 
-    monkeypatch.setattr(managed_omlx_binary, "marker_path", lambda: leftover)
     monkeypatch.setattr(own.managed, "command_output", lambda command: str(leftover.parent) if "--prefix" in command else "omlx 0.7.1")
     with pytest.raises(own.OwnOmlxUpgradeRequired, match="brew reinstall jundot/omlx/omlx"):
         own.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
@@ -81,7 +80,7 @@ def test_source_setup_leaves_an_unowned_broken_leftover_untouched(leftover, monk
     with pytest.raises(own.OwnOmlxUpgradeRequired, match="brew reinstall jundot/omlx/omlx"):
         own.ensure_omlx(lambda _stage: None, needs_repair=True, broken=True)
     assert commands == []
-    assert not own.managed.marker_path().exists()
+    assert not (tmp_path / "state" / "managed-omlx-installed").exists()
 
 
 def test_packaged_setup_ignores_a_broken_path_leftover_without_brew(leftover, monkeypatch):

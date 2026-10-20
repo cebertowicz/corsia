@@ -134,11 +134,14 @@ def restore_terminal_flight(operation: local_setup_operation.Operation) -> None:
 
 def record_resume_failure(ref: str) -> None:
     """Publish a referenced startup delivery failure through the same durable flight."""
-    operation = local_setup_operation.read() or local_setup_operation.Operation.for_model(None, "setup", onboarding=True)
+    operation = local_setup_operation.read()
+    if _running() or (operation is not None and operation.result is not None and not operation.result.get("downloading")):
+        return
+    operation = operation or local_setup_operation.Operation.for_model(None, "setup", onboarding=True)
     local_setup_operation.write(operation)
     restore_terminal_flight(operation)
     finish_flight({"ok": False, "state": "failed", "cause": "other", "ref": ref,
-                   "message": "CORSIA couldn't resume the local model outcome. Try again, or save a report."})
+                   "message": "CORSIA lost track of the local model download. Retry it in Settings › Providers, or save a report."})
 
 
 def finish_flight(result: dict) -> dict:
@@ -199,7 +202,7 @@ def setup_stage() -> str | None:
 
 
 def setup_kind() -> str | None:
-    """The wire kind: setup, starter or settings."""
+    """The wire kind: setup or settings."""
     return _flight.kind
 
 
@@ -251,6 +254,7 @@ def setup_status() -> dict[str, Any]:
         "download_size": model.download_size_bytes if model else None,
         "stalled": _flight.download_stalled,
         "cause": result.get("cause") if result else None,
+        "message": result.get("message") if result else None,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
         "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"))

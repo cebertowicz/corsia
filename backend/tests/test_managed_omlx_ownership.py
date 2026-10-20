@@ -16,11 +16,9 @@ async def test_register_managed_server_preserves_existing_rows(isolated_db, monk
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
     from llm.managed_omlx_binary import reserve_managed_omlx_port
-    from llm.managed_omlx_binary import marker_path
     from llm.local_setup_runtime import LOCAL_SERVER_NAME, register_managed_server
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    marker_path().write_text("legacy\n", encoding="utf-8")
     legacy_managed = await run_in_db(discovery.upsert_server,
         provider="omlx", instance_id="127.0.0.1:8000", instance_name=LOCAL_SERVER_NAME,
         host="127.0.0.1", port=8000, status="online", kind="managed",
@@ -116,10 +114,8 @@ async def test_manual_loopback_row_survives_startup_retirement_after_upgrade(iso
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
     from llm import local_model
-    from llm.managed_omlx_binary import marker_path
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    marker_path().write_text("legacy\n", encoding="utf-8")
     manual = await run_in_db(
         discovery.upsert_server,
         provider="omlx", instance_id="127.0.0.1:9000", instance_name="My oMLX",
@@ -227,9 +223,9 @@ def test_row_metadata_does_not_establish_process_ownership(row, monkeypatch, tmp
 def test_supervisor_spawn_record_survives_a_new_identity_read(monkeypatch, tmp_path) -> None:
     from llm.providers import omlx_supervisor as supervisor
 
-    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "RUNTIME_DIR", tmp_path / "runtime")
     supervisor._write_pid("managed", os.getpid())
-    assert supervisor._pid_path("managed").parent == tmp_path / "managed-omlx"
+    assert supervisor._pid_path("managed").parent == tmp_path / "runtime"
     assert supervisor.is_corsia_process(os.getpid())
     supervisor._clear_pid("managed")
     assert not supervisor.is_corsia_process(os.getpid())

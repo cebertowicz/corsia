@@ -12,9 +12,8 @@ def working_entrypoint(monkeypatch):
     monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: False)
 
 
-def test_the_tap_is_added_with_the_repository_url_before_the_install(monkeypatch, tmp_path):
+def test_the_tap_is_added_with_the_repository_url_before_the_install(monkeypatch):
     commands: list[list[str]] = []
-    monkeypatch.setattr(managed_omlx_binary, "marker_path", lambda: tmp_path / "marker")
     monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
     monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else None)
     local_setup_ownership.ensure_omlx(lambda _stage: None)
@@ -69,13 +68,8 @@ def test_homebrew_inspection_has_a_bounded_timeout(monkeypatch):
     assert seen["timeout"] == 30
 
 
-@pytest.mark.parametrize("marked", [False, True])
 @pytest.mark.parametrize("broken", [False, True])
-def test_existing_binary_repair_is_actionable_and_never_runs_brew(monkeypatch, tmp_path, marked, broken):
-    marker = tmp_path / "marker"
-    if marked:
-        marker.touch()
-    monkeypatch.setattr(managed_omlx_binary, "marker_path", lambda: marker)
+def test_existing_binary_repair_is_actionable_and_never_runs_brew(monkeypatch, broken):
     monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
     monkeypatch.setattr(local_setup_ownership, "run_command", lambda _cmd: pytest.fail("existing oMLX must stay untouched"))
     monkeypatch.setattr(managed_omlx_binary, "command_output", lambda _cmd: pytest.fail("never infer ownership from a brew keg"))

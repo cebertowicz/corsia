@@ -49,7 +49,7 @@ async def test_terminal_outcome_finished_before_first_run_render_persists_then_d
     assert delivered.await_count == 1
     assert delivered.await_args.kwargs["delivery_id"] == "local-download:flight-1:failed"
     notice = delivered.await_args.kwargs["notice"]
-    assert "Free 2048 bytes, then retry in Settings › Providers." in notice
+    assert "Free 0.1 GB, then retry in Settings › Providers." in notice
     assert '"ref": "setup-42"' in notice
     assert records.read().notified is True
     assert await wake.flush_pending_local_download("conductor") is False

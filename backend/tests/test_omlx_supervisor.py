@@ -23,7 +23,6 @@ def isolated_runtime(tmp_path, monkeypatch):
     from infra import config as cfg
     monkeypatch.setattr(cfg, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(sup, "RUNTIME_DIR", tmp_path)
-    monkeypatch.setattr(sup, "_identity_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -43,18 +42,31 @@ def test_build_argv_uses_the_bundled_managed_binary(monkeypatch):
     assert omlx_process.build_argv("127.0.0.1", 5200, {})[0] == bundled
 
 
-def test_managed_supervisor_argv_ignores_a_different_path_binary(monkeypatch):
+def test_managed_supervisor_argv_uses_the_bundled_binary_only_for_the_managed_row(monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: bundled)
     monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: True)
 
     argv = sup._managed_omlx_argv("127.0.0.1", 5200, {})
 
     assert isinstance(argv, list)
     assert argv[:2] == [bundled, "serve"]
-    assert "start" not in argv and "stop" not in argv
+
+
+def test_legacy_supervisor_argv_uses_path_binary(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: False)
+
+    argv = sup._managed_omlx_argv("127.0.0.1", 8000, {})
+
+    assert isinstance(argv, list)
+    assert argv[:2] == ["/opt/homebrew/bin/omlx", "serve"]
 
 
 def test_build_argv_with_settings():
@@ -110,35 +122,31 @@ def test_reconcile_clears_stale_pid(isolated_runtime):
     assert _read_pid(sid) is None
 
 
-@pytest.mark.parametrize("record_kind", ["different_creation_time", "legacy_pid_only"])
-def test_stale_record_never_adopts_or_signals_live_process(isolated_runtime, record_kind):
+def test_legacy_pid_record_is_adopted_only_when_its_pid_owns_the_row_port(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
-    proc = subprocess.Popen(["sleep", "60"])
-    sid = "unrelated-live-process"
-    path = sup._pid_path(sid)
+    sid, port = "legacy-owner", 8200
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda _host, observed_port: os.getpid() if observed_port == port else None)
 
-    def write_stale_record():
-        path.write_text(str(proc.pid) if record_kind == "legacy_pid_only" else json.dumps({
-            "pid": proc.pid, "create_time": psutil.Process(proc.pid).create_time() - 1,
-        }))
+    result = sup.reconcile({"server_id": sid, "host": "127.0.0.1", "port": port})
 
-    try:
-        write_stale_record()
-        assert not sup.is_corsia_process(proc.pid)
-        assert not path.exists()
-        write_stale_record()
-        result = sup.reconcile({"server_id": sid})
-        assert result == {"adopted": False, "cleared": True, "pid": None}
-        assert not path.exists()
-        write_stale_record()
-        result = asyncio.run(sup.stop_server({"server_id": sid}))
-        assert result["already_stopped"]
-        assert not path.exists()
-        assert proc.poll() is None
-    finally:
-        proc.terminate()
-        proc.wait(timeout=2)
+    assert result == {"adopted": True, "cleared": False, "pid": os.getpid()}
+    assert json.loads(sup._pid_path(sid).read_text())["pid"] == os.getpid()
+
+
+def test_legacy_pid_record_without_port_ownership_is_cleared_and_never_signalled(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-foreign", 8201
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup.os, "kill", lambda *_args: pytest.fail("stale record must not signal a process"))
+
+    result = asyncio.run(sup.stop_server({"server_id": sid, "host": "127.0.0.1", "port": port}))
+
+    assert result["already_stopped"]
+    assert not sup._pid_path(sid).exists()
 
 
 def test_reconcile_adopts_live_pid(isolated_runtime):

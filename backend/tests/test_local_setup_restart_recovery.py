@@ -165,3 +165,17 @@ def test_restart_preserves_the_download_origin(monkeypatch, onboarding):
 
     asyncio.run(scenario())
     assert observed == [(MODEL, onboarding)]
+
+
+def test_retired_starter_record_is_cleared_without_starting_a_managed_flight(monkeypatch):
+    local_setup_operation.record_path().write_text(json.dumps({
+        "model": {"repository": MODEL.repository, "download_size_bytes": MODEL.download_size_bytes,
+                  "context_window": MODEL.context_window},
+        "kind": "starter", "task_id": "task-1",
+    }))
+    monkeypatch.setattr(local_setup_new_omlx, "local_memory_ok", lambda: True)
+    monkeypatch.setattr(local_setup_new_omlx, "_run_flight", lambda **_kwargs: pytest.fail("must not start managed setup"))
+
+    assert asyncio.run(local_setup_new_omlx.resume_pending_setup()) is False
+    assert local_setup_operation.read() is None
+    assert not local_setup_operation.record_path().exists()

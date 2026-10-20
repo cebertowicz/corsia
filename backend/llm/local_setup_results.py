@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 
 import httpx
@@ -17,7 +18,8 @@ RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP) -> str:
     """The one next step for a failed setup, read by the wake, the status route and the CLI (with its own retry)."""
     if cause == "disk_full":
-        free = f"Free {bytes_to_free} bytes," if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "Free space,"
+        free = (f"Free {math.ceil(bytes_to_free / 100_000_000) / 10:.1f} GB,"
+                if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "Free space,")
         return f"{free} then {retry}"
     if cause == "connection":
         return f"Check the connection, then {retry}"

@@ -108,8 +108,8 @@ def test_local_setup_directs_existing_omlx_consent_to_the_app(monkeypatch, capsy
 
     assert cli_local.cmd_setup(_args()) == 2
     assert capsys.readouterr().out == (
-        "Another oMLX is running.\n"
-        "Open the CORSIA app and choose whether to stop it or keep both running.\n"
+        "Another copy of oMLX is already running on this computer.\n"
+        "Open the CORSIA app and choose whether to stop it or keep it running.\n"
     )
 
 
@@ -118,17 +118,17 @@ def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, ca
     import cli_local
 
     _patch_follow(monkeypatch, [{
-        "state": state, "cause": "connection", "ref": "local-test",
+        "state": state, "cause": "connection", "message": "The download failed.", "ref": "local-test",
         "fix": "Check the connection, then retry in Settings › Providers.",
     }])
 
     assert cli_local.cmd_setup(_args()) == 2
-    assert capsys.readouterr().out == "Check the connection, then run `corsia local setup` again. Reference: local-test\n"
+    assert capsys.readouterr().out == "The download failed.\nCheck the connection, then run `corsia local setup` again. Reference: local-test\n"
 
 
 # The shared fix with the terminal's retry: one next step, and none to retry for memory.
 @pytest.mark.parametrize("cause, expected", [
-    ("disk_full", "Free 2048 bytes, then run `corsia local setup` again."),
+    ("disk_full", "Free 0.1 GB, then run `corsia local setup` again."),
     ("connection", "Check the connection, then run `corsia local setup` again."),
     ("memory", "Choose a subscription or API provider instead."),
     ("own_omlx_upgrade_required", "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then run `corsia local setup` again."),
@@ -139,12 +139,12 @@ def test_cli_prints_the_shared_fix_with_the_command_as_its_only_retry(monkeypatc
     from llm import local_setup
 
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
-    local_setup._flight.result = {"ok": False, "cause": cause, "ref": "local-1", "bytes_to_free": 2048}
+    local_setup._flight.result = {"ok": False, "cause": cause, "message": "The download failed.", "ref": "local-1", "bytes_to_free": 2048}
     status = local_setup.setup_status()
     _patch_follow(monkeypatch, [status])
 
     assert cli_local.cmd_setup(_args()) == 2
-    assert capsys.readouterr().out.splitlines() == [f"{expected} Reference: local-1"]
+    assert capsys.readouterr().out.splitlines() == ["The download failed.", f"{expected} Reference: local-1"]
 
 
 def test_local_setup_idle_flight_while_following_means_the_server_restarted(monkeypatch, capsys):

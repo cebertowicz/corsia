@@ -23,10 +23,19 @@ def log_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.log"
 
 
-def read_pid(runtime_dir: Path, server_id: str) -> int | None:
-    """Return only the recorded live process; discard stale and legacy PID files."""
+def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: int | None = None,
+             preserve_legacy: bool = False) -> int | None:
+    """Return a live spawn record, adopting only a legacy PID that owns its row's port."""
     try:
         record = json.loads(pid_path(runtime_dir, server_id).read_text())
+        if type(record) is int:
+            if preserve_legacy:
+                return None
+            if record > 0 and legacy_port_owner_pid == record:
+                write_pid(runtime_dir, server_id, record)
+                return read_pid(runtime_dir, server_id)
+            clear_pid(runtime_dir, server_id)
+            return None
         pid = record["pid"]
         if type(pid) is int and pid > 0:
             proc = psutil.Process(pid)
