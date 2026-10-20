@@ -14,7 +14,6 @@
 
 <style>
 	.ct-author { display: flex; flex: 1 1 auto; min-width: 0; font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); white-space: nowrap; }
-
 	.ct-at { flex: none; font-size: var(--text-caption); color: var(--text-tertiary); white-space: nowrap; }
 	.ct-at.compact { display: none; }
 	/* A phone shows the compact time so the name keeps its one line. */
