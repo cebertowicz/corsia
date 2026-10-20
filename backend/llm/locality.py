@@ -162,6 +162,13 @@ def set_project_cloud_models_off(project_id: str, *, cloud_models_off: bool, db=
 LOCALITY_REFUSALS = ("project_cloud_off", "thread_local_only")
 
 
+def locality_cause(*, thread_local_only: bool, cloud_off: bool) -> str | None:
+    """Name the policy that refuses cloud rows, prioritizing a thread's own scope."""
+    if thread_local_only:
+        return "thread_local_only"
+    return "project_cloud_off" if cloud_off else None
+
+
 def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> str | None:
     """Return the named locality refusal for a catalog row, if policy requires it.
 
@@ -169,7 +176,8 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
     an ordinary project adds one primary-key read, never a server lookup.
     """
     cloud_off = project_cloud_models_off(project_id, db=db)
-    if not (thread_local_only or cloud_off):
+    cause = locality_cause(thread_local_only=thread_local_only, cloud_off=cloud_off)
+    if cause is None:
         return None
     private_servers: set[str] = set()
     local_servers: set[str] = set()
@@ -189,4 +197,4 @@ def locality_refusal(row: dict, *, thread_local_only: bool, project_id, db) -> s
                 local_servers.add(server_id)
     if row_is_local(row, private_servers=private_servers, local_servers=local_servers):
         return None
-    return "thread_local_only" if thread_local_only else "project_cloud_off"
+    return cause

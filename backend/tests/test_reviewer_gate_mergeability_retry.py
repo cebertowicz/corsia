@@ -36,6 +36,55 @@ class _RetryTask:
 
 
 class TestMergeabilityRetry:
+    def test_pr_info_fetch_retries_then_gate_proceeds(self, _reload_gate):
+        gate_mod = _reload_gate
+        ready = {**_DEFAULT_PR_INFO, "mergeable": "MERGEABLE"}
+
+        with patch.object(
+            gate_mod.github_reviewer_gate,
+            "fetch_pr_info",
+            side_effect=[None, ready],
+        ) as fetch_pr_info, patch.object(
+            gate_mod.github_reviewer_gate.time,
+            "sleep",
+        ) as sleep, patch.object(
+            gate_mod.github_reviewer_gate,
+            "checks_green",
+            return_value=True,
+        ), patch.object(gate_mod, "_run_reviewer") as run_reviewer, patch.object(
+            gate_mod,
+            "emit_product_event",
+        ), patch.object(
+            gate_mod.github_reviewer_notifications,
+            "notify_pr_info_unreadable",
+        ), patch("reviewer.reviewer_status.set_error"):
+            gate_mod._evaluate_review_gate(
+                "owner/repo", "abc123def", 42, "webhook.github.check_suite_completed", None,
+            )
+
+        assert fetch_pr_info.call_count == 2
+        sleep.assert_called_once_with(gate_mod.github_reviewer_gate.MERGEABILITY_POLL_INTERVAL_S)
+        run_reviewer.assert_called_once()
+
+    def test_pr_info_fetch_exhaustion_returns_none_after_full_budget(self, _reload_gate):
+        gate_mod = _reload_gate
+
+        with patch.object(
+            gate_mod.github_reviewer_gate,
+            "fetch_pr_info",
+            return_value=None,
+        ) as fetch_pr_info, patch.object(
+            gate_mod.github_reviewer_gate.time,
+            "sleep",
+        ) as sleep:
+            result = gate_mod.github_reviewer_gate.fetch_pr_info_awaiting_mergeability(
+                "owner/repo", 42, "abc123def",
+            )
+
+        assert result is None
+        assert fetch_pr_info.call_count == gate_mod.github_reviewer_gate.MERGEABILITY_POLL_ATTEMPTS
+        assert sleep.call_count == gate_mod.github_reviewer_gate.MERGEABILITY_POLL_ATTEMPTS - 1
+
     def test_unknown_then_mergeable_retry_fires_reviewer(self, _reload_gate):
         gate_mod = _reload_gate
         unknown = {**_DEFAULT_PR_INFO, "mergeable": "UNKNOWN"}

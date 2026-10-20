@@ -995,6 +995,10 @@ For Settings feature flags and other single boolean controls.
 interface Props {
   checked: boolean;
   disabled?: boolean;
+  /** Rule-held: muted, focusable, and click-inert with aria-disabled. */
+  held?: boolean;
+  /** In-flight: full colour and click-inert with aria-disabled. */
+  locked?: boolean;
   size?: 'sm' | 'md';
   ariaLabel: string;
   onchange: (next: boolean) => void;

@@ -79,7 +79,7 @@ def fetch_pr_info_awaiting_mergeability(
     pr_number: int,
     head_sha: str,
 ) -> dict[str, Any] | None:
-    """Retry transient mergeability, which may be UNKNOWN after the final CI event.
+    """Retry transient unreadable PR info or UNKNOWN mergeability after final CI.
 
     That final check-suite event may be the last trigger for this head (BUG #574),
     so exhausting the bounded retry is necessary to avoid leaving a ready PR clean
@@ -89,16 +89,23 @@ def fetch_pr_info_awaiting_mergeability(
     pr_info: dict[str, Any] | None = None
     for attempt in range(MERGEABILITY_POLL_ATTEMPTS):
         pr_info = fetch_pr_info(repo, pr_number)
-        if pr_info is None or pr_info["isDraft"]:
+        if pr_info is not None and pr_info["isDraft"]:
             return pr_info
-        if not mergeability_is_unknown(pr_info):
+        if pr_info is not None and not mergeability_is_unknown(pr_info):
             return pr_info
         if attempt + 1 < MERGEABILITY_POLL_ATTEMPTS:
-            log.info(
-                "reviewer-gate: PR #{} sha={} — mergeable=UNKNOWN, re-polling "
-                "({}/{})",
-                pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
-            )
+            if pr_info is None:
+                log.info(
+                    "reviewer-gate: PR #{} sha={} — PR info unreadable, re-polling "
+                    "({}/{})",
+                    pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
+                )
+            else:
+                log.info(
+                    "reviewer-gate: PR #{} sha={} — mergeable=UNKNOWN, re-polling "
+                    "({}/{})",
+                    pr_number, head_sha[:8], attempt + 1, MERGEABILITY_POLL_ATTEMPTS,
+                )
             time.sleep(MERGEABILITY_POLL_INTERVAL_S)
     return pr_info
 
