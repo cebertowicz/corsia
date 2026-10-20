@@ -333,6 +333,9 @@ async def _complete_sign_in(code: object, state: object) -> str:
         raise MicrosoftError(exchange_error_cause(None))
     identity = await client.identity(access, kind=pending.kind, tenant_id=pending.tenant_id)
     await run_in_db(account_store.store, pending, grant, identity)
+    from events.connectors.mail_poller import schedule_account
+
+    schedule_account(pending.account_id)
     return identity.address
 
 

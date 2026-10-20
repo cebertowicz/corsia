@@ -266,10 +266,9 @@ def _register_google_tools(agent: CORSIAAgent) -> None:
 
 
 def _register_microsoft_tools(agent: CORSIAAgent) -> None:
-    from tools.microsoft_account import MicrosoftConnectTool, MicrosoftStatusTool
+    from tools.register_microsoft import register
 
-    agent.tools.register(MicrosoftConnectTool())
-    agent.tools.register(MicrosoftStatusTool())
+    register(agent)
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:

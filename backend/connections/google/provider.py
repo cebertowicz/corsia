@@ -33,9 +33,9 @@ async def revoke(refresh_token: str | None) -> str:
 
 async def _release(account_id: str) -> None:
     """Stop the removed account's in-flight inbox check."""
-    from events.connectors import gmail_poller  # Imported here: the poller imports the account store.
+    from events.connectors import mail_poller  # Imported here: the poller imports the account store.
 
-    gmail_poller.cancel_account(account_id)
+    mail_poller.cancel_account(account_id)
 
 
 GOOGLE = AccountProvider(

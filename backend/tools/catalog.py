@@ -30,6 +30,9 @@ TOOL_PACKS: dict[str, str] = {
     "web": "Web",
     "google": "Email and calendar",
     "microsoft": "Microsoft sign-in",
+    "microsoft_mail": "Microsoft mail",
+    "microsoft_calendar": "Microsoft calendar",
+    "microsoft_files": "Microsoft files",
 }
 _CATEGORY_PACKS: dict[str, str] = {
     "plans": "plans",
@@ -46,6 +49,9 @@ _CATEGORY_PACKS: dict[str, str] = {
     "web": "web",
     "google": "google",
     "microsoft": "microsoft",
+    "microsoft_mail": "microsoft_mail",
+    "microsoft_calendar": "microsoft_calendar",
+    "microsoft_files": "microsoft_files",
 }
 
 

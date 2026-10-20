@@ -338,6 +338,9 @@ async def complete_sign_in(code: object, state: object) -> str:
     if not set(REQUIRED_SCOPES) <= set(scopes):
         raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
     await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
+    from events.connectors.mail_poller import schedule_account
+
+    schedule_account(pending.account_id)
     return email
 
 
@@ -347,7 +350,7 @@ def accounts_status(thread_id: str | None = None) -> dict:
     ``/api/google/status`` and the ``google_status`` tool answer from here."""
     # Imported here: the poller module imports this one.
     from connections.connected_accounts import GOOGLE_PROVIDER, granted_scopes, resolve_credentials, visible_accounts
-    from events.connectors.gmail_poller import poller_status
+    from events.connectors.mail_poller import poller_status
 
     db = get_db()
     try:
