@@ -1,5 +1,6 @@
+schema: corsia.pack/1
 name: corsia-default
-version: 0
+version: "0.1.0"
 status: unpublished
 summary: Generic coordination rules, charter and safety templates, additive role files, pinned starter-kit references and declared KPIs for a conductor plus at most one owner role
 parameters:  # filled by the conductor from the interview (conductor-bootstrap section 2); fills lists the template placeholders each answer feeds
@@ -16,8 +17,8 @@ parameters:  # filled by the conductor from the interview (conductor-bootstrap s
 files:  # ref: true is a starter-kit file pinned by repo-relative path, never copied into the package
   - kind: charter-template
     path: context/PROJECT.md.tmpl
-    bytes: 2121
-    sha256: 4db0e4b21c16398f8cd2726eb35ed63aa4af9c73340e7eaea5523ef9ebdff685
+    bytes: 2125
+    sha256: 67c8401f72d819521c7565acf43341825ab3ce8399c621017cfa0fa9390f2d40
   - kind: rules
     path: context/COORDINATION-CORE.md
     bytes: 9176
@@ -28,8 +29,8 @@ files:  # ref: true is a starter-kit file pinned by repo-relative path, never co
     sha256: 7fac89244083b32fe527608a2b319cac70b1f5a7c97f83f9e0d344fff2e3c10c
   - kind: safety-template
     path: context/SAFETY-INVARIANTS.md.tmpl
-    bytes: 1862
-    sha256: e7905c770022a0e5f0c1daf49efb43313674695933f9b1286494747173d85fde
+    bytes: 1866
+    sha256: 11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf
   - kind: role-context
     path: context/roles/agent/05-waiting-is-work.md
     bytes: 730
@@ -81,4 +82,4 @@ notes:
   - "A ref entry pins the starter-kit file's bytes and sha256 on the branch that carries this package, so an edit to that file makes the pin visibly stale."
   - "The pinned SPAWN-POLICY.md is selector-free (tier placeholders only) and is filled from the live /api/models at install."
   - "The bundled tests guard the package's structure (placeholder coverage, pins, manifest shape); what still keeps the package unpublished is the behavioral evals of the model itself, which do not exist yet."
-  - "Follow-ups not in this version: standards with an update path, optional/, evals/ (the behavioral evals), repository setup, install script, version stamping and requires_corsia."
+  - "Follow-ups not in this version: standards with an update path, optional/, evals/ (the behavioral evals), repository setup, install script and requires_corsia."
