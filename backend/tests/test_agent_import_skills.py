@@ -99,6 +99,8 @@ def test_an_unreadable_skill_names_the_one_thing_to_fix(home, tmp_path):
     (_skill(folder / "binary", "binary", "has a binary file") / "logo.png").write_bytes(b"\x89PNG\x00")
     (folder / "bad-header").mkdir()
     (folder / "bad-header" / "SKILL.md").write_text("---\nname: [unclosed\n---\nBody.\n")
+    bad_sidecar = _skill(folder / "bad-sidecar", "bad-sidecar", "has malformed corsia data")
+    (bad_sidecar / "corsia.yaml").write_text("handler: [unclosed\n")
     _skill(folder / "bad-name", "bad name!", "a name with spaces")
     _skill(folder / "no-description", "no-description", "")
     offers = _offers(home)
@@ -108,6 +110,7 @@ def test_an_unreadable_skill_names_the_one_thing_to_fix(home, tmp_path):
         "linked": "link", "inner-link": "link", "no-skill-md": "no_skill_md", "binary": "not_text",
         "bad-header": "bad_header", "bad-name": "bad_name", "no-description": "no_description",
     }
+    assert offers["bad-sidecar"]["state"] == "new"
     assert "reason" not in offers["adr-writer"] and "reason" not in offers["big"]
 
 
@@ -173,10 +176,17 @@ def test_install_writes_the_skill_data_form_and_nothing_tool_granting(home):
     upstream = (roots.claude / "skills" / "adr-writer" / "SKILL.md").read_bytes()
     import hashlib
 
-    assert sidecar == {"origin": {
+    assert sidecar["origin"] == {
         "source": "claude-code:~/.claude/skills/adr-writer",
-        "sha256": hashlib.sha256(upstream).hexdigest(), "adopted_at": "2026-10-18T12:00:00+00:00",
-    }}
+        "sha256": hashlib.sha256(upstream).hexdigest(),
+        "adopted_at": "2026-10-18T12:00:00+00:00",
+        "installed_digest": sidecar["origin"]["installed_digest"],
+    }
+    from core.skill_sidecar import installed_digest
+
+    assert sidecar["origin"]["installed_digest"] == installed_digest({
+        path.relative_to(target).as_posix(): path.read_bytes() for path in target.rglob("*") if path.is_file()
+    })
     assert stat.S_IMODE(os.stat(target / "scripts" / "new.py").st_mode) == 0o644
     assert not (target / ".DS_Store").exists()
     from core.skill_validation import validate_skill_file

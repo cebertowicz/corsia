@@ -197,3 +197,24 @@ def test_a_symlinked_sidecar_is_ignored_when_nothing_points_at_it(tmp_path):
     os.symlink(tmp_path, folder / "corsia.yaml")
 
     assert validate_skill_file(folder / "SKILL.md").ok
+
+
+def test_installed_digest_excludes_origin_but_includes_other_sidecar_data():
+    from core.skill_sidecar import installed_digest
+
+    files = {
+        "SKILL.md": b"skill",
+        "corsia.yaml": b"origin:\n  source: library:sample\n  adopted_at: now\nworkflow:\n  steps: []\n",
+        "references/use.md": b"use it",
+    }
+    same_content_new_origin = {
+        **files,
+        "corsia.yaml": b"origin:\n  source: library:sample\n  adopted_at: later\nworkflow:\n  steps: []\n",
+    }
+    changed_workflow = {
+        **files,
+        "corsia.yaml": b"origin:\n  source: library:sample\nworkflow:\n  steps:\n    - id: build\n",
+    }
+
+    assert installed_digest(files) == installed_digest(same_content_new_origin)
+    assert installed_digest(files) != installed_digest(changed_workflow)
