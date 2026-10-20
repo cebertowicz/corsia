@@ -11,9 +11,10 @@ import pytest
 
 from connections.app_reach import AppReach
 from connections.connected_accounts import (
-    ConnectedAccountError, credential_key, create_google_account, get_account, resolve_google_credentials,
+    GOOGLE_PROVIDER, ConnectedAccountError, create_account, credential_key, get_account, resolve_credentials,
 )
-from connections.google import account_actions
+from connections import account_actions
+from connections.google import provider as google_provider
 from connections.google import client as google_client
 from connections.google import oauth
 from google_account_helpers import ONLY_CORSIA_REACH, only_corsia_account
@@ -41,7 +42,7 @@ class AccountsGoogle(FakeGoogle):
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
-        if url == account_actions.REVOKE_URL:
+        if url == google_provider.REVOKE_URL:
             self.revoked.append(form["token"])
             return httpx.Response(self.revoke_status, text="google says no, token " + form["token"])
         if url == oauth.PROFILE_URL:
@@ -99,7 +100,7 @@ def _row(account_id: str) -> dict:
 def _bundle(account_id: str) -> dict | None:
     db = get_db()
     try:
-        return resolve_google_credentials(account_id, db=db)
+        return resolve_credentials(account_id, db=db)
     finally:
         db.close()
 
@@ -177,7 +178,7 @@ async def test_sign_out_leaves_no_usable_credential_and_audits_the_revoke(google
     account_id = await _add(google, conductor, client_file, "person@example.com")
     token = _bundle(account_id)["refresh_token"]
 
-    result = await account_actions.sign_out_google_account(account_id, actor=PERSON)
+    result = await account_actions.sign_out_account(account_id, actor=PERSON)
 
     assert result == {"account_id": account_id, "state": "signed_out", "revocation": "revoked"}
     assert google.revoked == [token]
@@ -199,7 +200,7 @@ async def test_a_remove_whose_revoke_fails_still_removes_with_a_fixed_cause(
     kept = await _add(google, conductor, None, "work@example.com")
     google.revoke_status = status
 
-    result = await account_actions.remove_google_account(account_id, actor=PERSON)
+    result = await account_actions.remove_account(account_id, actor=PERSON)
 
     assert result == {"account_id": account_id, "removed": True, "revocation": cause}
     assert [str(account["id"]) for account in _accounts()] == [kept]
@@ -221,7 +222,7 @@ async def test_a_remove_that_cannot_reach_google_still_removes(google, conductor
         raise httpx.ConnectError("offline", request=request)
 
     monkeypatch.setattr(google, "handler", unreachable)
-    result = await account_actions.remove_google_account(account_id, actor=PERSON)
+    result = await account_actions.remove_account(account_id, actor=PERSON)
     assert result["revocation"] == "provider_unreachable"
     assert _accounts() == []
 
@@ -232,21 +233,21 @@ def test_only_the_person_can_widen_where_an_account_works(isolated_db):
     outside = AppReach(mode="selected", project_ids=frozenset(), outside_projects=True)
 
     with pytest.raises(ConnectedAccountError, match=account_actions.PERSON_ONLY):
-        account_actions.change_google_account_reach(account_id, everywhere, actor=("agent", "some-thread"))
+        account_actions.change_account_reach(account_id, everywhere, actor=("agent", "some-thread"))
     assert _row(account_id)["reach"] == ONLY_CORSIA_REACH
 
-    account_actions.change_google_account_reach(account_id, everywhere, actor=PERSON)
+    account_actions.change_account_reach(account_id, everywhere, actor=PERSON)
     assert _row(account_id)["reach"]["mode"] == "all"
     # Narrowing never needs the person.
-    account_actions.change_google_account_reach(account_id, outside, actor=("agent", "some-thread"))
+    account_actions.change_account_reach(account_id, outside, actor=("agent", "some-thread"))
     assert _row(account_id)["reach"] == outside.as_dict()
     # Narrowing to no place is refused, and Only CORSIA is never a value a save can write.
     nowhere = AppReach(mode="selected", project_ids=frozenset(), outside_projects=False)
     for actor in (PERSON, ("agent", "some-thread")):
         with pytest.raises(ConnectedAccountError, match=account_actions.EMPTY_REACH):
-            account_actions.change_google_account_reach(account_id, nowhere, actor=actor)
+            account_actions.change_account_reach(account_id, nowhere, actor=actor)
         with pytest.raises(ConnectedAccountError, match=account_actions.INVALID_REACH):
-            account_actions.change_google_account_reach(account_id, ONLY_CORSIA_REACH, actor=actor)
+            account_actions.change_account_reach(account_id, ONLY_CORSIA_REACH, actor=actor)
     assert _row(account_id)["reach"] == outside.as_dict()
 
 

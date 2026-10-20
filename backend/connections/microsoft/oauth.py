@@ -1,9 +1,16 @@
-"""Microsoft authorization-code PKCE sign-in for person-owned public clients."""
+"""Microsoft authorization-code PKCE sign-in for person-owned public clients.
+
+Each flow listens on its own loopback port for ten minutes. An add creates the
+row at its callback; a sign-in again (``account_id``) reuses the registration
+saved in that row's key-store entry. Rows, credentials, state and audit go
+through the shared account store; only the protocol is Microsoft's.
+"""
 from __future__ import annotations
 
 import asyncio
 import base64
 import hashlib
+import logging
 import re
 import secrets
 import threading
@@ -15,22 +22,32 @@ from urllib.parse import urlencode
 import httpx
 
 from connections.app_reach import AppReach
-from connections.connected_accounts import Actor
-from connections.microsoft import client
-from connections.microsoft.config import CONSUMER_TENANT_ID
+from connections.connected_accounts import MICROSOFT_PROVIDER, Actor
+from connections.microsoft import account_store, client
+from connections.microsoft.config import SCOPES
 from connections.microsoft.errors import (
-    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, INPUT_REFUSAL, PROVIDER_UNAVAILABLE, MicrosoftError, token_error_cause,
+    ACCOUNT_NOT_FOUND, ACCOUNT_REMOVED, ALREADY_CONNECTED, ALREADY_NEEDS_SIGN_IN, CONSENT_CANCELLED,
+    DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL, SIGN_IN_BUSY, MicrosoftError, exchange_error_cause,
+    message, redirect_codes_cause,
 )
-from infra import key_store
-from infra.database import get_db, write_transaction
+from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import CallbackListener, allowed_hosts
 
+log = logging.getLogger(__name__)
+
 AUTHORITY_HOST = "https://login.microsoftonline.com/"
-SCOPES = ("Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.ReadWrite", "offline_access", "User.Read")
 PENDING_SECONDS = 600
 PENDING_MAX = 8
-# The consumer tenant identifier lives with the connector's static configuration.
+#: The key a person's own failed add is kept under; an agent's is its thread id.
+PERSON_ADDS = "person"
+WRONG_FLOW_PAGE = "This isn't the Microsoft sign-in CORSIA is waiting for."
+CONNECTED_PAGE = "Microsoft is connected. You can close this tab and go back to CORSIA."
+#: OAuth protocol error names (RFC 6749 §5.2) safe to log; anything else logs as ``other``.
+_PROTOCOL_ERRORS = frozenset((
+    "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type",
+    "invalid_scope", "access_denied", "consent_required", "interaction_required", "temporarily_unavailable",
+))
 
 
 @dataclass(frozen=True)
@@ -91,8 +108,7 @@ def validate_connect_input(client_id: object, kind: object, tenant_id: object = 
         raise MicrosoftError(INPUT_REFUSAL)
     if tenant_id is not None and (valid_tenant is None or kind != "work"):
         raise MicrosoftError(INPUT_REFUSAL)
-    authority = "consumers" if kind == "personal" else "common" if kind == "both" else valid_tenant
-    assert authority is not None
+    authority = "consumers" if kind == "personal" else "common" if kind == "both" else str(valid_tenant)
     return valid_client, str(kind), valid_tenant, authority
 
 
@@ -143,76 +159,89 @@ async def _close_expired() -> None:
 
 
 def _clear_expired_add_failures() -> None:
-    for thread_id, failure in list(_latest_add_failures.items()):
+    for adder, failure in list(_latest_add_failures.items()):
         if failure.expired:
-            _latest_add_failures.pop(thread_id)
+            _latest_add_failures.pop(adder)
 
 
-def _record_add_failure(thread_id: str, cause: str) -> None:
+def _adder(pending: _Pending) -> str:
+    return pending.adding_thread_id or PERSON_ADDS
+
+
+def _record_add_failure(adder: str, cause: str) -> None:
     with _pending_lock:
         _clear_expired_add_failures()
-        if thread_id not in _latest_add_failures and len(_latest_add_failures) >= PENDING_MAX:
+        if adder not in _latest_add_failures and len(_latest_add_failures) >= PENDING_MAX:
             oldest = min(_latest_add_failures, key=lambda key: _latest_add_failures[key].created_at)
             _latest_add_failures.pop(oldest)
-        _latest_add_failures[thread_id] = _LatestAddFailure(cause=cause, created_at=time.monotonic())
+        _latest_add_failures[adder] = _LatestAddFailure(cause=cause, created_at=time.monotonic())
 
 
-def _clear_add_failure(thread_id: str) -> None:
+def _clear_add_failure(adder: str) -> None:
     with _pending_lock:
-        _latest_add_failures.pop(thread_id, None)
+        _latest_add_failures.pop(adder, None)
 
 
-def _redirect_error_cause(query: dict[str, str]) -> str:
+def _redirect_error(query: dict[str, str]) -> MicrosoftError:
     """Classify a callback error without retaining any provider-supplied text."""
     aadsts_codes = {int(match.group(1)) for value in query.values() for match in re.finditer(r"AADSTS(\d+)", value)}
-    # Microsoft confirms AADSTS65004 is declined consent, never administrator approval.
-    if (query.get("error") == "access_denied" and query.get("error_subcode") == "cancel") or 65004 in aadsts_codes:
-        return CONSENT_CANCELLED
-    if aadsts_codes & {90094, 90095, 65001}:
-        return ADMIN_APPROVAL_REQUIRED
-    return PROVIDER_UNAVAILABLE
+    cancelled = query.get("error") == "access_denied" and query.get("error_subcode") == "cancel"
+    return MicrosoftError(redirect_codes_cause(aadsts_codes, cancelled=cancelled))
 
 
-async def _record_failure(pending: _Pending, cause: str) -> None:
+async def _record_failure(pending: _Pending, error: MicrosoftError) -> None:
+    """Keep a failure where the person and agents can read it: on the row being signed in again,
+    or as the adder's latest failed add. Results about the request or CORSIA itself mark nothing."""
     if pending.adding:
-        if pending.adding_thread_id is not None:
-            _record_add_failure(pending.adding_thread_id, cause)
+        _record_add_failure(_adder(pending), error.cause)
         return
-    from connections.microsoft.accounts import mark_microsoft_needs_sign_in
+    if error.state_cause is not None:
+        from connections.account_state import mark_sign_in_failed
 
-    await run_in_db(mark_microsoft_needs_sign_in, pending.account_id, cause=cause)
+        await run_in_db(mark_sign_in_failed, pending.account_id, error.state_cause)
 
 
 async def start_sign_in(
     client_id: object, kind: object, tenant_id: object = None, *, actor: Actor, account_id: str | None = None,
     adding_thread_id: str | None = None, reach: AppReach | None = None,
 ) -> tuple[str, str]:
-    """Open a one-flow loopback listener, then return the Microsoft authorization link."""
+    """Open a one-flow loopback listener, then return the Microsoft authorization link.
+
+    With ``account_id`` it signs that row in again with the registration saved for it;
+    ``client_id``, ``kind`` and ``tenant_id`` are then ignored, and ``adding_thread_id``
+    (None for the person) must be able to see the row. Without it, it adds an account
+    whose reach comes from ``adding_thread_id``'s scope or, for the person, ``reach``.
+    """
+    if account_id is not None:
+        client_id, kind, tenant_id = await run_in_db(account_store.saved_registration, account_id, adding_thread_id)
     await _close_expired()
     holder: dict[str, _Pending] = {}
 
     async def handler(query: dict[str, str]) -> tuple[int, str, bool, str | None]:
         pending = holder.get("pending")
         if pending is None:
-            return 400, "This isn't the Microsoft sign-in CORSIA is waiting for.", False, "pending"
+            return 400, WRONG_FLOW_PAGE, False, "pending"
         given = query.get("state", "")
         if not given or not secrets.compare_digest(given, pending.state):
-            return 400, "This isn't the Microsoft sign-in CORSIA is waiting for.", False, "state"
-        if "error" in query:
-            pending = _take_pending(given)
-            await _record_failure(pending, _redirect_error_cause(query))
-            return 400, "Microsoft sign-in couldn't finish. Go back to CORSIA and try again.", True, None
+            return 400, WRONG_FLOW_PAGE, False, "state"
         try:
+            if "error" in query:
+                _take_pending(given)
+                raise _redirect_error(query)
             await _complete_sign_in(query.get("code"), given)
         except MicrosoftError as exc:
-            await _record_failure(pending, exc.cause)
-            return 400, exc.browser_message or "Microsoft sign-in couldn't finish. Go back to CORSIA and try again.", True, None
-        except Exception:
-            await _record_failure(pending, PROVIDER_UNAVAILABLE)
-            return 500, "Microsoft sign-in couldn't finish. Go back to CORSIA and try again.", True, None
-        if pending.adding_thread_id is not None:
-            _clear_add_failure(pending.adding_thread_id)
-        return 200, "Microsoft is connected. You can close this tab and go back to CORSIA.", True, None
+            await _record_failure(pending, exc)
+            return 400, exc.browser_message, True, None
+        except Exception as exc:
+            # A fault in CORSIA, not Microsoft: logged by type only, since its text may carry account data.
+            log.error("Microsoft sign-in callback failed inside CORSIA: %s", type(exc).__name__)
+            internal = MicrosoftError(INTERNAL)
+            await _record_failure(pending, internal)
+            return 500, internal.browser_message, True, None
+        if pending.adding:
+            _clear_add_failure(_adder(pending))
+        log.info("Microsoft account %s signed in", pending.account_id)
+        return 200, CONNECTED_PAGE, True, None
 
     async def on_cap() -> None:
         pending = holder.get("pending")
@@ -226,7 +255,7 @@ async def start_sign_in(
         holder["pending"] = pending
         with _pending_lock:
             if len(_pending) >= PENDING_MAX:
-                raise MicrosoftError(PROVIDER_UNAVAILABLE)
+                raise MicrosoftError(SIGN_IN_BUSY)
             _pending[pending.state] = pending
             _pending_expiries[pending.state] = asyncio.create_task(_expire(pending))
     except BaseException:
@@ -265,66 +294,21 @@ async def stop_all_signins() -> None:
 
 def _take_pending(state: object) -> _Pending:
     if not isinstance(state, str) or not state:
-        raise MicrosoftError(CONSENT_CANCELLED, browser_message="Microsoft sign-in was cancelled. Go back to CORSIA and try again.")
+        raise MicrosoftError(CONSENT_CANCELLED)
     with _pending_lock:
         match = next((key for key in _pending if secrets.compare_digest(key, state)), None)
         pending = _pending.pop(match, None) if match else None
         if match is not None:
             _cancel_expiry(match)
     if pending is None or pending.expired:
-        raise MicrosoftError(CONSENT_CANCELLED, browser_message="Microsoft sign-in was cancelled or expired. Go back to CORSIA and try again.")
+        raise MicrosoftError(CONSENT_CANCELLED)
     return pending
-
-
-def _provider_subject(tenant_id: str, object_id: str) -> str:
-    return f"{tenant_id}:{object_id}"
-
-
-def _store(pending: _Pending, grant: dict[str, object], tenant: str, object_id: str, address: str) -> None:
-    from connections.connected_accounts import ConnectedAccountError, get_account, record_audit
-    from connections.microsoft.accounts import (
-        create_microsoft_account,
-        create_microsoft_account_for_thread,
-        mark_microsoft_signed_in,
-        store_microsoft_credentials,
-    )
-    row_kind = "personal" if pending.kind == "personal" or tenant.lower() == CONSUMER_TENANT_ID else "work"
-    subject = _provider_subject(tenant, object_id)
-    bundle = {
-        "access_token": key_store.validated_value(grant["access_token"]),
-        "refresh_token": key_store.validated_value(grant["refresh_token"]),
-        "client_id": pending.client_id, "tenant_id": "consumers" if row_kind == "personal" else tenant,
-        "scopes": list(SCOPES),
-    }
-    with write_transaction(None, scope="microsoft_sign_in_store") as conn:
-        if pending.adding:
-            existing = conn.execute(
-                "SELECT id FROM connected_accounts WHERE provider='microsoft' AND provider_subject=?", (subject,),
-            ).fetchone()
-            if existing is not None:
-                raise MicrosoftError(CONSENT_CANCELLED)
-            fields = {"created_by": pending.actor, "signed_in_by": pending.actor, "provider_subject": subject,
-                      "account_kind": row_kind, "account_id": pending.account_id, "state": "connected"}
-            if pending.adding_thread_id is not None:
-                create_microsoft_account_for_thread(address, actor_thread_id=pending.adding_thread_id, db=conn, **fields)
-            else:
-                create_microsoft_account(address, reach=pending.reach, db=conn, **fields)  # type: ignore[arg-type]
-        else:
-            try:
-                account = get_account(pending.account_id, db=conn)
-            except ConnectedAccountError:
-                raise MicrosoftError(CONSENT_CANCELLED) from None
-            if account["provider"] != "microsoft" or account["provider_subject"] != subject:
-                raise MicrosoftError(CONSENT_CANCELLED)
-            mark_microsoft_signed_in(pending.account_id, address=address, provider_subject=subject, account_kind=row_kind, actor=pending.actor, db=conn)
-        store_microsoft_credentials(pending.account_id, bundle, db=conn)
-        record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
 
 
 async def _complete_sign_in(code: object, state: object) -> str:
     pending = _take_pending(state)
     if not isinstance(code, str) or not code:
-        raise MicrosoftError(CONSENT_CANCELLED, browser_message="Microsoft sign-in was cancelled. Go back to CORSIA and try again.")
+        raise MicrosoftError(CONSENT_CANCELLED)
     try:
         async with httpx.AsyncClient(timeout=client.TIMEOUT_SECONDS) as http:
             response = await http.post(client.authority_url(pending.authority), data={
@@ -332,44 +316,50 @@ async def _complete_sign_in(code: object, state: object) -> str:
                 "redirect_uri": pending.redirect_uri, "code_verifier": pending.verifier, "scope": " ".join(SCOPES),
             })
     except httpx.HTTPError:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+        raise MicrosoftError(exchange_error_cause(None)) from None
     try:
         grant = response.json()
     except ValueError:
         grant = None
     if response.status_code != 200 or not isinstance(grant, dict):
-        raise MicrosoftError(token_error_cause(response.status_code, grant), browser_message="Microsoft sign-in couldn't finish. Go back to CORSIA and try again.")
-    access = grant.get("access_token")
-    identity = client.id_token_identity(grant.get("id_token")) or client.id_token_identity(access)
-    if identity is None:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE, browser_message="Microsoft sign-in couldn't read the account. Go back to CORSIA and try again.")
-    tenant, object_id, address = identity
-    if not address:
-        profile = await client.profile(str(access))
-        address = profile[2] if profile is not None else None
-    if not isinstance(address, str) or not address.strip() or not isinstance(grant.get("refresh_token"), str):
-        raise MicrosoftError(PROVIDER_UNAVAILABLE, browser_message="Microsoft sign-in couldn't read the account. Go back to CORSIA and try again.")
-    await run_in_db(_store, pending, grant, tenant, object_id, address)
-    return address
+        error = grant.get("error") if isinstance(grant, dict) else None
+        log.warning(
+            "Microsoft code exchange refused: HTTP %s, %s", response.status_code,
+            error if error in _PROTOCOL_ERRORS else "other",
+        )
+        raise MicrosoftError(exchange_error_cause(grant))
+    access, refresh = grant.get("access_token"), grant.get("refresh_token")
+    if not isinstance(access, str) or not access or not isinstance(refresh, str) or not refresh:
+        raise MicrosoftError(exchange_error_cause(None))
+    identity = await client.identity(access, kind=pending.kind, tenant_id=pending.tenant_id)
+    await run_in_db(account_store.store, pending, grant, identity)
+    return identity.address
 
 
 def accounts_status(thread_id: str | None = None, account_id: object = None) -> dict[str, object]:
-    """List reachable Microsoft rows, or report one selected row without exposing credentials."""
-    from connections.microsoft.accounts import visible_microsoft_accounts
+    """List the caller's reachable Microsoft rows, or report one, without exposing credentials.
+
+    With no rows, the caller's latest failed add (``thread_id`` None is the person) is
+    reported as its fixed cause and message.
+    """
+    from connections.connected_accounts import visible_accounts
+
     db = get_db()
     try:
         rows = [{
             "account_id": account["id"], "address": account["address"], "kind": account["account_kind"],
             "state": account["state"], "cause": account["state_cause"], "reach": account["reach"],
-        } for account in visible_microsoft_accounts(thread_id, db=db)]
-        if account_id is not None:
-            selected = next((row for row in rows if row["account_id"] == account_id), None)
-            return selected or {"status": "not_connected"}
-        if rows:
-            return {"accounts": rows}
-        with _pending_lock:
-            _clear_expired_add_failures()
-            failure = _latest_add_failures.get(thread_id) if thread_id is not None else None
-        return {"status": "not_connected", "cause": failure.cause} if failure else {"status": "not_connected"}
+        } for account in visible_accounts(thread_id, db=db, provider=MICROSOFT_PROVIDER)]
     finally:
         db.close()
+    if account_id is not None:
+        selected = next((row for row in rows if row["account_id"] == account_id), None)
+        return selected or {"status": "not_connected"}
+    if rows:
+        return {"accounts": rows}
+    with _pending_lock:
+        _clear_expired_add_failures()
+        failure = _latest_add_failures.get(thread_id or PERSON_ADDS)
+    if failure is None:
+        return {"status": "not_connected"}
+    return {"status": "not_connected", "cause": failure.cause, "message": message(failure.cause)}

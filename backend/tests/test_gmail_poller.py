@@ -6,7 +6,8 @@ import asyncio
 
 import pytest
 
-from connections.connected_accounts import get_account, set_state
+from connections.connected_accounts import get_account
+from connections.account_state import set_state
 from connections.google import client as google_client
 from connections.google import email_screen
 from connections.google import gmail_read
@@ -324,7 +325,7 @@ async def test_one_account_signed_out_by_google_leaves_the_other_polling(monkeyp
 
 
 async def test_a_remove_during_a_poll_stops_every_later_write(monkeypatch, account):
-    from connections.google.account_actions import _remove_locally
+    from connections.account_actions import _remove_locally
 
     _seed_cursor(account)
     delivered = _capture_deliveries(monkeypatch)

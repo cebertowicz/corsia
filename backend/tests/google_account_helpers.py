@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from connections.connected_accounts import ONLY_CORSIA, create_google_account
+from connections.connected_accounts import GOOGLE_PROVIDER, ONLY_CORSIA, create_account
 from infra.database import write_transaction
 
 ALL_PROJECTS = {"mode": "all", "project_ids": [], "outside_projects": False}
@@ -21,7 +21,7 @@ def make_only_corsia(account_id: str, *, db: sqlite3.Connection | None = None) -
 
 
 def only_corsia_account(address: str, *, db: sqlite3.Connection | None = None, **fields: object) -> dict[str, object]:
-    """Create a Google account that only the CORSIA agent reaches; ``fields`` go to ``create_google_account``."""
-    account = create_google_account(address, reach=ALL_PROJECTS, db=db, **fields)  # type: ignore[arg-type]
+    """Create a Google account that only the CORSIA agent reaches; ``fields`` go to ``create_account``."""
+    account = create_account(GOOGLE_PROVIDER, address, reach=ALL_PROJECTS, db=db, **fields)  # type: ignore[arg-type]
     make_only_corsia(str(account["id"]), db=db)
     return {**account, "reach": ONLY_CORSIA_REACH}
