@@ -44,10 +44,11 @@ const fixtures: Fixture[] = [
 ];
 const selectedFixtures = fixtures.filter((fixture) => !process.env.CORSIA_SETUP_FRAME_STATES || process.env.CORSIA_SETUP_FRAME_STATES.split(',').includes(fixture.name));
 const records: { file: string; state: string; element: string; assertion: string; sha256: string }[] = [];
-const assets = process.env.CORSIA_SETUP_FRAME_DIR;
+const assets = process.env.CORSIA_SETUP_FRAME_DIR ?? '';
 const fileSha256 = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
-if (!assets) throw new Error('CORSIA_SETUP_FRAME_DIR must name the review pack assets directory');
-mkdirSync(assets, { recursive: true });
+// The review pack renders on demand; the full suite skips it.
+test.skip(!assets, 'Set CORSIA_SETUP_FRAME_DIR to the review pack assets directory to render it');
+if (assets) mkdirSync(assets, { recursive: true });
 
 function cliSource(cli?: string, vendor = 'claude-code') {
 	if (!cli || cli === 'not-installed') {
