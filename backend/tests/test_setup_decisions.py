@@ -39,9 +39,9 @@ def _github(sign_up_with: str) -> dict:
             "Agents use GitHub to file issues and feature requests, comment, and send pull "
             "requests on your repositories, and report to CORSIA when it falls short. They can "
             "post as you, using your GitHub sign-in, or from their own account, so their posts "
-            "stay separate from yours. Reports to CORSIA come from whichever you choose; until "
-            "GitHub is set up, they keep the write-up and send it once it is. GitHub allows "
-            "each person one extra machine account for this."
+            "stay separate from yours. Reports to CORSIA are text only and go only with your OK, "
+            "from whichever you choose; until GitHub is set up, they keep the write-up and send "
+            "it once it is. GitHub allows each person one extra machine account for this."
         ),
         "tradeoff": (
             "Posting as you takes one sign-in, and everything agents post shows your name. Their "
