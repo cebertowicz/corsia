@@ -5,8 +5,8 @@
 	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { saveFailureText } from '$lib/saveFailure';
 
-	// The project's own switch: only models on this computer or a private machine run in the project.
-	let { projectId }: { projectId: string } = $props();
+	// The project's own switch: only models on this computer or a trusted device run in the project.
+	let { projectId, onCloudModelsOffState }: { projectId: string; onCloudModelsOffState?: (value: boolean) => void } = $props();
 	let off = $state(false);
 	let loaded = $state(false);
 	let saving = $state(false);
@@ -17,16 +17,24 @@
 	async function load(id: string) {
 		loaded = false; error = '';
 		const result = await loadCloudModelsOff(id);
-		if (result.ok) off = result.value.cloud_models_off === true;
-		else error = result.error;
+		if (result.ok) {
+			off = result.value.cloud_models_off === true;
+			onCloudModelsOffState?.(off);
+		} else {
+			error = result.error;
+			// If this read fails, leave account controls available as their safe existing state.
+			onCloudModelsOffState?.(false);
+		}
 		loaded = true;
 	}
 	async function change(next: boolean) {
 		if (saving) return;
 		saving = true; error = '';
 		const result = await saveCloudModelsOff(projectId, next);
-		if (result.ok) off = result.value.cloud_models_off;
-		else error = saveFailureText(result.detail, result.reached !== false);
+		if (result.ok) {
+			off = result.value.cloud_models_off;
+			onCloudModelsOffState?.(off);
+		} else error = saveFailureText(result.detail, result.reached !== false);
 		saving = false;
 	}
 </script>
@@ -34,7 +42,7 @@
 <div class="setting">
 	<div>
 		<span class="label">Local models only</span>
-		<p>Chats and agents in this project use only models on this computer or on a machine you've marked private. A chat on a cloud model waits until you switch it to a local one.</p>
+		<p>Chats and agents in this project use only models on this computer or on a trusted device. A chat on a cloud model waits until you switch it to a local one.</p>
 		{#if !hasReadyLocalModel}
 			<p class="status" class:warning={off}>{off ? 'No local model is ready, so nothing in this project can run.' : 'No local model is ready yet.'} <button type="button" onclick={() => requestSettingsSection('providers')}>Set up a local model</button></p>
 		{/if}

@@ -82,7 +82,7 @@ describe('model sheet in a cloud-off project', () => {
 	});
 });
 
-describe('a private machine is not this computer', () => {
+describe('a trusted device is not this computer', () => {
 	const external = { id: 'ext/lms', name: 'Gemma', size: '', backend: 'network', provider: 'external', server_name: 'LM Studio', litellm_model: 'external@lms/gemma', speed: '', status: 'ready', is_local: true } as Model;
 	it('private External group only: Local header, and the Local setup section shows below it', () => {
 		setup.canAdd.value = true;

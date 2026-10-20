@@ -14,6 +14,8 @@
 	let accountsError = $state('');
 	let loading = $state(true);
 	let busy = $state(false);
+	// `null` stays loading until the project's persisted Local models only setting settles.
+	let cloudModelsOff = $state<boolean | null>(null);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
 
 	$effect(() => { void load(); });
@@ -77,10 +79,12 @@
 <section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
 	{#if projectId}
 		<h2>Models</h2>
-		<CloudModelsOffSetting {projectId} />
+		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} />
 	{/if}
 	<h2>Accounts and rollover</h2>
-	{#if loading}<p role="status">Loading providers…</p>
+	{#if projectId && cloudModelsOff === true}
+		<p class="model-list-empty">Claude Code and Codex aren't used while Local models only is on.</p>
+	{:else if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}

@@ -4,7 +4,7 @@ import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 import { token } from '$lib/stores/auth';
 import type { NetworkServer } from '$lib/stores/networkServers';
 
-const DESCRIPTION = 'Its models count as local, so local-only chats and projects can use them. Turn this on only if the models run on that machine, not on a service it forwards to.';
+const DESCRIPTION = 'Its models count as local, so local-only chats and projects can use them. Turn this on only if this is your own secure, trusted device and the models run on it, not on a service it forwards to.';
 const THIS_COMPUTER = 'This computer';
 const endpoint = (host: string, kind: 'local' | 'lan') => ({ id: `e-${host}`, server_id: 's1', host, kind, last_ok_at: null, last_latency_ms: null });
 const server = (over: Partial<NetworkServer>): NetworkServer => ({
@@ -17,7 +17,7 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let bodies: unknown[] = [];
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
-const toggle = () => host.querySelector('[aria-label="Private machine"]') as HTMLButtonElement | null;
+const toggle = () => host.querySelector('[aria-label="Trusted device"]') as HTMLButtonElement | null;
 function render(s: NetworkServer, put: 'ok' | 'fail' = 'ok') {
 	vi.stubGlobal('fetch', vi.fn(async (_i: RequestInfo | URL, init?: RequestInit) => {
 		bodies.push(JSON.parse(init?.body as string));
@@ -30,10 +30,10 @@ function render(s: NetworkServer, put: 'ok' | 'fail' = 'ok') {
 beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); token.set('tok'); bodies = []; });
 afterEach(() => { if (component) unmount(component); component = null; host.remove(); token.set(null); vi.unstubAllGlobals(); });
 
-describe('ProviderEndpointsTab private machine', () => {
+describe('ProviderEndpointsTab trusted device', () => {
 	it('another machine, off: switch and description', () => {
 		render(server({}));
-		expect(text()).toContain('Private machine'); expect(text()).toContain(DESCRIPTION);
+		expect(text()).toContain('Trusted device'); expect(text()).toContain(DESCRIPTION);
 		expect(toggle()).not.toBeNull(); expect(text()).not.toContain(THIS_COMPUTER);
 	});
 	it('on: the saved mark shows as a set switch', () => {
@@ -42,7 +42,7 @@ describe('ProviderEndpointsTab private machine', () => {
 	});
 	it('managed oMLX on this computer: the caption, no switch', () => {
 		render(server({ endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: true }));
-		expect(text()).toContain(THIS_COMPUTER); expect(toggle()).toBeNull(); expect(text()).not.toContain('Private machine');
+		expect(text()).toContain(THIS_COMPUTER); expect(toggle()).toBeNull(); expect(text()).not.toContain('Trusted device');
 		expect(host.querySelector('.ep-kind.local')).toBeNull();
 	});
 	it('External on loopback: the address caption and the switch', () => {

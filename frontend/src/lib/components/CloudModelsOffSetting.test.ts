@@ -4,7 +4,7 @@ import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 import { token } from '$lib/stores/auth';
 import { models, type Model } from '$lib/stores/models';
 
-const DESCRIPTION = "Chats and agents in this project use only models on this computer or on a machine you've marked private. A chat on a cloud model waits until you switch it to a local one.";
+const DESCRIPTION = 'Chats and agents in this project use only models on this computer or on a trusted device. A chat on a cloud model waits until you switch it to a local one.';
 const NONE_READY_OFF = 'No local model is ready yet.';
 const NONE_READY_ON = 'No local model is ready, so nothing in this project can run.';
 const local = { id: 'omlx/q', name: 'Qwen', size: '', backend: 'network', speed: '', status: 'ready', is_local: true } as Model;

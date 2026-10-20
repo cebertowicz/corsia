@@ -35,11 +35,11 @@
 {#if canMarkPrivate}
 	<div class="private-machine">
 		<div>
-			<span>Private machine</span>
-			<p>Its models count as local, so local-only chats and projects can use them. Turn this on only if the models run on that machine, not on a service it forwards to.</p>
+			<span>Trusted device</span>
+			<p>Its models count as local, so local-only chats and projects can use them. Turn this on only if this is your own secure, trusted device and the models run on it, not on a service it forwards to.</p>
 			{#if error}<p class="status error" role="alert">{error}</p>{/if}
 		</div>
-		<Toggle checked={privateMachine} disabled={busy} ariaLabel="Private machine" onchange={savePrivate} />
+		<Toggle checked={privateMachine} disabled={busy} ariaLabel="Trusted device" onchange={savePrivate} />
 	</div>
 {/if}
 <p class="hint">Endpoints are auto-discovered (mDNS or probe). The active host is the one currently serving requests.</p>

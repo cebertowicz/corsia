@@ -6,7 +6,7 @@ import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';
 
 /**
- * Review frames for the local-only controls (Local models only, Private machine, the cloud-off model sheet).
+ * Review frames for the local-only controls (Local models only, Trusted device, the cloud-off model sheet).
  * Every frame is the real app with the server answers faked by route interception; nothing signs in beyond the
  * disposable test token. Enabled only with LOCAL_ONLY_FRAMES_OUT (the output folder); LOCAL_ONLY_FRAMES_MODE=before
  * renders just the project page and Endpoints tab, for a checkout that does not have the change.
@@ -245,10 +245,18 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			let region = await openProjectProviders(page, await begin(width, height, theme));
 			if (!BEFORE) await expect(region.getByText('Local models only').first()).toBeVisible();
 			await shot(`${prefix}project-page`, size, theme);
+			if (!BEFORE && size === '1440') {
+				Object.assign(state, { models: catalogs.plain, cloudOff: false, failSave: false });
+				await begin(width, height, theme);
+				const longProjectName = 'Western Washington workflow workshop working group workspace';
+				region = await openProjectProviders(page, longProjectName);
+				await expect(page.locator('.shell-header .h-scope')).toHaveText(longProjectName);
+				await shot('project-long-name', size, theme);
+			}
 			if (!BEFORE) {
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
-				await expect(region.getByText("Chats and agents in this project use only models on this computer or on a machine you've marked private. A chat on a cloud model waits until you switch it to a local one.")).toBeVisible();
+				await expect(region.getByText('Chats and agents in this project use only models on this computer or on a trusted device. A chat on a cloud model waits until you switch it to a local one.')).toBeVisible();
 				await shot('project-on-local-ready', size, theme);
 
 				Object.assign(state, { models: catalogs.noneReady, cloudOff: true });
@@ -318,7 +326,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 					await begin(width, height, theme);
 					await openEndpoints(page, label);
 					if (act === 'fail') {
-						await page.getByRole('button', { name: 'Private machine', exact: true }).click();
+						await page.getByRole('button', { name: 'Trusted device', exact: true }).click();
 						await expect(page.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
 					}
 					await shot(name, size, theme);

@@ -56,7 +56,7 @@
 	});
 
 	// Starter, setup, and Settings download states show in the Local group while the picker is open.
-	// The group that hosts this computer's oMLX setup status is keyed on the oMLX row, not on `is_local`: a private machine's group says "Local" but is not this computer.
+	// The group that hosts this computer's oMLX setup status is keyed on the oMLX row, not on `is_local`: a trusted device's group says "Local" but is not this computer.
 	const hostsLocalSetup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
 	const hasLocalSetupGroup = $derived(groups.some(hostsLocalSetup));
 	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
