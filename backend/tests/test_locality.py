@@ -109,8 +109,7 @@ def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
         "Held: this project uses local models only, so codex/gpt-5.6-terra can't run here. " + action
     )
     assert held_error("codex/gpt-5.6-terra", "thread_local_only") == (
-        "Held: codex/gpt-5.6-terra can't run here: this chat is set to local models only;"
-        " it runs once moved to a local model. " + action
+        "Held: codex/gpt-5.6-terra can't run here: this chat is set to local models only. " + action
     )
     for cause in ("project_cloud_off", "thread_local_only"):
         assert "current model" not in held_error("codex/gpt-5.6-terra", cause)

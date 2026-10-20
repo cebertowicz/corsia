@@ -179,11 +179,10 @@ def test_a_locality_held_worker_reads_stalled_for_its_policy(db, cause):
 
 @pytest.mark.parametrize("cause,clause", [
     ("project_cloud_off", "this project uses local models only, so native/model can't run here"),
-    ("thread_local_only", "native/model can't run here: this chat is set to local models only;"
-                          " it runs once moved to a local model"),
+    ("thread_local_only", "native/model can't run here: the worker is set to local models only"),
 ])
 def test_f1_for_a_locality_held_worker_names_its_cause_and_the_move(db, cause, clause):
-    """Only the person lifts the policy: the wake names moving the thread, never a re-send or a wait."""
+    """Only the person lifts the policy: the wake names moving the worker, never a re-send or a wait."""
     delegated(db)
     _turn(db, "error")
     _hold_head(db, cause)
@@ -196,6 +195,7 @@ def test_f1_for_a_locality_held_worker_names_its_cause_and_the_move(db, cause, c
     assert json.loads(appended[0]["metadata"])["summary"] == "Delegated worker is held: local models only"
     content = str(appended[0]["content"])
     assert f"is held: {clause}. Its plan and history are intact." in content
-    assert "Move the thread to a ready local model from model_catalog (delegate_set_model)." in content
+    assert "Move the worker to a ready local model from model_catalog (delegate_set_model)." in content
+    assert "this chat" not in content
     assert "resumes on its own" not in content
     assert "delegate_send" not in content
