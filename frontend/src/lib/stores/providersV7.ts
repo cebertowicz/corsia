@@ -47,22 +47,15 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
-// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the
-// canonical display owner: it derives the account-sensitive harness card text, and reads
-// each server from `networkServers`, so a saved server field shows without a reload.
+// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the canonical display
+// owner: harness card text follows accounts, and each server row is read live from `networkServers`.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
-export const hostGroups = derived(
-	[hostGroupSnapshot, vendorAccounts, networkServers],
-	([$snapshot, $accounts, $servers]) => $snapshot.map((group) => ({
-		...group,
-		providers: group.providers.map((provider) => {
-			const server = provider.server && ($servers.find((row) => row.id === provider.server?.id) ?? provider.server);
-			const live = server === provider.server ? provider : { ...provider, server };
-			return live.type === 'harness' && live.harnessModelCount != null
-				? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) }
-				: live;
-		}),
-	})),
+export const hostGroups = derived([hostGroupSnapshot, vendorAccounts, networkServers], ([$snapshot, $accounts, $servers]) =>
+	$snapshot.map((group) => ({ ...group, providers: group.providers.map((provider) => {
+		const live = provider.server ? { ...provider, server: $servers.find((row) => row.id === provider.server?.id) ?? provider.server } : provider;
+		return live.type === 'harness' && live.harnessModelCount != null
+			? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) } : live;
+	}) })),
 );
 export const hostGroupsLoading = writable(false);
 /** Set when the Claude Code and Codex cards could not load, so an absent card is never read as "no models". */
