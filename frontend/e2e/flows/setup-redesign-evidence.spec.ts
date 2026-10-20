@@ -5,15 +5,20 @@ import { resolve } from 'node:path';
 import { openAppByUrl, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
+import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
 type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed' | 'other-omlx';
-type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'disk-image' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'folder' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed'; other?: boolean; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
+type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'disk-image' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'folder' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'back-to-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed'; other?: boolean; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
 const fixtures: Fixture[] = [
 	{ name: 'checking', screen: 'checking', element: 'Checking this computer' },
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
 	{ name: 'disk-image', screen: 'disk-image', element: 'Move CORSIA to Applications' },
 	{ name: 'old-macos', screen: 'old-macos', element: 'Update macOS to open CORSIA' },
-	{ name: 'account-empty', screen: 'account', element: 'Welcome to CORSIA and five account fields' },
+	{ name: 'account-empty', screen: 'account', element: 'Welcome beside the five account fields' },
+	{ name: 'account-welcome-short', screen: 'account', only: 'short', element: 'All of Welcome, to its last line, beside the form in a 1280×600 window, with no scrolling' },
+	{ name: 'welcome', screen: 'welcome', only: 'narrow', element: 'Welcome screen: three rows and Continue' },
+	{ name: 'account-form', screen: 'account-form', only: 'narrow', element: 'Create your account form after Continue, with no Welcome' },
+	{ name: 'folder-back', screen: 'back-to-form', only: 'narrow', element: 'Back from the work folder lands on the filled form, not Welcome' },
 	{ name: 'account-early-download-failed', screen: 'account', local: 'connection', element: 'Local model rail job: Couldn’t download' },
 	{ name: 'account-invalid', screen: 'invalid', element: 'Use up to 32 lowercase letters, numbers, dashes or underscores.' },
 	{ name: 'account-short-password', screen: 'short-password', element: 'Use at least 8 characters.' },
@@ -181,18 +186,37 @@ async function fillAccount(page: Page) {
 	await page.getByLabel('Password', { exact: true }).fill('setup-example-password');
 	await page.getByLabel('Confirm password', { exact: true }).fill('setup-example-password');
 }
+const isNarrow = (page: Page) => (page.viewportSize()?.width ?? 0) < 1280;
+// The words are the shipped strings in setupWelcome.ts; every account and Welcome frame proves them on screen first.
+async function expectWelcomeCopy(page: Page) {
+	await expect(page.locator('.welcome .line')).toHaveText([...WELCOME_LINES]);
+	await expect(page.locator('.welcome li')).toHaveText(WELCOME_ROWS.map((row) => `${row.label} ${row.text}`));
+	await expect(page.locator('.welcome .account')).toHaveText(WELCOME_ACCOUNT_LINE);
+}
+const accountScreens = ['account', 'invalid', 'mismatch', 'short-password', 'account-exists'];
 async function navigate(page: Page, fixture: Fixture) {
 	await page.goto('/');
 	if (fixture.screen === 'checking') { await expect(page.getByRole('heading', { name: 'Checking this computer' })).toBeVisible(); return; }
 	if (['error', 'disk-image', 'old-macos'].includes(fixture.screen ?? '')) return;
-	await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
-	if (fixture.screen === 'account') return;
+	await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible();
+	if (fixture.screen === 'welcome') return;
+	// Below 1280 wide Welcome is its own screen: press its Continue to reach the account form.
+	if (isNarrow(page)) {
+		await page.getByRole('button', { name: 'Continue', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+	}
+	if (fixture.screen === 'account' || fixture.screen === 'account-form') return;
 	if (fixture.screen === 'invalid') { await page.getByLabel('Username', { exact: true }).fill('Bad user!'); return; }
 	if (fixture.screen === 'short-password') { await page.getByLabel('Password', { exact: true }).fill('short'); await page.getByLabel('Name', { exact: true }).focus(); return; }
 	if (fixture.screen === 'mismatch') { await fillAccount(page); await page.getByLabel('Confirm password', { exact: true }).fill('does-not-match'); await page.getByLabel('Name', { exact: true }).focus(); return; }
 	await fillAccount(page);
 	await page.getByRole('button', { name: 'Continue', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'Choose your work folder' })).toBeVisible();
+	if (fixture.screen === 'back-to-form') {
+		await page.getByRole('button', { name: 'Back', exact: true }).click();
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+		return;
+	}
 	if (fixture.screen === 'protected' || fixture.screen === 'unwritable') { await page.getByRole('button', { name: 'Change', exact: true }).click(); return; }
 	if (fixture.screen === 'folder') return;
 	await page.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -216,6 +240,34 @@ async function navigate(page: Page, fixture: Fixture) {
 }
 async function assertState(page: Page, fixture: Fixture) {
 	const text = (value: string | RegExp) => page.getByText(value, { exact: typeof value === 'string' });
+	if (fixture.screen === 'welcome') {
+		await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible();
+		await expectWelcomeCopy(page);
+		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
+		await expect(page.locator('#setup-name')).toHaveCount(0);
+		return;
+	}
+	if (fixture.screen === 'account-form' || fixture.screen === 'back-to-form') {
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+		await expect(page.locator('.welcome')).toHaveCount(0);
+		if (fixture.screen === 'back-to-form') await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Alex Morgan');
+		return;
+	}
+	// Account frames at 1280 and up show Welcome beside the form, so the form and every Welcome string are on screen together.
+	if (accountScreens.includes(fixture.screen ?? '')) {
+		await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible();
+		await expect(page.locator('.aside .welcome')).toBeVisible();
+		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+		await expectWelcomeCopy(page);
+		if (fixture.only === 'short') {
+			// Nothing is cut or hidden behind a scroll: the first and the last line of Welcome are both fully in the window.
+			const aside = page.locator('.aside');
+			expect(await aside.evaluate((node) => node.scrollHeight <= node.clientHeight), 'Welcome fits without scrolling').toBe(true);
+			await expect(page.locator('.welcome .line').first()).toBeInViewport({ ratio: 1 });
+			await expect(page.locator('.welcome .account')).toBeInViewport({ ratio: 1 });
+		}
+	}
 	if (fixture.screen === 'checking') { await expect(page.getByRole('heading', { name: 'Checking this computer' })).toBeVisible(); return; }
 	if (fixture.screen === 'error') { await expect(page.getByRole('heading', { name: 'CORSIA couldn’t start' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report' })).toBeVisible(); return; }
 	if (fixture.screen === 'disk-image') { await expect(page.getByRole('heading', { name: 'Move CORSIA to Applications' })).toBeVisible(); return; }
@@ -267,6 +319,13 @@ async function assertState(page: Page, fixture: Fixture) {
 		if (fixture.local === 'setup-failed' || fixture.local === 'start-failed') await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible();
 	}
 }
+async function writeManifest() {
+	const manifest = resolve(assets!, 'frames.json');
+	const previous: typeof records = existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8')) : [];
+	const replacements = new Set(records.map((record) => record.file));
+	writeFileSync(manifest, JSON.stringify([...previous.filter((record) => !replacements.has(record.file)), ...records], null, 2));
+	records.length = 0;
+}
 async function capture(page: Page, fixture: Fixture, theme: string, width: number, height: number) {
 	page.setDefaultTimeout(10_000);
 	const errors: string[] = [];
@@ -296,14 +355,24 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 	test.setTimeout(600000);
 	for (const theme of ['light', 'dark']) {
 		for (const fixture of selectedFixtures) {
+			if (fixture.only) continue;
 			const context = await browser.newContext(); const page = await context.newPage();
 			await capture(page, fixture, theme, 1280, 900); await page.close(); await context.close();
 		}
-		for (const fixture of selectedFixtures.filter((row) => ['account-empty', 'folder', 'cli-ready'].includes(row.name))) {
+		// Narrow (below 1280): Welcome is its own screen, so these frames walk through its Continue.
+		for (const fixture of selectedFixtures.filter((row) => row.only === 'narrow' || ['folder', 'cli-ready'].includes(row.name))) {
 			const context = await browser.newContext(); const page = await context.newPage();
 			await capture(page, fixture, theme, 800, 600); await page.close(); await context.close();
 		}
+		// The shortest window the pack uses, at the 1280 width where Welcome sits beside the form.
+		for (const fixture of selectedFixtures.filter((row) => row.only === 'short')) {
+			const context = await browser.newContext(); const page = await context.newPage();
+			await capture(page, fixture, theme, 1280, 600); await page.close(); await context.close();
+		}
 	}
+	await writeManifest();
+	// A run limited to named states leaves the first-run chat frames, which the setup screens don't change, as they were.
+	if (process.env.CORSIA_SETUP_FRAME_STATES) return;
 	await setFocusMode(request, false);
 	const emailQuestion = 'Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?';
 	const emailScenarios = [
@@ -363,8 +432,5 @@ First, a few things to set up here, one at a time. Any of them can wait: say "no
 			await emailContext.close();
 		}
 	}
-	const manifest = resolve(assets!, 'frames.json');
-	const previous: typeof records = existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8')) : [];
-	const replacements = new Set(records.map((record) => record.file));
-	writeFileSync(manifest, JSON.stringify([...previous.filter((record) => !replacements.has(record.file)), ...records], null, 2));
+	await writeManifest();
 });
