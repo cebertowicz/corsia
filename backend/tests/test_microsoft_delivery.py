@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import pytest
-from jsonschema import validate
+from jsonschema import ValidationError, validate
 
 from connections.connected_accounts import store_credentials
 from connections.microsoft import calendar, client
@@ -17,19 +17,21 @@ from infra.database import get_db
 from delegation_fixtures import deleg_db  # noqa: F401
 from tests.test_action_gate import THREAD, _admit, _bind, workspace  # noqa: F401
 from tests.test_microsoft_refresh import Response, connect
-from tools import action_delivery, microsoft_actions
+from tools import action_delivery, microsoft_actions, microsoft_calendar_invites
 from tools.action_gate import Approved
 from tools.action_drafts import create_draft
 from tools.microsoft_actions import (
-    CALENDAR_STILL_SENDING,
     MAIL_STILL_SENDING,
     MAIL_UNCONFIRMED,
-    MicrosoftCalendarCreateTool,
-    MicrosoftCalendarDraftTool,
     MicrosoftCalendarListTool,
-    MicrosoftCalendarUpdateTool,
     MicrosoftMailDraftTool,
     MicrosoftMailSendTool,
+)
+from tools.microsoft_calendar_invites import (
+    CALENDAR_STILL_SENDING,
+    MicrosoftCalendarCreateTool,
+    MicrosoftCalendarDraftTool,
+    MicrosoftCalendarUpdateTool,
 )
 
 
@@ -92,10 +94,16 @@ async def _mail_draft(account: str) -> dict[str, Any]:
     return json.loads(result)
 
 
-async def _calendar_draft(account: str, *, operation: str, event_id: str | None = None) -> dict[str, Any]:
+async def _calendar_draft(
+    account: str, *, operation: str, event_id: str | None = None, draft_id: str | None = None,
+    title: str = "Planning", start: str = "2026-10-20T09:00:00-07:00",
+    end: str = "2026-10-20T10:00:00-07:00", attendees: list[str] | None = None,
+    description: str = "Agenda",
+) -> dict[str, Any]:
     result = await MicrosoftCalendarDraftTool().execute(
         _thread_id=THREAD, account_id=account, operation=operation, event_id=event_id,
-        event={"subject": "Planning", "start": {"dateTime": "2026-10-20T09:00:00-07:00"}},
+        draft_id=draft_id, title=title, start=start, end=end,
+        attendees=attendees or ["reviewed@example.test"], description=description,
     )
     assert not result.startswith("Error:"), result
     return json.loads(result)
@@ -109,7 +117,11 @@ async def test_calendar_draft_revision_accepts_its_returned_draft_id(microsoft, 
     first_args = {
         "account_id": microsoft,
         "operation": "create",
-        "event": {"subject": "Planning", "start": {"dateTime": "2026-10-20T09:00:00-07:00"}},
+        "title": "Planning",
+        "start": "2026-10-20T09:00:00-07:00",
+        "end": "2026-10-20T10:00:00-07:00",
+        "attendees": ["reviewed@example.test"],
+        "description": "Agenda",
     }
     validate(first_args, tool.parameters)
     first = json.loads(await tool.execute(_thread_id=THREAD, **first_args))
@@ -117,13 +129,108 @@ async def test_calendar_draft_revision_accepts_its_returned_draft_id(microsoft, 
     revised_args = {
         **first_args,
         "draft_id": first["draft_id"],
-        "event": {"subject": "Revised planning", "start": {"dateTime": "2026-10-20T10:00:00-07:00"}},
+        "title": "Revised planning",
+        "start": "2026-10-20T10:00:00-07:00",
+        "end": "2026-10-20T11:00:00-07:00",
     }
     validate(revised_args, tool.parameters)
     revised = json.loads(await tool.execute(_thread_id=THREAD, **revised_args))
 
     assert revised["draft_id"] == first["draft_id"]
     assert revised["revision"] != first["revision"]
+
+
+def test_calendar_draft_schema_refuses_raw_event_and_extra_attendee(microsoft) -> None:
+    with pytest.raises(ValidationError):
+        validate({
+            "account_id": microsoft, "operation": "create", "event": {
+                "subject": "Planning", "attendees": [{"emailAddress": {"address": "hidden@example.test"}}],
+            },
+        }, MicrosoftCalendarDraftTool().parameters)
+
+
+async def test_calendar_draft_refuses_changed_readback(microsoft, monkeypatch) -> None:
+    from tools import reviewed_drafts
+
+    monkeypatch.setattr(reviewed_drafts, "_read_bytes", lambda _relative: b"changed")
+    output = await MicrosoftCalendarDraftTool().execute(
+        _thread_id=THREAD, account_id=microsoft, operation="create", title="Planning",
+        start="2026-10-20T09:00:00-07:00", end="2026-10-20T10:00:00-07:00",
+        attendees=["reviewed@example.test"], description="Agenda",
+    )
+    assert output == "Error: The draft changed while it was being saved, so it is not recorded. Save it again."
+
+
+@pytest.mark.parametrize("attendee", ["Name <person@example.test>", "one@example.test, two@example.test"])
+async def test_calendar_draft_refuses_non_plain_attendees(microsoft, attendee) -> None:
+    output = await MicrosoftCalendarDraftTool().execute(
+        _thread_id=THREAD, account_id=microsoft, operation="create", title="Planning",
+        start="2026-10-20T09:00:00-07:00", end="2026-10-20T10:00:00-07:00",
+        attendees=[attendee], description="Agenda",
+    )
+    assert output == "Error: Attendees must be email addresses."
+
+
+async def test_calendar_send_builds_graph_bodies_only_from_recorded_fields(microsoft, monkeypatch) -> None:
+    _approve(monkeypatch)
+    calls = _graph(monkeypatch, [Response(201, {"id": "created"}), Response(200, {"id": "updated"})])
+    create = await _calendar_draft(
+        microsoft, operation="create", title="Planning hidden@example.test",
+        description="Agenda hidden@example.test", attendees=["reviewed@example.test"],
+    )
+    assert json.loads(await MicrosoftCalendarCreateTool().execute(
+        _thread_id=THREAD, account_id=microsoft, draft_id=create["draft_id"], revision=create["revision"],
+    ))["id"] == "created"
+    body = {
+        "subject": "Planning hidden@example.test",
+        "start": {"dateTime": "2026-10-20T16:00:00", "timeZone": "UTC"},
+        "end": {"dateTime": "2026-10-20T17:00:00", "timeZone": "UTC"},
+        "attendees": [{"emailAddress": {"address": "reviewed@example.test"}, "type": "required"}],
+        "body": {"contentType": "text", "content": "Agenda hidden@example.test"},
+    }
+    assert calls[0]["method"] == "POST" and calls[0]["json"] == body
+
+    update = await _calendar_draft(microsoft, operation="update", event_id="event/with slash")
+    assert json.loads(await MicrosoftCalendarUpdateTool().execute(
+        _thread_id=THREAD, account_id=microsoft, draft_id=update["draft_id"], revision=update["revision"],
+    ))["id"] == "updated"
+    assert calls[1]["method"] == "PATCH" and calls[1]["url"].endswith("/event%2Fwith%20slash")
+    assert calls[1]["json"] == {
+        **body,
+        "subject": "Planning",
+        "body": {"contentType": "text", "content": "Agenda"},
+    }
+
+
+async def test_calendar_send_refuses_a_changed_account(microsoft, monkeypatch) -> None:
+    _approve(monkeypatch)
+    saved = await _calendar_draft(microsoft, operation="create")
+    other = connect("11111111-1111-4111-8111-111111111111")
+    output = await MicrosoftCalendarCreateTool().execute(
+        _thread_id=THREAD, account_id=other, draft_id=saved["draft_id"], revision=saved["revision"],
+    )
+    assert output.startswith("Error: account_id does not match this draft.")
+
+    db = get_db()
+    db.execute("UPDATE connected_accounts SET address='moved@example.test' WHERE id=?", (microsoft,))
+    db.commit()
+    assert await MicrosoftCalendarCreateTool().execute(
+        _thread_id=THREAD, account_id=microsoft, draft_id=saved["draft_id"], revision=saved["revision"],
+    ) == "Error: Not sent: the From line does not match the Microsoft account this draft was written from."
+
+
+async def test_calendar_send_refuses_a_legacy_raw_event_draft(microsoft, workspace, monkeypatch) -> None:
+    _approve(monkeypatch)
+    calls = _graph(monkeypatch, [Response(201, {"id": "created"})])
+    data = b'{"operation":"create","event_id":null,"event":{"subject":"Planning","attendees":[{"emailAddress":{"address":"hidden@example.test"}}]}}'
+    (workspace / "legacy-event.json").write_bytes(data)
+    legacy = create_draft(THREAD, "invite", "legacy-event.json", data, {"account_id": microsoft, "operation": "create"})
+    get_db().commit()
+    assert await MicrosoftCalendarCreateTool().execute(
+        _thread_id=THREAD, account_id=microsoft, draft_id=legacy["draft_id"], revision=legacy["revision"],
+    ) == ("Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft "
+          "with microsoft_calendar_draft, show the person, and wait for their reply.")
+    assert calls == []
 
 
 def _approve(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,6 +240,7 @@ def _approve(monkeypatch: pytest.MonkeyPatch) -> None:
         return Approved(row, (config.WORKSPACE / row["path"]).read_bytes())
 
     monkeypatch.setattr(microsoft_actions, "check_action", approved)
+    monkeypatch.setattr(microsoft_calendar_invites, "check_action", approved)
 
 
 async def test_mail_send_carries_cc_and_refuses_mismatched_from_before_graph(microsoft, monkeypatch):
