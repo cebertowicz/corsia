@@ -97,6 +97,40 @@ describe('browser pane input helpers', () => {
 		expect(scroll.translation.y).toBe(0);
 	});
 
+	it('keeps an ordinary scroll whose real frame is slow on a busy host', () => {
+		vi.useFakeTimers();
+		const expired = vi.fn();
+		const scroll = new FrameScrollShift(expired);
+		scroll.replace({ scrollOffsetY: 100, scrollMaxY: 600 });
+		scroll.shift({ x: 0, y: 120 }, 0);
+		// The slowest busy-host run's 95th-percentile wheel-to-frame time.
+		vi.advanceTimersByTime(619);
+		expect(expired).not.toHaveBeenCalled();
+		scroll.replace({ scrollOffsetY: 220, scrollMaxY: 600 });
+		expect(scroll.translation.y).toBe(0);
+	});
+
+	it('never moves the real frame when the page grew past the measured scroll range', () => {
+		const scroll = new FrameScrollShift();
+		scroll.replace({ scrollOffsetY: 400, scrollMaxY: 400 });
+		// Lazy content loaded below; the range stays as measured when capture started.
+		scroll.replace({ scrollOffsetY: 900, scrollMaxY: 400 });
+		expect(scroll.translation.y).toBe(0);
+		scroll.shift({ x: 0, y: 100 });
+		expect(scroll.translation.y).toBe(0);
+		scroll.shift({ x: 0, y: -100 });
+		expect(scroll.translation.y).toBe(-100);
+	});
+
+	it('drops a prediction when the page jumps the other way', () => {
+		const scroll = new FrameScrollShift();
+		scroll.replace({ scrollOffsetY: 1000, scrollMaxY: 3000 });
+		scroll.shift({ x: 0, y: 200 });
+		// A navigation lands on the new page's top.
+		scroll.replace({ scrollOffsetY: 0, scrollMaxY: 3000 });
+		expect(scroll.translation.y).toBe(0);
+	});
+
 	it('fills the band a predicted scroll uncovers with the frame edge colour, not stretched pixels', () => {
 		const probe = { imageSmoothingQuality: 'low', drawImage: vi.fn() };
 		vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(probe as never);

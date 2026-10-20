@@ -35,8 +35,12 @@ export function clampPoint(point: PanePoint, width: number, height: number): Pan
 
 type ScrollFrame = { scrollOffsetX?: unknown; scrollOffsetY?: unknown; scrollMaxX?: unknown; scrollMaxY?: unknown };
 
-/** How long a predicted scroll waits for a real frame that moves the page before it is dropped, in ms. */
-export const SCROLL_CONFIRM_MS = 300;
+/**
+ * How long a predicted scroll waits for a real frame that moves the page before it is dropped, in ms.
+ * Above the slowest run's 95th-percentile wheel-to-frame time on a busy host (619 ms, Oct 20), so an ordinary
+ * scroll is not snapped back before Chrome shows it.
+ */
+export const SCROLL_CONFIRM_MS = 700;
 
 const edgeSamples = new WeakMap<HTMLImageElement, Map<string, HTMLCanvasElement | null>>();
 
@@ -100,11 +104,15 @@ export class FrameScrollShift {
 		const previous = this.frame;
 		const x = typeof metadata.scrollOffsetX === 'number' ? metadata.scrollOffsetX : previous.x;
 		const y = typeof metadata.scrollOffsetY === 'number' ? metadata.scrollOffsetY : previous.y;
-		const maxX = typeof metadata.scrollMaxX === 'number' ? Math.max(0, metadata.scrollMaxX) : Infinity;
-		const maxY = typeof metadata.scrollMaxY === 'number' ? Math.max(0, metadata.scrollMaxY) : Infinity;
-		const remaining = (prediction: number, advance: number) => prediction > 0
-			? Math.max(0, prediction - Math.max(0, advance))
-			: Math.min(0, prediction - Math.min(0, advance));
+		// The range is measured only when capture starts, so content that grew since can put the real offset past it;
+		// the real offset is never clamped, only the prediction beyond it.
+		const maxX = typeof metadata.scrollMaxX === 'number' ? Math.max(0, metadata.scrollMaxX, x) : Infinity;
+		const maxY = typeof metadata.scrollMaxY === 'number' ? Math.max(0, metadata.scrollMaxY, y) : Infinity;
+		// A move against the prediction (a navigation or a script jumped the page) means Chrome did not apply it.
+		const remaining = (prediction: number, advance: number) => {
+			if (prediction === 0 || Math.sign(advance) === -Math.sign(prediction)) return 0;
+			return prediction > 0 ? Math.max(0, prediction - advance) : Math.min(0, prediction - advance);
+		};
 		const pending = {
 			x: remaining(this.shown.x - previous.x, x - previous.x),
 			y: remaining(this.shown.y - previous.y, y - previous.y)
