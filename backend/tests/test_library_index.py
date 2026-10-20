@@ -33,7 +33,7 @@ def _seams(monkeypatch, tmp_path, *, now: float = 1_000.0) -> list[float]:
     return clock
 
 
-def test_fresh_fetch_caches_validated_skills(monkeypatch, tmp_path):
+def test_first_raw_fetch_without_a_cache_is_refreshed(monkeypatch, tmp_path):
     _seams(monkeypatch, tmp_path)
     payload = _index_payload()
     monkeypatch.setattr(index, "_fetch_index", lambda: payload)
@@ -46,17 +46,32 @@ def test_fresh_fetch_caches_validated_skills(monkeypatch, tmp_path):
     assert result.refreshed is True
 
 
-def test_fresh_cache_skips_a_second_raw_fetch(monkeypatch, tmp_path):
+def test_unchanged_second_raw_fetch_is_not_refreshed(monkeypatch, tmp_path):
     _seams(monkeypatch, tmp_path)
     payload = _index_payload()
     calls = []
     monkeypatch.setattr(index, "_fetch_index", lambda: calls.append(1) or payload)
 
     index.load_index()
-    cached = index.load_index()
+    unchanged = index.load_index()
 
-    assert calls == [1]
-    assert cached.refreshed is False
+    assert calls == [1, 1]
+    assert unchanged.refreshed is False
+
+
+def test_changed_raw_fetch_is_refreshed(monkeypatch, tmp_path):
+    _seams(monkeypatch, tmp_path)
+    initial = _index_payload()
+    changed = deepcopy(initial)
+    changed["skills"][0]["version"] = "1.1.0"
+    payloads = iter((initial, changed))
+    monkeypatch.setattr(index, "_fetch_index", lambda: next(payloads))
+
+    index.load_index()
+    refreshed = index.load_index()
+
+    assert refreshed.skills == (changed["skills"][0],)
+    assert refreshed.refreshed is True
 
 
 def test_stale_cache_is_used_when_raw_fetch_fails(monkeypatch, tmp_path):

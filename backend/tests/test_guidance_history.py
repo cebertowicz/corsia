@@ -330,6 +330,21 @@ def test_binary_safe_history_refuses_an_oversized_file_without_writing(history_s
     assert not path.exists()
 
 
+def test_binary_safe_history_refuses_an_oversized_file_before_a_non_atomic_target_fault(history_scope):
+    from infra.guidance_git import GuidanceTarget, save_guidance
+
+    workspace, _thread_id = history_scope
+    path = workspace / "context" / "large.bin"
+    result = save_guidance(
+        {path: b"\0" * (1024 * 1024 + 1)}, workspace=workspace,
+        target=GuidanceTarget("unknown", "classifier fault"), author="Tester <t@agents.corsia.local>",
+        binary_safe_history=True,
+    )
+
+    assert (result.outcome, result.reason) == ("refused", "binary-too-large")
+    assert not path.exists()
+
+
 @pytest.mark.asyncio
 async def test_edit_and_multi_edit_commit_on_a_recorded_base(history_scope):
     from tools.filesystem_edit import EditFileTool, MultiEditTool

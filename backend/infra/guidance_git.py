@@ -330,11 +330,11 @@ def _save(
                     write(path, data)
         return SaveResult(outcome, why, line=line)
 
+    if binary_safe_history and any(data is not None and len(data) > MAX_GUIDANCE_BYTES for data in writes.values()):
+        return SaveResult("refused", "binary-too-large", line="Not saved: reviewed bundle files must be at most 1 MB.")
     if target.fault:
         line = f"Not saved: {target.fault}." if atomic else f"Saved. History may be missing: {target.fault}."
         return unrecorded("failed", target.fault, line)
-    if binary_safe_history and any(data is not None and len(data) > MAX_GUIDANCE_BYTES for data in writes.values()):
-        return SaveResult("refused", "binary-too-large", line="Not saved: reviewed bundle files must be at most 1 MB.")
     if not binary_safe_history and not all(_is_text(data) for data in writes.values()):
         return unrecorded("ordinary", "not text up to 1 MB", None)
     repo, why = workspace_repository(workspace, create=True)

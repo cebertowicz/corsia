@@ -14,7 +14,6 @@ from urllib.request import urlopen
 
 INDEX_URL = "https://raw.githubusercontent.com/cebertowicz/corsia-library/main/index.json"
 _CACHE_NAME = "index.json"
-_CACHE_TTL_SECONDS = 24 * 60 * 60
 _SHA256 = re.compile(r"^(?:sha256:)?[0-9a-fA-F]{64}$")
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -45,10 +44,6 @@ def load_index() -> LibraryIndex:
     """Fetch the index, falling back to its last valid cached copy when offline."""
     now = time.time()
     cached = _read_cache()
-    if cached is not None:
-        payload, fetched_at = cached
-        if now - fetched_at < _CACHE_TTL_SECONDS:
-            return LibraryIndex(payload, _format_age(now - fetched_at), refreshed=False)
     try:
         payload = _validate_index(_fetch_index())
     except LibraryIndexValidationError:
@@ -63,8 +58,9 @@ def load_index() -> LibraryIndex:
         payload, fetched_at = cached
         return LibraryIndex(payload, _format_age(now - fetched_at), refreshed=False)
 
+    refreshed = cached is None or payload != cached[0]
     _write_cache(payload, now)
-    return LibraryIndex(payload, "just now", refreshed=True)
+    return LibraryIndex(payload, "just now", refreshed=refreshed)
 
 
 def _fetch_index() -> Any:

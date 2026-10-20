@@ -46,7 +46,7 @@ def _installed_rows(db=None) -> list[dict[str, Any]]:
 
 def produce_once() -> int:
     """Compare one cached/raw index read with active installed artifacts and deliver notices."""
-    from events.platform import deliver_platform_event_sync
+    from events.platform import DUPLICATE, deliver_platform_event_sync
     from library import load_index
 
     index = load_index()  # Exactly one cache-backed raw-main read per producer refresh.
@@ -57,8 +57,6 @@ def produce_once() -> int:
         if payload is None:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
-        from events.platform import DUPLICATE
-
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
 
