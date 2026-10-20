@@ -228,7 +228,7 @@
 	:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: flex-start; }
 	:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: calc((var(--space-7) - var(--text-subhead)) / 2); }
 	:global(.document-header) .rb-receipt, :global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: var(--space-7); }
-	/* A 16ch ask needs more room than the prior 48px floor. Below this point the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. The name never truncates; it wraps if even its row is short. Line 2 is unchanged.
+	/* A 16ch ask needs more room than the prior 48px floor. Below this point the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. A long name there truncates in the middle, keeping its suffix (MiddleName); with no one-line ask (the person step) the name has the row to itself and wraps instead. Line 2 is unchanged.
 	   Threshold, measured at a fine pointer with a narrow canvas (the pill shows its count only):
 	     avatar 19 + gap 8 + 21-character name 129 + gap 8 + ask minimum 16ch (122) + gap 8 + chevron 13
 	     + two header column gaps 8 + tools 94 (comments pill 52 + gap 4 + Request review 38) = 401px of header content; 408px keeps a small tolerance.
@@ -239,9 +239,14 @@
 		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
 		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 		:global(.document-header) .review-bar.ask .rb-who { max-width: none; }
+		/* The person step: release every nowrap/ellipsis layer around the name, MiddleName's included, and flow its head, tail and colon as one inline run so a long name wraps as text. */
+		:global(.document-header) .review-bar.ask.static .rb-who { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+		:global(.document-header) .review-bar.ask.static .rb-who strong { overflow: visible; white-space: normal; }
+		:global(.document-header) .review-bar.ask.static .rb-who :global(.name) { display: inline; white-space: normal; }
+		:global(.document-header) .review-bar.ask.static .rb-who :global(.name-head) { overflow: visible; }
 		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
 		:global(.document-header) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); }
-		:global(.document-header) .review-bar.ask.static { grid-template-rows: var(--space-7) var(--space-7); }
+		:global(.document-header) .review-bar.ask.static { grid-template-rows: var(--space-7) minmax(var(--space-7), auto); }
 		:global(.document-header) .review-bar.ask.static .rb-line { grid-row: 1 / span 2; }
 	}
 
@@ -268,6 +273,8 @@
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 55%; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
 			:global(.document-header) .review-bar.ask.static .rb-lead { flex: 1 1 auto; max-width: 100%; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
+			/* The person step's name may wrap, so its touch row grows with it. */
+			:global(.document-header) .review-bar.ask.static:not(.expanded) { grid-template-rows: minmax(var(--rb-hit), auto); }
 			/* Centre the ask's text line within the touch row; its former block line box sat above the requester's centred content. */
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: flex; align-items: center; align-self: stretch; flex: 1 1 0; min-width: 0; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }

@@ -190,7 +190,11 @@ async function personStep(page: Page, request: APIRequestContext, name: string, 
 	const who = bar(page).locator('.rb-who');
 	await expect(who).toHaveText(`${doc.title}:`);
 	await expect(bar(page).locator('.rb-ask-full')).toHaveText('Needs you to do this: Set up the workspace');
-	expect(await who.evaluate((el) => el.scrollWidth <= el.clientWidth), 'the owner’s name is never truncated').toBe(true);
+	// The pane and the bar animate in after the resize; measure the layout they land in.
+	await settled(page);
+	// MiddleName's head is the innermost element that ellipsizes, so it is the one to measure.
+	const head = who.locator('.name-head');
+	expect(await head.evaluate((el) => el.scrollWidth <= el.clientWidth), 'the owner’s name is never truncated').toBe(true);
 	return (label: 'Done' | 'Won’t do') => bar(page).getByRole('button', { name: label, exact: true });
 }
 
@@ -203,6 +207,23 @@ journey('mark a person step done from its instructions', PERSON_STEP, async ({ p
 	await expect(bar(page).locator('.rb-receipt')).toBeFocused();
 	await settled(page);
 	await shot(page, 'person-step-done', info);
+});
+
+// A name too long for the narrow header (1280 with the pane open) wraps onto a second line rather than truncating.
+journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	await personStep(page, request, 'Person with a very long agent name', mode, theme);
+	const who = bar(page).locator('.rb-who');
+	if (mode === 'default') {
+		const wrapped = await who.evaluate((el) => el.getBoundingClientRect().height > 1.8 * parseFloat(getComputedStyle(el).fontSize));
+		expect(wrapped, 'the long name wraps in the narrow header').toBe(true);
+		// Wrapped as one text run: the name's last characters follow its head instead of sitting beside its first line.
+		const tailBelowFirstLine = await who.evaluate((el) => {
+			const tail = el.querySelector('.name-tail');
+			return !tail || tail.getBoundingClientRect().top > el.getBoundingClientRect().top + parseFloat(getComputedStyle(el).fontSize);
+		});
+		expect(tailBelowFirstLine, 'the name’s tail flows after its wrapped head').toBe(true);
+	}
+	await shot(page, 'person-step-long-name', info);
 });
 
 journey('decline a person step from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
