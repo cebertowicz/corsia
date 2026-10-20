@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import quote
 
 from connections.microsoft import client
-from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, REQUEST_REFUSED, SERVICE_UNAVAILABLE
 
 MESSAGES = "https://graph.microsoft.com/v1.0/me/messages"
 MESSAGE_FIELDS = "id,conversationId,from,toRecipients,receivedDateTime,subject,body"
@@ -36,7 +36,7 @@ def _address(value: object) -> str:
 
 def _message(value: object) -> Message:
     if not isinstance(value, dict) or not isinstance(value.get("id"), str):
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(SERVICE_UNAVAILABLE)
     body_value = value.get("body")
     body = body_value.get("content", "") if isinstance(body_value, dict) else ""
     return Message(
@@ -57,7 +57,7 @@ async def search(account_id: str, query: str, maximum: int) -> list[Message]:
 
 async def fetch(account_id: str, message_id: str) -> Message:
     if not isinstance(message_id, str) or not message_id:
-        raise MicrosoftError(PROVIDER_UNAVAILABLE)
+        raise MicrosoftError(REQUEST_REFUSED, never_sent=True)
     value = await client.graph_json("GET", f"{MESSAGES}/{quote(message_id, safe='')}", account_id=account_id)
     return _message(value)
 
