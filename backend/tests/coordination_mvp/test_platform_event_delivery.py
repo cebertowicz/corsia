@@ -115,7 +115,13 @@ class TestDelivery:
         assert [d.outcome for d in deliver_platform_event_sync("gmail", raw)] == [DUPLICATE]
         assert _notes(workspace) == 1
 
-    def test_measurement_digest_includes_bounded_facts(self, isolated_db):
+    @pytest.mark.parametrize("value, tail", [
+        ("x" * 40, "x" * 40 + "\"}]"),
+        ("x" * 3000, " more characters not shown]"),
+    ])
+    def test_measurement_digest_shows_whole_facts_within_the_cap(
+        self, isolated_db, value, tail,
+    ):
         thread = mk_session("measurement-owner")
         assert set_scope_coordinator(WORKSPACE_SCOPE, thread)
         assert binder.ensure_designation_rule(
@@ -124,19 +130,21 @@ class TestDelivery:
         raw = {
             "scope": "workspace", "report_date": "2026-10-19",
             "report_key": "workspace:2026-10-19", "breach": False,
-            "moves": [{"series": "attention", "value": "x" * 500}],
+            "moves": [{"series": "attention", "value": value}],
         }
 
         assert [delivery.outcome for delivery in deliver_platform_event_sync(
             "measurement", raw,
         )] == [DIGESTED]
-        assert _digest(thread) == (
-            "[PASSIVE CONTEXT DIGEST]\n"
+        content, summaries = _digest(thread)
+        line = content.removeprefix("[PASSIVE CONTEXT DIGEST]\n")
+        assert line.startswith(
             "measurement.movement_digest from measurement: scope=workspace, "
             "report_date=2026-10-19, report_key=workspace:2026-10-19, breach=false, "
-            "moves=[{\"series\":\"attention\",\"value\":\"" + "x" * 87 + "…",
-            ["measurement.movement_digest from measurement"],
+            "moves=[{\"series\":\"attention\",\"value\":\"x"
         )
+        assert line.endswith(tail) and len(line) <= 2000
+        assert summaries == ["measurement.movement_digest from measurement"]
 
     @pytest.mark.parametrize("screen", [
         {**SCREENED_NOW, "injection": True, "injection_rule": "R1"},

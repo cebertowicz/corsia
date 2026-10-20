@@ -33,8 +33,7 @@ DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
 
-_NOTE_LINE_LIMIT = 400
-_NOTE_VALUE_LIMIT = 120
+_NOTE_LINE_LIMIT = 2000
 
 
 @dataclass(frozen=True)
@@ -86,15 +85,18 @@ def _summary(envelope: EventEnvelope) -> str:
 
 
 def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[:limit - 1] + "…"
+    if len(text) <= limit:
+        return text
+    marker = f"… [{len(text) - limit} more characters not shown]"
+    return text[:limit - len(marker)] + marker
 
 
 def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
     """The agent's note line: the event plus the type's declared line facts.
 
     Only declared facts show, so outside text such as an email subject never
-    reaches the line. Each value is clipped so one long fact cannot hide the
-    rest; the full facts stay in the note's details.
+    reaches the line. The note's details never reach the agent, so values are
+    whole; only a line past the cap is cut, and it says how much is missing.
     """
     facts = []
     for key in line_facts:
@@ -104,7 +106,7 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
         rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
         )
-        facts.append(f"{key}={_clip(rendered, _NOTE_VALUE_LIMIT)}")
+        facts.append(f"{key}={rendered}")
     line = _summary(envelope)
     if facts:
         line = f"{line}: {', '.join(facts)}"
