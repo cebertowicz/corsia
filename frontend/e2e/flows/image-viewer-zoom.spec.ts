@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import {
 	createSession,
 	loginByUrl,
@@ -69,12 +70,17 @@ const frame = (page: Page) => page.locator('.image-overlay .frame');
 const frameWidth = async (page: Page) => (await frame(page).boundingBox())!.width;
 const level = (page: Page) => page.locator('.image-overlay .level');
 
-/** The editor draws only what is near the viewport, so a thing far down the document appears once the text has scrolled to it. */
+/**
+ * The editor draws only what is near the viewport, so a thing far down the document appears once the text has scrolled to it.
+ * It scrolls with the wheel: after Back, the document holds the image where it was until the person touches it (documentImagePlace.ts,
+ * USER_INPUT), and a script's scrollTop write is not that.
+ */
 async function reveal(page: Page, selector: string) {
 	const found = page.locator(selector).first();
 	await expect.poll(async () => {
 		if (await found.count()) return true;
-		await page.locator('.cm-scroller').first().evaluate((el) => { el.scrollTop += 250; });
+		await page.locator('.cm-scroller').first().hover();
+		await page.mouse.wheel(0, 250);
 		return false;
 	}, { intervals: [100] }).toBe(true);
 	return found;

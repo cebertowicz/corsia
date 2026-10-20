@@ -7,10 +7,15 @@ import os
 
 from fastapi import FastAPI
 
-from e2e_live_faults import FaultConfiguration, FaultConfigurationError, FaultController, build_router
-from e2e_mock import mock_engine, router as mock_router, seed_mock_catalog
-from infra.config import DB_PATH, STATE_ROOT
-from main import app as production_app
+import e2e_reset
+
+# A process restarted by POST /api/test/reset puts the captured seed back before anything opens the database.
+e2e_reset.restore_if_requested()
+
+from e2e_live_faults import FaultConfiguration, FaultConfigurationError, FaultController, build_router  # noqa: E402
+from e2e_mock import mock_engine, router as mock_router, seed_mock_catalog  # noqa: E402
+from infra.config import DB_PATH, STATE_ROOT  # noqa: E402
+from main import app as production_app  # noqa: E402
 
 
 _live_fault_opt_in = os.environ.get("CORSIA_E2E_LIVE_FAULTS") == "1"
@@ -42,6 +47,7 @@ app = FastAPI(
     redoc_url=None,
 )
 app.include_router(mock_router)
+app.include_router(e2e_reset.router, prefix="/api/test", tags=["test"])
 _live_fault_router = build_router(_live_fault_controller, opt_in_requested=_live_fault_opt_in)
 if _live_fault_router is not None:
     app.include_router(_live_fault_router)

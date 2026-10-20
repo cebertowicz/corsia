@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
 import { openLiveDocument } from '../support/liveDocument';
 import { layouts } from '../support/liveConcurrency';

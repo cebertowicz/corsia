@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, openSettings, TEST_TOKEN } from '../support/corsia';
 
 const SHOTS = process.env.PICKER_SHOTS_DIR;

@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
+import { expect, type Page, type Route, type TestInfo } from '@playwright/test';
+import { test } from './support/test';
 import { createSession, lastUserMessage, loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_SESSION_TOKEN, userMessages } from './support/corsia';
 import { readMockCallCount, seedMockResponses } from './support/mock';
 

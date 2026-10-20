@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/imageRegionComments';
 import { comment, deleteSeededThreads, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';

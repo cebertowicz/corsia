@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
+import { test } from '../support/test';
 import { openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';

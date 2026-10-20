@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { chatComposer, lastAssistantMessage, sendChatMessage, TEST_SESSION_TOKEN, waitForWsConnected } from '../support/corsia';
 import { seedMockResponses } from '../support/mock';
 
@@ -33,6 +34,8 @@ async function shot(page: Page, name: string) {
 }
 
 test.describe('@surface:first-run setup landing', () => {
+	// Each test ends the first run this screen is for, so each starts from the seed, with it pending.
+	test.use({ seedPerTest: true });
 	for (const [label, sources] of readySources) {
 		test(`${label} ready: Start using CORSIA lands in a usable chat and a turn renders with attribution`, async ({ page, request }) => {
 			await serveReadySetup(page, sources);

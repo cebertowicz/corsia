@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 /**
@@ -548,7 +549,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		expect(await ordinary.fresh.evaluate(() => {
 			const doc = document.querySelector<HTMLElement>('.doc')!;
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth };
+			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) };
 		}), 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
 		await ordinary.fresh.close();
 		// Zoom: a 200% zoom of this viewport is half the CSS width; the rail stays 24 or 44 CSS px.
@@ -618,10 +619,15 @@ test.describe('@flow:doc-margin-marker', () => {
 		const nearId = now[nearIndex].ids[0];
 		await buttons.nth(nearIndex).focus();
 		expect(await active(), `the marker holding qmna (${keysOf(opened, now[nearIndex])}) has focus before the regroup`).toBe(now[nearIndex].ids.join(','));
+		// Each step regroups against the grouping the step before settled on: spread to 90px, a fine pointer's markers go
+		// back to the natural grouping (one thread per line), so comparing with the first grouping would never see a change.
+		const grouping = async () => (await markers(page)).map((marker) => marker.ids.length).join(',');
+		let before = all.map((marker) => marker.ids.length).join(',');
 		for (const lineHeight of ['10px', '90px']) {
 			await page.addStyleTag({ content: `.cm-line { line-height: ${lineHeight} !important; }` });
-			await expect.poll(async () => (await markers(page)).map((marker) => marker.ids.length).join(','), { message: `markers regroup at ${lineHeight}` }).not.toBe(all.map((marker) => marker.ids.length).join(','));
+			await expect.poll(grouping, { message: `markers regroup at ${lineHeight}` }).not.toBe(before);
 			await settle(page);
+			before = await grouping();
 			const holder = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.commentIds ?? '');
 			expect(holder.split(','), `after ${lineHeight} lines focus is on the marker holding the thread it was on (${opened.byId[nearId]}; focus is on ${keysOf(opened, { ids: holder.split(',') })}; markers ${(await markers(page)).map((marker) => keysOf(opened, marker).join('+')).join(' | ')})`).toContain(nearId);
 			const labels = (await markers(page)).flatMap((marker) => marker.ids);

@@ -126,13 +126,19 @@ export async function drag(page: Page, from: { x: number; y: number }, to: { x: 
 	await page.mouse.move(to.x, to.y, { steps: 8 });
 	await page.mouse.up();
 }
-/** One finger, through CDP, so the touch path (not the mouse path) draws or pans. */
+/**
+ * One finger, through CDP, so the touch path (not the mouse path) draws or pans. It moves at a finger's pace and rests
+ * a moment before lifting: eight moves sent back to back, then a lift, read as a fast flick, and the browser swallowed
+ * the next tap (touch and pointer events, no click) as the one that stops a fling, on the runner and not locally.
+ */
 export async function touchDrag(page: Page, a: { x: number; y: number }, b: { x: number; y: number }) {
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: a.x, y: a.y, id: 0 }] });
 	for (let step = 1; step <= 8; step++) {
+		await page.waitForTimeout(24);
 		await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x + ((b.x - a.x) * step) / 8, y: a.y + ((b.y - a.y) * step) / 8, id: 0 }] });
 	}
+	await page.waitForTimeout(150);
 	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 	await cdp.detach();
 }
@@ -150,7 +156,7 @@ export async function shoot(page: Page, testInfo: TestInfo, name: string, both =
 /**
  * Waits until the layout has settled, for two frames in a row: no finite animation or transition is running anywhere in
  * the page, and the comments sheet, where it sits uncovered over the document's column, has that column's left and right
- * edges. A screenshot fast-forwards running CSS transitions to their end, but not what script places from them (the sheet
+ * client edges. A screenshot fast-forwards running CSS transitions to their end, but not what script places from them (the sheet
  * following its column, a card placed beside its tag), so a frame taken earlier shows those where they were mid-slide.
  */
 export async function settled(page: Page) {
@@ -159,7 +165,11 @@ export async function settled(page: Page) {
 			const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity);
 			if (running.length) return `${running.length} running`;
 			const sheet = document.querySelector('[data-adaptive-drawer].within:not(.covered)')?.getBoundingClientRect();
-			const column = document.querySelector('.cm-editor')?.closest('.leaf-body')?.getBoundingClientRect();
+			const body = document.querySelector('.cm-editor')?.closest('.leaf-body');
+			// The column's client box: a scrollbar gutter (the runner keeps its 6px layout space even when hidden) sits
+			// inside the border box but is not part of what the sheet covers.
+			const box = body?.getBoundingClientRect();
+			const column = body && box ? { left: box.left + body.clientLeft, right: box.left + body.clientLeft + body.clientWidth } : undefined;
 			if (sheet && column && (Math.abs(sheet.left - column.left) >= 1 || Math.abs(sheet.right - column.right) >= 1)) {
 				return `sheet ${sheet.left}-${sheet.right}, column ${column.left}-${column.right}`;
 			}
@@ -302,14 +312,17 @@ export function newRevision(seeded: Seeded) {
  * Sends the open comments drawer's batch with Send now from the keyboard (R2: focus unchanged). Once the footer has gone,
  * focus rests on the drawer's heading with its ring, still inside the drawer, and Escape then closes only the drawer:
  * `remains`, on the canvas under it, stays. `name` shoots that rest in both themes. Returns the send request.
+ * `whileSent` runs the moment the footer has gone: the document's row says "N comments sent" for only
+ * SENT_HOLD_MS (1.5 s), which the shots and checks that follow can outlast on a slow machine.
  */
-export async function sendFromDrawerByKeyboard(page: Page, testInfo: TestInfo, remains: Locator, name?: string) {
+export async function sendFromDrawerByKeyboard(page: Page, testInfo: TestInfo, remains: Locator, name?: string, whileSent?: () => Promise<void>) {
 	const footer = page.locator('[data-doc-comments-drawer] [data-drawer-unsent]');
 	await footer.getByRole('button', { name: 'Send now', exact: true }).focus();
 	const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes('/api/doc-feedback/send'));
 	await page.keyboard.press('Enter');
 	const request = await sent;
 	await expect(footer).toHaveCount(0);
+	await whileSent?.();
 	const home = page.locator('[data-doc-comments-drawer] [data-drawer-focus-home]');
 	await expect(home).toBeFocused();
 	expect(await home.evaluate((el) => el.matches(':focus-visible')), 'the heading shows its focus ring').toBe(true);

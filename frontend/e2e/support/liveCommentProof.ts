@@ -103,9 +103,11 @@ export async function selectLine(page: Page, quote: string): Promise<void> {
 	await uncoverDocumentSurface(page);
 	const line = page.locator('.cm-line').filter({ hasText: quote });
 	await expect(line).toHaveCount(1);
-	await line.click();
+	// From the line's own start, one key per character: Shift+End stops at the end of a wrapped line's first row, so
+	// a quote the width wraps would select only part of it.
+	await line.click({ position: { x: 1, y: 1 } });
 	await page.keyboard.press('Home');
-	await page.keyboard.press('Shift+End');
+	for (let index = 0; index < quote.length; index++) await page.keyboard.press('Shift+ArrowRight');
 	await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? '')).toBe(quote);
 	await expect(page.locator('.sel-comment')).toBeVisible();
 }

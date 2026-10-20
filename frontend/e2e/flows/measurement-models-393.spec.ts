@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject } from '../support/measurement-fixture';
 import { waitForMainSlideToSettle } from '../support/sidebar';
