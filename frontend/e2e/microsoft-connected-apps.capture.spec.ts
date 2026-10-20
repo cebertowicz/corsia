@@ -14,7 +14,7 @@ type State = 'connected' | 'admin' | 'cancelled' | 'expired' | 'failure' | 'many
 
 function microsoft(state: State, id = 'microsoft-work', address = 'alex@contoso.example') {
 	return {
-		id, provider: 'microsoft' as const, address, capabilities: ['mail', 'calendar', 'files'],
+		id, provider: 'microsoft' as const, provider_display_name: 'Microsoft', address, capabilities: ['mail', 'calendar', 'files'],
 		state: state === 'connected' || state === 'many' ? 'connected' as const : 'needs_sign_in' as const,
 		account_kind: address.endsWith('@outlook.example') ? 'personal' as const : 'work' as const,
 		cause: state === 'admin' ? 'admin_approval_required' : state === 'cancelled' ? 'consent_cancelled' : state === 'expired' ? 'refresh_token_invalid' : state === 'failure' ? 'provider_unavailable' : null,
@@ -29,7 +29,7 @@ function accounts(state: State) {
 		microsoft(state, 'microsoft-three', 'alexandria.long-project-alpha-address@contoso.example'),
 		microsoft(state, 'microsoft-four', 'alexandria.long-project-beta-address@contoso.example'),
 	];
-	return [microsoft(state), { id: 'google', provider: 'google' as const, address: 'alex@gmail.example', capabilities: ['mail', 'calendar', 'files'], state: 'connected' as const, tenant_id: null, reach: onlyCorsia }];
+	return [microsoft(state), { id: 'google', provider: 'google' as const, provider_display_name: 'Google', address: 'alex@gmail.example', capabilities: ['mail', 'calendar', 'files'], state: 'connected' as const, tenant_id: null, reach: onlyCorsia }];
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {

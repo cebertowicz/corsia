@@ -14,7 +14,7 @@ from auth_fixtures import OWNER_USER
 from connections.app_reach import AppReach
 from connections.app_lifecycle import create_app
 from connections.connected_accounts import (
-    GOOGLE_PROVIDER, create_account, credential_key, get_account, store_credentials,
+    GOOGLE_PROVIDER, MICROSOFT_PROVIDER, create_account, credential_key, get_account, store_credentials,
 )
 from connections import account_actions
 from connections.google import provider as google_provider
@@ -98,13 +98,24 @@ def test_two_accounts_are_two_rows_with_their_own_state_and_reach_and_no_secrets
     rows = {row["id"]: row for row in body["accounts"]}
     assert set(rows) == {first, second}
     assert rows[first] == {
-        "kind": "account", "id": first, "provider": GOOGLE_PROVIDER, "address": "person@example.com",
+        "kind": "account", "id": first, "provider": GOOGLE_PROVIDER, "provider_display_name": "Google", "address": "person@example.com",
         "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": ONLY_CORSIA_REACH,
         "account_kind": None, "cause": None, "client_id": None, "tenant_id": None,
     }
     # A row that lost its sign-in says so, with its own reach, whatever its stored state.
     assert rows[second]["state"] == "needs_sign_in" and rows[second]["reach"] == ALL
     assert not any(secret in response.text for secret in SECRETS)
+
+
+def test_account_rows_project_each_provider_display_name(api):
+    client, _who, _revoked = api
+    microsoft = str(create_account(MICROSOFT_PROVIDER, "person@contoso.example", reach=ALL, created_by=("system", "test"), state="needs_sign_in", provider_subject="tenant:person", account_kind="work")["id"])
+    google = _account("person@example.com")
+
+    rows = {row["id"]: row for row in client.get("/api/mcp/servers").json()["accounts"]}
+
+    assert rows[google]["provider_display_name"] == "Google"
+    assert rows[microsoft]["provider_display_name"] == "Microsoft"
 
 
 def test_the_list_filters_accounts_like_apps_and_an_agent_sees_only_those_that_reach_it(api):

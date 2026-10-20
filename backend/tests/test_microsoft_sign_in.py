@@ -654,7 +654,7 @@ async def test_rows_show_microsoft_and_google_side_by_side_with_registration_gui
         db.close()
 
     assert rows[work] == {
-        "kind": "account", "id": work, "provider": MICROSOFT_PROVIDER, "address": "same@example.test",
+        "kind": "account", "id": work, "provider": MICROSOFT_PROVIDER, "provider_display_name": "Microsoft", "address": "same@example.test",
         "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": selected.as_dict(),
         "account_kind": "work", "cause": None, "client_id": CLIENT_ID, "tenant_id": TENANT_A,
     }

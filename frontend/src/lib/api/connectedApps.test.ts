@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 const account: ConnectedAccount = {
-	kind: 'account', id: 'acc 1', provider: 'google', address: 'person@example.com',
+	kind: 'account', id: 'acc 1', provider: 'google', provider_display_name: 'Google', address: 'person@example.com',
 	capabilities: ['mail', 'calendar', 'files'], state: 'connected', tenant_id: null,
 	reach: { mode: 'corsia', project_ids: [], outside_projects: false },
 };
@@ -124,7 +124,7 @@ describe('the account controls', () => {
 		await expect(saveAccountReach(account, { mode: 'all', project_ids: [], outside_projects: false })).rejects.toThrow('Only the signed-in person can widen where an account works; open Connected apps.');
 		refuse('connected_account_gone');
 		await expect(signOutOfAccount(account)).rejects.toThrow("Couldn't change this Google account. Try again.");
-		await expect(removeAccount({ ...account, provider: 'microsoft' })).rejects.toThrow("Couldn't change this Microsoft account. Try again.");
+		await expect(removeAccount({ ...account, provider: 'microsoft', provider_display_name: 'Microsoft' })).rejects.toThrow("Couldn't change this Microsoft account. Try again.");
 	});
 });
 

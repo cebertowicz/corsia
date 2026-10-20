@@ -8,7 +8,7 @@ import { get } from 'svelte/store';
 import { resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
-const googleAccount = { id: 'google-work', provider: 'google' as const, address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
+const googleAccount = { id: 'google-work', provider: 'google' as const, provider_display_name: 'Google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
@@ -324,14 +324,14 @@ describe('ConnectedAppsSettings', () => {
 	});
 
 	it('renders a Microsoft account with its provider title', async () => {
-		const microsoft = { ...googleAccount, id: 'microsoft-work', provider: 'microsoft' as const, address: 'alex@contoso.example', account_kind: 'work' as const, tenant_id: '22222222-2222-4222-8222-222222222222' };
+		const microsoft = { ...googleAccount, id: 'microsoft-work', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', account_kind: 'work' as const, tenant_id: '22222222-2222-4222-8222-222222222222' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [microsoft] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
 	});
 
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
-		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null };
+		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null };
 		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };
 		const expired = { ...admin, id: 'microsoft-expired', cause: 'refresh_token_invalid' };
 		const failed = { ...admin, id: 'microsoft-failed', cause: 'provider_unavailable' };
@@ -365,7 +365,7 @@ describe('ConnectedAppsSettings', () => {
 	});
 
 	it('uses Microsoft removal copy and keeps the correct provider permissions link after removal', async () => {
-		const microsoft = { ...googleAccount, id: 'microsoft-personal', provider: 'microsoft' as const, address: 'alex@outlook.example', account_kind: 'personal' as const, tenant_id: 'consumers' };
+		const microsoft = { ...googleAccount, id: 'microsoft-personal', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@outlook.example', account_kind: 'personal' as const, tenant_id: 'consumers' };
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/microsoft-personal') ? { id: microsoft.id, removed: true, revocation: 'manual_only' } : { servers: [], accounts: [microsoft] } })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@outlook.example"]')).not.toBeNull());
@@ -381,7 +381,7 @@ describe('ConnectedAppsSettings', () => {
 	});
 
 	it('keeps work-account removals on My Apps', async () => {
-		const microsoft = { ...googleAccount, id: 'microsoft-work-remove', provider: 'microsoft' as const, address: 'alex@contoso.example', account_kind: 'work' as const, tenant_id: '22222222-2222-4222-8222-222222222222' };
+		const microsoft = { ...googleAccount, id: 'microsoft-work-remove', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', account_kind: 'work' as const, tenant_id: '22222222-2222-4222-8222-222222222222' };
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/microsoft-work-remove') ? { id: microsoft.id, removed: true, revocation: 'manual_only' } : { servers: [], accounts: [microsoft] } })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());

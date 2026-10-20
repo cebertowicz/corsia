@@ -6,7 +6,7 @@
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
-		type ConnectedAppsRow, isOnlyCorsia, needsManualGoogleStep,
+		type ConnectedAppsRow, isOnlyCorsia, needsManualAccountStep,
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
@@ -15,8 +15,7 @@
 	import WhereItWorks from './WhereItWorks.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
 	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
-	const providerName = (account: ConnectedAccount) => account.provider === 'microsoft' ? 'Microsoft' : 'Google';
-	const accountName = (account: ConnectedAccount) => `${providerName(account)} — ${account.address}`;
+	const accountName = (account: ConnectedAccount) => `${account.provider_display_name} — ${account.address}`;
 	const accountAnchor = (id: string) => `connected-account-${id}`;
 	const isAccount = (row: ConnectedAppsRow): row is ConnectedAccount => row.kind === 'account';
 	const accountNeedsSignIn = (account: ConnectedAccount) => account.state === 'needs_sign_in' || account.state === 'signed_out';
@@ -149,8 +148,8 @@
 			const result: AccountSignOutResult = await signOutOfAccount(account);
 			const row = { ...result.row, kind: 'account' as const };
 			replace(row); signedOut = new Set(signedOut).add(account.id);
-			manualStep = row.provider === 'google' && needsManualGoogleStep(result.revocation) ? row : null;
-		} catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${providerName(account)} account. Try again.`; }
+			manualStep = needsManualAccountStep(row, result.revocation) ? row : null;
+		} catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${account.provider_display_name} account. Try again.`; }
 		finally { confirmingOut = null; actionId = null; }
 	}
 	async function remove(account: ConnectedAccount): Promise<void> {
@@ -158,9 +157,9 @@
 		try {
 			const result = await removeAccount(account);
 			rows = rows.filter((row) => row.id !== account.id);
-			removedManualStep = account.provider === 'microsoft' || needsManualGoogleStep(result.revocation) ? account : null;
+			removedManualStep = needsManualAccountStep(account, result.revocation) ? account : null;
 		}
-		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${providerName(account)} account. Try again.`; }
+		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${account.provider_display_name} account. Try again.`; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
 	function accountAddress(address: string): AccountAddress | null {
@@ -307,7 +306,7 @@
 				{#each rows as row (row.id)}
 					{#if isAccount(row)}
 						<div class="item account-item" data-connected-account-id={row.id} data-settings-anchor={accountAnchor(row.id)} use:settingsAnchor={accountAnchor(row.id)}>
-							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">{providerName(row)} —</span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
+							{#snippet accountTitle()}{#if openId === row.id}<span class="account-open-name">{accountName(row)}</span>{:else}<span class="account-closed-name" use:observeClosedTitle={row}><span class="account-provider">{row.provider_display_name} —</span><span class="account-local-prefix">{shownPrefix(row)}</span><span class="account-local-suffix">{shownSuffix(row)}</span><span class="account-domain">@{accountAddress(row.address)?.domain}</span></span>{/if}{/snippet}
 							<SettingsRow name={accountTitle} ariaLabel={accountName(row)} subTone={tone(row)} wrapName={openId === row.id} chevron expanded={openId === row.id} onOpen={() => openId = openId === row.id ? null : row.id}>
 								{#snippet sub()}{accountStateLine(row)}<span class="place">{` · ${placeLine(row)}`}</span>{/snippet}
 							</SettingsRow>

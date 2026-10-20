@@ -17,6 +17,12 @@ router = APIRouter(prefix="/api/microsoft", tags=["microsoft"])
 ALL_PROJECTS = AppReach(mode="all", project_ids=frozenset(), outside_projects=False)
 MAX_BODY_BYTES = 2048
 NOT_FOUND = "That account isn't connected."
+PERSON_CAUSE_COPY = {
+    "admin_approval_required": "Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.",
+    "consent_cancelled": "Sign-in was cancelled. Press Sign in to try again.",
+    "refresh_token_invalid": "Microsoft signed you out, so agents can’t use this account until you sign in again.",
+    "provider_unavailable": "Microsoft had a problem with sign-in. Try again.",
+}
 
 
 def _body_field(body: object, key: str) -> str | None:
@@ -55,6 +61,8 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
     except MicrosoftError as exc:
         if exc.cause == ACCOUNT_NOT_FOUND:
             raise HTTPException(404, {"cause": exc.cause, "message": NOT_FOUND}) from None
+        if person and (copy := PERSON_CAUSE_COPY.get(exc.cause)) is not None:
+            raise HTTPException(400, copy) from None
         raise HTTPException(400, {"cause": exc.cause, "message": exc.message}) from None
     return {"url": url, "account_id": signing_in}
 
