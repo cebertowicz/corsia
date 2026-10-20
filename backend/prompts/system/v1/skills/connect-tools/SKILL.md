@@ -35,7 +35,7 @@ For both lists, find out what is available from CORSIA's own tools at the time, 
 
 ## Permissions and reach
 
-- Reading access never permits sending. Ask the person before the first send, post, change or purchase through a new connection.
+- Reading access never permits sending. Ask the person before any send, post, change or purchase they have not asked for; a yes covers only the action it named.
 - A new connection reaches only where it is added: the whole workspace, or one project. One that would help every project goes through CORSIA, as skill `coordination-api` says; otherwise add it where it is needed.
 - The person types a key only into the field CORSIA names, never into chat. You never read it.
 
